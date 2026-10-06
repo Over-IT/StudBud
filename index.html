@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StudBud | Student Planner</title>
+    <!-- FontAwesome 6 for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha512-iecdLmaskl7CVkqkXNQ/ZH/XLlvWZOJyj7Yy7tcenmpD1ypASozpmT/E0iPtmFIB46ZmdtAc9eNBvH0H/ZpiBw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <!-- Main Stylesheet -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="dark-theme">
+    <div id="app-container">
+        
+        <!-- SIDEBAR NAVIGATION -->
+        <aside id="sidebar" class="glass-panel">
+            <div class="sidebar-header">
+                <div class="logo-container">
+                    <i class="fas fa-building-columns logo-icon"></i>
+                    <span class="logo-text">StudBud<br><small>Student Hub</small></span>
+                </div>
+                <button id="sidebar-collapse-btn" class="icon-btn sidebar-collapse-btn" aria-label="Collapse sidebar" aria-expanded="true" title="Collapse sidebar">
+                    <i class="fas fa-chevron-left"></i>
+                </button>
+            </div>
+
+            <nav id="main-nav">
+                <ul class="nav-links">
+                    <li class="nav-item active" data-target="dashboard-view" role="button" tabindex="0" aria-current="page">
+                        <i class="fas fa-home"></i> <span>Dashboard</span>
+                    </li>
+                    <li class="nav-item" data-target="gpa-view" role="button" tabindex="0">
+                        <i class="fas fa-graduation-cap"></i> <span>GPA & Transcript</span>
+                    </li>
+                    <li class="nav-item" data-target="grade-scenarios-view" role="button" tabindex="0">
+                        <i class="fas fa-flask"></i> <span>Hypothetical Grades</span>
+                    </li>
+                    <li class="nav-item" data-target="planner-view" role="button" tabindex="0">
+                        <i class="fas fa-calendar-check"></i> <span>Planner & Schedule</span>
+                    </li>
+                    <li class="nav-item" data-target="calendar-view" role="button" tabindex="0">
+                        <i class="fas fa-calendar-days"></i> <span>Calendar</span>
+                    </li>
+                    <li class="nav-item" data-target="schedule-view" role="button" tabindex="0">
+                        <i class="fas fa-clock"></i> <span>Class Schedule</span>
+                    </li>
+                    <li class="nav-item" data-target="flashcard-view" role="button" tabindex="0">
+                        <i class="fas fa-layer-group"></i> <span>Flashcard Studio</span>
+                    </li>
+                    <li class="nav-item" data-target="analytics-view" role="button" tabindex="0">
+                        <i class="fas fa-chart-line"></i> <span>Analytics & Projections</span>
+                    </li>
+                    <li class="nav-item" data-target="exam-arcade-view" role="button" tabindex="0">
+                        <i class="fas fa-gamepad"></i> <span>Practice Exams & Arcade</span>
+                    </li>
+                    <li class="nav-item" data-target="importer-view" role="button" tabindex="0">
+                        <i class="fas fa-file-import"></i> <span>Quizlet Importer</span>
+                    </li>
+                    <li class="nav-item" data-target="settings-view" role="button" tabindex="0">
+                        <i class="fas fa-user-cog"></i> <span>Profile & Data</span>
+                    </li>
+                    <li class="nav-item" data-target="appearance-view" role="button" tabindex="0">
+                        <i class="fas fa-palette"></i> <span>UI Settings</span>
+                    </li>
+                </ul>
+            </nav>
+
+            <!-- Quick Audio Deck (Sidebar Bottom) -->
+            <div id="quick-audio-deck" class="glass-card">
+                <h4><i class="fas fa-headphones"></i> Soundscapes</h4>
+                <div class="audio-toggles">
+                    <button class="audio-btn" data-audio="lofi" title="Lo-Fi Synth"><i class="fas fa-music"></i></button>
+                    <button class="audio-btn" data-audio="rain" title="Rain Noise"><i class="fas fa-cloud-rain"></i></button>
+                    <button class="audio-btn" data-audio="white" title="White Noise"><i class="fas fa-wave-square"></i></button>
+                    <button class="audio-btn" data-audio="binaural" title="Binaural Waves"><i class="fas fa-brain"></i></button>
+                </div>
+                <button id="drawer-toggle-btn" class="secondary-btn"><i class="fas fa-sliders-h"></i> Mixer</button>
+            </div>
+        </aside>
+
+        <!-- MAIN CONTENT AREA -->
+        <main id="main-content">
+            
+            <!-- TOP HEADER -->
+            <header id="top-header" class="glass-panel">
+                <div class="header-left">
+                    <h1 id="active-view-title">Dashboard</h1>
+                </div>
+                
+                <div class="header-right">
+                    <!-- Burnout Warning Indicator -->
+                    <div id="burnout-indicator" class="header-badge warning hidden">
+                        <i class="fas fa-fire-alt"></i>
+                        <span id="burnout-text">Burnout Risk: High</span>
+                    </div>
+
+                    <div id="student-class-badge" class="header-badge glass-card">
+                        <i class="fas fa-graduation-cap"></i>
+                        <span id="header-grade-level">Class of 2026</span>
+                    </div>
+                    <div id="current-term-badge" class="header-badge glass-card">
+                        <i class="fas fa-calendar-week"></i>
+                        <span id="current-term-display">Semester 1</span>
+                    </div>
+
+                    <button id="mobile-mixer-toggle-btn" class="icon-btn mobile-mixer-toggle" aria-label="Expand audio mixer" aria-expanded="false" title="Audio mixer">
+                        <i class="fas fa-sliders" aria-hidden="true"></i>
+                    </button>
+                    <!-- Light/Dark Theme Toggle -->
+                    <button id="theme-toggle" class="icon-btn" aria-label="Switch light and dark mode" title="Switch light and dark mode">
+                        <i class="fas fa-sun"></i>
+                    </button>
+                </div>
+            </header>
+
+            <!-- VIEW CONTAINERS -->
+            <div id="view-container">
+                
+                <!-- 1. Dashboard View -->
+                <section id="dashboard-view" class="view active">
+                    <div class="dashboard-grid">
+                        <div class="glass-card widget schedule-widget">
+                            <div class="view-header">
+                                <div><h3 id="daily-schedule-title">Today's PCHS Schedule</h3><p id="daily-schedule-type" class="schedule-day-type"></p></div>
+                                <button class="secondary-btn" data-target="schedule-view">Set Schedule</button>
+                            </div>
+                            <ul id="daily-schedule-list" class="empty-list"></ul>
+                        </div>
+                        <div class="glass-card widget priority-widget">
+                            <h3>High Priority Tasks</h3>
+                            <ul id="priority-task-list" class="empty-list">
+                                <li class="empty-state">No upcoming tasks.</li>
+                            </ul>
+                            <button id="quick-add-task-btn" class="primary-btn"><i class="fas fa-plus"></i> Add Assignment</button>
+                        </div>
+                        <div class="glass-card widget study-widget">
+                            <h3>Due for Review (SM-2)</h3>
+                            <div class="review-stats">
+                                <span class="stat-number" id="cards-due-count">0</span>
+                                <span class="stat-label">Cards Due</span>
+                            </div>
+                            <button id="start-daily-review-btn" class="primary-btn"><i class="fas fa-play"></i> Start Review</button>
+                        </div>
+                        <div class="glass-card widget gpa-widget">
+                            <h3>GPA Snapshot</h3>
+                            <div class="gpa-stats">
+                                <div><span class="stat-number" id="dash-weighted-gpa">0.00</span><span class="stat-label">Weighted</span></div>
+                                <div><span class="stat-number" id="dash-unweighted-gpa">0.00</span><span class="stat-label">Unweighted</span></div>
+                            </div>
+                        </div>
+                        <div class="glass-card widget full-width">
+                            <h3>What to study next</h3>
+                            <p class="study-guidance-intro">Ranked by urgency and class goals, with a suggested study time and a method matched to each item.</p>
+                            <div id="study-priority-list" class="study-guidance-list"></div>
+                        </div>
+                        <div class="glass-card widget full-width">
+                            <div class="view-header">
+                                <div><h3>Study progress & adaptive plan</h3><p id="study-week-summary" class="study-guidance-intro"></p></div>
+                            </div>
+                            <div id="study-progress-summary" class="study-progress-summary"></div>
+                            <div id="study-history-list" class="study-history-list"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 2. GPA & Transcript View -->
+                <section id="gpa-view" class="view hidden">
+                    <div class="view-header">
+                        <h2>My Classes & Grades</h2>
+                        <div class="actions">
+                            <button id="add-course-btn" class="primary-btn"><i class="fas fa-plus"></i> Add Class</button>
+                            <button id="open-target-gpa-btn" class="secondary-btn"><i class="fas fa-bullseye"></i> Target GPA Solver</button>
+                        </div>
+                    </div>
+                    <div id="cumulative-gpa-summary" class="gpa-summary-grid"></div>
+                    <div id="class-card-grid" class="class-card-grid"></div>
+                    <div id="transcript-section" class="glass-card full-width">
+                        <div class="transcript-heading"><div><h3>Class Transcript</h3><p>Expand a class to review categories, grades, and assignments.</p></div></div>
+                        <div id="transcript-body" class="transcript-list"></div>
+                    </div>
+                </section>
+
+                <section id="grade-scenarios-view" class="view hidden">
+                    <div class="view-header">
+                        <div><h2>Hypothetical Grades</h2><p>Try possible assignment scores and see how they could change your class grades and GPA. These scores never change your actual transcript.</p></div>
+                    </div>
+                    <div class="glass-card scenario-toolbar">
+                        <label for="grade-scenario-select">Saved scenario</label>
+                        <select id="grade-scenario-select" aria-label="Select a saved grade scenario"></select>
+                        <label for="grade-scenario-name">Scenario name</label>
+                        <input id="grade-scenario-name" type="text" maxlength="60" placeholder="e.g. Finals week estimate">
+                        <button id="new-grade-scenario-btn" class="secondary-btn">New</button>
+                        <button id="create-grade-scenario-btn" class="primary-btn"><i class="fas fa-plus"></i> Create scenario</button>
+                        <button id="delete-grade-scenario-btn" class="danger-btn" disabled>Delete scenario</button>
+                    </div>
+                    <div id="grade-scenario-empty" class="glass-card empty-state hidden">Create a scenario to begin testing possible grades.</div>
+                    <div id="grade-scenario-workspace">
+                        <div id="grade-scenario-gpa-summary" class="gpa-summary-grid"></div>
+                        <div class="glass-card scenario-builder">
+                            <h3>Add a hypothetical assignment</h3>
+                            <p>Enter the points you might earn and the assignment’s total points. Optional categories use the weights set for each class. If no past scores are recorded, the projection treats the current grade as 100 points of prior work.</p>
+                            <form id="grade-scenario-assignment-form" class="scenario-assignment-form">
+                                <label>Assignment name<input name="title" type="text" maxlength="100" placeholder="Unit test" required></label>
+                                <label>Class<select name="courseCode" id="grade-scenario-course" required></select></label>
+                                <label>Category (optional)<select name="categoryId" id="grade-scenario-category"><option value="">Uncategorized</option></select></label>
+                                <label>Points earned<input name="pointsEarned" type="number" min="0" step="any" value="90" required></label>
+                                <label>Points possible<input name="maxPoints" type="number" min="0.01" step="any" value="100" required></label>
+                                <button class="primary-btn" type="submit"><i class="fas fa-plus"></i> Add to scenario</button>
+                            </form>
+                        </div>
+                        <div class="scenario-results-grid">
+                            <section class="glass-card">
+                                <div class="view-header"><div><h3>Hypothetical assignments</h3><p>Saved on this device and included in backups.</p></div></div>
+                                <div id="grade-scenario-items" class="scenario-item-list"></div>
+                            </section>
+                            <section class="glass-card">
+                                <div class="view-header"><div><h3>Projected class grades</h3><p>Current grade compared with this scenario.</p></div></div>
+                                <div id="grade-scenario-results" class="scenario-grade-list"></div>
+                            </section>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="class-detail-view" class="view hidden">
+                    <div class="view-header">
+                        <button id="back-to-classes-btn" class="secondary-btn"><i class="fas fa-arrow-left"></i> All Classes</button>
+                        <button id="class-add-assignment-btn" class="primary-btn"><i class="fas fa-plus"></i> Add Assignment</button>
+                    </div>
+                    <div id="class-detail-content"></div>
+                </section>
+
+                <!-- 3. Planner & Schedule View -->
+                <section id="planner-view" class="view hidden">
+                    <div class="planner-grid">
+                        <div class="glass-card full-width">
+                            <h2>Eisenhower Priority Matrix</h2>
+                            <div class="eisenhower-matrix">
+                                <div class="matrix-quadrant quadrant-1">
+                                    <h4>Do First (Urgent & Important)</h4>
+                                    <ul id="quad-1-list"></ul>
+                                </div>
+                                <div class="matrix-quadrant quadrant-2">
+                                    <h4>Schedule (Important, Not Urgent)</h4>
+                                    <ul id="quad-2-list"></ul>
+                                </div>
+                                <div class="matrix-quadrant quadrant-3">
+                                    <h4>Delegate/Automate (Urgent, Not Important)</h4>
+                                    <ul id="quad-3-list"></ul>
+                                </div>
+                                <div class="matrix-quadrant quadrant-4">
+                                    <h4>Eliminate (Not Urgent, Not Important)</h4>
+                                    <ul id="quad-4-list"></ul>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="glass-card full-width">
+                            <h2>Master Assignment List</h2>
+                            <div class="assignment-filters" role="search" aria-label="Filter assignments">
+                                <label class="assignment-search-field" for="assignment-search"><i class="fas fa-search" aria-hidden="true"></i><span class="sr-only">Search assignments</span><input id="assignment-search" type="search" placeholder="Search assignments or classes"></label>
+                                <label for="assignment-course-filter" class="sr-only">Filter by class</label>
+                                <select id="assignment-course-filter"><option value="">All classes</option></select>
+                                <label for="assignment-status-filter" class="sr-only">Filter by status</label>
+                                <select id="assignment-status-filter">
+                                    <option value="all">All work</option>
+                                    <option value="open">Not completed</option>
+                                    <option value="completed">Completed</option>
+                                    <option value="overdue">Overdue</option>
+                                </select>
+                                <span id="assignment-result-count" class="assignment-result-count" aria-live="polite"></span>
+                            </div>
+                            <table id="assignment-table">
+                                <thead>
+                                    <tr>
+                                        <th>Status</th>
+                                        <th>Assignment</th>
+                                        <th>Course</th>
+                                        <th>Due Date</th>
+                                        <th>Smart Score (P)</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="assignment-body">
+                                    <tr><td colspan="6" class="empty-state">No assignments found.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="calendar-view" class="view hidden">
+                    <div class="calendar-layout">
+                        <div class="glass-card calendar-panel">
+                            <div class="calendar-toolbar">
+                                <button id="calendar-prev-btn" class="icon-btn" aria-label="Previous month"><i class="fas fa-chevron-left"></i></button>
+                                <h2 id="calendar-month-label">Month Year</h2>
+                                <button id="calendar-next-btn" class="icon-btn" aria-label="Next month"><i class="fas fa-chevron-right"></i></button>
+                                <button id="calendar-today-btn" class="secondary-btn">Today</button>
+                            </div>
+                            <div class="calendar-weekdays">
+                                <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+                            </div>
+                            <div id="calendar-days" class="calendar-days" role="grid" aria-label="Monthly calendar"></div>
+                        </div>
+                        <aside class="glass-card calendar-agenda">
+                            <div class="view-header">
+                                <h3 id="calendar-selected-label">Selected day</h3>
+                                <button id="calendar-add-event-btn" class="primary-btn"><i class="fas fa-plus"></i> Add</button>
+                            </div>
+                            <div id="calendar-agenda-list"></div>
+                        </aside>
+                    </div>
+                </section>
+
+                <section id="schedule-view" class="view hidden">
+                    <div class="view-header">
+                        <div><h2>Set up your class schedule</h2><p class="study-guidance-intro">Choose the period for each class on PCHS all-period, odd/red, and even/blue days. The calendar uses the PCHS weekday rotation to show the matching classes.</p></div>
+                    </div>
+                    <form id="schedule-form" class="glass-card schedule-editor">
+                        <div id="schedule-course-list"></div>
+                        <div class="schedule-actions">
+                            <p>Leave a day pattern blank if you do not have that class on that pattern.</p>
+                            <button type="submit" class="primary-btn"><i class="fas fa-save"></i> Save Schedule</button>
+                        </div>
+                    </form>
+                    <p class="settings-hint">PCHS dates shown are based on the built-in weekday rotation. Check school announcements for holidays or special schedule changes.</p>
+                </section>
+
+                <!-- 4. Flashcard Studio View -->
+                <section id="flashcard-view" class="view hidden">
+                    <div class="view-header">
+                        <h2>Study Decks</h2>
+                        <button id="create-deck-btn" class="primary-btn"><i class="fas fa-folder-plus"></i> New Deck</button>
+                    </div>
+                    <div id="deck-grid" class="deck-grid">
+                        <div class="empty-state glass-card full-width">No decks available. Create one or import from Quizlet.</div>
+                    </div>
+                    
+                    <!-- Active Study Area (Hidden until a deck is opened) -->
+                    <div id="active-study-area" class="glass-card full-width hidden">
+                        <div class="study-header">
+                            <h3 id="study-deck-title">Deck Name</h3>
+                            <span id="study-progress">Card 1 / 10</span>
+                            <div class="focus-timer-control">
+                                <i class="fas fa-stopwatch"></i>
+                                <span class="focus-time-display">25:00</span>
+                                <button class="focus-play-btn" aria-label="Start study timer"><i class="fas fa-play"></i></button>
+                            </div>
+                            <button id="exit-study-btn" class="icon-btn"><i class="fas fa-times"></i></button>
+                        </div>
+                        <div class="flashcard-container" id="current-flashcard">
+                            <div class="flashcard-inner">
+                                <div class="flashcard-front" id="card-front-content">Front Content</div>
+                                <div class="flashcard-back" id="card-back-content">Back Content</div>
+                            </div>
+                        </div>
+                        <div class="study-controls">
+                            <button id="reveal-card-btn" class="primary-btn full-width">Reveal Answer</button>
+                            <div id="sm2-controls" class="hidden">
+                                <p>How difficult was this?</p>
+                                <div class="quality-buttons">
+                                    <button class="sm2-btn q0" data-q="0">Blackout (0)</button>
+                                    <button class="sm2-btn q1" data-q="1">Failed (1)</button>
+                                    <button class="sm2-btn q2" data-q="2">Hard (2)</button>
+                                    <button class="sm2-btn q3" data-q="3">Good (3)</button>
+                                    <button class="sm2-btn q4" data-q="4">Easy (4)</button>
+                                    <button class="sm2-btn q5" data-q="5">Perfect (5)</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 5. Analytics & Projections View -->
+                <section id="analytics-view" class="view hidden">
+                    <div class="analytics-grid">
+                        <div class="glass-card chart-container">
+                            <h3>BKT Mastery & Retrievability Decay</h3>
+                            <canvas id="bkt-decay-chart"></canvas>
+                        </div>
+                        <div class="glass-card chart-container">
+                            <h3>Projected Exam Scores</h3>
+                            <canvas id="exam-projection-chart"></canvas>
+                        </div>
+                        <div class="glass-card chart-container">
+                            <h3>Study Velocity & Time-on-Task</h3>
+                            <canvas id="velocity-chart"></canvas>
+                        </div>
+                        <div class="glass-card chart-container">
+                            <h3>Burnout Index Tracking</h3>
+                            <canvas id="burnout-chart"></canvas>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 6. Practice Exams & Arcade View -->
+                <section id="exam-arcade-view" class="view hidden">
+                    <div class="view-header">
+                        <h2>Interactive Learning Arcade</h2>
+                    </div>
+                    <div class="arcade-menu">
+                        <div class="glass-card arcade-game-card">
+                            <i class="fas fa-space-shuttle game-icon"></i>
+                            <h3>Asteroid Definitions</h3>
+                            <p>Destroy asteroids by matching terms to their correct definitions before they hit your ship.</p>
+                            <button class="primary-btn play-game-btn" data-game="asteroids">Play Now</button>
+                        </div>
+                        <div class="glass-card arcade-game-card">
+                            <i class="fas fa-layer-group game-icon"></i>
+                            <h3>Memory Match Tower</h3>
+                            <p>Flip cards and match each flashcard term to its definition.</p>
+                            <button class="primary-btn play-game-btn" data-game="match">Play Now</button>
+                        </div>
+                        <div class="glass-card arcade-game-card">
+                            <i class="fas fa-running game-icon"></i>
+                            <h3>Exam Runner</h3>
+                            <p>Jump over obstacles by answering practice test questions rapidly to build study velocity.</p>
+                            <button class="primary-btn play-game-btn" data-game="runner">Play Now</button>
+                        </div>
+                        <div class="glass-card arcade-game-card">
+                            <i class="fas fa-bolt game-icon"></i>
+                            <h3>Lightning Round</h3>
+                            <p>Race the clock and answer as many flashcards as you can.</p>
+                            <button class="primary-btn play-game-btn" data-game="lightning">Play Now</button>
+                        </div>
+                        <div class="glass-card arcade-game-card">
+                            <i class="fas fa-bullseye game-icon"></i>
+                            <h3>Streak Builder</h3>
+                            <p>Build a perfect answer streak; a missed answer resets your streak.</p>
+                            <button class="primary-btn play-game-btn" data-game="streak">Play Now</button>
+                        </div>
+                        <div class="glass-card arcade-game-card">
+                            <i class="fas fa-heart-pulse game-icon"></i>
+                            <h3>Survival Mode</h3>
+                            <p>Keep answering until you clear the deck or use all three lives.</p>
+                            <button class="primary-btn play-game-btn" data-game="survival">Play Now</button>
+                        </div>
+                        <div class="glass-card arcade-game-card">
+                            <i class="fas fa-circle-question game-icon"></i>
+                            <h3>True or False</h3>
+                            <p>Decide whether each definition matches its term. Watch for convincing decoys.</p>
+                            <button class="primary-btn play-game-btn" data-game="truefalse">Play Now</button>
+                        </div>
+                        <div class="glass-card arcade-game-card">
+                            <i class="fas fa-clipboard-check game-icon"></i>
+                            <h3>Practice Test</h3>
+                            <p>Build a test from a flashcard deck. Choose the question styles and how many questions to try.</p>
+                            <button class="primary-btn play-game-btn" data-game="test">Set Up Test</button>
+                        </div>
+                    </div>
+                    <div id="arcade-canvas-container" class="glass-card hidden full-width">
+                        <div class="arcade-header">
+                            <h3 id="arcade-game-title">Game Title</h3>
+                            <button id="exit-arcade-btn" class="icon-btn"><i class="fas fa-times"></i></button>
+                        </div>
+                        <canvas id="game-canvas" width="800" height="450"></canvas>
+                    </div>
+                </section>
+
+                <!-- 7. Quizlet Importer View -->
+                <section id="importer-view" class="view hidden">
+                    <div class="glass-card full-width">
+                        <h2>Quizlet Importer Tool</h2>
+                        <p>Paste your exported Quizlet text here. Format requires terms and definitions separated by a delimiter (e.g., Tab or Dash) and cards separated by newlines.</p>
+                        
+                        <div class="form-group">
+                            <label for="import-deck-name">New Deck Name</label>
+                            <input type="text" id="import-deck-name" placeholder="e.g., AP Bio Unit 1">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="import-delimiter">Delimiter between Term and Definition</label>
+                            <select id="import-delimiter">
+                                <option value="\t">Tab</option>
+                                <option value="-">Dash (-)</option>
+                                <option value=",">Comma (,)</option>
+                                <option value=";">Semicolon (;)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="quizlet-data">Quizlet Export Data</label>
+                            <textarea id="quizlet-data" rows="10" placeholder="Term 1    Definition 1&#10;Term 2    Definition 2"></textarea>
+                        </div>
+
+                        <button id="process-import-btn" class="primary-btn full-width"><i class="fas fa-file-import"></i> Parse & Create Deck</button>
+                    </div>
+                </section>
+
+                <!-- 8. Settings View -->
+                <section id="settings-view" class="view hidden">
+                    <div class="settings-grid">
+                        <div class="glass-card">
+                            <h2>Student Profile</h2>
+                            <div class="form-group">
+                                <label for="settings-grad-year">Graduation Year</label>
+                                <select id="settings-grad-year">
+                                    <option value="2026">Class of 2026</option>
+                                    <option value="2027">Class of 2027</option>
+                                    <option value="2028">Class of 2028</option>
+                                    <option value="2029">Class of 2029</option>
+                                    <option value="2030">Class of 2030</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="settings-target-gpa">Target Cumulative GPA</label>
+                                <input type="number" id="settings-target-gpa" min="0" max="5" step="0.01" value="3.8">
+                            </div>
+                            <div class="form-group">
+                                <label for="settings-current-term">Current semester</label>
+                                <select id="settings-current-term">
+                                    <option value="auto">Automatic (based on today's date)</option>
+                                    <option value="S1">Semester 1</option>
+                                    <option value="S2">Semester 2</option>
+                                </select>
+                            </div>
+                            <p class="settings-hint">Automatic term uses August–December for Semester 1 and January–July for Semester 2.</p>
+                            <button id="save-profile-btn" class="primary-btn">Save Profile</button>
+                        </div>
+                        
+                        <div class="glass-card">
+                            <h2>Data Management</h2>
+                            <p>Your classes, assignments, profile, schedule, and UI settings are saved in this browser. Flashcards, study sessions, and progress are stored in the browser database. This data stays on this device unless you export a backup.</p>
+                            <p id="data-save-status" class="data-save-status" role="status" aria-live="polite">Checking local save status…</p>
+                            <button id="open-backup-modal-btn" class="secondary-btn"><i class="fas fa-download"></i> Export / Import Backup</button>
+                            <div class="danger-zone">
+                                <h4>Danger Zone</h4>
+                                <button id="factory-reset-btn" class="danger-btn"><i class="fas fa-trash-alt"></i> Factory Reset (Delete All Data)</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="appearance-view" class="view hidden">
+                    <div class="view-header">
+                        <div><h2>UI Settings</h2><p class="study-guidance-intro">Personalize StudBud’s colors and layout. Changes are saved automatically on this device.</p></div>
+                    </div>
+                    <div class="appearance-grid">
+                        <section class="glass-card">
+                            <h3>Color scheme</h3>
+                            <p>Choose a palette for the full interface, including backgrounds. Every palette supports light and dark appearance.</p>
+                            <div class="scheme-picker" role="group" aria-label="Color scheme">
+                                <button type="button" class="scheme-option" data-color-scheme="forest"><span class="scheme-swatch forest-swatch"></span><span>Forest</span></button>
+                                <button type="button" class="scheme-option" data-color-scheme="ocean"><span class="scheme-swatch ocean-swatch"></span><span>Ocean</span></button>
+                                <button type="button" class="scheme-option" data-color-scheme="violet"><span class="scheme-swatch violet-swatch"></span><span>Violet</span></button>
+                                <button type="button" class="scheme-option" data-color-scheme="sunset"><span class="scheme-swatch sunset-swatch"></span><span>Sunset</span></button>
+                                <button type="button" class="scheme-option" data-color-scheme="monochrome"><span class="scheme-swatch monochrome-swatch"></span><span>Black &amp; White</span></button>
+                            </div>
+                        </section>
+                        <section class="glass-card">
+                            <h3>Display</h3>
+                            <div class="form-group">
+                                <label for="ui-theme-select">Appearance</label>
+                                <select id="ui-theme-select">
+                                    <option value="dark">Dark</option>
+                                    <option value="light">Light</option>
+                                </select>
+                            </div>
+                            <label class="setting-toggle"><input type="checkbox" id="ui-compact-mode"> <span>Compact spacing</span></label>
+                            <p class="settings-hint">Compact mode fits more information on smaller displays.</p>
+                        </section>
+                    </div>
+                </section>
+
+            </div>
+        </main>
+
+        <!-- FOCUS & SOUND DRAWER (Collapsible) -->
+        <div id="sound-drawer" class="glass-panel collapsed">
+            <div class="drawer-header">
+                <h3>Audio Synthesizer Mixer</h3>
+                <button id="close-drawer-btn" class="icon-btn"><i class="fas fa-chevron-down"></i></button>
+            </div>
+            <div class="drawer-content">
+                <div class="mixer-channel">
+                    <label for="vol-lofi">Lo-Fi Synth <output id="vol-lofi-value">50%</output></label>
+                    <input type="range" id="vol-lofi" min="0" max="100" value="50">
+                </div>
+                <div class="mixer-channel">
+                    <label for="vol-rain">Rain Noise <output id="vol-rain-value">50%</output></label>
+                    <input type="range" id="vol-rain" min="0" max="100" value="50">
+                </div>
+                <div class="mixer-channel">
+                    <label for="vol-white">White Noise <output id="vol-white-value">30%</output></label>
+                    <input type="range" id="vol-white" min="0" max="100" value="30">
+                </div>
+                <div class="mixer-channel">
+                    <label for="vol-binaural">Binaural Waves (Focus) <output id="vol-binaural-value">60%</output></label>
+                    <input type="range" id="vol-binaural" min="0" max="100" value="60">
+                </div>
+            </div>
+        </div>
+
+        <!-- MODAL OVERLAYS -->
+        <div id="modal-container" class="modal-overlay hidden">
+            <div id="study-log-modal" class="glass-card modal-content hidden">
+                <div class="modal-header">
+                    <h2>Log a study session</h2>
+                    <button class="close-modal-btn icon-btn" aria-label="Close"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body">
+                    <form id="study-log-form">
+                        <input type="hidden" id="study-log-assignment-id">
+                        <div class="form-group">
+                            <label for="study-log-minutes">Minutes studied</label>
+                            <input type="number" id="study-log-minutes" min="1" max="360" step="1" value="25" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="study-log-method">How did you study?</label>
+                            <select id="study-log-method" required>
+                                <option value="retrieval">Closed-book recall / self-quiz</option>
+                                <option value="practice">Practice problems / timed questions</option>
+                                <option value="explain">Explain it aloud / teach-back</option>
+                                <option value="flashcards">Flashcards / spaced review</option>
+                                <option value="outline">Outline / draft from a rubric</option>
+                                <option value="chunk">Read in chunks / summarize</option>
+                                <option value="checklist">Checklist / project steps</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="study-log-effectiveness">How effective did that feel?</label>
+                            <select id="study-log-effectiveness" required>
+                                <option value="1">1 - Not effective</option>
+                                <option value="2">2 - A little effective</option>
+                                <option value="3" selected>3 - Somewhat effective</option>
+                                <option value="4">4 - Effective</option>
+                                <option value="5">5 - Very effective</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="study-log-notes">What did you cover? (optional)</label>
+                            <textarea id="study-log-notes" rows="2" maxlength="300" placeholder="e.g. Reviewed questions 1-8; missed 3 and 6"></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button class="secondary-btn cancel-modal-btn">Cancel</button>
+                    <button type="submit" form="study-log-form" class="primary-btn">Save Study Log</button>
+                </div>
+            </div>
+            
+            <!-- Add/Edit Course Modal -->
+            <div id="course-modal" class="glass-card modal-content hidden">
+                <div class="modal-header">
+                    <h2 id="course-modal-title">Add Course</h2>
+                    <button class="close-modal-btn icon-btn"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body">
+                    <form id="course-form">
+                        <input type="hidden" id="course-id">
+                        <div class="form-group">
+                            <label for="course-name">Course Name</label>
+                            <input type="text" id="course-name" required>
+                        </div>
+                        <div class="form-group">
+                        </div>
+                        <div class="form-group">
+                            <label for="course-subject-category">Transcript subject area</label>
+                            <select id="course-subject-category">
+                                <option value="Electives">Electives</option>
+                                <option value="ELA">English / Language Arts</option>
+                                <option value="Math">Math</option>
+                                <option value="Science">Science</option>
+                                <option value="Social Studies">Social Studies</option>
+                                <option value="Fine Arts">Fine Arts</option>
+                                <option value="Practical Arts">Practical Arts</option>
+                                <option value="PE">Physical Education</option>
+                                <option value="Health">Health</option>
+                                <option value="Personal Finance">Personal Finance</option>
+                            </select>
+                        </div>
+                        <div class="form-group row-group">
+                            <div class="half-width">
+                                <label for="course-term">Term</label>
+                                <select id="course-term">
+                                    <option value="S1">Semester 1</option>
+                                    <option value="S2">Semester 2</option>
+                                    <option value="FY">Full Year</option>
+                                </select>
+                            </div>
+                            <div class="half-width">
+                                <label for="course-credits">Credits</label>
+                                <input type="number" id="course-credits" step="0.5" value="0.5" required>
+                            </div>
+                        </div>
+                        <div class="form-group row-group">
+                            <div class="half-width">
+                                <label for="course-weight">Weight Scale</label>
+                                <select id="course-weight">
+                                    <option value="Regular">Regular (4.0)</option>
+                                    <option value="Honors">Honors (4.5)</option>
+                                    <option value="AP">AP/Dual Credit (5.0)</option>
+                                </select>
+                            </div>
+                            <div class="half-width">
+                                <label for="course-grade">Current Grade (%)</label>
+                                <input type="number" id="course-grade" min="0" max="120" step="0.1" required>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="course-target-grade">Target Grade (%)</label>
+                            <input type="number" id="course-target-grade" min="0" max="100" step="0.1" value="90" required>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button class="secondary-btn cancel-modal-btn">Cancel</button>
+                    <button type="submit" form="course-form" class="primary-btn">Save Course</button>
+                </div>
+            </div>
+
+            <!-- Add/Edit Assignment Modal -->
+            <div id="assignment-modal" class="glass-card modal-content hidden">
+                <div class="modal-header">
+                    <h2 id="assignment-modal-title">Add Assignment</h2>
+                    <button class="close-modal-btn icon-btn"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body">
+                    <form id="assignment-form">
+                        <input type="hidden" id="assignment-id">
+                        <div class="form-group">
+                            <label for="assignment-name">Assignment Title</label>
+                            <input type="text" id="assignment-name" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="assignment-course">Associated Course</label>
+                            <select id="assignment-course" required>
+                                <option value="">Select a Course...</option>
+                                <!-- Populated dynamically by JS -->
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="assignment-category">Grade Category (optional)</label>
+                            <select id="assignment-category">
+                                <option value="">No category / unweighted average</option>
+                            </select>
+                        </div>
+                        <div class="form-group row-group">
+                            <div class="half-width">
+                                <label for="assignment-kind">Item Type</label>
+                                <select id="assignment-kind">
+                                    <option value="assignment">Assignment</option>
+                                    <option value="quiz">Quiz</option>
+                                    <option value="test">Test / Exam</option>
+                                </select>
+                            </div>
+                            <div class="half-width">
+                                <label for="assignment-size">Estimated Study Time (minutes)</label>
+                                <input type="number" id="assignment-size" min="5" step="5" value="30">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="assignment-importance">Importance (1 = normal, 5 = critical)</label>
+                            <input type="range" id="assignment-importance" min="1" max="5" value="3">
+                        </div>
+                        <div class="form-group">
+                            <label for="assignment-due-date">Due Date</label>
+                            <input type="date" id="assignment-due-date" required>
+                        </div>
+                        <div class="form-group row-group">
+                            <div class="half-width">
+                                <label for="assignment-points">Points Earned</label>
+                                <input type="number" id="assignment-points" step="0.5" value="0">
+                            </div>
+                            <div class="half-width">
+                                <label for="assignment-max-points">Max Points</label>
+                                <input type="number" id="assignment-max-points" step="0.5" value="100" required>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button class="secondary-btn cancel-modal-btn">Cancel</button>
+                    <button type="submit" form="assignment-form" class="primary-btn">Save Assignment</button>
+                </div>
+            </div>
+
+            <!-- Card Studio Builder Modal -->
+            <div id="card-studio-modal" class="glass-card modal-content hidden">
+                <div class="modal-header">
+                    <h2>Card Studio Builder</h2>
+                    <button class="close-modal-btn icon-btn"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body">
+                    <form id="card-form">
+                        <input type="hidden" id="card-deck-id">
+                        <input type="hidden" id="card-id">
+                        <div class="form-group">
+                            <label for="card-tags">Tags (comma separated)</label>
+                            <input type="text" id="card-tags" placeholder="e.g., Chapter 1, Vocabulary">
+                        </div>
+                        <div class="form-group">
+                            <label for="card-front">Front (Concept / Question)</label>
+                            <textarea id="card-front" rows="3" required></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="card-back">Back (Definition / Answer)</label>
+                            <textarea id="card-back" rows="4" required></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button class="secondary-btn cancel-modal-btn">Cancel</button>
+                    <button type="submit" form="card-form" class="primary-btn">Save Card</button>
+                </div>
+            </div>
+
+            <!-- Target GPA Solver Modal -->
+            <div id="target-gpa-modal" class="glass-card modal-content hidden">
+                <div class="modal-header">
+                    <h2>Target GPA Solver</h2>
+                    <button class="close-modal-btn icon-btn"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body">
+                    <p>Enter your desired Cumulative GPA to calculate what grades you need in your current active courses.</p>
+                    <div class="form-group">
+                        <label for="desired-gpa">Target GPA</label>
+                        <input type="number" id="desired-gpa" step="0.01" min="0" max="5.0" placeholder="e.g. 3.85">
+                    </div>
+                    <div class="form-group">
+                        <label>Calculation Mode</label>
+                        <select id="gpa-solver-mode">
+                            <option value="weighted">Weighted GPA</option>
+                            <option value="unweighted">Unweighted GPA</option>
+                        </select>
+                    </div>
+                    <div id="solver-results" class="solver-results-box hidden">
+                        <h4>Required Average Grade:</h4>
+                        <span id="solver-output-percentage" class="stat-number">--%</span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="secondary-btn cancel-modal-btn">Close</button>
+                    <button id="run-gpa-solver-btn" class="primary-btn">Calculate</button>
+                </div>
+            </div>
+
+            <!-- Import/Export Backup Modal -->
+            <div id="backup-modal" class="glass-card modal-content hidden">
+                <div class="modal-header">
+                    <h2>Import / Export Data</h2>
+                    <button class="close-modal-btn icon-btn"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body">
+                    <div class="backup-section">
+                        <h3>Export Backup</h3>
+                        <p>Download your entire StudBud database as a JSON file.</p>
+                        <button id="export-json-btn" class="primary-btn"><i class="fas fa-file-export"></i> Download Backup</button>
+                    </div>
+                    <hr class="divider">
+                    <div class="backup-section">
+                        <h3>Import Backup</h3>
+                        <p>Paste your previously exported JSON string below to restore your data. <strong>Warning: This overwrites current data!</strong></p>
+                        <div class="form-group">
+                            <textarea id="import-json-textarea" rows="6" placeholder="Paste JSON backup here..."></textarea>
+                        </div>
+                        <button id="import-json-btn" class="danger-btn"><i class="fas fa-file-import"></i> Restore Data</button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Chart.js CDN for Analytics (Required for analyticsEngine.js rendering) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
+    
+    <!-- Application Scripts (Zero Dependency strict vanilla logic apart from Chart rendering on canvas) -->
+    <script src="pchsData.js" defer></script>
+    <script src="gpaCalculator.js" defer></script>
+    <script src="plannerEngine.js" defer></script>
+    <script src="flashcardEngine.js" defer></script>
+    <script src="analyticsEngine.js" defer></script>
+    <script src="practiceExamEngine.js" defer></script>
+    <script src="app.js" defer></script>
+</body>
+</html>
