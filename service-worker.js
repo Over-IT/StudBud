@@ -1,4 +1,4 @@
-const CACHE_NAME = 'studbud-shell-v1';
+const CACHE_NAME = 'studbud-shell-v2';
 const APP_FILES = [
     './',
     './index.html',
@@ -11,6 +11,7 @@ const APP_FILES = [
     './flashcardEngine.js',
     './analyticsEngine.js',
     './practiceExamEngine.js',
+    './cloudSync.js',
     './app.js'
 ];
 
@@ -35,6 +36,10 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
     const request = event.request;
     if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;
+    if (new URL(request.url).pathname.endsWith('/supabase-config.js')) {
+        event.respondWith(fetch(request));
+        return;
+    }
 
     if (request.mode === 'navigate') {
         event.respondWith(

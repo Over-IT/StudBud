@@ -117,6 +117,114 @@
     --shadow-glass: 0 4px 30px rgba(0, 0, 0, 0.05);
 }
 
+.auth-screen {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+
+.auth-card {
+    width: min(100%, 460px);
+    padding: clamp(24px, 5vw, 40px);
+}
+
+.auth-card > .logo-container {
+    justify-content: center;
+    margin-bottom: 24px;
+}
+
+.auth-card h1,
+.auth-card > p {
+    text-align: center;
+}
+
+.auth-form {
+    display: grid;
+    gap: 16px;
+    margin-top: 24px;
+}
+
+.auth-form label {
+    display: grid;
+    gap: 6px;
+}
+
+.auth-form input,
+.analytics-controls select {
+    width: 100%;
+}
+
+.auth-message {
+    min-height: 1.4em;
+    margin: 12px 0 0;
+}
+
+.auth-message.error {
+    color: var(--status-danger);
+}
+
+.auth-switch {
+    margin-top: 20px;
+}
+
+.text-btn {
+    padding: 0;
+    color: var(--accent-primary);
+    background: none;
+    border: 0;
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.analytics-controls {
+    display: grid;
+    grid-template-columns: auto minmax(150px, 1fr) auto minmax(160px, 1fr) auto minmax(110px, 0.6fr);
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+.grade-progress-chart {
+    margin-bottom: 20px;
+}
+
+.grade-progress-chart canvas {
+    min-height: 300px;
+}
+
+.course-weight-label {
+    display: block;
+    max-height: 5em;
+    overflow-y: auto;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.form-label {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.study-tips-widget ul {
+    display: grid;
+    gap: 10px;
+    padding-left: 22px;
+    color: var(--text-secondary);
+}
+
+@media (max-width: 760px) {
+    .analytics-controls {
+        grid-template-columns: 1fr;
+    }
+}
+
 /* --- RESET & BASE STYLES --- */
 *, *::before, *::after {
     box-sizing: border-box;

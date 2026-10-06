@@ -61,13 +61,15 @@
         }
 
         /**
-         * Converts a letter grade to points, factoring in PCHS Honors/AP weighting (+1.0 for C or higher)
+         * Converts a letter grade using the PCHS grade-scale data.
          */
         getGradePoints(grade, isWeighted) {
+            const pchsGrade = (window.PCHS_GRADE_SCALE || []).find(item => item.letter === String(grade).toUpperCase());
+            if (pchsGrade) return isWeighted ? pchsGrade.weighted : pchsGrade.unweighted;
             let basePts = GRADE_SCALE[grade.toUpperCase()];
             if (basePts === undefined) return 0;
             if (isWeighted && basePts >= 2.0) {
-                return basePts + 1.0;
+                return basePts + 0.5;
             }
             return basePts;
         }

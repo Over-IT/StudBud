@@ -193,32 +193,17 @@
 
             this.state = {
                 profile: {
-                    firstName: "Alex",
-                    gradeLevel: 12,
                     graduationYear: 2026,
                     targetGpa: 3.8,
                     currentTerm: "auto",
-                    customNote: "Stay focused on AP Physics & Calculus!"
                 },
-                courses: [
-                    { code: "ENG302", title: "AP English Language", credits: 1.0, category: "ELA", isWeighted: true, targetGrade: "A", targetPct: 95, currentPct: 94.5, categories: [] },
-                    { code: "MAT402", title: "AP Calculus AB", credits: 1.0, category: "Math", isWeighted: true, targetGrade: "A", targetPct: 95, currentPct: 91.2, categories: [] },
-                    { code: "SCI302", title: "AP Physics 1", credits: 1.0, category: "Science", isWeighted: true, targetGrade: "A-", targetPct: 90, currentPct: 89.8, categories: [] }
-                ],
-                assignments: [
-                    { id: "asgn_1", courseCode: "MAT402", title: "Derivatives Problem Set 4", dueDate: "2026-10-12", priority: "high", status: "pending", kind: "assignment", estimatedMinutes: 60, importance: 4 },
-                    { id: "asgn_2", courseCode: "SCI302", title: "Kinematics Lab Report", dueDate: "2026-10-14", priority: "high", status: "pending", kind: "assignment", estimatedMinutes: 90, importance: 4 }
-                ],
+                courses: [],
+                assignments: [],
                 gradeScenarios: [],
                 selectedGradeScenarioId: null,
                 flashcards: [],
                 studyHistory: [],
-                gameMetrics: {
-                    level: 4,
-                    xp: 1250,
-                    streakDays: 5,
-                    lastStudyDate: "2026-10-05"
-                },
+                gameMetrics: { level: 1, xp: 0, streakDays: 0, lastStudyDate: null },
                 settings: {
                     theme: "dark",
                     audioVolume: 0.70,
@@ -944,10 +929,14 @@
             this.practiceTestAnswers = [];
             this.practiceTestQuestionTypes = [];
             this.creatingGradeScenario = false;
+            this.gradeProgressChart = null;
         }
 
         async init() {
             await AppState.init();
+            if (window.StudBudCloud.initialSnapshot) {
+                await AppState.importAppState(window.StudBudCloud.initialSnapshot);
+            }
             this.bindUI();
             this.renderUI();
             Router.init();
@@ -961,6 +950,17 @@
             window.addEventListener('keydown', unlockAudio);
 
             EventBus.emit('app:ready', null);
+        }
+
+        async restoreCloudSnapshot(snapshot) {
+            await AppState.importAppState(snapshot);
+            this.renderUI();
+            this.setCloudChartControls();
+            this.renderGradeProgress();
+        }
+
+        async clearLocalStore(storeName) {
+            await NexusDB.clear(storeName);
         }
 
         escapeHTML(value) {
@@ -980,6 +980,7 @@
             document.addEventListener('change', event => this.handleChange(event));
             document.addEventListener('input', event => {
                 if (event.target.matches('#assignment-search')) this.renderAssignments();
+                if (event.target.matches('#course-search')) this.filterCourseCatalog(event.target.value);
                 if (event.target.matches('input[type="range"][id^="vol-"]')) this.setMixerLevel(event.target, false);
             });
             window.addEventListener('resize', () => this.updateSidebarToggle());
@@ -1000,6 +1001,7 @@
                 if (route === 'calendar') this.renderCalendar();
                 if (route === 'schedule') this.renderSchedulePage();
                 if (route === 'grade-scenarios') this.renderGradeScenarios();
+                if (route === 'analytics') this.renderGradeProgress();
                 if (!['class', 'flashcard'].includes(route)) this.stopFocusTimer();
             });
         }
@@ -1011,6 +1013,8 @@
             this.renderProfile();
             this.renderDashboard();
             this.renderGradeScenarios();
+            this.setCloudChartControls();
+            this.renderGradeProgress();
             if (Router.activeRoute === 'class') this.renderClassDetail();
             if (Router.activeRoute === 'calendar') this.renderCalendar();
             if (Router.activeRoute === 'schedule') this.renderSchedulePage();
@@ -1040,8 +1044,7 @@
             const selectedScenario = scenarios.find(item => item.id === storedSelectedId) || scenarios[0] || null;
             const selectedId = selectedScenario ? selectedScenario.id : '';
             if (selectedId !== (storedSelectedId || '')) {
-                AppState.state.selectedGradeScenarioId = selectedScenario ? selectedId : null;
-                AppState.saveToLocalStorage();
+                AppState.set('selectedGradeScenarioId', selectedScenario ? selectedId : null);
             }
             scenarioSelect.innerHTML = scenarios.map(item =>
                 `<option value="${this.escapeHTML(item.id)}">${this.escapeHTML(item.name)}</option>`
@@ -1095,14 +1098,10 @@
                 status: 'completed'
             }));
             const currentGpa = this.calculateTrackedGPA();
-            const projectedCourses = courses.map(course => ({
-                ...course,
-                targetGrade: this.gradeForPercentage(this.calculateScenarioCourseGrade(
-                    course,
-                    assignments,
-                    hypotheticalAssignments
-                ))
-            }));
+            const projectedCourses = courses.map(course => {
+                const grade = this.calculateScenarioCourseGrade(course, assignments, hypotheticalAssignments);
+                return Number.isFinite(grade) ? { ...course, targetGrade: this.gradeForPercentage(grade) } : null;
+            }).filter(Boolean);
             const projectedGpa = window.GPACalculator
                 ? window.GPACalculator.calculateCurrentGPA(projectedCourses)
                 : currentGpa;
@@ -1126,11 +1125,11 @@
             resultContainer.innerHTML = courses.length ? courses.map(course => {
                 const currentGrade = this.calculateCourseGrade(course, assignments);
                 const projectedGrade = this.calculateScenarioCourseGrade(course, assignments, hypotheticalAssignments);
-                const change = projectedGrade - currentGrade;
+                const change = Number.isFinite(projectedGrade) && Number.isFinite(currentGrade) ? projectedGrade - currentGrade : 0;
                 return `<article class="scenario-grade-row">
                     <strong>${this.escapeHTML(course.title)}</strong>
-                    <span>${currentGrade.toFixed(1)}% <i class="fas fa-arrow-right" aria-hidden="true"></i> <strong>${projectedGrade.toFixed(1)}%</strong></span>
-                    <small class="${change > 0.005 ? 'grade-change-positive' : change < -0.005 ? 'grade-change-negative' : ''}">${change > 0.005 ? '+' : ''}${change.toFixed(1)} percentage points</small>
+                    <span>${Number.isFinite(currentGrade) ? `${currentGrade.toFixed(1)}%` : 'Not graded'} <i class="fas fa-arrow-right" aria-hidden="true"></i> <strong>${Number.isFinite(projectedGrade) ? `${projectedGrade.toFixed(1)}%` : 'Not graded'}</strong></span>
+                    <small class="${change > 0.005 ? 'grade-change-positive' : change < -0.005 ? 'grade-change-negative' : ''}">${Number.isFinite(projectedGrade) && Number.isFinite(currentGrade) ? `${change > 0.005 ? '+' : ''}${change.toFixed(1)} percentage points` : 'Add hypothetical scores to project this class'}</small>
                 </article>`;
             }).join('') : '<p class="empty-state">Add a class to compare projected grades.</p>';
         }
@@ -1143,41 +1142,7 @@
         calculateScenarioCourseGrade(course, assignments, hypotheticalAssignments) {
             const courseHypotheticals = hypotheticalAssignments.filter(item => item.courseCode === course.code);
             if (!courseHypotheticals.length) return this.calculateCourseGrade(course, assignments);
-            const gradedWork = assignments.filter(item =>
-                item.courseCode === course.code &&
-                (item.status === 'completed' || Number(item.pointsEarned) > 0)
-            );
-            if (gradedWork.length) return this.calculateCourseGrade(course, assignments.concat(courseHypotheticals));
-
-            const baseline = Number(course.currentPct ?? 0);
-            const categories = course.categories || [];
-            const syntheticPriorWork = categories.length
-                ? categories.map(category => ({
-                    id: `scenario_baseline_${category.id}`,
-                    courseCode: course.code,
-                    categoryId: category.id,
-                    pointsEarned: baseline,
-                    maxPoints: 100,
-                    status: 'completed'
-                })).concat(
-                    categories.reduce((sum, category) => sum + (Number(category.weight) || 0), 0) < 100
-                        ? [{
-                            id: `scenario_baseline_uncategorized_${course.code}`,
-                            courseCode: course.code,
-                            pointsEarned: baseline,
-                            maxPoints: 100,
-                            status: 'completed'
-                        }]
-                        : []
-                )
-                : [{
-                    id: `scenario_baseline_${course.code}`,
-                    courseCode: course.code,
-                    pointsEarned: baseline,
-                    maxPoints: 100,
-                    status: 'completed'
-                }];
-            return this.calculateCourseGrade(course, assignments.concat(syntheticPriorWork, courseHypotheticals));
+            return this.calculateCourseGrade(course, assignments.concat(courseHypotheticals));
         }
 
         updateGradeScenarioCategories() {
@@ -1200,6 +1165,7 @@
 
         renderCourses() {
             const courses = AppState.get('courses') || [];
+            const catalog = window.PCHS_COURSE_CATALOG || [];
             const body = document.getElementById('transcript-body');
             const cards = document.getElementById('class-card-grid');
             const summary = document.getElementById('cumulative-gpa-summary');
@@ -1216,7 +1182,7 @@
                     const classAssignments = assignments.filter(item => item.courseCode === course.code);
                     const categories = course.categories || [];
                     const currentGrade = this.calculateCourseGrade(course);
-                    const gradeLetter = this.gradeForPercentage(currentGrade);
+                    const gradeLetter = currentGrade === null ? '—' : this.gradeForPercentage(currentGrade);
                     const categoryGroups = categories.map(category => ({
                         id: category.id,
                         name: category.name,
@@ -1265,8 +1231,8 @@
                             <summary class="transcript-class-summary">
                                 <span class="transcript-chevron" aria-hidden="true"><i class="fas fa-chevron-right"></i></span>
                                 <span class="transcript-class-name"><strong>${this.escapeHTML(course.title)}</strong><small>${this.escapeHTML(this.termLabel(course.term))} · ${course.isWeighted ? 'Weighted' : 'Regular'} · ${Number(course.credits || 0).toFixed(1)} credits</small></span>
-                                <span class="transcript-grade"><strong>${this.escapeHTML(gradeLetter)}</strong><small>${currentGrade.toFixed(1)}%</small></span>
-                                <span class="transcript-class-target"><small>Target</small><strong>${Number(course.targetPct ?? 90).toFixed(1)}%</strong></span>
+                                <span class="transcript-grade"><strong>${this.escapeHTML(gradeLetter)}</strong><small>${currentGrade === null ? 'No graded work' : `${currentGrade.toFixed(1)}%`}</small></span>
+                                <span class="transcript-class-target"><small>Target</small><strong>${course.targetPct !== null && course.targetPct !== undefined && Number.isFinite(Number(course.targetPct)) ? `${Number(course.targetPct).toFixed(1)}%` : '—'}</strong></span>
                                 <span class="transcript-item-count">${classAssignments.length} item${classAssignments.length === 1 ? '' : 's'}</span>
                             </summary>
                             <div class="transcript-class-content">
@@ -1284,11 +1250,11 @@
             if (cards) {
                 cards.innerHTML = courses.length ? courses.map(course => {
                     const grade = this.calculateCourseGrade(course);
-                    const target = Number(course.targetPct ?? 90);
+                    const target = course.targetPct === null || course.targetPct === undefined ? NaN : Number(course.targetPct);
                     return `<article class="glass-card class-card">
                         <div><h3>${this.escapeHTML(course.title)}</h3><span class="class-term">${this.escapeHTML(this.termLabel(course.term))}</span></div>
-                        <p>Current grade <strong>${grade.toFixed(1)}%</strong> · Goal <strong>${target.toFixed(1)}%</strong></p>
-                        <div class="class-grade-track"><span style="width:${Math.max(0, Math.min(100, grade))}%"></span></div>
+                        <p>Current grade <strong>${grade === null ? 'Not graded' : `${grade.toFixed(1)}%`}</strong> · Goal <strong>${Number.isFinite(target) ? `${target.toFixed(1)}%` : 'Not set'}</strong></p>
+                        <div class="class-grade-track"><span style="width:${Math.max(0, Math.min(100, grade || 0))}%"></span></div>
                         <button class="primary-btn" data-action="open-class" data-id="${this.escapeHTML(course.code)}">Open class</button>
                     </article>`;
                 }).join('') : '<p class="empty-state glass-card">No classes yet. Add your first class to start tracking grades.</p>';
@@ -1302,6 +1268,7 @@
                 ).join('');
                 if (courses.some(course => course.code === selected)) options.value = selected;
             }
+            if (!catalog.length) console.error('[StudBud] PCHS course catalog did not load.');
         }
 
         termLabel(term) {
@@ -1311,10 +1278,10 @@
         calculateTrackedGPA(courses = AppState.get('courses') || []) {
             const calculator = window.GPACalculator;
             if (!calculator) return { weighted: '0.000', unweighted: '0.000', totalCredits: 0 };
-            const currentCourses = courses.map(course => ({
-                ...course,
-                targetGrade: this.gradeForPercentage(this.calculateCourseGrade(course))
-            }));
+            const currentCourses = courses.map(course => {
+                const grade = this.calculateCourseGrade(course);
+                return Number.isFinite(grade) ? { ...course, targetGrade: this.gradeForPercentage(grade) } : null;
+            }).filter(Boolean);
             return calculator.calculateCurrentGPA(currentCourses);
         }
 
@@ -1323,7 +1290,7 @@
                 item.courseCode === course.code &&
                 (item.status === 'completed' || Number(item.pointsEarned) > 0)
             );
-            if (!courseAssignments.length) return Number(course.currentPct ?? 0);
+            if (!courseAssignments.length) return null;
 
             const categories = course.categories || [];
             if (categories.length) {
@@ -1355,7 +1322,7 @@
 
             const earned = courseAssignments.reduce((sum, item) => sum + Number(item.pointsEarned || 0), 0);
             const possible = courseAssignments.reduce((sum, item) => sum + Number(item.maxPoints || 0), 0);
-            return possible > 0 ? earned / possible * 100 : Number(course.currentPct ?? 0);
+            return possible > 0 ? earned / possible * 100 : null;
         }
 
         renderClassDetail() {
@@ -1369,7 +1336,7 @@
             const categories = course.categories || [];
             const assignments = (AppState.get('assignments') || []).filter(item => item.courseCode === course.code);
             const grade = this.calculateCourseGrade(course);
-            const target = Number(course.targetPct ?? 90);
+            const target = course.targetPct === null || course.targetPct === undefined ? NaN : Number(course.targetPct);
             const sumWeights = categories.reduce((sum, category) => sum + Number(category.weight || 0), 0);
             const categoryRows = categories.map(category => {
                 const items = assignments.filter(item => item.categoryId === category.id);
@@ -1399,7 +1366,7 @@
             container.innerHTML = `
                 <div class="class-detail-summary glass-card">
                     <div><span class="class-term">${this.escapeHTML(this.termLabel(course.term))}</span><h2>${this.escapeHTML(course.title)}</h2><p>Current grade uses scored work and your category weights.</p></div>
-                    <div class="class-grade-metrics"><div><span>${grade.toFixed(1)}%</span><small>Current</small></div><div><span>${target.toFixed(1)}%</span><small>Target</small></div></div>
+                    <div class="class-grade-metrics"><div><span>${grade === null ? '—' : `${grade.toFixed(1)}%`}</span><small>Current</small></div><div><span>${Number.isFinite(target) ? `${target.toFixed(1)}%` : '—'}</span><small>Optional target</small></div></div>
                 </div>
                 <div class="class-detail-grid">
                     <section class="glass-card">
@@ -1587,13 +1554,7 @@
             const assignments = AppState.get('assignments') || [];
             const profile = AppState.get('profile') || {};
             const targetGpa = Number(profile.targetGpa || 0);
-            const weightedPoints = courses.reduce((sum, course) => {
-                const grade = this.gradeForPercentage(this.calculateCourseGrade(course));
-                const gradePoints = window.GPACalculator ? window.GPACalculator.getGradePoints(grade, course.isWeighted) : 0;
-                return sum + gradePoints * Number(course.credits || 0);
-            }, 0);
-            const totalCredits = courses.reduce((sum, course) => sum + Number(course.credits || 0), 0);
-            const currentWeightedGpa = totalCredits ? weightedPoints / totalCredits : 0;
+            const currentWeightedGpa = Number(this.calculateTrackedGPA(courses).weighted);
             const gpaGap = Math.max(0, targetGpa - currentWeightedGpa);
             const today = new Date();
             today.setHours(0, 0, 0, 0);
@@ -1601,8 +1562,8 @@
             const recommended = assignments.filter(item => item.status !== 'completed').map(item => {
                 const course = courses.find(entry => entry.code === item.courseCode);
                 const grade = course ? this.calculateCourseGrade(course) : 0;
-                const target = course ? Number(course.targetPct ?? 90) : 90;
-                const gradeGap = Math.max(0, target - grade);
+                const target = course ? Number(course.targetPct) : NaN;
+                const gradeGap = Number.isFinite(grade) && Number.isFinite(target) ? Math.max(0, target - grade) : 0;
                 const due = item.dueDate ? new Date(`${item.dueDate}T00:00:00`) : null;
                 const daysUntilDue = due && Number.isFinite(due.getTime()) ? Math.ceil((due - today) / 86400000) : 7;
                 const urgency = daysUntilDue < 0 ? 2 : 1 / Math.max(1, daysUntilDue + 1);
@@ -1862,7 +1823,7 @@
             const termDisplay = document.getElementById('current-term-display');
             if (termDisplay) termDisplay.textContent = this.termLabel(selectedTerm);
             const saveStatus = document.getElementById('data-save-status');
-            if (saveStatus && !saveStatus.textContent.trim()) saveStatus.textContent = 'Your classes, assignments, profile, and settings save automatically on this device.';
+            if (saveStatus && !saveStatus.textContent.trim()) saveStatus.textContent = 'Your classes, assignments, profile, and settings sync automatically to your account.';
             this.applyAppearance();
         }
 
@@ -1951,6 +1912,7 @@
             }
             this.renderDailySchedule(new Date());
             const priorityList = document.getElementById('study-priority-list');
+            this.renderTodayStudyPlan();
             if (priorityList) {
                 const recommendations = this.getStudyRecommendations().slice(0, 5);
                 priorityList.innerHTML = recommendations.length ? recommendations.map((item, index) =>
@@ -1958,6 +1920,125 @@
                 ).join('') : '<p class="empty-state">Add classes and upcoming work to get personalized study suggestions.</p>';
             }
             this.renderStudyProgress();
+        }
+
+        renderTodayStudyPlan() {
+            const totalElement = document.getElementById('today-study-total');
+            const classContainer = document.getElementById('today-study-by-class');
+            if (!totalElement || !classContainer) return;
+            const recommendations = this.getStudyRecommendations();
+            const byClass = new Map();
+            recommendations.forEach(item => {
+                const current = byClass.get(item.courseCode) || { title: item.courseTitle, minutes: 0, items: 0 };
+                current.minutes += item.sessionMinutes;
+                current.items += 1;
+                byClass.set(item.courseCode, current);
+            });
+            const dueCards = (AppState.get('flashcards') || []).flatMap(deck => {
+                const count = (deck.cards || []).filter(card => this.isCardDue(card)).length;
+                return count ? [{ courseCode: deck.courseCode, title: deck.title, count }] : [];
+            });
+            dueCards.forEach(deck => {
+                const key = deck.courseCode || `review_${deck.title}`;
+                const course = (AppState.get('courses') || []).find(item => item.code === deck.courseCode);
+                const current = byClass.get(key) || { title: course?.title || `${deck.title} review`, minutes: 0, items: 0 };
+                current.minutes += Math.ceil(deck.count / 5) * 5;
+                current.items += 1;
+                byClass.set(key, current);
+            });
+            const totalMinutes = Array.from(byClass.values()).reduce((sum, item) => sum + item.minutes, 0);
+            const dueCardCount = dueCards.reduce((sum, deck) => sum + deck.count, 0);
+            totalElement.textContent = totalMinutes
+                ? `Plan for about ${Math.floor(totalMinutes / 60)} hr ${totalMinutes % 60} min today across assignments${dueCardCount ? ` and ${dueCardCount} flashcard review${dueCardCount === 1 ? '' : 's'}` : ''}. Estimates use due dates, task size, and your study logs.`
+                : 'No upcoming assignment or flashcard review blocks today. Add due dates and study cards to get a personalized time estimate.';
+            classContainer.innerHTML = byClass.size ? Array.from(byClass.values()).map(item =>
+                `<article class="study-progress-item"><strong>${this.escapeHTML(item.title)}</strong><span>${item.minutes} min · ${item.items} task${item.items === 1 ? '' : 's'}</span></article>`
+            ).join('') : '<p class="empty-state">Add classes and assignments to create a daily plan.</p>';
+        }
+
+        setCloudChartControls() {
+            const select = document.getElementById('analytics-course-select');
+            if (!select) return;
+            const selected = select.value || 'all';
+            select.innerHTML = '<option value="all">All classes</option>' + (AppState.get('courses') || []).map(course =>
+                `<option value="${this.escapeHTML(course.code)}">${this.escapeHTML(course.title)}</option>`
+            ).join('');
+            if (selected === 'all' || (AppState.get('courses') || []).some(course => course.code === selected)) select.value = selected;
+        }
+
+        renderGradeProgress() {
+            const canvas = document.getElementById('grade-progress-chart');
+            if (!canvas) return;
+            if (!window.Chart) {
+                document.getElementById('grade-progress-caption').textContent = 'Charts could not load. Check your internet connection and reload.';
+                return;
+            }
+            const courses = AppState.get('courses') || [];
+            const assignments = AppState.get('assignments') || [];
+            const metric = document.getElementById('analytics-metric-select')?.value || 'class';
+            const selectedCode = document.getElementById('analytics-course-select')?.value || 'all';
+            const chartType = document.getElementById('analytics-chart-type')?.value || 'line';
+            const caption = document.getElementById('grade-progress-caption');
+            const datedAssignments = assignments.filter(item =>
+                (item.status === 'completed' || Number(item.pointsEarned) > 0) && (item.gradedAt || item.dueDate)
+            );
+            const dateFor = item => {
+                const value = String(item.gradedAt || item.dueDate);
+                return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : localDateKey(new Date(value));
+            };
+            const labels = Array.from(new Set(datedAssignments.map(dateFor))).sort();
+            let datasets;
+
+            if (metric === 'class') {
+                const visibleCourses = courses.filter(course => selectedCode === 'all' || course.code === selectedCode);
+                datasets = visibleCourses.map((course, index) => ({
+                    label: course.title,
+                    data: labels.map(date => {
+                        const scored = datedAssignments.filter(item => item.courseCode === course.code && dateFor(item) <= date);
+                        const grade = this.calculateCourseGrade(course, scored);
+                        return Number.isFinite(grade) ? Number(grade.toFixed(2)) : null;
+                    }),
+                    borderColor: `hsl(${(index * 67 + 145) % 360} 62% 55%)`,
+                    backgroundColor: `hsla(${(index * 67 + 145) % 360} 62% 55% / 0.18)`,
+                    tension: 0.25,
+                    spanGaps: false
+                }));
+                caption.textContent = labels.length
+                    ? 'Each line shows a class grade calculated from scored assignments up to that date.'
+                    : 'Record assignment scores to see class grades progress over time.';
+            } else {
+                datasets = [{
+                    label: metric === 'weighted' ? 'Weighted GPA' : 'Unweighted GPA',
+                    data: labels.map(date => {
+                        const coursesAtDate = courses.map(course => {
+                            const scored = datedAssignments.filter(item => item.courseCode === course.code && dateFor(item) <= date);
+                            const grade = this.calculateCourseGrade(course, scored);
+                            return Number.isFinite(grade) ? { ...course, targetGrade: this.gradeForPercentage(grade) } : null;
+                        }).filter(Boolean);
+                        return Number(window.GPACalculator.calculateCurrentGPA(coursesAtDate)[metric]);
+                    }),
+                    borderColor: '#55c995',
+                    backgroundColor: 'rgba(85, 201, 149, 0.2)',
+                    tension: 0.25
+                }];
+                caption.textContent = labels.length
+                    ? 'Overall GPA calculated from scored assignments recorded on or before each date.'
+                    : 'Record assignment scores to see overall GPA progress over time.';
+            }
+
+            if (this.gradeProgressChart) this.gradeProgressChart.destroy();
+            this.gradeProgressChart = new window.Chart(canvas, {
+                type: chartType,
+                data: { labels, datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { intersect: false, mode: 'index' },
+                    scales: {
+                        y: { beginAtZero: metric !== 'class', min: 0, max: metric === 'class' ? 100 : 5 }
+                    }
+                }
+            });
         }
 
         isCardDue(card, now = Date.now()) {
@@ -2166,13 +2247,16 @@
                 this.setMixerLevel(event.target, true);
                 return;
             }
+            if (event.target.id === 'course-name') this.populateCourseFromCatalog();
+            if (['analytics-metric-select', 'analytics-course-select', 'analytics-chart-type'].includes(event.target.id)) {
+                this.renderGradeProgress();
+            }
             if (event.target.id === 'assignment-course') this.updateAssignmentCategories();
             if (event.target.id === 'assignment-course-filter' || event.target.id === 'assignment-status-filter') {
                 this.renderAssignments();
             } else if (event.target.id === 'grade-scenario-select') {
                 this.creatingGradeScenario = false;
-                AppState.state.selectedGradeScenarioId = event.target.value || null;
-                AppState.saveToLocalStorage();
+                AppState.set('selectedGradeScenarioId', event.target.value || null);
                 this.renderGradeScenarios();
             } else if (event.target.id === 'grade-scenario-course') {
                 this.selectedScenarioCourseCode = event.target.value;
@@ -2275,14 +2359,54 @@
             form.reset();
             document.getElementById('course-id').value = course ? course.code : '';
             document.getElementById('course-modal-title').textContent = course ? 'Edit Course' : 'Add Course';
-            document.getElementById('course-name').value = course ? course.title : '';
+            const search = document.getElementById('course-search');
+            search.value = '';
+            this.filterCourseCatalog('');
+            document.getElementById('course-name').value = course ? (course.catalogCode || course.code) : '';
             document.getElementById('course-subject-category').value = course ? course.category || 'Electives' : 'Electives';
             document.getElementById('course-term').value = course ? (course.term || 'FY') : 'FY';
             document.getElementById('course-credits').value = course ? course.credits : '0.5';
-            document.getElementById('course-weight').value = course && course.isWeighted ? 'AP' : 'Regular';
-            document.getElementById('course-grade').value = course ? course.currentPct : '';
-            document.getElementById('course-target-grade').value = course ? course.targetPct ?? 90 : 90;
+            document.getElementById('course-target-grade').value = course && course.targetPct !== null && course.targetPct !== undefined && Number.isFinite(Number(course.targetPct)) ? course.targetPct : '';
+            if (course) this.populateCourseFromCatalog();
+            else document.getElementById('course-weight-label').textContent = 'Select a catalog course';
             this.openModal('course-modal');
+        }
+
+        filterCourseCatalog(query) {
+            const select = document.getElementById('course-name');
+            if (!select) return;
+            const selected = select.value;
+            const normalized = String(query || '').trim().toLowerCase();
+            const catalog = window.PCHS_COURSE_CATALOG || [];
+            const matches = catalog.filter(course => !normalized ||
+                `${course.code} ${course.title} ${course.category}`.toLowerCase().includes(normalized));
+            select.innerHTML = '<option value="">Select a PCHS course…</option>' + matches.map(course =>
+                `<option value="${this.escapeHTML(course.code)}">${this.escapeHTML(course.title)} (${this.escapeHTML(course.code)})</option>`
+            ).join('');
+            if (matches.some(course => course.code === selected)) select.value = selected;
+        }
+
+        populateCourseFromCatalog() {
+            const courseCode = document.getElementById('course-name').value;
+            const catalogCourse = (window.PCHS_COURSE_CATALOG || []).find(course => course.code === courseCode);
+            if (!catalogCourse) return;
+            const categoryMap = {
+                'Visual Arts': 'Fine Arts',
+                'Fine Arts': 'Fine Arts',
+                Business: 'Practical Arts',
+                CS: 'Practical Arts',
+                CTE: 'Practical Arts',
+                'Practical Arts': 'Practical Arts'
+            };
+            const category = categoryMap[catalogCourse.category] || catalogCourse.category;
+            const categorySelect = document.getElementById('course-subject-category');
+            if (Array.from(categorySelect.options).some(option => option.value === category)) categorySelect.value = category;
+            document.getElementById('course-credits').value = catalogCourse.credits;
+            const weightedScale = (window.PCHS_GRADE_SCALE || []).map(item =>
+                `${item.letter} ${catalogCourse.isWeighted ? item.weighted : item.unweighted.toFixed(1)}`
+            ).join(' · ');
+            document.getElementById('course-weight-label').textContent =
+                `${catalogCourse.isWeighted ? 'Weighted' : 'Regular'} · ${weightedScale}`;
         }
 
         openAssignmentForm(assignment, courseCode = '', dueDate = '') {
@@ -2321,21 +2445,26 @@
 
         async saveCourse() {
             const oldCode = document.getElementById('course-id').value;
-            const code = oldCode || `course_${Date.now()}`;
-            const percentage = Number(document.getElementById('course-grade').value);
-            const weight = document.getElementById('course-weight').value;
+            const catalogCode = document.getElementById('course-name').value;
+            const catalogCourse = (window.PCHS_COURSE_CATALOG || []).find(item => item.code === catalogCode);
+            if (!catalogCourse) throw new Error('Select a course from the PCHS catalog.');
+            const term = document.getElementById('course-term').value;
+            const existingCourse = (AppState.get('courses') || []).find(item => item.code === oldCode);
+            const sameCatalogAlreadyUsed = (AppState.get('courses') || []).some(item =>
+                item.code !== oldCode && (item.catalogCode || item.code) === catalogCode
+            );
+            const code = oldCode || (sameCatalogAlreadyUsed ? `${catalogCode}_${term}_${Date.now()}` : catalogCode);
+            const targetValue = document.getElementById('course-target-grade').value;
             const course = {
                 code,
-                title: document.getElementById('course-name').value.trim(),
-                term: document.getElementById('course-term').value,
-                credits: Number(document.getElementById('course-credits').value),
+                catalogCode,
+                title: catalogCourse.title,
+                term,
+                credits: Number(catalogCourse.credits),
                 category: document.getElementById('course-subject-category').value,
-                isWeighted: weight !== 'Regular',
-                currentPct: percentage,
-                targetGrade: this.gradeForPercentage(percentage),
-                targetPct: Number(document.getElementById('course-target-grade').value)
+                isWeighted: Boolean(catalogCourse.isWeighted),
+                targetPct: targetValue === '' ? null : Number(targetValue)
             };
-            const existingCourse = AppState.get('courses').find(item => item.code === oldCode);
             if (existingCourse) {
                 course.categories = existingCourse.categories || [];
             }
@@ -2346,19 +2475,21 @@
         saveAssignment() {
             const id = document.getElementById('assignment-id').value || `asgn_${Date.now()}`;
             const current = (AppState.get('assignments') || []).find(item => item.id === id);
+            const pointsEarned = Number(document.getElementById('assignment-points').value) || 0;
             const assignment = {
                 id,
                 title: document.getElementById('assignment-name').value.trim(),
                 courseCode: document.getElementById('assignment-course').value,
                 dueDate: document.getElementById('assignment-due-date').value,
-                pointsEarned: Number(document.getElementById('assignment-points').value) || 0,
+                pointsEarned,
                 maxPoints: Number(document.getElementById('assignment-max-points').value) || 100,
                 categoryId: document.getElementById('assignment-category').value || null,
                 kind: document.getElementById('assignment-kind').value,
                 estimatedMinutes: Number(document.getElementById('assignment-size').value) || 30,
                 importance: Number(document.getElementById('assignment-importance').value) || 3,
                 priority: current ? current.priority : 'high',
-                status: current ? current.status : 'pending'
+                status: current ? current.status : 'pending',
+                gradedAt: pointsEarned > 0 ? (current?.gradedAt || localDateKey(new Date())) : current?.gradedAt || null
             };
             if (current) AppState.updateAssignment(id, assignment);
             else AppState.addAssignment(assignment);
@@ -2397,7 +2528,13 @@
             if (action === 'delete-assignment') AppState.deleteAssignment(id);
             if (action === 'toggle-assignment') {
                 const assignment = assignments.find(item => item.id === id);
-                if (assignment) AppState.updateAssignment(id, { status: assignment.status === 'completed' ? 'pending' : 'completed' });
+                if (assignment) {
+                    const status = assignment.status === 'completed' ? 'pending' : 'completed';
+                    AppState.updateAssignment(id, {
+                        status,
+                        gradedAt: status === 'completed' ? (assignment.gradedAt || localDateKey(new Date())) : assignment.gradedAt
+                    });
+                }
             }
             if (action === 'add-category') {
                 const course = courses.find(item => item.code === Router.selectedClassCode);
@@ -2528,12 +2665,16 @@
 
         saveProfile() {
             const targetGpa = Number(document.getElementById('settings-target-gpa').value);
+            const graduationYear = Number(document.getElementById('settings-grad-year').value);
             if (!Number.isFinite(targetGpa) || targetGpa < 0 || targetGpa > 5) {
                 throw new Error('Target GPA must be between 0 and 5.');
             }
+            if (!Number.isInteger(graduationYear) || graduationYear < 2026 || graduationYear > 2030) {
+                throw new Error('Graduation year must be between 2026 and 2030.');
+            }
             const profile = {
                 ...AppState.get('profile'),
-                graduationYear: Number(document.getElementById('settings-grad-year').value),
+                graduationYear,
                 targetGpa,
                 currentTerm: document.getElementById('settings-current-term').value
             };
@@ -3078,16 +3219,20 @@
 
     window.NexusApp = new AppOrchestrator();
 
+    const start = () => window.StudBudCloud.bootstrap().catch(error => {
+        console.error('[NexusApp] Startup failed:', error);
+        const status = document.getElementById('auth-status');
+        if (status) {
+            status.textContent = `StudBud could not start: ${error.message}`;
+            status.classList.add('error');
+        }
+        document.getElementById('auth-screen')?.classList.remove('hidden');
+        document.getElementById('app-container')?.classList.add('hidden');
+    });
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => window.NexusApp.init().catch(error => {
-            console.error('[NexusApp] Startup failed:', error);
-            window.alert(`StudBud could not load saved data: ${error.message}`);
-        }));
+        document.addEventListener('DOMContentLoaded', start);
     } else {
-        window.NexusApp.init().catch(error => {
-            console.error('[NexusApp] Startup failed:', error);
-            window.alert(`StudBud could not load saved data: ${error.message}`);
-        });
+        start();
     }
 
 })(window);

@@ -15,6 +15,30 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body class="dark-theme">
+    <section id="auth-screen" class="auth-screen hidden" aria-labelledby="auth-title">
+        <div class="glass-card auth-card">
+            <div class="logo-container">
+                <i class="fas fa-building-columns logo-icon"></i>
+                <span class="logo-text">StudBud<br><small>Student Hub</small></span>
+            </div>
+            <h1 id="auth-title">Sign in to StudBud</h1>
+            <p id="auth-description">Your classes, assignments, study history, and preferences sync to your account.</p>
+            <p id="auth-config-message" class="auth-message error hidden" role="alert"></p>
+            <form id="login-form" class="auth-form">
+                <label>Username<input id="login-username" type="text" autocomplete="username" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" title="Use 3–24 letters, numbers, or underscores." required></label>
+                <label>Password<input id="login-password" type="password" autocomplete="current-password" minlength="8" required></label>
+                <button class="primary-btn full-width" type="submit">Sign in</button>
+            </form>
+            <form id="signup-form" class="auth-form hidden">
+                <label>Username (3–24 letters, numbers, or underscores)<input id="signup-username" type="text" autocomplete="username" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" title="Use 3–24 letters, numbers, or underscores." required></label>
+                <label>Password (at least 8 characters)<input id="signup-password" type="password" autocomplete="new-password" minlength="8" required></label>
+                <label>Confirm password<input id="signup-password-confirm" type="password" autocomplete="new-password" minlength="8" required></label>
+                <button class="primary-btn full-width" type="submit">Create account</button>
+            </form>
+            <p id="auth-status" class="auth-message" role="status" aria-live="polite"></p>
+            <p class="auth-switch"><span id="auth-switch-prompt">New to StudBud?</span> <button id="auth-switch-btn" type="button" class="text-btn">Create an account</button></p>
+        </div>
+    </section>
     <div id="app-container">
         
         <!-- SIDEBAR NAVIGATION -->
@@ -159,6 +183,20 @@
                             <div id="study-priority-list" class="study-guidance-list"></div>
                         </div>
                         <div class="glass-card widget full-width">
+                            <h3><i class="fas fa-stopwatch"></i> Today's study plan</h3>
+                            <p id="today-study-total" class="study-guidance-intro"></p>
+                            <div id="today-study-by-class" class="study-progress-summary"></div>
+                        </div>
+                        <div class="glass-card widget full-width study-tips-widget">
+                            <h3><i class="fas fa-lightbulb"></i> Study smarter</h3>
+                            <ul>
+                                <li>Start with a 5-minute setup: choose one outcome and put away distractions.</li>
+                                <li>Use active recall before rereading; write what you remember, then check gaps.</li>
+                                <li>Split long assignments into small steps and schedule the first one before the due date.</li>
+                                <li>Take a short break after focused blocks, and protect sleep before tests.</li>
+                            </ul>
+                        </div>
+                        <div class="glass-card widget full-width">
                             <div class="view-header">
                                 <div><h3>Study progress & adaptive plan</h3><p id="study-week-summary" class="study-guidance-intro"></p></div>
                             </div>
@@ -215,7 +253,7 @@
                         </div>
                         <div class="scenario-results-grid">
                             <section class="glass-card">
-                                <div class="view-header"><div><h3>Hypothetical assignments</h3><p>Saved on this device and included in backups.</p></div></div>
+                                <div class="view-header"><div><h3>Hypothetical assignments</h3><p>Saved to your account and included in backups.</p></div></div>
                                 <div id="grade-scenario-items" class="scenario-item-list"></div>
                             </section>
                             <section class="glass-card">
@@ -377,6 +415,26 @@
 
                 <!-- 5. Analytics & Projections View -->
                 <section id="analytics-view" class="view hidden">
+                    <div class="glass-card analytics-controls">
+                        <label for="analytics-metric-select">Progress to graph</label>
+                        <select id="analytics-metric-select">
+                            <option value="class">Class grade progress</option>
+                            <option value="weighted">Overall weighted GPA</option>
+                            <option value="unweighted">Overall unweighted GPA</option>
+                        </select>
+                        <label for="analytics-course-select">Class</label>
+                        <select id="analytics-course-select"><option value="all">All classes</option></select>
+                        <label for="analytics-chart-type">Graph type</label>
+                        <select id="analytics-chart-type">
+                            <option value="line">Line</option>
+                            <option value="bar">Bar</option>
+                        </select>
+                    </div>
+                    <div class="glass-card chart-container grade-progress-chart">
+                        <h3>Grade progress through the year</h3>
+                        <p id="grade-progress-caption" class="study-guidance-intro">Track assignment scores over time.</p>
+                        <canvas id="grade-progress-chart" aria-label="Grade progress chart"></canvas>
+                    </div>
                     <div class="analytics-grid">
                         <div class="glass-card chart-container">
                             <h3>BKT Mastery & Retrievability Decay</h3>
@@ -524,8 +582,10 @@
                         
                         <div class="glass-card">
                             <h2>Data Management</h2>
-                            <p>Your classes, assignments, profile, schedule, and UI settings are saved in this browser. Flashcards, study sessions, and progress are stored in the browser database. This data stays on this device unless you export a backup.</p>
+                            <p>Your classes, assignments, grades, study tools, history, profile, and UI preferences are synced to your signed-in account. A device cache supports the active session; exported backups remain available.</p>
                             <p id="data-save-status" class="data-save-status" role="status" aria-live="polite">Checking local save status…</p>
+                            <p>Signed in as <strong id="account-name">—</strong></p>
+                            <button id="sign-out-btn" class="secondary-btn"><i class="fas fa-right-from-bracket"></i> Sign out</button>
                             <button id="open-backup-modal-btn" class="secondary-btn"><i class="fas fa-download"></i> Export / Import Backup</button>
                             <div class="danger-zone">
                                 <h4>Danger Zone</h4>
@@ -537,7 +597,7 @@
 
                 <section id="appearance-view" class="view hidden">
                     <div class="view-header">
-                        <div><h2>UI Settings</h2><p class="study-guidance-intro">Personalize StudBud’s colors and layout. Changes are saved automatically on this device.</p></div>
+                        <div><h2>UI Settings</h2><p class="study-guidance-intro">Personalize StudBud’s colors and layout. Changes are synced to your account.</p></div>
                     </div>
                     <div class="appearance-grid">
                         <section class="glass-card">
@@ -653,10 +713,12 @@
                     <form id="course-form">
                         <input type="hidden" id="course-id">
                         <div class="form-group">
-                            <label for="course-name">Course Name</label>
-                            <input type="text" id="course-name" required>
+                            <label for="course-search">Search PCHS courses</label>
+                            <input type="search" id="course-search" placeholder="Type a course name or code" autocomplete="off">
                         </div>
                         <div class="form-group">
+                            <label for="course-name">Select a course</label>
+                            <select id="course-name" required><option value="">Search and select a PCHS course…</option></select>
                         </div>
                         <div class="form-group">
                             <label for="course-subject-category">Transcript subject area</label>
@@ -684,26 +746,19 @@
                             </div>
                             <div class="half-width">
                                 <label for="course-credits">Credits</label>
-                                <input type="number" id="course-credits" step="0.5" value="0.5" required>
+                                <input type="number" id="course-credits" step="0.5" value="0.5" readonly required>
                             </div>
                         </div>
                         <div class="form-group row-group">
                             <div class="half-width">
-                                <label for="course-weight">Weight Scale</label>
-                                <select id="course-weight">
-                                    <option value="Regular">Regular (4.0)</option>
-                                    <option value="Honors">Honors (4.5)</option>
-                                    <option value="AP">AP/Dual Credit (5.0)</option>
-                                </select>
+                                <span class="form-label">PCHS grade scale</span>
+                                <output id="course-weight-label" class="course-weight-label">Select a catalog course</output>
                             </div>
-                            <div class="half-width">
-                                <label for="course-grade">Current Grade (%)</label>
-                                <input type="number" id="course-grade" min="0" max="120" step="0.1" required>
-                            </div>
+                            <div class="half-width"><span class="form-label">Grade</span><span>Calculated from assignment scores</span></div>
                         </div>
                         <div class="form-group">
-                            <label for="course-target-grade">Target Grade (%)</label>
-                            <input type="number" id="course-target-grade" min="0" max="100" step="0.1" value="90" required>
+                            <label for="course-target-grade">Target grade (%) <span class="settings-hint">Optional</span></label>
+                            <input type="number" id="course-target-grade" min="0" max="100" step="0.1" placeholder="Optional">
                         </div>
                     </form>
                 </div>
@@ -868,6 +923,8 @@
 
     <!-- Chart.js CDN for Analytics (Required for analyticsEngine.js rendering) -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
+    <script src="supabase-config.js" defer></script>
     
     <!-- Application Scripts (Zero Dependency strict vanilla logic apart from Chart rendering on canvas) -->
     <script src="pchsData.js" defer></script>
@@ -876,6 +933,7 @@
     <script src="flashcardEngine.js" defer></script>
     <script src="analyticsEngine.js" defer></script>
     <script src="practiceExamEngine.js" defer></script>
+    <script src="cloudSync.js" defer></script>
     <script src="app.js" defer></script>
     <script>
         if ('serviceWorker' in navigator && ['http:', 'https:'].includes(window.location.protocol)) {

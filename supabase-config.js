@@ -1,4 +1,4 @@
 window.STUDBUD_SUPABASE_CONFIG = {
-    url: 'https://sidkgxyepkbrjrmmsjgt.supabase.co',
-    anonKey: 'sb_publishable_bo8xQ27u5bCKCZUXBFrMHw_LQdn092d'
+    url: 'https://fdgtfotpcauxsznbkozz.supabase.co',
+    anonKey: 'sb_publishable_gobh-MzqEJcr8bCMnn1q5Q_Yamx8mJm'
 };
