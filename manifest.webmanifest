@@ -1,0 +1,19 @@
+{
+  "id": "./",
+  "name": "StudBud | Student Planner",
+  "short_name": "StudBud",
+  "description": "Organize classes, assignments, grades, and study sessions.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#111827",
+  "theme_color": "#111827",
+  "icons": [
+    {
+      "src": "./icons/studbud.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

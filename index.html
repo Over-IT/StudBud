@@ -4,6 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>StudBud | Student Planner</title>
+    <meta name="theme-color" content="#111827">
+    <meta name="description" content="StudBud helps students organize classes, assignments, study plans, and grades.">
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" type="image/svg+xml" href="./icons/studbud.svg">
+    <link rel="apple-touch-icon" href="./icons/studbud.svg">
     <!-- FontAwesome 6 for Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha512-iecdLmaskl7CVkqkXNQ/ZH/XLlvWZOJyj7Yy7tcenmpD1ypASozpmT/E0iPtmFIB46ZmdtAc9eNBvH0H/ZpiBw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <!-- Main Stylesheet -->
@@ -872,5 +877,13 @@
     <script src="analyticsEngine.js" defer></script>
     <script src="practiceExamEngine.js" defer></script>
     <script src="app.js" defer></script>
+    <script>
+        if ('serviceWorker' in navigator && ['http:', 'https:'].includes(window.location.protocol)) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./service-worker.js')
+                    .catch(error => console.error('[StudBud] Could not enable offline app support:', error));
+            });
+        }
+    </script>
 </body>
 </html>
