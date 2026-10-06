@@ -20,4 +20,4 @@ Class, assignment, and study data is saved in the browser on the device where it
 
 ## Deployment
 
-Every push to `main` automatically deploys the site to GitHub Pages using the workflow in `.github/workflows/pages.yml`.
+Every push to `main` automatically deploys the site to GitHub Pages using the workflow in `.github/workflows/pages.yml`. If a deployment does not start, open the repository's **Actions** tab, select **Deploy StudBud to GitHub Pages**, and choose **Run workflow** on `main`.
