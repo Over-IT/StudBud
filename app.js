@@ -904,6 +904,9 @@
             this.Soundscape = Soundscape;
             this.timerInterval = null;
             this.timerSeconds = 25 * 60;
+            this.dashboardSprintInterval = null;
+            this.dashboardSprintSeconds = null;
+            this.dashboardSprintAssignmentId = '';
             this.activeDeckId = null;
             this.activeCardIndex = 0;
             this.studyCards = [];
@@ -980,7 +983,11 @@
             document.addEventListener('change', event => this.handleChange(event));
             document.addEventListener('input', event => {
                 if (event.target.matches('#assignment-search')) this.renderAssignments();
-                if (event.target.matches('#course-search')) this.filterCourseCatalog(event.target.value);
+                if (event.target.matches('#course-search')) {
+                    document.getElementById('course-name').value = '';
+                    document.getElementById('course-selection-hint').textContent = 'Choose a PCHS course from the matches.';
+                    this.filterCourseCatalog(event.target.value);
+                }
                 if (event.target.matches('input[type="range"][id^="vol-"]')) this.setMixerLevel(event.target, false);
             });
             window.addEventListener('resize', () => this.updateSidebarToggle());
@@ -1408,9 +1415,9 @@
         }
 
         getSchedulePattern(schoolSchedule) {
-            if (schoolSchedule?.type === 'Anchor') return 'all';
-            if (schoolSchedule?.type === 'Red') return 'odd';
-            if (schoolSchedule?.type === 'Blue') return 'even';
+            if (schoolSchedule?.type === 'All') return 'all';
+            if (schoolSchedule?.type === 'Odd') return 'odd';
+            if (schoolSchedule?.type === 'Even') return 'even';
             return null;
         }
 
@@ -1424,9 +1431,9 @@
                 return;
             }
             const patterns = [
-                ['all', 'All-period day'],
-                ['odd', 'Odd / Red day'],
-                ['even', 'Even / Blue day']
+                ['all', 'All day'],
+                ['odd', 'Odd day'],
+                ['even', 'Even day']
             ];
             const periodOptions = '<option value="">Not scheduled</option>' +
                 Array.from({ length: 7 }, (_, index) => `<option value="${index + 1}">Period ${index + 1}</option>`).join('');
@@ -1913,6 +1920,7 @@
             this.renderDailySchedule(new Date());
             const priorityList = document.getElementById('study-priority-list');
             this.renderTodayStudyPlan();
+            this.renderFocusSprint();
             if (priorityList) {
                 const recommendations = this.getStudyRecommendations().slice(0, 5);
                 priorityList.innerHTML = recommendations.length ? recommendations.map((item, index) =>
@@ -1920,6 +1928,99 @@
                 ).join('') : '<p class="empty-state">Add classes and upcoming work to get personalized study suggestions.</p>';
             }
             this.renderStudyProgress();
+        }
+
+        renderFocusSprint() {
+            const select = document.getElementById('focus-assignment');
+            if (!select) return;
+            const recommendations = this.getStudyRecommendations().slice(0, 12);
+            const currentId = this.dashboardSprintAssignmentId || select.value;
+            select.innerHTML = '<option value="">Choose an assignment</option>' + recommendations.map(item =>
+                `<option value="${this.escapeHTML(item.id)}">${this.escapeHTML(item.title)} · ${this.escapeHTML(item.courseTitle)}</option>`
+            ).join('');
+            if (recommendations.some(item => item.id === currentId)) {
+                select.value = currentId;
+            } else {
+                select.value = recommendations[0]?.id || '';
+            }
+            this.dashboardSprintAssignmentId = select.value;
+            select.disabled = Boolean(this.dashboardSprintInterval);
+            document.getElementById('focus-duration').disabled = Boolean(this.dashboardSprintInterval);
+            const startButton = document.getElementById('focus-sprint-start-btn');
+            startButton.innerHTML = this.dashboardSprintInterval ? '<i class="fas fa-pause"></i> Pause' : '<i class="fas fa-play"></i> Start';
+            startButton.disabled = !select.value;
+            this.updateFocusSprintDisplay();
+            const status = document.getElementById('focus-sprint-status');
+            if (!recommendations.length) status.textContent = 'Add an upcoming assignment to start a focused study session.';
+        }
+
+        updateFocusSprintDisplay() {
+            const duration = Number(document.getElementById('focus-duration')?.value || 25);
+            const seconds = this.dashboardSprintSeconds ?? duration * 60;
+            const clock = document.getElementById('focus-sprint-clock');
+            if (clock) clock.textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+        }
+
+        toggleFocusSprint() {
+            const status = document.getElementById('focus-sprint-status');
+            if (this.dashboardSprintInterval) {
+                clearInterval(this.dashboardSprintInterval);
+                this.dashboardSprintInterval = null;
+                document.getElementById('focus-assignment').disabled = false;
+                document.getElementById('focus-duration').disabled = false;
+                document.getElementById('focus-sprint-start-btn').innerHTML = '<i class="fas fa-play"></i> Resume';
+                status.textContent = 'Paused. Resume when you are ready.';
+                return;
+            }
+            const assignmentId = document.getElementById('focus-assignment').value;
+            const assignment = (AppState.get('assignments') || []).find(item => item.id === assignmentId && item.status !== 'completed');
+            if (!assignment) throw new Error('Choose an incomplete assignment before starting a focus sprint.');
+            this.dashboardSprintAssignmentId = assignmentId;
+            if (this.dashboardSprintSeconds === null) {
+                this.dashboardSprintSeconds = Number(document.getElementById('focus-duration').value || 25) * 60;
+            }
+            if (this.dashboardSprintSeconds <= 0) {
+                this.dashboardSprintSeconds = Number(document.getElementById('focus-duration').value || 25) * 60;
+            }
+            status.textContent = `Focused time for “${assignment.title}”. Silence notifications and work on one small step.`;
+            document.getElementById('focus-assignment').disabled = true;
+            document.getElementById('focus-duration').disabled = true;
+            document.getElementById('focus-sprint-start-btn').innerHTML = '<i class="fas fa-pause"></i> Pause';
+            this.dashboardSprintInterval = setInterval(() => {
+                this.dashboardSprintSeconds = Math.max(0, this.dashboardSprintSeconds - 1);
+                this.updateFocusSprintDisplay();
+                if (this.dashboardSprintSeconds === 0) this.completeFocusSprint();
+            }, 1000);
+        }
+
+        completeFocusSprint() {
+            if (this.dashboardSprintInterval) clearInterval(this.dashboardSprintInterval);
+            this.dashboardSprintInterval = null;
+            document.getElementById('focus-assignment').disabled = false;
+            document.getElementById('focus-duration').disabled = false;
+            document.getElementById('focus-sprint-start-btn').innerHTML = '<i class="fas fa-play"></i> Start';
+            const assignmentId = this.dashboardSprintAssignmentId;
+            const status = document.getElementById('focus-sprint-status');
+            status.textContent = 'Sprint complete. Log your session to update your study plan.';
+            try {
+                this.openStudyLog(assignmentId);
+                document.getElementById('study-log-minutes').value = String(Math.max(1, Math.round(Number(document.getElementById('focus-duration').value || 25))));
+                document.getElementById('study-log-notes').value = 'Completed a focused study sprint.';
+            } catch (error) {
+                console.error('[NexusApp] Could not open the completed focus session:', error);
+                window.alert(`Focus sprint finished, but the session could not be logged: ${error.message}`);
+            }
+        }
+
+        resetFocusSprint() {
+            if (this.dashboardSprintInterval) clearInterval(this.dashboardSprintInterval);
+            this.dashboardSprintInterval = null;
+            this.dashboardSprintSeconds = null;
+            document.getElementById('focus-assignment').disabled = false;
+            document.getElementById('focus-duration').disabled = false;
+            document.getElementById('focus-sprint-start-btn').innerHTML = '<i class="fas fa-play"></i> Start';
+            document.getElementById('focus-sprint-status').textContent = 'Timer reset. Choose a task and start when ready.';
+            this.updateFocusSprintDisplay();
         }
 
         renderTodayStudyPlan() {
@@ -1969,6 +2070,9 @@
         renderGradeProgress() {
             const canvas = document.getElementById('grade-progress-chart');
             if (!canvas) return;
+            const summary = document.getElementById('analytics-summary');
+            const courseControl = document.getElementById('analytics-course-control');
+            const emptyMessage = document.getElementById('grade-progress-empty');
             if (!window.Chart) {
                 document.getElementById('grade-progress-caption').textContent = 'Charts could not load. Check your internet connection and reload.';
                 return;
@@ -1979,6 +2083,9 @@
             const selectedCode = document.getElementById('analytics-course-select')?.value || 'all';
             const chartType = document.getElementById('analytics-chart-type')?.value || 'line';
             const caption = document.getElementById('grade-progress-caption');
+            const title = document.getElementById('grade-progress-title');
+            const range = document.getElementById('grade-progress-range');
+            if (courseControl) courseControl.classList.toggle('hidden', metric !== 'class');
             const datedAssignments = assignments.filter(item =>
                 (item.status === 'completed' || Number(item.pointsEarned) > 0) && (item.gradedAt || item.dueDate)
             );
@@ -2001,11 +2108,29 @@
                     borderColor: `hsl(${(index * 67 + 145) % 360} 62% 55%)`,
                     backgroundColor: `hsla(${(index * 67 + 145) % 360} 62% 55% / 0.18)`,
                     tension: 0.25,
+                    fill: chartType === 'area',
+                    pointRadius: 3,
+                    pointHoverRadius: 5,
                     spanGaps: false
                 }));
+                const selectedCourse = courses.find(course => course.code === selectedCode);
+                title.textContent = selectedCourse ? `${selectedCourse.title} grade history` : 'Class grade history';
                 caption.textContent = labels.length
-                    ? 'Each line shows a class grade calculated from scored assignments up to that date.'
-                    : 'Record assignment scores to see class grades progress over time.';
+                    ? 'Each point is the class grade after scores recorded by that date. Add more graded work to build the timeline.'
+                    : 'Record an assignment score with a due or graded date to start the timeline.';
+                const currentCourses = selectedCourse ? [selectedCourse] : courses;
+                const currentGrades = currentCourses.map(course => ({
+                    course,
+                    grade: this.calculateCourseGrade(course)
+                })).filter(item => Number.isFinite(item.grade));
+                const scoredCount = assignments.filter(item =>
+                    (item.status === 'completed' || Number(item.pointsEarned) > 0) &&
+                    (!selectedCourse || item.courseCode === selectedCourse.code)
+                ).length;
+                if (summary) summary.innerHTML = `
+                    <article><span>${selectedCourse ? 'Current class grade' : 'Classes with grades'}</span><strong>${selectedCourse ? (currentGrades[0] ? `${currentGrades[0].grade.toFixed(1)}%` : '—') : `${currentGrades.length} / ${courses.length}`}</strong></article>
+                    <article><span>Scored assignments</span><strong>${scoredCount}</strong></article>
+                    <article><span>Grade target</span><strong>${selectedCourse?.targetPct ? `${Number(selectedCourse.targetPct).toFixed(1)}%` : 'Optional'}</strong></article>`;
             } else {
                 datasets = [{
                     label: metric === 'weighted' ? 'Weighted GPA' : 'Unweighted GPA',
@@ -2019,23 +2144,50 @@
                     }),
                     borderColor: '#55c995',
                     backgroundColor: 'rgba(85, 201, 149, 0.2)',
-                    tension: 0.25
+                    tension: 0.25,
+                    fill: chartType === 'area',
+                    pointRadius: 3,
+                    pointHoverRadius: 5
                 }];
+                const currentGpa = this.calculateTrackedGPA(courses);
+                title.textContent = metric === 'weighted' ? 'Weighted GPA history' : 'Unweighted GPA history';
                 caption.textContent = labels.length
-                    ? 'Overall GPA calculated from scored assignments recorded on or before each date.'
-                    : 'Record assignment scores to see overall GPA progress over time.';
+                    ? 'GPA is recalculated from class grades recorded on or before each date.'
+                    : 'Record dated assignment scores to start your GPA timeline.';
+                if (summary) summary.innerHTML = `
+                    <article><span>Current ${metric} GPA</span><strong>${Number(currentGpa[metric]).toFixed(2)}</strong></article>
+                    <article><span>Classes tracked</span><strong>${courses.length}</strong></article>
+                    <article><span>Scored assignments</span><strong>${assignments.filter(item => item.status === 'completed' || Number(item.pointsEarned) > 0).length}</strong></article>`;
             }
 
+            const hasHistory = labels.length > 0 && datasets.some(dataset => dataset.data.some(value => Number.isFinite(value)));
+            if (emptyMessage) emptyMessage.classList.toggle('hidden', hasHistory);
+            if (range) range.textContent = labels.length ? `${new Date(`${labels[0]}T00:00:00`).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })} – ${new Date(`${labels[labels.length - 1]}T00:00:00`).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}` : '';
             if (this.gradeProgressChart) this.gradeProgressChart.destroy();
             this.gradeProgressChart = new window.Chart(canvas, {
-                type: chartType,
+                type: chartType === 'area' ? 'line' : chartType,
                 data: { labels, datasets },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
                     interaction: { intersect: false, mode: 'index' },
+                    plugins: {
+                        legend: { display: metric !== 'class' || selectedCode === 'all' && datasets.length > 1, position: 'bottom' },
+                        tooltip: {
+                            callbacks: {
+                                label: context => `${context.dataset.label}: ${metric === 'class' ? `${Number(context.parsed.y).toFixed(1)}%` : Number(context.parsed.y).toFixed(2)}`
+                            }
+                        }
+                    },
                     scales: {
-                        y: { beginAtZero: metric !== 'class', min: 0, max: metric === 'class' ? 100 : 5 }
+                        x: { ticks: { maxTicksLimit: 8, maxRotation: 0 } },
+                        y: {
+                            beginAtZero: false,
+                            min: metric === 'class' ? 0 : 0,
+                            max: metric === 'class' ? 100 : 5,
+                            title: { display: true, text: metric === 'class' ? 'Grade (%)' : 'GPA (0–5)' },
+                            ticks: { callback: value => metric === 'class' ? `${value}%` : Number(value).toFixed(1) }
+                        }
                     }
                 }
             });
@@ -2048,6 +2200,7 @@
         }
 
         async handleClick(event) {
+            if (!event.target.closest('#course-modal')) this.hideCourseSuggestions();
             const target = event.target.closest('button, .nav-item[data-target]');
             if (!target) return;
 
@@ -2060,7 +2213,15 @@
             const id = target.id;
             const action = target.dataset.action;
             try {
-                if (target.matches('.audio-btn[data-audio]')) {
+                if (action === 'select-course') {
+                    this.selectCatalogCourse(target.dataset.id);
+                } else if (id === 'focus-sprint-start-btn') {
+                    this.toggleFocusSprint();
+                } else if (id === 'focus-sprint-reset-btn') {
+                    this.resetFocusSprint();
+                } else if (id === 'focus-assignment') {
+                    this.dashboardSprintAssignmentId = target.value;
+                } else if (target.matches('.audio-btn[data-audio]')) {
                     this.toggleSoundscape(target);
                 } else if (id === 'sidebar-collapse-btn') {
                     const settings = { ...AppState.get('settings'), sidebarCollapsed: !AppState.get('settings').sidebarCollapsed };
@@ -2201,6 +2362,33 @@
         }
 
         handleKeydown(event) {
+            if (event.target.id === 'course-search') {
+                const list = document.getElementById('course-suggestions');
+                const options = Array.from(list.querySelectorAll('[role="option"]'));
+                if (event.key === 'ArrowDown' && options.length) {
+                    event.preventDefault();
+                    this.courseSuggestionIndex = Math.min((this.courseSuggestionIndex ?? -1) + 1, options.length - 1);
+                    this.highlightCourseSuggestion(options);
+                    return;
+                }
+                if (event.key === 'ArrowUp' && options.length) {
+                    event.preventDefault();
+                    this.courseSuggestionIndex = Math.max((this.courseSuggestionIndex ?? options.length) - 1, 0);
+                    this.highlightCourseSuggestion(options);
+                    return;
+                }
+                if (event.key === 'Enter' && !list.classList.contains('hidden') && options.length) {
+                    event.preventDefault();
+                    const index = Math.max(this.courseSuggestionIndex ?? 0, 0);
+                    this.selectCatalogCourse(options[index].dataset.id);
+                    return;
+                }
+                if (event.key === 'Escape' && !list.classList.contains('hidden')) {
+                    event.preventDefault();
+                    this.hideCourseSuggestions();
+                    return;
+                }
+            }
             const navItem = event.target.closest('.nav-item[data-target]');
             if (navItem && (event.key === 'Enter' || event.key === ' ')) {
                 event.preventDefault();
@@ -2247,7 +2435,15 @@
                 this.setMixerLevel(event.target, true);
                 return;
             }
-            if (event.target.id === 'course-name') this.populateCourseFromCatalog();
+            if (event.target.id === 'focus-assignment' && !this.dashboardSprintInterval) {
+                this.dashboardSprintAssignmentId = event.target.value;
+                this.dashboardSprintSeconds = null;
+                this.updateFocusSprintDisplay();
+            }
+            if (event.target.id === 'focus-duration' && !this.dashboardSprintInterval) {
+                this.dashboardSprintSeconds = null;
+                this.updateFocusSprintDisplay();
+            }
             if (['analytics-metric-select', 'analytics-course-select', 'analytics-chart-type'].includes(event.target.id)) {
                 this.renderGradeProgress();
             }
@@ -2360,9 +2556,11 @@
             document.getElementById('course-id').value = course ? course.code : '';
             document.getElementById('course-modal-title').textContent = course ? 'Edit Course' : 'Add Course';
             const search = document.getElementById('course-search');
-            search.value = '';
-            this.filterCourseCatalog('');
-            document.getElementById('course-name').value = course ? (course.catalogCode || course.code) : '';
+            const selectedCatalogCourse = course && (window.PCHS_COURSE_CATALOG || []).find(item => item.code === (course.catalogCode || course.code));
+            search.value = selectedCatalogCourse ? `${selectedCatalogCourse.title} (${selectedCatalogCourse.code})` : '';
+            document.getElementById('course-name').value = selectedCatalogCourse?.code || '';
+            document.getElementById('course-selection-hint').textContent = selectedCatalogCourse ? 'PCHS catalog course selected.' : 'Choose a PCHS course from the matches.';
+            this.hideCourseSuggestions();
             document.getElementById('course-subject-category').value = course ? course.category || 'Electives' : 'Electives';
             document.getElementById('course-term').value = course ? (course.term || 'FY') : 'FY';
             document.getElementById('course-credits').value = course ? course.credits : '0.5';
@@ -2373,17 +2571,53 @@
         }
 
         filterCourseCatalog(query) {
-            const select = document.getElementById('course-name');
-            if (!select) return;
-            const selected = select.value;
+            const list = document.getElementById('course-suggestions');
+            if (!list) return;
             const normalized = String(query || '').trim().toLowerCase();
             const catalog = window.PCHS_COURSE_CATALOG || [];
-            const matches = catalog.filter(course => !normalized ||
-                `${course.code} ${course.title} ${course.category}`.toLowerCase().includes(normalized));
-            select.innerHTML = '<option value="">Select a PCHS course…</option>' + matches.map(course =>
-                `<option value="${this.escapeHTML(course.code)}">${this.escapeHTML(course.title)} (${this.escapeHTML(course.code)})</option>`
-            ).join('');
-            if (matches.some(course => course.code === selected)) select.value = selected;
+            if (!normalized) {
+                this.hideCourseSuggestions();
+                return;
+            }
+            const matches = catalog.filter(course =>
+                `${course.code} ${course.title} ${course.category}`.toLowerCase().includes(normalized)
+            ).slice(0, 8);
+            this.courseSuggestionIndex = -1;
+            list.innerHTML = matches.length ? matches.map(course =>
+                `<button type="button" id="course-option-${this.escapeHTML(course.code)}" role="option" aria-selected="false" class="course-suggestion" data-action="select-course" data-id="${this.escapeHTML(course.code)}"><strong>${this.escapeHTML(course.title)}</strong><span>${this.escapeHTML(course.code)} · ${this.escapeHTML(course.category)}</span></button>`
+            ).join('') : '<p class="course-suggestion-empty">No matching PCHS courses.</p>';
+            list.classList.remove('hidden');
+            document.getElementById('course-search').setAttribute('aria-expanded', 'true');
+            document.getElementById('course-search').removeAttribute('aria-activedescendant');
+        }
+
+        highlightCourseSuggestion(options) {
+            options.forEach((option, index) => {
+                const selected = index === this.courseSuggestionIndex;
+                option.setAttribute('aria-selected', String(selected));
+                if (selected) {
+                    document.getElementById('course-search').setAttribute('aria-activedescendant', option.id);
+                    option.scrollIntoView({ block: 'nearest' });
+                }
+            });
+        }
+
+        hideCourseSuggestions() {
+            const list = document.getElementById('course-suggestions');
+            if (list) list.classList.add('hidden');
+            document.getElementById('course-search')?.setAttribute('aria-expanded', 'false');
+            document.getElementById('course-search')?.removeAttribute('aria-activedescendant');
+            this.courseSuggestionIndex = -1;
+        }
+
+        selectCatalogCourse(courseCode) {
+            const course = (window.PCHS_COURSE_CATALOG || []).find(item => item.code === courseCode);
+            if (!course) throw new Error('That course is not in the PCHS catalog.');
+            document.getElementById('course-name').value = course.code;
+            document.getElementById('course-search').value = `${course.title} (${course.code})`;
+            document.getElementById('course-selection-hint').textContent = 'PCHS catalog course selected.';
+            this.hideCourseSuggestions();
+            this.populateCourseFromCatalog();
         }
 
         populateCourseFromCatalog() {

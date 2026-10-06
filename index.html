@@ -177,9 +177,28 @@
                                 <div><span class="stat-number" id="dash-unweighted-gpa">0.00</span><span class="stat-label">Unweighted</span></div>
                             </div>
                         </div>
+                        <div class="glass-card widget full-width focus-sprint-widget">
+                            <div class="view-header">
+                                <div><h3><i class="fas fa-stopwatch"></i> Focus sprint</h3><p class="study-guidance-intro">Pick one task, focus without distractions, then log the session.</p></div>
+                                <span id="focus-sprint-clock" class="focus-sprint-clock" aria-live="polite">25:00</span>
+                            </div>
+                            <div class="focus-sprint-controls">
+                                <label for="focus-assignment">Task</label>
+                                <select id="focus-assignment"><option value="">Choose an assignment</option></select>
+                                <label for="focus-duration">Focus</label>
+                                <select id="focus-duration">
+                                    <option value="15">15 min</option>
+                                    <option value="25" selected>25 min</option>
+                                    <option value="45">45 min</option>
+                                </select>
+                                <button id="focus-sprint-start-btn" class="primary-btn" type="button"><i class="fas fa-play"></i> Start</button>
+                                <button id="focus-sprint-reset-btn" class="secondary-btn" type="button">Reset</button>
+                            </div>
+                            <p id="focus-sprint-status" class="study-guidance-intro" role="status" aria-live="polite">A short, single-task session is a good place to start.</p>
+                        </div>
                         <div class="glass-card widget full-width">
                             <h3>What to study next</h3>
-                            <p class="study-guidance-intro">Ranked by urgency and class goals, with a suggested study time and a method matched to each item.</p>
+                            <p class="study-guidance-intro">Start with the top task. Time estimates reflect deadlines, task size, class goals, and your study logs.</p>
                             <div id="study-priority-list" class="study-guidance-list"></div>
                         </div>
                         <div class="glass-card widget full-width">
@@ -356,12 +375,12 @@
 
                 <section id="schedule-view" class="view hidden">
                     <div class="view-header">
-                        <div><h2>Set up your class schedule</h2><p class="study-guidance-intro">Choose the period for each class on PCHS all-period, odd/red, and even/blue days. The calendar uses the PCHS weekday rotation to show the matching classes.</p></div>
+                        <div><h2>Set up your class schedule</h2><p class="study-guidance-intro">Choose each class’s period for All, Odd, and Even days. All days are Mondays; Tuesday–Friday repeat Odd, Even, Odd, Even. The calendar applies this pattern automatically.</p></div>
                     </div>
                     <form id="schedule-form" class="glass-card schedule-editor">
                         <div id="schedule-course-list"></div>
                         <div class="schedule-actions">
-                            <p>Leave a day pattern blank if you do not have that class on that pattern.</p>
+                            <p>Leave a pattern blank if you do not have that class on that type of day.</p>
                             <button type="submit" class="primary-btn"><i class="fas fa-save"></i> Save Schedule</button>
                         </div>
                     </form>
@@ -416,24 +435,23 @@
                 <!-- 5. Analytics & Projections View -->
                 <section id="analytics-view" class="view hidden">
                     <div class="glass-card analytics-controls">
-                        <label for="analytics-metric-select">Progress to graph</label>
-                        <select id="analytics-metric-select">
-                            <option value="class">Class grade progress</option>
-                            <option value="weighted">Overall weighted GPA</option>
-                            <option value="unweighted">Overall unweighted GPA</option>
-                        </select>
-                        <label for="analytics-course-select">Class</label>
-                        <select id="analytics-course-select"><option value="all">All classes</option></select>
-                        <label for="analytics-chart-type">Graph type</label>
-                        <select id="analytics-chart-type">
+                        <div><label for="analytics-metric-select">Measure</label><select id="analytics-metric-select">
+                            <option value="class">Class grades</option>
+                            <option value="weighted">Weighted GPA</option>
+                            <option value="unweighted">Unweighted GPA</option>
+                        </select></div>
+                        <div id="analytics-course-control"><label for="analytics-course-select">Class</label><select id="analytics-course-select"><option value="all">All classes</option></select></div>
+                        <div><label for="analytics-chart-type">Chart style</label><select id="analytics-chart-type">
                             <option value="line">Line</option>
+                            <option value="area">Area</option>
                             <option value="bar">Bar</option>
-                        </select>
+                        </select></div>
                     </div>
+                    <div id="analytics-summary" class="analytics-summary"></div>
                     <div class="glass-card chart-container grade-progress-chart">
-                        <h3>Grade progress through the year</h3>
-                        <p id="grade-progress-caption" class="study-guidance-intro">Track assignment scores over time.</p>
+                        <div class="chart-heading"><div><h3 id="grade-progress-title">Grade progress</h3><p id="grade-progress-caption" class="study-guidance-intro">Record assignment scores to build your progress chart.</p></div><span id="grade-progress-range" class="chart-range-label"></span></div>
                         <canvas id="grade-progress-chart" aria-label="Grade progress chart"></canvas>
+                        <p id="grade-progress-empty" class="chart-empty-message hidden">Your dated assignment scores will appear here.</p>
                     </div>
                     <div class="analytics-grid">
                         <div class="glass-card chart-container">
@@ -713,12 +731,13 @@
                     <form id="course-form">
                         <input type="hidden" id="course-id">
                         <div class="form-group">
-                            <label for="course-search">Search PCHS courses</label>
-                            <input type="search" id="course-search" placeholder="Type a course name or code" autocomplete="off">
-                        </div>
-                        <div class="form-group">
-                            <label for="course-name">Select a course</label>
-                            <select id="course-name" required><option value="">Search and select a PCHS course…</option></select>
+                            <label for="course-search">Class</label>
+                            <div class="course-autocomplete">
+                                <input type="search" id="course-search" placeholder="Type a class name or code…" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="course-suggestions" aria-expanded="false">
+                                <input type="hidden" id="course-name">
+                                <div id="course-suggestions" class="course-suggestions hidden" role="listbox" aria-label="PCHS course matches"></div>
+                            </div>
+                            <small id="course-selection-hint" class="form-hint">Choose a PCHS course from the matches.</small>
                         </div>
                         <div class="form-group">
                             <label for="course-subject-category">Transcript subject area</label>

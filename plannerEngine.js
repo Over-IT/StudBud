@@ -120,7 +120,7 @@
         // ============================================================================
 
         /**
-         * Resolves Parkway Central High School Red/Blue Alternating Block Schedule
+         * Resolves the weekday All/Odd/Even rotation used by the class calendar.
          */
         getPCHSBlockSchedule(date = new Date()) {
             const dayOfWeek = date.getDay(); // 0 = Sun, 6 = Sat
@@ -129,14 +129,11 @@
                 return { type: "Weekend", title: "Weekend", classes: [] };
             }
 
-            const startOfYear = new Date(date.getFullYear(), 0, 1);
-            const dayOfYear = Math.floor((date - startOfYear) / (1000 * 60 * 60 * 24));
-
-            // Monday: Anchor All-Period Day (50-min periods)
+            // Mondays are All days; block days repeat Odd, Even, Odd, Even Tuesday-Friday.
             if (dayOfWeek === 1) {
                 return {
-                    type: "Anchor",
-                    title: "Anchor Day (Periods 1-7)",
+                    type: "All",
+                    title: "All Day (Periods 1-7)",
                     badge: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
                     classes: [
                         { period: "1st Period", time: "7:35 AM - 8:25 AM" },
@@ -150,11 +147,11 @@
                 };
             }
 
-            // Alternating Block Days (Red = Odd, Blue = Even)
-            if (dayOfYear % 2 === 0) {
+            // Tuesday and Thursday are Odd days; Wednesday and Friday are Even days.
+            if (dayOfWeek === 2 || dayOfWeek === 4) {
                 return {
-                    type: "Red",
-                    title: "Red Day (Block)",
+                    type: "Odd",
+                    title: "Odd Day (Block)",
                     badge: "bg-red-500/20 text-red-300 border-red-500/30",
                     classes: [
                         { period: "1st Period", time: "7:35 AM - 9:05 AM" },
@@ -166,8 +163,8 @@
                 };
             } else {
                 return {
-                    type: "Blue",
-                    title: "Blue Day (Block)",
+                    type: "Even",
+                    title: "Even Day (Block)",
                     badge: "bg-blue-500/20 text-blue-300 border-blue-500/30",
                     classes: [
                         { period: "2nd Period", time: "7:35 AM - 9:05 AM" },

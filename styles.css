@@ -9,16 +9,16 @@
     --font-mono: 'Fira Code', 'Courier New', Courier, monospace;
 
     /* Sizing & Spacing */
-    --sidebar-width: 280px;
-    --header-height: 70px;
+    --sidebar-width: 256px;
+    --header-height: 62px;
     --border-radius-sm: 8px;
     --border-radius-md: 12px;
     --border-radius-lg: 20px;
     --spacing-xs: 4px;
     --spacing-sm: 8px;
     --spacing-md: 16px;
-    --spacing-lg: 24px;
-    --spacing-xl: 32px;
+    --spacing-lg: 20px;
+    --spacing-xl: 26px;
 
     /* Transitions */
     --transition-fast: 0.2s ease;
@@ -336,7 +336,7 @@ input:focus, select:focus, textarea:focus {
     -webkit-backdrop-filter: blur(8px);
     border: 1px solid var(--border-glass);
     border-radius: var(--border-radius-md);
-    padding: var(--spacing-lg);
+    padding: 20px;
     box-shadow: var(--shadow-md);
     transition: transform var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
 }
@@ -1263,6 +1263,52 @@ tbody tr:hover {
     position: relative;
     height: 300px;
     width: 100%;
+}
+
+.analytics-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-md);
+    padding: var(--spacing-md);
+}
+.analytics-controls > div { display: grid; gap: 5px; min-width: 150px; flex: 1; }
+.analytics-controls label { color: var(--text-secondary); font-size: 0.82rem; font-weight: 600; }
+.analytics-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--spacing-sm); margin-bottom: var(--spacing-md); }
+.analytics-summary article { display: grid; gap: 4px; padding: 12px 14px; border: 1px solid var(--border-glass); border-radius: var(--border-radius-sm); background: var(--bg-glass); }
+.analytics-summary span, .chart-range-label { color: var(--text-secondary); font-size: 0.8rem; }
+.analytics-summary strong { font-size: 1.25rem; }
+.grade-progress-chart { display: flex; flex-direction: column; gap: var(--spacing-sm); height: 350px; }
+.chart-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--spacing-md); }
+.chart-heading h3, .chart-heading p { margin: 0; }
+.chart-heading p { margin-top: 4px; }
+.chart-range-label { white-space: nowrap; padding-top: 4px; }
+.grade-progress-chart canvas { min-height: 0; flex: 1; }
+.chart-empty-message { margin: auto; color: var(--text-secondary); text-align: center; }
+
+.focus-sprint-widget .view-header { align-items: center; margin-bottom: var(--spacing-sm); }
+.focus-sprint-widget .view-header h3, .focus-sprint-widget .view-header p { margin: 0; }
+.focus-sprint-clock { color: var(--accent-primary); font: 600 1.45rem var(--font-mono); font-variant-numeric: tabular-nums; }
+.focus-sprint-controls { display: grid; grid-template-columns: auto minmax(150px, 1fr) auto minmax(90px, 0.5fr) auto auto; gap: var(--spacing-sm); align-items: center; }
+.focus-sprint-controls label { color: var(--text-secondary); font-size: 0.84rem; }
+.focus-sprint-widget > p { margin: var(--spacing-sm) 0 0; }
+.course-autocomplete { position: relative; }
+.course-suggestions { position: absolute; z-index: var(--z-tooltip); top: calc(100% + 4px); left: 0; right: 0; max-height: 260px; overflow-y: auto; padding: 4px; border: 1px solid var(--border-glass); border-radius: var(--border-radius-sm); background: var(--bg-base); box-shadow: var(--shadow-lg); }
+.course-suggestion { display: flex; width: 100%; flex-direction: column; align-items: flex-start; gap: 2px; padding: 9px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
+.course-suggestion:hover, .course-suggestion[aria-selected="true"] { background: var(--bg-glass-hover); }
+.course-suggestion span, .course-suggestion-empty, .form-hint { color: var(--text-secondary); font-size: 0.8rem; }
+.course-suggestion-empty { margin: 0; padding: 10px; }
+.form-hint { display: block; margin-top: 5px; }
+body.compact-ui { --spacing-md: 13px; --spacing-lg: 16px; --spacing-xl: 20px; }
+body.compact-ui .glass-card { padding: 14px; }
+
+@media (max-width: 640px) {
+    .analytics-summary { grid-template-columns: 1fr; }
+    .focus-sprint-controls { grid-template-columns: auto 1fr; }
+    .focus-sprint-controls .primary-btn, .focus-sprint-controls .secondary-btn { grid-column: span 1; }
+    .chart-heading { flex-direction: column; }
+    .chart-range-label { padding-top: 0; }
 }
 
 /* --- 6. EXAM ARCADE SPECIFICS --- */
