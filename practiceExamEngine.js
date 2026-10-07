@@ -10,7 +10,7 @@ window.PracticeExamEngine = (() => {
   // ==========================================
   const UniversalImporter = {
     /**
-     * Parses raw text from Quizlet, CSV, or Gradebooks.
+     * Parses raw tabular flashcard, CSV, or gradebook text.
      * Auto-detects delimiters.
      */
     parseRawText: function (rawText) {

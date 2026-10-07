@@ -29,6 +29,18 @@ Because accounts have no email address, there is no email-based password recover
 
 The first account used on a device adopts any existing local StudBud data into its cloud account. After sign-out, the local app cache is cleared. Signed-in changes sync automatically; sign in on another device to load the same account data. Keep using **Export / Import Backup** for an independent backup.
 
+### Community flashcards and hosted games
+
+After deploying the latest version, run the updated [`supabase-setup.sql`](./supabase-setup.sql) in the Supabase SQL editor. It adds the private-by-default community deck library and the protected RPC functions for live game rooms. No Supabase Realtime add-on or service-role key is required; room state is polled securely while players are connected.
+
+Community deck discovery is available to signed-in users. A local deck becomes eligible for publishing only after at least one card is studied. It is **not shared automatically**: the owner must choose **Share with community**. The deck title and card terms/definitions (plus source attribution for an imported set) are published—personal spaced-repetition progress is not. Owners can stop sharing at any time. Community-use counts increase once per signed-in student after they study an imported set.
+
+**Multiplayer Study Club** has separate Host and Join screens, an account-backed coin wallet, animated player avatars, and a cosmetic shop. The eight game modes have different settings and round actions: Rooftop Rumble is a long, checkpointed parkour route with hazards and shortcuts; River Raiders and Market Mayhem mix reliable rewards with luck-based casts and trades; Crystal Cartel lets players choose a steady drill or risky blast; Hammerheart Showdown is a two-player swing-or-guard climbing duel; Crypto Crash has volatile buy/short outcomes; Starfall Blasters is a target-quota shooter; and Endzone Rally is a run/pass football drive scored by touchdowns. Players choose a tactical move before answering each card, and the server resolves random rewards so clients cannot choose or spoof a lucky payout. Hosts set score/objective or time limits, manage players, and see a live leaderboard and final podium. Guests waiting in a room can play Potshot Peak, a drag-to-aim hammer-climbing warm-up with an account-synced personal best. It is only available in the waiting lobby and does not affect match rewards. Mystery drops can unlock random shop cosmetics; owned colorways can be applied from UI Settings. Multiplayer coins and cosmetics are kept outside StudBud's academic planner data. Rooms expire after two hours and use 2–50 complete flashcards.
+
+Apply the latest `supabase-setup.sql` to enable account-backed multiplayer profiles, purchases, random drops, personal-best syncing, and hosted rooms.
+
+The **Flashcard Importer** accepts tab-separated or other delimiter-separated term/definition rows without depending on a specific flashcard provider.
+
 Supabase must be configured before account creation or sign-in is available. The GitHub Pages site is static, so this repository does not contain server secrets or a service-role key.
 
 ## Deployment

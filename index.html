@@ -82,8 +82,11 @@
                     <li class="nav-item" data-target="exam-arcade-view" role="button" tabindex="0">
                         <i class="fas fa-gamepad"></i> <span>Practice Exams & Arcade</span>
                     </li>
+                    <li class="nav-item" data-target="multiplayer-view" role="button" tabindex="0">
+                        <i class="fas fa-users"></i> <span>Multiplayer</span><strong id="multiplayer-sidebar-coins" class="sidebar-coin-count">0 <i class="fas fa-coins"></i></strong>
+                    </li>
                     <li class="nav-item" data-target="importer-view" role="button" tabindex="0">
-                        <i class="fas fa-file-import"></i> <span>Quizlet Importer</span>
+                        <i class="fas fa-file-import"></i> <span>Flashcard Importer</span>
                     </li>
                     <li class="nav-item" data-target="settings-view" role="button" tabindex="0">
                         <i class="fas fa-user-cog"></i> <span>Profile & Data</span>
@@ -131,6 +134,10 @@
                         <i class="fas fa-calendar-week"></i>
                         <span id="current-term-display">Semester 1</span>
                     </div>
+                    <button id="multiplayer-profile-button" class="multiplayer-profile-button" type="button" data-target="multiplayer-view" aria-label="Open multiplayer profile and shop">
+                        <span id="multiplayer-header-avatar" class="multiplayer-avatar player-avatar"><i class="fas fa-user-astronaut" aria-hidden="true"></i></span>
+                        <span id="multiplayer-header-name">Student</span>
+                    </button>
 
                     <button id="mobile-mixer-toggle-btn" class="icon-btn mobile-mixer-toggle" aria-label="Expand audio mixer" aria-expanded="false" title="Audio mixer">
                         <i class="fas fa-sliders" aria-hidden="true"></i>
@@ -393,8 +400,21 @@
                         <h2>Study Decks</h2>
                         <button id="create-deck-btn" class="primary-btn"><i class="fas fa-folder-plus"></i> New Deck</button>
                     </div>
+                    <section class="glass-card community-deck-browser">
+                        <div class="community-heading">
+                            <div><h3>Community decks</h3><p>Find sets shared by StudBud students. Your own decks stay private unless you choose to share them.</p></div>
+                            <span class="community-badge"><i class="fas fa-users"></i> Shared library</span>
+                        </div>
+                        <form id="community-deck-search-form" class="community-search-form">
+                            <label class="sr-only" for="community-deck-query">Search community decks</label>
+                            <input id="community-deck-query" type="search" maxlength="100" placeholder="Search public deck titles">
+                            <button class="secondary-btn" type="submit"><i class="fas fa-search"></i> Search</button>
+                        </form>
+                        <p id="community-deck-status" class="community-status" role="status" aria-live="polite">Search for a set, or browse the most-studied decks.</p>
+                        <div id="community-deck-results" class="community-deck-results"></div>
+                    </section>
                     <div id="deck-grid" class="deck-grid">
-                        <div class="empty-state glass-card full-width">No decks available. Create one or import from Quizlet.</div>
+                        <div class="empty-state glass-card full-width">No decks available. Create one or import flashcards.</div>
                     </div>
                     
                     <!-- Active Study Area (Hidden until a deck is opened) -->
@@ -478,6 +498,7 @@
                     <div class="view-header">
                         <h2>Interactive Learning Arcade</h2>
                     </div>
+                    <div class="view-header"><p>Solo practice and study games live here. For hosted races, the multiplayer shop, and your player profile, head to Multiplayer.</p><button class="primary-btn" type="button" data-target="multiplayer-view"><i class="fas fa-users"></i> Open Multiplayer</button></div>
                     <div class="arcade-menu">
                         <div class="glass-card arcade-game-card">
                             <i class="fas fa-space-shuttle game-icon"></i>
@@ -537,11 +558,119 @@
                     </div>
                 </section>
 
-                <!-- 7. Quizlet Importer View -->
+                <section id="multiplayer-view" class="view hidden">
+                    <div class="multiplayer-topline">
+                        <div><h2>Multiplayer Study Club</h2><p>Race friends, earn coins, and customize your player. Multiplayer rewards stay separate from your school planner.</p></div>
+                        <div class="multiplayer-wallet"><i class="fas fa-coins"></i><strong id="multiplayer-wallet-coins">0</strong><span>coins</span></div>
+                    </div>
+                    <div class="multiplayer-layout">
+                        <main class="multiplayer-main">
+                            <section class="glass-card hosted-games-panel">
+                                <div class="multiplayer-tabs" role="tablist" aria-label="Multiplayer actions">
+                                    <button id="multiplayer-host-tab" class="multiplayer-tab selected" type="button" role="tab" aria-selected="true" data-multiplayer-tab="host">Host a game</button>
+                                    <button id="multiplayer-join-tab" class="multiplayer-tab" type="button" role="tab" aria-selected="false" data-multiplayer-tab="join">Join with code</button>
+                                </div>
+                                <section id="multiplayer-host-flow" class="multiplayer-flow" role="tabpanel" aria-labelledby="multiplayer-host-tab">
+                                    <div class="community-heading">
+                                        <div><h3>Choose a live game</h3><p>Every correct answer powers a different animated challenge.</p></div>
+                                        <span id="multiplayer-identity-badge" class="community-badge">Player</span>
+                                    </div>
+                                    <div class="multiplayer-mode-picker" role="group" aria-label="Choose a game mode">
+                                        <button type="button" class="multiplayer-mode selected" data-mode="skyline"><span class="mode-art mode-rooftop" aria-hidden="true"></span><strong>Rooftop Rumble</strong><small>Explore a sprawling rooftop course with shortcuts, hazards, and checkpoints</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="river"><span class="mode-art mode-river" aria-hidden="true"></span><strong>River Raiders</strong><small>Cast from changing spots; safe catches or a lucky rare haul</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="market"><span class="mode-art mode-market" aria-hidden="true"></span><strong>Market Mayhem</strong><small>Make deliveries, trade for a gamble, and keep your streak alive</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="miner"><span class="mode-art mode-miner" aria-hidden="true"></span><strong>Crystal Cartel</strong><small>Pick a careful drill or a risky blast through branching caverns</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="duel"><span class="mode-art mode-duel" aria-hidden="true"></span><strong>Hammerheart Showdown</strong><small>Choose when to swing or guard in a head-to-head climbing duel</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="crypto"><span class="mode-art mode-crypto" aria-hidden="true"></span><strong>Crypto Crash</strong><small>Buy or short volatile tokens; big wins and wipeouts are possible</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="shooter"><span class="mode-art mode-shooter" aria-hidden="true"></span><strong>Starfall Blasters</strong><small>Pick precision or a scatter burst to clear waves of drones</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="sports"><span class="mode-art mode-sports" aria-hidden="true"></span><strong>Endzone Rally</strong><small>Call a run or pass, gain yards, and drive for touchdowns</small></button>
+                                    </div>
+                                    <div class="hosted-game-setup">
+                                    <form id="host-game-form" class="hosted-game-form">
+                                        <h4>Host a room</h4>
+                                        <label>Player name<input id="host-game-nickname" name="nickname" type="text" minlength="2" maxlength="20" pattern="[A-Za-z0-9 _\-]{2,20}" required></label>
+                                        <label>Flashcard set<select id="host-game-deck" name="deckId" required></select></label>
+                                        <input id="host-game-mode" name="mode" type="hidden" value="skyline">
+                                        <div class="multiplayer-goals">
+                                            <label>Match ends at<select id="host-game-goal-type" name="goalType"><option value="points">Point limit</option><option value="time">Time limit</option></select></label>
+                                            <label id="host-game-point-goal">Points<select name="pointLimit"><option value="500">500</option><option value="1000">1,000</option><option value="2000">2,000</option></select></label>
+                                            <label id="host-game-time-goal" class="hidden">Minutes<select name="timeLimit"><option value="2">2 minutes</option><option value="5" selected>5 minutes</option><option value="10">10 minutes</option></select></label>
+                                        </div>
+                                        <button class="primary-btn" type="submit"><i class="fas fa-door-open"></i> Create room</button>
+                                    </form>
+                                    </div>
+                                    <div id="multiplayer-preview" class="multiplayer-preview">
+                                        <div class="preview-heading"><div><strong id="multiplayer-preview-title">Rooftop Rumble</strong><span id="multiplayer-preview-description">Scale a lively rooftop course with every correct answer.</span></div><span class="preview-live"><i></i> Game preview</span></div>
+                                        <canvas id="multiplayer-game-canvas" width="900" height="360" aria-label="Animated preview of the selected multiplayer game"></canvas>
+                                    </div>
+                                </section>
+                                <section id="multiplayer-join-flow" class="multiplayer-flow hidden" role="tabpanel" aria-labelledby="multiplayer-join-tab">
+                                    <form id="join-game-form" class="hosted-game-form join-game-form">
+                                        <h4>Join a room</h4>
+                                        <label>Player name<input id="join-game-nickname" name="nickname" type="text" minlength="2" maxlength="20" pattern="[A-Za-z0-9 _\-]{2,20}" required></label>
+                                        <label>6-character room code<input id="join-game-code" name="roomCode" type="text" inputmode="text" autocomplete="off" minlength="6" maxlength="6" pattern="[A-HJ-NP-Z2-9]{6}" required></label>
+                                        <button class="secondary-btn" type="submit"><i class="fas fa-right-to-bracket"></i> Join room</button>
+                                    </form>
+                                    <p>Enter the room code from your host. You’ll see the lobby and can play a warm-up while the host gets ready.</p>
+                                </section>
+                                <p id="hosted-game-message" class="community-status" role="status" aria-live="polite"></p>
+                                <section id="hosted-game-room" class="hosted-game-room hidden" aria-live="polite">
+                                    <div class="hosted-room-heading">
+                                        <div><h4 id="hosted-room-title">Game room</h4><p id="hosted-room-meta"></p></div>
+                                        <div class="hosted-room-code"><span>Room code</span><strong id="hosted-room-code"></strong></div>
+                                    </div>
+                                    <p id="hosted-room-status" class="hosted-room-status"></p>
+                                    <div id="multiplayer-arena" class="multiplayer-arena" aria-label="Live game progress">
+                                        <div class="multiplayer-scene-head"><strong id="multiplayer-scene-name"></strong><span id="multiplayer-scene-goal"></span></div>
+                                        <canvas id="multiplayer-room-canvas" width="900" height="360" aria-label="Animated live game arena"></canvas>
+                                        <div id="multiplayer-scene-feed" class="multiplayer-scene-feed" aria-live="polite"></div>
+                                    </div>
+                                    <details id="hosted-leaderboard" class="hosted-leaderboard" open>
+                                        <summary><i class="fas fa-ranking-star"></i> Leaderboard <span id="hosted-leaderboard-count"></span></summary>
+                                        <ol id="hosted-room-players" class="hosted-room-players"></ol>
+                                    </details>
+                                    <div id="hosted-room-question" class="hosted-room-question hidden">
+                                        <p id="hosted-question-progress"></p>
+                                        <h4 id="hosted-question-prompt"></h4>
+                                        <div id="game-action-picker" class="game-action-picker hidden" role="group" aria-label="Choose your game action"></div>
+                                        <div id="hosted-question-options" class="hosted-answer-options"></div>
+                                        <p id="hosted-answer-feedback" role="status" aria-live="polite"></p>
+                                    </div>
+                                    <div id="hosted-podium" class="hosted-podium hidden"></div>
+                                    <div class="hosted-room-actions">
+                                        <button id="hosted-start-btn" class="primary-btn hidden" type="button">Start game</button>
+                                        <button id="hosted-next-btn" class="primary-btn hidden" type="button">Next round</button>
+                                        <button id="hosted-finish-btn" class="secondary-btn hidden" type="button">End game</button>
+                                        <button id="hosted-leave-btn" class="secondary-btn" type="button">Leave room</button>
+                                    </div>
+                                </section>
+                            </section>
+                            <section id="waiting-arcade-card" class="glass-card waiting-arcade-card hidden">
+                                <div><h3>Warm-up: Potshot Peak</h3><p>Pull back to aim the hammer, then release to launch. Chain clean landings and set your personal best while you wait.</p></div>
+                                <canvas id="waiting-runner-canvas" width="520" height="360" aria-label="A pot-climbing game. Drag to aim the hammer and release to launch onto a ledge."></canvas>
+                                <div class="waiting-runner-meta"><span>Altitude <strong id="waiting-runner-score">0</strong> m · Best <strong id="waiting-runner-best">0</strong> m</span><button id="waiting-runner-start" class="secondary-btn" type="button">Start climbing</button></div>
+                            </section>
+                        </main>
+                        <aside class="multiplayer-side">
+                            <section class="glass-card multiplayer-player-card">
+                                <span id="multiplayer-large-avatar" class="multiplayer-large-avatar player-avatar player-avatar-large"><i class="fas fa-user-astronaut" aria-hidden="true"></i></span>
+                                <h3 id="multiplayer-player-name">Student</h3>
+                                <p>Match wins: <strong id="multiplayer-wins">0</strong></p>
+                            </section>
+                            <section class="glass-card multiplayer-shop">
+                                <div class="view-header"><div><h3>Player shop</h3><p>Unlock avatars and multiplayer-only colorways.</p></div><i class="fas fa-store"></i></div>
+                                <p id="multiplayer-shop-status" class="community-status" role="status" aria-live="polite"></p>
+                                <div id="multiplayer-shop-items" class="multiplayer-shop-items"></div>
+                            </section>
+                        </aside>
+                    </div>
+                </section>
+
+                <!-- 7. Flashcard Importer View -->
                 <section id="importer-view" class="view hidden">
                     <div class="glass-card full-width">
-                        <h2>Quizlet Importer Tool</h2>
-                        <p>Paste your exported Quizlet text here. Format requires terms and definitions separated by a delimiter (e.g., Tab or Dash) and cards separated by newlines.</p>
+                        <h2>Flashcard Importer</h2>
+                        <p>Paste tabular flashcard text below. Terms and definitions should be separated by your chosen delimiter, with one card per line.</p>
                         
                         <div class="form-group">
                             <label for="import-deck-name">New Deck Name</label>
@@ -559,8 +688,8 @@
                         </div>
 
                         <div class="form-group">
-                            <label for="quizlet-data">Quizlet Export Data</label>
-                            <textarea id="quizlet-data" rows="10" placeholder="Term 1    Definition 1&#10;Term 2    Definition 2"></textarea>
+                            <label for="flashcard-import-data">Flashcard text</label>
+                            <textarea id="flashcard-import-data" rows="10" placeholder="Term 1    Definition 1&#10;Term 2    Definition 2"></textarea>
                         </div>
 
                         <button id="process-import-btn" class="primary-btn full-width"><i class="fas fa-file-import"></i> Parse & Create Deck</button>
@@ -623,9 +752,9 @@
                             <p>Choose a palette for the full interface, including backgrounds. Every palette supports light and dark appearance.</p>
                             <div class="scheme-picker" role="group" aria-label="Color scheme">
                                 <button type="button" class="scheme-option" data-color-scheme="forest"><span class="scheme-swatch forest-swatch"></span><span>Forest</span></button>
-                                <button type="button" class="scheme-option" data-color-scheme="ocean"><span class="scheme-swatch ocean-swatch"></span><span>Ocean</span></button>
-                                <button type="button" class="scheme-option" data-color-scheme="violet"><span class="scheme-swatch violet-swatch"></span><span>Violet</span></button>
-                                <button type="button" class="scheme-option" data-color-scheme="sunset"><span class="scheme-swatch sunset-swatch"></span><span>Sunset</span></button>
+                                <button type="button" class="scheme-option" data-color-scheme="ocean" data-shop-item="palette_ocean"><span class="scheme-swatch ocean-swatch"></span><span>Ocean</span><small class="scheme-lock-note">Unlock in multiplayer shop</small></button>
+                                <button type="button" class="scheme-option" data-color-scheme="violet" data-shop-item="palette_violet"><span class="scheme-swatch violet-swatch"></span><span>Violet</span><small class="scheme-lock-note">Unlock in multiplayer shop</small></button>
+                                <button type="button" class="scheme-option" data-color-scheme="sunset" data-shop-item="palette_sunset"><span class="scheme-swatch sunset-swatch"></span><span>Sunset</span><small class="scheme-lock-note">Unlock in multiplayer shop</small></button>
                                 <button type="button" class="scheme-option" data-color-scheme="monochrome"><span class="scheme-swatch monochrome-swatch"></span><span>Black &amp; White</span></button>
                             </div>
                         </section>
@@ -953,6 +1082,7 @@
     <script src="analyticsEngine.js" defer></script>
     <script src="practiceExamEngine.js" defer></script>
     <script src="cloudSync.js" defer></script>
+    <script src="communityGames.js" defer></script>
     <script src="app.js" defer></script>
     <script>
         if ('serviceWorker' in navigator && ['http:', 'https:'].includes(window.location.protocol)) {
