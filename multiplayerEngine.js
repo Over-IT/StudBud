@@ -1,0 +1,818 @@
+(function (window) {
+    'use strict';
+
+    const TAU = Math.PI * 2;
+    const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+    const overlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    const esc = value => String(value ?? '').replace(/[&<>"']/g, ch =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+
+    function mulberry32(seed) {
+        let a = seed >>> 0;
+        return function () {
+            a = (a + 0x6D2B79F5) | 0;
+            let t = Math.imul(a ^ (a >>> 15), 1 | a);
+            t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+    }
+
+    function hashStr(text) {
+        let h = 2166136261;
+        for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+        return h >>> 0;
+    }
+
+    const PALETTE = ['#f87171', '#fb923c', '#fbbf24', '#a3e635', '#34d399', '#22d3ee', '#60a5fa', '#a78bfa', '#f472b6', '#e879f9', '#2dd4bf', '#facc15'];
+
+    function playerColor(player) {
+        const palette = String(player?.palette || '');
+        if (palette.includes('ocean')) return '#38bdf8';
+        if (palette.includes('sunset')) return '#fb923c';
+        if (palette.includes('violet')) return '#a78bfa';
+        return PALETTE[hashStr(String(player?.id || 'x')) % PALETTE.length];
+    }
+
+    // Axis-aligned body vs. rectangles. Solids may carry dx/dy (moving platforms) and `oneway`/`off` flags.
+    function moveBody(b, solids, dt) {
+        b.onGround = false;
+        b.wall = 0;
+        b.ground = null;
+        b.x += b.vx * dt;
+        for (const s of solids) {
+            if (s.oneway || s.off || !overlap(b, s)) continue;
+            if (b.vx > 0 || (b.vx === 0 && b.x + b.w / 2 < s.x + s.w / 2)) { b.x = s.x - b.w; b.wall = 1; }
+            else { b.x = s.x + s.w; b.wall = -1; }
+            b.vx = 0;
+        }
+        const prevBottom = b.y + b.h;
+        b.y += b.vy * dt;
+        for (const s of solids) {
+            if (s.off || !overlap(b, s)) continue;
+            if (s.oneway) {
+                if (b.vy >= 0 && prevBottom <= s.y + 6) { b.y = s.y - b.h; b.vy = 0; b.onGround = true; b.ground = s; }
+            } else if (b.vy >= 0 && prevBottom <= s.y + 12 + Math.abs(b.vy) * dt) {
+                b.y = s.y - b.h; b.vy = 0; b.onGround = true; b.ground = s;
+            } else if (b.vy < 0) {
+                b.y = s.y + s.h; b.vy = 0;
+            } else {
+                b.y = s.y - b.h; b.vy = 0; b.onGround = true; b.ground = s;
+            }
+        }
+    }
+
+    // Circle vs. rectangle push-out. Returns true if a collision was resolved.
+    function pushCircleOutOfRect(c, r) {
+        const nx = clamp(c.x, r.x, r.x + r.w);
+        const ny = clamp(c.y, r.y, r.y + r.h);
+        let dx = c.x - nx;
+        let dy = c.y - ny;
+        const d2 = dx * dx + dy * dy;
+        if (d2 >= c.r * c.r) return false;
+        if (d2 === 0) {
+            const left = c.x - r.x, right = r.x + r.w - c.x, top = c.y - r.y, bottom = r.y + r.h - c.y;
+            const m = Math.min(left, right, top, bottom);
+            if (m === left) c.x = r.x - c.r; else if (m === right) c.x = r.x + r.w + c.r;
+            else if (m === top) c.y = r.y - c.r; else c.y = r.y + r.h + c.r;
+            return true;
+        }
+        const d = Math.sqrt(d2);
+        c.x = nx + dx / d * c.r;
+        c.y = ny + dy / d * c.r;
+        return true;
+    }
+
+    function roundRect(ctx, x, y, w, h, r) {
+        r = Math.min(r, w / 2, h / 2);
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + w, y, x + w, y + h, r);
+        ctx.arcTo(x + w, y + h, x, y + h, r);
+        ctx.arcTo(x, y + h, x, y, r);
+        ctx.arcTo(x, y, x + w, y, r);
+        ctx.closePath();
+    }
+
+    function nameTag(ctx, name, x, y, color) {
+        ctx.font = '700 13px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        const w = ctx.measureText(name).width + 12;
+        ctx.fillStyle = 'rgba(8,12,24,.62)';
+        roundRect(ctx, x - w / 2, y - 14, w, 19, 9);
+        ctx.fill();
+        ctx.fillStyle = color || '#fff';
+        ctx.fillText(name, x, y);
+    }
+
+    class Particles {
+        constructor() { this.items = []; }
+        burst(x, y, color, count = 10, speed = 160, life = 0.5, size = 4) {
+            for (let i = 0; i < count; i++) {
+                const a = Math.random() * TAU;
+                const v = speed * (0.3 + Math.random() * 0.7);
+                this.items.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life, max: life, color, size });
+            }
+        }
+        update(dt, gravity = 0) {
+            for (const p of this.items) { p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += gravity * dt; }
+            this.items = this.items.filter(p => p.life > 0);
+        }
+        draw(ctx) {
+            for (const p of this.items) {
+                ctx.globalAlpha = clamp(p.life / p.max, 0, 1);
+                ctx.fillStyle = p.color;
+                ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+            }
+            ctx.globalAlpha = 1;
+        }
+    }
+
+    // A meter (ammo, energy, bait…) that is spent by playing and refilled by answering questions.
+    class Resource {
+        constructor(label, color, max, start, mult = 1) {
+            this.label = label; this.color = color; this.max = max; this.value = start; this.mult = mult;
+        }
+        has(n = 1) { return this.value >= n; }
+        spend(n = 1) { if (this.value < n) return false; this.value -= n; return true; }
+        drain(n) { this.value = Math.max(0, this.value - n); }
+        add(n) { this.value = Math.min(this.max, this.value + n); }
+    }
+
+    class BaseGame {
+        constructor(session) { this.s = session; this.particles = new Particles(); }
+        update() { }
+        draw() { }
+        net() { return {}; }
+        onEvent() { }
+        goalText() { return ''; }
+        hint() { return ''; }
+    }
+
+    class Session {
+        constructor(options) {
+            this.room = options.room;
+            this.user = options.user;
+            this.api = options.api;
+            this.isHost = Boolean(options.isHost);
+            this.onLeave = options.onLeave;
+            this.finishRoom = options.finishRoom;
+            this.practice = Boolean(options.practice);
+            this.correct = 0;
+            this.reward = Math.min(100, Math.max(5, Number(this.room.state?.question_reward) || 20));
+            this.mode = this.room.mode;
+            this.code = this.room.room_code;
+            this.seed = hashStr(`${this.code}:${this.mode}`);
+            this.roster = new Map();
+            this.remotes = new Map();
+            this.keys = new Set();
+            this.justPressed = new Set();
+            this.mouse = { x: 0, y: 0, down: false, pressed: false, rdown: false, rpressed: false };
+            this.score = 0;
+            this.goal = 0;
+            this.answered = 0;
+            this.paused = false;
+            this.over = false;
+            this.ending = false;
+            this.countdown = 3.4;
+            this.t = 0;
+            this.cards = [];
+            this.lastCard = -1;
+            this.outbox = [];
+            this.rewards = null;
+            this.standingsCache = null;
+            this.firstDone = 0;
+            this.finishMs = 0;
+            this.done = false;
+            this.lastReport = { score: -1, answered: -1, at: 0 };
+            this.startedAt = Date.parse(this.room.started_at) || Date.now();
+            this.deadline = this.practice ? Infinity : this.room.goal_type === 'time'
+                ? this.startedAt + Number(this.room.time_limit_seconds) * 1000
+                : this.startedAt + 12 * 60000;
+            this.updateRoster(this.room);
+            this.local = this.roster.get(this.user.id) || { id: this.user.id, nickname: 'Player', color: PALETTE[0] };
+
+            const Game = (window.StudBudArcade.games[this.mode]) || window.StudBudArcade.games.skyline;
+            this.buildDom();
+            this.game = new Game(this);
+            this.bind();
+            if (!this.practice) this.connect();
+            this.loadCards(options.fallbackCards);
+            this.resize();
+            if (this.practice) this.countdown = 1.2;
+            this.lastFrame = performance.now();
+            this.raf = requestAnimationFrame(now => this.frame(now));
+            if (!this.practice) {
+                this.sendTimer = setInterval(() => this.sendState(), 100);
+                this.reportTimer = setInterval(() => this.reportScore(false), 5000);
+                this.overlay.requestFullscreen?.().catch(() => { });
+            }
+            this.hudTimer = setInterval(() => this.updateHud(), 250);
+        }
+
+        // ---------- roster / network ----------
+        updateRoster(room) {
+            const players = Array.isArray(room.state?.players) ? room.state.players : [];
+            const ids = new Set();
+            players.forEach(player => {
+                ids.add(player.id);
+                this.roster.set(player.id, {
+                    id: player.id, nickname: player.nickname, score: Number(player.score || 0), color: playerColor(player), avatar: player.avatar,
+                    cos: { skin: player.skin || '', hat: player.hat || '', acc: player.accessory || '' }
+                });
+            });
+            for (const id of [...this.roster.keys()]) if (!ids.has(id)) { this.roster.delete(id); this.remotes.delete(id); }
+        }
+
+        updateRoom(room) {
+            if (this.over && room.status === 'finished') {
+                const rewards = room.state?.coin_rewards;
+                if (rewards && !this.rewards) { this.rewards = rewards; this.renderResults(); }
+            }
+            this.room = room;
+            this.updateRoster(room);
+            if (room.status === 'finished' && !this.over) this.finish(this.standings());
+        }
+
+        connect() {
+            try {
+                this.channel = this.api.openChannel(this.code);
+                this.channel.on('broadcast', { event: 'm' }, ({ payload }) => this.receive(payload));
+                this.channel.subscribe(status => { this.connected = status === 'SUBSCRIBED'; });
+            } catch (error) {
+                console.error('[Arcade] Realtime unavailable:', error);
+            }
+        }
+
+        async loadCards(fallback) {
+            try {
+                this.cards = await this.api.getCards(this.code);
+            } catch (error) {
+                console.warn('[Arcade] Using local cards:', error.message);
+            }
+            if (!this.cards.length && fallback?.length) this.cards = fallback;
+        }
+
+        send(payload) {
+            if (!this.connected || !this.channel) return;
+            this.channel.send({ type: 'broadcast', event: 'm', payload });
+        }
+
+        emit(event) { if (this.outbox.length < 60) this.outbox.push(event); }
+
+        sendState() {
+            if (this.over || this.countdown > 0) return;
+            this.send({
+                t: 's', id: this.user.id, s: Math.round(this.score), g: Math.round(this.goal), q: this.answered,
+                d: this.done ? 1 : 0, ft: this.finishMs, ...this.game.net(), ev: this.outbox.splice(0, 40)
+            });
+        }
+
+        receive(p) {
+            if (!p || p.id === this.user.id) return;
+            if (p.t === 'end') {
+                if (p.id === this.room.host_id) this.finish(p.st);
+                return;
+            }
+            if (p.t !== 's' || !this.roster.has(p.id)) return;
+            let r = this.remotes.get(p.id);
+            const info = this.roster.get(p.id);
+            if (!r) { r = { id: p.id, x: p.x, y: p.y, tx: p.x, ty: p.y }; this.remotes.set(p.id, r); }
+            r.name = info.nickname; r.color = info.color; r.cos = info.cos;
+            r.tx = p.x; r.ty = p.y; r.vx = p.vx || 0; r.vy = p.vy || 0; r.f = p.f || 0; r.a = p.a || 0;
+            r.hp = p.hp; r.ex = p.ex || {};
+            r.score = p.s || 0; r.goal = p.g || 0; r.answered = p.q || 0; r.done = p.d; r.ft = p.ft || 0;
+            r.seen = performance.now();
+            if (p.d && !this.firstDone) this.firstDone = Date.now();
+            for (const ev of p.ev || []) this.game.onEvent(ev, r);
+        }
+
+        remoteList() { return [...this.remotes.values()]; }
+
+        // ---------- scoring / end of match ----------
+        addScore(n) { this.score = Math.max(0, this.score + n); }
+        setGoal(n) { this.goal = n; }
+
+        standings() {
+            const rows = [];
+            for (const info of this.roster.values()) {
+                const r = this.remotes.get(info.id);
+                const isMe = info.id === this.user.id;
+                rows.push({
+                    id: info.id, n: info.nickname, color: info.color,
+                    s: Math.round(isMe ? this.score : r ? r.score : info.score),
+                    g: Math.round(isMe ? this.goal : r ? r.goal : 0),
+                    d: isMe ? this.done : Boolean(r?.done)
+                });
+            }
+            return rows.sort((a, b) => b.s - a.s);
+        }
+
+        metric(row) { return this.game.scoreGoal === false ? row.g : row.s; }
+
+        checkEnd() {
+            if (this.practice || this.over || this.ending || !this.isHost || this.countdown > 0) return;
+            const now = Date.now();
+            const rows = this.standings();
+            const limit = Number(this.room.point_limit);
+            let end = now >= this.deadline;
+            if (this.room.goal_type !== 'time' && !this.game.race && rows.some(row => this.metric(row) >= limit)) end = true;
+            if (this.game.race) {
+                if (rows.length && rows.every(row => row.d)) end = true;
+                const first = this.done && !this.firstDone ? now : this.firstDone;
+                if (first && now - first > 20000) end = true;
+            }
+            if (end) this.hostEnd();
+        }
+
+        hostEnd() {
+            if (this.ending || this.over) return;
+            this.ending = true;
+            const st = this.standings();
+            this.send({ t: 'end', id: this.user.id, st });
+            this.finish(st);
+            setTimeout(async () => {
+                try {
+                    const room = await this.finishRoom();
+                    if (room?.state?.coin_rewards) { this.rewards = room.state.coin_rewards; this.renderResults(); }
+                } catch (error) { console.error('[Arcade] Could not finish room:', error); }
+            }, 1800);
+        }
+
+        async reportScore(force) {
+            if (this.practice) return;
+            const last = this.lastReport;
+            const answered = this.answered + Math.floor(this.t / 20);
+            if (!force && last.score === this.score && last.answered === answered && last.correct === this.correct) return;
+            this.lastReport = { score: this.score, answered, correct: this.correct, at: Date.now() };
+            try { await this.api.reportScore(this.code, this.score, answered, this.correct); } catch (error) { /* rewards are best effort */ }
+        }
+
+        finish(standings) {
+            if (this.over) return;
+            this.over = true;
+            this.standingsCache = (standings || this.standings()).map(row => ({ ...row, color: row.color || this.roster.get(row.id)?.color || '#94a3b8' }));
+            this.reportScore(true);
+            this.closeQuestion(true);
+            this.renderResults();
+        }
+
+        // ---------- questions ----------
+        // Spend from the game's resource; nags the player to answer a question when empty.
+        spend(n) {
+            const res = this.game.res;
+            if (res.spend(n)) return true;
+            const now = performance.now();
+            if (now - (this.lastNeed || 0) > 1800) {
+                this.lastNeed = now;
+                this.toast(`Out of ${res.label.toLowerCase()} — press Q to answer a question`, '#f87171');
+            }
+            return false;
+        }
+
+        // Amount of the game's resource a correct answer is worth (host-configured).
+        rewardAmount() { return Math.max(1, Math.round(this.reward * (this.game.res?.mult || 1))); }
+
+        refill() {
+            const res = this.game.res;
+            if (!res) return 0;
+            const n = this.rewardAmount();
+            res.add(n);
+            this.toast(`+${n} ${res.label}`, res.color);
+            return n;
+        }
+
+        // Player-triggered question that refills the game's resource.
+        recharge() {
+            const res = this.game.res;
+            if (!res || this.paused || this.over || this.countdown > 0) return;
+            if (res.value >= res.max) { this.toast(`${res.label} is already full`, res.color); return; }
+            this.ask(correct => {
+                if (correct) this.refill();
+                else if (correct === false) this.toast(`Wrong answer — no ${res.label.toLowerCase()}`, '#f87171');
+            }, `Correct answer: +${this.rewardAmount()} ${res.label}`);
+        }
+
+        ask(callback, note) {
+            if (this.paused || this.over || this.countdown > 0) return false;
+            if (!this.cards.length) { this.toast('Questions are still loading…', '#fbbf24'); return false; }
+            let index = Math.floor(Math.random() * this.cards.length);
+            if (this.cards.length > 1 && index === this.lastCard) index = (index + 1) % this.cards.length;
+            this.lastCard = index;
+            const card = this.cards[index];
+            const wrong = [...new Set(this.cards.filter(c => c.back !== card.back).map(c => c.back))];
+            for (let i = wrong.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [wrong[i], wrong[j]] = [wrong[j], wrong[i]]; }
+            const options = wrong.slice(0, 3).concat(card.back);
+            for (let i = options.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [options[i], options[j]] = [options[j], options[i]]; }
+            this.question = { card, options, callback, locked: false };
+            this.paused = true;
+            this.keys.clear();
+            const box = this.overlay.querySelector('.mpg-question');
+            box.querySelector('.mpg-q-prompt').textContent = card.front;
+            box.querySelector('.mpg-q-options').innerHTML = options.map((option, i) =>
+                `<button type="button" data-q="${i}"><kbd>${i + 1}</kbd><span>${esc(option)}</span></button>`).join('');
+            box.querySelector('.mpg-q-result').textContent = '';
+            const res = this.game.res;
+            box.querySelector('small').textContent = note || (res ? `Correct answer: +${this.rewardAmount()} ${res.label}` : 'Question');
+            box.classList.remove('hidden');
+            return true;
+        }
+
+        answerQuestion(index) {
+            const q = this.question;
+            if (!q || q.locked) return;
+            q.locked = true;
+            const correct = q.options[index] === q.card.back;
+            this.answered++;
+            if (correct) this.correct++;
+            const box = this.overlay.querySelector('.mpg-question');
+            box.querySelectorAll('[data-q]').forEach((button, i) => {
+                button.classList.toggle('right', q.options[i] === q.card.back);
+                button.classList.toggle('wrong', i === index && !correct);
+            });
+            box.querySelector('.mpg-q-result').textContent = correct ? 'Correct!' : `Not quite — ${q.card.back}`;
+            setTimeout(() => {
+                if (this.question !== q) return;
+                this.closeQuestion(true);
+                try { q.callback?.(correct); } catch (error) { console.error(error); }
+            }, correct ? 650 : 1400);
+        }
+
+        skipQuestion() {
+            const q = this.question;
+            if (!q || q.locked) return;
+            this.closeQuestion(true);
+            q.callback?.(null);
+        }
+
+        closeQuestion(resume) {
+            this.question = null;
+            this.overlay.querySelector('.mpg-question').classList.add('hidden');
+            if (resume) this.paused = false;
+        }
+
+        toast(text, color = '#e2e8f0') {
+            const holder = this.overlay.querySelector('.mpg-toasts');
+            const item = document.createElement('div');
+            item.textContent = text;
+            item.style.borderColor = color;
+            holder.appendChild(item);
+            setTimeout(() => item.remove(), 2400);
+            while (holder.children.length > 4) holder.firstChild.remove();
+        }
+
+        // ---------- input ----------
+        axis() {
+            const k = this.keys;
+            return {
+                x: (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0),
+                y: (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0) - (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0)
+            };
+        }
+        pressed(...codes) { return codes.some(code => this.justPressed.has(code)); }
+        down(...codes) { return codes.some(code => this.keys.has(code)); }
+
+        bind() {
+            const typing = e => /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || '');
+            this.handlers = {
+                keydown: e => {
+                    if (typing(e)) return;
+                    if (this.question) {
+                        const n = Number(e.key);
+                        if (n >= 1 && n <= 4) this.answerQuestion(n - 1);
+                        e.preventDefault();
+                        return;
+                    }
+                    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) e.preventDefault();
+                    if (e.code === 'KeyQ' && !e.repeat && this.game?.res) { this.recharge(); return; }
+                    if (!e.repeat) this.justPressed.add(e.code);
+                    this.keys.add(e.code);
+                },
+                keyup: e => this.keys.delete(e.code),
+                blur: () => { this.keys.clear(); this.mouse.down = false; this.mouse.rdown = false; },
+                resize: () => this.resize()
+            };
+            window.addEventListener('keydown', this.handlers.keydown);
+            window.addEventListener('keyup', this.handlers.keyup);
+            window.addEventListener('blur', this.handlers.blur);
+            window.addEventListener('resize', this.handlers.resize);
+            const canvas = this.canvas;
+            canvas.addEventListener('pointermove', e => {
+                const b = canvas.getBoundingClientRect();
+                this.mouse.x = (e.clientX - b.left) / this.scale;
+                this.mouse.y = (e.clientY - b.top) / this.scale;
+            });
+            canvas.addEventListener('pointerdown', e => {
+                const b = canvas.getBoundingClientRect();
+                this.mouse.x = (e.clientX - b.left) / this.scale;
+                this.mouse.y = (e.clientY - b.top) / this.scale;
+                if (e.button === 2) { this.mouse.rdown = true; this.mouse.rpressed = true; }
+                else { this.mouse.down = true; this.mouse.pressed = true; }
+                canvas.setPointerCapture?.(e.pointerId);
+            });
+            canvas.addEventListener('pointerup', e => { if (e.button === 2) this.mouse.rdown = false; else this.mouse.down = false; });
+            canvas.addEventListener('contextmenu', e => e.preventDefault());
+            this.overlay.addEventListener('click', e => {
+                const target = e.target.closest('button');
+                if (!target) return;
+                if (target.dataset.q !== undefined) this.answerQuestion(Number(target.dataset.q));
+                else if (target.classList.contains('mpg-q-skip')) this.skipQuestion();
+                else if (target.classList.contains('mpg-recharge')) this.recharge();
+                else if (target.classList.contains('mpg-leave') || target.classList.contains('mpg-exit')) this.onLeave?.();
+                else if (target.classList.contains('mpg-end')) this.hostEnd();
+            });
+        }
+
+        // ---------- DOM ----------
+        buildDom() {
+            const overlay = document.createElement('div');
+            overlay.className = 'mpg-overlay';
+            overlay.innerHTML = `
+                <canvas class="mpg-canvas"></canvas>
+                <div class="mpg-top">
+                    <div class="mpg-chip"><strong class="mpg-name"></strong><span class="mpg-goal"></span></div>
+                    <div class="mpg-timer"></div>
+                    <div class="mpg-actions">
+                        <button type="button" class="mpg-end ${this.isHost && !this.practice ? '' : 'hidden'}">End match</button>
+                        <button type="button" class="mpg-leave">${this.practice ? 'Close' : 'Leave'}</button>
+                    </div>
+                </div>
+                <ol class="mpg-board"></ol>
+                <div class="mpg-score"><span>Score</span><strong>0</strong></div>
+                <div class="mpg-meter hidden">
+                    <div class="mpg-meter-head"><span class="mpg-meter-label"></span><b class="mpg-meter-value"></b></div>
+                    <div class="mpg-meter-bar"><i></i></div>
+                    <button type="button" class="mpg-recharge">Answer a question <kbd>Q</kbd></button>
+                </div>
+                <div class="mpg-hint"></div>
+                <div class="mpg-toasts"></div>
+                <div class="mpg-countdown"></div>
+                <div class="mpg-question hidden" role="dialog" aria-modal="true" aria-label="Question">
+                    <div class="mpg-q-card">
+                        <small>Question</small>
+                        <h3 class="mpg-q-prompt"></h3>
+                        <div class="mpg-q-options"></div>
+                        <p class="mpg-q-result" role="status"></p>
+                        <button type="button" class="mpg-q-skip">Skip</button>
+                    </div>
+                </div>
+                <div class="mpg-results hidden"></div>`;
+            document.body.appendChild(overlay);
+            document.body.classList.add('mpg-active');
+            this.overlay = overlay;
+            this.canvas = overlay.querySelector('.mpg-canvas');
+            this.ctx = this.canvas.getContext('2d');
+            overlay.querySelector('.mpg-name').textContent = this.game?.title || this.mode;
+        }
+
+        resize() {
+            const dpr = window.devicePixelRatio || 1;
+            const w = window.innerWidth, h = window.innerHeight;
+            this.canvas.width = Math.floor(w * dpr);
+            this.canvas.height = Math.floor(h * dpr);
+            this.dpr = dpr;
+            this.scale = Math.max(0.45, h / 720);
+            this.vw = w / this.scale;
+            this.vh = 720;
+        }
+
+        updateHud() {
+            if (this.over) return;
+            const o = this.overlay;
+            o.querySelector('.mpg-name').textContent = this.game.title || '';
+            o.querySelector('.mpg-goal').textContent = this.game.goalText();
+            o.querySelector('.mpg-score strong').textContent = Math.round(this.score).toLocaleString();
+            const left = Math.max(0, this.deadline - Date.now());
+            o.querySelector('.mpg-timer').textContent = this.room.goal_type === 'time' && Number.isFinite(left)
+                ? `${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, '0')}`
+                : `${Math.floor(this.t / 60)}:${String(Math.floor(this.t) % 60).padStart(2, '0')}`;
+            o.querySelector('.mpg-hint').textContent = this.question ? '' : this.game.hint();
+            o.querySelector('.mpg-board').innerHTML = this.standings().slice(0, 6).map((row, i) =>
+                `<li class="${row.id === this.user.id ? 'me' : ''}"><i style="background:${row.color}"></i><span>${i + 1}. ${esc(row.n)}</span><b>${row.s.toLocaleString()}</b></li>`).join('');
+        }
+
+        updateMeter() {
+            const res = this.game.res;
+            const box = this.overlay.querySelector('.mpg-meter');
+            if (!res) { box.classList.add('hidden'); return; }
+            box.classList.remove('hidden');
+            const value = Math.round(res.value);
+            box.querySelector('.mpg-meter-label').textContent = res.label;
+            box.querySelector('.mpg-meter-value').textContent = `${value} / ${res.max}`;
+            const fill = box.querySelector('.mpg-meter-bar i');
+            fill.style.width = `${Math.max(0, Math.min(100, res.value / res.max * 100))}%`;
+            fill.style.background = res.color;
+            box.classList.toggle('low', res.value < res.max * 0.2);
+        }
+
+        renderResults() {
+            const panel = this.overlay.querySelector('.mpg-results');
+            const rows = this.standingsCache || this.standings();
+            const winner = rows[0];
+            panel.classList.remove('hidden');
+            panel.innerHTML = `<div class="mpg-results-card">
+                <small>Match over</small>
+                <h2>${winner ? `${esc(winner.n)} wins!` : 'Game over'}</h2>
+                <ol>${rows.map((row, i) => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${i + 1}</span><i style="background:${row.color}"></i><strong>${esc(row.n)}</strong><b>${row.s.toLocaleString()} pts</b><em>${this.rewards ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
+                <p>${this.rewards ? 'Coins have been added to your multiplayer wallet.' : 'Tallying coin rewards…'}</p>
+                <button type="button" class="mpg-exit">Back to lobby</button>
+            </div>`;
+        }
+
+        // ---------- main loop ----------
+        frame(now) {
+            if (this.destroyed) return;
+            const dt = Math.min(0.05, (now - this.lastFrame) / 1000);
+            this.lastFrame = now;
+            if (!this.over) {
+                if (this.countdown > 0) {
+                    this.countdown -= dt;
+                    const text = this.countdown > 0.4 ? String(Math.ceil(this.countdown - 0.4)) : 'GO!';
+                    const el = this.overlay.querySelector('.mpg-countdown');
+                    el.textContent = this.countdown > -0.2 ? text : '';
+                    el.classList.toggle('hidden', this.countdown <= -0.2);
+                } else {
+                    this.overlay.querySelector('.mpg-countdown').classList.add('hidden');
+                    this.t += dt;
+                    if (!this.paused) this.game.update(dt);
+                    this.checkEnd();
+                    if (!this.practice && !this.isHost && !this.over && Date.now() > this.deadline + 9000) this.finish(this.standings());
+                }
+            }
+            for (const r of this.remotes.values()) {
+                if (now - r.seen > 5000) { this.remotes.delete(r.id); continue; }
+                const gap = dist(r.x, r.y, r.tx, r.ty);
+                const k = gap > 500 ? 1 : Math.min(1, dt * 14);
+                r.x += (r.tx - r.x) * k;
+                r.y += (r.ty - r.y) * k;
+            }
+            this.updateMeter();
+            this.justPressed.clear();
+            this.mouse.pressed = false;
+            this.mouse.rpressed = false;
+            const ctx = this.ctx;
+            ctx.setTransform(this.dpr * this.scale, 0, 0, this.dpr * this.scale, 0, 0);
+            this.game.draw(ctx, this.vw, this.vh);
+            this.raf = requestAnimationFrame(t => this.frame(t));
+        }
+
+        destroy() {
+            this.destroyed = true;
+            cancelAnimationFrame(this.raf);
+            clearInterval(this.sendTimer);
+            clearInterval(this.hudTimer);
+            clearInterval(this.reportTimer);
+            window.removeEventListener('keydown', this.handlers.keydown);
+            window.removeEventListener('keyup', this.handlers.keyup);
+            window.removeEventListener('blur', this.handlers.blur);
+            window.removeEventListener('resize', this.handlers.resize);
+            try { if (this.channel) this.api.getClient().removeChannel(this.channel); } catch (error) { /* already closed */ }
+            this.overlay.remove();
+            document.body.classList.remove('mpg-active');
+            if (document.fullscreenElement) document.exitFullscreen?.().catch(() => { });
+        }
+    }
+
+    // ---------- cosmetics ----------
+    const SKINS = {
+        skin_robot: { body: '#94a3b8', head: '#cbd5e1', eye: '#06b6d4', trim: '#475569' },
+        skin_ninja: { body: '#111827', head: '#1f2937', eye: '#f8fafc', trim: '#dc2626' },
+        skin_alien: { body: '#16a34a', head: '#86efac', eye: '#0f172a', trim: '#14532d' },
+        skin_ghost: { body: '#e2e8f0', head: '#f8fafc', eye: '#0f172a', trim: '#94a3b8', alpha: 0.88 },
+        skin_lava: { body: '#ea580c', head: '#7c2d12', eye: '#fde047', trim: '#fbbf24' },
+        skin_gold: { body: '#f59e0b', head: '#fcd34d', eye: '#451a03', trim: '#b45309' }
+    };
+
+    // Accepts either a colour string or a player-like object ({ color, cos }).
+    function who(p) {
+        if (typeof p === 'string') return { color: p, skin: null, hat: '', acc: '' };
+        const cos = p?.cos || {};
+        return { color: p?.color || '#94a3b8', skin: SKINS[cos.skin] || null, hat: cos.hat || '', acc: cos.acc || '' };
+    }
+
+    function drawHat(ctx, hat, cx, top, r, tilt = 0) {
+        if (!hat) return;
+        ctx.save();
+        ctx.translate(cx, top);
+        ctx.rotate(tilt);
+        const fill = (color, fn) => { ctx.fillStyle = color; ctx.beginPath(); fn(); ctx.fill(); };
+        if (hat === 'hat_cap') {
+            fill('#ef4444', () => ctx.arc(0, r * 0.35, r * 1.02, Math.PI, TAU));
+            fill('#b91c1c', () => ctx.rect(0, r * 0.2, r * 1.5, r * 0.28));
+        } else if (hat === 'hat_party') {
+            fill('#a855f7', () => { ctx.moveTo(-r * 0.8, r * 0.4); ctx.lineTo(0, -r * 1.7); ctx.lineTo(r * 0.8, r * 0.4); });
+            fill('#fde047', () => ctx.arc(0, -r * 1.7, r * 0.25, 0, TAU));
+            ctx.fillStyle = '#f472b6'; ctx.fillRect(-r * 0.5, -r * 0.4, r, r * 0.22);
+        } else if (hat === 'hat_cowboy') {
+            fill('#92400e', () => ctx.ellipse(0, r * 0.35, r * 1.7, r * 0.35, 0, 0, TAU));
+            fill('#b45309', () => { ctx.moveTo(-r * 0.8, r * 0.3); ctx.quadraticCurveTo(-r * 0.7, -r * 1.1, 0, -r * 0.7); ctx.quadraticCurveTo(r * 0.7, -r * 1.1, r * 0.8, r * 0.3); });
+        } else if (hat === 'hat_headphones') {
+            ctx.strokeStyle = '#1e293b'; ctx.lineWidth = r * 0.28;
+            ctx.beginPath(); ctx.arc(0, r * 0.8, r * 1.1, Math.PI, TAU); ctx.stroke();
+            fill('#ef4444', () => { ctx.arc(-r * 1.1, r * 0.9, r * 0.38, 0, TAU); ctx.arc(r * 1.1, r * 0.9, r * 0.38, 0, TAU); });
+        } else if (hat === 'hat_tophat') {
+            ctx.fillStyle = '#111827'; ctx.fillRect(-r * 0.75, -r * 1.5, r * 1.5, r * 1.8);
+            ctx.fillRect(-r * 1.3, r * 0.2, r * 2.6, r * 0.28);
+            ctx.fillStyle = '#dc2626'; ctx.fillRect(-r * 0.75, -r * 0.1, r * 1.5, r * 0.3);
+        } else if (hat === 'hat_wizard') {
+            fill('#4f46e5', () => { ctx.moveTo(-r * 1.1, r * 0.4); ctx.lineTo(r * 0.2, -r * 2.1); ctx.lineTo(r * 1.1, r * 0.4); });
+            fill('#4338ca', () => ctx.ellipse(0, r * 0.4, r * 1.5, r * 0.3, 0, 0, TAU));
+            fill('#fde047', () => ctx.arc(r * 0.1, -r * 0.5, r * 0.2, 0, TAU));
+        } else if (hat === 'hat_viking') {
+            fill('#9ca3af', () => ctx.arc(0, r * 0.4, r * 1.05, Math.PI, TAU));
+            fill('#fef3c7', () => { ctx.moveTo(-r * 0.9, r * 0.1); ctx.lineTo(-r * 1.6, -r * 1.1); ctx.lineTo(-r * 0.6, -r * 0.3); });
+            fill('#fef3c7', () => { ctx.moveTo(r * 0.9, r * 0.1); ctx.lineTo(r * 1.6, -r * 1.1); ctx.lineTo(r * 0.6, -r * 0.3); });
+        } else if (hat === 'hat_halo') {
+            ctx.strokeStyle = '#fde047'; ctx.lineWidth = r * 0.24;
+            ctx.beginPath(); ctx.ellipse(0, -r * 0.7, r * 0.95, r * 0.28, 0, 0, TAU); ctx.stroke();
+        } else if (hat === 'hat_crown') {
+            fill('#facc15', () => {
+                ctx.moveTo(-r * 0.95, r * 0.35); ctx.lineTo(-r * 1.0, -r * 0.95); ctx.lineTo(-r * 0.45, -r * 0.35);
+                ctx.lineTo(0, -r * 1.1); ctx.lineTo(r * 0.45, -r * 0.35); ctx.lineTo(r * 1.0, -r * 0.95); ctx.lineTo(r * 0.95, r * 0.35);
+            });
+            fill('#ef4444', () => ctx.arc(0, -r * 0.1, r * 0.2, 0, TAU));
+        }
+        ctx.restore();
+    }
+
+    // Side-on character. (x, y) is the top-left of the body box.
+    function drawFigureSide(ctx, p, x, y, w, h, face, time, running, alpha = 1) {
+        const c = who(p);
+        const body = c.skin?.body || c.color;
+        const head = c.skin?.head || '#fde7c8';
+        const cx = x + w / 2;
+        const run = running ? Math.sin(time * 18) : 0;
+        const bob = running ? Math.abs(Math.sin(time * 9)) * 1.5 : Math.sin(time * 3) * 0.8;
+        ctx.save();
+        ctx.globalAlpha = alpha * (c.skin?.alpha || 1);
+        ctx.fillStyle = 'rgba(0,0,0,.25)';
+        ctx.fillRect(x + 2, y + h - 2, w - 4, 3);
+        if (c.acc === 'acc_wings') {
+            ctx.fillStyle = 'rgba(226,232,240,.9)';
+            const flap = Math.sin(time * 10) * 4;
+            ctx.beginPath(); ctx.moveTo(cx - face * w * 0.3, y + 16); ctx.quadraticCurveTo(cx - face * w * 1.6, y - 6 + flap, cx - face * w * 1.1, y + 30); ctx.fill();
+        }
+        if (c.acc === 'acc_cape') {
+            ctx.fillStyle = '#dc2626';
+            ctx.beginPath(); ctx.moveTo(cx - face * 3, y + 14); ctx.lineTo(cx - face * (w * 0.9 + run * 4), y + h - 8); ctx.lineTo(cx - face * 2, y + h - 12); ctx.fill();
+        }
+        if (c.acc === 'acc_backpack') {
+            ctx.fillStyle = '#b45309'; roundRect(ctx, cx - face * w * 0.78 - 5, y + 16 + bob, 10, 20, 3); ctx.fill();
+        }
+        ctx.fillStyle = c.skin?.trim || '#1e293b';
+        ctx.fillRect(cx - 8 + run * 5, y + h - 14, 7, 14);
+        ctx.fillRect(cx + 1 - run * 5, y + h - 14, 7, 14);
+        ctx.fillStyle = body;
+        roundRect(ctx, x, y + 12 + bob, w, h - 24, 8);
+        ctx.fill();
+        if (c.acc === 'acc_scarf') { ctx.fillStyle = '#ef4444'; ctx.fillRect(x + 1, y + 12 + bob, w - 2, 5); ctx.fillRect(cx - face * 6 - 2, y + 15 + bob, 5, 12); }
+        ctx.fillStyle = head;
+        ctx.beginPath(); ctx.arc(cx, y + 11 + bob, 11, 0, TAU); ctx.fill();
+        if (!c.hat && !c.skin) { ctx.fillStyle = body; ctx.beginPath(); ctx.arc(cx, y + 8 + bob, 11.5, Math.PI, TAU); ctx.fill(); }
+        if (c.skin === SKINS.skin_ninja) { ctx.fillStyle = '#111827'; ctx.fillRect(cx - 11, y + 4 + bob, 22, 5); ctx.fillStyle = '#dc2626'; ctx.fillRect(cx - 11, y + 8 + bob, 22, 2); }
+        if (c.skin === SKINS.skin_robot) { ctx.strokeStyle = '#475569'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx, y + bob); ctx.lineTo(cx, y - 7 + bob); ctx.stroke(); ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(cx, y - 8 + bob, 2.5, 0, TAU); ctx.fill(); }
+        if (c.skin === SKINS.skin_alien) { ctx.strokeStyle = '#16a34a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx - 5, y + 1 + bob); ctx.lineTo(cx - 8, y - 6 + bob); ctx.moveTo(cx + 5, y + 1 + bob); ctx.lineTo(cx + 8, y - 6 + bob); ctx.stroke(); }
+        ctx.fillStyle = c.skin?.eye || '#0f172a';
+        ctx.fillRect(cx + face * 4 - 1.5, y + 9 + bob, 3, 4);
+        if (c.acc === 'acc_shades') { ctx.fillStyle = '#0f172a'; ctx.fillRect(cx + face * 4 - 6, y + 8 + bob, 12, 5); }
+        if (c.acc === 'acc_monocle') { ctx.strokeStyle = '#facc15'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(cx + face * 5, y + 11 + bob, 4.5, 0, TAU); ctx.stroke(); }
+        drawHat(ctx, c.hat, cx, y + 3 + bob, 10, face * 0.08);
+        ctx.restore();
+    }
+
+    // Top-down character; the body faces `aim` and hats are drawn upright on top.
+    function drawFigureTop(ctx, p, x, y, r, aim, time, alpha = 1) {
+        const c = who(p);
+        const body = c.skin?.body || c.color;
+        ctx.save();
+        ctx.globalAlpha = alpha * (c.skin?.alpha || 1);
+        ctx.translate(x, y);
+        ctx.fillStyle = 'rgba(0,0,0,.3)';
+        ctx.beginPath(); ctx.ellipse(2, 4, r, r * 0.8, 0, 0, TAU); ctx.fill();
+        ctx.save();
+        ctx.rotate(aim);
+        if (c.acc === 'acc_cape') { ctx.fillStyle = '#dc2626'; ctx.beginPath(); ctx.moveTo(-r * 0.2, -r * 0.9); ctx.lineTo(-r * 1.7, 0); ctx.lineTo(-r * 0.2, r * 0.9); ctx.fill(); }
+        if (c.acc === 'acc_wings') { ctx.fillStyle = 'rgba(226,232,240,.9)'; const f = Math.sin(time * 10) * 0.12; ctx.beginPath(); ctx.ellipse(-r * 0.3, -r * 1.15, r * 0.35, r * (1 + f), 0.4, 0, TAU); ctx.ellipse(-r * 0.3, r * 1.15, r * 0.35, r * (1 + f), -0.4, 0, TAU); ctx.fill(); }
+        if (c.acc === 'acc_backpack') { ctx.fillStyle = '#b45309'; roundRect(ctx, -r * 1.25, -r * 0.5, r * 0.7, r, 3); ctx.fill(); }
+        ctx.fillStyle = body;
+        ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
+        ctx.fillStyle = c.skin?.trim || 'rgba(0,0,0,.25)';
+        ctx.beginPath(); ctx.arc(0, 0, r, -0.9, 0.9); ctx.lineTo(0, 0); ctx.fill();
+        if (c.acc === 'acc_scarf') { ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(0, 0, r * 0.95, 0.6, 2.6); ctx.stroke(); }
+        ctx.fillStyle = c.skin?.head || '#fde7c8';
+        ctx.beginPath(); ctx.arc(r * 0.1, 0, r * 0.62, 0, TAU); ctx.fill();
+        ctx.fillStyle = c.skin?.eye || '#0f172a';
+        ctx.beginPath(); ctx.arc(r * 0.5, -r * 0.2, r * 0.1, 0, TAU); ctx.arc(r * 0.5, r * 0.2, r * 0.1, 0, TAU); ctx.fill();
+        if (c.acc === 'acc_shades') { ctx.fillStyle = '#0f172a'; ctx.fillRect(r * 0.4, -r * 0.34, r * 0.26, r * 0.68); }
+        if (c.acc === 'acc_monocle') { ctx.strokeStyle = '#facc15'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(r * 0.55, r * 0.2, r * 0.18, 0, TAU); ctx.stroke(); }
+        ctx.restore();
+        if (c.hat) drawHat(ctx, c.hat, 0, -r * 0.55, r * 0.55);
+        ctx.restore();
+    }
+
+    window.StudBudArcade = {
+        Session, BaseGame, Particles, Resource, games: {},
+        util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, who, drawHat, drawFigureSide, drawFigureTop }
+    };
+})(window);

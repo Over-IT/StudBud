@@ -169,14 +169,6 @@
                             </ul>
                             <button id="quick-add-task-btn" class="primary-btn"><i class="fas fa-plus"></i> Add Assignment</button>
                         </div>
-                        <div class="glass-card widget study-widget">
-                            <h3>Due for Review (SM-2)</h3>
-                            <div class="review-stats">
-                                <span class="stat-number" id="cards-due-count">0</span>
-                                <span class="stat-label">Cards Due</span>
-                            </div>
-                            <button id="start-daily-review-btn" class="primary-btn"><i class="fas fa-play"></i> Start Review</button>
-                        </div>
                         <div class="glass-card widget gpa-widget">
                             <h3>GPA Snapshot</h3>
                             <div class="gpa-stats">
@@ -581,7 +573,9 @@
                                         <button type="button" class="multiplayer-mode" data-mode="market"><span class="mode-art mode-market" aria-hidden="true"></span><strong>Market Mayhem</strong><small>Make deliveries, trade for a gamble, and keep your streak alive</small></button>
                                         <button type="button" class="multiplayer-mode" data-mode="miner"><span class="mode-art mode-miner" aria-hidden="true"></span><strong>Crystal Cartel</strong><small>Pick a careful drill or a risky blast through branching caverns</small></button>
                                         <button type="button" class="multiplayer-mode" data-mode="duel"><span class="mode-art mode-duel" aria-hidden="true"></span><strong>Hammerheart Showdown</strong><small>Choose when to swing or guard in a head-to-head climbing duel</small></button>
-                                        <button type="button" class="multiplayer-mode" data-mode="crypto"><span class="mode-art mode-crypto" aria-hidden="true"></span><strong>Crypto Crash</strong><small>Buy or short volatile tokens; big wins and wipeouts are possible</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="crypto"><span class="mode-art mode-crypto" aria-hidden="true"></span><strong>Crypto Exchange</strong><small>Pick from six investments, ride market news, and build mining rigs</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="fishing"><span class="mode-art mode-fishing" aria-hidden="true"></span><strong>Fishing Frenzy</strong><small>Cast, hook the bite, and win the reel minigame for rare fish</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="hack"><span class="mode-art mode-hack" aria-hidden="true"></span><strong>Crypto Hack</strong><small>Mine crypto, crack codes, and steal from rivals' wallets</small></button>
                                         <button type="button" class="multiplayer-mode" data-mode="shooter"><span class="mode-art mode-shooter" aria-hidden="true"></span><strong>Starfall Blasters</strong><small>Pick precision or a scatter burst to clear waves of drones</small></button>
                                         <button type="button" class="multiplayer-mode" data-mode="sports"><span class="mode-art mode-sports" aria-hidden="true"></span><strong>Endzone Rally</strong><small>Call a run or pass, gain yards, and drive for touchdowns</small></button>
                                     </div>
@@ -595,6 +589,7 @@
                                             <label>Match ends at<select id="host-game-goal-type" name="goalType"><option value="points">Point limit</option><option value="time">Time limit</option></select></label>
                                             <label id="host-game-point-goal">Points<select name="pointLimit"><option value="500">500</option><option value="1000">1,000</option><option value="2000">2,000</option></select></label>
                                             <label id="host-game-time-goal" class="hidden">Minutes<select name="timeLimit"><option value="2">2 minutes</option><option value="5" selected>5 minutes</option><option value="10">10 minutes</option></select></label>
+                                            <label>Reward per correct answer<select name="questionReward"><option value="10">Small (10)</option><option value="20" selected>Medium (20)</option><option value="30">Large (30)</option><option value="50">Huge (50)</option></select></label>
                                         </div>
                                         <button class="primary-btn" type="submit"><i class="fas fa-door-open"></i> Create room</button>
                                     </form>
@@ -629,17 +624,9 @@
                                         <summary><i class="fas fa-ranking-star"></i> Leaderboard <span id="hosted-leaderboard-count"></span></summary>
                                         <ol id="hosted-room-players" class="hosted-room-players"></ol>
                                     </details>
-                                    <div id="hosted-room-question" class="hosted-room-question hidden">
-                                        <p id="hosted-question-progress"></p>
-                                        <h4 id="hosted-question-prompt"></h4>
-                                        <div id="game-action-picker" class="game-action-picker hidden" role="group" aria-label="Choose your game action"></div>
-                                        <div id="hosted-question-options" class="hosted-answer-options"></div>
-                                        <p id="hosted-answer-feedback" role="status" aria-live="polite"></p>
-                                    </div>
                                     <div id="hosted-podium" class="hosted-podium hidden"></div>
                                     <div class="hosted-room-actions">
                                         <button id="hosted-start-btn" class="primary-btn hidden" type="button">Start game</button>
-                                        <button id="hosted-next-btn" class="primary-btn hidden" type="button">Next round</button>
                                         <button id="hosted-finish-btn" class="secondary-btn hidden" type="button">End game</button>
                                         <button id="hosted-leave-btn" class="secondary-btn" type="button">Leave room</button>
                                     </div>
@@ -649,6 +636,7 @@
                                 <div><h3>Warm-up: Potshot Peak</h3><p>Pull back to aim the hammer, then release to launch. Chain clean landings and set your personal best while you wait.</p></div>
                                 <canvas id="waiting-runner-canvas" width="520" height="360" aria-label="A pot-climbing game. Drag to aim the hammer and release to launch onto a ledge."></canvas>
                                 <div class="waiting-runner-meta"><span>Altitude <strong id="waiting-runner-score">0</strong> m · Best <strong id="waiting-runner-best">0</strong> m</span><button id="waiting-runner-start" class="secondary-btn" type="button">Start climbing</button></div>
+                                <div class="waiting-practice"><span>Want a full-screen warm-up?</span><button id="waiting-practice-btn" class="primary-btn" type="button"><i class="fas fa-gamepad"></i> Practice this game</button></div>
                             </section>
                         </main>
                         <aside class="multiplayer-side">
@@ -1083,6 +1071,10 @@
     <script src="practiceExamEngine.js" defer></script>
     <script src="cloudSync.js" defer></script>
     <script src="communityGames.js" defer></script>
+    <script src="multiplayerEngine.js" defer></script>
+    <script src="multiplayerGames.js" defer></script>
+    <script src="multiplayerGames2.js" defer></script>
+    <script src="multiplayerGames3.js" defer></script>
     <script src="app.js" defer></script>
     <script>
         if ('serviceWorker' in navigator && ['http:', 'https:'].includes(window.location.protocol)) {

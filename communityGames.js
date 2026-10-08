@@ -10,7 +10,28 @@
                 { id: 'avatar_crown', name: 'Gold Crown', icon: 'fa-crown', price: 220, type: 'avatar' },
                 { id: 'palette_ocean', name: 'Tidal Glow', color: 'ocean', price: 120, type: 'palette' },
                 { id: 'palette_sunset', name: 'Heatwave', color: 'sunset', price: 120, type: 'palette' },
-                { id: 'palette_violet', name: 'Nebula', color: 'violet', price: 120, type: 'palette' }
+                { id: 'palette_violet', name: 'Nebula', color: 'violet', price: 120, type: 'palette' },
+                { id: 'skin_robot', name: 'Robo Buddy', icon: 'fa-robot', price: 150, type: 'skin' },
+                { id: 'skin_ninja', name: 'Shadow Ninja', icon: 'fa-user-ninja', price: 180, type: 'skin' },
+                { id: 'skin_alien', name: 'Martian', icon: 'fa-user-astronaut', price: 180, type: 'skin' },
+                { id: 'skin_ghost', name: 'Spooky Ghost', icon: 'fa-ghost', price: 220, type: 'skin' },
+                { id: 'skin_lava', name: 'Magma Golem', icon: 'fa-fire', price: 300, type: 'skin' },
+                { id: 'skin_gold', name: 'Golden Hero', icon: 'fa-medal', price: 400, type: 'skin' },
+                { id: 'hat_cap', name: 'Sporty Cap', icon: 'fa-hat-cowboy-side', price: 60, type: 'hat' },
+                { id: 'hat_party', name: 'Party Hat', icon: 'fa-cake-candles', price: 70, type: 'hat' },
+                { id: 'hat_cowboy', name: 'Cowboy Hat', icon: 'fa-hat-cowboy', price: 110, type: 'hat' },
+                { id: 'hat_headphones', name: 'Headphones', icon: 'fa-headphones', price: 120, type: 'hat' },
+                { id: 'hat_tophat', name: 'Top Hat', icon: 'fa-hat-wizard', price: 130, type: 'hat' },
+                { id: 'hat_wizard', name: 'Wizard Hat', icon: 'fa-hat-wizard', price: 160, type: 'hat' },
+                { id: 'hat_viking', name: 'Viking Helm', icon: 'fa-shield', price: 190, type: 'hat' },
+                { id: 'hat_halo', name: 'Angel Halo', icon: 'fa-circle-notch', price: 250, type: 'hat' },
+                { id: 'hat_crown', name: 'Royal Crown', icon: 'fa-crown', price: 400, type: 'hat' },
+                { id: 'acc_shades', name: 'Cool Shades', icon: 'fa-glasses', price: 80, type: 'accessory' },
+                { id: 'acc_scarf', name: 'Cozy Scarf', icon: 'fa-wind', price: 90, type: 'accessory' },
+                { id: 'acc_backpack', name: 'Backpack', icon: 'fa-bag-shopping', price: 100, type: 'accessory' },
+                { id: 'acc_monocle', name: 'Monocle', icon: 'fa-eye', price: 140, type: 'accessory' },
+                { id: 'acc_cape', name: 'Hero Cape', icon: 'fa-mask', price: 180, type: 'accessory' },
+                { id: 'acc_wings', name: 'Jet Wings', icon: 'fa-dove', price: 350, type: 'accessory' }
             ];
         }
 
@@ -200,6 +221,34 @@
             });
             if (error) throw new Error(`Could not remove player: ${error.message}`);
             return data;
+        }
+
+        async getCards(roomCode) {
+            const { data, error } = await this.getClient().rpc('studbud_get_game_cards', { p_code: roomCode });
+            if (error) throw new Error(`Could not load questions: ${error.message}`);
+            return (Array.isArray(data) ? data : []).filter(card => card?.front && card?.back);
+        }
+
+        async reportScore(roomCode, score, answered, correct = 0) {
+            const { error } = await this.getClient().rpc('studbud_report_game_score', {
+                p_code: roomCode,
+                p_score: Math.max(0, Math.round(score)),
+                p_answered: Math.max(0, Math.round(answered)),
+                p_correct: Math.max(0, Math.round(correct))
+            });
+            return !error;
+        }
+
+        async unequipSlot(slot) {
+            const { data, error } = await this.getClient().rpc('studbud_unequip_multiplayer_slot', { p_slot: slot });
+            if (error) throw new Error(`Could not unequip item: ${error.message}`);
+            return data;
+        }
+
+        openChannel(roomCode) {
+            return this.getClient().channel(`studbud-room-${roomCode}`, {
+                config: { broadcast: { self: false, ack: false } }
+            });
         }
 
         async leaveRoom(roomCode) {

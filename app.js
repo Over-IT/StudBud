@@ -944,8 +944,9 @@
             this.multiplayerFrameTime = 0;
             this.multiplayerScreen = 'host';
             this.selectedMultiplayerMode = 'skyline';
-            this.selectedGameAction = null;
-            this.gameActionQuestionNumber = null;
+            this.arcadeSession = null;
+            this.practiceSession = null;
+            this.arcadeLeft = false;
         }
 
         async init() {
@@ -1930,18 +1931,20 @@
                 if (wins) wins.textContent = Number(profile.wins).toLocaleString();
                 document.getElementById('multiplayer-shop-items').innerHTML = `
                     <article class="multiplayer-shop-item mystery-shop-item"><span class="mystery-capsule"><i class="fas fa-box-open"></i></span><div><strong>Mystery drop</strong><small>Random avatar or colorway · 80 coins</small></div><button type="button" class="secondary-btn" data-action="multiplayer-mystery" ${catalog.every(item => (profile.owned_items || []).includes(item.id)) ? 'disabled' : ''}>Open capsule</button></article>
-                    ${catalog.map(item => {
+                    ${[['avatar', 'Avatars'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['palette', 'Color schemes']].map(([type, label]) => `
+                    <h4 class="shop-category-title">${label}${['skin', 'hat', 'accessory'].includes(type) ? ` <button type="button" class="ghost-btn shop-unequip" data-action="multiplayer-unequip" data-slot="${type}">Remove</button>` : ''}</h4>
+                    ${catalog.filter(item => item.type === type).map(item => {
                     const owned = (profile.owned_items || []).includes(item.id);
-                    const equipped = item.type === 'avatar'
-                        ? profile.equipped_avatar === item.id
-                        : profile.equipped_palette === item.id;
-                    const preview = item.type === 'avatar'
-                        ? this.multiplayerAvatarMarkup(item.id)
-                        : `<span class="shop-palette ${this.escapeHTML(item.color)}"></span>`;
+                    const equippedId = { avatar: profile.equipped_avatar, palette: profile.equipped_palette, skin: profile.equipped_skin, hat: profile.equipped_hat, accessory: profile.equipped_accessory }[item.type];
+                    const equipped = equippedId === item.id;
+                    const preview = item.type === 'palette'
+                        ? `<span class="shop-palette ${this.escapeHTML(item.color)}"></span>`
+                        : this.multiplayerAvatarMarkup(item.id);
                     const action = owned ? 'multiplayer-equip' : 'multiplayer-buy';
                     const label = equipped ? 'Equipped' : owned ? 'Equip' : `Buy · ${item.price} <i class="fas fa-coins"></i>`;
-                    return `<article class="multiplayer-shop-item">${preview}<div><strong>${this.escapeHTML(item.name)}</strong><small>${item.type === 'avatar' ? 'Player avatar' : 'Apply in UI Settings'}</small></div><button type="button" class="secondary-btn" data-action="${action}" data-id="${this.escapeHTML(item.id)}" ${equipped ? 'disabled' : ''}>${label}</button></article>`;
-                }).join('')}`;
+                    const note = { avatar: 'Lobby avatar', skin: 'In-game character', hat: 'Worn in games', accessory: 'Worn in games', palette: 'Apply in UI Settings' }[item.type];
+                    return `<article class="multiplayer-shop-item">${preview}<div><strong>${this.escapeHTML(item.name)}</strong><small>${note}</small></div><button type="button" class="secondary-btn" data-action="${action}" data-id="${this.escapeHTML(item.id)}" ${equipped ? 'disabled' : ''}>${label}</button></article>`;
+                }).join('')}`).join('')}`;
                 shopStatus.textContent = 'Coins are earned and spent only in Multiplayer.';
                 const best = document.getElementById('waiting-runner-best');
                 if (best) {
@@ -1960,7 +1963,9 @@
                 ? await window.StudBudCommunityGames.purchaseItem(itemId)
                 : action === 'multiplayer-mystery'
                     ? await window.StudBudCommunityGames.buyMysteryItem()
-                    : await window.StudBudCommunityGames.equipItem(itemId);
+                    : action === 'multiplayer-unequip'
+                        ? await window.StudBudCommunityGames.unequipSlot(itemId)
+                        : await window.StudBudCommunityGames.equipItem(itemId);
             const unlockedItem = profile.unlocked_item;
             this.multiplayerProfile = profile;
             await this.renderMultiplayerProfile(true);
@@ -1997,44 +2002,6 @@
             document.getElementById('host-game-time-goal')?.classList.toggle('hidden', type !== 'time');
         }
 
-        multiplayerGameActions(mode) {
-            const actions = {
-                skyline: [
-                    ['sprint', 'Sprint', 'Fast progress, lower route'],
-                    ['vault', 'Take the shortcut', 'Vault hazards for double progress']
-                ],
-                river: [
-                    ['shore_cast', 'Shore cast', 'Steady catch, smaller haul'],
-                    ['deep_cast', 'Deep cast', 'Random catch: tiny to rare']
-                ],
-                market: [
-                    ['deliver', 'Make delivery', 'Reliable tips and streak bonus'],
-                    ['bargain', 'Bargain', 'Risk an empty stall for a jackpot']
-                ],
-                miner: [
-                    ['drill', 'Drill the vein', 'Steady crystals and cave depth'],
-                    ['blast', 'Blast through', 'Risk a miss for a rich pocket']
-                ],
-                duel: [
-                    ['swing', 'Hammer swing', 'Heavy strike and climbing push'],
-                    ['guard', 'Guard & counter', 'Safer points, counter-step']
-                ],
-                crypto: [
-                    ['buy', 'Buy & hold', 'Smaller, steadier market swing'],
-                    ['short', 'Short the dip', 'High risk: can lose points or hit big']
-                ],
-                shooter: [
-                    ['precision', 'Precision shot', 'One accurate drone hit'],
-                    ['scatter', 'Scatter burst', 'Clear two targets per correct answer']
-                ],
-                sports: [
-                    ['run', 'Run play', 'Reliable yards, modest gains'],
-                    ['pass', 'Pass play', 'Big yardage chance, but can be intercepted']
-                ]
-            };
-            return actions[mode] || [['steady', 'Answer', 'Score points for correct answers']];
-        }
-
         updateMultiplayerModeSetup(mode) {
             const labels = {
                 skyline: ['Rooftop Rumble', 'A long rooftop route with branching shortcuts and checkpoint towers.'],
@@ -2042,9 +2009,11 @@
                 market: ['Market Mayhem', 'Deliver orders or gamble on changing market stalls.'],
                 miner: ['Crystal Cartel', 'Drill safely or blast for high-value crystal pockets.'],
                 duel: ['Hammerheart Showdown', 'Swing for a hard hit or guard and counter-climb.'],
-                crypto: ['Crypto Crash', 'Volatile buy and short plays can swing your haul either way.'],
-                shooter: ['Starfall Blasters', 'Shoot animated drone waves and clear a target quota.'],
-                sports: ['Endzone Rally', 'Drive 100 yards at a time; runs are safe and passes are risky.']
+                crypto: ['Crypto Exchange', 'Invest in six different assets, react to market news, research with questions and build mining rigs.'],
+                fishing: ['Fishing Frenzy', 'Charge a cast, hook the bite, and win the reel minigame. Rare fish and treasure chests score big.'],
+                hack: ['Crypto Hack', 'Mine crypto at terminals, crack codes at hack stations, and steal from rivals in a server room.'],
+                shooter: ['Starfall Blasters', 'Aim with the mouse in a top-down arena and blast drone waves.'],
+                sports: ['Endzone Rally', 'Run the field, juke tacklers, and score touchdowns against real opponents.']
             };
             const [title, description] = labels[mode] || labels.skyline;
             document.getElementById('multiplayer-preview-title').textContent = title;
@@ -2285,6 +2254,8 @@
             if (!canvas) return;
             const context = canvas.getContext('2d');
             if (!context) return;
+            if (mode === 'fishing') mode = 'river';
+            else if (mode === 'hack') mode = 'crypto';
             const width = canvas.width, height = canvas.height;
             const phase = time * 0.8;
             const ranked = players.length ? players : [{ score: 300 }, { score: 150 }];
@@ -2707,7 +2678,8 @@
             const options = {
                 goal_type: form.elements.goalType.value,
                 point_limit: Number(form.elements.pointLimit.value),
-                time_limit_seconds: Number(form.elements.timeLimit.value) * 60
+                time_limit_seconds: Number(form.elements.timeLimit.value) * 60,
+                question_reward: Number(form.elements.questionReward.value)
             };
             const room = await window.StudBudCommunityGames.createRoom(
                 this.createRoomCode(), nickname, { ...deck, cards }, form.elements.mode.value, options
@@ -2723,6 +2695,7 @@
 
         openHostedGame(room) {
             this.hostedGameRoom = room;
+            this.arcadeLeft = false;
             this.hostedGamePollError = '';
             document.getElementById('hosted-game-room').classList.remove('hidden');
             document.getElementById('hosted-game-message').textContent = '';
@@ -2771,7 +2744,7 @@
                 classic: 'Classic', rush: 'Rush', survival: 'Survival',
                 skyline: 'Rooftop Rumble', river: 'River Raiders', market: 'Market Mayhem',
                 miner: 'Crystal Cartel', duel: 'Hammerheart Showdown',
-                crypto: 'Crypto Crash', shooter: 'Starfall Blasters', sports: 'Endzone Rally'
+                crypto: 'Crypto Exchange', shooter: 'Starfall Blasters', sports: 'Endzone Rally', fishing: 'Fishing Frenzy', hack: 'Crypto Hack'
             };
             document.getElementById('hosted-room-title').textContent = `${room.deck_title} · ${modeNames[room.mode] || room.mode}`;
             const playerLimit = room.mode === 'duel' ? 2 : 16;
@@ -2807,7 +2780,8 @@
             const sceneNames = {
                 skyline: 'Rooftop Rumble', river: 'River Raiders', market: 'Market Mayhem',
                 miner: 'Crystal Cartel', duel: 'Hammerheart Showdown',
-                crypto: 'Crypto Crash', shooter: 'Starfall Blasters', sports: 'Endzone Rally',
+                crypto: 'Crypto Exchange', shooter: 'Starfall Blasters', sports: 'Endzone Rally',
+                fishing: 'Fishing Frenzy', hack: 'Crypto Hack',
                 classic: 'Flashcard Face-off', rush: 'Rapid Recall', survival: 'Last Learner Standing'
             };
             document.getElementById('multiplayer-scene-name').textContent = sceneNames[room.mode] || 'Live match';
@@ -2822,39 +2796,14 @@
             feed.classList.toggle('feed-correct', Boolean(latest?.last_correct));
             feed.classList.toggle('feed-miss', Boolean(latest && !latest.last_correct));
             const startButton = document.getElementById('hosted-start-btn');
-            const nextButton = document.getElementById('hosted-next-btn');
             const finishButton = document.getElementById('hosted-finish-btn');
-            const questionPanel = document.getElementById('hosted-room-question');
-            const question = state.question;
-            const activePlayers = players.filter(player => !player.eliminated);
-            const allAnswered = activePlayers.length > 0 && activePlayers.every(player => player.answered);
-            const answeredCount = activePlayers.filter(player => player.answered).length;
             startButton.classList.toggle('hidden', !isHost || room.status !== 'waiting');
             startButton.disabled = players.length < 2;
             startButton.textContent = room.mode === 'duel' ? 'Start 1v1 showdown' : 'Start the game';
             finishButton.classList.toggle('hidden', !isHost || room.status === 'finished');
-            nextButton.classList.toggle('hidden', !isHost || room.status !== 'playing');
-            nextButton.disabled = !allAnswered;
-            nextButton.textContent = allAnswered ? 'Next question' : `Waiting · ${answeredCount}/${activePlayers.length} answered`;
-            questionPanel.classList.toggle('hidden', room.status !== 'playing' || !question);
-            const actionPicker = document.getElementById('game-action-picker');
-            if (room.status === 'playing' && question) {
-                const questionNumber = Number(state.question_index);
-                if (questionNumber !== this.gameActionQuestionNumber) {
-                    this.gameActionQuestionNumber = questionNumber;
-                    this.selectedGameAction = this.multiplayerGameActions(room.mode)[0][0];
-                }
-                const actions = this.multiplayerGameActions(room.mode);
-                actionPicker.classList.toggle('hidden', actions.length < 2);
-                actionPicker.innerHTML = `<span class="game-action-heading">Choose a move</span>${actions.map(([id, title, description]) =>
-                    `<button class="game-action-option${this.selectedGameAction === id ? ' selected' : ''}" type="button" data-game-action="${id}" ${me?.answered || me?.eliminated ? 'disabled' : ''}><strong>${title}</strong><small>${description}</small></button>`
-                ).join('')}`;
-            } else {
-                actionPicker.innerHTML = '';
-                actionPicker.classList.add('hidden');
-            }
+            this.syncArcadeSession(room, isHost);
             const waitingCard = document.getElementById('waiting-arcade-card');
-            const guestWaiting = !isHost && room.status === 'waiting';
+            const guestWaiting = room.status === 'waiting';
             waitingCard.classList.toggle('hidden', !guestWaiting);
             if (guestWaiting && !this.waitingRunner.started) this.startWaitingRunner();
             if (!guestWaiting) this.stopWaitingRunner();
@@ -2878,43 +2827,80 @@
             } else {
                 document.getElementById('hosted-podium').classList.add('hidden');
                 document.getElementById('hosted-room-status').textContent = me?.eliminated
-                    ? 'You are out of this Survival round. Watch the scores until the game ends.'
-                    : room.goal_type === 'time' && room.started_at
-                        ? 'Play quickly! Every correct answer makes your character race ahead.'
-                        : room.mode === 'skyline' ? 'Choose a route move, then answer to climb the huge rooftop course. Hazards, shortcuts, and checkpoints change as you advance.'
-                            : room.mode === 'river' ? 'Choose a safe shoreline cast or gamble on the deep current for a rare catch.'
-                                : room.mode === 'crypto' ? 'Buy or short before answering. The server rolls a volatile market event; a short can lose points.'
-                                    : room.mode === 'shooter' ? 'Choose precision or scatter, answer correctly to shoot, and clear the drone quota.'
-                                        : room.mode === 'sports' ? 'Call a run or pass, then answer to gain yards and drive toward a touchdown.'
-                                            : 'Choose a move, then answer to score and advance your game objective.';
+                    ? 'You are out of this round. Watch the scores until the game ends.'
+                    : 'The match is live in full screen. If you left it, rejoin by reopening the room.';
             }
 
-            if (room.status === 'playing' && question) {
-                document.getElementById('hosted-question-progress').textContent = `Round ${Number(question.number) + 1} · ${Number(question.options?.length || 0)} choices`;
-                document.getElementById('hosted-question-prompt').textContent = question.front || '';
-                const options = document.getElementById('hosted-question-options');
-                options.innerHTML = (question.options || []).map((option, index) =>
-                    `<button class="secondary-btn hosted-answer-btn" type="button" data-action="hosted-game-answer" data-index="${index}" ${me?.answered || me?.eliminated ? 'disabled' : ''}>${this.escapeHTML(option)}</button>`
-                ).join('');
-                const feedback = document.getElementById('hosted-answer-feedback');
-                feedback.textContent = me?.answered
-                    ? `${me.last_correct ? 'Correct! ' : 'Incorrect. '}${me.last_event || (me.last_correct ? 'Points added to your score.' : 'Keep going on the next question.')}`
-                    : '';
-            } else {
-                document.getElementById('hosted-question-options').innerHTML = '';
-                document.getElementById('hosted-answer-feedback').textContent = '';
-            }
             if (room.status !== 'finished') document.getElementById('hosted-podium').classList.add('hidden');
             if (this.multiplayerProfile && room.status === 'finished') this.renderMultiplayerProfile(true);
-            if (room.status === 'finished' && this.hostedGameInterval) {
+            if (room.status === 'finished' && this.hostedGameInterval && (!this.arcadeSession || this.arcadeSession.rewards || this.arcadeSession.practice)) {
                 clearInterval(this.hostedGameInterval);
                 this.hostedGameInterval = null;
             }
         }
 
+        syncArcadeSession(room, isHost) {
+            const arcade = window.StudBudArcade;
+            const api = window.StudBudCommunityGames;
+            if (room.status === 'playing' && arcade && !this.arcadeLeft) {
+                if (!this.arcadeSession || this.arcadeSession.destroyed) {
+                    this.closePractice();
+                    const deck = (AppState.get('flashcards') || []).find(item => item.id === room.deck_id || item.title === room.deck_title);
+                    this.arcadeSession = new arcade.Session({
+                        room, user: window.StudBudCloud.user, api, isHost,
+                        fallbackCards: (deck?.cards || []).filter(card => card.front && card.back),
+                        finishRoom: () => api.finishRoom(room.room_code),
+                        onLeave: () => this.leaveHostedGame().catch(error => console.error(error))
+                    });
+                    document.body.classList.add('mpg-active');
+                } else {
+                    this.arcadeSession.updateRoom(room);
+                }
+            } else if (this.arcadeSession && room.status === 'finished') {
+                this.arcadeSession.updateRoom(room);
+            } else if (this.arcadeSession && room.status !== 'playing') {
+                this.destroyArcadeSession();
+            }
+            if (room.status === 'waiting') this.arcadeLeft = false;
+        }
+
+        destroyArcadeSession() {
+            if (this.arcadeSession) this.arcadeSession.destroy();
+            this.arcadeSession = null;
+            document.body.classList.remove('mpg-active');
+        }
+
+        closePractice() {
+            if (this.practiceSession) this.practiceSession.destroy();
+            this.practiceSession = null;
+            if (!this.arcadeSession) document.body.classList.remove('mpg-active');
+        }
+
+        startPractice() {
+            const room = this.hostedGameRoom;
+            const arcade = window.StudBudArcade;
+            if (!room || !arcade || this.practiceSession) return;
+            const user = window.StudBudCloud.user;
+            const me = (room.state?.players || []).find(player => player.id === user.id) || { id: user.id, nickname: 'You' };
+            const deck = (AppState.get('flashcards') || []).find(item => item.id === room.deck_id || item.title === room.deck_title);
+            const fake = {
+                mode: room.mode, room_code: 'PRACTICE', goal_type: 'points', point_limit: 99999, host_id: user.id,
+                started_at: new Date().toISOString(), state: { players: [me] }
+            };
+            this.practiceSession = new arcade.Session({
+                room: fake, user, api: window.StudBudCommunityGames, isHost: false, practice: true,
+                fallbackCards: (deck?.cards || []).filter(card => card.front && card.back),
+                onLeave: () => this.closePractice()
+            });
+            document.body.classList.add('mpg-active');
+        }
+
         async leaveHostedGame() {
             if (!this.hostedGameRoom) return;
             const code = this.hostedGameRoom.room_code;
+            this.arcadeLeft = true;
+            this.destroyArcadeSession();
+            this.closePractice();
             await window.StudBudCommunityGames.leaveRoom(code);
             await this.renderMultiplayerProfile(true);
             if (this.hostedGameInterval) clearInterval(this.hostedGameInterval);
@@ -2924,20 +2910,10 @@
             document.getElementById('hosted-game-message').textContent = 'You left the room.';
             document.querySelector('.multiplayer-tabs').classList.remove('hidden');
             document.getElementById('hosted-start-btn').classList.add('hidden');
-            document.getElementById('hosted-next-btn').classList.add('hidden');
             document.getElementById('hosted-finish-btn').classList.add('hidden');
             this.setMultiplayerScreen(this.multiplayerScreen);
         }
 
-        async submitHostedAnswer(choiceIndex) {
-            const room = this.hostedGameRoom;
-            if (!room || room.status !== 'playing') throw new Error('There is no active question.');
-            const questionNumber = Number(room.state.question_index);
-            const action = this.selectedGameAction || this.multiplayerGameActions(room.mode)[0][0];
-            const updated = await window.StudBudCommunityGames.submitAnswer(room.room_code, questionNumber, choiceIndex, action);
-            this.hostedGameRoom = updated;
-            this.renderHostedGameRoom(updated);
-        }
 
         renderProfile() {
             const profile = AppState.get('profile') || {};
@@ -3040,12 +3016,6 @@
                 const unweighted = document.getElementById('dash-unweighted-gpa');
                 if (weighted) weighted.textContent = Number(gpa.weighted).toFixed(2);
                 if (unweighted) unweighted.textContent = Number(gpa.unweighted).toFixed(2);
-            }
-            const dueCount = document.getElementById('cards-due-count');
-            if (dueCount) {
-                const dueCards = (AppState.get('flashcards') || []).flatMap(deck => deck.cards || [])
-                    .filter(card => this.isCardDue(card));
-                dueCount.textContent = String(dueCards.length);
             }
             this.renderDailySchedule(new Date());
             const priorityList = document.getElementById('study-priority-list');
@@ -3352,11 +3322,12 @@
                     );
                 } else if (target.matches('[data-multiplayer-tab]')) {
                     this.setMultiplayerScreen(target.dataset.multiplayerTab);
-                } else if (target.matches('[data-game-action]')) {
-                    this.selectedGameAction = target.dataset.gameAction;
-                    if (this.hostedGameRoom) this.renderHostedGameRoom(this.hostedGameRoom);
+                } else if (id === 'waiting-practice-btn') {
+                    this.startPractice();
                 } else if (action === 'multiplayer-buy' || action === 'multiplayer-equip') {
                     await this.updateMultiplayerShop(action, target.dataset.id);
+                } else if (action === 'multiplayer-unequip') {
+                    await this.updateMultiplayerShop(action, target.dataset.slot);
                 } else if (action === 'multiplayer-mystery') {
                     await this.updateMultiplayerShop(action, '');
                 } else if (action === 'hosted-kick-player') {
@@ -3431,13 +3402,8 @@
                     await this.unpublishCommunityDeck(target.dataset.id);
                 } else if (action === 'import-community-deck') {
                     await this.importCommunityDeck(target.dataset.id);
-                } else if (action === 'hosted-game-answer') {
-                    await this.submitHostedAnswer(Number(target.dataset.index));
                 } else if (id === 'hosted-start-btn') {
                     this.hostedGameRoom = await window.StudBudCommunityGames.startRoom(this.hostedGameRoom.room_code);
-                    this.renderHostedGameRoom(this.hostedGameRoom);
-                } else if (id === 'hosted-next-btn') {
-                    this.hostedGameRoom = await window.StudBudCommunityGames.nextQuestion(this.hostedGameRoom.room_code);
                     this.renderHostedGameRoom(this.hostedGameRoom);
                 } else if (id === 'hosted-finish-btn') {
                     this.hostedGameRoom = await window.StudBudCommunityGames.finishRoom(this.hostedGameRoom.room_code);
@@ -3461,12 +3427,6 @@
                     this.syncMixerDrawer();
                 } else if (target.matches('.focus-play-btn')) {
                     this.toggleFocusTimer();
-                } else if (id === 'start-daily-review-btn') {
-                    const deck = (AppState.get('flashcards') || []).find(item =>
-                        (item.cards || []).some(card => this.isCardDue(card))
-                    );
-                    if (deck) this.startStudy(deck.id, true);
-                    else window.alert('Create or import a flashcard deck to start a review.');
                 } else if (id === 'exit-study-btn') {
                     this.closeStudy();
                 } else if (id === 'back-to-classes-btn') {

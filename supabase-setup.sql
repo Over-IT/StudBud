@@ -142,7 +142,7 @@ create table if not exists public.studbud_game_rooms (
         jsonb_typeof(cards) = 'array'
         and jsonb_array_length(cards) between 2 and 50
     ),
-    mode text not null check (mode in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'sports')),
+    mode text not null check (mode in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'sports', 'fishing', 'hack')),
     status text not null default 'waiting' check (status in ('waiting', 'playing', 'finished')),
     state jsonb not null default '{"players":[],"question_index":-1,"question":null}'::jsonb,
     goal_type text not null default 'points',
@@ -164,7 +164,7 @@ alter table public.studbud_game_rooms
 alter table public.studbud_game_rooms drop constraint if exists studbud_game_rooms_mode_check;
 alter table public.studbud_game_rooms
     add constraint studbud_game_rooms_mode_check
-    check (mode in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'sports'));
+    check (mode in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'sports', 'fishing', 'hack'));
 alter table public.studbud_game_rooms drop constraint if exists studbud_game_rooms_goal_type_check;
 alter table public.studbud_game_rooms
     add constraint studbud_game_rooms_goal_type_check check (goal_type in ('points', 'time'));
@@ -185,9 +185,36 @@ create table if not exists public.studbud_multiplayer_profiles (
     owned_items text[] not null default array['avatar_default', 'palette_default'],
     equipped_avatar text not null default 'avatar_default',
     equipped_palette text not null default 'palette_default',
+    equipped_skin text not null default '',
+    equipped_hat text not null default '',
+    equipped_accessory text not null default '',
     best_wait_score integer not null default 0 check (best_wait_score >= 0),
     updated_at timestamptz not null default now()
 );
+
+alter table public.studbud_multiplayer_profiles
+    add column if not exists equipped_skin text not null default '',
+    add column if not exists equipped_hat text not null default '',
+    add column if not exists equipped_accessory text not null default '';
+
+create or replace function public.studbud_shop_price(p_item_id text)
+returns integer
+language sql
+immutable
+as $$
+    select case p_item_id
+        when 'avatar_spark' then 50 when 'avatar_fox' then 90 when 'avatar_rocket' then 140 when 'avatar_crown' then 220
+        when 'palette_ocean' then 120 when 'palette_sunset' then 120 when 'palette_violet' then 120
+        when 'skin_robot' then 150 when 'skin_ninja' then 180 when 'skin_alien' then 180
+        when 'skin_ghost' then 220 when 'skin_lava' then 300 when 'skin_gold' then 400
+        when 'hat_cap' then 60 when 'hat_party' then 70 when 'hat_cowboy' then 110 when 'hat_headphones' then 120
+        when 'hat_tophat' then 130 when 'hat_wizard' then 160 when 'hat_viking' then 190
+        when 'hat_halo' then 250 when 'hat_crown' then 400
+        when 'acc_shades' then 80 when 'acc_scarf' then 90 when 'acc_backpack' then 100
+        when 'acc_monocle' then 140 when 'acc_cape' then 180 when 'acc_wings' then 350
+        else null
+    end;
+$$;
 
 alter table public.studbud_multiplayer_profiles
     add column if not exists best_wait_score integer not null default 0;
@@ -215,6 +242,9 @@ begin
         'owned_items', to_jsonb(v_profile.owned_items),
         'equipped_avatar', v_profile.equipped_avatar,
         'equipped_palette', v_profile.equipped_palette,
+        'equipped_skin', v_profile.equipped_skin,
+        'equipped_hat', v_profile.equipped_hat,
+        'equipped_accessory', v_profile.equipped_accessory,
         'best_wait_score', v_profile.best_wait_score
     );
 end;
@@ -241,7 +271,10 @@ begin
     select item_id into v_item_id
     from unnest(array[
         'avatar_spark', 'avatar_fox', 'avatar_rocket', 'avatar_crown',
-        'palette_ocean', 'palette_sunset', 'palette_violet'
+        'palette_ocean', 'palette_sunset', 'palette_violet',
+        'skin_robot', 'skin_ninja', 'skin_alien', 'skin_ghost', 'skin_lava', 'skin_gold',
+        'hat_cap', 'hat_party', 'hat_cowboy', 'hat_headphones', 'hat_tophat', 'hat_wizard', 'hat_viking', 'hat_halo', 'hat_crown',
+        'acc_shades', 'acc_scarf', 'acc_backpack', 'acc_monocle', 'acc_cape', 'acc_wings'
     ]) as item(item_id)
     where not (item_id = any(v_profile.owned_items))
     order by random()
@@ -289,16 +322,7 @@ declare
     v_profile public.studbud_multiplayer_profiles%rowtype;
 begin
     if v_user_id is null then raise exception 'Sign in to shop.'; end if;
-    v_cost := case p_item_id
-        when 'avatar_spark' then 50
-        when 'avatar_fox' then 90
-        when 'avatar_rocket' then 140
-        when 'avatar_crown' then 220
-        when 'palette_ocean' then 120
-        when 'palette_sunset' then 120
-        when 'palette_violet' then 120
-        else null
-    end;
+    v_cost := public.studbud_shop_price(p_item_id);
     if v_cost is null then raise exception 'That shop item is not available.'; end if;
     insert into public.studbud_multiplayer_profiles (user_id)
     values (v_user_id) on conflict (user_id) do nothing;
@@ -329,9 +353,34 @@ begin
         update public.studbud_multiplayer_profiles set equipped_avatar = p_item_id, updated_at = now() where user_id = v_user_id;
     elsif p_item_id like 'palette_%' then
         update public.studbud_multiplayer_profiles set equipped_palette = p_item_id, updated_at = now() where user_id = v_user_id;
+    elsif p_item_id like 'skin_%' then
+        update public.studbud_multiplayer_profiles set equipped_skin = p_item_id, updated_at = now() where user_id = v_user_id;
+    elsif p_item_id like 'hat_%' then
+        update public.studbud_multiplayer_profiles set equipped_hat = p_item_id, updated_at = now() where user_id = v_user_id;
+    elsif p_item_id like 'acc_%' then
+        update public.studbud_multiplayer_profiles set equipped_accessory = p_item_id, updated_at = now() where user_id = v_user_id;
     else
         raise exception 'That item cannot be equipped.';
     end if;
+    return public.studbud_get_multiplayer_profile();
+end;
+$$;
+
+create or replace function public.studbud_unequip_multiplayer_slot(p_slot text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_user_id uuid := auth.uid();
+begin
+    if v_user_id is null then raise exception 'Sign in to customize your multiplayer profile.'; end if;
+    insert into public.studbud_multiplayer_profiles (user_id) values (v_user_id) on conflict (user_id) do nothing;
+    if p_slot = 'skin' then update public.studbud_multiplayer_profiles set equipped_skin = '', updated_at = now() where user_id = v_user_id;
+    elsif p_slot = 'hat' then update public.studbud_multiplayer_profiles set equipped_hat = '', updated_at = now() where user_id = v_user_id;
+    elsif p_slot = 'accessory' then update public.studbud_multiplayer_profiles set equipped_accessory = '', updated_at = now() where user_id = v_user_id;
+    else raise exception 'Unknown slot.'; end if;
     return public.studbud_get_multiplayer_profile();
 end;
 $$;
@@ -345,7 +394,10 @@ set search_path = public, pg_temp
 as $$
     select jsonb_build_object(
         'avatar', coalesce(profile.equipped_avatar, 'avatar_default'),
-        'palette', coalesce(profile.equipped_palette, 'palette_default')
+        'palette', coalesce(profile.equipped_palette, 'palette_default'),
+        'skin', coalesce(profile.equipped_skin, ''),
+        'hat', coalesce(profile.equipped_hat, ''),
+        'accessory', coalesce(profile.equipped_accessory, '')
     )
     from (select p_user_id as user_id) user_ref
     left join public.studbud_multiplayer_profiles profile on profile.user_id = user_ref.user_id;
@@ -368,19 +420,19 @@ begin
     if not found or v_room.status <> 'finished' or v_room.rewards_paid then return; end if;
     select coalesce(max((player ->> 'score')::integer), 0)
     into v_high_score
-    from jsonb_array_elements(v_room.state -> 'players') as item(player)
-    where coalesce((player ->> 'answered_count')::integer, 0) >= 3;
+    from jsonb_array_elements(v_room.state -> 'players') as item(player);
 
     for v_player in
         select player from jsonb_array_elements(v_room.state -> 'players') as item(player)
-        where coalesce((player ->> 'answered_count')::integer, 0) >= 3
+        where coalesce((player ->> 'correct_count')::integer, 0) > 0 or coalesce((player ->> 'score')::integer, 0) > 0
     loop
-        v_reward := 20 + case when (v_player ->> 'score')::integer = v_high_score then 40 else 0 end;
+        v_reward := least(250, coalesce((v_player ->> 'correct_count')::integer, 0) * 6)
+            + case when (v_player ->> 'score')::integer = v_high_score and v_high_score > 0 then 25 else 0 end;
         insert into public.studbud_multiplayer_profiles (user_id)
         values ((v_player ->> 'id')::uuid) on conflict (user_id) do nothing;
         update public.studbud_multiplayer_profiles
         set coins = coins + v_reward,
-            wins = wins + case when (v_player ->> 'score')::integer = v_high_score then 1 else 0 end,
+            wins = wins + case when (v_player ->> 'score')::integer = v_high_score and v_high_score > 0 then 1 else 0 end,
             updated_at = now()
         where user_id = (v_player ->> 'id')::uuid;
         v_rewards := jsonb_set(v_rewards, array[v_player ->> 'id'], to_jsonb(v_reward), true);
@@ -482,6 +534,7 @@ declare
     v_goal_type text := coalesce(p_options ->> 'goal_type', 'points');
     v_point_limit integer := coalesce((p_options ->> 'point_limit')::integer, 1000);
     v_time_limit integer := coalesce((p_options ->> 'time_limit_seconds')::integer, 300);
+    v_reward integer := coalesce((p_options ->> 'question_reward')::integer, 20);
     v_cosmetics jsonb;
 begin
     if v_user_id is null then raise exception 'Sign in to host a game.'; end if;
@@ -489,7 +542,7 @@ begin
     if char_length(v_nickname) not between 2 and 20 or v_nickname !~ '^[A-Za-z0-9 _-]+$' then
         raise exception 'Nickname must be 2–20 letters, numbers, spaces, underscores, or hyphens.';
     end if;
-    if coalesce(p_mode, '') not in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'sports') then raise exception 'Choose a valid game mode.'; end if;
+    if coalesce(p_mode, '') not in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'sports', 'fishing', 'hack') then raise exception 'Choose a valid game mode.'; end if;
     if v_goal_type not in ('points', 'time') then raise exception 'Choose a valid match goal.'; end if;
     if (p_mode = 'sports' and v_point_limit not in (1, 3, 5))
         or (p_mode = 'shooter' and v_point_limit not in (5, 10, 20))
@@ -497,6 +550,7 @@ begin
         or v_time_limit not in (120, 300, 600) then
         raise exception 'Choose a supported point or time limit.';
     end if;
+    if v_reward not in (10, 20, 30, 50) then raise exception 'Choose a supported question reward.'; end if;
     if jsonb_typeof(v_cards) is distinct from 'array' then raise exception 'The selected deck is invalid.'; end if;
     if jsonb_array_length(v_cards) not between 2 and 50 then raise exception 'A hosted game needs 2–50 cards.'; end if;
     if exists (
@@ -531,10 +585,12 @@ begin
                 'streak', 0, 'lives', 3, 'answered', false, 'answered_count', 0, 'eliminated', false,
                 'distance', 0, 'loot', 0, 'deliveries', 0, 'depth', 0, 'yards', 0,
                 'touchdowns', 0, 'targets', 0, 'wave', 1, 'last_event', '', 'last_action', '',
-                'avatar', v_cosmetics ->> 'avatar', 'palette', v_cosmetics ->> 'palette'
+                'avatar', v_cosmetics ->> 'avatar', 'palette', v_cosmetics ->> 'palette',
+                'skin', v_cosmetics ->> 'skin', 'hat', v_cosmetics ->> 'hat', 'accessory', v_cosmetics ->> 'accessory'
             )),
             'question_index', -1,
-            'question', null
+            'question', null,
+            'question_reward', v_reward
         ),
         v_goal_type,
         v_point_limit,
@@ -607,7 +663,8 @@ begin
         'streak', 0, 'lives', 3, 'answered', false, 'answered_count', 0, 'eliminated', false,
         'distance', 0, 'loot', 0, 'deliveries', 0, 'depth', 0, 'yards', 0,
         'touchdowns', 0, 'targets', 0, 'wave', 1, 'last_event', '', 'last_action', '',
-        'avatar', v_cosmetics ->> 'avatar', 'palette', v_cosmetics ->> 'palette'
+        'avatar', v_cosmetics ->> 'avatar', 'palette', v_cosmetics ->> 'palette',
+        'skin', v_cosmetics ->> 'skin', 'hat', v_cosmetics ->> 'hat', 'accessory', v_cosmetics ->> 'accessory'
     ));
     update public.studbud_game_rooms
     set state = jsonb_set(state, '{players}', v_players),
@@ -674,6 +731,7 @@ begin
         state = jsonb_build_object(
             'players', v_players,
             'question_index', 0,
+            'question_reward', coalesce((v_room.state ->> 'question_reward')::integer, 20),
             'question', public.studbud_game_make_question(cards, 0)
         ),
         updated_at = now()
@@ -1042,6 +1100,67 @@ begin
     end if;
 end;
 $$;
+
+drop function if exists public.studbud_report_game_score(text, integer, integer);
+create or replace function public.studbud_report_game_score(p_code text, p_score integer, p_answered integer, p_correct integer default 0)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_room public.studbud_game_rooms%rowtype;
+    v_players jsonb;
+begin
+    select * into v_room
+    from public.studbud_game_rooms
+    where room_code = upper(btrim(p_code)) and expires_at > now()
+    for update;
+    if not found or v_room.status <> 'playing' then return; end if;
+    select coalesce(jsonb_agg(
+        case when player ->> 'id' = auth.uid()::text
+            then player || jsonb_build_object(
+                'score', greatest(0, least(coalesce(p_score, 0), 100000)),
+                'answered_count', greatest(0, least(coalesce(p_answered, 0), 1000)),
+                'correct_count', greatest(0, least(coalesce(p_correct, 0), coalesce(p_answered, 0), 1000)))
+            else player end
+        order by ordinality), '[]'::jsonb)
+    into v_players
+    from jsonb_array_elements(v_room.state -> 'players') with ordinality as item(player, ordinality);
+    update public.studbud_game_rooms
+    set state = jsonb_set(state, '{players}', v_players), updated_at = now()
+    where id = v_room.id;
+end;
+$$;
+
+create or replace function public.studbud_get_game_cards(p_code text)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_room public.studbud_game_rooms%rowtype;
+begin
+    select * into v_room
+    from public.studbud_game_rooms
+    where room_code = upper(btrim(p_code)) and expires_at > now();
+    if not found or not exists (
+        select 1 from jsonb_array_elements(v_room.state -> 'players') as item(player)
+        where player ->> 'id' = auth.uid()::text
+    ) then raise exception 'You are not in this game, or the room has expired.'; end if;
+    return v_room.cards;
+end;
+$$;
+
+revoke all on function public.studbud_get_game_cards(text) from public, anon;
+grant execute on function public.studbud_get_game_cards(text) to authenticated;
+
+revoke all on function public.studbud_report_game_score(text, integer, integer, integer) from public, anon;
+grant execute on function public.studbud_report_game_score(text, integer, integer, integer) to authenticated;
+revoke all on function public.studbud_unequip_multiplayer_slot(text) from public, anon;
+grant execute on function public.studbud_unequip_multiplayer_slot(text) to authenticated;
 
 revoke all on function public.studbud_record_community_deck_study(uuid) from public, anon;
 grant execute on function public.studbud_record_community_deck_study(uuid) to authenticated;
