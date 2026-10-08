@@ -370,6 +370,7 @@
         async recordStudySession(session) {
             if (!session.id) session.id = 'session_' + Date.now();
             session.timestamp = session.timestamp || new Date().toISOString();
+            session.leaderboardSyncPending = true;
 
             await NexusDB.put('studyHistory', session);
             const sessionIndex = this.state.studyHistory.findIndex(item => item.id === session.id);
@@ -389,6 +390,7 @@
             }
             EventBus.emit('study:recorded', session);
             EventBus.emit('metrics:updated', this.state.gameMetrics);
+            if (window.NexusApp?.syncStudyTimeEntry) await window.NexusApp.syncStudyTimeEntry(session);
         }
 
         async exportAppState() {
@@ -457,6 +459,14 @@
                 throw err;
             }
         }
+
+        async resetForCloudAccount() {
+            await Promise.all(['flashcards', 'studyHistory', 'gameMetrics'].map(store => NexusDB.clear(store)));
+            localStorage.removeItem(this.STORAGE_KEY);
+            this.state = new AppStateEngine().state;
+            this.saveToLocalStorage();
+            EventBus.emit('state:restored', this.state);
+        }
     }
 
     const AppState = new AppStateEngine();
@@ -468,7 +478,7 @@
         constructor() {
             this.routes = [
                 "dashboard", "gpa", "grade-scenarios", "planner", "calendar", "schedule", "flashcard",
-                "analytics", "exam-arcade", "multiplayer", "importer", "settings", "appearance"
+                "analytics", "leaderboard", "exam-arcade", "multiplayer", "importer", "settings", "appearance"
             ];
             this.activeRoute = "dashboard";
         }
@@ -908,6 +918,10 @@
             this.dashboardSprintSeconds = null;
             this.dashboardSprintAssignmentId = '';
             this.activeDeckId = null;
+            this.activeStudyStartedAt = null;
+            this.studyLeaderboardPeriod = 'daily';
+            this.studyLeaderboardSnapshot = null;
+            this.studyLeaderboardError = '';
             this.activeCardIndex = 0;
             this.studyCards = [];
             this.arcadeCards = [];
@@ -922,6 +936,8 @@
             this.arcadeTimer = null;
             this.arcadeTimeLeft = 60;
             this.arcadeStreak = 0;
+            this.arcadeStudyStartedAt = null;
+            this.arcadeStudyRecorded = false;
             this.memoryCards = [];
             this.memoryRevealed = [];
             this.memoryMatched = new Set();
@@ -959,6 +975,11 @@
             this.renderUI();
             Router.init();
             await this.renderMultiplayerProfile();
+            this.syncPendingStudyTime().catch(error => {
+                console.error('[NexusApp] Pending study time could not be loaded:', error);
+                AppState.setSaveStatus(`Saved study time could not be synced. ${this.friendlyErrorMessage(error)}`, 'error');
+            });
+            this.refreshStudyLeaderboard('daily');
 
             const unlockAudio = () => {
                 Soundscape.initAudioContext();
@@ -982,6 +1003,11 @@
             await NexusDB.clear(storeName);
         }
 
+        async resetForCloudAccount() {
+            await AppState.resetForCloudAccount();
+            this.renderUI();
+        }
+
         escapeHTML(value) {
             return String(value ?? '').replace(/[&<>"']/g, character => ({
                 '&': '&amp;',
@@ -992,11 +1018,44 @@
             })[character]);
         }
 
+        friendlyErrorMessage(error, fallback = 'Please try again.') {
+            const message = String(error?.message || error || '').trim();
+            const code = String(error?.code || '');
+            if (/PGRST202|PGRST204|PGRST205|42883|42P01|schema cache|could not find the function|function .* does not exist|relation .* does not exist/i.test(`${code} ${message}`)) {
+                return 'This feature is not enabled on the server yet. Ask the site administrator to run the latest supabase-setup.sql, then try again.';
+            }
+            if (/failed to fetch|networkerror|network request failed|load failed/i.test(message)) {
+                return 'Could not reach the server. Check your internet connection and try again.';
+            }
+            if (/jwt expired|invalid jwt|not authenticated|auth session missing/i.test(message)) {
+                return 'Your sign-in has expired. Sign in again and retry.';
+            }
+
+            const readableMessage = message
+                .replace(/^Could not (?:create the game|join the game|refresh the game|start the game|submit your answer|move to the next question|end the game|remove player|leave the game|purchase item|equip item|open mystery capsule|load multiplayer profile):\s*/i, '')
+                .replace(/^Error:\s*/i, '')
+                .trim();
+            if (/23505|duplicate key/i.test(`${code} ${readableMessage}`)) {
+                return 'That room code is already in use. Please try creating the room again.';
+            }
+            if (!readableMessage || readableMessage.length > 220
+                || /\b(?:PGRST\d{3}|SQLSTATE|PostgREST|PostgreSQL|schema|permission denied|violates .*constraint|stack trace|invalid input syntax|unexpected token|TypeError|ReferenceError|SyntaxError)\b/i.test(readableMessage)) {
+                return fallback;
+            }
+            return readableMessage;
+        }
+
         bindUI() {
             document.addEventListener('click', event => this.handleClick(event));
             document.addEventListener('keydown', event => this.handleKeydown(event));
             document.addEventListener('submit', event => this.handleSubmit(event));
             document.addEventListener('change', event => this.handleChange(event));
+            window.addEventListener('online', () => {
+                this.syncPendingStudyTime().catch(error => {
+                    console.error('[NexusApp] Pending study time could not be synced:', error);
+                    AppState.setSaveStatus(`Saved study time could not be synced. ${this.friendlyErrorMessage(error)}`, 'error');
+                });
+            });
             const waitingCanvas = document.getElementById('waiting-runner-canvas');
             waitingCanvas.addEventListener('pointerdown', event => this.beginWaitingAim(event));
             waitingCanvas.addEventListener('pointermove', event => this.updateWaitingAim(event));
@@ -1027,7 +1086,10 @@
                 this.renderHostedGameDecks();
                 this.renderDashboard();
             });
-            this.EventBus.on('study:recorded', () => this.renderDashboard());
+            this.EventBus.on('study:recorded', () => {
+                this.renderDashboard();
+                this.refreshStudyLeaderboard(this.studyLeaderboardPeriod || 'daily');
+            });
             this.EventBus.on('state:restored', () => this.renderUI());
             this.EventBus.on('router:navigated', route => {
                 if (route === 'class') this.renderClassDetail();
@@ -1035,6 +1097,7 @@
                 if (route === 'schedule') this.renderSchedulePage();
                 if (route === 'grade-scenarios') this.renderGradeScenarios();
                 if (route === 'analytics') this.renderGradeProgress();
+                if (route === 'leaderboard') this.refreshStudyLeaderboard(this.studyLeaderboardPeriod || 'daily');
                 if (route === 'multiplayer') {
                     this.renderHostedGameDecks();
                     this.renderMultiplayerProfile(true);
@@ -1045,6 +1108,8 @@
                     if (!document.getElementById('community-deck-results').dataset.loaded) this.searchCommunityDecks('');
                 }
                 if (!['class', 'flashcard'].includes(route)) this.stopFocusTimer();
+                if (route !== 'flashcard' && this.activeDeckId) this.closeStudy();
+                if (route !== 'exam-arcade' && this.arcadeStudyStartedAt) this.closeArcade();
                 if (route !== 'multiplayer') {
                     this.stopWaitingRunner();
                     this.stopMultiplayerAnimation();
@@ -1859,12 +1924,15 @@
             const select = document.getElementById('host-game-deck');
             if (!select) return;
             const previous = select.value;
-            const decks = (AppState.get('flashcards') || []).filter(deck =>
-                (deck.cards || []).filter(card => card.front && card.back).length >= 2
-            );
+            const decks = (AppState.get('flashcards') || []).map(deck => ({
+                ...deck,
+                completeCards: (deck.cards || []).filter(card =>
+                    String(card.front || '').trim() && String(card.back || '').trim()
+                )
+            })).filter(deck => deck.completeCards.length >= 1 && deck.completeCards.length <= 50);
             select.innerHTML = decks.length
-                ? decks.map(deck => `<option value="${this.escapeHTML(deck.id)}">${this.escapeHTML(deck.title)} · ${deck.cards.length} cards</option>`).join('')
-                : '<option value="">Add a set with at least 2 complete cards</option>';
+                ? decks.map(deck => `<option value="${this.escapeHTML(deck.id)}">${this.escapeHTML(deck.title)} · ${deck.completeCards.length} cards</option>`).join('')
+                : '<option value="">Add a set with at least 1 complete card</option>';
             if (decks.some(deck => deck.id === previous)) select.value = previous;
             const nickname = this.multiplayerDisplayName().replace(/[^A-Za-z0-9 _-]/g, '').slice(0, 20);
             ['host-game-nickname', 'join-game-nickname'].forEach(id => {
@@ -1882,10 +1950,11 @@
             return fullName || user?.user_metadata?.username || 'Student';
         }
 
-        multiplayerAvatarMarkup(itemId, large = false) {
+        multiplayerAvatarMarkup(itemId, large = false, accessoryId = '') {
             const item = window.StudBudCommunityGames.catalog.find(entry => entry.id === itemId);
             const icon = item?.icon || 'fa-user-astronaut';
-            return `<span class="player-avatar${large ? ' player-avatar-large' : ''} ${this.escapeHTML(itemId || 'avatar_default')}"><i class="fas ${this.escapeHTML(icon)}" aria-hidden="true"></i></span>`;
+            const accessoryItem = window.StudBudCommunityGames.catalog.find(entry => entry.id === accessoryId && entry.type === 'accessory');
+            return `<span class="player-avatar${large ? ' player-avatar-large' : ''} ${this.escapeHTML(itemId || 'avatar_default')}"${accessoryItem ? ` data-accessory="${this.escapeHTML(accessoryItem.id)}"` : ''}><i class="fas ${this.escapeHTML(icon)}" aria-hidden="true"></i>${accessoryItem ? `<i class="avatar-accessory fas ${this.escapeHTML(accessoryItem.icon)}" aria-hidden="true"></i>` : ''}</span>`;
         }
 
         async renderMultiplayerProfile(force = false) {
@@ -1916,8 +1985,9 @@
                 this.multiplayerProfile = profile;
                 const catalog = window.StudBudCommunityGames.catalog;
                 const avatar = profile.equipped_avatar || 'avatar_default';
+                const accessory = profile.equipped_accessory || 'accessory_default';
                 [defaultAvatar, document.getElementById('multiplayer-large-avatar')].forEach(element => {
-                    if (element) element.innerHTML = this.multiplayerAvatarMarkup(avatar, element.id === 'multiplayer-large-avatar');
+                    if (element) element.innerHTML = this.multiplayerAvatarMarkup(avatar, element.id === 'multiplayer-large-avatar', accessory);
                 });
                 const palette = profile.equipped_palette?.replace('palette_', '') || 'default';
                 document.getElementById('multiplayer-view')?.setAttribute('data-game-palette', palette);
@@ -1930,7 +2000,7 @@
                 const wins = document.getElementById('multiplayer-wins');
                 if (wins) wins.textContent = Number(profile.wins).toLocaleString();
                 document.getElementById('multiplayer-shop-items').innerHTML = `
-                    <article class="multiplayer-shop-item mystery-shop-item"><span class="mystery-capsule"><i class="fas fa-box-open"></i></span><div><strong>Mystery drop</strong><small>Random avatar or colorway · 80 coins</small></div><button type="button" class="secondary-btn" data-action="multiplayer-mystery" ${catalog.every(item => (profile.owned_items || []).includes(item.id)) ? 'disabled' : ''}>Open capsule</button></article>
+                    <article class="multiplayer-shop-item mystery-shop-item"><span class="mystery-capsule"><i class="fas fa-box-open"></i></span><div><strong>Mystery drop</strong><small>Random avatar, colorway, or accessory · 80 coins</small></div><button type="button" class="secondary-btn" data-action="multiplayer-mystery" ${catalog.every(item => (profile.owned_items || []).includes(item.id)) ? 'disabled' : ''}>Open capsule</button></article>
                     ${[['avatar', 'Avatars'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['palette', 'Color schemes']].map(([type, label]) => `
                     <h4 class="shop-category-title">${label}${['skin', 'hat', 'accessory'].includes(type) ? ` <button type="button" class="ghost-btn shop-unequip" data-action="multiplayer-unequip" data-slot="${type}">Remove</button>` : ''}</h4>
                     ${catalog.filter(item => item.type === type).map(item => {
@@ -1939,7 +2009,9 @@
                     const equipped = equippedId === item.id;
                     const preview = item.type === 'palette'
                         ? `<span class="shop-palette ${this.escapeHTML(item.color)}"></span>`
-                        : this.multiplayerAvatarMarkup(item.id);
+                        : item.id.startsWith('accessory_')
+                            ? `<span class="shop-avatar accessory-shop-preview"><i class="fas ${this.escapeHTML(item.icon)}" aria-hidden="true"></i></span>`
+                            : this.multiplayerAvatarMarkup(item.id);
                     const action = owned ? 'multiplayer-equip' : 'multiplayer-buy';
                     const label = equipped ? 'Equipped' : owned ? 'Equip' : `Buy · ${item.price} <i class="fas fa-coins"></i>`;
                     const note = { avatar: 'Lobby avatar', skin: 'In-game character', hat: 'Worn in games', accessory: 'Worn in games', palette: 'Apply in UI Settings' }[item.type];
@@ -1954,7 +2026,7 @@
                 this.renderAppearanceShopSchemes();
             } catch (error) {
                 console.error('[NexusApp] Multiplayer profile could not load:', error);
-                shopStatus.textContent = `Multiplayer profile unavailable: ${error.message}`;
+                shopStatus.textContent = `Your multiplayer profile could not load. ${this.friendlyErrorMessage(error, 'Please refresh the page and try again.')}`;
             }
         }
 
@@ -1991,8 +2063,15 @@
                 button.setAttribute('aria-label', `${button.dataset.colorScheme} color scheme${unlocked ? ', unlocked' : ', locked; unlock in multiplayer shop'}`);
             });
             const current = AppState.get('settings')?.colorScheme;
+            const activePremiumScheme = Array.from(document.querySelectorAll('.scheme-option[data-shop-item]'))
+                .find(button => button.dataset.colorScheme === current);
+            if (activePremiumScheme && !owned.includes(activePremiumScheme.dataset.shopItem)) {
+                AppState.set('settings', { ...AppState.get('settings'), colorScheme: 'forest' });
+                this.applyAppearance();
+            }
+            const selectedScheme = activePremiumScheme && !owned.includes(activePremiumScheme.dataset.shopItem) ? 'forest' : current;
             document.querySelectorAll('.scheme-option').forEach(button =>
-                button.classList.toggle('selected', button.dataset.colorScheme === current)
+                button.classList.toggle('selected', button.dataset.colorScheme === selectedScheme)
             );
         }
 
@@ -2167,7 +2246,7 @@
                 document.getElementById('waiting-runner-best').textContent = String(runner.best);
             } catch (error) {
                 console.error('[NexusApp] Warm-up personal best could not sync:', error);
-                document.getElementById('hosted-game-message').textContent = `Run complete. Personal best could not sync: ${error.message}`;
+                document.getElementById('hosted-game-message').textContent = `Run complete. Your personal best could not sync. ${this.friendlyErrorMessage(error)}`;
             } finally {
                 runner.saving = false;
             }
@@ -2212,7 +2291,7 @@
             this.multiplayerFrame = null;
         }
 
-        drawCharacter(context, x, y, color, scale, time, swinging = false) {
+        drawCharacter(context, x, y, color, scale, time, swinging = false, accessoryId = '', tool = '') {
             context.save();
             context.translate(x, y + Math.sin(time * 7 + x) * 1.8);
             context.scale(scale, scale);
@@ -2236,15 +2315,48 @@
             context.beginPath(); context.arc(4, -10, 2.5, 0, Math.PI * 2); context.fill();
             context.fillStyle = '#172033';
             context.beginPath(); context.arc(5, -10, 1.1, 0, Math.PI * 2); context.fill();
-            if (swinging) {
+            if (accessoryId === 'accessory_cap') {
+                context.fillStyle = '#f8d46a';
+                context.beginPath(); context.ellipse(0, -21, 12, 5, 0, Math.PI, Math.PI * 2); context.fill();
+                context.fillRect(-12, -22, 18, 3);
+            } else if (accessoryId === 'accessory_halo') {
+                context.strokeStyle = '#ffe786';
+                context.lineWidth = 3;
+                context.beginPath(); context.ellipse(0, -28, 12, 4, 0, 0, Math.PI * 2); context.stroke();
+            } else if (accessoryId === 'accessory_headphones') {
+                context.strokeStyle = '#71d9ff';
+                context.lineWidth = 4;
+                context.beginPath(); context.arc(0, -11, 13, Math.PI, Math.PI * 2); context.stroke();
+                context.fillStyle = '#71d9ff';
+                context.beginPath(); context.roundRect(-14, -14, 5, 10, 2); context.roundRect(9, -14, 5, 10, 2); context.fill();
+            }
+            if (tool) {
                 context.save();
                 context.translate(13, 5);
-                context.rotate(swing);
-                context.strokeStyle = '#9b694b';
-                context.lineWidth = 5;
-                context.beginPath(); context.moveTo(0, 0); context.lineTo(28, -25); context.stroke();
-                context.fillStyle = '#94a3b8';
-                context.beginPath(); context.roundRect(20, -38, 24, 17, 5); context.fill();
+                context.rotate(swinging ? swing : -0.15);
+                if (tool === 'hammer' || tool === 'pickaxe') {
+                    context.strokeStyle = '#9b694b';
+                    context.lineWidth = 5;
+                    context.beginPath(); context.moveTo(0, 0); context.lineTo(28, -25); context.stroke();
+                    context.fillStyle = tool === 'hammer' ? '#94a3b8' : '#b8c1d2';
+                    context.beginPath();
+                    if (tool === 'hammer') context.roundRect(20, -38, 24, 17, 5);
+                    else {
+                        context.moveTo(19, -33); context.lineTo(38, -42); context.lineTo(30, -27); context.closePath();
+                    }
+                    context.fill();
+                } else if (tool === 'blaster') {
+                    context.fillStyle = '#90e8ff';
+                    context.beginPath(); context.roundRect(7, -6, 29, 10, 3); context.fill();
+                    context.fillStyle = '#f9df7b';
+                    context.fillRect(32, -3, 9, 4);
+                } else if (tool === 'rod') {
+                    context.strokeStyle = '#e5c78d';
+                    context.lineWidth = 3;
+                    context.beginPath(); context.moveTo(0, 0); context.lineTo(28, -34); context.lineTo(43, -8); context.stroke();
+                    context.fillStyle = '#ffb36e';
+                    context.beginPath(); context.arc(43, -7, 3, 0, Math.PI * 2); context.fill();
+                }
                 context.restore();
             }
             context.restore();
@@ -2260,7 +2372,10 @@
             const phase = time * 0.8;
             const ranked = players.length ? players : [{ score: 300 }, { score: 150 }];
             const palette = this.multiplayerProfile?.equipped_palette || 'palette_default';
-            const accent = palette.includes('ocean') ? '#39d2f2' : palette.includes('sunset') ? '#ff835f' : palette.includes('violet') ? '#bd8cff' : '#68e0ac';
+            const accent = palette.includes('ocean') ? '#39d2f2'
+                : palette.includes('sunset') || palette.includes('coral') ? '#ff835f'
+                    : palette.includes('violet') || palette.includes('aurora') ? '#bd8cff'
+                        : palette.includes('midnight') ? '#91a5ff' : '#68e0ac';
             const sky = context.createLinearGradient(0, 0, 0, height);
             sky.addColorStop(0, mode === 'miner' ? '#2e2542' : mode === 'river' ? '#4baad0' : mode === 'market' ? '#ffb66e' : mode === 'duel' ? '#34294e' : '#5094cf');
             sky.addColorStop(1, mode === 'miner' ? '#100f1c' : mode === 'river' ? '#164c75' : mode === 'market' ? '#9c4869' : mode === 'duel' ? '#121629' : '#1a355e');
@@ -2318,7 +2433,8 @@
                     const x = ((index * 300 + phase * 50) % (width + 160)) - 80;
                     context.fillStyle = '#e59c61'; context.beginPath(); context.moveTo(x - 49, 272); context.lineTo(x + 50, 272); context.lineTo(x + 35, 291); context.lineTo(x - 31, 291); context.fill();
                     context.fillStyle = '#f5d8a7'; context.fillRect(x - 24, 243, 47, 28);
-                    this.drawCharacter(context, x + ((index % Math.max(players.length, 1)) * 16), 237, index === 0 ? accent : '#f69074', 0.75, time, true);
+                    const player = players[index % Math.max(players.length, 1)] || {};
+                    this.drawCharacter(context, x + ((index % Math.max(players.length, 1)) * 16), 237, index === 0 ? accent : '#f69074', 0.75, time, true, player.accessory, 'rod');
                 }
             } else if (mode === 'market') {
                 for (let stall = 0; stall < 5; stall++) {
@@ -2333,7 +2449,7 @@
                     context.fillStyle = '#f6c76a';
                     for (let item = 0; item < 4; item++) { context.beginPath(); context.arc(x + 24 + item * 34, 252, 8 + item % 2 * 3, 0, Math.PI * 2); context.fill(); }
                 }
-                for (let index = 0; index < 3; index++) this.drawCharacter(context, 100 + index * 285 + Math.sin(phase + index) * 26, 296, index ? '#ff9c69' : accent, 0.78, time + index, false);
+                for (let index = 0; index < 3; index++) this.drawCharacter(context, 100 + index * 285 + Math.sin(phase + index) * 26, 296, index ? '#ff9c69' : accent, 0.78, time + index, false, players[index]?.accessory);
             } else if (mode === 'miner') {
                 context.fillStyle = '#372b4c'; context.beginPath(); context.moveTo(0, 290);
                 for (let x = 0; x <= width; x += 35) context.lineTo(x, 260 + Math.sin(x * 0.016 + phase) * 28);
@@ -2351,7 +2467,7 @@
                 for (let rail = 0; rail < 2; rail++) { context.beginPath(); context.moveTo(0, 321 + rail * 23); context.lineTo(width, 321 + rail * 23); context.stroke(); }
                 context.fillStyle = '#485262'; context.fillRect(60, 280, 85, 37);
                 for (let wheel = 0; wheel < 2; wheel++) { context.fillStyle = '#18202e'; context.beginPath(); context.arc(78 + wheel * 54, 319, 11, 0, Math.PI * 2); context.fill(); }
-                this.drawCharacter(context, 100, 272, accent, 0.8, time, true);
+                this.drawCharacter(context, 100, 272, accent, 0.8, time, true, players[0]?.accessory, 'pickaxe');
             } else if (mode === 'duel') {
                 context.fillStyle = 'rgba(31,25,55,.68)';
                 context.fillRect(0, 0, width / 2 - 3, height);
@@ -2376,8 +2492,8 @@
                 const rival = players[1] || { distance: 0 };
                 const challengerY = Math.max(72, 285 - Number(challenger.distance || 0) * 13);
                 const rivalY = Math.max(72, 285 - Number(rival.distance || 0) * 13);
-                this.drawCharacter(context, 320 + clash, challengerY, accent, 1.12, time, true);
-                this.drawCharacter(context, 575 - clash, rivalY, '#ff8178', 1.12, time + 0.8, true);
+                this.drawCharacter(context, 320 + clash, challengerY, accent, 1.12, time, true, challenger.accessory, 'hammer');
+                this.drawCharacter(context, 575 - clash, rivalY, '#ff8178', 1.12, time + 0.8, true, rival.accessory, 'hammer');
                 context.strokeStyle = '#f9dc89'; context.lineWidth = 4;
                 context.globalAlpha = 0.35 + (Math.sin(time * 8) + 1) * 0.25;
                 context.beginPath(); context.arc(width / 2, 236, 30 + Math.sin(time * 7) * 8, -0.9, 1.3); context.stroke();
@@ -2407,7 +2523,7 @@
                 context.fillStyle = '#def8ef'; context.font = 'bold 19px system-ui'; context.fillText('MARKET VOLATILITY', 24, 58);
                 const position = players[0]?.last_action || 'choose a position';
                 context.fillStyle = '#9db6c8'; context.font = '14px system-ui'; context.fillText(`Latest move: ${position.toUpperCase()}`, 24, 83);
-                this.drawCharacter(context, 120 + Math.sin(phase * 2) * 18, 302, accent, 0.86, time, false);
+                this.drawCharacter(context, 120 + Math.sin(phase * 2) * 18, 302, accent, 0.86, time, false, players[0]?.accessory);
             } else if (mode === 'shooter') {
                 context.fillStyle = '#0b1528';
                 for (let star = 0; star < 60; star++) {
@@ -2431,7 +2547,7 @@
                 context.fillStyle = '#63d8ff'; context.fillRect(421, 278, 18, 27);
                 context.fillStyle = '#b9eaff'; context.font = 'bold 17px system-ui'; context.fillText(`WAVE ${Number(players[0]?.wave || 1)}`, 28, 58);
                 context.strokeStyle = '#75e7ff'; context.lineWidth = 4; context.beginPath(); context.moveTo(450, 274); context.lineTo(490 + Math.sin(phase * 4) * 45, 138 + Math.cos(phase * 3) * 24); context.stroke();
-                this.drawCharacter(context, 450, 297, accent, 0.82, time, true);
+                this.drawCharacter(context, 450, 297, accent, 0.82, time, true, players[0]?.accessory, 'blaster');
             } else if (mode === 'sports') {
                 context.fillStyle = '#246b4d'; context.fillRect(0, 0, width, height);
                 for (let stripe = 0; stripe < 9; stripe++) {
@@ -2453,8 +2569,8 @@
                 const ballX = 90 + (yards / 100) * 660;
                 context.fillStyle = '#c77747'; context.beginPath(); context.ellipse(ballX, 225, 13, 8, -0.3, 0, Math.PI * 2); context.fill();
                 context.fillStyle = '#fff'; context.fillRect(ballX - 5, 222, 1.5, 6); context.fillRect(ballX + 1, 222, 1.5, 6);
-                this.drawCharacter(context, ballX - 25, 222, accent, 0.93, time, players[0]?.last_action === 'run');
-                this.drawCharacter(context, Math.min(width - 95, ballX + 86), 225, '#f78278', 0.88, time + 1, true);
+                this.drawCharacter(context, ballX - 25, 222, accent, 0.93, time, players[0]?.last_action === 'run', players[0]?.accessory);
+                this.drawCharacter(context, Math.min(width - 95, ballX + 86), 225, '#f78278', 0.88, time + 1, true, players[1]?.accessory);
                 context.fillStyle = '#f4f8e8'; context.font = 'bold 15px system-ui'; context.fillText(`${yards} YD LINE · ${Number(players[0]?.touchdowns || 0)} TD`, 25, height - 18);
             } else {
                 const runner = players[0] || { score: 280, distance: 5 };
@@ -2514,14 +2630,14 @@
                 const currentIndex = Math.min(segment, routeEnd - 1);
                 const currentY = heights[currentIndex % heights.length];
                 const playerX = currentIndex * 176 - camera + 340 + Math.sin(phase * 2) * 4;
-                this.drawCharacter(context, playerX, currentY - 29, accent, 1, time, true);
+                this.drawCharacter(context, playerX, currentY - 29, accent, 1, time, true, players[0]?.accessory);
                 ranked.forEach((player, index) => {
                     if (index === 0) return;
                     const distance = Math.max(Number(player.distance || 0), Math.floor(Number(player.score || 0) / 50));
                     const rivalSegment = Math.floor(distance);
                     const rivalX = rivalSegment * 176 - camera + 340;
                     const rivalY = heights[Math.max(0, rivalSegment) % heights.length];
-                    this.drawCharacter(context, rivalX, rivalY - 27, ['#ff9d69', '#a8a0ff', '#f185aa'][index % 3], 0.78, time + index, true);
+                    this.drawCharacter(context, rivalX, rivalY - 27, ['#ff9d69', '#a8a0ff', '#f185aa'][index % 3], 0.78, time + index, true, player.accessory);
                 });
                 context.fillStyle = '#fff4cc'; context.font = 'bold 17px system-ui'; context.fillText(`ROOFTOP DISTRICT ${Math.floor(segment / 6) + 1} · CHECKPOINT ${Math.min(7, Math.floor(segment / 5))}/7`, 22, 42);
                 context.fillStyle = 'rgba(9,19,37,.65)'; context.fillRect(width - 226, 14, 205, 15);
@@ -2617,7 +2733,7 @@
             } catch (error) {
                 console.error('[NexusApp] Community deck search failed:', error);
                 results.dataset.loaded = '';
-                status.textContent = `Community library unavailable: ${error.message} Run the latest supabase-setup.sql in your project to enable it.`;
+                status.textContent = `The community library could not load. ${this.friendlyErrorMessage(error, 'Please check your connection and try again.')}`;
             }
         }
 
@@ -2638,8 +2754,15 @@
 
         async importCommunityDeck(deckId) {
             const shared = await window.StudBudCommunityGames.importDeck(deckId);
+            const existingDeck = (AppState.get('flashcards') || []).find(deck =>
+                deck.communitySourceId === shared.id
+            );
+            if (existingDeck) {
+                document.getElementById('community-deck-status').textContent = `“${shared.title}” is already in your decks.`;
+                return;
+            }
             const localDeck = {
-                id: `community_${crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`}`,
+                id: `community_${window.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`}`,
                 title: shared.title,
                 cards: shared.cards.map(card => ({
                     id: `card_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -2670,10 +2793,10 @@
             const nickname = form.elements.nickname.value.trim();
             const deck = (AppState.get('flashcards') || []).find(item => item.id === form.elements.deckId.value);
             if (!deck) throw new Error('Add a flashcard set before hosting a game.');
-            const cards = (deck.cards || []).filter(card => card.front && card.back);
-            if (cards.length < 2 || cards.length > 50) throw new Error('Hosted games need a set with 2–50 complete cards.');
-            if (new Set(cards.map(card => String(card.back).trim())).size < 2) {
-                throw new Error('This set needs at least two different definitions to make answer choices.');
+            const cards = (deck.cards || []).filter(card => String(card.front || '').trim() && String(card.back || '').trim());
+            if (cards.length < 1 || cards.length > 50) throw new Error('Hosted games need a set with 1–50 complete cards.');
+            if (cards.some(card => String(card.front).trim().length > 1000 || String(card.back).trim().length > 1000)) {
+                throw new Error('Hosted game terms and definitions must be 1000 characters or fewer.');
             }
             const options = {
                 goal_type: form.elements.goalType.value,
@@ -2681,16 +2804,39 @@
                 time_limit_seconds: Number(form.elements.timeLimit.value) * 60,
                 question_reward: Number(form.elements.questionReward.value)
             };
-            const room = await window.StudBudCommunityGames.createRoom(
-                this.createRoomCode(), nickname, { ...deck, cards }, form.elements.mode.value, options
-            );
+            let room;
+            for (let attempt = 0; attempt < 3; attempt++) {
+                try {
+                    room = await window.StudBudCommunityGames.createRoom(
+                        this.createRoomCode(), nickname, { ...deck, cards }, form.elements.mode.value, options
+                    );
+                    break;
+                } catch (error) {
+                    if (error.code !== '23505' && !/duplicate key|unique constraint/i.test(error.message)) throw error;
+                    if (attempt === 2) throw new Error('Could not reserve a room code. Please try creating the room again.');
+                }
+            }
             this.openHostedGame(room);
         }
 
         async joinGame(form) {
             const nickname = form.elements.nickname.value.trim();
-            const room = await window.StudBudCommunityGames.joinRoom(form.elements.roomCode.value.trim().toUpperCase(), nickname);
+            const roomCode = form.elements.roomCode.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+            const room = await window.StudBudCommunityGames.joinRoom(roomCode, nickname);
             this.openHostedGame(room);
+        }
+
+        async copyHostedRoomCode() {
+            const code = document.getElementById('hosted-room-code')?.textContent.trim();
+            if (!code) return;
+            try {
+                if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable.');
+                await navigator.clipboard.writeText(code);
+                document.getElementById('hosted-room-status').textContent = `Room code ${code} copied. Share it with your players.`;
+            } catch (error) {
+                console.error('[NexusApp] Room code could not be copied:', error);
+                window.prompt('Copy this room code and share it with your players:', code);
+            }
         }
 
         openHostedGame(room) {
@@ -2719,11 +2865,11 @@
                     this.hostedGameInterval = null;
                     this.hostedGameRoom = null;
                     document.getElementById('hosted-game-room').classList.add('hidden');
-                    document.getElementById('hosted-game-message').textContent = `You left the room or were removed by the host. ${error.message}`;
+                    document.getElementById('hosted-game-message').textContent = 'You left the room or were removed by the host.';
                     this.hostedGamePollError = error.message;
                     return;
                 }
-                const message = `Connection problem: ${error.message}`;
+                const message = `Connection problem. ${this.friendlyErrorMessage(error, 'The game could not refresh. Please try again shortly.')}`;
                 if (this.hostedGamePollError !== message) {
                     document.getElementById('hosted-room-status').textContent = message;
                     this.hostedGamePollError = message;
@@ -2762,7 +2908,7 @@
             document.getElementById('hosted-room-meta').textContent = `${goalLabel} · ${players.length} / ${playerLimit} players`;
             document.getElementById('hosted-room-code').textContent = room.room_code;
             const rankedPlayers = players.slice().sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
-            const avatarFor = item => this.multiplayerAvatarMarkup(item);
+            const avatarFor = player => this.multiplayerAvatarMarkup(player.avatar, false, player.accessory);
             document.getElementById('hosted-leaderboard-count').textContent = `${players.length} player${players.length === 1 ? '' : 's'}`;
             document.getElementById('hosted-room-players').innerHTML = rankedPlayers
                 .map((player, index) => {
@@ -2775,7 +2921,7 @@
                                             : room.mode === 'crypto' ? `${Number(player.loot || 0)} chips · ${player.last_action || 'ready'}`
                                                 : room.mode === 'duel' ? `${Number(player.distance || 0)} climb · ${Number(player.streak || 0)} combo`
                                                     : `${Number(player.score || 0)} points · ${Number(player.streak || 0)} streak`;
-                    return `<li class="leaderboard-player${player.id === window.StudBudCloud.user.id ? ' is-self' : ''}">${avatarFor(player.avatar)}<span class="leaderboard-name">${index + 1}. ${this.escapeHTML(player.nickname)}${player.id === window.StudBudCloud.user.id ? ' · you' : ''}</span><span class="leaderboard-stat"><strong>${Number(player.score || 0).toLocaleString()} score</strong><small>${this.escapeHTML(progress)}</small></span>${isHost && player.id !== room.host_id && room.status !== 'finished' ? `<button class="host-kick-btn" type="button" data-action="hosted-kick-player" data-id="${this.escapeHTML(player.id)}" aria-label="Remove ${this.escapeHTML(player.nickname)}">Remove</button>` : ''}</li>`;
+                    return `<li class="leaderboard-player${player.id === window.StudBudCloud.user.id ? ' is-self' : ''}">${avatarFor(player)}<span class="leaderboard-name">${index + 1}. ${this.escapeHTML(player.nickname)}${player.id === window.StudBudCloud.user.id ? ' · you' : ''}</span><span class="leaderboard-stat"><strong>${Number(player.score || 0).toLocaleString()} score</strong><small>${this.escapeHTML(progress)}</small></span>${isHost && player.id !== room.host_id && room.status !== 'finished' ? `<button class="host-kick-btn" type="button" data-action="hosted-kick-player" data-id="${this.escapeHTML(player.id)}" aria-label="Remove ${this.escapeHTML(player.nickname)}">Remove</button>` : ''}</li>`;
                 }).join('');
             const sceneNames = {
                 skyline: 'Rooftop Rumble', river: 'River Raiders', market: 'Market Mayhem',
@@ -2822,7 +2968,7 @@
                 const rewards = state.coin_rewards || {};
                 document.getElementById('hosted-podium').classList.remove('hidden');
                 document.getElementById('hosted-podium').innerHTML = rankedPlayers.slice(0, 3).map((player, index) =>
-                    `<div class="podium-place place-${index + 1}"><span class="podium-rank">0${index + 1}</span><strong>${avatarFor(player.avatar)} ${this.escapeHTML(player.nickname)}</strong><small>${Number(player.score || 0).toLocaleString()} points · +${Number(rewards[player.id] || 0)} coins</small></div>`
+                    `<div class="podium-place place-${index + 1}"><span class="podium-rank">0${index + 1}</span><strong>${avatarFor(player)} ${this.escapeHTML(player.nickname)}</strong><small>${Number(player.score || 0).toLocaleString()} points · +${Number(rewards[player.id] || 0)} coins</small></div>`
                 ).join('');
             } else {
                 document.getElementById('hosted-podium').classList.add('hidden');
@@ -2943,7 +3089,7 @@
         applyAppearance() {
             const settings = AppState.get('settings') || {};
             const theme = settings.theme === 'light' ? 'light' : 'dark';
-            const colorScheme = ['forest', 'ocean', 'violet', 'sunset', 'monochrome'].includes(settings.colorScheme) ? settings.colorScheme : 'forest';
+            const colorScheme = ['forest', 'ocean', 'violet', 'sunset', 'monochrome', 'aurora', 'coral', 'midnight'].includes(settings.colorScheme) ? settings.colorScheme : 'forest';
             document.body.classList.toggle('dark-theme', theme === 'dark');
             document.body.classList.toggle('light-theme', theme === 'light');
             document.body.classList.toggle('compact-ui', Boolean(settings.compactUi));
@@ -3005,6 +3151,12 @@
             sidebarToggle.setAttribute('aria-label', `${action} ${target}`);
             sidebarToggle.title = `${action} ${target}`;
             sidebarToggle.innerHTML = `<i class="fas fa-chevron-${orientation}" aria-hidden="true"></i>`;
+            document.querySelectorAll('.nav-item[data-target]').forEach(item => {
+                const label = item.querySelector('span')?.textContent.trim();
+                if (!label) return;
+                item.setAttribute('aria-label', label);
+                item.title = label;
+            });
         }
 
         renderDashboard() {
@@ -3028,6 +3180,110 @@
                 ).join('') : '<p class="empty-state">Add classes and upcoming work to get personalized study suggestions.</p>';
             }
             this.renderStudyProgress();
+            this.renderDailyStudyHabit();
+        }
+
+        formatStudyDuration(seconds) {
+            const totalSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+            const minutes = Math.floor(totalSeconds / 60);
+            const remainder = totalSeconds % 60;
+            if (!totalSeconds) return '0 min';
+            return minutes ? `${minutes} min${remainder ? ` ${remainder} sec` : ''}` : `${remainder} sec`;
+        }
+
+        renderDailyStudyHabit() {
+            const snapshot = this.studyLeaderboardSnapshot;
+            const seconds = Number(snapshot?.today_seconds || 0);
+            const goal = Number(snapshot?.daily_goal_seconds || 900);
+            const streak = Number(snapshot?.streak_days || 0);
+            const time = document.getElementById('daily-study-time');
+            const streakNode = document.getElementById('daily-study-streak');
+            const progress = document.getElementById('daily-study-progress');
+            const note = document.getElementById('daily-study-note');
+            const boardTime = document.getElementById('leaderboard-today-time');
+            const boardStreak = document.getElementById('leaderboard-streak-display');
+            const boardProgress = document.getElementById('leaderboard-study-progress');
+            const boardNote = document.getElementById('leaderboard-goal-note');
+            if (time) time.textContent = this.formatStudyDuration(seconds);
+            if (streakNode) streakNode.textContent = `${streak} day${streak === 1 ? '' : 's'}`;
+            if (boardTime) boardTime.textContent = this.formatStudyDuration(seconds);
+            if (boardStreak) boardStreak.textContent = `${streak} day streak`;
+            if (progress) {
+                progress.max = goal;
+                progress.value = Math.min(seconds, goal);
+                progress.setAttribute('aria-label', `${Math.floor(seconds / 60)} of 15 study minutes completed today`);
+            }
+            if (boardProgress) {
+                boardProgress.max = goal;
+                boardProgress.value = Math.min(seconds, goal);
+                boardProgress.setAttribute('aria-label', `${Math.floor(seconds / 60)} of 15 study minutes completed today`);
+            }
+            const goalNote = seconds >= goal
+                ? 'Daily goal complete. Come back tomorrow to keep your streak growing.'
+                : `${Math.ceil((goal - seconds) / 60)} more minute${Math.ceil((goal - seconds) / 60) === 1 ? '' : 's'} to reach today’s 15-minute goal.`;
+            if (note) note.textContent = this.studyLeaderboardError || goalNote;
+            if (boardNote) boardNote.textContent = this.studyLeaderboardError || goalNote;
+        }
+
+        renderStudyLeaderboard() {
+            const list = document.getElementById('study-leaderboard-list');
+            if (!list) return;
+            const board = this.studyLeaderboardSnapshot?.leaderboard || [];
+            list.innerHTML = board.length ? board.map(player =>
+                `<li class="study-leaderboard-row${player.is_me ? ' is-self' : ''}"><span class="study-leaderboard-rank">${Number(player.rank) || '—'}</span><strong>${this.escapeHTML(player.username || 'Student')}${player.is_me ? ' · you' : ''}</strong><span>${this.formatStudyDuration(player.seconds)}</span></li>`
+            ).join('') : '<li class="empty-state">No study time logged for this period yet. Start a session to be first on the board.</li>';
+            const label = document.getElementById('study-leaderboard-period-label');
+            if (label) label.textContent = this.studyLeaderboardPeriod === 'weekly' ? 'This week · UTC' : 'Today · UTC';
+            document.querySelectorAll('[data-study-leaderboard-period]').forEach(button => {
+                const selected = button.dataset.studyLeaderboardPeriod === this.studyLeaderboardPeriod;
+                button.classList.toggle('selected', selected);
+                button.setAttribute('aria-pressed', String(selected));
+            });
+        }
+
+        async refreshStudyLeaderboard(period = 'daily') {
+            if (!window.StudBudCloud?.user) return;
+            this.studyLeaderboardPeriod = period === 'weekly' ? 'weekly' : 'daily';
+            const status = document.getElementById('study-leaderboard-status');
+            if (status) status.textContent = 'Loading study progress…';
+            try {
+                this.studyLeaderboardSnapshot = await window.StudBudCommunityGames.getStudyLeaderboard(this.studyLeaderboardPeriod);
+                this.studyLeaderboardError = '';
+                if (status) status.textContent = 'Study time is recorded from flashcard reviews, solo study games, focus logs, and manual study logs.';
+                this.renderStudyLeaderboard();
+                this.renderDailyStudyHabit();
+            } catch (error) {
+                console.error('[NexusApp] Study leaderboard could not load:', error);
+                this.studyLeaderboardError = `Study progress could not load. ${this.friendlyErrorMessage(error, 'Check your connection and try again.')}`;
+                if (status) status.textContent = this.studyLeaderboardError;
+                this.renderStudyLeaderboard();
+                this.renderDailyStudyHabit();
+            }
+        }
+
+        async syncStudyTimeEntry(session, refreshBoard = true) {
+            if (!session?.leaderboardSyncPending || !window.StudBudCloud?.user) return;
+            const seconds = Math.min(21600, Math.max(1, Math.round(Number(session.durationSec) || 0)));
+            try {
+                await window.StudBudCommunityGames.recordStudyTime(session.id, seconds, session.timestamp);
+                session.leaderboardSyncPending = false;
+                session.leaderboardSyncedAt = new Date().toISOString();
+                await NexusDB.put('studyHistory', session);
+                const index = AppState.state.studyHistory.findIndex(item => item.id === session.id);
+                if (index >= 0) AppState.state.studyHistory[index] = session;
+                AppState.setSaveStatus('Study session synced to your daily goal and leaderboard.');
+                if (refreshBoard) await this.refreshStudyLeaderboard(this.studyLeaderboardPeriod || 'daily');
+            } catch (error) {
+                console.error('[NexusApp] Study time could not sync:', error);
+                AppState.setSaveStatus(`Your study session is saved on this device, but its leaderboard time could not sync yet. ${this.friendlyErrorMessage(error)}`, 'error');
+            }
+        }
+
+        async syncPendingStudyTime() {
+            if (!window.StudBudCloud?.user || !window.StudBudCommunityGames) return;
+            const pending = (await NexusDB.getAll('studyHistory')).filter(session => session.leaderboardSyncPending);
+            for (const session of pending) await this.syncStudyTimeEntry(session, false);
+            if (pending.length) await this.refreshStudyLeaderboard(this.studyLeaderboardPeriod || 'daily');
         }
 
         renderFocusSprint() {
@@ -3108,7 +3364,7 @@
                 document.getElementById('study-log-notes').value = 'Completed a focused study sprint.';
             } catch (error) {
                 console.error('[NexusApp] Could not open the completed focus session:', error);
-                window.alert(`Focus sprint finished, but the session could not be logged: ${error.message}`);
+                window.alert(`Focus sprint finished, but the session could not be logged. ${this.friendlyErrorMessage(error)}`);
             }
         }
 
@@ -3324,6 +3580,13 @@
                     this.setMultiplayerScreen(target.dataset.multiplayerTab);
                 } else if (id === 'waiting-practice-btn') {
                     this.startPractice();
+                } else if (target.matches('[data-study-leaderboard-period]')) {
+                    this.studyLeaderboardPeriod = target.dataset.studyLeaderboardPeriod;
+                    await this.refreshStudyLeaderboard(this.studyLeaderboardPeriod);
+                } else if (action === 'copy-hosted-room-code') {
+                    await this.copyHostedRoomCode();
+                } else if (action === 'study-leaderboard-retry') {
+                    await this.refreshStudyLeaderboard(this.studyLeaderboardPeriod);
                 } else if (action === 'multiplayer-buy' || action === 'multiplayer-equip') {
                     await this.updateMultiplayerShop(action, target.dataset.id);
                 } else if (action === 'multiplayer-unequip') {
@@ -3410,6 +3673,8 @@
                     this.renderHostedGameRoom(this.hostedGameRoom);
                 } else if (id === 'hosted-leave-btn') {
                     await this.leaveHostedGame();
+                } else if (id === 'hosted-room-copy-btn') {
+                    await this.copyHostedRoomCode();
                 } else if (id === 'quick-add-task-btn') {
                     this.openAssignmentForm();
                 } else if (id === 'add-course-btn') {
@@ -3494,7 +3759,7 @@
                 }
             } catch (error) {
                 console.error('[NexusApp] Button action failed:', error);
-                window.alert(`Action failed: ${error.message}`);
+                window.alert(`That action could not be completed. ${this.friendlyErrorMessage(error)}`);
             }
         }
 
@@ -3561,18 +3826,29 @@
                     else await this.joinGame(form);
                 } catch (error) {
                     console.error(`[NexusApp] ${form.id} failed:`, error);
-                    message.textContent = `Could not join or host the game: ${error.message}`;
+                    const action = form.id === 'host-game-form' ? 'create the room' : 'join the room';
+                    message.textContent = `Could not ${action}. ${this.friendlyErrorMessage(error, 'Check your connection and try again.')}`;
                 }
                 return;
             }
             if (form.id === 'practice-test-config-form') {
                 event.preventDefault();
-                this.beginPracticeTest(form);
+                try {
+                    this.beginPracticeTest(form);
+                } catch (error) {
+                    console.error('[NexusApp] Practice test could not start:', error);
+                    window.alert(`The practice test could not start. ${this.friendlyErrorMessage(error)}`);
+                }
                 return;
             }
             if (form.id === 'practice-test-answer-form') {
                 event.preventDefault();
-                this.submitPracticeTestAnswer(form);
+                try {
+                    this.submitPracticeTestAnswer(form);
+                } catch (error) {
+                    console.error('[NexusApp] Practice test answer could not be checked:', error);
+                    window.alert(`Your answer could not be checked. ${this.friendlyErrorMessage(error)}`);
+                }
                 return;
             }
             if (!['course-form', 'assignment-form', 'card-form', 'schedule-form', 'study-log-form', 'grade-scenario-assignment-form'].includes(form.id)) return;
@@ -3587,7 +3863,7 @@
                 this.closeModal();
             } catch (error) {
                 console.error(`[NexusApp] ${form.id} submit failed:`, error);
-                window.alert(`Could not save: ${error.message}`);
+                window.alert(`Could not save your changes. ${this.friendlyErrorMessage(error)}`);
             }
         }
 
@@ -3996,6 +4272,7 @@
                 return;
             }
             this.activeCardIndex = 0;
+            this.activeStudyStartedAt = Date.now();
             document.getElementById('active-study-area').classList.remove('hidden');
             this.renderStudyCard();
         }
@@ -4038,7 +4315,7 @@
                     await AppState.saveFlashcardDeck(deck);
                 } catch (error) {
                     console.error('[NexusApp] Community study count could not sync:', error);
-                    AppState.setSaveStatus(`Card progress saved, but the community study count could not sync: ${error.message}`, 'error');
+                    AppState.setSaveStatus(`Card progress saved, but the community study count could not sync. ${this.friendlyErrorMessage(error)}`, 'error');
                 }
             }
             this.activeCardIndex += 1;
@@ -4049,6 +4326,24 @@
         closeStudy() {
             this.stopFocusTimer();
             document.getElementById('active-study-area').classList.add('hidden');
+            const startedAt = this.activeStudyStartedAt;
+            this.activeStudyStartedAt = null;
+            if (startedAt) {
+                const durationSec = Math.min(21600, Math.floor((Date.now() - startedAt) / 1000));
+                if (durationSec > 0) {
+                    AppState.recordStudySession({
+                        id: `flashcards_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                        title: 'Flashcard study',
+                        durationSec,
+                        method: 'flashcards',
+                        methodLabel: 'Flashcards / spaced review',
+                        source: 'flashcards'
+                    }).catch(error => {
+                        console.error('[NexusApp] Flashcard study time could not be saved:', error);
+                        AppState.setSaveStatus(`Flashcard progress is saved, but study time could not be recorded. ${this.friendlyErrorMessage(error)}`, 'error');
+                    });
+                }
+            }
             this.activeDeckId = null;
             this.studyCards = [];
             this.renderDashboard();
@@ -4145,7 +4440,7 @@
                 document.getElementById('flashcard-import-data').value = '';
             }).catch(error => {
                 console.error('[NexusApp] Flashcard import failed:', error);
-                window.alert(`Import failed: ${error.message}`);
+                window.alert(`The flashcards could not be imported. ${this.friendlyErrorMessage(error)}`);
             });
         }
 
@@ -4205,9 +4500,11 @@
             this.arcadeCards = (AppState.get('flashcards') || []).flatMap(deck => deck.cards || [])
                 .filter(card => card.front && card.back);
             if (this.arcadeCards.length < 2) {
-                window.alert('Create a flashcard deck with at least two cards to play.');
+                window.alert('Create a flashcard deck with at least two complete cards to play.');
                 return;
             }
+            this.arcadeStudyStartedAt = Date.now();
+            this.arcadeStudyRecorded = false;
             this.arcadeQuestionIndex = 0;
             this.arcadeScore = 0;
             this.arcadeStreak = 0;
@@ -4321,6 +4618,8 @@
             this.practiceTestAnswers = [];
             this.arcadeQuestionIndex = 0;
             this.arcadeScore = 0;
+            this.arcadeStudyStartedAt = Date.now();
+            this.arcadeStudyRecorded = false;
             document.getElementById('arcade-game-title').textContent = `${deck.title} · Practice Test`;
             this.renderPracticeTestQuestion();
         }
@@ -4417,6 +4716,7 @@
         }
 
         renderPracticeTestResults() {
+            this.finishArcadeStudySession();
             const content = document.getElementById('arcade-game-content');
             const total = this.practiceTestCards.length;
             const percent = total ? Math.round(this.arcadeScore / total * 100) : 0;
@@ -4459,6 +4759,7 @@
             const content = document.getElementById('arcade-game-content');
             if (!content) return;
             if (this.memoryMatched.size === this.memoryCards.length / 2) {
+                this.finishArcadeStudySession();
                 content.innerHTML = '';
                 const result = document.createElement('p');
                 result.textContent = `Tower cleared! You matched all ${this.arcadeScore} pairs.`;
@@ -4522,6 +4823,7 @@
             const content = document.getElementById('arcade-game-content');
             if (!content) return;
             if (this.arcadeQuestionIndex >= this.arcadeCards.length || (this.arcadeMode === 'survival' && this.arcadeLives <= 0)) {
+                this.finishArcadeStudySession();
                 content.innerHTML = '';
                 const result = document.createElement('p');
                 result.textContent = this.arcadeMode === 'survival' && this.arcadeLives <= 0
@@ -4615,7 +4917,29 @@
             this.arcadeQuestionIndex += 1;
         }
 
+        async finishArcadeStudySession() {
+            if (!this.arcadeStudyStartedAt || this.arcadeStudyRecorded) return;
+            this.arcadeStudyRecorded = true;
+            const durationSec = Math.min(21600, Math.floor((Date.now() - this.arcadeStudyStartedAt) / 1000));
+            this.arcadeStudyStartedAt = null;
+            if (!durationSec) return;
+            try {
+                await AppState.recordStudySession({
+                    id: `arcade_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                    title: `Study game: ${document.getElementById('arcade-game-title')?.textContent || 'Practice'}`,
+                    durationSec,
+                    method: 'practice',
+                    methodLabel: 'Practice problems / timed questions',
+                    source: 'arcade'
+                });
+            } catch (error) {
+                console.error('[NexusApp] Arcade study time could not be saved:', error);
+                AppState.setSaveStatus(`Your game progress is complete, but study time could not be recorded. ${this.friendlyErrorMessage(error)}`, 'error');
+            }
+        }
+
         closeArcade() {
+            this.finishArcadeStudySession();
             if (this.arcadeTimer) {
                 clearInterval(this.arcadeTimer);
                 this.arcadeTimer = null;
@@ -4636,7 +4960,7 @@
         console.error('[NexusApp] Startup failed:', error);
         const status = document.getElementById('auth-status');
         if (status) {
-            status.textContent = `StudBud could not start: ${error.message}`;
+            status.textContent = `StudBud could not start. ${window.NexusApp.friendlyErrorMessage(error, 'Reload the page and try again.')}`;
             status.classList.add('error');
         }
         document.getElementById('auth-screen')?.classList.remove('hidden');

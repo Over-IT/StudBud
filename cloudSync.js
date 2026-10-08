@@ -9,6 +9,13 @@
             this.syncTimer = null;
             this.appStarted = false;
             this.authMode = 'login';
+            this.accountVersion = 0;
+            this.accountReady = false;
+            this.accountOpening = null;
+            this.stateEventsBound = false;
+            this.syncRevision = 0;
+            this.syncPromise = null;
+            this.signOutHandling = null;
         }
 
         async bootstrap() {
@@ -24,6 +31,20 @@
                 throw new Error('Supabase could not load. Check your internet connection and reload.');
             }
             this.client = window.supabase.createClient(config.url, config.anonKey);
+            const { data: authListener } = this.client.auth.onAuthStateChange((event, session) => {
+                if (event === 'SIGNED_OUT') {
+                    this.handleSignedOut().catch(error => {
+                        console.error('[StudBudCloud] Could not finish signing out:', error);
+                        this.showAuth();
+                        this.setAuthStatus('Signed out, but this device could not clear its saved data. Reload before another person signs in.', true);
+                    });
+                    return;
+                }
+                if (session?.user && ['INITIAL_SESSION', 'SIGNED_IN', 'TOKEN_REFRESHED', 'USER_UPDATED'].includes(event)) {
+                    window.setTimeout(() => this.openAccount(session.user).catch(error => this.reportAccountError(error)), 0);
+                }
+            });
+            this.authSubscription = authListener.subscription;
             const { data, error } = await this.client.auth.getSession();
             if (error) throw error;
             if (data.session) await this.openAccount(data.session.user);
@@ -92,7 +113,7 @@
                 await this.openAccount(data.user);
             } catch (error) {
                 console.error('[StudBudCloud] Sign-in failed:', error);
-                this.setAuthStatus(error.message || 'Could not sign in. Check your credentials and try again.', true);
+                this.setAuthStatus(this.friendlyAuthError(error, 'Could not sign in. Check your username and password, then try again.'), true);
             }
         }
 
@@ -129,67 +150,157 @@
                 await this.openAccount(data.user);
             } catch (error) {
                 console.error('[StudBudCloud] Sign-up failed:', error);
-                this.setAuthStatus(error.message || 'Could not create your account.', true);
+                this.setAuthStatus(this.friendlyAuthError(error, 'Could not create your account. Check your details and try again.'), true);
             }
         }
 
         async openAccount(user) {
-            this.user = user;
-            this.setAuthStatus('');
-            document.getElementById('auth-screen')?.classList.add('hidden');
-            document.getElementById('app-container')?.classList.remove('hidden');
+            if (!user?.id) return;
+            if (this.accountReady && this.user?.id === user.id) return;
+            if (this.accountOpening?.userId === user.id) return this.accountOpening.promise;
+            if (this.accountOpening) {
+                this.accountVersion++;
+                this.accountReady = false;
+                this.user = null;
+                window.clearTimeout(this.syncTimer);
+                await this.accountOpening.promise.catch(() => {});
+                return this.openAccount(user);
+            }
 
+            const version = ++this.accountVersion;
+            this.accountReady = false;
+            this.user = null;
+            window.clearTimeout(this.syncTimer);
+            const promise = this.loadAccount(user, version);
+            this.accountOpening = { userId: user.id, promise };
+            try {
+                await promise;
+            } catch (error) {
+                if (version === this.accountVersion) {
+                    this.user = null;
+                    this.accountReady = false;
+                    this.showAuth();
+                }
+                throw error;
+            } finally {
+                if (this.accountOpening?.promise === promise) this.accountOpening = null;
+            }
+        }
+
+        async loadAccount(user, version) {
+            this.setAuthStatus('');
             const { data: row, error } = await this.client
                 .from('studbud_user_data')
                 .select('data')
                 .eq('user_id', user.id)
                 .maybeSingle();
-            if (error) {
-                this.showAuth();
-                throw new Error(`Could not load your cloud data: ${error.message}`);
-            }
+            if (error) throw new Error(`Could not load your cloud data: ${error.message}`);
+            if (version !== this.accountVersion) return;
+
             this.initialSnapshot = row?.data || null;
-            if (!this.appStarted) {
-                await window.NexusApp.init();
-                this.appStarted = true;
-            } else if (this.initialSnapshot) {
-                await window.NexusApp.restoreCloudSnapshot(this.initialSnapshot);
+            this.user = user;
+            if (this.initialSnapshot) {
+                if (!this.appStarted) {
+                    await window.NexusApp.init();
+                    this.appStarted = true;
+                } else {
+                    await window.NexusApp.restoreCloudSnapshot(this.initialSnapshot);
+                }
+            } else {
+                const previousAccount = localStorage.getItem('STUDBUD_CLOUD_ACCOUNT_ID');
+                if (previousAccount && previousAccount !== user.id) {
+                    await window.NexusApp.resetForCloudAccount();
+                }
+                if (!this.appStarted) {
+                    await window.NexusApp.init();
+                    this.appStarted = true;
+                }
             }
+            if (version !== this.accountVersion) return;
+
+            localStorage.setItem('STUDBUD_CLOUD_ACCOUNT_ID', user.id);
             const username = user.user_metadata?.username || user.email;
             const accountName = document.getElementById('account-name');
             if (accountName) accountName.textContent = username;
             this.bindStateEvents();
-            this.setCloudStatus('Synced to your account.');
+            this.accountReady = true;
+            document.getElementById('auth-screen')?.classList.add('hidden');
+            document.getElementById('app-container')?.classList.remove('hidden');
+            this.setCloudStatus(this.initialSnapshot ? 'Synced to your account.' : 'Saving your account data…');
             this.queueSync();
         }
 
+        reportAccountError(error) {
+            console.error('[StudBudCloud] Could not open account:', error);
+            this.user = null;
+            this.accountReady = false;
+            this.showAuth();
+            this.setAuthStatus(this.friendlyAuthError(error, 'Could not load your account data. Check your connection and try again.'), true);
+        }
+
+        friendlyAuthError(error, fallback) {
+            const message = String(error?.message || '');
+            if (/failed to fetch|networkerror|network request failed|load failed/i.test(message)) {
+                return 'Could not reach the account server. Check your internet connection and try again.';
+            }
+            if (/invalid login credentials|invalid email or password/i.test(message)) {
+                return 'That username or password was not recognized. Check your details and try again.';
+            }
+            if (/already registered|user already exists/i.test(message)) {
+                return 'An account with that username already exists. Try signing in instead.';
+            }
+            if (/password.*(weak|short|least)/i.test(message)) {
+                return 'Choose a stronger password with at least 8 characters.';
+            }
+            return window.NexusApp?.friendlyErrorMessage(error, fallback) || fallback;
+        }
+
         bindStateEvents() {
+            if (this.stateEventsBound) return;
             const syncEvents = ['state:changed', 'state:restored', 'courses:updated', 'assignments:updated', 'flashcards:updated', 'study:recorded', 'metrics:updated'];
             syncEvents.forEach(eventName => window.NexusApp.EventBus.on(eventName, () => this.queueSync()));
+            this.stateEventsBound = true;
         }
 
         queueSync() {
-            if (!this.user || !window.NexusApp?.AppState) return;
+            if (!this.accountReady || !this.user || !window.NexusApp?.AppState) return;
+            this.syncRevision++;
             window.clearTimeout(this.syncTimer);
             this.setCloudStatus('Syncing to your account…');
             this.syncTimer = window.setTimeout(() => {
                 this.syncNow().catch(error => {
                     console.error('[StudBudCloud] Cloud sync failed:', error);
-                    this.setCloudStatus(`Cloud sync failed: ${error.message}`, true);
+                    this.setCloudStatus(this.friendlyAuthError(error, 'Your changes could not sync. Check your connection and try again.'), true);
                 });
             }, 350);
         }
 
         async syncNow() {
-            if (!this.user) return;
-            const backup = JSON.parse(await window.NexusApp.AppState.exportAppState());
-            const { error } = await this.client.from('studbud_user_data').upsert({
-                user_id: this.user.id,
-                data: backup,
-                updated_at: new Date().toISOString()
-            }, { onConflict: 'user_id' });
-            if (error) throw new Error(error.message);
-            this.setCloudStatus(`Synced to your account · ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`);
+            if (!this.accountReady || !this.user) return;
+            if (this.syncPromise) return this.syncPromise;
+            const userId = this.user.id;
+            const version = this.accountVersion;
+            let completedRevision = -1;
+            this.syncPromise = (async () => {
+                do {
+                    completedRevision = this.syncRevision;
+                    const backup = JSON.parse(await window.NexusApp.AppState.exportAppState());
+                    if (!this.accountReady || this.user?.id !== userId || this.accountVersion !== version) return;
+                    const { error } = await this.client.from('studbud_user_data').upsert({
+                        user_id: userId,
+                        data: backup,
+                        updated_at: new Date().toISOString()
+                    }, { onConflict: 'user_id' });
+                    if (error) throw new Error(error.message);
+                    if (!this.accountReady || this.user?.id !== userId || this.accountVersion !== version) return;
+                } while (completedRevision !== this.syncRevision);
+                this.setCloudStatus(`Synced to your account · ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`);
+            })();
+            try {
+                await this.syncPromise;
+            } finally {
+                this.syncPromise = null;
+            }
         }
 
         setCloudStatus(message, isError = false) {
@@ -206,20 +317,32 @@
             const { error } = await this.client.auth.signOut();
             if (error) {
                 console.error('[StudBudCloud] Sign-out failed:', error);
-                this.setCloudStatus(`Could not sign out: ${error.message}`, true);
+                this.setCloudStatus(this.friendlyAuthError(error, 'Could not sign out. Please try again.'), true);
                 return;
             }
+            await this.handleSignedOut();
+        }
+
+        async handleSignedOut() {
+            if (this.signOutHandling) return this.signOutHandling;
+            this.accountVersion++;
+            this.accountReady = false;
             this.user = null;
+            this.initialSnapshot = null;
             window.clearTimeout(this.syncTimer);
+            this.syncTimer = null;
+            this.showAuth();
+            this.signOutHandling = (async () => {
             try {
                 await this.clearDeviceCache();
             } catch (clearError) {
                 console.error('[StudBudCloud] Could not clear signed-out device cache:', clearError);
-                this.showAuth();
-                this.setAuthStatus(`Signed out, but could not clear this device's cache: ${clearError.message}`, true);
-                return;
+                this.setAuthStatus('Signed out, but could not clear this device’s saved data. Reload before another person signs in.', true);
+            } finally {
+                this.signOutHandling = null;
             }
-            window.location.reload();
+            })();
+            return this.signOutHandling;
         }
     }
 

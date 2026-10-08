@@ -31,7 +31,13 @@
                 { id: 'acc_backpack', name: 'Backpack', icon: 'fa-bag-shopping', price: 100, type: 'accessory' },
                 { id: 'acc_monocle', name: 'Monocle', icon: 'fa-eye', price: 140, type: 'accessory' },
                 { id: 'acc_cape', name: 'Hero Cape', icon: 'fa-mask', price: 180, type: 'accessory' },
-                { id: 'acc_wings', name: 'Jet Wings', icon: 'fa-dove', price: 350, type: 'accessory' }
+                { id: 'acc_wings', name: 'Jet Wings', icon: 'fa-dove',                 price: 350, type: 'accessory' },
+                { id: 'palette_aurora', name: 'Aurora Drift', color: 'aurora', price: 160, type: 'palette' },
+                { id: 'palette_coral', name: 'Coral Reef', color: 'coral', price: 160, type: 'palette' },
+                { id: 'palette_midnight', name: 'Midnight', color: 'midnight', price: 180, type: 'palette' },
+                { id: 'accessory_cap', name: 'Comet Cap', icon: 'fa-hat-cowboy-side', price: 75, type: 'hat' },
+                { id: 'accessory_halo', name: 'Halo Headband', icon: 'fa-circle', price: 125, type: 'hat' },
+                { id: 'accessory_headphones', name: 'Cloud Headphones', icon: 'fa-headphones',                 price: 150, type: 'hat' }
             ];
         }
 
@@ -61,6 +67,8 @@
         }
 
         async publishDeck(deck) {
+            const title = String(deck.title || '').trim();
+            if (!title || title.length > 100) throw new Error('Deck titles must be between 1 and 100 characters to share.');
             const cards = (deck.cards || []).map(card => ({
                 front: String(card.front || '').trim(),
                 back: String(card.back || '').trim()
@@ -72,7 +80,7 @@
             const { data, error } = await this.getClient().from('studbud_community_decks').upsert({
                 owner_id: this.getUserId(),
                 source_deck_id: String(deck.id),
-                title: String(deck.title || '').trim(),
+                title,
                 description: deck.communitySourceTitle
                     ? `Adapted from the shared set “${String(deck.communitySourceTitle).slice(0, 240)}”.`
                     : '',
@@ -106,6 +114,34 @@
                 p_deck_id: deckId
             });
             if (error) throw new Error(`Could not update the community study count: ${error.message}`);
+        }
+
+        async recordStudyTime(entryId, seconds, studiedAt) {
+            const normalizedEntryId = String(entryId || '').trim();
+            const normalizedSeconds = Math.round(Number(seconds));
+            if (!normalizedEntryId || normalizedEntryId.length > 140) {
+                throw new Error('That study session could not be recorded.');
+            }
+            if (!Number.isInteger(normalizedSeconds) || normalizedSeconds < 1 || normalizedSeconds > 21600) {
+                throw new Error('Study time must be between 1 second and 6 hours.');
+            }
+            const studiedDate = new Date(studiedAt || Date.now());
+            if (!Number.isFinite(studiedDate.getTime())) throw new Error('That study session has an invalid date.');
+            const { data, error } = await this.getClient().rpc('studbud_record_study_time', {
+                p_entry_id: normalizedEntryId,
+                p_seconds: normalizedSeconds,
+                p_study_date: studiedDate.toISOString().slice(0, 10)
+            });
+            if (error) throw new Error(`Could not sync study time: ${error.message}`);
+            return data;
+        }
+
+        async getStudyLeaderboard(period = 'daily') {
+            const { data, error } = await this.getClient().rpc('studbud_get_study_leaderboard', {
+                p_period: period
+            });
+            if (error) throw new Error(`Could not load the study leaderboard: ${error.message}`);
+            return data;
         }
 
         async getPlayerProfile() {
@@ -145,11 +181,9 @@
         }
 
         async createRoom(roomCode, nickname, deck, mode, options = {}) {
-            const cards = (deck.cards || []).filter(card => card.front && card.back).slice(0, 50)
-                .map(card => ({ front: String(card.front).slice(0, 1000), back: String(card.back).slice(0, 1000) }));
-            if (new Set(cards.map(card => card.back.trim())).size < 2) {
-                throw new Error('The selected set needs at least two different definitions for answer choices.');
-            }
+            const cards = (deck.cards || []).filter(card => String(card.front || '').trim() && String(card.back || '').trim()).slice(0, 50)
+                .map(card => ({ front: String(card.front).trim().slice(0, 1000), back: String(card.back).trim().slice(0, 1000) }));
+            if (!cards.length) throw new Error('Choose a set with at least one complete card.');
             const { data, error } = await this.getClient().rpc('studbud_create_game_room', {
                 p_code: roomCode,
                 p_nickname: nickname,
@@ -158,7 +192,11 @@
                 p_mode: mode,
                 p_options: options
             });
-            if (error) throw new Error(`Could not create the game: ${error.message}`);
+            if (error) {
+                const roomError = new Error(`Could not create the game: ${error.message}`);
+                roomError.code = error.code;
+                throw roomError;
+            }
             return data;
         }
 

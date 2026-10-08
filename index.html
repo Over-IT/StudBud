@@ -79,6 +79,9 @@
                     <li class="nav-item" data-target="analytics-view" role="button" tabindex="0">
                         <i class="fas fa-chart-line"></i> <span>Analytics & Projections</span>
                     </li>
+                    <li class="nav-item" data-target="leaderboard-view" role="button" tabindex="0" aria-label="Study streaks and leaderboards" title="Study streaks and leaderboards">
+                        <i class="fas fa-ranking-star" aria-hidden="true"></i> <span>Study Leaderboards</span>
+                    </li>
                     <li class="nav-item" data-target="exam-arcade-view" role="button" tabindex="0">
                         <i class="fas fa-gamepad"></i> <span>Practice Exams & Arcade</span>
                     </li>
@@ -176,6 +179,15 @@
                                 <div><span class="stat-number" id="dash-unweighted-gpa">0.00</span><span class="stat-label">Unweighted</span></div>
                             </div>
                         </div>
+                        <section class="glass-card widget full-width daily-study-card" aria-labelledby="daily-study-heading">
+                            <div class="daily-study-topline">
+                                <div><h3 id="daily-study-heading"><i class="fas fa-fire-flame-curved" aria-hidden="true"></i> Your study streak</h3><p class="study-guidance-intro">Study for 15 minutes each day to keep your streak alive.</p></div>
+                                <span id="daily-study-streak" class="daily-study-streak">0 days</span>
+                            </div>
+                            <div class="daily-study-stats"><strong id="daily-study-time">0 min</strong><span>of 15 min today</span></div>
+                            <progress id="daily-study-progress" class="daily-study-progress" max="900" value="0" aria-label="0 of 15 study minutes completed today"></progress>
+                            <div class="daily-study-footer"><p id="daily-study-note" role="status" aria-live="polite">Loading today's progress…</p><button class="secondary-btn" type="button" data-target="leaderboard-view"><i class="fas fa-ranking-star" aria-hidden="true"></i> View leaderboards</button></div>
+                        </section>
                         <div class="glass-card widget full-width focus-sprint-widget">
                             <div class="view-header">
                                 <div><h3><i class="fas fa-stopwatch"></i> Focus sprint</h3><p class="study-guidance-intro">Pick one task, focus without distractions, then log the session.</p></div>
@@ -485,6 +497,34 @@
                     </div>
                 </section>
 
+                <section id="leaderboard-view" class="view hidden">
+                    <div class="view-header">
+                        <div><h2>Study streaks &amp; leaderboards</h2><p class="study-guidance-intro">Build a daily learning habit: 15 minutes of study keeps your streak going. Compare study time with other StudBud students.</p></div>
+                    </div>
+                    <section class="glass-card daily-study-card leaderboard-habit-card">
+                        <div class="daily-study-topline">
+                            <div><h3><i class="fas fa-fire-flame-curved" aria-hidden="true"></i> Daily goal</h3><p class="study-guidance-intro">Your study time and streak update as sessions sync.</p></div>
+                            <span id="leaderboard-streak-display" class="daily-study-streak">0 day streak</span>
+                        </div>
+                        <div class="daily-study-stats"><strong id="leaderboard-today-time">0 min</strong><span>of 15 min today</span></div>
+                        <progress id="leaderboard-study-progress" class="daily-study-progress" max="900" value="0" aria-label="0 of 15 study minutes completed today"></progress>
+                        <p id="leaderboard-goal-note" class="study-guidance-intro" role="status"></p>
+                    </section>
+                    <section class="glass-card study-leaderboard-panel">
+                        <div class="study-leaderboard-heading">
+                            <div><h3><i class="fas fa-trophy" aria-hidden="true"></i> Study time leaderboard</h3><p id="study-leaderboard-period-label" class="study-guidance-intro">Today · UTC</p></div>
+                            <div class="study-leaderboard-tabs" role="group" aria-label="Leaderboard period">
+                                <button class="secondary-btn selected" type="button" data-study-leaderboard-period="daily" aria-pressed="true">Daily</button>
+                                <button class="secondary-btn" type="button" data-study-leaderboard-period="weekly" aria-pressed="false">Weekly</button>
+                                <button class="secondary-btn" type="button" data-action="study-leaderboard-retry"><i class="fas fa-rotate" aria-hidden="true"></i> Refresh</button>
+                            </div>
+                        </div>
+                        <p id="study-leaderboard-status" class="community-status" role="status" aria-live="polite">Loading study progress…</p>
+                        <ol id="study-leaderboard-list" class="study-leaderboard-list"></ol>
+                        <p class="settings-hint">Leaderboard periods use UTC. Usernames are visible to signed-in StudBud students. Study time is synced from the time users log or spend in supported study activities.</p>
+                    </section>
+                </section>
+
                 <!-- 6. Practice Exams & Arcade View -->
                 <section id="exam-arcade-view" class="view hidden">
                     <div class="view-header">
@@ -612,7 +652,7 @@
                                 <section id="hosted-game-room" class="hosted-game-room hidden" aria-live="polite">
                                     <div class="hosted-room-heading">
                                         <div><h4 id="hosted-room-title">Game room</h4><p id="hosted-room-meta"></p></div>
-                                        <div class="hosted-room-code"><span>Room code</span><strong id="hosted-room-code"></strong></div>
+                                        <div class="hosted-room-code"><span>Room code</span><strong id="hosted-room-code"></strong><button id="copy-hosted-room-code-btn" class="secondary-btn" type="button" data-action="copy-hosted-room-code" aria-label="Copy room code"><i class="fas fa-copy" aria-hidden="true"></i> Copy</button></div>
                                     </div>
                                     <p id="hosted-room-status" class="hosted-room-status"></p>
                                     <div id="multiplayer-arena" class="multiplayer-arena" aria-label="Live game progress">
@@ -743,6 +783,9 @@
                                 <button type="button" class="scheme-option" data-color-scheme="ocean" data-shop-item="palette_ocean"><span class="scheme-swatch ocean-swatch"></span><span>Ocean</span><small class="scheme-lock-note">Unlock in multiplayer shop</small></button>
                                 <button type="button" class="scheme-option" data-color-scheme="violet" data-shop-item="palette_violet"><span class="scheme-swatch violet-swatch"></span><span>Violet</span><small class="scheme-lock-note">Unlock in multiplayer shop</small></button>
                                 <button type="button" class="scheme-option" data-color-scheme="sunset" data-shop-item="palette_sunset"><span class="scheme-swatch sunset-swatch"></span><span>Sunset</span><small class="scheme-lock-note">Unlock in multiplayer shop</small></button>
+                                <button type="button" class="scheme-option" data-color-scheme="aurora" data-shop-item="palette_aurora"><span class="scheme-swatch aurora-swatch"></span><span>Aurora Drift</span><small class="scheme-lock-note">Unlock in multiplayer shop</small></button>
+                                <button type="button" class="scheme-option" data-color-scheme="coral" data-shop-item="palette_coral"><span class="scheme-swatch coral-swatch"></span><span>Coral Reef</span><small class="scheme-lock-note">Unlock in multiplayer shop</small></button>
+                                <button type="button" class="scheme-option" data-color-scheme="midnight" data-shop-item="palette_midnight"><span class="scheme-swatch midnight-swatch"></span><span>Midnight</span><small class="scheme-lock-note">Unlock in multiplayer shop</small></button>
                                 <button type="button" class="scheme-option" data-color-scheme="monochrome"><span class="scheme-swatch monochrome-swatch"></span><span>Black &amp; White</span></button>
                             </div>
                         </section>

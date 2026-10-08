@@ -76,6 +76,129 @@ create table if not exists public.studbud_community_deck_studies (
 alter table public.studbud_community_deck_studies enable row level security;
 revoke all on table public.studbud_community_deck_studies from anon, authenticated;
 
+create table if not exists public.studbud_study_time_entries (
+    user_id uuid not null references auth.users (id) on delete cascade,
+    entry_id text not null check (char_length(entry_id) between 1 and 140),
+    study_date date not null default (timezone('utc', now())::date),
+    seconds integer not null check (seconds between 1 and 21600),
+    created_at timestamptz not null default now(),
+    primary key (user_id, entry_id)
+);
+
+create index if not exists studbud_study_time_entries_date_idx
+    on public.studbud_study_time_entries (study_date, user_id);
+alter table public.studbud_study_time_entries enable row level security;
+revoke all on table public.studbud_study_time_entries from public, anon, authenticated;
+
+drop function if exists public.studbud_record_study_time(text, integer);
+create or replace function public.studbud_record_study_time(
+    p_entry_id text,
+    p_seconds integer,
+    p_study_date date
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_user_id uuid := auth.uid();
+    v_inserted integer;
+begin
+    if v_user_id is null then raise exception 'Sign in to record study time.'; end if;
+    if p_entry_id is null or char_length(btrim(p_entry_id)) not between 1 and 140 then
+        raise exception 'That study session could not be recorded.';
+    end if;
+    if p_seconds is null or p_seconds not between 1 and 21600 then
+        raise exception 'Study time must be between 1 second and 6 hours.';
+    end if;
+    if p_study_date is null or p_study_date > timezone('utc', now())::date then
+        raise exception 'Study dates cannot be in the future.';
+    end if;
+
+    insert into public.studbud_study_time_entries (user_id, entry_id, study_date, seconds)
+    values (v_user_id, btrim(p_entry_id), p_study_date, p_seconds)
+    on conflict (user_id, entry_id) do nothing;
+    get diagnostics v_inserted = row_count;
+    return jsonb_build_object('recorded', v_inserted > 0);
+end;
+$$;
+
+create or replace function public.studbud_get_study_leaderboard(p_period text default 'daily')
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_user_id uuid := auth.uid();
+    v_today date := timezone('utc', now())::date;
+    v_start date;
+    v_streak_day date;
+    v_day_seconds integer;
+    v_today_seconds integer;
+    v_streak integer := 0;
+    v_board jsonb;
+begin
+    if v_user_id is null then raise exception 'Sign in to open study leaderboards.'; end if;
+    if p_period is null or p_period not in ('daily', 'weekly') then raise exception 'Choose a daily or weekly leaderboard.'; end if;
+    v_start := case when p_period = 'weekly'
+        then date_trunc('week', v_today::timestamp)::date
+        else v_today
+    end;
+
+    select coalesce(sum(seconds), 0)::integer into v_today_seconds
+    from public.studbud_study_time_entries
+    where user_id = v_user_id and study_date = v_today;
+
+    v_streak_day := v_today;
+    if v_today_seconds < 900 then v_streak_day := v_today - 1; end if;
+    loop
+        select coalesce(sum(seconds), 0)::integer into v_day_seconds
+        from public.studbud_study_time_entries
+        where user_id = v_user_id and study_date = v_streak_day;
+        exit when v_day_seconds < 900;
+        v_streak := v_streak + 1;
+        v_streak_day := v_streak_day - 1;
+    end loop;
+
+    select coalesce(jsonb_agg(
+        jsonb_build_object(
+            'rank', ranked.rank,
+            'username', ranked.username,
+            'seconds', ranked.seconds,
+            'minutes', floor(ranked.seconds / 60.0)::integer,
+            'is_me', ranked.user_id = v_user_id
+        ) order by ranked.seconds desc, ranked.username
+    ), '[]'::jsonb)
+    into v_board
+    from (
+        select row_number() over (order by sum(entry.seconds) desc, coalesce(nullif(account.raw_user_meta_data ->> 'username', ''), 'Student'))::integer as rank,
+            entry.user_id,
+            coalesce(nullif(account.raw_user_meta_data ->> 'username', ''), 'Student') as username,
+            sum(entry.seconds)::integer as seconds
+        from public.studbud_study_time_entries entry
+        join auth.users account on account.id = entry.user_id
+        where entry.study_date between v_start and v_today
+        group by entry.user_id, account.raw_user_meta_data
+        order by sum(entry.seconds) desc, username
+        limit 50
+    ) ranked;
+
+    return jsonb_build_object(
+        'period', p_period,
+        'starts_on', v_start,
+        'ends_on', v_today,
+        'today_seconds', v_today_seconds,
+        'today_minutes', floor(v_today_seconds / 60.0)::integer,
+        'daily_goal_seconds', 900,
+        'streak_days', v_streak,
+        'leaderboard', v_board
+    );
+end;
+$$;
+
 create or replace function public.studbud_protect_community_deck_study_count()
 returns trigger
 language plpgsql
@@ -140,7 +263,7 @@ create table if not exists public.studbud_game_rooms (
     deck_title text not null check (char_length(deck_title) between 1 and 100),
     cards jsonb not null check (
         jsonb_typeof(cards) = 'array'
-        and jsonb_array_length(cards) between 2 and 50
+        and jsonb_array_length(cards) between 1 and 50
     ),
     mode text not null check (mode in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'sports', 'fishing', 'hack')),
     status text not null default 'waiting' check (status in ('waiting', 'playing', 'finished')),
@@ -161,6 +284,10 @@ alter table public.studbud_game_rooms
     add column if not exists time_limit_seconds integer not null default 300,
     add column if not exists started_at timestamptz,
     add column if not exists rewards_paid boolean not null default false;
+alter table public.studbud_game_rooms drop constraint if exists studbud_game_rooms_cards_check;
+alter table public.studbud_game_rooms
+    add constraint studbud_game_rooms_cards_check
+    check (jsonb_typeof(cards) = 'array' and jsonb_array_length(cards) between 1 and 50);
 alter table public.studbud_game_rooms drop constraint if exists studbud_game_rooms_mode_check;
 alter table public.studbud_game_rooms
     add constraint studbud_game_rooms_mode_check
@@ -195,7 +322,11 @@ create table if not exists public.studbud_multiplayer_profiles (
 alter table public.studbud_multiplayer_profiles
     add column if not exists equipped_skin text not null default '',
     add column if not exists equipped_hat text not null default '',
-    add column if not exists equipped_accessory text not null default '';
+    add column if not exists equipped_accessory text not null default '',
+    add column if not exists best_wait_score integer not null default 0;
+
+-- Legacy 'accessory_default' placeholder from older versions means "nothing equipped".
+update public.studbud_multiplayer_profiles set equipped_accessory = '' where equipped_accessory = 'accessory_default';
 
 create or replace function public.studbud_shop_price(p_item_id text)
 returns integer
@@ -205,20 +336,19 @@ as $$
     select case p_item_id
         when 'avatar_spark' then 50 when 'avatar_fox' then 90 when 'avatar_rocket' then 140 when 'avatar_crown' then 220
         when 'palette_ocean' then 120 when 'palette_sunset' then 120 when 'palette_violet' then 120
+        when 'palette_aurora' then 160 when 'palette_coral' then 160 when 'palette_midnight' then 180
         when 'skin_robot' then 150 when 'skin_ninja' then 180 when 'skin_alien' then 180
         when 'skin_ghost' then 220 when 'skin_lava' then 300 when 'skin_gold' then 400
         when 'hat_cap' then 60 when 'hat_party' then 70 when 'hat_cowboy' then 110 when 'hat_headphones' then 120
         when 'hat_tophat' then 130 when 'hat_wizard' then 160 when 'hat_viking' then 190
         when 'hat_halo' then 250 when 'hat_crown' then 400
+        when 'accessory_cap' then 75 when 'accessory_halo' then 125 when 'accessory_headphones' then 150
         when 'acc_shades' then 80 when 'acc_scarf' then 90 when 'acc_backpack' then 100
         when 'acc_monocle' then 140 when 'acc_cape' then 180 when 'acc_wings' then 350
         else null
     end;
 $$;
 
-alter table public.studbud_multiplayer_profiles
-    add column if not exists best_wait_score integer not null default 0;
-alter table public.studbud_multiplayer_profiles enable row level security;
 revoke all on table public.studbud_multiplayer_profiles from anon, authenticated;
 
 create or replace function public.studbud_get_multiplayer_profile()
@@ -272,8 +402,10 @@ begin
     from unnest(array[
         'avatar_spark', 'avatar_fox', 'avatar_rocket', 'avatar_crown',
         'palette_ocean', 'palette_sunset', 'palette_violet',
+        'palette_aurora', 'palette_coral', 'palette_midnight',
         'skin_robot', 'skin_ninja', 'skin_alien', 'skin_ghost', 'skin_lava', 'skin_gold',
         'hat_cap', 'hat_party', 'hat_cowboy', 'hat_headphones', 'hat_tophat', 'hat_wizard', 'hat_viking', 'hat_halo', 'hat_crown',
+        'accessory_cap', 'accessory_halo', 'accessory_headphones',
         'acc_shades', 'acc_scarf', 'acc_backpack', 'acc_monocle', 'acc_cape', 'acc_wings'
     ]) as item(item_id)
     where not (item_id = any(v_profile.owned_items))
@@ -355,7 +487,7 @@ begin
         update public.studbud_multiplayer_profiles set equipped_palette = p_item_id, updated_at = now() where user_id = v_user_id;
     elsif p_item_id like 'skin_%' then
         update public.studbud_multiplayer_profiles set equipped_skin = p_item_id, updated_at = now() where user_id = v_user_id;
-    elsif p_item_id like 'hat_%' then
+    elsif p_item_id like 'hat_%' or p_item_id like 'accessory_%' then
         update public.studbud_multiplayer_profiles set equipped_hat = p_item_id, updated_at = now() where user_id = v_user_id;
     elsif p_item_id like 'acc_%' then
         update public.studbud_multiplayer_profiles set equipped_accessory = p_item_id, updated_at = now() where user_id = v_user_id;
@@ -474,8 +606,8 @@ begin
         limit 3
     ) as choices;
 
-    if not (v_options @> jsonb_build_array(v_card ->> 'back')) then
-        v_options := v_options || jsonb_build_array(v_card ->> 'back');
+    if not coalesce(v_options @> jsonb_build_array(v_card ->> 'back'), false) then
+        v_options := coalesce(v_options, '[]'::jsonb) || jsonb_build_array(v_card ->> 'back');
     end if;
 
     return jsonb_build_object(
@@ -552,18 +684,13 @@ begin
     end if;
     if v_reward not in (10, 20, 30, 50) then raise exception 'Choose a supported question reward.'; end if;
     if jsonb_typeof(v_cards) is distinct from 'array' then raise exception 'The selected deck is invalid.'; end if;
-    if jsonb_array_length(v_cards) not between 2 and 50 then raise exception 'A hosted game needs 2–50 cards.'; end if;
+    if jsonb_array_length(v_cards) not between 1 and 50 then raise exception 'A hosted game needs 1–50 cards.'; end if;
     if exists (
         select 1 from jsonb_array_elements(v_cards) as item(card)
         where jsonb_typeof(card) <> 'object'
             or char_length(btrim(coalesce(card ->> 'front', ''))) not between 1 and 1000
             or char_length(btrim(coalesce(card ->> 'back', ''))) not between 1 and 1000
     ) then raise exception 'Every game card needs a term and definition under 1000 characters.'; end if;
-    if (
-        select count(distinct card ->> 'back')
-        from jsonb_array_elements(v_cards) as item(card)
-    ) < 2 then raise exception 'The selected set needs at least two different definitions for answer choices.'; end if;
-
     delete from public.studbud_game_rooms where expires_at <= now();
 
     insert into public.studbud_multiplayer_profiles (user_id)
@@ -688,8 +815,7 @@ begin
     if auth.uid() is null then raise exception 'Sign in to view a game.'; end if;
     select * into v_room
     from public.studbud_game_rooms
-    where room_code = upper(btrim(p_code)) and expires_at > now()
-    for update;
+    where room_code = upper(btrim(p_code)) and expires_at > now();
     if v_room.id is null then raise exception 'You are not in this game, or the room has expired.'; end if;
     if v_room.status = 'playing' and v_room.goal_type = 'time'
         and now() >= v_room.started_at + make_interval(secs => v_room.time_limit_seconds) then
@@ -1078,6 +1204,7 @@ declare
     v_room public.studbud_game_rooms%rowtype;
     v_players jsonb;
 begin
+    if auth.uid() is null then raise exception 'Sign in to leave a game.'; end if;
     select * into v_room
     from public.studbud_game_rooms
     where room_code = upper(btrim(p_code)) and expires_at > now()
@@ -1164,6 +1291,10 @@ grant execute on function public.studbud_unequip_multiplayer_slot(text) to authe
 
 revoke all on function public.studbud_record_community_deck_study(uuid) from public, anon;
 grant execute on function public.studbud_record_community_deck_study(uuid) to authenticated;
+revoke all on function public.studbud_record_study_time(text, integer, date) from public, anon;
+grant execute on function public.studbud_record_study_time(text, integer, date) to authenticated;
+revoke all on function public.studbud_get_study_leaderboard(text) from public, anon;
+grant execute on function public.studbud_get_study_leaderboard(text) to authenticated;
 revoke all on function public.studbud_protect_community_deck_study_count() from public, anon, authenticated;
 revoke all on function public.studbud_game_make_question(jsonb, integer) from public, anon, authenticated;
 revoke all on function public.studbud_game_room_view(public.studbud_game_rooms) from public, anon, authenticated;
