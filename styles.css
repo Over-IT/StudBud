@@ -1165,7 +1165,7 @@ tbody tr:hover {
 .calendar-schedule small { color: var(--text-muted); text-align: right; }
 .schedule-day-type { margin: 0; color: var(--text-secondary); font-size: 0.85rem; }
 .schedule-editor { padding: var(--spacing-lg); }
-.schedule-pattern-headings, .schedule-course-row { display: grid; grid-template-columns: minmax(150px, 1.5fr) repeat(3, minmax(120px, 1fr)); gap: var(--spacing-md); align-items: center; }
+.schedule-pattern-headings, .schedule-course-row { display: grid; grid-template-columns: minmax(150px, 1.5fr) minmax(120px, 1fr); gap: var(--spacing-md); align-items: center; }
 .schedule-pattern-headings { padding: 0 0 var(--spacing-sm); color: var(--text-secondary); font-size: 0.86rem; font-weight: 700; }
 .schedule-course-row { padding: var(--spacing-sm) 0; border-top: 1px solid var(--border-glass); }
 .schedule-period-select select { width: 100%; }
@@ -2061,7 +2061,7 @@ input[type=range]::-webkit-slider-runnable-track {
     }
 
     .class-detail-grid, .calendar-layout { grid-template-columns: 1fr; }
-    .schedule-pattern-headings, .schedule-course-row { grid-template-columns: minmax(100px, 1.1fr) repeat(3, minmax(90px, 1fr)); gap: var(--spacing-sm); }
+    .schedule-pattern-headings, .schedule-course-row { grid-template-columns: minmax(100px, 1.1fr) minmax(90px, 1fr); gap: var(--spacing-sm); }
     .calendar-day, .calendar-day-empty { min-height: 56px; padding: 5px; }
     .calendar-day small { font-size: 0.62rem; }
     .memory-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -2072,7 +2072,7 @@ input[type=range]::-webkit-slider-runnable-track {
 }
 
 @media (max-width: 640px) {
-    .schedule-pattern-headings, .schedule-course-row { grid-template-columns: minmax(100px, 1fr) repeat(3, minmax(76px, 0.8fr)); gap: 5px; }
+    .schedule-pattern-headings, .schedule-course-row { grid-template-columns: minmax(0, 1fr) minmax(100px, 0.8fr); gap: 5px; }
     .schedule-pattern-headings { font-size: 0.7rem; }
     .schedule-course-row strong { font-size: 0.8rem; }
     .schedule-actions, .class-focus-panel { align-items: stretch; flex-direction: column; }
@@ -2149,8 +2149,8 @@ input[type=range]::-webkit-slider-runnable-track {
     .calendar-day, .calendar-day-empty { min-width: 0; min-height: 48px; padding: 4px; overflow: hidden; }
     .calendar-day > span { font-size: 0.82rem; }
     .calendar-day small { max-width: 100%; overflow: hidden; white-space: nowrap; }
-    .schedule-course-list, #schedule-course-list { overflow-x: auto; }
-    .schedule-pattern-headings, .schedule-course-row { min-width: 430px; grid-template-columns: minmax(120px, 1.2fr) repeat(3, minmax(95px, 1fr)); }
+    .schedule-course-list, #schedule-course-list { overflow-x: visible; }
+    .schedule-pattern-headings, .schedule-course-row { min-width: 0; grid-template-columns: minmax(0, 1fr) minmax(110px, 0.8fr); }
     table { display: block; max-width: 100%; overflow-x: auto; }
     .transcript-class-summary { grid-template-columns: 20px minmax(110px, 1fr) auto auto; gap: var(--spacing-sm); }
     .transcript-class-summary > .transcript-item-count { display: none; }

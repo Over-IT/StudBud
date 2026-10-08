@@ -13,7 +13,7 @@
         battle: { name: 'Battle Drive', bpm: 140, chords: [[52, 1], [52, 1], [55, 0], [50, 0]], bass: '1011101110111011', lead: '1000100110001001', arp: [0, 2, 3, 2, 3, 1], leadWave: 'sawtooth', bassWave: 'sawtooth', kick: '1001100110011001', snare: '0000100000001000', hat: '1111111111111111' },
         neon: { name: 'Neon Exchange', bpm: 108, chords: [[57, 1], [55, 0], [53, 0], [52, 0]], bass: '1100110011001100', lead: '1010101010101010', arp: [0, 1, 2, 3, 3, 2, 1, 0], leadWave: 'square', bassWave: 'square', kick: '1000100010001000', snare: '0000100000001000', hat: '0101010101010101' }
     };
-    const MODE_STYLE = { skyline: 'summit', river: 'lagoon', fishing: 'lagoon', market: 'bazaar', miner: 'cavern', duel: 'battle', shooter: 'battle', sports: 'bazaar', crypto: 'neon', hack: 'neon' };
+    const MODE_STYLE = { skyline: 'summit', river: 'lagoon', market: 'bazaar', miner: 'cavern', duel: 'battle', shooter: 'battle', sports: 'bazaar', crypto: 'neon' };
 
     // Every sound is synthesized on the fly, so there are no audio files to load.
     const RECIPES = {

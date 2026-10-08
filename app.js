@@ -480,7 +480,7 @@
         constructor() {
             this.routes = [
                 "dashboard", "gpa", "grade-scenarios", "planner", "calendar", "schedule", "flashcard",
-                "analytics", "leaderboard", "exam-arcade", "multiplayer", "importer", "settings", "appearance", "sound"
+                "analytics", "leaderboard", "exam-arcade", "multiplayer", "player", "importer", "settings", "appearance", "sound"
             ];
             this.activeRoute = "dashboard";
         }
@@ -1129,6 +1129,7 @@
                     this.renderMultiplayerProfile(true);
                     this.startMultiplayerAnimation();
                 }
+                if (route === 'player') this.renderMultiplayerProfile(true);
                 if (route === 'flashcard') {
                     this.renderHostedGameDecks();
                     if (!document.getElementById('community-deck-results').dataset.loaded) this.searchCommunityDecks('');
@@ -1333,7 +1334,7 @@
                         categoryGroups.push({ id: 'uncategorized', name: 'Other assignments', weight: null, assignments: uncategorized });
                     }
                     const categoryMarkup = categoryGroups.map(group => {
-                        const graded = group.assignments.filter(item => item.status === 'completed' || Number(item.pointsEarned) > 0);
+                        const graded = group.assignments.filter(item => this.isAssignmentGraded(item));
                         const pointsEarned = graded.reduce((sum, item) => sum + Number(item.pointsEarned || 0), 0);
                         const pointsPossible = graded.reduce((sum, item) => sum + Number(item.maxPoints || 0), 0);
                         const categoryGrade = pointsPossible > 0 ? `${(pointsEarned / pointsPossible * 100).toFixed(1)}%` : '—';
@@ -1361,7 +1362,10 @@
                                 <strong class="transcript-category-grade">${categoryGrade}</strong>
                                 <span class="transcript-item-count">${group.assignments.length} item${group.assignments.length === 1 ? '' : 's'}</span>
                             </summary>
-                            <div class="transcript-assignment-list">${assignmentMarkup}</div>
+                            <div class="transcript-assignment-list">
+                                <button class="secondary-btn" data-action="add-category-assignment" data-course="${this.escapeHTML(course.code)}" data-id="${this.escapeHTML(group.id === 'uncategorized' ? '' : group.id)}"><i class="fas fa-plus"></i> Add to ${this.escapeHTML(group.name)}</button>
+                                ${assignmentMarkup}
+                            </div>
                         </details>`;
                     }).join('');
                     return `<article class="transcript-class">
@@ -1426,7 +1430,7 @@
         calculateCourseGrade(course, assignments = AppState.get('assignments') || []) {
             const courseAssignments = assignments.filter(item =>
                 item.courseCode === course.code &&
-                (item.status === 'completed' || Number(item.pointsEarned) > 0)
+                this.isAssignmentGraded(item)
             );
             if (!courseAssignments.length) return null;
 
@@ -1463,6 +1467,11 @@
             return possible > 0 ? earned / possible * 100 : null;
         }
 
+        isAssignmentGraded(assignment) {
+            if (assignment.isGraded !== undefined) return Boolean(assignment.isGraded);
+            return Boolean(assignment.gradedAt) || Number(assignment.pointsEarned) > 0;
+        }
+
         renderClassDetail() {
             const container = document.getElementById('class-detail-content');
             if (!container) return;
@@ -1478,15 +1487,19 @@
             const sumWeights = categories.reduce((sum, category) => sum + Number(category.weight || 0), 0);
             const categoryRows = categories.map(category => {
                 const items = assignments.filter(item => item.categoryId === category.id);
-                const earned = items.reduce((sum, item) => sum + Number(item.pointsEarned || 0), 0);
-                const possible = items.reduce((sum, item) => sum + Number(item.maxPoints || 0), 0);
+                const graded = items.filter(item => this.isAssignmentGraded(item));
+                const earned = graded.reduce((sum, item) => sum + Number(item.pointsEarned || 0), 0);
+                const possible = graded.reduce((sum, item) => sum + Number(item.maxPoints || 0), 0);
                 const categoryGrade = possible > 0 ? `${(earned / possible * 100).toFixed(1)}%` : 'No graded work';
                 return `<div class="category-row">
                     <div><strong>${this.escapeHTML(category.name)}</strong><span>${categoryGrade} · ${items.length} items</span></div>
                     <strong>${Number(category.weight || 0).toFixed(1)}%</strong>
+                    <button class="secondary-btn" data-action="add-category-assignment" data-course="${this.escapeHTML(course.code)}" data-id="${this.escapeHTML(category.id)}"><i class="fas fa-plus"></i> Add</button>
                     <button class="danger-btn" data-action="remove-category" data-id="${this.escapeHTML(category.id)}" aria-label="Remove ${this.escapeHTML(category.name)}">Remove</button>
                 </div>`;
             }).join('');
+            const uncategorized = assignments.filter(item => !item.categoryId || !categories.some(category => category.id === item.categoryId));
+            const otherCategoryRow = `<div class="category-row"><div><strong>Other assignments</strong><span>${uncategorized.length} items</span></div><strong>—</strong><button class="secondary-btn" data-action="add-category-assignment" data-course="${this.escapeHTML(course.code)}" data-id=""><i class="fas fa-plus"></i> Add</button><span></span></div>`;
             const workRows = assignments.length ? assignments.map(item => `
                 <tr>
                     <td><button class="secondary-btn" data-action="toggle-assignment" data-id="${this.escapeHTML(item.id)}">${item.status === 'completed' ? 'Done' : 'Open'}</button></td>
@@ -1494,7 +1507,7 @@
                     <td>${this.escapeHTML((categories.find(category => category.id === item.categoryId) || {}).name || 'Uncategorized')}</td>
                     <td>${this.escapeHTML(item.kind || 'assignment')}</td>
                     <td>${this.escapeHTML(item.dueDate || 'No date')}</td>
-                    <td>${item.pointsEarned ?? 0} / ${item.maxPoints ?? 100}</td>
+                    <td>${this.isAssignmentGraded(item) ? `${item.pointsEarned ?? 0} / ${item.maxPoints ?? 100}` : 'Not graded'}</td>
                     <td class="actions">
                         <button class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit</button>
                         <button class="danger-btn" data-action="delete-assignment" data-id="${this.escapeHTML(item.id)}">Delete</button>
@@ -1516,7 +1529,7 @@
                     <section class="glass-card">
                         <h3>Optional grade categories</h3>
                         <p>Weights are percentages. Category averages use earned points / possible points; categories without scores are left out until work is graded.</p>
-                        <div class="category-list">${categoryRows || '<p class="empty-state">No categories. Your graded assignments will use a points-based average.</p>'}</div>
+                        <div class="category-list">${categoryRows || '<p class="empty-state">No categories. Add work under Other assignments.</p>'}${otherCategoryRow}</div>
                         <p class="${Math.abs(sumWeights - 100) < 0.01 ? 'weight-valid' : 'weight-note'}">Category weights total ${sumWeights.toFixed(1)}%${categories.length && Math.abs(sumWeights - 100) >= 0.01 ? ' (recommended total: 100%)' : ''}</p>
                         <div class="category-add-form">
                             <input id="new-category-name" type="text" placeholder="Category name (e.g. Tests)">
@@ -1556,37 +1569,36 @@
             const container = document.getElementById('schedule-course-list');
             if (!container) return;
             const courses = AppState.get('courses') || [];
-            const schedule = AppState.get('schedule') || { all: {}, odd: {}, even: {} };
+            const schedule = AppState.get('schedule') || {};
             if (!courses.length) {
                 container.innerHTML = '<p class="empty-state">Add a class before assigning it to a period.</p>';
                 return;
             }
-            const patterns = [
-                ['all', 'All day'],
-                ['odd', 'Odd day'],
-                ['even', 'Even day']
-            ];
             const periodOptions = '<option value="">Not scheduled</option>' +
                 [1, 2, 3, 5, 6, 7, 8].map(number => `<option value="${number}">Period ${number}</option>`).join('');
+            const assignedPeriods = { ...(schedule.periods || {}) };
+            if (!schedule.periods) {
+                ['all', 'odd', 'even'].forEach(pattern => {
+                    Object.entries(schedule[pattern] || {}).forEach(([period, courseCode]) => {
+                        if (assignedPeriods[courseCode] === undefined || pattern === 'all') assignedPeriods[courseCode] = period;
+                    });
+                });
+            }
             container.innerHTML = `
-                <div class="schedule-pattern-headings"><span>Class</span>${patterns.map(([, label]) => `<span>${label}</span>`).join('')}</div>
+                <div class="schedule-pattern-headings"><span>Class</span><span>Period</span></div>
                 ${courses.map(course => `<div class="schedule-course-row">
                     <strong>${this.escapeHTML(course.title)}</strong>
-                    ${patterns.map(([pattern, label]) => `<label class="schedule-period-select"><select aria-label="${this.escapeHTML(course.title)} period on ${this.escapeHTML(label)}" data-schedule-pattern="${pattern}" data-course="${this.escapeHTML(course.code)}">${periodOptions}</select></label>`).join('')}
+                    <label class="schedule-period-select"><select aria-label="${this.escapeHTML(course.title)} period" data-course-period="${this.escapeHTML(course.code)}">${periodOptions}</select></label>
                 </div>`).join('')}`;
-            patterns.forEach(([pattern]) => {
-                container.querySelectorAll(`select[data-schedule-pattern="${pattern}"]`).forEach(select => {
-                    const courseCode = select.dataset.course;
-                    const assignedPeriod = Object.entries(schedule[pattern] || {}).find(([, code]) => code === courseCode)?.[0];
-                    if (assignedPeriod) select.value = assignedPeriod;
-                });
+            container.querySelectorAll('select[data-course-period]').forEach(select => {
+                select.value = assignedPeriods[select.dataset.coursePeriod] || '';
             });
         }
 
         saveSchedule() {
-            const schedule = { all: {}, odd: {}, even: {} };
-            document.querySelectorAll('#schedule-course-list select[data-schedule-pattern]').forEach(select => {
-                if (select.value) schedule[select.dataset.schedulePattern][select.value] = select.dataset.course;
+            const schedule = { periods: {} };
+            document.querySelectorAll('#schedule-course-list select[data-course-period]').forEach(select => {
+                if (select.value) schedule.periods[select.dataset.coursePeriod] = select.value;
             });
             AppState.set('schedule', schedule);
             this.renderDashboard();
@@ -1597,12 +1609,17 @@
         getScheduleEntries(date) {
             const pchsSchedule = this.getSchoolSchedule(date);
             const pattern = this.getSchedulePattern(pchsSchedule);
-            const periodMap = (AppState.get('schedule') || {})[pattern] || {};
+            const schedule = AppState.get('schedule') || {};
+            const periodMap = schedule.periods
+                ? Object.fromEntries(Object.entries(schedule.periods).map(([courseCode, period]) => [String(period), courseCode]))
+                : { ...(schedule.all || {}), ...(pattern === 'all' ? { ...(schedule.odd || {}), ...(schedule.even || {}) } : {}), ...(schedule[pattern] || {}) };
+            const allowedPeriods = pattern === 'odd' ? new Set([1, 3, 5, 7])
+                : pattern === 'even' ? new Set([2, 6, 8]) : null;
             const courses = AppState.get('courses') || [];
             const entries = (pchsSchedule?.classes || []).map(slot => {
                 const match = String(slot.period).match(/^\s*(\d+)/);
                 const period = match ? Number(match[1]) : null;
-                const courseCode = period ? periodMap[String(period)] : null;
+                const courseCode = period && (!allowedPeriods || allowedPeriods.has(period)) ? periodMap[String(period)] : null;
                 const course = courses.find(item => item.code === courseCode);
                 return { ...slot, periodNumber: period, course };
             });
@@ -2156,8 +2173,6 @@
                 miner: ['Crystal Cartel', 'Drill safely or blast for high-value crystal pockets.'],
                 duel: ['Hammerheart Showdown', 'Swing for a hard hit or guard and counter-climb.'],
                 crypto: ['Crypto Exchange', 'Invest in six different assets, react to market news, research with questions and build mining rigs.'],
-                fishing: ['Fishing Frenzy', 'Charge a cast, hook the bite, and win the reel minigame. Rare fish and treasure chests score big.'],
-                hack: ['Crypto Hack', 'Mine crypto at terminals, crack codes at hack stations, and steal from rivals in a server room.'],
                 shooter: ['Starfall Blasters', 'Aim with the mouse in a top-down arena and blast drone waves.'],
                 sports: ['Endzone Rally', 'Run the field, juke tacklers, and score touchdowns against real opponents.']
             };
@@ -2957,7 +2972,7 @@
                 classic: 'Classic', rush: 'Rush', survival: 'Survival',
                 skyline: 'Rooftop Rumble', river: 'River Raiders', market: 'Market Mayhem',
                 miner: 'Crystal Cartel', duel: 'Hammerheart Showdown',
-                crypto: 'Crypto Exchange', shooter: 'Starfall Blasters', sports: 'Endzone Rally', fishing: 'Fishing Frenzy', hack: 'Crypto Hack'
+                crypto: 'Crypto Exchange', shooter: 'Starfall Blasters', sports: 'Endzone Rally'
             };
             document.getElementById('hosted-room-title').textContent = `${room.deck_title} · ${modeNames[room.mode] || room.mode}`;
             const playerLimit = room.mode === 'duel' ? 2 : 16;
@@ -2994,7 +3009,6 @@
                 skyline: 'Rooftop Rumble', river: 'River Raiders', market: 'Market Mayhem',
                 miner: 'Crystal Cartel', duel: 'Hammerheart Showdown',
                 crypto: 'Crypto Exchange', shooter: 'Starfall Blasters', sports: 'Endzone Rally',
-                fishing: 'Fishing Frenzy', hack: 'Crypto Hack',
                 classic: 'Flashcard Face-off', rush: 'Rapid Recall', survival: 'Last Learner Standing'
             };
             document.getElementById('multiplayer-scene-name').textContent = sceneNames[room.mode] || 'Live match';
@@ -3530,9 +3544,7 @@
             const title = document.getElementById('grade-progress-title');
             const range = document.getElementById('grade-progress-range');
             if (courseControl) courseControl.classList.toggle('hidden', metric !== 'class');
-            const datedAssignments = assignments.filter(item =>
-                (item.status === 'completed' || Number(item.pointsEarned) > 0) && (item.gradedAt || item.dueDate)
-            );
+            const datedAssignments = assignments.filter(item => this.isAssignmentGraded(item) && (item.gradedAt || item.dueDate));
             const dateFor = item => {
                 const value = String(item.gradedAt || item.dueDate);
                 return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : localDateKey(new Date(value));
@@ -3803,8 +3815,6 @@
                     this.closeStudy();
                 } else if (id === 'back-to-classes-btn') {
                     Router.navigate('gpa');
-                } else if (id === 'class-add-assignment-btn') {
-                    this.openAssignmentForm(null, Router.selectedClassCode);
                 } else if (id === 'calendar-prev-btn') {
                     this.changeCalendarMonth(-1);
                 } else if (id === 'calendar-next-btn') {
@@ -3862,7 +3872,7 @@
                 } else if (target.matches('.close-modal-btn, .cancel-modal-btn')) {
                     this.closeModal();
                 } else if (action) {
-                    await this.handleDataAction(action, target.dataset.id);
+                    await this.handleDataAction(action, target.dataset.id, target);
                 }
             } catch (error) {
                 console.error('[NexusApp] Button action failed:', error);
@@ -3993,6 +4003,7 @@
                 this.renderGradeProgress();
             }
             if (event.target.id === 'assignment-course') this.updateAssignmentCategories();
+            if (event.target.id === 'assignment-is-graded') this.updateAssignmentGradeFields();
             if (event.target.id === 'assignment-course-filter' || event.target.id === 'assignment-status-filter') {
                 this.renderAssignments();
             } else if (event.target.id === 'grade-scenario-select') {
@@ -4115,12 +4126,9 @@
             document.getElementById('course-name').value = selectedCatalogCourse?.code || '';
             document.getElementById('course-selection-hint').textContent = selectedCatalogCourse ? 'PCHS catalog course selected.' : 'Choose a PCHS course from the matches.';
             this.hideCourseSuggestions();
-            document.getElementById('course-subject-category').value = course ? course.category || 'Electives' : 'Electives';
             document.getElementById('course-term').value = course ? (course.term || 'FY') : 'FY';
-            document.getElementById('course-credits').value = course ? course.credits : '0.5';
-            document.getElementById('course-target-grade').value = course && course.targetPct !== null && course.targetPct !== undefined && Number.isFinite(Number(course.targetPct)) ? course.targetPct : '';
             if (course) this.populateCourseFromCatalog();
-            else document.getElementById('course-weight-label').textContent = 'Select a catalog course';
+            else document.getElementById('course-term-field').classList.add('hidden');
             this.openModal('course-modal');
         }
 
@@ -4178,26 +4186,13 @@
             const courseCode = document.getElementById('course-name').value;
             const catalogCourse = (window.PCHS_COURSE_CATALOG || []).find(course => course.code === courseCode);
             if (!catalogCourse) return;
-            const categoryMap = {
-                'Visual Arts': 'Fine Arts',
-                'Fine Arts': 'Fine Arts',
-                Business: 'Practical Arts',
-                CS: 'Practical Arts',
-                CTE: 'Practical Arts',
-                'Practical Arts': 'Practical Arts'
-            };
-            const category = categoryMap[catalogCourse.category] || catalogCourse.category;
-            const categorySelect = document.getElementById('course-subject-category');
-            if (Array.from(categorySelect.options).some(option => option.value === category)) categorySelect.value = category;
-            document.getElementById('course-credits').value = catalogCourse.credits;
-            const weightedScale = (window.PCHS_GRADE_SCALE || []).map(item =>
-                `${item.letter} ${catalogCourse.isWeighted ? item.weighted : item.unweighted.toFixed(1)}`
-            ).join(' · ');
-            document.getElementById('course-weight-label').textContent =
-                `${catalogCourse.isWeighted ? 'Weighted' : 'Regular'} · ${weightedScale}`;
+            const semesterCourse = Number(catalogCourse.credits) < 1;
+            document.getElementById('course-term-field').classList.toggle('hidden', !semesterCourse);
+            if (!semesterCourse) document.getElementById('course-term').value = 'FY';
+            else if (!['S1', 'S2'].includes(document.getElementById('course-term').value)) document.getElementById('course-term').value = 'S1';
         }
 
-        openAssignmentForm(assignment, courseCode = '', dueDate = '') {
+        openAssignmentForm(assignment, courseCode = '', dueDate = '', categoryId = '') {
             const form = document.getElementById('assignment-form');
             form.reset();
             document.getElementById('assignment-id').value = assignment ? assignment.id : '';
@@ -4205,13 +4200,21 @@
             document.getElementById('assignment-name').value = assignment ? assignment.title : '';
             document.getElementById('assignment-course').value = assignment ? assignment.courseCode : courseCode;
             document.getElementById('assignment-due-date').value = assignment ? assignment.dueDate : (dueDate || '');
+            const isGraded = assignment ? this.isAssignmentGraded(assignment) : false;
+            document.getElementById('assignment-is-graded').checked = isGraded;
             document.getElementById('assignment-points').value = assignment ? assignment.pointsEarned ?? 0 : 0;
             document.getElementById('assignment-max-points').value = assignment ? assignment.maxPoints ?? 100 : 100;
-            document.getElementById('assignment-kind').value = assignment ? assignment.kind || 'assignment' : 'assignment';
-            document.getElementById('assignment-size').value = assignment ? assignment.estimatedMinutes || 30 : 30;
-            document.getElementById('assignment-importance').value = assignment ? assignment.importance || 3 : 3;
-            this.updateAssignmentCategories(assignment ? assignment.categoryId : '');
+            document.getElementById('assignment-course-field').classList.toggle('hidden', !assignment && Boolean(courseCode));
+            this.updateAssignmentCategories(assignment ? assignment.categoryId : categoryId);
+            this.updateAssignmentGradeFields();
             this.openModal('assignment-modal');
+        }
+
+        updateAssignmentGradeFields() {
+            const graded = document.getElementById('assignment-is-graded').checked;
+            document.getElementById('assignment-due-field').classList.toggle('hidden', graded);
+            document.getElementById('assignment-score-fields').classList.toggle('hidden', !graded);
+            document.getElementById('assignment-max-points').disabled = !graded;
         }
 
         updateAssignmentCategories(selectedId = null) {
@@ -4236,22 +4239,29 @@
             const catalogCode = document.getElementById('course-name').value;
             const catalogCourse = (window.PCHS_COURSE_CATALOG || []).find(item => item.code === catalogCode);
             if (!catalogCourse) throw new Error('Select a course from the PCHS catalog.');
-            const term = document.getElementById('course-term').value;
+            const term = Number(catalogCourse.credits) < 1 ? document.getElementById('course-term').value : 'FY';
             const existingCourse = (AppState.get('courses') || []).find(item => item.code === oldCode);
             const sameCatalogAlreadyUsed = (AppState.get('courses') || []).some(item =>
                 item.code !== oldCode && (item.catalogCode || item.code) === catalogCode
             );
             const code = oldCode || (sameCatalogAlreadyUsed ? `${catalogCode}_${term}_${Date.now()}` : catalogCode);
-            const targetValue = document.getElementById('course-target-grade').value;
+            const categoryMap = {
+                'Visual Arts': 'Fine Arts',
+                'Fine Arts': 'Fine Arts',
+                Business: 'Practical Arts',
+                CS: 'Practical Arts',
+                CTE: 'Practical Arts',
+                'Practical Arts': 'Practical Arts'
+            };
             const course = {
                 code,
                 catalogCode,
                 title: catalogCourse.title,
                 term,
                 credits: Number(catalogCourse.credits),
-                category: document.getElementById('course-subject-category').value,
+                category: categoryMap[catalogCourse.category] || catalogCourse.category,
                 isWeighted: Boolean(catalogCourse.isWeighted),
-                targetPct: targetValue === '' ? null : Number(targetValue)
+                targetPct: existingCourse?.targetPct ?? null
             };
             if (existingCourse) {
                 course.categories = existingCourse.categories || [];
@@ -4263,21 +4273,27 @@
         saveAssignment() {
             const id = document.getElementById('assignment-id').value || `asgn_${Date.now()}`;
             const current = (AppState.get('assignments') || []).find(item => item.id === id);
-            const pointsEarned = Number(document.getElementById('assignment-points').value) || 0;
+            const isGraded = document.getElementById('assignment-is-graded').checked;
+            const pointsEarned = Number(document.getElementById('assignment-points').value);
+            const maxPoints = Number(document.getElementById('assignment-max-points').value);
+            if (isGraded && (!Number.isFinite(pointsEarned) || !Number.isFinite(maxPoints) || maxPoints <= 0 || pointsEarned < 0 || pointsEarned > maxPoints)) {
+                throw new Error('Enter points earned from 0 up to the points possible.');
+            }
             const assignment = {
                 id,
                 title: document.getElementById('assignment-name').value.trim(),
                 courseCode: document.getElementById('assignment-course').value,
-                dueDate: document.getElementById('assignment-due-date').value,
-                pointsEarned,
-                maxPoints: Number(document.getElementById('assignment-max-points').value) || 100,
+                dueDate: isGraded ? (current?.dueDate || '') : document.getElementById('assignment-due-date').value,
+                isGraded,
+                pointsEarned: isGraded ? pointsEarned : null,
+                maxPoints: isGraded ? maxPoints : 100,
                 categoryId: document.getElementById('assignment-category').value || null,
-                kind: document.getElementById('assignment-kind').value,
-                estimatedMinutes: Number(document.getElementById('assignment-size').value) || 30,
-                importance: Number(document.getElementById('assignment-importance').value) || 3,
-                priority: current ? current.priority : 'high',
-                status: current ? current.status : 'pending',
-                gradedAt: pointsEarned > 0 ? (current?.gradedAt || localDateKey(new Date())) : current?.gradedAt || null
+                kind: current?.kind || 'assignment',
+                estimatedMinutes: current?.estimatedMinutes || 30,
+                importance: current?.importance || 3,
+                priority: current?.priority || 'high',
+                status: current?.status || (isGraded ? 'completed' : 'pending'),
+                gradedAt: isGraded ? (current?.gradedAt || localDateKey(new Date())) : null
             };
             if (current) AppState.updateAssignment(id, assignment);
             else AppState.addAssignment(assignment);
@@ -4300,7 +4316,7 @@
             await AppState.saveFlashcardDeck(deck);
         }
 
-        async handleDataAction(action, id) {
+        async handleDataAction(action, id, target) {
             const courses = AppState.get('courses') || [];
             const assignments = AppState.get('assignments') || [];
             if (action === 'open-class') {
@@ -4313,15 +4329,15 @@
                 this.renderUI();
             }
             if (action === 'edit-assignment') this.openAssignmentForm(assignments.find(item => item.id === id));
+            if (action === 'add-category-assignment') {
+                this.openAssignmentForm(null, target.dataset.course || Router.selectedClassCode, '', id || '');
+            }
             if (action === 'delete-assignment') AppState.deleteAssignment(id);
             if (action === 'toggle-assignment') {
                 const assignment = assignments.find(item => item.id === id);
                 if (assignment) {
                     const status = assignment.status === 'completed' ? 'pending' : 'completed';
-                    AppState.updateAssignment(id, {
-                        status,
-                        gradedAt: status === 'completed' ? (assignment.gradedAt || localDateKey(new Date())) : assignment.gradedAt
-                    });
+                    AppState.updateAssignment(id, { status });
                 }
             }
             if (action === 'add-category') {
@@ -4413,7 +4429,7 @@
             document.getElementById('study-progress').textContent = `${remaining} left${this.cramMode ? ' · cram mode' : ''}`;
             document.getElementById('card-front-content').textContent = card.front || '';
             document.getElementById('card-back-content').textContent = card.back || '';
-            document.getElementById('current-flashcard').classList.remove('flipped');
+            document.getElementById('current-flashcard').classList.remove('is-flipped');
             document.getElementById('card-back-content').classList.add('hidden');
             document.getElementById('card-front-content').classList.remove('hidden');
             document.getElementById('reveal-card-btn').classList.remove('hidden');
@@ -4428,6 +4444,7 @@
 
         revealCard() {
             const card = this.studyCards[this.activeCardIndex];
+            document.getElementById('current-flashcard').classList.add('is-flipped');
             document.getElementById('card-front-content').classList.add('hidden');
             document.getElementById('card-back-content').classList.remove('hidden');
             document.getElementById('reveal-card-btn').classList.add('hidden');
@@ -4626,9 +4643,7 @@
 
         startArcade(game) {
             const title = {
-                asteroids: 'Asteroid Definitions',
                 match: 'Memory Match Tower',
-                runner: 'Exam Runner',
                 lightning: 'Lightning Round',
                 streak: 'Streak Builder',
                 survival: 'Survival Mode',
@@ -4724,7 +4739,7 @@
             }
             content.innerHTML = `
                 <form id="practice-test-config-form" class="practice-test-setup">
-                    <p>Choose the source deck, test length, and question styles. Mixed mode alternates between selected styles.</p>
+                    <p>Choose a deck, test length, and the percentage of each question type. Percentages must total 100.</p>
                     <label>Flashcard deck
                         <select name="deckId" required>${usableDecks.map(deck =>
                             `<option value="${this.escapeHTML(deck.id)}">${this.escapeHTML(deck.title)} · ${(deck.cards || []).filter(card => card.front && card.back).length} cards</option>`
@@ -4738,10 +4753,11 @@
                             <option value="all">All cards in deck</option>
                         </select>
                     </label>
-                    <fieldset>
-                        <legend>Question styles</legend>
-                        <label><input type="checkbox" name="multipleChoice" checked> Multiple choice</label>
-                        <label><input type="checkbox" name="writtenAnswer"> Written answer</label>
+                    <fieldset class="practice-test-spread">
+                        <legend>Question mix (%)</legend>
+                        <label>Multiple choice<input type="number" name="multipleChoice" min="0" max="100" step="5" value="50" required></label>
+                        <label>Matching<input type="number" name="matching" min="0" max="100" step="5" value="25" required></label>
+                        <label>Typing<input type="number" name="typing" min="0" max="100" step="5" value="25" required></label>
                     </fieldset>
                     <button class="primary-btn" type="submit"><i class="fas fa-play"></i> Start practice test</button>
                 </form>`;
@@ -4752,9 +4768,14 @@
             const deck = (AppState.get('flashcards') || []).find(item => item.id === data.get('deckId'));
             if (!deck) throw new Error('Choose an available flashcard deck.');
             const availableCards = (deck.cards || []).filter(card => card.front && card.back);
-            const hasMultipleChoice = data.has('multipleChoice');
-            const hasWrittenAnswer = data.has('writtenAnswer');
-            if (!hasMultipleChoice && !hasWrittenAnswer) throw new Error('Select at least one question style.');
+            const mix = [
+                { type: 'multiple-choice', weight: Number(data.get('multipleChoice')) },
+                { type: 'matching', weight: Number(data.get('matching')) },
+                { type: 'written', weight: Number(data.get('typing')) }
+            ];
+            if (mix.some(item => !Number.isFinite(item.weight) || item.weight < 0) || mix.reduce((sum, item) => sum + item.weight, 0) !== 100) {
+                throw new Error('Set multiple choice, matching, and typing percentages so they total 100.');
+            }
             const requestedCount = data.get('questionCount');
             const questionCount = requestedCount === 'all'
                 ? availableCards.length
@@ -4762,11 +4783,16 @@
             if (!Number.isInteger(questionCount) || questionCount < 1) throw new Error('Select a valid number of questions.');
 
             this.practiceTestCards = [...availableCards].sort(() => Math.random() - 0.5).slice(0, questionCount);
-            const styles = [
-                ...(hasMultipleChoice ? ['multiple-choice'] : []),
-                ...(hasWrittenAnswer ? ['written'] : [])
-            ];
-            this.practiceTestQuestionTypes = this.practiceTestCards.map((_, index) => styles[index % styles.length]);
+            const allocations = mix.map(item => {
+                const exact = questionCount * item.weight / 100;
+                return { type: item.type, count: Math.floor(exact), remainder: exact % 1 };
+            });
+            let remaining = questionCount - allocations.reduce((sum, item) => sum + item.count, 0);
+            allocations.sort((a, b) => b.remainder - a.remainder).forEach(item => {
+                if (remaining > 0) { item.count++; remaining--; }
+            });
+            this.practiceTestQuestionTypes = allocations.flatMap(item => Array(item.count).fill(item.type))
+                .sort(() => Math.random() - 0.5);
             this.practiceTestAnswers = [];
             this.arcadeQuestionIndex = 0;
             this.arcadeScore = 0;
@@ -4795,19 +4821,36 @@
             const form = document.createElement('form');
             form.id = 'practice-test-answer-form';
             form.dataset.questionType = questionType;
-            if (questionType === 'multiple-choice') {
+            if (questionType === 'multiple-choice' || questionType === 'matching') {
                 const choices = [card, ...this.practiceTestCards.filter(item => item !== card)
                     .sort(() => Math.random() - 0.5).slice(0, 3)].sort(() => Math.random() - 0.5);
-                const options = document.createElement('div');
-                options.className = 'arcade-answer-options';
-                choices.forEach((option, choiceIndex) => {
-                    const label = document.createElement('label');
-                    label.className = 'practice-test-choice';
-                    label.innerHTML = `<input type="radio" name="answer" value="${choiceIndex}" required><span></span>`;
-                    label.querySelector('span').textContent = option.back;
-                    label.dataset.correct = String(option === card);
-                    options.append(label);
-                });
+                let options;
+                if (questionType === 'matching') {
+                    options = document.createElement('label');
+                    options.className = 'practice-test-matching';
+                    options.textContent = 'Choose the matching definition';
+                    const select = document.createElement('select');
+                    select.name = 'answer';
+                    select.required = true;
+                    select.innerHTML = '<option value="">Choose a definition</option>';
+                    choices.forEach((option, choiceIndex) => {
+                        const choice = document.createElement('option');
+                        choice.value = String(choiceIndex);
+                        choice.textContent = option.back;
+                        select.append(choice);
+                    });
+                    options.append(select);
+                } else {
+                    options = document.createElement('div');
+                    options.className = 'arcade-answer-options';
+                    choices.forEach((option, choiceIndex) => {
+                        const label = document.createElement('label');
+                        label.className = 'practice-test-choice';
+                        label.innerHTML = `<input type="radio" name="answer" value="${choiceIndex}" required><span></span>`;
+                        label.querySelector('span').textContent = option.back;
+                        options.append(label);
+                    });
+                }
                 form.dataset.correctAnswer = String(choices.findIndex(option => option === card));
                 form.append(options);
             } else {
@@ -4839,11 +4882,14 @@
             const data = new FormData(form);
             let correct;
             let givenAnswer;
-            if (form.dataset.questionType === 'multiple-choice') {
+            if (form.dataset.questionType === 'multiple-choice' || form.dataset.questionType === 'matching') {
                 const selected = data.get('answer');
                 if (selected === null) throw new Error('Choose an answer first.');
                 correct = selected === form.dataset.correctAnswer;
-                givenAnswer = form.querySelector(`input[value="${CSS.escape(selected)}"]`)?.closest('label').querySelector('span')?.textContent || '';
+                const selectedControl = form.querySelector(`[name="answer"]`);
+                givenAnswer = form.dataset.questionType === 'matching'
+                    ? selectedControl.selectedOptions[0]?.textContent || ''
+                    : form.querySelector(`input[value="${CSS.escape(selected)}"]`)?.closest('label').querySelector('span')?.textContent || '';
             } else {
                 givenAnswer = String(data.get('answer') || '').trim();
                 if (!givenAnswer) throw new Error('Enter a written answer first.');

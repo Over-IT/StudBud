@@ -621,5 +621,5 @@
         }
     }
 
-    Object.assign(A.games, { crypto: Crypto, fishing: Fishing, hack: Hack });
+    Object.assign(A.games, { crypto: Crypto });
 })(window);
