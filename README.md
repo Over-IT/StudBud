@@ -1,6 +1,6 @@
 # StudBud
 
-StudBud is a responsive student planner for classes, assignments, grades, calendars, and study sessions.
+StudBud is a student hub with three parts: **Plan** (classes, assignments, grades, calendar), **Study** (flashcards with spaced repetition, focus sessions, study streaks and leaderboards) and **Play** (live multiplayer games and arcade modes powered by your own flashcards, with a coin shop for characters, hats and accessories).
 
 ## Open StudBud
 

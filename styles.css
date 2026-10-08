@@ -492,6 +492,14 @@ input:focus, select:focus, textarea:focus {
     gap: var(--spacing-md);
 }
 
+.logo-mark {
+    width: 40px;
+    height: 40px;
+    border-radius: 11px;
+    flex-shrink: 0;
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
+}
+
 .logo-icon {
     font-size: 2rem;
     color: var(--accent-primary);
