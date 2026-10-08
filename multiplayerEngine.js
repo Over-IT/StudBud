@@ -2,6 +2,7 @@
     'use strict';
 
     const TAU = Math.PI * 2;
+    const sfx = (name, gap) => { try { window.StudBudSfx?.play(name, 'game', gap); } catch (error) { /* audio is optional */ } };
     const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
     const lerp = (a, b, t) => a + (b - a) * t;
     const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
@@ -109,6 +110,8 @@
     class Particles {
         constructor() { this.items = []; }
         burst(x, y, color, count = 10, speed = 160, life = 0.5, size = 4) {
+            if (count >= 24) sfx('boom', 160);
+            else if (count >= 8) sfx('pop', 70);
             for (let i = 0; i < count; i++) {
                 const a = Math.random() * TAU;
                 const v = speed * (0.3 + Math.random() * 0.7);
@@ -196,6 +199,7 @@
             const Game = (window.StudBudArcade.games[this.mode]) || window.StudBudArcade.games.skyline;
             this.buildDom();
             this.game = new Game(this);
+            window.StudBudSfx?.startMusic(this.mode);
             this.bind();
             if (!this.practice) this.connect();
             this.loadCards(options.fallbackCards);
@@ -219,7 +223,7 @@
                 ids.add(player.id);
                 this.roster.set(player.id, {
                     id: player.id, nickname: player.nickname, score: Number(player.score || 0), color: playerColor(player), avatar: player.avatar,
-                    cos: { skin: player.skin || '', hat: player.hat || '', acc: player.accessory || '' }
+                    cos: { skin: player.skin || '', hat: player.hat || '', acc: player.accessory || '', pet: player.pet || '' }
                 });
             });
             for (const id of [...this.roster.keys()]) if (!ids.has(id)) { this.roster.delete(id); this.remotes.delete(id); }
@@ -291,7 +295,14 @@
         remoteList() { return [...this.remotes.values()]; }
 
         // ---------- scoring / end of match ----------
-        addScore(n) { this.score = Math.max(0, this.score + n); }
+        sfx(name, gap) { sfx(name, gap); }
+
+        addScore(n) {
+            this.score = Math.max(0, this.score + n);
+            if (n >= 40) sfx('coin', 120);
+            else if (n > 0) sfx('pop', 90);
+            else if (n < 0) sfx('hit');
+        }
         setGoal(n) { this.goal = n; }
 
         standings() {
@@ -356,6 +367,8 @@
             this.reportScore(true);
             this.closeQuestion(true);
             this.renderResults();
+            const me = this.standingsCache.findIndex(row => row.id === this.user.id);
+            sfx(me === 0 ? 'win' : 'lose');
         }
 
         // ---------- questions ----------
@@ -366,6 +379,7 @@
             const now = performance.now();
             if (now - (this.lastNeed || 0) > 1800) {
                 this.lastNeed = now;
+                sfx('wrong');
                 this.toast(`Out of ${res.label.toLowerCase()} — press Q to answer a question`, '#f87171');
             }
             return false;
@@ -379,6 +393,7 @@
             if (!res) return 0;
             const n = this.rewardAmount();
             res.add(n);
+            sfx('refill');
             this.toast(`+${n} ${res.label}`, res.color);
             return n;
         }
@@ -416,7 +431,7 @@
             const res = this.game.res;
             box.querySelector('small').textContent = note || (res ? `Correct answer: +${this.rewardAmount()} ${res.label}` : 'Question');
             box.classList.remove('hidden');
-            return true;
+            sfx('question');
         }
 
         answerQuestion(index) {
@@ -426,6 +441,7 @@
             const correct = q.options[index] === q.card.back;
             this.answered++;
             if (correct) this.correct++;
+            sfx(correct ? 'correct' : 'wrong');
             const box = this.overlay.querySelector('.mpg-question');
             box.querySelectorAll('[data-q]').forEach((button, i) => {
                 button.classList.toggle('right', q.options[i] === q.card.back);
@@ -628,6 +644,11 @@
             if (!this.over) {
                 if (this.countdown > 0) {
                     this.countdown -= dt;
+                    const step = this.countdown > 0.4 ? Math.ceil(this.countdown - 0.4) : 0;
+                    if (step !== this.lastCountStep) {
+                        this.lastCountStep = step;
+                        sfx(step ? 'countdown' : 'go');
+                    }
                     const text = this.countdown > 0.4 ? String(Math.ceil(this.countdown - 0.4)) : 'GO!';
                     const el = this.overlay.querySelector('.mpg-countdown');
                     el.textContent = this.countdown > -0.2 ? text : '';
@@ -659,6 +680,7 @@
 
         destroy() {
             this.destroyed = true;
+            window.StudBudSfx?.stopMusic();
             cancelAnimationFrame(this.raf);
             clearInterval(this.sendTimer);
             clearInterval(this.hudTimer);
@@ -681,14 +703,44 @@
         skin_alien: { body: '#16a34a', head: '#86efac', eye: '#0f172a', trim: '#14532d' },
         skin_ghost: { body: '#e2e8f0', head: '#f8fafc', eye: '#0f172a', trim: '#94a3b8', alpha: 0.88 },
         skin_lava: { body: '#ea580c', head: '#7c2d12', eye: '#fde047', trim: '#fbbf24' },
-        skin_gold: { body: '#f59e0b', head: '#fcd34d', eye: '#451a03', trim: '#b45309' }
+        skin_gold: { body: '#f59e0b', head: '#fcd34d', eye: '#451a03', trim: '#b45309' },
+        skin_zombie: { body: '#4d7c0f', head: '#a3e635', eye: '#7f1d1d', trim: '#365314' },
+        skin_snow: { body: '#e0f2fe', head: '#f0f9ff', eye: '#0f172a', trim: '#7dd3fc' },
+        skin_pumpkin: { body: '#f97316', head: '#fb923c', eye: '#111827', trim: '#9a3412' },
+        skin_bubble: { body: '#f472b6', head: '#fbcfe8', eye: '#831843', trim: '#be185d' },
+        skin_cyber: { body: '#0f172a', head: '#1e293b', eye: '#22d3ee', trim: '#06b6d4' },
+        skin_crystal: { body: '#67e8f9', head: '#cffafe', eye: '#164e63', trim: '#0891b2', alpha: 0.92 },
+        skin_shadow: { body: '#312e81', head: '#4c1d95', eye: '#f0abfc', trim: '#1e1b4b', alpha: 0.9 },
+        skin_galaxy: { body: '#1e1b4b', head: '#312e81', eye: '#fde047', trim: '#a78bfa' },
+        skin_dragon: { body: '#15803d', head: '#4ade80', eye: '#fde047', trim: '#7f1d1d' }
     };
+
+    const LEGACY_HATS = { accessory_cap: 'hat_cap', accessory_halo: 'hat_halo', accessory_headphones: 'hat_headphones' };
+    let petMap = null;
+    function petEmoji(id) {
+        if (!id) return '';
+        if (!petMap) {
+            const catalog = window.StudBudCommunityGames?.catalog || [];
+            petMap = new Map(catalog.filter(item => item.emoji).map(item => [item.id, item.emoji]));
+        }
+        return petMap.get(id) || '';
+    }
+
+    function drawPet(ctx, emoji, x, y, size, time) {
+        if (!emoji) return;
+        ctx.save();
+        ctx.font = `${size}px serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(emoji, x, y + Math.sin(time * 5) * 2);
+        ctx.restore();
+    }
 
     // Accepts either a colour string or a player-like object ({ color, cos }).
     function who(p) {
-        if (typeof p === 'string') return { color: p, skin: null, hat: '', acc: '' };
+        if (typeof p === 'string') return { color: p, skin: null, hat: '', acc: '', pet: '' };
         const cos = p?.cos || {};
-        return { color: p?.color || '#94a3b8', skin: SKINS[cos.skin] || null, hat: cos.hat || '', acc: cos.acc || '' };
+        return { color: p?.color || '#94a3b8', skin: SKINS[cos.skin] || null, hat: LEGACY_HATS[cos.hat] || cos.hat || '', acc: cos.acc || '', pet: petEmoji(cos.pet) };
     }
 
     function drawHat(ctx, hat, cx, top, r, tilt = 0) {
@@ -732,6 +784,32 @@
                 ctx.lineTo(0, -r * 1.1); ctx.lineTo(r * 0.45, -r * 0.35); ctx.lineTo(r * 1.0, -r * 0.95); ctx.lineTo(r * 0.95, r * 0.35);
             });
             fill('#ef4444', () => ctx.arc(0, -r * 0.1, r * 0.2, 0, TAU));
+        } else if (hat === 'hat_beanie') {
+            fill('#2563eb', () => ctx.arc(0, r * 0.4, r, Math.PI, TAU));
+            ctx.fillStyle = '#f8fafc'; ctx.fillRect(-r, r * 0.15, r * 2, r * 0.32);
+            fill('#f8fafc', () => ctx.arc(0, -r * 0.65, r * 0.28, 0, TAU));
+        } else if (hat === 'hat_chef') {
+            ctx.fillStyle = '#f8fafc'; ctx.fillRect(-r * 0.8, -r * 0.2, r * 1.6, r * 0.6);
+            fill('#f8fafc', () => { ctx.arc(-r * 0.5, -r * 0.5, r * 0.55, 0, TAU); ctx.arc(0, -r * 0.95, r * 0.6, 0, TAU); ctx.arc(r * 0.5, -r * 0.5, r * 0.55, 0, TAU); });
+        } else if (hat === 'hat_pirate') {
+            fill('#111827', () => { ctx.moveTo(-r * 1.5, r * 0.4); ctx.quadraticCurveTo(0, -r * 1.8, r * 1.5, r * 0.4); });
+            fill('#f8fafc', () => ctx.arc(0, -r * 0.25, r * 0.25, 0, TAU));
+        } else if (hat === 'hat_bunny') {
+            fill('#f8fafc', () => { ctx.ellipse(-r * 0.45, -r * 1.0, r * 0.25, r * 0.9, -0.15, 0, TAU); ctx.ellipse(r * 0.45, -r * 1.0, r * 0.25, r * 0.9, 0.15, 0, TAU); });
+            fill('#f9a8d4', () => { ctx.ellipse(-r * 0.45, -r * 1.0, r * 0.11, r * 0.6, -0.15, 0, TAU); ctx.ellipse(r * 0.45, -r * 1.0, r * 0.11, r * 0.6, 0.15, 0, TAU); });
+        } else if (hat === 'hat_cat') {
+            fill('#f59e0b', () => { ctx.moveTo(-r * 0.95, r * 0.2); ctx.lineTo(-r * 0.8, -r * 0.95); ctx.lineTo(-r * 0.1, -r * 0.2); });
+            fill('#f59e0b', () => { ctx.moveTo(r * 0.95, r * 0.2); ctx.lineTo(r * 0.8, -r * 0.95); ctx.lineTo(r * 0.1, -r * 0.2); });
+        } else if (hat === 'hat_flower') {
+            for (let i = 0; i < 5; i++) { const a = i / 5 * TAU; fill('#f472b6', () => ctx.arc(r * 0.5 + Math.cos(a) * r * 0.4, -r * 0.2 + Math.sin(a) * r * 0.4, r * 0.28, 0, TAU)); }
+            fill('#fde047', () => ctx.arc(r * 0.5, -r * 0.2, r * 0.22, 0, TAU));
+        } else if (hat === 'hat_horns') {
+            fill('#dc2626', () => { ctx.moveTo(-r * 0.9, r * 0.1); ctx.quadraticCurveTo(-r * 1.4, -r * 0.9, -r * 0.5, -r * 1.0); ctx.lineTo(-r * 0.5, -r * 0.2); });
+            fill('#dc2626', () => { ctx.moveTo(r * 0.9, r * 0.1); ctx.quadraticCurveTo(r * 1.4, -r * 0.9, r * 0.5, -r * 1.0); ctx.lineTo(r * 0.5, -r * 0.2); });
+        } else if (hat === 'hat_santa') {
+            fill('#dc2626', () => { ctx.moveTo(-r, r * 0.4); ctx.quadraticCurveTo(-r * 0.2, -r * 1.7, r * 1.2, -r * 0.3); ctx.lineTo(r, r * 0.4); });
+            ctx.fillStyle = '#f8fafc'; ctx.fillRect(-r * 1.05, r * 0.1, r * 2.1, r * 0.34);
+            fill('#f8fafc', () => ctx.arc(r * 1.2, -r * 0.3, r * 0.3, 0, TAU));
         }
         ctx.restore();
     }
@@ -777,7 +855,11 @@
         ctx.fillRect(cx + face * 4 - 1.5, y + 9 + bob, 3, 4);
         if (c.acc === 'acc_shades') { ctx.fillStyle = '#0f172a'; ctx.fillRect(cx + face * 4 - 6, y + 8 + bob, 12, 5); }
         if (c.acc === 'acc_monocle') { ctx.strokeStyle = '#facc15'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(cx + face * 5, y + 11 + bob, 4.5, 0, TAU); ctx.stroke(); }
+        if (c.acc === 'acc_eyepatch') { ctx.fillStyle = '#0f172a'; ctx.fillRect(cx + face * 4 - 3, y + 8 + bob, 6, 5); ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(cx - 11, y + 5 + bob); ctx.lineTo(cx + 11, y + 12 + bob); ctx.stroke(); }
+        if (c.acc === 'acc_bowtie') { ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.moveTo(cx, y + 21 + bob); ctx.lineTo(cx - 7, y + 17 + bob); ctx.lineTo(cx - 7, y + 25 + bob); ctx.moveTo(cx, y + 21 + bob); ctx.lineTo(cx + 7, y + 17 + bob); ctx.lineTo(cx + 7, y + 25 + bob); ctx.fill(); }
+        if (c.acc === 'acc_sparkles') { ctx.font = '10px serif'; ctx.textAlign = 'center'; for (let i = 0; i < 3; i++) { const a = time * 2 + i * 2.1; ctx.globalAlpha = 0.6 + Math.sin(time * 6 + i) * 0.4; ctx.fillText('✨', cx + Math.cos(a) * (w * 0.9), y + 22 + Math.sin(a) * 18); } ctx.globalAlpha = alpha; }
         drawHat(ctx, c.hat, cx, y + 3 + bob, 10, face * 0.08);
+        drawPet(ctx, c.pet, cx - face * (w * 0.5 + 18), y + h - 8, 18, time);
         ctx.restore();
     }
 
@@ -808,6 +890,7 @@
         if (c.acc === 'acc_monocle') { ctx.strokeStyle = '#facc15'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(r * 0.55, r * 0.2, r * 0.18, 0, TAU); ctx.stroke(); }
         ctx.restore();
         if (c.hat) drawHat(ctx, c.hat, 0, -r * 0.55, r * 0.55);
+        drawPet(ctx, c.pet, -r * 2, r * 1.2, r * 1.1, time);
         ctx.restore();
     }
 

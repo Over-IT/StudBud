@@ -11,13 +11,14 @@
     </linearGradient>
   </defs>
   <rect width="512" height="512" rx="112" fill="url(#bg)"/>
-  <path d="M158 262h196c46 0 72 38 82 92 6 34-12 56-40 56-24 0-38-14-52-32-8-10-16-14-28-14H196c-12 0-20 4-28 14-14 18-28 32-52 32-28 0-46-22-40-56 10-54 36-92 82-92z" fill="url(#pad)"/>
-  <path d="M178 300h16v16h16v16h-16v16h-16v-16h-16v-16h16z" fill="#2563eb"/>
-  <circle cx="322" cy="334" r="12" fill="#6366f1"/>
-  <circle cx="352" cy="308" r="12" fill="#06b6d4"/>
-  <circle cx="352" cy="352" r="12" fill="#f59e0b"/>
-  <path d="M256 92l130 56-130 56-130-56z" fill="#0f172a"/>
-  <path d="M190 184v36c0 14 29 28 66 28s66-14 66-28v-36l-66 28z" fill="#1e293b"/>
-  <path d="M386 148v52" stroke="#fbbf24" stroke-width="8" stroke-linecap="round"/>
-  <circle cx="386" cy="208" r="10" fill="#fbbf24"/>
+  <clipPath id="clip"><rect width="512" height="512" rx="112"/></clipPath>
+  <g clip-path="url(#clip)">
+    <ellipse cx="256" cy="520" rx="190" ry="170" fill="url(#pad)"/>
+    <circle cx="256" cy="300" r="84" fill="url(#pad)"/>
+  </g>
+  <path d="M176 196v44c0 12 36 22 80 22s80-10 80-22v-44z" fill="#1e293b"/>
+  <path d="M256 70l170 66-170 66-170-66z" fill="#0f172a"/>
+  <path d="M256 92l112 44-112 44-112-44z" fill="#1e293b" opacity=".55"/>
+  <path d="M410 140v70" stroke="#fbbf24" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="410" cy="220" r="14" fill="#fbbf24"/>
 </svg>

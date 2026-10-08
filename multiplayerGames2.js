@@ -363,7 +363,7 @@
                 const ang = Math.atan2(m.y - me.y, m.x - me.x);
                 const d = Math.min(320, dist(m.x, m.y, me.x, me.y));
                 this.cast = { x: me.x + Math.cos(ang) * d, y: me.y + Math.sin(ang) * d, t: 0 };
-                this.castCd = 1.1;
+                this.castCd = 1.1; s.sfx('splash');
             }
             if (this.cast) {
                 this.cast.t += dt;
@@ -692,7 +692,7 @@
             else if (wantsSprint) s.spend(1);
             this.speedMul = (sprint ? 1.4 : 1) * (this.bull > 0 ? 1.2 : 1) * (this.dash > 0 ? 2.4 : 1);
             if (s.pressed('Space') && this.dashCd <= 0 && this.stun <= 0 && s.spend(15)) {
-                this.dash = 0.22; this.dashCd = 1.1;
+                this.dash = 0.22; this.dashCd = 1.1; s.sfx('dash');
                 const a = s.axis();
                 if (a.x || a.y) me.aim = Math.atan2(a.y, a.x);
                 me.vx = Math.cos(me.aim) * 620; me.vy = Math.sin(me.aim) * 620;

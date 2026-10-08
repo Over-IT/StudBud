@@ -309,7 +309,7 @@
             const space = s.pressed('Space');
             const act = click || space;
             if (this.st === 0) {
-                if (act && s.spend(10)) { this.st = 1; this.power = 0; this.dir = 1; }
+                if (act && s.spend(10)) { this.st = 1; this.power = 0; this.dir = 1; s.sfx('shoot'); }
             } else if (this.st === 1) {
                 this.power += this.dir * dt * 1.4;
                 if (this.power >= 1) { this.power = 1; this.dir = -1; } else if (this.power <= 0) { this.power = 0; this.dir = 1; }

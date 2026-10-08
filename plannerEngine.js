@@ -133,16 +133,16 @@
             if (dayOfWeek === 1) {
                 return {
                     type: "All",
-                    title: "All Day (Periods 1-7)",
+                    title: "All Day (Periods 1-8)",
                     badge: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
                     classes: [
-                        { period: "1st Period", time: "7:35 AM - 8:25 AM" },
-                        { period: "2nd Period", time: "8:30 AM - 9:20 AM" },
-                        { period: "3rd Period", time: "9:25 AM - 10:15 AM" },
-                        { period: "4th Period", time: "10:20 AM - 11:10 AM" },
-                        { period: "5th Period & Lunch", time: "11:15 AM - 12:40 PM" },
-                        { period: "6th Period", time: "12:45 PM - 1:35 PM" },
-                        { period: "7th Period", time: "1:40 PM - 2:30 PM" }
+                        { period: "1st Period", time: "7:35 AM - 8:26 AM" },
+                        { period: "2nd Period", time: "8:26 AM - 9:17 AM" },
+                        { period: "3rd Period", time: "9:17 AM - 10:08 AM" },
+                        { period: "5th Period", time: "10:08 AM - 10:59 AM" },
+                        { period: "6th Period & Lunch", time: "10:59 AM - 12:54 PM" },
+                        { period: "7th Period", time: "12:54 PM - 1:45 PM" },
+                        { period: "8th Period", time: "1:45 PM - 2:30 PM" }
                     ]
                 };
             }
@@ -154,11 +154,10 @@
                     title: "Odd Day (Block)",
                     badge: "bg-red-500/20 text-red-300 border-red-500/30",
                     classes: [
-                        { period: "1st Period", time: "7:35 AM - 9:05 AM" },
-                        { period: "3rd Period", time: "9:12 AM - 10:42 AM" },
-                        { period: "5th Period & Lunch", time: "10:49 AM - 12:53 PM" },
-                        { period: "ColT / Advisory", time: "12:58 PM - 1:35 PM" },
-                        { period: "7th Period", time: "1:40 PM - 2:30 PM" }
+                        { period: "1st Period", time: "7:35 AM - 9:10 AM" },
+                        { period: "3rd Period", time: "9:10 AM - 10:49 AM" },
+                        { period: "5th Period & Lunch", time: "10:49 AM - 1:01 PM" },
+                        { period: "7th Period", time: "1:01 PM - 2:30 PM" }
                     ]
                 };
             } else {
@@ -167,11 +166,10 @@
                     title: "Even Day (Block)",
                     badge: "bg-blue-500/20 text-blue-300 border-blue-500/30",
                     classes: [
-                        { period: "2nd Period", time: "7:35 AM - 9:05 AM" },
-                        { period: "4th Period", time: "9:12 AM - 10:42 AM" },
-                        { period: "5th Period & Lunch", time: "10:49 AM - 12:53 PM" },
-                        { period: "Academic Lab", time: "12:58 PM - 1:35 PM" },
-                        { period: "6th Period", time: "1:40 PM - 2:30 PM" }
+                        { period: "2nd Period", time: "7:35 AM - 9:10 AM" },
+                        { period: "Academic Lab", time: "9:10 AM - 10:49 AM" },
+                        { period: "6th Period & Lunch", time: "10:49 AM - 1:01 PM" },
+                        { period: "8th Period", time: "1:01 PM - 2:30 PM" }
                     ]
                 };
             }

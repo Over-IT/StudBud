@@ -91,26 +91,11 @@
                     <li class="nav-item" data-target="importer-view" role="button" tabindex="0">
                         <i class="fas fa-file-import"></i> <span>Flashcard Importer</span>
                     </li>
-                    <li class="nav-item" data-target="settings-view" role="button" tabindex="0">
-                        <i class="fas fa-user-cog"></i> <span>Profile & Data</span>
-                    </li>
-                    <li class="nav-item" data-target="appearance-view" role="button" tabindex="0">
-                        <i class="fas fa-palette"></i> <span>UI Settings</span>
+                    <li class="nav-item" data-target="settings-view" data-also="appearance-view sound-view" role="button" tabindex="0">
+                        <i class="fas fa-gear"></i> <span>Settings</span>
                     </li>
                 </ul>
             </nav>
-
-            <!-- Quick Audio Deck (Sidebar Bottom) -->
-            <div id="quick-audio-deck" class="glass-card">
-                <h4><i class="fas fa-headphones"></i> Soundscapes</h4>
-                <div class="audio-toggles">
-                    <button class="audio-btn" data-audio="lofi" title="Lo-Fi Synth"><i class="fas fa-music"></i></button>
-                    <button class="audio-btn" data-audio="rain" title="Rain Noise"><i class="fas fa-cloud-rain"></i></button>
-                    <button class="audio-btn" data-audio="white" title="White Noise"><i class="fas fa-wave-square"></i></button>
-                    <button class="audio-btn" data-audio="binaural" title="Binaural Waves"><i class="fas fa-brain"></i></button>
-                </div>
-                <button id="drawer-toggle-btn" class="secondary-btn"><i class="fas fa-sliders-h"></i> Mixer</button>
-            </div>
         </aside>
 
         <!-- MAIN CONTENT AREA -->
@@ -142,9 +127,6 @@
                         <span id="multiplayer-header-name">Student</span>
                     </button>
 
-                    <button id="mobile-mixer-toggle-btn" class="icon-btn mobile-mixer-toggle" aria-label="Expand audio mixer" aria-expanded="false" title="Audio mixer">
-                        <i class="fas fa-sliders" aria-hidden="true"></i>
-                    </button>
                     <!-- Light/Dark Theme Toggle -->
                     <button id="theme-toggle" class="icon-btn" aria-label="Switch light and dark mode" title="Switch light and dark mode">
                         <i class="fas fa-sun"></i>
@@ -444,12 +426,10 @@
                             <div id="sm2-controls" class="hidden">
                                 <p>How difficult was this?</p>
                                 <div class="quality-buttons">
-                                    <button class="sm2-btn q0" data-q="0">Blackout (0)</button>
-                                    <button class="sm2-btn q1" data-q="1">Failed (1)</button>
-                                    <button class="sm2-btn q2" data-q="2">Hard (2)</button>
-                                    <button class="sm2-btn q3" data-q="3">Good (3)</button>
-                                    <button class="sm2-btn q4" data-q="4">Easy (4)</button>
-                                    <button class="sm2-btn q5" data-q="5">Perfect (5)</button>
+                                    <button class="sm2-btn q1" data-q="1">Again<small></small></button>
+                                    <button class="sm2-btn q3" data-q="3">Hard<small></small></button>
+                                    <button class="sm2-btn q4" data-q="4">Good<small></small></button>
+                                    <button class="sm2-btn q5" data-q="5">Easy<small></small></button>
                                 </div>
                             </div>
                         </div>
@@ -685,13 +665,13 @@
                                 <h3 id="multiplayer-player-name">Student</h3>
                                 <p>Match wins: <strong id="multiplayer-wins">0</strong></p>
                             </section>
-                            <section class="glass-card multiplayer-shop">
-                                <div class="view-header"><div><h3>Player shop</h3><p>Unlock avatars and multiplayer-only colorways.</p></div><i class="fas fa-store"></i></div>
-                                <p id="multiplayer-shop-status" class="community-status" role="status" aria-live="polite"></p>
-                                <div id="multiplayer-shop-items" class="multiplayer-shop-items"></div>
-                            </section>
                         </aside>
                     </div>
+                    <section class="glass-card multiplayer-shop" id="multiplayer-shop">
+                        <div class="view-header"><div><h3><i class="fas fa-store"></i> Player shop</h3><p>Open mystery boxes, collect characters, hats, accessories and pets, then equip them to show off in every game.</p></div><div class="shop-wallet"><i class="fas fa-coins"></i> <strong id="shop-wallet-coins">0</strong></div></div>
+                        <p id="multiplayer-shop-status" class="community-status" role="status" aria-live="polite"></p>
+                        <div id="multiplayer-shop-items" class="multiplayer-shop-items"></div>
+                    </section>
                 </section>
 
                 <!-- 7. Flashcard Importer View -->
@@ -726,6 +706,11 @@
 
                 <!-- 8. Settings View -->
                 <section id="settings-view" class="view hidden">
+                    <nav class="settings-tabs" aria-label="Settings sections">
+                        <button type="button" class="settings-tab active" data-target="settings-view"><i class="fas fa-user-cog"></i> Profile &amp; Data</button>
+                        <button type="button" class="settings-tab" data-target="appearance-view"><i class="fas fa-palette"></i> UI</button>
+                        <button type="button" class="settings-tab" data-target="sound-view"><i class="fas fa-volume-high"></i> Sound</button>
+                    </nav>
                     <div class="settings-grid">
                         <div class="glass-card">
                             <h2>Student Profile</h2>
@@ -771,6 +756,11 @@
                 </section>
 
                 <section id="appearance-view" class="view hidden">
+                    <nav class="settings-tabs" aria-label="Settings sections">
+                        <button type="button" class="settings-tab" data-target="settings-view"><i class="fas fa-user-cog"></i> Profile &amp; Data</button>
+                        <button type="button" class="settings-tab active" data-target="appearance-view"><i class="fas fa-palette"></i> UI</button>
+                        <button type="button" class="settings-tab" data-target="sound-view"><i class="fas fa-volume-high"></i> Sound</button>
+                    </nav>
                     <div class="view-header">
                         <div><h2>UI Settings</h2><p class="study-guidance-intro">Personalize StudBud’s colors and layout. Changes are synced to your account.</p></div>
                     </div>
@@ -804,34 +794,69 @@
                     </div>
                 </section>
 
+                <section id="sound-view" class="view hidden">
+                    <nav class="settings-tabs" aria-label="Settings sections">
+                        <button type="button" class="settings-tab" data-target="settings-view"><i class="fas fa-user-cog"></i> Profile &amp; Data</button>
+                        <button type="button" class="settings-tab" data-target="appearance-view"><i class="fas fa-palette"></i> UI</button>
+                        <button type="button" class="settings-tab active" data-target="sound-view"><i class="fas fa-volume-high"></i> Sound</button>
+                    </nav>
+                    <div class="view-header">
+                        <div><h2>Sound Settings</h2><p class="study-guidance-intro">Control sound effects. Ambient study sounds are available while you study flashcards or play solo study games. Saved on this device.</p></div>
+                    </div>
+                    <div class="appearance-grid">
+                        <section class="glass-card">
+                            <h3>Sound effects</h3>
+                            <div class="mixer-channel">
+                                <label for="sfx-volume">Effects volume <output id="sfx-volume-value">70%</output></label>
+                                <input type="range" id="sfx-volume" min="0" max="100" value="70">
+                            </div>
+                            <label class="setting-toggle"><input type="checkbox" id="sfx-ui" checked> <span>Interface sounds (clicks, saves, shop)</span></label>
+                            <label class="setting-toggle"><input type="checkbox" id="sfx-game" checked> <span>Game sounds (jumps, shots, hits, rounds)</span></label>
+                            <button type="button" id="sfx-test-btn" class="secondary-btn"><i class="fas fa-play"></i> Play test sound</button>
+                        </section>
+                        <section class="glass-card">
+                            <h3>Game music</h3>
+                            <label class="setting-toggle"><input type="checkbox" id="music-on" checked> <span>Background music in games</span></label>
+                            <div class="mixer-channel">
+                                <label for="music-volume">Music volume <output id="music-volume-value">50%</output></label>
+                                <input type="range" id="music-volume" min="0" max="100" value="50">
+                            </div>
+                            <div class="mixer-channel">
+                                <label for="music-style">Track</label>
+                                <select id="music-style">
+                                    <option value="auto">Automatic (matches the game)</option>
+                                    <option value="summit">Summit Run</option>
+                                    <option value="lagoon">Lagoon Breeze</option>
+                                    <option value="bazaar">Bazaar Bounce</option>
+                                    <option value="cavern">Crystal Cavern</option>
+                                    <option value="battle">Battle Drive</option>
+                                    <option value="neon">Neon Exchange</option>
+                                </select>
+                            </div>
+                            <button type="button" id="music-preview-btn" class="secondary-btn"><i class="fas fa-music"></i> Preview track</button>
+                        </section>
+                    </div>
+                </section>
+
+                <aside id="study-ambience" class="study-ambience hidden" aria-label="Study ambience">
+                    <button type="button" class="ambience-toggle" id="ambience-toggle" aria-expanded="false" title="Study ambience"><i class="fas fa-headphones"></i></button>
+                    <div class="ambience-panel hidden" id="ambience-panel">
+                        <strong>Study ambience</strong>
+                        <div class="audio-toggles">
+                            <button class="audio-btn" data-audio="lofi" title="Lo-Fi Synth"><i class="fas fa-music"></i></button>
+                            <button class="audio-btn" data-audio="rain" title="Rain Noise"><i class="fas fa-cloud-rain"></i></button>
+                            <button class="audio-btn" data-audio="white" title="White Noise"><i class="fas fa-wave-square"></i></button>
+                            <button class="audio-btn" data-audio="binaural" title="Binaural Waves"><i class="fas fa-brain"></i></button>
+                        </div>
+                        <div class="mixer-channel"><label for="vol-lofi">Lo-Fi <output id="vol-lofi-value">50%</output></label><input type="range" id="vol-lofi" min="0" max="100" value="50"></div>
+                        <div class="mixer-channel"><label for="vol-rain">Rain <output id="vol-rain-value">50%</output></label><input type="range" id="vol-rain" min="0" max="100" value="50"></div>
+                        <div class="mixer-channel"><label for="vol-white">White noise <output id="vol-white-value">30%</output></label><input type="range" id="vol-white" min="0" max="100" value="30"></div>
+                        <div class="mixer-channel"><label for="vol-binaural">Binaural <output id="vol-binaural-value">60%</output></label><input type="range" id="vol-binaural" min="0" max="100" value="60"></div>
+                    </div>
+                </aside>
+
             </div>
         </main>
-
-        <!-- FOCUS & SOUND DRAWER (Collapsible) -->
-        <div id="sound-drawer" class="glass-panel collapsed">
-            <div class="drawer-header">
-                <h3>Audio Synthesizer Mixer</h3>
-                <button id="close-drawer-btn" class="icon-btn"><i class="fas fa-chevron-down"></i></button>
-            </div>
-            <div class="drawer-content">
-                <div class="mixer-channel">
-                    <label for="vol-lofi">Lo-Fi Synth <output id="vol-lofi-value">50%</output></label>
-                    <input type="range" id="vol-lofi" min="0" max="100" value="50">
-                </div>
-                <div class="mixer-channel">
-                    <label for="vol-rain">Rain Noise <output id="vol-rain-value">50%</output></label>
-                    <input type="range" id="vol-rain" min="0" max="100" value="50">
-                </div>
-                <div class="mixer-channel">
-                    <label for="vol-white">White Noise <output id="vol-white-value">30%</output></label>
-                    <input type="range" id="vol-white" min="0" max="100" value="30">
-                </div>
-                <div class="mixer-channel">
-                    <label for="vol-binaural">Binaural Waves (Focus) <output id="vol-binaural-value">60%</output></label>
-                    <input type="range" id="vol-binaural" min="0" max="100" value="60">
-                </div>
-            </div>
-        </div>
 
         <!-- MODAL OVERLAYS -->
         <div id="modal-container" class="modal-overlay hidden">
@@ -1113,6 +1138,7 @@
     <script src="analyticsEngine.js" defer></script>
     <script src="practiceExamEngine.js" defer></script>
     <script src="cloudSync.js" defer></script>
+    <script src="sfx.js" defer></script>
     <script src="communityGames.js" defer></script>
     <script src="multiplayerEngine.js" defer></script>
     <script src="multiplayerGames.js" defer></script>

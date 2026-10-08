@@ -1,4 +1,4 @@
-const CACHE_NAME = 'studbud-shell-v9';
+const CACHE_NAME = 'studbud-shell-v15';
 const APP_FILES = [
     './',
     './index.html',
@@ -12,6 +12,7 @@ const APP_FILES = [
     './analyticsEngine.js',
     './practiceExamEngine.js',
     './cloudSync.js',
+    './sfx.js',
     './communityGames.js',
     './multiplayerEngine.js',
     './multiplayerGames.js',

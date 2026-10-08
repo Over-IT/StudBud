@@ -282,6 +282,8 @@
             if (!saveStatus) return;
             saveStatus.textContent = message;
             saveStatus.dataset.state = state;
+            if (state === 'error') window.StudBudSfx?.play('error', 'ui', 800);
+            else if (state === 'saved' && /saved|synced/i.test(message)) window.StudBudSfx?.play('success', 'ui', 1500);
         }
 
         get(key) {
@@ -478,7 +480,7 @@
         constructor() {
             this.routes = [
                 "dashboard", "gpa", "grade-scenarios", "planner", "calendar", "schedule", "flashcard",
-                "analytics", "leaderboard", "exam-arcade", "multiplayer", "importer", "settings", "appearance"
+                "analytics", "leaderboard", "exam-arcade", "multiplayer", "importer", "settings", "appearance", "sound"
             ];
             this.activeRoute = "dashboard";
         }
@@ -527,19 +529,29 @@
             });
 
             document.querySelectorAll('.nav-item[data-target]').forEach(item => {
-                const active = item.dataset.target === viewId;
+                const group = `${item.dataset.target} ${item.dataset.also || ''}`.split(' ');
+                const active = group.includes(viewId);
                 item.classList.toggle('active', active);
                 if (active) item.setAttribute('aria-current', 'page');
                 else item.removeAttribute('aria-current');
             });
 
-            const activeItem = document.querySelector(`.nav-item[data-target="${viewId}"]`);
+            const activeItem = Array.from(document.querySelectorAll('.nav-item[data-target]'))
+                .find(item => `${item.dataset.target} ${item.dataset.also || ''}`.split(' ').includes(viewId));
             const title = activeItem && activeItem.querySelector('span');
             const titleElement = document.getElementById('active-view-title');
             if (title && titleElement) titleElement.textContent = title.textContent.trim();
             else if (route === 'class' && titleElement) {
                 const course = (AppState.get('courses') || []).find(item => item.code === this.selectedClassCode);
                 titleElement.textContent = course ? course.title : 'Class';
+            }
+
+            const studyRoute = viewId === 'flashcard-view' || viewId === 'exam-arcade-view';
+            document.getElementById('study-ambience')?.classList.toggle('hidden', !studyRoute);
+            if (!studyRoute) {
+                document.getElementById('ambience-panel')?.classList.add('hidden');
+                Soundscape.stopAll();
+                document.querySelectorAll('.audio-btn').forEach(item => item.classList.remove('active'));
             }
 
             EventBus.emit('router:navigated', route);
@@ -1046,6 +1058,11 @@
         }
 
         bindUI() {
+            document.addEventListener('click', event => {
+                const target = event.target.closest?.('button, .nav-item, .scheme-option, [data-action]');
+                if (!target || target.disabled || target.closest('.mpg-overlay')) return;
+                window.StudBudSfx?.play(target.classList.contains('nav-item') ? 'tick' : 'click', 'ui');
+            }, true);
             document.addEventListener('click', event => this.handleClick(event));
             document.addEventListener('keydown', event => this.handleKeydown(event));
             document.addEventListener('submit', event => this.handleSubmit(event));
@@ -1073,6 +1090,15 @@
                 }
                 if (event.target.id === 'host-game-goal-type') this.updateMultiplayerGoalInputs();
                 if (event.target.matches('input[type="range"][id^="vol-"]')) this.setMixerLevel(event.target, false);
+                if (event.target.id === 'sfx-volume') {
+                    const volume = Number(event.target.value) / 100;
+                    window.StudBudSfx.update({ volume });
+                    document.getElementById('sfx-volume-value').value = `${event.target.value}%`;
+                }
+                if (event.target.id === 'music-volume') {
+                    window.StudBudSfx.update({ musicVolume: Number(event.target.value) / 100 });
+                    document.getElementById('music-volume-value').value = `${event.target.value}%`;
+                }
             });
             window.addEventListener('resize', () => this.updateSidebarToggle());
             document.getElementById('modal-container').addEventListener('click', event => {
@@ -1541,7 +1567,7 @@
                 ['even', 'Even day']
             ];
             const periodOptions = '<option value="">Not scheduled</option>' +
-                Array.from({ length: 7 }, (_, index) => `<option value="${index + 1}">Period ${index + 1}</option>`).join('');
+                [1, 2, 3, 5, 6, 7, 8].map(number => `<option value="${number}">Period ${number}</option>`).join('');
             container.innerHTML = `
                 <div class="schedule-pattern-headings"><span>Class</span>${patterns.map(([, label]) => `<span>${label}</span>`).join('')}</div>
                 ${courses.map(course => `<div class="schedule-course-row">
@@ -1907,7 +1933,7 @@
             grid.innerHTML = decks.length ? decks.map(deck => `
                 <article class="glass-card">
                     <h3>${this.escapeHTML(deck.title)}</h3>
-                    <p>${(deck.cards || []).length} cards</p>
+                    <p>${(deck.cards || []).length} cards · ${(deck.cards || []).filter(card => this.isCardDue(card)).length} to review</p>
                     <div class="actions">
                         <button class="primary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}">Study</button>
                         <button class="secondary-btn" data-action="add-card" data-id="${this.escapeHTML(deck.id)}">Add Card</button>
@@ -1950,11 +1976,68 @@
             return fullName || user?.user_metadata?.username || 'Student';
         }
 
-        multiplayerAvatarMarkup(itemId, large = false, accessoryId = '') {
-            const item = window.StudBudCommunityGames.catalog.find(entry => entry.id === itemId);
-            const icon = item?.icon || 'fa-user-astronaut';
-            const accessoryItem = window.StudBudCommunityGames.catalog.find(entry => entry.id === accessoryId && entry.type === 'accessory');
-            return `<span class="player-avatar${large ? ' player-avatar-large' : ''} ${this.escapeHTML(itemId || 'avatar_default')}"${accessoryItem ? ` data-accessory="${this.escapeHTML(accessoryItem.id)}"` : ''}><i class="fas ${this.escapeHTML(icon)}" aria-hidden="true"></i>${accessoryItem ? `<i class="avatar-accessory fas ${this.escapeHTML(accessoryItem.icon)}" aria-hidden="true"></i>` : ''}</span>`;
+        profileCosmetics(profile) {
+            return { skin: profile?.equipped_skin || '', hat: profile?.equipped_hat || '', acc: profile?.equipped_accessory || '', pet: profile?.equipped_pet || '' };
+        }
+
+        // Draws the same animated-game character to a cached image so lobby avatars match in-game characters.
+        multiplayerAvatarMarkup(cos = {}, large = false) {
+            const util = window.StudBudArcade?.util;
+            const key = [cos.skin, cos.hat, cos.acc, cos.pet, cos.color].join('|');
+            this.characterCache = this.characterCache || new Map();
+            let url = this.characterCache.get(key);
+            if (!url && util) {
+                const canvas = document.createElement('canvas');
+                canvas.width = 160;
+                canvas.height = 160;
+                const ctx = canvas.getContext('2d');
+                ctx.scale(2, 2);
+                util.drawFigureSide(ctx, { color: cos.color || '#34d399', cos }, 29, 26, 26, 42, 1, 0, false);
+                url = canvas.toDataURL('image/png');
+                this.characterCache.set(key, url);
+            }
+            return `<span class="player-avatar char-avatar${large ? ' player-avatar-large' : ''}">${url ? `<img src="${url}" alt="" draggable="false">` : '<i class="fas fa-user" aria-hidden="true"></i>'}</span>`;
+        }
+
+        renderMultiplayerShop(profile) {
+            const games = window.StudBudCommunityGames;
+            const owned = profile.owned_items || [];
+            const tab = this.shopTab || 'boxes';
+            const catalog = games.catalog.filter(item => !item.legacy);
+            const equippedBy = { skin: profile.equipped_skin, hat: profile.equipped_hat, accessory: profile.equipped_accessory, pet: profile.equipped_pet, palette: profile.equipped_palette };
+            const tabs = [['boxes', 'Mystery boxes'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['pet', 'Collection'], ['palette', 'Colors']];
+            const slotKey = { skin: 'skin', hat: 'hat', accessory: 'acc', pet: 'pet' };
+            const itemCard = item => {
+                const has = owned.includes(item.id);
+                const equipped = equippedBy[item.type] === item.id;
+                let preview;
+                if (item.type === 'palette') preview = `<span class="shop-palette ${this.escapeHTML(item.color)}"></span>`;
+                else if (item.type === 'pet' && !has) preview = '<span class="player-avatar char-avatar pet-locked"><b>?</b></span>';
+                else preview = this.multiplayerAvatarMarkup({ skin: '', hat: '', acc: '', pet: '', [slotKey[item.type]]: item.id });
+                const price = item.price == null ? '' : ` · ${item.price} <i class="fas fa-coins"></i>`;
+                let button;
+                if (has) button = `<button type="button" class="secondary-btn" data-action="multiplayer-equip" data-id="${this.escapeHTML(item.id)}" ${equipped ? 'disabled' : ''}>${equipped ? 'Equipped' : 'Equip'}</button>`;
+                else if (item.price == null) button = '<button type="button" class="secondary-btn" disabled>Box only</button>';
+                else button = `<button type="button" class="secondary-btn" data-action="multiplayer-buy" data-id="${this.escapeHTML(item.id)}" ${profile.coins < item.price ? 'disabled' : ''}>Buy${price}</button>`;
+                const name = item.type === 'pet' && !has ? 'Unknown pet' : item.name;
+                return `<article class="multiplayer-shop-item rarity-${item.rarity}${equipped ? ' equipped' : ''}">${preview}<div><strong>${this.escapeHTML(name)}</strong><small class="rarity-label">${item.rarity}</small></div>${button}</article>`;
+            };
+            let body;
+            if (tab === 'boxes') {
+                const drop = this.lastDrop;
+                const dropItem = drop && games.catalog.find(entry => entry.id === drop.unlocked_item);
+                body = `${dropItem ? `<div class="box-reveal rarity-${this.escapeHTML(drop.rarity)}">${this.multiplayerAvatarMarkup({ skin: '', hat: '', acc: '', pet: '', [slotKey[dropItem.type]]: dropItem.id }, true)}<div><small>${this.escapeHTML(drop.rarity)}</small><strong>${this.escapeHTML(dropItem.name)}</strong><span>${drop.duplicate ? `Duplicate! Refunded ${Number(drop.refund)} coins.` : 'New item added to your collection!'}</span></div></div>` : ''}
+                    ${games.constructor.boxes.map(box => `<article class="multiplayer-shop-item box-card box-${box.id}"><span class="mystery-capsule"><i class="fas ${box.icon}"></i></span><div><strong>${box.name}</strong><small>${box.odds}</small></div><button type="button" class="secondary-btn" data-action="multiplayer-mystery" data-id="${box.id}" ${profile.coins < box.price ? 'disabled' : ''}>Open · ${box.price} <i class="fas fa-coins"></i></button></article>`).join('')}
+                    <p class="settings-hint">Boxes can contain characters, hats, accessories, colors and pets. Duplicates refund coins.</p>`;
+            } else {
+                const items = catalog.filter(item => item.type === tab);
+                const count = items.filter(item => owned.includes(item.id)).length;
+                const remove = slotKey[tab] ? `<button type="button" class="ghost-btn shop-unequip" data-action="multiplayer-unequip" data-slot="${tab === 'accessory' ? 'accessory' : tab}">Remove</button>` : '';
+                body = `<h4 class="shop-category-title">${count} / ${items.length} collected ${remove}</h4>${items.map(itemCard).join('')}`;
+            }
+            document.getElementById('multiplayer-shop-items').innerHTML = `
+                <div class="shop-tabs" role="tablist">${tabs.map(([id, label]) => `<button type="button" class="shop-tab${tab === id ? ' selected' : ''}" role="tab" aria-selected="${tab === id}" data-shop-tab="${id}">${label}</button>`).join('')}</div>
+                <div class="shop-grid">${body}</div>`;
         }
 
         async renderMultiplayerProfile(force = false) {
@@ -1976,22 +2059,20 @@
                 if (element) element.textContent = name;
             });
             const defaultAvatar = document.getElementById('multiplayer-header-avatar');
-            if (defaultAvatar) defaultAvatar.innerHTML = this.multiplayerAvatarMarkup('avatar_default');
+            if (defaultAvatar) defaultAvatar.innerHTML = this.multiplayerAvatarMarkup({});
             const shopStatus = document.getElementById('multiplayer-shop-status');
             if (!shopStatus) return;
             shopStatus.textContent = 'Loading your multiplayer profile…';
             try {
                 const profile = await window.StudBudCommunityGames.getPlayerProfile();
                 this.multiplayerProfile = profile;
-                const catalog = window.StudBudCommunityGames.catalog;
-                const avatar = profile.equipped_avatar || 'avatar_default';
-                const accessory = profile.equipped_accessory || 'accessory_default';
+                const cosmetics = this.profileCosmetics(profile);
                 [defaultAvatar, document.getElementById('multiplayer-large-avatar')].forEach(element => {
-                    if (element) element.innerHTML = this.multiplayerAvatarMarkup(avatar, element.id === 'multiplayer-large-avatar', accessory);
+                    if (element) element.innerHTML = this.multiplayerAvatarMarkup(cosmetics, element.id === 'multiplayer-large-avatar');
                 });
                 const palette = profile.equipped_palette?.replace('palette_', '') || 'default';
                 document.getElementById('multiplayer-view')?.setAttribute('data-game-palette', palette);
-                ['multiplayer-wallet-coins', 'multiplayer-sidebar-coins'].forEach(id => {
+                ['multiplayer-wallet-coins', 'multiplayer-sidebar-coins', 'shop-wallet-coins'].forEach(id => {
                     const element = document.getElementById(id);
                     if (element) element.innerHTML = id.includes('sidebar')
                         ? `${Number(profile.coins).toLocaleString()} <i class="fas fa-coins" aria-hidden="true"></i>`
@@ -1999,24 +2080,7 @@
                 });
                 const wins = document.getElementById('multiplayer-wins');
                 if (wins) wins.textContent = Number(profile.wins).toLocaleString();
-                document.getElementById('multiplayer-shop-items').innerHTML = `
-                    <article class="multiplayer-shop-item mystery-shop-item"><span class="mystery-capsule"><i class="fas fa-box-open"></i></span><div><strong>Mystery drop</strong><small>Random avatar, colorway, or accessory · 80 coins</small></div><button type="button" class="secondary-btn" data-action="multiplayer-mystery" ${catalog.every(item => (profile.owned_items || []).includes(item.id)) ? 'disabled' : ''}>Open capsule</button></article>
-                    ${[['avatar', 'Avatars'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['palette', 'Color schemes']].map(([type, label]) => `
-                    <h4 class="shop-category-title">${label}${['skin', 'hat', 'accessory'].includes(type) ? ` <button type="button" class="ghost-btn shop-unequip" data-action="multiplayer-unequip" data-slot="${type}">Remove</button>` : ''}</h4>
-                    ${catalog.filter(item => item.type === type).map(item => {
-                    const owned = (profile.owned_items || []).includes(item.id);
-                    const equippedId = { avatar: profile.equipped_avatar, palette: profile.equipped_palette, skin: profile.equipped_skin, hat: profile.equipped_hat, accessory: profile.equipped_accessory }[item.type];
-                    const equipped = equippedId === item.id;
-                    const preview = item.type === 'palette'
-                        ? `<span class="shop-palette ${this.escapeHTML(item.color)}"></span>`
-                        : item.id.startsWith('accessory_')
-                            ? `<span class="shop-avatar accessory-shop-preview"><i class="fas ${this.escapeHTML(item.icon)}" aria-hidden="true"></i></span>`
-                            : this.multiplayerAvatarMarkup(item.id);
-                    const action = owned ? 'multiplayer-equip' : 'multiplayer-buy';
-                    const label = equipped ? 'Equipped' : owned ? 'Equip' : `Buy · ${item.price} <i class="fas fa-coins"></i>`;
-                    const note = { avatar: 'Lobby avatar', skin: 'In-game character', hat: 'Worn in games', accessory: 'Worn in games', palette: 'Apply in UI Settings' }[item.type];
-                    return `<article class="multiplayer-shop-item">${preview}<div><strong>${this.escapeHTML(item.name)}</strong><small>${note}</small></div><button type="button" class="secondary-btn" data-action="${action}" data-id="${this.escapeHTML(item.id)}" ${equipped ? 'disabled' : ''}>${label}</button></article>`;
-                }).join('')}`).join('')}`;
+                this.renderMultiplayerShop(profile);
                 shopStatus.textContent = 'Coins are earned and spent only in Multiplayer.';
                 const best = document.getElementById('waiting-runner-best');
                 if (best) {
@@ -2034,16 +2098,19 @@
             const profile = action === 'multiplayer-buy'
                 ? await window.StudBudCommunityGames.purchaseItem(itemId)
                 : action === 'multiplayer-mystery'
-                    ? await window.StudBudCommunityGames.buyMysteryItem()
+                    ? await window.StudBudCommunityGames.buyMysteryItem(itemId || 'basic')
                     : action === 'multiplayer-unequip'
                         ? await window.StudBudCommunityGames.unequipSlot(itemId)
                         : await window.StudBudCommunityGames.equipItem(itemId);
             const unlockedItem = profile.unlocked_item;
+            window.StudBudSfx?.play(action === 'multiplayer-mystery' ? 'open' : action === 'multiplayer-buy' ? 'buy' : 'success', 'ui');
             this.multiplayerProfile = profile;
+            if (action === 'multiplayer-mystery') this.lastDrop = { unlocked_item: unlockedItem, rarity: profile.rarity, duplicate: profile.duplicate, refund: profile.refund };
             await this.renderMultiplayerProfile(true);
             if (action === 'multiplayer-mystery') {
                 const item = window.StudBudCommunityGames.catalog.find(entry => entry.id === unlockedItem);
-                document.getElementById('multiplayer-shop-status').textContent = `Mystery drop unlocked: ${item?.name || 'new cosmetic'}!`;
+                document.getElementById('multiplayer-shop-status').textContent = `${profile.duplicate ? 'Duplicate' : 'New'} ${profile.rarity} drop: ${item?.name || 'cosmetic'}!`;
+                window.StudBudSfx?.play(profile.rarity === 'epic' || profile.rarity === 'legendary' ? 'win' : 'success', 'ui', 0);
             }
             if (action === 'multiplayer-equip' && itemId.startsWith('palette_')) {
                 const colorScheme = itemId.slice('palette_'.length);
@@ -2264,7 +2331,7 @@
                     if (previewActive) this.drawMultiplayerScene(
                         document.getElementById('multiplayer-game-canvas'),
                         this.selectedMultiplayerMode,
-                        [{ nickname: this.multiplayerDisplayName(), score: 280, avatar: this.multiplayerProfile?.equipped_avatar, streak: 2 }, { nickname: 'Rival', score: 140, avatar: 'avatar_fox', streak: 1 }],
+                        [{ nickname: this.multiplayerDisplayName(), score: 280, skin: this.multiplayerProfile?.equipped_skin, hat: this.multiplayerProfile?.equipped_hat, accessory: this.multiplayerProfile?.equipped_accessory, pet: this.multiplayerProfile?.equipped_pet, streak: 2 }, { nickname: 'Rival', score: 140, skin: 'skin_robot', streak: 1 }],
                         now / 1000,
                         true
                     );
@@ -2908,7 +2975,7 @@
             document.getElementById('hosted-room-meta').textContent = `${goalLabel} · ${players.length} / ${playerLimit} players`;
             document.getElementById('hosted-room-code').textContent = room.room_code;
             const rankedPlayers = players.slice().sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
-            const avatarFor = player => this.multiplayerAvatarMarkup(player.avatar, false, player.accessory);
+            const avatarFor = player => this.multiplayerAvatarMarkup({ skin: player.skin, hat: player.hat, acc: player.accessory, pet: player.pet });
             document.getElementById('hosted-leaderboard-count').textContent = `${players.length} player${players.length === 1 ? '' : 's'}`;
             document.getElementById('hosted-room-players').innerHTML = rankedPlayers
                 .map((player, index) => {
@@ -3111,6 +3178,27 @@
         }
 
         syncMixerControls() {
+            const sfx = window.StudBudSfx?.settings;
+            if (sfx) {
+                const volume = document.getElementById('sfx-volume');
+                if (volume) {
+                    volume.value = String(Math.round(sfx.volume * 100));
+                    document.getElementById('sfx-volume-value').value = `${volume.value}%`;
+                }
+                const ui = document.getElementById('sfx-ui');
+                const game = document.getElementById('sfx-game');
+                if (ui) ui.checked = sfx.ui;
+                if (game) game.checked = sfx.game;
+                const musicOn = document.getElementById('music-on');
+                const musicVol = document.getElementById('music-volume');
+                const musicStyle = document.getElementById('music-style');
+                if (musicOn) musicOn.checked = sfx.music;
+                if (musicVol) {
+                    musicVol.value = String(Math.round(sfx.musicVolume * 100));
+                    document.getElementById('music-volume-value').value = `${musicVol.value}%`;
+                }
+                if (musicStyle) musicStyle.value = sfx.musicStyle;
+            }
             const levels = AppState.get('settings')?.audioLevels || {};
             const defaults = { lofi: 0.5, rain: 0.5, white: 0.3, binaural: 0.6 };
             Object.entries(defaults).forEach(([channel, fallback]) => {
@@ -3566,6 +3654,13 @@
                 return;
             }
 
+            if (target.id === 'ambience-toggle') {
+                const panel = document.getElementById('ambience-panel');
+                const open = panel.classList.toggle('hidden') === false;
+                target.setAttribute('aria-expanded', String(open));
+                return;
+            }
+
             const id = target.id;
             const action = target.dataset.action;
             try {
@@ -3592,7 +3687,10 @@
                 } else if (action === 'multiplayer-unequip') {
                     await this.updateMultiplayerShop(action, target.dataset.slot);
                 } else if (action === 'multiplayer-mystery') {
-                    await this.updateMultiplayerShop(action, '');
+                    await this.updateMultiplayerShop(action, target.dataset.id || 'basic');
+                } else if (target.matches('[data-shop-tab]')) {
+                    this.shopTab = target.dataset.shopTab;
+                    if (this.multiplayerProfile) this.renderMultiplayerShop(this.multiplayerProfile);
                 } else if (action === 'hosted-kick-player') {
                     this.hostedGameRoom = await window.StudBudCommunityGames.kickPlayer(
                         this.hostedGameRoom.room_code, target.dataset.id
@@ -3608,6 +3706,15 @@
                     this.resetFocusSprint();
                 } else if (id === 'focus-assignment') {
                     this.dashboardSprintAssignmentId = target.value;
+                } else if (id === 'sfx-test-btn') {
+                    ['success', 'jump', 'shoot', 'coin'].forEach((name, i) => setTimeout(() => window.StudBudSfx.play(name, 'ui', 0), i * 260));
+                } else if (id === 'music-preview-btn') {
+                    const sfx = window.StudBudSfx;
+                    clearTimeout(this.musicPreviewTimer);
+                    if (sfx.mus) { sfx.stopMusic(); } else {
+                        sfx.startMusic(sfx.settings.musicStyle === 'auto' ? 'summit' : sfx.settings.musicStyle, true);
+                        this.musicPreviewTimer = setTimeout(() => sfx.stopMusic(), 12000);
+                    }
                 } else if (target.matches('.audio-btn[data-audio]')) {
                     this.toggleSoundscape(target);
                 } else if (id === 'sidebar-collapse-btn') {
@@ -3911,6 +4018,14 @@
             } else if (event.target.id === 'ui-compact-mode') {
                 AppState.set('settings', { ...AppState.get('settings'), compactUi: event.target.checked });
                 this.applyAppearance();
+            } else if (event.target.id === 'sfx-ui' || event.target.id === 'sfx-game') {
+                window.StudBudSfx.update({ [event.target.id === 'sfx-ui' ? 'ui' : 'game']: event.target.checked });
+                window.StudBudSfx.play('toggle', 'ui');
+            } else if (event.target.id === 'music-on') {
+                window.StudBudSfx.update({ music: event.target.checked });
+                if (!event.target.checked) window.StudBudSfx.stopMusic();
+            } else if (event.target.id === 'music-style') {
+                window.StudBudSfx.update({ musicStyle: event.target.value });
             }
             if (event.target.id === 'host-game-goal-type') this.updateMultiplayerGoalInputs();
         }
@@ -4018,9 +4133,9 @@
                 this.hideCourseSuggestions();
                 return;
             }
-            const matches = catalog.filter(course =>
+            const matches = catalog.filter(course => !course.legacy &&
                 `${course.code} ${course.title} ${course.category}`.toLowerCase().includes(normalized)
-            ).slice(0, 8);
+            ).slice(0, 12);
             this.courseSuggestionIndex = -1;
             list.innerHTML = matches.length ? matches.map(course =>
                 `<button type="button" id="course-option-${this.escapeHTML(course.code)}" role="option" aria-selected="false" class="course-suggestion" data-action="select-course" data-id="${this.escapeHTML(course.code)}"><strong>${this.escapeHTML(course.title)}</strong><span>${this.escapeHTML(course.code)} · ${this.escapeHTML(course.category)}</span></button>`
@@ -4266,11 +4381,23 @@
             if (!deck) throw new Error('The selected deck no longer exists.');
             this.activeDeckId = deckId;
             const now = Date.now();
-            this.studyCards = (deck.cards || []).filter(card => !dueOnly || this.isCardDue(card, now));
-            if (!this.studyCards.length) {
-                window.alert('There are no cards due for review in this deck.');
-                return;
+            const cards = deck.cards || [];
+            let due = cards.filter(card => this.isCardDue(card, now));
+            this.cramMode = false;
+            if (!due.length) {
+                if (!cards.length) {
+                    window.alert('This deck has no cards yet.');
+                    return;
+                }
+                if (dueOnly || !window.confirm('Nothing is due in this deck. Cram all cards anyway? (This will not change your review schedule.)')) return;
+                due = cards.slice();
+                this.cramMode = true;
             }
+            // Learning/relearning cards first, then the oldest due cards, then new cards, capped like Anki's daily limit
+            const rank = card => !card.lastReviewed ? 2 : Number(card.interval || 0) === 0 ? 0 : 1;
+            this.studyCards = due.sort((a, b) => rank(a) - rank(b) || (new Date(a.nextReviewDate || 0) - new Date(b.nextReviewDate || 0)) || Math.random() - 0.5);
+            if (!this.cramMode) this.studyCards = this.studyCards.slice(0, 100);
+            this.studyTotal = this.studyCards.length;
             this.activeCardIndex = 0;
             this.activeStudyStartedAt = Date.now();
             document.getElementById('active-study-area').classList.remove('hidden');
@@ -4282,7 +4409,8 @@
             if (!card) return this.closeStudy();
             document.getElementById('study-deck-title').textContent =
                 (AppState.get('flashcards') || []).find(deck => deck.id === this.activeDeckId)?.title || 'Flashcards';
-            document.getElementById('study-progress').textContent = `Card ${this.activeCardIndex + 1} / ${this.studyCards.length}`;
+            const remaining = this.studyCards.length - this.activeCardIndex;
+            document.getElementById('study-progress').textContent = `${remaining} left${this.cramMode ? ' · cram mode' : ''}`;
             document.getElementById('card-front-content').textContent = card.front || '';
             document.getElementById('card-back-content').textContent = card.back || '';
             document.getElementById('current-flashcard').classList.remove('flipped');
@@ -4292,11 +4420,24 @@
             document.getElementById('sm2-controls').classList.add('hidden');
         }
 
+        formatReviewInterval(card, quality) {
+            const result = window.SM2Engine.evaluate(card, quality);
+            if (!result.interval) return '10 min';
+            return result.interval === 1 ? '1 day' : result.interval < 30 ? `${result.interval} days` : result.interval < 365 ? `${Math.round(result.interval / 30)} mo` : `${(result.interval / 365).toFixed(1)} yr`;
+        }
+
         revealCard() {
+            const card = this.studyCards[this.activeCardIndex];
             document.getElementById('card-front-content').classList.add('hidden');
             document.getElementById('card-back-content').classList.remove('hidden');
             document.getElementById('reveal-card-btn').classList.add('hidden');
             document.getElementById('sm2-controls').classList.remove('hidden');
+            if (card && window.SM2Engine) {
+                document.querySelectorAll('#sm2-controls .sm2-btn').forEach(button => {
+                    const label = button.querySelector('small');
+                    if (label) label.textContent = this.formatReviewInterval(card, Number(button.dataset.q));
+                });
+            }
         }
 
         async rateCurrentCard(quality) {
@@ -4304,7 +4445,9 @@
             if (!deck) throw new Error('The selected deck no longer exists.');
             const card = this.studyCards[this.activeCardIndex];
             if (!window.SM2Engine) throw new Error('The spaced-repetition scheduler did not load.');
-            Object.assign(card, window.SM2Engine.evaluate(card, quality));
+            if (!this.cramMode) Object.assign(card, window.SM2Engine.evaluate(card, quality));
+            // A forgotten card comes back before the session ends
+            if (quality < 3) this.studyCards.push(card);
             deck.studiedAt = deck.studiedAt || new Date().toISOString();
             deck.studiedCount = Number(deck.studiedCount || 0) + 1;
             await AppState.saveFlashcardDeck(deck);
@@ -4497,8 +4640,17 @@
                 this.showPracticeTestSetup();
                 return;
             }
-            this.arcadeCards = (AppState.get('flashcards') || []).flatMap(deck => deck.cards || [])
-                .filter(card => card.front && card.back);
+            this.arcadeCardDeck = new Map();
+            (AppState.get('flashcards') || []).forEach(deck => (deck.cards || []).forEach(card => this.arcadeCardDeck.set(card, deck)));
+            const now = Date.now();
+            // Spaced-repetition ordering: due and struggling cards come first, mastered cards last
+            const priority = card => (this.isCardDue(card, now) ? 0 : 10) + Math.min(5, Number(card.lapses || 0)) - (card.lastReviewed ? 0 : 1);
+            this.arcadeCards = Array.from(this.arcadeCardDeck.keys())
+                .filter(card => card.front && card.back)
+                .map(card => ({ card, key: priority(card) + Math.random() * 2 }))
+                .sort((a, b) => a.key - b.key)
+                .map(item => item.card);
+            if (this.arcadeCards.length > 40) this.arcadeCards = this.arcadeCards.slice(0, 40);
             if (this.arcadeCards.length < 2) {
                 window.alert('Create a flashcard deck with at least two complete cards to play.');
                 return;
@@ -4892,12 +5044,22 @@
             content.append(progress, question, choicesContainer, feedback);
         }
 
+        updateCardSchedule(card, correct) {
+            const deck = this.arcadeCardDeck && this.arcadeCardDeck.get(card);
+            if (!deck || !window.SM2Engine || !card) return;
+            // Multiple choice is easier than free recall: only due cards earn credit, a miss always counts
+            if (correct && !this.isCardDue(card)) return;
+            Object.assign(card, window.SM2Engine.evaluate(card, correct ? 4 : 1));
+            AppState.saveFlashcardDeck(deck).catch(error => console.error('[NexusApp] Card progress could not be saved:', error));
+        }
+
         answerArcade(index) {
             const correctCard = this.arcadeCards[this.arcadeQuestionIndex];
             const correct = this.arcadeMode === 'truefalse'
                 ? this.arcadeOptions[index] === this.arcadeCurrentIsTrue
                 : this.arcadeOptions[index] === correctCard;
             if (correct) this.arcadeScore += 1;
+            this.updateCardSchedule(correctCard, correct);
             this.arcadeStreak = correct ? this.arcadeStreak + 1 : 0;
             if (this.arcadeMode === 'survival' && !correct) this.arcadeLives -= 1;
             document.querySelectorAll('#arcade-game-content [data-action="arcade-answer"]').forEach(button => {

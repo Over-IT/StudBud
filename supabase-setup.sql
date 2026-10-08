@@ -328,25 +328,53 @@ alter table public.studbud_multiplayer_profiles
 -- Legacy 'accessory_default' placeholder from older versions means "nothing equipped".
 update public.studbud_multiplayer_profiles set equipped_accessory = '' where equipped_accessory = 'accessory_default';
 
+alter table public.studbud_multiplayer_profiles
+    add column if not exists equipped_pet text not null default '';
+
+-- Single source of truth for priced items and rarity (pets are box-only, so price is null).
+create or replace function public.studbud_shop_items()
+returns table (id text, price integer, rarity text)
+language sql
+immutable
+as $$
+    with priced(id, price) as (values
+        ('palette_ocean', 120), ('palette_sunset', 120), ('palette_violet', 120),
+        ('palette_aurora', 160), ('palette_coral', 160), ('palette_midnight', 180),
+        ('skin_robot', 150), ('skin_ninja', 180), ('skin_alien', 180), ('skin_ghost', 220), ('skin_lava', 300), ('skin_gold', 400),
+        ('skin_bubble', 130), ('skin_snow', 140), ('skin_zombie', 160), ('skin_pumpkin', 170), ('skin_cyber', 260),
+        ('skin_shadow', 280), ('skin_crystal', 320), ('skin_galaxy', 450), ('skin_dragon', 500),
+        ('hat_cap', 60), ('hat_party', 70), ('hat_beanie', 70), ('hat_flower', 90), ('hat_chef', 100), ('hat_cowboy', 110),
+        ('hat_headphones', 120), ('hat_santa', 120), ('hat_tophat', 130), ('hat_bunny', 140), ('hat_cat', 140),
+        ('hat_wizard', 160), ('hat_pirate', 170), ('hat_viking', 190), ('hat_horns', 200), ('hat_halo', 250), ('hat_crown', 400),
+        ('acc_bowtie', 70), ('acc_shades', 80), ('acc_eyepatch', 90), ('acc_scarf', 90), ('acc_backpack', 100),
+        ('acc_monocle', 140), ('acc_cape', 180), ('acc_sparkles', 220), ('acc_wings', 350),
+        ('accessory_cap', 75), ('accessory_halo', 125), ('accessory_headphones', 150)
+    ), pets(id, rarity) as (values
+        ('pet_puppy', 'common'), ('pet_kitten', 'common'), ('pet_hamster', 'common'), ('pet_bunny', 'common'),
+        ('pet_chick', 'common'), ('pet_frog', 'common'), ('pet_turtle', 'common'), ('pet_goldfish', 'common'),
+        ('pet_fox', 'uncommon'), ('pet_panda', 'uncommon'), ('pet_koala', 'uncommon'), ('pet_penguin', 'uncommon'),
+        ('pet_duck', 'uncommon'), ('pet_octopus', 'uncommon'), ('pet_owl', 'uncommon'), ('pet_bee', 'uncommon'),
+        ('pet_unicorn', 'rare'), ('pet_tiger', 'rare'), ('pet_shark', 'rare'), ('pet_butterfly', 'rare'),
+        ('pet_wolf', 'rare'), ('pet_dino', 'rare'), ('pet_robot', 'rare'), ('pet_ghosty', 'rare'),
+        ('pet_dragon', 'epic'), ('pet_eagle', 'epic'), ('pet_alien', 'epic'), ('pet_squid', 'epic'),
+        ('pet_genie', 'epic'), ('pet_gem', 'epic'), ('pet_comet', 'epic'), ('pet_phoenix', 'epic'),
+        ('pet_star', 'legendary'), ('pet_planet', 'legendary'), ('pet_rainbow', 'legendary'),
+        ('pet_elder', 'legendary'), ('pet_brain', 'legendary'), ('pet_trophy', 'legendary')
+    )
+    select priced.id, priced.price,
+        case when priced.price < 100 then 'common' when priced.price < 160 then 'uncommon'
+             when priced.price < 260 then 'rare' when priced.price < 400 then 'epic' else 'legendary' end
+    from priced
+    union all
+    select pets.id, null::integer, pets.rarity from pets;
+$$;
+
 create or replace function public.studbud_shop_price(p_item_id text)
 returns integer
 language sql
 immutable
 as $$
-    select case p_item_id
-        when 'avatar_spark' then 50 when 'avatar_fox' then 90 when 'avatar_rocket' then 140 when 'avatar_crown' then 220
-        when 'palette_ocean' then 120 when 'palette_sunset' then 120 when 'palette_violet' then 120
-        when 'palette_aurora' then 160 when 'palette_coral' then 160 when 'palette_midnight' then 180
-        when 'skin_robot' then 150 when 'skin_ninja' then 180 when 'skin_alien' then 180
-        when 'skin_ghost' then 220 when 'skin_lava' then 300 when 'skin_gold' then 400
-        when 'hat_cap' then 60 when 'hat_party' then 70 when 'hat_cowboy' then 110 when 'hat_headphones' then 120
-        when 'hat_tophat' then 130 when 'hat_wizard' then 160 when 'hat_viking' then 190
-        when 'hat_halo' then 250 when 'hat_crown' then 400
-        when 'accessory_cap' then 75 when 'accessory_halo' then 125 when 'accessory_headphones' then 150
-        when 'acc_shades' then 80 when 'acc_scarf' then 90 when 'acc_backpack' then 100
-        when 'acc_monocle' then 140 when 'acc_cape' then 180 when 'acc_wings' then 350
-        else null
-    end;
+    select price from public.studbud_shop_items() where id = p_item_id;
 $$;
 
 revoke all on table public.studbud_multiplayer_profiles from anon, authenticated;
@@ -375,12 +403,15 @@ begin
         'equipped_skin', v_profile.equipped_skin,
         'equipped_hat', v_profile.equipped_hat,
         'equipped_accessory', v_profile.equipped_accessory,
+        'equipped_pet', v_profile.equipped_pet,
         'best_wait_score', v_profile.best_wait_score
     );
 end;
 $$;
 
-create or replace function public.studbud_buy_mystery_item()
+drop function if exists public.studbud_buy_mystery_item();
+
+create or replace function public.studbud_buy_mystery_item(p_box text default 'basic')
 returns jsonb
 language plpgsql
 security definer
@@ -390,35 +421,49 @@ declare
     v_user_id uuid := auth.uid();
     v_profile public.studbud_multiplayer_profiles%rowtype;
     v_item_id text;
-    v_cost integer := 80;
+    v_cost integer;
+    v_roll numeric := random();
+    v_rarity text;
+    v_refund integer := 0;
+    v_duplicate boolean := false;
 begin
-    if v_user_id is null then raise exception 'Sign in to open a mystery capsule.'; end if;
+    if v_user_id is null then raise exception 'Sign in to open a mystery box.'; end if;
+    if p_box = 'basic' then
+        v_cost := 80;
+        v_rarity := case when v_roll < 0.70 then 'common' when v_roll < 0.92 then 'uncommon' when v_roll < 0.99 then 'rare' else 'epic' end;
+    elsif p_box = 'rare' then
+        v_cost := 200;
+        v_rarity := case when v_roll < 0.20 then 'common' when v_roll < 0.60 then 'uncommon' when v_roll < 0.88 then 'rare' when v_roll < 0.98 then 'epic' else 'legendary' end;
+    elsif p_box = 'legendary' then
+        v_cost := 500;
+        v_rarity := case when v_roll < 0.20 then 'uncommon' when v_roll < 0.60 then 'rare' when v_roll < 0.90 then 'epic' else 'legendary' end;
+    else
+        raise exception 'Unknown mystery box.';
+    end if;
     insert into public.studbud_multiplayer_profiles (user_id)
     values (v_user_id) on conflict (user_id) do nothing;
     select * into v_profile from public.studbud_multiplayer_profiles where user_id = v_user_id for update;
-    if v_profile.coins < v_cost then raise exception 'You need 80 multiplayer coins to open a mystery capsule.'; end if;
+    if v_profile.coins < v_cost then raise exception 'You need % multiplayer coins to open that box.', v_cost; end if;
 
-    select item_id into v_item_id
-    from unnest(array[
-        'avatar_spark', 'avatar_fox', 'avatar_rocket', 'avatar_crown',
-        'palette_ocean', 'palette_sunset', 'palette_violet',
-        'palette_aurora', 'palette_coral', 'palette_midnight',
-        'skin_robot', 'skin_ninja', 'skin_alien', 'skin_ghost', 'skin_lava', 'skin_gold',
-        'hat_cap', 'hat_party', 'hat_cowboy', 'hat_headphones', 'hat_tophat', 'hat_wizard', 'hat_viking', 'hat_halo', 'hat_crown',
-        'accessory_cap', 'accessory_halo', 'accessory_headphones',
-        'acc_shades', 'acc_scarf', 'acc_backpack', 'acc_monocle', 'acc_cape', 'acc_wings'
-    ]) as item(item_id)
-    where not (item_id = any(v_profile.owned_items))
+    select id into v_item_id
+    from public.studbud_shop_items()
+    where rarity = v_rarity and id not like 'accessory\_%'
     order by random()
     limit 1;
-    if v_item_id is null then raise exception 'You already unlocked every item in this capsule.'; end if;
+    if v_item_id is null then raise exception 'That box is empty right now.'; end if;
+
+    if v_item_id = any(v_profile.owned_items) then
+        v_duplicate := true;
+        v_refund := case v_rarity when 'common' then 15 when 'uncommon' then 30 when 'rare' then 60 when 'epic' then 120 else 250 end;
+    end if;
 
     update public.studbud_multiplayer_profiles
-    set coins = coins - v_cost,
-        owned_items = array_append(owned_items, v_item_id),
+    set coins = coins - v_cost + v_refund,
+        owned_items = case when v_duplicate then owned_items else array_append(owned_items, v_item_id) end,
         updated_at = now()
     where user_id = v_user_id;
-    return public.studbud_get_multiplayer_profile() || jsonb_build_object('unlocked_item', v_item_id);
+    return public.studbud_get_multiplayer_profile()
+        || jsonb_build_object('unlocked_item', v_item_id, 'duplicate', v_duplicate, 'refund', v_refund, 'rarity', v_rarity);
 end;
 $$;
 
@@ -454,6 +499,7 @@ declare
     v_profile public.studbud_multiplayer_profiles%rowtype;
 begin
     if v_user_id is null then raise exception 'Sign in to shop.'; end if;
+    if p_item_id like 'pet\_%' then raise exception 'Pets can only be found in mystery boxes.'; end if;
     v_cost := public.studbud_shop_price(p_item_id);
     if v_cost is null then raise exception 'That shop item is not available.'; end if;
     insert into public.studbud_multiplayer_profiles (user_id)
@@ -489,8 +535,10 @@ begin
         update public.studbud_multiplayer_profiles set equipped_skin = p_item_id, updated_at = now() where user_id = v_user_id;
     elsif p_item_id like 'hat_%' or p_item_id like 'accessory_%' then
         update public.studbud_multiplayer_profiles set equipped_hat = p_item_id, updated_at = now() where user_id = v_user_id;
-    elsif p_item_id like 'acc_%' then
+    elsif p_item_id like 'acc\_%' then
         update public.studbud_multiplayer_profiles set equipped_accessory = p_item_id, updated_at = now() where user_id = v_user_id;
+    elsif p_item_id like 'pet\_%' then
+        update public.studbud_multiplayer_profiles set equipped_pet = p_item_id, updated_at = now() where user_id = v_user_id;
     else
         raise exception 'That item cannot be equipped.';
     end if;
@@ -512,6 +560,7 @@ begin
     if p_slot = 'skin' then update public.studbud_multiplayer_profiles set equipped_skin = '', updated_at = now() where user_id = v_user_id;
     elsif p_slot = 'hat' then update public.studbud_multiplayer_profiles set equipped_hat = '', updated_at = now() where user_id = v_user_id;
     elsif p_slot = 'accessory' then update public.studbud_multiplayer_profiles set equipped_accessory = '', updated_at = now() where user_id = v_user_id;
+    elsif p_slot = 'pet' then update public.studbud_multiplayer_profiles set equipped_pet = '', updated_at = now() where user_id = v_user_id;
     else raise exception 'Unknown slot.'; end if;
     return public.studbud_get_multiplayer_profile();
 end;
@@ -529,7 +578,8 @@ as $$
         'palette', coalesce(profile.equipped_palette, 'palette_default'),
         'skin', coalesce(profile.equipped_skin, ''),
         'hat', coalesce(profile.equipped_hat, ''),
-        'accessory', coalesce(profile.equipped_accessory, '')
+        'accessory', coalesce(profile.equipped_accessory, ''),
+        'pet', coalesce(profile.equipped_pet, '')
     )
     from (select p_user_id as user_id) user_ref
     left join public.studbud_multiplayer_profiles profile on profile.user_id = user_ref.user_id;
@@ -713,7 +763,7 @@ begin
                 'distance', 0, 'loot', 0, 'deliveries', 0, 'depth', 0, 'yards', 0,
                 'touchdowns', 0, 'targets', 0, 'wave', 1, 'last_event', '', 'last_action', '',
                 'avatar', v_cosmetics ->> 'avatar', 'palette', v_cosmetics ->> 'palette',
-                'skin', v_cosmetics ->> 'skin', 'hat', v_cosmetics ->> 'hat', 'accessory', v_cosmetics ->> 'accessory'
+                'skin', v_cosmetics ->> 'skin', 'hat', v_cosmetics ->> 'hat', 'accessory', v_cosmetics ->> 'accessory', 'pet', v_cosmetics ->> 'pet'
             )),
             'question_index', -1,
             'question', null,
@@ -791,7 +841,7 @@ begin
         'distance', 0, 'loot', 0, 'deliveries', 0, 'depth', 0, 'yards', 0,
         'touchdowns', 0, 'targets', 0, 'wave', 1, 'last_event', '', 'last_action', '',
         'avatar', v_cosmetics ->> 'avatar', 'palette', v_cosmetics ->> 'palette',
-        'skin', v_cosmetics ->> 'skin', 'hat', v_cosmetics ->> 'hat', 'accessory', v_cosmetics ->> 'accessory'
+        'skin', v_cosmetics ->> 'skin', 'hat', v_cosmetics ->> 'hat', 'accessory', v_cosmetics ->> 'accessory', 'pet', v_cosmetics ->> 'pet'
     ));
     update public.studbud_game_rooms
     set state = jsonb_set(state, '{players}', v_players),
@@ -1306,8 +1356,8 @@ revoke all on function public.studbud_create_game_room(text, text, text, jsonb, 
 grant execute on function public.studbud_create_game_room(text, text, text, jsonb, text) to authenticated;
 revoke all on function public.studbud_get_multiplayer_profile() from public, anon;
 grant execute on function public.studbud_get_multiplayer_profile() to authenticated;
-revoke all on function public.studbud_buy_mystery_item() from public, anon;
-grant execute on function public.studbud_buy_mystery_item() to authenticated;
+revoke all on function public.studbud_buy_mystery_item(text) from public, anon;
+grant execute on function public.studbud_buy_mystery_item(text) to authenticated;
 revoke all on function public.studbud_record_waiting_game_best(integer) from public, anon;
 grant execute on function public.studbud_record_waiting_game_best(integer) to authenticated;
 revoke all on function public.studbud_buy_multiplayer_item(text) from public, anon;

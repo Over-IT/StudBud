@@ -59,32 +59,41 @@
             let easeFactor = card.easeFactor || 2.5;
             let interval = card.interval || 0;
             let lapses = card.lapses || 0;
+            const reviewedAt = Date.now();
+            let dueInMs;
 
             if (q >= 3) {
-                // Successful Recall
+                // Anki-style grades: 3 = Hard, 4 = Good, 5 = Easy
                 if (repetitions === 0) {
-                    interval = 1;
+                    interval = q === 5 ? 4 : 1;
                 } else if (repetitions === 1) {
-                    interval = 6;
+                    interval = q === 3 ? 4 : q === 5 ? 8 : 6;
+                } else if (q === 3) {
+                    interval = Math.max(interval + 1, Math.round(interval * 1.2));
+                } else if (q === 4) {
+                    interval = Math.max(interval + 1, Math.round(interval * easeFactor));
                 } else {
-                    interval = Math.round(interval * easeFactor);
+                    interval = Math.max(interval + 1, Math.round(interval * easeFactor * 1.3));
                 }
+                // Fuzz longer intervals slightly so cards from the same session don't all return together
+                if (interval >= 7) interval = Math.max(1, Math.round(interval * (0.95 + Math.random() * 0.1)));
                 interval = Math.max(1, Math.min(interval, 36500));
                 repetitions += 1;
+                dueInMs = interval * 86400000;
             } else {
-                // Failed Recall (Lapse)
+                // Lapse: relearn within the session (about 10 minutes) and shrink the next interval
                 repetitions = 0;
-                interval = 1;
+                interval = 0;
                 lapses += 1;
+                dueInMs = 10 * 60000;
             }
 
-            // Calculate new Ease Factor (EF), bounded strictly above 1.3
-            easeFactor = easeFactor + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02));
-            if (easeFactor < 1.3) easeFactor = 1.3;
+            // Ease factor update: Again/Hard lower it, Easy raises it, Good leaves it roughly unchanged
+            const easeDelta = q <= 2 ? -0.2 : q === 3 ? -0.15 : q === 4 ? 0 : 0.15;
+            easeFactor = Math.min(3.5, Math.max(1.3, easeFactor + easeDelta));
 
-            const reviewedAt = Date.now();
             const lastReviewed = new Date(reviewedAt).toISOString();
-            const nextReviewDate = new Date(reviewedAt + interval * 86400000).toISOString();
+            const nextReviewDate = new Date(reviewedAt + dueInMs).toISOString();
 
             return {
                 repetitions,
