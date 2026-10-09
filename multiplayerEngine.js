@@ -435,11 +435,13 @@
             this.ask(correct => {
                 if (correct) this.refill();
                 else if (correct === false) this.toast(`Wrong answer — no ${res.label.toLowerCase()}`, '#f87171');
-            }, `Correct answer: +${this.rewardAmount()} ${res.label}`);
+            }, `Correct answer: +${this.rewardAmount()} ${res.label}`, true);
         }
 
-        ask(callback, note) {
+        // Automatic triggers (mystery boxes, chests, pads) are blocked briefly after any question closes.
+        ask(callback, note, manual) {
             if (this.paused || this.question || this.over || this.countdown > 0) return false;
+            if (!manual && performance.now() < (this.askCooldownUntil || 0)) return false;
             if (!this.cards.length) { this.toast('Questions are still loading…', '#fbbf24'); return false; }
             let index = Math.floor(Math.random() * this.cards.length);
             if (this.cards.length > 1 && index === this.lastCard) index = (index + 1) % this.cards.length;
@@ -492,6 +494,7 @@
 
         closeQuestion(resume) {
             this.question = null;
+            this.askCooldownUntil = performance.now() + 6000;
             this.overlay.querySelector('.mpg-question').classList.add('hidden');
             if (resume) this.paused = false;
         }
@@ -592,12 +595,7 @@
                 </div>
                 <div class="mpg-hint"></div>
                 <div class="mpg-touch" aria-label="Touch controls">
-                    <div class="mpg-pad">
-                        <button type="button" data-k="KeyA" aria-label="Left">◀</button>
-                        <button type="button" data-k="KeyD" aria-label="Right">▶</button>
-                        <button type="button" data-k="KeyW" aria-label="Up">▲</button>
-                        <button type="button" data-k="KeyS" aria-label="Down">▼</button>
-                    </div>
+                    <div class="mpg-stick" role="application" aria-label="Movement joystick"><i class="mpg-knob"></i></div>
                     <div class="mpg-btns">
                         <button type="button" data-k="Space" class="b-main">Jump</button>
                         <button type="button" data-k="ShiftLeft">Dash</button>
@@ -638,6 +636,43 @@
                 if (btn.dataset.click) this.mouse.down = false;
                 btn.classList.remove('on');
             };
+            const stick = pad.querySelector('.mpg-stick'), knob = stick?.querySelector('.mpg-knob');
+            if (stick) {
+                const dirs = { KeyA: false, KeyD: false, KeyW: false, KeyS: false };
+                let activeId = null;
+                const setDirs = next => {
+                    for (const code in dirs) {
+                        if (next[code] && !dirs[code]) this.justPressed.add(code);
+                        if (next[code]) this.keys.add(code); else this.keys.delete(code);
+                        dirs[code] = next[code];
+                    }
+                };
+                const reset = () => {
+                    activeId = null;
+                    setDirs({ KeyA: false, KeyD: false, KeyW: false, KeyS: false });
+                    knob.style.transform = '';
+                };
+                const move = e => {
+                    const b = stick.getBoundingClientRect();
+                    const max = b.width / 2;
+                    let dx = e.clientX - (b.left + max), dy = e.clientY - (b.top + max);
+                    const len = Math.hypot(dx, dy);
+                    if (len > max) { dx = dx / len * max; dy = dy / len * max; }
+                    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+                    if (this.question || this.over) { setDirs({ KeyA: false, KeyD: false, KeyW: false, KeyS: false }); return; }
+                    const dead = max * 0.3;
+                    setDirs({ KeyA: dx < -dead, KeyD: dx > dead, KeyW: dy < -dead, KeyS: dy > dead });
+                };
+                stick.addEventListener('pointerdown', e => {
+                    e.preventDefault();
+                    activeId = e.pointerId;
+                    stick.setPointerCapture?.(e.pointerId);
+                    move(e);
+                });
+                stick.addEventListener('pointermove', e => { if (e.pointerId === activeId) move(e); });
+                for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) stick.addEventListener(type, reset);
+                stick.addEventListener('contextmenu', e => e.preventDefault());
+            }
             pad.querySelectorAll('button').forEach(btn => {
                 btn.addEventListener('pointerdown', e => {
                     e.preventDefault();

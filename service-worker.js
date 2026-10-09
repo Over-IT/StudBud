@@ -1,10 +1,14 @@
-const CACHE_NAME = 'studbud-shell-v28';
+const CACHE_NAME = 'studbud-shell-v30';
 const APP_FILES = [
     './',
     './index.html',
     './styles.css',
     './manifest.webmanifest',
     './icons/studbud.svg',
+    './icons/icon-192.png',
+    './icons/icon-512.png',
+    './icons/icon-maskable-512.png',
+    './icons/apple-touch-icon.png',
     './pchsData.js',
     './gpaCalculator.js',
     './plannerEngine.js',
@@ -17,6 +21,7 @@ const APP_FILES = [
     './multiplayerEngine.js',
     './multiplayerGames.js',
     './multiplayerGames2.js',
+    './multiplayerGames3.js',
     './app.js'
 ];
 

@@ -144,7 +144,7 @@
                     this.researchCd = 6;
                     if (correct) { const gain = s.reward * 8 + this.intern * 40; this.cash += gain; this.pop(`Research +${money(gain)}`, '#38bdf8'); s.toast(`Great research! +${money(gain)}`, '#38bdf8'); }
                     else if (correct === false) s.toast('Bad intel — no payout.', '#f87171');
-                }, `Correct answer: +${money(s.reward * 8 + this.intern * 40)} cash`);
+                }, `Correct answer: +${money(s.reward * 8 + this.intern * 40)} cash`, true);
             } else if (id === 'rig') {
                 const cost = this.rigCost();
                 if (this.cash >= cost) { this.cash -= cost; this.rigs++; s.toast('Mining rig online! +$7/sec', '#fb923c'); } else s.toast('Not enough cash', '#f87171');
@@ -294,7 +294,7 @@
             const opened = this.s.ask(correct => {
                 if (correct) { this.s.refill(); this.s.addScore(90); this.s.toast('Treasure! +90', '#fbbf24'); }
                 else if (correct === false) this.s.toast('The chest was empty…', '#f87171');
-            });
+            }, undefined, true);
             if (opened) this.chests--;
         }
 

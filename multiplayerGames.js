@@ -896,14 +896,7 @@
                 }
                 for (const b of this.boxes) {
                     if (b.t > 0) continue;
-                    if (dist(me.x + 13, me.y + 22, b.x, b.y) < 36) {
-                        const opened = s.ask(correct => {
-                            if (correct === null) { b.t = 4; return; }
-                            if (correct) { this.boost = 8; this.bonus += 80; s.refill(); s.toast('Speed boost! +80', '#34d399'); }
-                            else { this.slow = 2.5; s.toast('Stumbled…', '#f87171'); }
-                        });
-                        if (opened) b.t = 1e9;
-                    }
+                    b.t = 1e9; // question boxes are disabled in the parkour climb
                 }
                 if (me.onGround && me.ground === this.summit) {
                     this.finished = true;
@@ -1215,15 +1208,6 @@
                 ctx.fillStyle = '#94a3b8'; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, TAU); ctx.fill();
                 ctx.fillStyle = '#ef4444';
                 for (let i = 0; i < 8; i++) { const a = i * TAU / 8; ctx.beginPath(); ctx.arc(b.x + Math.cos(a) * b.r, b.y + Math.sin(a) * b.r, 4, 0, TAU); ctx.fill(); }
-            }
-            for (const b of this.boxes) {
-                if (b.t > 0 || b.x > right || b.x < left || !seen(b.y)) continue;
-                const bob = Math.sin(this.anim * 3 + b.x) * 5;
-                ctx.fillStyle = 'rgba(250,204,21,' + (0.14 + Math.sin(this.anim * 4 + b.x) * 0.06) + ')'; ctx.beginPath(); ctx.arc(b.x, b.y + bob, 34, 0, TAU); ctx.fill();
-                ctx.fillStyle = '#f59e0b'; roundRect(ctx, b.x - 20, b.y - 15 + bob, 40, 36, 9); ctx.fill();
-                ctx.fillStyle = '#facc15'; roundRect(ctx, b.x - 18, b.y - 18 + bob, 36, 36, 8); ctx.fill();
-                ctx.fillStyle = '#fef08a'; ctx.fillRect(b.x - 14, b.y - 15 + bob, 28, 4);
-                ctx.fillStyle = '#92400e'; ctx.font = '900 24px system-ui'; ctx.textAlign = 'center'; ctx.fillText('?', b.x, b.y + 9 + bob);
             }
             if (this.tideY < bottom) {
                 const tb = Math.min(3, Math.floor(-this.tideY / this.summitH * 4));
