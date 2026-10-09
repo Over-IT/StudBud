@@ -1,4 +1,4 @@
-const CACHE_NAME = 'studbud-shell-v27';
+const CACHE_NAME = 'studbud-shell-v28';
 const APP_FILES = [
     './',
     './index.html',

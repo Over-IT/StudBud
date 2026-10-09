@@ -586,7 +586,14 @@
                                         <input id="host-game-mode" name="mode" type="hidden" value="skyline">
                                         <div class="multiplayer-goals">
                                             <label class="time-slider">Time limit: <strong id="host-game-time-value">5 min</strong><input id="host-game-time" name="timeLimit" type="range" min="1" max="60" step="1" value="5"></label>
-                                        <button class="primary-btn" type="submit"><i class="fas fa-door-open"></i> Create room</button>
+                                                                                    </div>
+                                                                                    <label>Refill per correct answer<select id="host-game-reward" name="questionReward">
+                                                                                        <option value="10">10 (hard)</option>
+                                                                                        <option value="20" selected>20 (normal)</option>
+                                                                                        <option value="30">30 (easy)</option>
+                                                                                        <option value="50">50 (very easy)</option>
+                                                                                    </select></label>
+                                                                                    <button class="primary-btn" type="submit"><i class="fas fa-door-open"></i> Create room</button>
                                     </form>
                                     </div>
                                     <div id="multiplayer-preview" class="multiplayer-preview">
