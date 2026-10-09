@@ -1984,7 +1984,7 @@
                 )
             })).filter(deck => deck.completeCards.length >= 1);
             select.innerHTML = decks.length
-                ? decks.map(deck => `<option value="${this.escapeHTML(deck.id)}">${this.escapeHTML(deck.title)} · ${deck.completeCards.length} cards${deck.completeCards.length > 50 ? ' (first 50 used)' : ''}</option>`).join('')
+                ? decks.map(deck => `<option value="${this.escapeHTML(deck.id)}">${this.escapeHTML(deck.title)} · ${deck.completeCards.length} cards</option>`).join('')
                 : '<option value="">Add a set with at least 1 complete card</option>';
             if (decks.some(deck => deck.id === previous)) select.value = previous;
             const nickname = this.multiplayerDisplayName().replace(/[^A-Za-z0-9 _-]/g, '').slice(0, 20);
@@ -3023,7 +3023,7 @@
             const deck = (AppState.get('flashcards') || []).find(item => item.id === form.elements.deckId.value);
             if (!deck) throw new Error('Add a flashcard set before hosting a game.');
             const cards = (deck.cards || []).filter(card => String(card.front || '').trim() && String(card.back || '').trim());
-            if (cards.length < 1 || cards.length > 50) throw new Error('Hosted games need a set with 1–50 complete cards.');
+            if (cards.length < 1) throw new Error('Hosted games need a set with at least one complete card.');
             if (cards.some(card => String(card.front).trim().length > 1000 || String(card.back).trim().length > 1000)) {
                 throw new Error('Hosted game terms and definitions must be 1000 characters or fewer.');
             }

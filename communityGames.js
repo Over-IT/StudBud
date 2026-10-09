@@ -113,7 +113,7 @@
                 front: String(card.front || '').trim(),
                 back: String(card.back || '').trim()
             })).filter(card => card.front && card.back);
-            if (cards.length < 2 || cards.length > 250) throw new Error('A shared deck needs 2–250 complete cards.');
+            if (cards.length < 2) throw new Error('A shared deck needs at least 2 complete cards.');
             if (cards.some(card => card.front.length > 5000 || card.back.length > 5000)) {
                 throw new Error('Shared card terms and definitions must be 5000 characters or fewer.');
             }
@@ -246,7 +246,7 @@
         }
 
         async createRoom(roomCode, nickname, deck, mode, options = {}) {
-            const cards = (deck.cards || []).filter(card => String(card.front || '').trim() && String(card.back || '').trim()).slice(0, 50)
+            const cards = (deck.cards || []).filter(card => String(card.front || '').trim() && String(card.back || '').trim())
                 .map(card => ({ front: String(card.front).trim().slice(0, 1000), back: String(card.back).trim().slice(0, 1000) }));
             if (!cards.length) throw new Error('Choose a set with at least one complete card.');
             const { data, error } = await this.getClient().rpc('studbud_create_game_room', {

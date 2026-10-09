@@ -32,7 +32,7 @@ create table if not exists public.studbud_community_decks (
     description text not null default '' check (char_length(description) <= 300),
     cards jsonb not null check (
         jsonb_typeof(cards) = 'array'
-        and jsonb_array_length(cards) between 2 and 250
+        and jsonb_array_length(cards) >= 2
     ),
     card_count integer generated always as (jsonb_array_length(cards)) stored,
     study_count integer not null default 0 check (study_count >= 0),
@@ -40,6 +40,10 @@ create table if not exists public.studbud_community_decks (
     updated_at timestamptz not null default now(),
     unique (owner_id, source_deck_id)
 );
+alter table public.studbud_community_decks drop constraint if exists studbud_community_decks_cards_check;
+alter table public.studbud_community_decks
+    add constraint studbud_community_decks_cards_check
+    check (jsonb_typeof(cards) = 'array' and jsonb_array_length(cards) >= 2);
 
 alter table public.studbud_community_decks enable row level security;
 revoke all on table public.studbud_community_decks from anon, authenticated;
@@ -263,7 +267,7 @@ create table if not exists public.studbud_game_rooms (
     deck_title text not null check (char_length(deck_title) between 1 and 100),
     cards jsonb not null check (
         jsonb_typeof(cards) = 'array'
-        and jsonb_array_length(cards) between 1 and 50
+        and jsonb_array_length(cards) >= 1
     ),
     mode text not null check (mode in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'sports', 'fishing', 'hack')),
     status text not null default 'waiting' check (status in ('waiting', 'playing', 'finished')),
@@ -287,7 +291,7 @@ alter table public.studbud_game_rooms
 alter table public.studbud_game_rooms drop constraint if exists studbud_game_rooms_cards_check;
 alter table public.studbud_game_rooms
     add constraint studbud_game_rooms_cards_check
-    check (jsonb_typeof(cards) = 'array' and jsonb_array_length(cards) between 1 and 50);
+    check (jsonb_typeof(cards) = 'array' and jsonb_array_length(cards) >= 1);
 alter table public.studbud_game_rooms drop constraint if exists studbud_game_rooms_mode_check;
 alter table public.studbud_game_rooms
     add constraint studbud_game_rooms_mode_check
@@ -790,7 +794,7 @@ begin
     end if;
     if v_reward not in (10, 20, 30, 50) then raise exception 'Choose a supported question reward.'; end if;
     if jsonb_typeof(v_cards) is distinct from 'array' then raise exception 'The selected deck is invalid.'; end if;
-    if jsonb_array_length(v_cards) not between 1 and 50 then raise exception 'A hosted game needs 1–50 cards.'; end if;
+    if jsonb_array_length(v_cards) < 1 then raise exception 'A hosted game needs at least one card.'; end if;
     if exists (
         select 1 from jsonb_array_elements(v_cards) as item(card)
         where jsonb_typeof(card) <> 'object'
