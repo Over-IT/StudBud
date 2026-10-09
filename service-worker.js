@@ -1,4 +1,4 @@
-const CACHE_NAME = 'studbud-shell-v26';
+const CACHE_NAME = 'studbud-shell-v27';
 const APP_FILES = [
     './',
     './index.html',
@@ -62,13 +62,14 @@ self.addEventListener('fetch', event => {
     }
 
     event.respondWith(
-        caches.match(request)
-            .then(cached => cached || fetch(request).then(response => {
+        fetch(request)
+            .then(response => {
                 if (response.ok) {
                     const copy = response.clone();
                     caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
                 }
                 return response;
-            }))
+            })
+            .catch(() => caches.match(request))
     );
 });
