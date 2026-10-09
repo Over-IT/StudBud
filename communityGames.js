@@ -223,6 +223,19 @@
             return !error && data === true;
         }
 
+        async getUsernameStatus() {
+            const { data, error } = await this.getClient().rpc('studbud_username_status');
+            if (error) throw new Error(error.message);
+            return data;
+        }
+
+        async changeUsername(username) {
+            const { data, error } = await this.getClient().rpc('studbud_change_username', { p_username: username });
+            if (error) throw new Error(error.message.includes('Could not find the function')
+                ? 'Username changes are not set up yet. Re-run supabase-setup.sql in Supabase.' : error.message);
+            return data;
+        }
+
         async adminCall(fn, args = {}) {
             const { data, error } = await this.getClient().rpc(fn, args);
             if (error) throw new Error(error.message.includes('Could not find the function')

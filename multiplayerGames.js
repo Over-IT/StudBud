@@ -83,7 +83,11 @@
         const cA = clamp((1.3 - p) / 0.8, 0, 1);
         if (cA > 0) {
             ctx.globalAlpha = cA;
-            ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.arc(w * 0.78, h * 0.28 + down * 0.04, 70, 0, TAU); ctx.fill();
+            // a soft, fixed sun glow (no hard disc) that doesn't slide around as you climb
+            const sx0 = w * 0.8, sy0 = h * 0.2 + Math.min(40, Math.max(0, down) * 0.01);
+            const sg = ctx.createRadialGradient(sx0, sy0, 4, sx0, sy0, 150);
+            sg.addColorStop(0, 'rgba(254,243,199,.9)'); sg.addColorStop(0.25, 'rgba(251,191,36,.4)'); sg.addColorStop(1, 'rgba(251,191,36,0)');
+            ctx.fillStyle = sg; ctx.fillRect(sx0 - 160, sy0 - 160, 320, 320);
             [[0.15, '#1b2342', 330, 150], [0.3, '#161c36', 260, 110], [0.5, '#10152b', 190, 80]].forEach(([f, color, base, span], layer) => {
                 const size = 150 + layer * 20, baseY = h * 0.78 + down * f;
                 const start = Math.floor(cam.x * f / size) - 1;
@@ -147,7 +151,7 @@
     class Skyline extends A.BaseGame {
         constructor(s) {
             super(s);
-            this.title = 'Rooftop Rumble';
+            this.title = 'City Escape';
             this.race = true;
             this.WIDTH = 2000; this.SUMMIT = 48000; this.biomeSeen = 0;
             this.build();
@@ -720,7 +724,15 @@
                     if (!solids.some(o => o !== q && o.x < q.x + q.w && o.x + o.w > q.x && o.y < ny + q.h + 10 && o.y + o.h > q.y)) q.y = ny;
                 }
             }
-            for (const p of solids) p.oneway = !!p.jt;
+            // Map sanity: a thin platform buried inside a roof or prop is unreachable and can trap you, so drop it
+            for (let i = solids.length - 1; i >= 0; i--) {
+                const q = solids[i];
+                if (!q.thin || q.roof || q.prop || q.wall || q.ground || q.mover || q === this.summit) continue;
+                if (solids.some(p => p !== q && (p.roof || p.prop) && !p.slope && q.x < p.x + p.w - 4 && q.x + q.w > p.x + 4 && q.y + q.h > p.y + 4 && q.y < p.y + p.h - 4)) solids.splice(i, 1);
+            }
+            // Every platform you can stand on is jump-through with no side walls, so no ledge edge or underside can ever snag or trap you.
+            // Only roofs, props, slopes, wall-jump walls and the ground stay fully solid.
+            for (const p of solids) p.oneway = !!(p.jt || p.mover || p.pipe || ((p.thin || p.roof) && !p.prop && !p.slope && !p.wallJ && !p.wall && !p.ground));
             // purely visual rooftop clutter, placed only in free gaps (no props, spikes, springs, boxes, flags or ceilings)
             const rd = mulberry32((this.s.seed ^ 0x9e3779b1) >>> 0), DW = [80, 110, 80, 100, 110, 110, 90, 70, 100];
             for (const p of solids) {
@@ -796,6 +808,15 @@
             }
 
             if (this.finished) { me.vx *= 0.9; }
+            // Safety net: R (or being stuck for a few seconds) returns you to the last checkpoint
+            if (!this.finished) {
+                this.stuckT = (this.stuckT || 0) + dt;
+                if (Math.hypot(me.x - (this.stuckX ?? me.x), me.y - (this.stuckY ?? me.y)) > 80 || this.stuckX === undefined) { this.stuckX = me.x; this.stuckY = me.y; this.stuckT = 0; }
+                const idle = s.game.res.value >= 0.5 && this.stuckT > 5 && !me.ground?.mover;
+                if (idle && !this.stuckHinted) { this.stuckHinted = true; s.toast('Stuck? Press R to return to your checkpoint', '#fbbf24'); }
+                if (this.stuckT < 5) this.stuckHinted = false;
+                if (s.pressed('KeyR')) { this.stuckT = 0; this.hurt(); return; }
+            }
             const exhausted = !this.finished && s.game.res.value < 0.5;
             if (exhausted && !this.wasExhausted) s.toast('Out of energy — no control! Press Q for a question', '#f87171');
             this.wasExhausted = exhausted;
@@ -920,7 +941,7 @@
         }
 
         goalText() { const last = this.checkpoints.length - 1; return `${this.cp.id ? `Checkpoint ${this.cp.id}/${last}` : 'Start'} · ${Math.round(this.maxH / 40)}m / ${Math.round(this.summitH / 40)}m · ${SKY_BIOMES[Math.min(3, Math.floor(this.maxH / this.summitH * 4))].name}`; }
-        hint() { return 'A/D run · Space jump (twice) · Shift dash · climb to the summit before the tide · Q = recharge'; }
+        hint() { return 'A/D run · Space jump (twice) · Shift dash · R = back to checkpoint · climb to the summit before the tide · Q = recharge'; }
 
         drawProp(ctx, p) {
             const { x, y, w, h } = p;
@@ -1024,13 +1045,18 @@
         }
 
         drawLedge(ctx, p, B) {
-            ctx.fillStyle = B.ledge; roundRect(ctx, p.x, p.y, p.w, p.h, 3); ctx.fill();
-            ctx.fillStyle = B.ledgeTop; ctx.fillRect(p.x, p.y, p.w, 4);
+            // soft drop shadow so ledges separate from the backdrop
+            ctx.fillStyle = 'rgba(0,0,0,.22)'; roundRect(ctx, p.x + 3, p.y + 6, p.w, p.h + 2, 5); ctx.fill();
+            const lg = ctx.createLinearGradient(0, p.y, 0, p.y + p.h);
+            lg.addColorStop(0, B.ledgeTop); lg.addColorStop(0.3, B.ledge); lg.addColorStop(1, mixHex(B.ledge, '#0f172a', 0.45));
+            ctx.fillStyle = lg; roundRect(ctx, p.x, p.y, p.w, p.h, 4); ctx.fill();
+            ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.fillRect(p.x + 3, p.y, p.w - 6, 2);
+            ctx.fillStyle = B.ledgeTop; ctx.fillRect(p.x, p.y, p.w, 3);
             if (p.bi === 3) { ctx.fillStyle = 'rgba(196,181,253,.35)'; ctx.fillRect(p.x - 3, p.y - 3, p.w + 6, 3); }
-            ctx.fillStyle = 'rgba(0,0,0,.28)';
+            ctx.fillStyle = 'rgba(0,0,0,.3)';
             ctx.beginPath(); ctx.moveTo(p.x + 10, p.y + p.h); ctx.lineTo(p.x + 10 + Math.min(34, p.w / 3), p.y + p.h); ctx.lineTo(p.x + 10, p.y + p.h + 22); ctx.fill();
             ctx.beginPath(); ctx.moveTo(p.x + p.w - 10, p.y + p.h); ctx.lineTo(p.x + p.w - 10 - Math.min(34, p.w / 3), p.y + p.h); ctx.lineTo(p.x + p.w - 10, p.y + p.h + 22); ctx.fill();
-            ctx.fillStyle = 'rgba(226,232,240,.5)';
+            ctx.fillStyle = 'rgba(15,23,42,.35)';
             for (let rx = p.x + 12; rx < p.x + p.w - 8; rx += 26) ctx.fillRect(rx, p.y + 7, 3, 3);
             if (p.w < 120) return;
             const hsh = Math.abs(Math.round(p.x) * 73856093 ^ Math.round(p.y) * 19349663);
@@ -1241,6 +1267,13 @@
             }
             this.particles.draw(ctx);
             ctx.restore();
+            // foreground: soft vignette and drifting haze for depth
+            const vg = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.45, w / 2, h / 2, Math.max(w, h) * 0.8);
+            vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(2,6,23,.38)');
+            ctx.fillStyle = vg; ctx.fillRect(0, 0, w, h);
+            const hz = ctx.createLinearGradient(0, h * 0.8, 0, h);
+            hz.addColorStop(0, 'rgba(148,163,184,0)'); hz.addColorStop(1, 'rgba(148,163,184,.14)');
+            ctx.fillStyle = hz; ctx.fillRect(0, h * 0.8, w, h * 0.2);
         }
     }
 
@@ -1250,7 +1283,7 @@
     class Duel extends A.BaseGame {
         constructor(s) {
             super(s);
-            this.title = 'Hammerheart Showdown';
+            this.title = 'King of the Hill';
             this.solids = [
                 { x: 300, y: 520, w: 1000, h: 260, main: true },
                 { x: 400, y: 390, w: 220, h: 14, oneway: true },
@@ -1264,7 +1297,7 @@
             this.dmg = 0; this.stun = 0; this.invuln = 1.5; this.swingT = 0; this.swingCd = 0;
             this.guard = false; this.airJumps = 1; this.coyote = 0; this.hammer = 0; this.kos = 0; this.respawn = 0;
             this.lastHit = { by: null, at: 0 }; this.anim = 0; this.orb = { x: 800, y: 150, t: 0 }; this.state = 0; this.shake = 0;
-            this.hitFlash = 0; this.view = { z: 1 };
+            this.hitFlash = 0; this.view = { z: 1 }; this.aim = 0; this.swingAim = 0; this.offY = 0;
             this.hillTick = 0; this.hillState = 'away';
             this.zones = [
                 { x: 690, y: 270, w: 220, name: 'Top ledge' }, { x: 640, y: 520, w: 320, name: 'Center stage' },
@@ -1306,7 +1339,15 @@
             const target = this.guard ? 0 : ax * 320;
             const acc = (me.onGround ? 3000 : 1500) * dt;
             me.vx += clamp(target - me.vx, -acc, acc);
-            if (ax && this.swingT <= 0) me.face = ax;
+            const mouseAim = this.aimAngle();
+            if (mouseAim !== null) {
+                // The player always looks toward the cursor
+                this.aim = mouseAim;
+                if (Math.abs(Math.cos(mouseAim)) > 0.05) me.face = Math.cos(mouseAim) >= 0 ? 1 : -1;
+            } else {
+                if (ax && this.swingT <= 0) me.face = ax;
+                this.aim = me.face > 0 ? 0 : Math.PI;
+            }
             me.vy = Math.min(1200, me.vy + 2400 * dt);
             if (me.onGround) { this.airJumps = 1; this.coyote = 0.1; } else this.coyote -= dt;
             if (this.stun <= 0 && s.pressed('Space', 'KeyW', 'ArrowUp')) {
@@ -1314,9 +1355,9 @@
                 else if (this.airJumps > 0) { me.vy = -820; this.airJumps--; s.sfx('jump'); this.particles.burst(me.x + 17, me.y + 56, '#bae6fd', 8, 120, 0.3, 4); }
             }
             if (this.stun <= 0 && !this.guard && this.swingCd <= 0 && (s.mouse.pressed || s.pressed('KeyJ', 'KeyK')) && s.spend(8)) {
-                this.swingT = 0.22; this.swingCd = 0.5; s.sfx('dash');
-                s.emit({ k: 'sw', x: Math.round(me.x + 17), y: Math.round(me.y + 28), d: me.face, p: this.hammer > 0 ? 1.6 : 1, by: s.user.id, c: (this.dmg | 0) });
-                this.particles.burst(me.x + 17 + me.face * 70, me.y + 28, '#fde68a', 8, 200, 0.25, 4);
+                this.swingT = 0.22; this.swingCd = 0.5; s.sfx('swing'); this.swingAim = this.aim;
+                s.emit({ k: 'sw', x: Math.round(me.x + 17), y: Math.round(me.y + 28), d: me.face, a: +this.aim.toFixed(2), p: this.hammer > 0 ? 1.6 : 1, by: s.user.id, c: (this.dmg | 0) });
+                this.particles.burst(me.x + 17 + Math.cos(this.aim) * 70, me.y + 28 + Math.sin(this.aim) * 70, '#fde68a', 8, 200, 0.25, 4);
             }
             moveBody(me, this.solids, dt);
             const drag = me.onGround ? 1 : 0;
@@ -1346,6 +1387,14 @@
 
         screenToWorldX(sx) { return (sx - this.offX) / this.view.z; }
 
+        // Angle from the player's centre to the cursor in world space, or null when no mouse is in use (touch play)
+        aimAngle() {
+            const m = this.s.mouse, me = this.me;
+            if (this.offX === undefined || !(m.x || m.y) || (m.touchAt && performance.now() - m.touchAt < 3000)) return null;
+            const wx = (m.x - this.offX) / this.view.z, wy = (m.y - this.offY) / this.view.z;
+            return Math.atan2(wy - (me.y + 28), wx - (me.x + 17));
+        }
+
         ko() {
             const s = this.s;
             this.particles.burst(this.me.x, this.me.y, s.local.color, 30, 500, 0.8, 6); s.sfx('boom');
@@ -1358,17 +1407,19 @@
             const s = this.s, me = this.me;
             if (ev.k === 'sw') {
                 from.swing = performance.now();
+                from.swingAim = typeof ev.a === 'number' ? ev.a : (ev.d > 0 ? 0 : Math.PI);
                 if (this.respawn > 0 || this.invuln > 0 || this.stun > 0.2) return;
-                const cx = ev.x, cy = ev.y;
-                const box = { x: ev.d > 0 ? cx : cx - 125, y: cy - 50, w: 125, h: 90 };
+                const ang = typeof ev.a === 'number' ? ev.a : (ev.d > 0 ? 0 : Math.PI);
+                const dx = Math.cos(ang), dy = Math.sin(ang);
+                const box = { x: ev.x + dx * 70 - 65, y: ev.y + dy * 70 - 58, w: 130, h: 116 };
                 if (!overlap(box, me)) return;
                 const power = ev.p || 1;
-                const blocked = this.guard && me.face === -ev.d;
+                const blocked = this.guard && me.face === -(dx >= 0 ? 1 : -1);
                 const base = 9 * power;
                 const taken = blocked ? base * 0.3 : base;
                 this.dmg += taken;
                 const force = (280 + this.dmg * 9) * power * (blocked ? 0.25 : 1);
-                me.vx = ev.d * force; me.vy = blocked ? 0 : -(100 + this.dmg * 2);
+                me.vx = dx * force; me.vy = blocked ? 0 : dy * force * 0.5 - (100 + this.dmg * 2);
                 me.onGround = false;
                 this.stun = blocked ? 0.08 : clamp(0.2 + this.dmg / 400, 0.2, 0.55);
                 this.hitFlash = 0.2; this.shake = 0.18; s.sfx(blocked ? 'click' : 'hit', 60);
@@ -1385,27 +1436,29 @@
 
         net() {
             const m = this.me;
-            return { x: Math.round(m.x), y: Math.round(m.y), vx: Math.round(m.vx), vy: Math.round(m.vy), f: m.face, a: this.state, ex: { d: Math.round(this.dmg), h: this.hammer > 0 ? 1 : 0, i: this.invuln > 0 ? 1 : 0 } };
+            return { x: Math.round(m.x), y: Math.round(m.y), vx: Math.round(m.vx), vy: Math.round(m.vy), f: m.face, a: this.state,             ex: { d: Math.round(this.dmg), h: this.hammer > 0 ? 1 : 0, i: this.invuln > 0 ? 1 : 0, t: +(this.aim || 0).toFixed(2) } };
         }
 
         goalText() { return `${this.kos} KOs · ${Math.round(this.dmg)}% damage`; }
-        hint() { return 'A/D move · Space jump · Click swing where you face · Shift guard · hold the glowing hill alone to score · Q = recharge'; }
+        hint() { return 'A/D move · Space jump · Click to swing the hammer at your cursor · Shift guard · hold the glowing hill alone to score · Q = recharge'; }
 
-        drawFighter(ctx, x, y, who, face, state, dmg, name, hammer, swingAge, alpha, you) {
+                    drawFighter(ctx, x, y, who, face, state, dmg, name, hammer, swingAge, alpha, you, aim, swingAim) {
             const color = who.color;
             drawRunner(ctx, x, y, 34, 56, who, face, this.anim, state === 1 ? 1 : 0, alpha);
             const cx = x + 34 / 2, cy = y + 30;
             const swinging = state === 3 || swingAge < 0.22;
             ctx.save();
             ctx.translate(cx, cy);
-            ctx.scale(face, 1);
-            const angle = swinging ? -1.2 + Math.min(1, (swingAge < 0.22 ? swingAge / 0.22 : 0.5)) * 2.6 : -0.5;
-            ctx.rotate(angle);
-            ctx.globalAlpha = alpha;
-            ctx.fillStyle = '#92400e'; ctx.fillRect(0, -3, 62, 6);
-            ctx.fillStyle = hammer ? '#f472b6' : '#9ca3af'; roundRect(ctx, 52, -17, 30, 34, 6); ctx.fill();
-            if (swinging) { ctx.strokeStyle = 'rgba(253,230,138,.6)'; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(0, 0, 80, -1, 1); ctx.stroke(); }
-            ctx.restore();
+                        // The hammer points at the cursor and sweeps around the aim direction captured when the swing started
+                        const base = swinging && typeof swingAim === 'number' ? swingAim : (typeof aim === 'number' ? aim : (face > 0 ? 0 : Math.PI));
+                        const sweepProgress = Math.min(1, swingAge < 0.22 ? swingAge / 0.22 : 0.5);
+                        const angle = base + (swinging ? (-1.2 + sweepProgress * 2.6) * face : -0.35 * face);
+                        ctx.rotate(angle);
+                        ctx.globalAlpha = alpha;
+                        ctx.fillStyle = '#92400e'; ctx.fillRect(0, -3, 62, 6);
+                        ctx.fillStyle = hammer ? '#f472b6' : '#9ca3af'; roundRect(ctx, 52, -17, 30, 34, 6); ctx.fill();
+                        if (swinging) { ctx.strokeStyle = 'rgba(253,230,138,.6)'; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(0, 0, 80, -0.9, 0.9); ctx.stroke(); }
+                        ctx.restore();
             if (state === 4) { ctx.strokeStyle = 'rgba(125,211,252,.85)'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(cx, cy, 44, 0, TAU); ctx.stroke(); }
             nameTag(ctx, `${you ? 'You' : name} · ${Math.round(dmg)}%`, cx, y - 14, you ? '#fff' : color);
         }
@@ -1425,6 +1478,7 @@
             ctx.save();
             const sh = this.shake > 0 ? 8 : 0;
             ctx.translate(this.offX + (Math.random() - 0.5) * sh, h * 0.14 + (Math.random() - 0.5) * sh);
+            this.offY = h * 0.14;
             ctx.scale(z, z);
             for (const p of this.solids) {
                 if (p.main) {
@@ -1453,11 +1507,11 @@
             for (const r of s.remoteList()) {
                 if (r.a === 5) continue;
                 const swingAge = r.swing ? (performance.now() - r.swing) / 1000 : 9;
-                this.drawFighter(ctx, r.x, r.y, r, r.f || 1, r.a, r.ex?.d || 0, r.name, r.ex?.h, swingAge, r.ex?.i ? 0.5 : 0.95, false);
+                this.drawFighter(ctx, r.x, r.y, r, r.f || 1, r.a, r.ex?.d || 0, r.name, r.ex?.h, swingAge, r.ex?.i ? 0.5 : 0.95, false, r.ex?.t, r.swingAim);
             }
             if (this.respawn <= 0) {
                 const alpha = this.invuln > 0 ? 0.55 + Math.sin(this.anim * 22) * 0.25 : 1;
-                this.drawFighter(ctx, me.x, me.y, s.local, me.face, this.state, this.dmg, 'You', this.hammer > 0, this.swingT > 0 ? 0.22 - this.swingT : 9, alpha, true);
+                this.drawFighter(ctx, me.x, me.y, s.local, me.face, this.state, this.dmg, 'You', this.hammer > 0, this.swingT > 0 ? 0.22 - this.swingT : 9, alpha, true, this.aim, this.swingAim);
                 if (this.hitFlash > 0) { ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.fillRect(me.x, me.y, me.w, me.h); }
             }
             this.particles.draw(ctx);
@@ -1471,7 +1525,7 @@
     class Shooter extends A.BaseGame {
         constructor(s) {
             super(s);
-            this.title = 'Starfall Blasters';
+            this.title = 'Arena Shooter';
             this.touchBlast = true; this.touchMain = 'Dash';
             this.scoreGoal = false;
             this.W = 2600; this.H = 1700;

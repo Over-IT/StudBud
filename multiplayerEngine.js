@@ -766,7 +766,7 @@
                 } else {
                     this.overlay.querySelector('.mpg-countdown').classList.add('hidden');
                     this.t += dt;
-                    if (!this.paused) this.game.update(dt);
+                    if (!this.paused) { this.onTick?.(dt); this.game.update(dt); }
                     this.checkEnd();
                     if (!this.practice && !this.isHost && !this.over && Date.now() > this.deadline + 9000) this.finish(this.standings());
                 }

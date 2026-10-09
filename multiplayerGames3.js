@@ -52,7 +52,7 @@
     class Crypto extends A.BaseGame {
         constructor(s) {
             super(s);
-            this.title = 'Crypto Exchange';
+            this.title = 'Crypto Trading';
             this.ui = new Ui(s);
             const r = mulberry32(s.seed);
             this.params = ASSETS.map(a => ({

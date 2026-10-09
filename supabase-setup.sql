@@ -185,6 +185,7 @@ begin
         from public.studbud_study_time_entries entry
         join auth.users account on account.id = entry.user_id
         where entry.study_date between v_start and v_today
+          and not exists (select 1 from public.studbud_banned_users banned where banned.user_id = entry.user_id)
         group by entry.user_id, account.raw_user_meta_data
         order by sum(entry.seconds) desc, username
         limit 50
@@ -1488,6 +1489,15 @@ create policy "Deck owners can publish community decks"
         and not exists (select 1 from public.studbud_banned_users b where b.user_id = auth.uid())
     );
 
+-- Username changes: once every 7 days, or immediately when the admin forces a rename.
+create table if not exists public.studbud_username_state (
+    user_id uuid primary key references auth.users(id) on delete cascade,
+    changed_at timestamptz,
+    force_change boolean not null default false
+);
+alter table public.studbud_username_state enable row level security;
+revoke all on public.studbud_username_state from anon, authenticated;
+
 create or replace function public.studbud_admin_list_users(p_query text default '')
 returns jsonb
 language plpgsql
@@ -1506,7 +1516,8 @@ begin
                 coalesce(p.coins, 0) as coins,
                 coalesce(p.wins, 0) as wins,
                 (select count(*) from public.studbud_community_decks d where d.owner_id = a.id) as decks,
-                exists (select 1 from public.studbud_banned_users b where b.user_id = a.id) as banned
+                exists (select 1 from public.studbud_banned_users b where b.user_id = a.id) as banned,
+                coalesce((select s.force_change from public.studbud_username_state s where s.user_id = a.id), false) as force_change
             from auth.users a
             left join public.studbud_multiplayer_profiles p on p.user_id = a.id
             where coalesce(p_query, '') = ''
@@ -1617,3 +1628,79 @@ revoke all on function public.studbud_admin_adjust_coins(uuid, integer) from pub
 grant execute on function public.studbud_admin_adjust_coins(uuid, integer) to authenticated;
 revoke all on function public.studbud_admin_remove_user_decks(uuid) from public, anon;
 grant execute on function public.studbud_admin_remove_user_decks(uuid) to authenticated;
+
+create or replace function public.studbud_username_status()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare st public.studbud_username_state;
+begin
+    if auth.uid() is null then raise exception 'Sign in first.'; end if;
+    select * into st from public.studbud_username_state where user_id = auth.uid();
+    return jsonb_build_object(
+        'forced', coalesce(st.force_change, false),
+        'next_change_at', case when st.changed_at is null then null else st.changed_at + interval '7 days' end,
+        'can_change', public.studbud_is_admin() = false and (coalesce(st.force_change, false) or st.changed_at is null or st.changed_at <= now() - interval '7 days')
+    );
+end;
+$$;
+
+create or replace function public.studbud_change_username(p_username text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_uid uuid := auth.uid();
+    v_name text := lower(trim(coalesce(p_username, '')));
+    v_email text;
+    st public.studbud_username_state;
+begin
+    if v_uid is null then raise exception 'Sign in first.'; end if;
+    if public.studbud_is_admin() then raise exception 'The admin account''s username can''t be changed.'; end if;
+    if v_name !~ '^[a-z0-9_]{3,24}$' then raise exception 'Username must be 3-24 characters and contain only letters, numbers, or underscores.'; end if;
+    select * into st from public.studbud_username_state where user_id = v_uid;
+    if found and not st.force_change and st.changed_at is not null and st.changed_at > now() - interval '7 days' then
+        raise exception 'You can change your username once a week. Try again after %.', to_char(st.changed_at + interval '7 days', 'Mon DD, HH24:MI "UTC"');
+    end if;
+    v_email := v_name || '@accounts.studbud.invalid';
+    if exists (select 1 from auth.users where id = v_uid and lower(email) = v_email) then raise exception 'That is already your username.'; end if;
+    if exists (select 1 from auth.users where id <> v_uid and lower(email) = v_email) then raise exception 'That username is already taken.'; end if;
+    update auth.users
+        set email = v_email,
+            raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb) || jsonb_build_object('username', v_name, 'email', v_email),
+            updated_at = now()
+        where id = v_uid;
+    update auth.identities
+        set identity_data = coalesce(identity_data, '{}'::jsonb) || jsonb_build_object('email', v_email), updated_at = now()
+        where user_id = v_uid and provider = 'email';
+    insert into public.studbud_username_state (user_id, changed_at, force_change) values (v_uid, now(), false)
+    on conflict (user_id) do update set changed_at = now(), force_change = false;
+    return jsonb_build_object('username', v_name);
+end;
+$$;
+
+create or replace function public.studbud_admin_force_username(p_user_id uuid, p_force boolean default true)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    perform public.studbud_require_admin();
+    if p_user_id = auth.uid() then raise exception 'You can''t force your own account.'; end if;
+    insert into public.studbud_username_state (user_id, force_change) values (p_user_id, p_force)
+    on conflict (user_id) do update set force_change = excluded.force_change;
+end;
+$$;
+
+revoke all on function public.studbud_username_status() from public, anon;
+grant execute on function public.studbud_username_status() to authenticated;
+revoke all on function public.studbud_change_username(text) from public, anon;
+grant execute on function public.studbud_change_username(text) to authenticated;
+revoke all on function public.studbud_admin_force_username(uuid, boolean) from public, anon;
+grant execute on function public.studbud_admin_force_username(uuid, boolean) to authenticated;

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>StudBud | Plan, Study, Play</title>
     <meta name="theme-color" content="#111827">
     <meta name="description" content="StudBud is a student hub: plan classes, assignments and grades, study with flashcards and focus tools, then play live multiplayer games powered by your own flashcards.">
@@ -261,6 +261,10 @@
                                 <button class="primary-btn" type="submit"><i class="fas fa-plus"></i> Add to scenario</button>
                             </form>
                         </div>
+                        <section class="glass-card scenario-existing">
+                            <div class="view-header"><div><h3>Change existing grades</h3><p>Type a different score for any assignment to see how it would change your class grade. Your real grades are never modified.</p></div></div>
+                            <div id="grade-scenario-existing" class="scenario-existing-list"></div>
+                        </section>
                         <div class="scenario-results-grid">
                             <section class="glass-card">
                                 <div class="view-header"><div><h3>Hypothetical assignments</h3><p>Saved to your account and included in backups.</p></div></div>
@@ -574,13 +578,13 @@
                                         <span id="multiplayer-identity-badge" class="community-badge">Player</span>
                                     </div>
                                     <div class="multiplayer-mode-picker" role="group" aria-label="Choose a game mode">
-                                        <button type="button" class="multiplayer-mode selected" data-mode="skyline"><span class="mode-art mode-rooftop" aria-hidden="true"></span><strong>Rooftop Rumble</strong><small>Climb a rooftop obstacle course</small></button>
-                                        <button type="button" class="multiplayer-mode" data-mode="river"><span class="mode-art mode-river" aria-hidden="true"></span><strong>River Raiders</strong><small>Steer a boat and catch fish</small></button>
-                                        <button type="button" class="multiplayer-mode" data-mode="market"><span class="mode-art mode-market" aria-hidden="true"></span><strong>Market Mayhem</strong><small>Deliver packages, dodge cars</small></button>
-                                        <button type="button" class="multiplayer-mode" data-mode="miner"><span class="mode-art mode-miner" aria-hidden="true"></span><strong>Crystal Cartel</strong><small>Dig crystals, avoid lava</small></button>
-                                        <button type="button" class="multiplayer-mode" data-mode="duel"><span class="mode-art mode-duel" aria-hidden="true"></span><strong>Hammerheart Showdown</strong><small>King of the Hill: hold the zone, knock rivals off</small></button>
-                                        <button type="button" class="multiplayer-mode" data-mode="shooter"><span class="mode-art mode-shooter" aria-hidden="true"></span><strong>Starfall Blasters</strong><small>Blast waves of drones</small></button>
-                                        <button type="button" class="multiplayer-mode" data-mode="sports"><span class="mode-art mode-sports" aria-hidden="true"></span><strong>Endzone Rally</strong><small>Run for touchdowns, teams of 4+</small></button>
+                                        <button type="button" class="multiplayer-mode selected" data-mode="skyline"><span class="mode-art mode-rooftop" aria-hidden="true"></span><strong>City Escape</strong><small>Climb a rooftop obstacle course</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="river"><span class="mode-art mode-river" aria-hidden="true"></span><strong>River Fishing</strong><small>Steer a boat and catch fish</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="market"><span class="mode-art mode-market" aria-hidden="true"></span><strong>Package Delivery</strong><small>Deliver packages, dodge cars</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="miner"><span class="mode-art mode-miner" aria-hidden="true"></span><strong>Crystal Mining</strong><small>Dig crystals, avoid lava</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="duel"><span class="mode-art mode-duel" aria-hidden="true"></span><strong>King of the Hill</strong><small>King of the Hill: hold the zone, knock rivals off</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="shooter"><span class="mode-art mode-shooter" aria-hidden="true"></span><strong>Arena Shooter</strong><small>Aim, dash and blast drones and rivals</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="sports"><span class="mode-art mode-sports" aria-hidden="true"></span><strong>Team Football</strong><small>Blue vs red teams, run for touchdowns</small></button>
                                     </div>
                                     <div class="hosted-game-setup">
                                     <form id="host-game-form" class="hosted-game-form">
@@ -601,7 +605,7 @@
                                     </form>
                                     </div>
                                     <div id="multiplayer-preview" class="multiplayer-preview">
-                                        <div class="preview-heading"><div><strong id="multiplayer-preview-title">Rooftop Rumble</strong><span id="multiplayer-preview-description">Scale a lively rooftop course with every correct answer.</span></div><span class="preview-live"><i></i> Game preview</span></div>
+                                        <div class="preview-heading"><div><strong id="multiplayer-preview-title">City Escape</strong><span id="multiplayer-preview-description">Scale a lively rooftop course with every correct answer.</span></div><span class="preview-live"><i></i> Game preview</span></div>
                                         <canvas id="multiplayer-game-canvas" width="900" height="360" aria-label="Animated preview of the selected multiplayer game"></canvas>
                                     </div>
                                 </section>
@@ -690,13 +694,18 @@
                 <section id="importer-view" class="view hidden">
                     <div class="glass-card full-width">
                         <h2>Flashcard Importer</h2>
-                        <p>Paste tabular flashcard text below. Terms and definitions should be separated by your chosen delimiter, with one card per line.</p>
+                        <div class="importer-mode-tabs" role="tablist" aria-label="Deck creation mode">
+                            <button type="button" class="importer-mode-btn active" data-importer-mode="import" role="tab" aria-selected="true"><i class="fas fa-file-import"></i> Import text</button>
+                            <button type="button" class="importer-mode-btn" data-importer-mode="manual" role="tab" aria-selected="false"><i class="fas fa-pen"></i> Create manually</button>
+                        </div>
+                        <p id="importer-mode-hint">Paste tabular flashcard text below. Terms and definitions should be separated by your chosen delimiter, with one card per line.</p>
                         
                         <div class="form-group">
                             <label for="import-deck-name">New Deck Name</label>
                             <input type="text" id="import-deck-name" placeholder="e.g., AP Bio Unit 1">
                         </div>
                         
+                        <div id="importer-import-panel">
                         <div class="form-group">
                             <label for="import-delimiter">Delimiter between Term and Definition</label>
                             <select id="import-delimiter">
@@ -713,6 +722,16 @@
                         </div>
 
                         <button id="process-import-btn" class="primary-btn full-width"><i class="fas fa-file-import"></i> Parse & Create Deck</button>
+                        </div>
+
+                        <div id="importer-manual-panel" class="hidden">
+                            <div id="manual-card-rows" class="manual-card-rows"></div>
+                            <div class="manual-card-actions">
+                                <button type="button" id="add-manual-card-btn" class="secondary-btn"><i class="fas fa-plus"></i> Add card</button>
+                                <span id="manual-card-count" class="manual-card-count">0 complete cards</span>
+                                <button type="button" id="create-manual-deck-btn" class="primary-btn"><i class="fas fa-check"></i> Create Deck</button>
+                            </div>
+                        </div>
                     </div>
                 </section>
 
@@ -750,6 +769,17 @@
                             </div>
                             <p class="settings-hint">Automatic term uses August–December for Semester 1 and January–July for Semester 2.</p>
                             <button id="save-profile-btn" class="primary-btn">Save Profile</button>
+                        </div>
+
+                        <div class="glass-card" id="username-card">
+                            <h2>Username</h2>
+                            <div class="form-group">
+                                <label for="settings-username">Username (3–24 letters, numbers, or underscores)</label>
+                                <input type="text" id="settings-username" maxlength="24" autocomplete="off" pattern="[A-Za-z0-9_]{3,24}">
+                            </div>
+                            <p id="username-hint" class="settings-hint">You can change your username once every 7 days. Use your new username the next time you sign in.</p>
+                            <p id="username-status" class="community-status" role="status" aria-live="polite"></p>
+                            <button id="change-username-btn" class="primary-btn" type="button">Change username</button>
                         </div>
                         
                         <div class="glass-card">
@@ -843,6 +873,14 @@
                                     <option value="cavern">Crystal Cavern</option>
                                     <option value="battle">Battle Drive</option>
                                     <option value="neon">Neon Exchange</option>
+                                    <option value="sunrise">Sunrise Run</option>
+                                    <option value="midnight">Midnight Drive</option>
+                                    <option value="pixel">Pixel Quest</option>
+                                    <option value="zen">Zen Garden</option>
+                                    <option value="funk">Funky Groove</option>
+                                    <option value="orbit">Orbit Station</option>
+                                    <option value="tropic">Tropic Sunset</option>
+                                    <option value="stadium">Stadium Anthem</option>
                                 </select>
                             </div>
                             <button type="button" id="music-preview-btn" class="secondary-btn"><i class="fas fa-music"></i> Preview track</button>
@@ -1032,11 +1070,11 @@
                         <div class="form-group row-group hidden" id="assignment-graded-fields">
                             <div class="half-width">
                                 <label for="assignment-points">Score</label>
-                                <input type="number" id="assignment-points" step="0.5" min="0" value="0">
+                                <input type="number" id="assignment-points" step="0.01" min="0" value="0">
                             </div>
                             <div class="half-width">
                                 <label for="assignment-max-points">Out of</label>
-                                <input type="number" id="assignment-max-points" step="0.5" min="0.5" value="100">
+                                <input type="number" id="assignment-max-points" step="0.01" min="0.01" value="100">
                             </div>
                         </div>
                         <details class="assignment-more hidden" id="assignment-study-options">

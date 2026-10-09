@@ -107,7 +107,7 @@
     class Miner extends Arena {
         constructor(s) {
             super(s, COLS * TS, ROWS * TS);
-            this.title = 'Crystal Cartel';
+            this.title = 'Crystal Mining';
             this.touchMain = 'Dig';
             const r = mulberry32(s.seed);
             const T = this.T = new Uint8Array(COLS * ROWS);
@@ -298,7 +298,7 @@
     class River extends Arena {
         constructor(s) {
             super(s, 3600, 1800);
-            this.title = 'River Raiders';
+            this.title = 'River Fishing';
             const r = mulberry32(s.seed);
             this.bank = 210;
             this.me.x = 400; this.me.y = this.H / 2; this.baseSpeed = 235;
@@ -501,7 +501,7 @@
     class Market extends Arena {
         constructor(s) {
             super(s, ROAD * (BC + 1) + BW * BC, ROAD * (BR + 1) + BH * BR);
-            this.title = 'Market Mayhem';
+            this.title = 'Package Delivery';
             const r = mulberry32(s.seed);
             this.blocks = [];
             for (let row = 0; row < BR; row++) for (let col = 0; col < BC; col++) {
@@ -659,33 +659,35 @@
     class Sports extends Arena {
         constructor(s) {
             super(s, 2600, 900);
-            this.title = 'Endzone Rally';
+            this.title = 'Team Football';
             this.touchMain = 'Tackle';
             this.scoreGoal = false;
             this.dir = 1; this.td = 0; this.yards = 0; this.progress = 0; this.best = 0;
             this.me.y = this.H / 2; this.baseSpeed = 255;
             this.res = new A.Resource('Energy', '#38bdf8', 100, 60, 2);
             this.dash = 0; this.dashCd = 0; this.bull = 0; this.msg = '';
-            // With four or more players the match splits into two teams that attack opposite endzones
+            // Everyone is split into two teams (blue vs red) that attack opposite endzones; rivals are the only defenders
             this.teamIds = [...s.roster.keys()].sort();
-            this.teamsOn = this.teamIds.length >= 4;
+            this.teamsOn = this.teamIds.length >= 2;
             this.myTeam = this.teamsOn ? this.teamIds.indexOf(s.user.id) % 2 : -1;
             if (this.teamsOn && this.myTeam === 1) this.dir = -1;
-            this.defenders = []; this.pads = [];
+            this.teamTd = [0, 0];
+            this.pads = [];
             this.newDrive();
             this.cam.x = this.me.x; this.cam.y = this.me.y;
         }
 
+        spawnY() {
+            if (!this.teamsOn) return this.H / 2;
+            const mates = this.teamIds.filter(id => this.teamOf(id) === this.myTeam);
+            const slot = Math.max(0, mates.indexOf(this.s.user.id));
+            return this.H * (slot + 1) / (mates.length + 1);
+        }
+
         newDrive() {
             const me = this.me, r = Math.random;
-            me.x = this.dir > 0 ? 130 : this.W - 130; me.y = this.H / 2; me.vx = me.vy = 0;
+            me.x = this.dir > 0 ? 130 : this.W - 130; me.y = this.spawnY(); me.vx = me.vy = 0;
             this.progress = 0; this.best = 0; this.checkpoint = 0;
-            this.defenders = [];
-            const count = Math.min(14, 7 + this.td * 2);
-            for (let i = 0; i < count; i++) {
-                const along = 380 + (i / count) * (this.W - 760);
-                this.defenders.push({ x: this.dir > 0 ? along : this.W - along, y: 90 + r() * (this.H - 180), vx: 0, vy: 0, wake: 380 + r() * 140, sp: 165 + r() * 40 + this.td * 12, anim: r() * 6 });
-            }
             this.pads = [];
             for (let i = 0; i < 3; i++) this.pads.push({ x: 500 + r() * (this.W - 1000), y: 120 + r() * (this.H - 240), used: false });
         }
@@ -697,13 +699,15 @@
             this.stun = 1.3; this.msg = 'TACKLED!';
             s.toast(msg, '#f87171');
             this.particles.burst(me.x, me.y, '#fecaca', 22, 280, 0.6, 5);
-            me.x = (this.dir > 0 ? 130 : this.W - 130) + this.dir * this.checkpoint; me.y = this.H / 2; me.vx = me.vy = 0;
-            this.defenders = this.defenders.filter(o => dist(o.x, o.y, me.x, me.y) > 380);
+            me.x = (this.dir > 0 ? 130 : this.W - 130) + this.dir * this.checkpoint; me.y = this.spawnY(); me.vx = me.vy = 0;
         }
 
         onEvent(ev, from) {
             if (ev.k === 'tk' && ev.to === this.s.user.id && this.stun <= 0 && this.bull <= 0) {
                 this.tackled(`${from.name} tackled you!`);
+            } else if (ev.k === 'td' && from && this.teamsOn) {
+                const team = this.teamOf(from.id);
+                if (team >= 0) this.teamTd[team]++;
             }
         }
 
@@ -742,37 +746,10 @@
             }
             this.checkpoint = Math.max(this.checkpoint, Math.floor(this.progress / 400) * 400);
 
-            for (const d of this.defenders) {
-                const dx = me.x - d.x, dy = me.y - d.y, dd = Math.hypot(dx, dy) || 1;
-                d.anim += dt;
-                if (dd < d.wake && this.stun <= 0) {
-                    const lead = Math.min(0.5, dd / 600);
-                    const tx = me.x + me.vx * lead - d.x, ty = me.y + me.vy * lead - d.y, tl = Math.hypot(tx, ty) || 1;
-                    const sign = this.bull > 0 ? -0.8 : 1;
-                    d.vx += clamp(tx / tl * d.sp * sign - d.vx, -900 * dt, 900 * dt);
-                    d.vy += clamp(ty / tl * d.sp * sign - d.vy, -900 * dt, 900 * dt);
-                } else { d.vx *= 0.9; d.vy *= 0.9; }
-                for (const o of this.defenders) {
-                    if (o === d) continue;
-                    const ox = d.x - o.x, oy = d.y - o.y, od = Math.hypot(ox, oy);
-                    if (od > 0 && od < 30) { d.x += ox / od * 30 * dt * 4; d.y += oy / od * 30 * dt * 4; }
-                }
-                d.x = clamp(d.x + d.vx * dt, 20, this.W - 20); d.y = clamp(d.y + d.vy * dt, 20, this.H - 20);
-                if (dd < 30 && this.stun <= 0) {
-                    if (this.bull > 0 || this.dash > 0.08) {
-                        d.vx = dx / dd * -600; d.vy = dy / dd * -600; d.wake = 0;
-                        this.particles.burst(d.x, d.y, '#fca5a5', 12, 240, 0.4, 4);
-                        if (this.bull > 0) s.addScore(5);
-                    } else {
-                        this.tackled();
-                        break;
-                    }
-                }
-            }
             for (const p of this.pads) {
                 if (p.used || dist(me.x, me.y, p.x, p.y) > 40) continue;
                 const opened = s.ask(correct => {
-                    if (correct) { this.bull = 8; s.refill(); s.addScore(40); s.toast('BULLDOZER! Smash through defenders', '#fde047'); }
+                    if (correct) { this.bull = 8; s.refill(); s.addScore(40); s.toast('BULLDOZER! Rivals cannot tackle you', '#fde047'); }
                     else if (correct === false) s.toast('Fumbled the play call.', '#f87171');
                 });
                 if (opened) p.used = true;
@@ -780,6 +757,7 @@
             const inEnd = this.dir > 0 ? me.x > this.W - 190 : me.x < 190;
             if (inEnd) {
                 this.td++; s.addScore(100); s.setGoal(this.td);
+                if (this.teamsOn) this.teamTd[this.myTeam]++;
                 s.toast(`TOUCHDOWN! (${this.td})`, '#fde047');
                 this.particles.burst(me.x, me.y, '#fde047', 50, 420, 1, 6);
                 s.emit({ k: 'td', n: this.td });
@@ -790,8 +768,11 @@
         }
 
         ex() { return { b: this.bull > 0 ? 1 : 0 }; }
-        goalText() { return `${this.td} TD · ${Math.round(this.yards / 1)} yds`; }
-        hint() { return this.teamsOn ? `\${this.myTeam === 0 ? 'Blue' : 'Red'} team · WASD run · Shift sprint · Space tackle rivals · Q = recharge` : 'WASD run · Shift sprint · Space dash · reach the far endzone · Q = recharge'; }
+        goalText() {
+            const mine = `${this.td} TD · ${Math.round(this.yards)} yds`;
+            return this.teamsOn ? `Blue ${this.teamTd[0]} – ${this.teamTd[1]} Red · ${mine}` : mine;
+        }
+        hint() { return this.teamsOn ? `${this.myTeam === 0 ? 'Blue' : 'Red'} team · WASD run · Shift sprint · Space dash-tackle rivals · Q = recharge` : 'WASD run · Shift sprint · Space dash · reach the far endzone · Q = recharge'; }
 
         draw(ctx, w, h) {
             const me = this.me, t = this.anim;
@@ -812,10 +793,6 @@
             const goalX = this.dir > 0 ? this.W - 190 : 190;
             ctx.beginPath(); ctx.moveTo(goalX, 0); ctx.lineTo(goalX, this.H); ctx.stroke();
             for (const p of this.pads) { if (!p.used) this.qMark(ctx, p.x, p.y, '#7c3aed', t); }
-            for (const d of this.defenders) {
-                if (!this.seen(d.x, d.y)) continue;
-                drawFigureTop(ctx, { color: '#ef4444' }, d.x, d.y, 15, Math.atan2(d.vy, d.vx || 0.01), d.anim);
-            }
             this.drawPlayers(ctx, (c, x, y, r) => {
                 if (this.teamsOn) this.ring(c, x, y, 21, this.teamOf(r ? r.id : this.s.user.id) === 0 ? '#60a5fa' : '#f87171', 3);
                 c.fillStyle = '#92400e'; c.beginPath(); c.ellipse(x + 14, y + 6, 8, 5, 0.4, 0, TAU); c.fill();

@@ -1247,7 +1247,12 @@
             }
 
             const scenarioItems = Array.isArray(selectedScenario.items) ? selectedScenario.items : [];
-            const assignments = AppState.get('assignments') || [];
+            const overrides = selectedScenario.overrides || {};
+            const realAssignments = AppState.get('assignments') || [];
+            const assignments = realAssignments.map(item => Object.prototype.hasOwnProperty.call(overrides, item.id)
+                ? { ...item, pointsEarned: Number(overrides[item.id]), graded: true, status: 'completed' }
+                : item);
+            this.renderScenarioExisting(courses, realAssignments, overrides);
             const hypotheticalAssignments = scenarioItems.map(item => ({
                 id: item.id,
                 courseCode: item.courseCode,
@@ -1277,19 +1282,19 @@
                 const category = (course && course.categories || []).find(entry => entry.id === item.categoryId);
                 return `<article class="scenario-item">
                     <div><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(course ? course.title : 'Class removed')} · ${this.escapeHTML(category ? category.name : 'Uncategorized')}</span></div>
-                    <strong>${Number(item.pointsEarned)} / ${Number(item.maxPoints)} (${(Number(item.pointsEarned) / Number(item.maxPoints) * 100).toFixed(1)}%)</strong>
+                    <strong>${Number(item.pointsEarned)} / ${Number(item.maxPoints)} (${(Number(item.pointsEarned) / Number(item.maxPoints) * 100).toFixed(2)}%)</strong>
                     <button class="icon-btn scenario-remove-btn" data-action="remove-scenario-item" data-id="${this.escapeHTML(item.id)}" aria-label="Remove ${this.escapeHTML(item.title)} from scenario" title="Remove"><i class="fas fa-xmark"></i></button>
                 </article>`;
             }).join('') : '<p class="empty-state">Add hypothetical assignment scores to see their effect.</p>';
 
             resultContainer.innerHTML = courses.length ? courses.map(course => {
-                const currentGrade = this.calculateCourseGrade(course, assignments);
+                const currentGrade = this.calculateCourseGrade(course, realAssignments);
                 const projectedGrade = this.calculateScenarioCourseGrade(course, assignments, hypotheticalAssignments);
                 const change = Number.isFinite(projectedGrade) && Number.isFinite(currentGrade) ? projectedGrade - currentGrade : 0;
                 return `<article class="scenario-grade-row">
                     <strong>${this.escapeHTML(course.title)}</strong>
-                    <span>${Number.isFinite(currentGrade) ? `${currentGrade.toFixed(1)}%` : 'Not graded'} <i class="fas fa-arrow-right" aria-hidden="true"></i> <strong>${Number.isFinite(projectedGrade) ? `${projectedGrade.toFixed(1)}%` : 'Not graded'}</strong></span>
-                    <small class="${change > 0.005 ? 'grade-change-positive' : change < -0.005 ? 'grade-change-negative' : ''}">${Number.isFinite(projectedGrade) && Number.isFinite(currentGrade) ? `${change > 0.005 ? '+' : ''}${change.toFixed(1)} percentage points` : 'Add hypothetical scores to project this class'}</small>
+                    <span>${Number.isFinite(currentGrade) ? `${currentGrade.toFixed(2)}%` : 'Not graded'} <i class="fas fa-arrow-right" aria-hidden="true"></i> <strong>${Number.isFinite(projectedGrade) ? `${projectedGrade.toFixed(2)}%` : 'Not graded'}</strong></span>
+                    <small class="${change > 0.005 ? 'grade-change-positive' : change < -0.005 ? 'grade-change-negative' : ''}">${Number.isFinite(projectedGrade) && Number.isFinite(currentGrade) ? `${change > 0.005 ? '+' : ''}${change.toFixed(2)} percentage points` : 'Add hypothetical scores to project this class'}</small>
                 </article>`;
             }).join('') : '<p class="empty-state">Add a class to compare projected grades.</p>';
         }
@@ -1316,6 +1321,45 @@
                 `<option value="${this.escapeHTML(category.id)}">${this.escapeHTML(category.name)} (${Number(category.weight || 0).toFixed(1)}%)</option>`
             ).join('');
             if (categories.some(category => category.id === previousCategory)) categorySelect.value = previousCategory;
+        }
+
+        renderScenarioExisting(courses, assignments, overrides) {
+            const container = document.getElementById('grade-scenario-existing');
+            if (!container) return;
+            const groups = courses.map(course => {
+                const items = assignments.filter(item => item.courseCode === course.code);
+                if (!items.length) return '';
+                const rows = items.map(item => {
+                    const overridden = Object.prototype.hasOwnProperty.call(overrides, item.id);
+                    const actual = this.isGradedItem(item) ? Number(item.pointsEarned || 0) : null;
+                    const max = Number(item.maxPoints || 100);
+                    return `<div class="scenario-existing-row${overridden ? ' is-changed' : ''}">
+                        <div><strong>${this.escapeHTML(item.title)}</strong><small>${actual === null ? 'Not graded yet' : `Actual: ${actual} / ${max}`}</small></div>
+                        <label class="scenario-existing-input"><span class="sr-only">What-if score for ${this.escapeHTML(item.title)}</span>
+                            <input type="number" min="0" step="0.01" data-scenario-override="${this.escapeHTML(item.id)}" value="${overridden ? Number(overrides[item.id]) : ''}" placeholder="${actual === null ? 'Score' : actual}"> / ${max}</label>
+                        <button class="secondary-btn" data-action="reset-scenario-override" data-id="${this.escapeHTML(item.id)}" ${overridden ? '' : 'disabled'}>Reset</button>
+                    </div>`;
+                }).join('');
+                return `<div class="scenario-existing-group"><h4>${this.escapeHTML(course.title)}</h4>${rows}</div>`;
+            }).join('');
+            container.innerHTML = groups || '<p class="empty-state">Add assignments to a class to try changing their grades.</p>';
+        }
+
+        setScenarioOverride(assignmentId, rawValue) {
+            const selectedId = AppState.get('selectedGradeScenarioId');
+            const assignment = (AppState.get('assignments') || []).find(item => item.id === assignmentId);
+            if (!selectedId || !assignment) return;
+            const text = String(rawValue ?? '').trim();
+            const value = Math.round(Number(text) * 100) / 100;
+            const clear = text === '' || !Number.isFinite(value) || value < 0;
+            const scenarios = (AppState.get('gradeScenarios') || []).map(scenario => {
+                if (scenario.id !== selectedId) return scenario;
+                const overrides = { ...(scenario.overrides || {}) };
+                if (clear) delete overrides[assignmentId];
+                else overrides[assignmentId] = value;
+                return { ...scenario, overrides };
+            });
+            this.saveGradeScenarioItems(scenarios);
         }
 
         saveGradeScenarioItems(scenarios) {
@@ -1358,7 +1402,7 @@
                         const graded = group.assignments.filter(item => this.isGradedItem(item));
                         const pointsEarned = graded.reduce((sum, item) => sum + Number(item.pointsEarned || 0), 0);
                         const pointsPossible = graded.reduce((sum, item) => sum + Number(item.maxPoints || 0), 0);
-                        const categoryGrade = pointsPossible > 0 ? `${(pointsEarned / pointsPossible * 100).toFixed(1)}%` : '—';
+                        const categoryGrade = pointsPossible > 0 ? `${(pointsEarned / pointsPossible * 100).toFixed(2)}%` : '—';
                         const assignmentMarkup = group.assignments.length ? group.assignments.map(item => {
                             const hasScore = this.isGradedItem(item);
                             return `<article class="transcript-assignment ${item.status === 'completed' ? 'is-complete' : ''}">
@@ -1391,8 +1435,8 @@
                             <summary class="transcript-class-summary">
                                 <span class="transcript-chevron" aria-hidden="true"><i class="fas fa-chevron-right"></i></span>
                                 <span class="transcript-class-name"><strong>${this.escapeHTML(course.title)}</strong><small>${this.escapeHTML(this.termLabel(course.term))} · ${course.isWeighted ? 'Weighted' : 'Regular'} · ${Number(course.credits || 0).toFixed(1)} credits</small></span>
-                                <span class="transcript-grade"><strong>${this.escapeHTML(gradeLetter)}</strong><small>${currentGrade === null ? 'No graded work' : `${currentGrade.toFixed(1)}%`}</small></span>
-                                <span class="transcript-class-target"><small>Target</small><strong>${course.targetPct !== null && course.targetPct !== undefined && Number.isFinite(Number(course.targetPct)) ? `${Number(course.targetPct).toFixed(1)}%` : '—'}</strong></span>
+                                <span class="transcript-grade"><strong>${this.escapeHTML(gradeLetter)}</strong><small>${currentGrade === null ? 'No graded work' : `${currentGrade.toFixed(2)}%`}</small></span>
+                                <span class="transcript-class-target"><small>Target</small><strong>${course.targetPct !== null && course.targetPct !== undefined && Number.isFinite(Number(course.targetPct)) ? `${Number(course.targetPct).toFixed(2)}%` : '—'}</strong></span>
                                 <span class="transcript-item-count">${classAssignments.length} item${classAssignments.length === 1 ? '' : 's'}</span>
                             </summary>
                             <div class="transcript-class-content">
@@ -1413,7 +1457,7 @@
                     const target = course.targetPct === null || course.targetPct === undefined ? NaN : Number(course.targetPct);
                     return `<article class="glass-card class-card">
                         <div><h3>${this.escapeHTML(course.title)}</h3><span class="class-term">${this.escapeHTML(this.termLabel(course.term))}</span></div>
-                        <p>Current grade <strong>${grade === null ? 'Not graded' : `${grade.toFixed(1)}%`}</strong> · Goal <strong>${Number.isFinite(target) ? `${target.toFixed(1)}%` : 'Not set'}</strong></p>
+                        <p>Current grade <strong>${grade === null ? 'Not graded' : `${grade.toFixed(2)}%`}</strong> · Goal <strong>${Number.isFinite(target) ? `${target.toFixed(2)}%` : 'Not set'}</strong></p>
                         <div class="class-grade-track"><span style="width:${Math.max(0, Math.min(100, grade || 0))}%"></span></div>
                         <button class="primary-btn" data-action="open-class" data-id="${this.escapeHTML(course.code)}">Open class</button>
                     </article>`;
@@ -1503,7 +1547,7 @@
                 const gradedItems = items.filter(item => this.isGradedItem(item));
                 const earned = gradedItems.reduce((sum, item) => sum + Number(item.pointsEarned || 0), 0);
                 const possible = gradedItems.reduce((sum, item) => sum + Number(item.maxPoints || 0), 0);
-                const categoryGrade = possible > 0 ? `${(earned / possible * 100).toFixed(1)}%` : 'No graded work';
+                const categoryGrade = possible > 0 ? `${(earned / possible * 100).toFixed(2)}%` : 'No graded work';
                 return `<div class="category-row">
                     <div><strong>${this.escapeHTML(category.name)}</strong><span>${categoryGrade} · ${items.length} items</span></div>
                     <strong>${Number(category.weight || 0).toFixed(1)}%</strong>
@@ -1528,14 +1572,14 @@
             container.innerHTML = `
                 <div class="class-detail-summary glass-card">
                     <div><span class="class-term">${this.escapeHTML(this.termLabel(course.term))}</span><h2>${this.escapeHTML(course.title)}</h2><p>Current grade uses scored work and your category weights.</p></div>
-                    <div class="class-grade-metrics"><div><span>${grade === null ? '—' : `${grade.toFixed(1)}%`}</span><small>Current</small></div><div><span>${Number.isFinite(target) ? `${target.toFixed(1)}%` : '—'}</span><small>Optional target</small></div></div>
+                    <div class="class-grade-metrics"><div><span>${grade === null ? '—' : `${grade.toFixed(2)}%`}</span><small>Current</small></div><div><span>${Number.isFinite(target) ? `${target.toFixed(2)}%` : '—'}</span><small>Optional target</small></div></div>
                 </div>
                 <div class="class-detail-grid">
                     <section class="glass-card">
                         <h3>Grade targets</h3>
                         <label for="class-target-percent">Target grade (%)</label>
                         <div class="inline-form"><input id="class-target-percent" type="number" min="0" max="100" step="0.1" value="${target}"><button class="primary-btn" data-action="save-class-target">Save target</button></div>
-                        <p>${grade >= target ? 'You are currently meeting this class target.' : `You are ${(target - grade).toFixed(1)} points below your target.`}</p>
+                        <p>${grade >= target ? 'You are currently meeting this class target.' : `You are ${(target - grade).toFixed(2)} points below your target.`}</p>
                     </section>
                     <section class="glass-card">
                         <h3>Optional grade categories</h3>
@@ -1765,7 +1809,7 @@
                     daysUntilDue <= 1 ? 'Due very soon; give it priority today.' :
                     `${daysUntilDue} days until due; split the work into ${sessionCount} focused session${sessionCount === 1 ? '' : 's'}.`;
                 if (minutesStudied) reason += ` You have logged ${minutesStudied} min; about ${remainingStudyMinutes} min remain in the estimate.`;
-                if (gradeGap > 0) reason += ` ${gradeGap.toFixed(1)} points below your ${target.toFixed(1)}% class target.`;
+                if (gradeGap > 0) reason += ` ${gradeGap.toFixed(2)} points below your ${target.toFixed(2)}% class target.`;
                 if (gpaGap > 0) reason += ` Your current weighted GPA (${currentWeightedGpa.toFixed(2)}) is below your ${targetGpa.toFixed(2)} target.`;
                 const studyMethodKey = this.getStudyMethodKey(item, taskSessions);
                 const studyMethod = this.studyMethodLabel(studyMethodKey);
@@ -2015,10 +2059,11 @@
             let url = this.characterCache.get(key);
             if (!url && util) {
                 const canvas = document.createElement('canvas');
-                canvas.width = 160;
-                canvas.height = 160;
+                canvas.width = 240;
+                canvas.height = 240;
                 const ctx = canvas.getContext('2d');
-                ctx.scale(2, 2);
+                ctx.scale(3, 3);
+                ctx.imageSmoothingQuality = 'high';
                 util.drawFigureSide(ctx, { color: cos.color || '#34d399', cos }, 29, 26, 26, 42, 1, 0, false);
                 url = canvas.toDataURL('image/png');
                 this.characterCache.set(key, url);
@@ -2138,6 +2183,74 @@
                 : `Claim free coins once a day. Keep a streak going for bigger rewards (up to 85 coins). Practice games earn coins too.`;
         }
 
+        // ---- Username changes (once a week; the admin can force a rename) ----
+        async refreshUsernameCard() {
+            const input = document.getElementById('settings-username');
+            const button = document.getElementById('change-username-btn');
+            const hint = document.getElementById('username-hint');
+            if (!input || !window.StudBudCloud?.user) return;
+            const current = String(window.StudBudCloud.user.user_metadata?.username || '');
+            if (document.activeElement !== input) input.value = current;
+            try {
+                const status = await window.StudBudCommunityGames.getUsernameStatus();
+                this.usernameStatus = status;
+                const locked = !status.can_change;
+                input.disabled = locked; button.disabled = locked;
+                if (this.isAdmin) hint.textContent = 'The admin account\'s username can\'t be changed.';
+                else if (status.forced) hint.textContent = 'An admin has asked you to pick a new username. Choose one now.';
+                else if (locked && status.next_change_at) hint.textContent = `You can change your username once every 7 days. Next change available ${new Date(status.next_change_at).toLocaleString()}.`;
+                else hint.textContent = 'You can change your username once every 7 days. Use your new username the next time you sign in.';
+                if (status.forced && !this.isAdmin) this.showForcedUsernameModal();
+            } catch (error) {
+                hint.textContent = 'Username changes are unavailable right now. If this persists, re-run supabase-setup.sql in Supabase.';
+                input.disabled = true; button.disabled = true;
+            }
+        }
+
+        async submitUsernameChange(name, statusEl) {
+            const username = String(name || '').trim().toLowerCase();
+            if (!/^[a-z0-9_]{3,24}$/.test(username)) { statusEl.textContent = 'Use 3–24 letters, numbers, or underscores.'; return false; }
+            statusEl.textContent = 'Saving…';
+            try {
+                await window.StudBudCommunityGames.changeUsername(username);
+                const cloud = window.StudBudCloud;
+                const { data } = await cloud.client.auth.refreshSession();
+                if (data?.user) cloud.user = data.user;
+                const accountName = document.getElementById('account-name');
+                if (accountName) accountName.textContent = username;
+                statusEl.textContent = `Username changed to ${username}. Use it the next time you sign in.`;
+                document.getElementById('forced-username-modal')?.remove();
+                await this.refreshUsernameCard();
+                Promise.resolve(this.refreshStudyLeaderboard?.(this.studyLeaderboardPeriod)).catch(() => { });
+                return true;
+            } catch (error) {
+                statusEl.textContent = this.friendlyErrorMessage(error, 'Could not change your username.');
+                return false;
+            }
+        }
+
+        showForcedUsernameModal() {
+            if (document.getElementById('forced-username-modal')) return;
+            const modal = document.createElement('div');
+            modal.id = 'forced-username-modal';
+            modal.className = 'forced-username-modal';
+            modal.setAttribute('role', 'alertdialog');
+            modal.setAttribute('aria-modal', 'true');
+            modal.innerHTML = `<form class="glass-card forced-username-card">
+                <h2>Please choose a new username</h2>
+                <p>An admin has asked you to change your username. You need to pick a new one before you continue.</p>
+                <input type="text" id="forced-username-input" maxlength="24" autocomplete="off" placeholder="New username" aria-label="New username">
+                <p id="forced-username-status" class="community-status" role="status"></p>
+                <button type="submit" class="primary-btn">Save new username</button></form>`;
+            document.body.appendChild(modal);
+            const input = modal.querySelector('input');
+            input.focus();
+            modal.querySelector('form').addEventListener('submit', event => {
+                event.preventDefault();
+                this.submitUsernameChange(input.value, modal.querySelector('#forced-username-status'));
+            });
+        }
+
         // Admin tools. The server re-checks the account on every call; this only controls what is shown.
         async refreshAdminAccess() {
             // Show the tab to the "overit" account even if the server isn't set up yet, so the page can explain what is missing.
@@ -2146,6 +2259,7 @@
             try { if (await window.StudBudCommunityGames.isAdmin()) this.isAdmin = true; } catch (error) { /* keep the name check */ }
             window.NexusApp.isAdmin = this.isAdmin;
             document.getElementById('admin-nav-item')?.classList.toggle('hidden', !this.isAdmin);
+            this.refreshUsernameCard();
         }
 
         async loadAdminList() {
@@ -2162,11 +2276,12 @@
                 const esc = value => this.escapeHTML(String(value ?? ''));
                 list.innerHTML = tab === 'users'
                     ? rows.map(user => `<article class="admin-row">
-                        <div><strong>${esc(user.username)}</strong>${user.banned ? ' <span class="admin-badge">banned</span>' : ''}
+                        <div><strong>${esc(user.username)}</strong>${user.banned ? ' <span class="admin-badge">banned</span>' : ''}${user.force_change ? ' <span class="admin-badge">rename required</span>' : ''}
                         <small>${Number(user.coins)} coins · ${Number(user.wins)} wins · ${Number(user.decks)} public decks · joined ${esc(new Date(user.created_at).toLocaleDateString())}</small></div>
                         <div class="admin-actions">
                             <button type="button" class="secondary-btn" data-admin-action="coins" data-id="${esc(user.id)}" data-name="${esc(user.username)}">Coins</button>
                             <button type="button" class="secondary-btn" data-admin-action="remove-decks" data-id="${esc(user.id)}" data-name="${esc(user.username)}">Remove decks</button>
+                            <button type="button" class="secondary-btn" data-admin-action="${user.force_change ? 'cancel-rename' : 'force-rename'}" data-id="${esc(user.id)}" data-name="${esc(user.username)}">${user.force_change ? 'Cancel rename' : 'Force rename'}</button>
                             <button type="button" class="${user.banned ? 'secondary-btn' : 'danger-btn'}" data-admin-action="${user.banned ? 'unban' : 'ban'}" data-id="${esc(user.id)}" data-name="${esc(user.username)}">${user.banned ? 'Unban' : 'Ban'}</button>
                         </div></article>`).join('')
                     : rows.map(deck => `<article class="admin-row">
@@ -2194,6 +2309,11 @@
                     const reason = prompt(`Ban ${data.name}? They will lose their public decks and can't publish new ones. Reason (optional):`);
                     if (reason === null) return;
                     await games.adminCall('studbud_admin_set_ban', { p_user_id: data.id, p_banned: true, p_reason: reason });
+                } else if (action === 'force-rename') {
+                    if (!confirm(`Force ${data.name} to choose a new username? They'll be blocked from the app until they do.`)) return;
+                    await games.adminCall('studbud_admin_force_username', { p_user_id: data.id, p_force: true });
+                } else if (action === 'cancel-rename') {
+                    await games.adminCall('studbud_admin_force_username', { p_user_id: data.id, p_force: false });
                 } else if (action === 'unban') {
                     await games.adminCall('studbud_admin_set_ban', { p_user_id: data.id, p_banned: false });
                 } else if (action === 'coins') {
@@ -2275,14 +2395,14 @@
 
         updateMultiplayerModeSetup(mode) {
             const labels = {
-                skyline: ['Rooftop Rumble', 'Climb a rooftop obstacle course before the tide.'],
-                river: ['River Raiders', 'Steer a boat, dodge obstacles and catch fish.'],
-                market: ['Market Mayhem', 'Deliver packages across town and dodge cars.'],
-                miner: ['Crystal Cartel', 'Dig crystals, bank them at base, avoid lava.'],
-                duel: ['Hammerheart Showdown', 'King of the Hill: hold the glowing zone to score and knock rivals off.'],
-                crypto: ['Crypto Exchange', 'Trade six assets and answer questions for cash.'],
-                shooter: ['Starfall Blasters', 'Aim and blast drone waves.'],
-                sports: ['Endzone Rally', 'Run to the endzone. Teams of blue vs red with 4+ players.']
+                skyline: ['City Escape', 'Climb a rooftop obstacle course before the tide.'],
+                river: ['River Fishing', 'Steer a boat, dodge obstacles and catch fish.'],
+                market: ['Package Delivery', 'Deliver packages across town and dodge cars.'],
+                miner: ['Crystal Mining', 'Dig crystals, bank them at base, avoid lava.'],
+                duel: ['King of the Hill', 'King of the Hill: hold the glowing zone to score and knock rivals off.'],
+                crypto: ['Crypto Trading', 'Trade six assets and answer questions for cash.'],
+                shooter: ['Arena Shooter', 'Twin-stick arena: aim with the mouse, dash, blast drone waves and rival pilots.'],
+                sports: ['Team Football', 'Blue vs red: players are split into two teams. Run to the far endzone and tackle rivals.']
             };
             const [title, description] = labels[mode] || labels.skyline;
             document.getElementById('multiplayer-preview-title').textContent = title;
@@ -2311,21 +2431,25 @@
             if (reset) {
                 runner.score = 0;
                 runner.x = 90;
-                runner.y = 245;
+                runner.y = 251;
                 runner.vx = 0;
                 runner.vy = 0;
+                runner.grounded = true;
                 runner.camera = 0;
+                runner.aiming = false;
+                runner.aimStart = null;
+                runner.aimPoint = null;
                 runner.platforms = [{ x: 28, y: 278, width: 175 }];
-                for (let index = 1; index < 30; index++) {
-                    runner.platforms.push({
-                        x: 22 + ((index * 137 + (index % 3) * 29) % 405),
-                        y: 278 - index * 58,
-                        width: 72 + (index % 3) * 10
-                    });
+                let center = 115;
+                for (let index = 1; index < 60; index++) {
+                    const width = 92 - Math.min(30, index) * 0.8;
+                    center = Math.max(width / 2 + 12, Math.min(508 - width / 2, center + (Math.random() * 2 - 1) * 150));
+                    runner.platforms.push({ x: center - width / 2, y: 278 - index * 58, width });
                 }
+                document.getElementById('waiting-runner-score').textContent = '0';
             }
-            this.waitingRunner.running = true;
-            this.waitingRunner.started = true;
+            runner.running = true;
+            runner.started = true;
             document.getElementById('waiting-runner-start').textContent = 'Restart climb';
         }
 
@@ -2337,13 +2461,36 @@
             };
         }
 
+        // Pull-back launch: the drag vector (start point minus current point) sets the launch velocity.
+        waitingLaunchVelocity(runner, point) {
+            const dx = Math.max(-100, Math.min(100, runner.aimStart.x - point.x));
+            const dy = Math.max(0, Math.min(110, point.y - runner.aimStart.y));
+            if (Math.hypot(dx, dy) < 14) return null;
+            return { vx: dx * 0.065, vy: -(5.6 + dy * 0.05) };
+        }
+
+        // Advances one 1/60s tick of the warm-up physics; returns the platform landed on, if any.
+        waitingPhysics(state, platforms) {
+            const previousFoot = state.y + 27;
+            state.x += state.vx;
+            state.y += state.vy;
+            state.vy += 0.27;
+            if (state.x < 15) { state.x = 15; state.vx = Math.abs(state.vx) * 0.6; }
+            if (state.x > 505) { state.x = 505; state.vx = -Math.abs(state.vx) * 0.6; }
+            if (state.vy <= 0) return null;
+            return platforms.find(item =>
+                previousFoot <= item.y && state.y + 27 >= item.y
+                && state.x + 13 >= item.x && state.x - 13 <= item.x + item.width
+            ) || null;
+        }
+
         beginWaitingAim(event) {
-            if (!this.waitingRunner.running) this.startWaitingRunner();
+            if (!this.waitingRunner.running) { this.startWaitingRunner(); event.preventDefault(); return; }
             const runner = this.waitingRunner;
-            if (runner.vy !== 0 || runner.y < 0) return;
+            if (!runner.grounded) return;
             const point = this.pointOnCanvas(event.currentTarget, event);
-            if (Math.hypot(point.x - runner.x, point.y - (runner.y - runner.camera)) > 100) return;
             runner.aiming = true;
+            runner.aimStart = point;
             runner.aimPoint = point;
             event.currentTarget.setPointerCapture?.(event.pointerId);
             event.preventDefault();
@@ -2358,51 +2505,39 @@
         releaseWaitingAim(event) {
             const runner = this.waitingRunner;
             if (!runner.aiming || !runner.aimPoint) return;
-            const point = this.pointOnCanvas(event.currentTarget, event);
-            const originX = runner.x;
-            const originY = runner.y - runner.camera;
-            const dx = Math.max(-95, Math.min(95, originX - point.x));
-            const dy = Math.max(-110, Math.min(0, originY - point.y));
-            if (Math.hypot(dx, dy) < 12) {
-                runner.aiming = false;
-                return;
-            }
-            runner.vx = dx * 0.105;
-            runner.vy = Math.min(-5, dy * 0.12);
+            const launch = event.type === 'pointercancel' ? null : this.waitingLaunchVelocity(runner, this.pointOnCanvas(event.currentTarget, event));
             runner.aiming = false;
             runner.aimPoint = null;
+            if (!launch) return;
+            runner.vx = launch.vx;
+            runner.vy = launch.vy;
+            runner.grounded = false;
+            window.StudBudSfx?.play?.('jump');
             event.preventDefault();
         }
 
         stepWaitingRunner(delta) {
             const runner = this.waitingRunner;
-            if (!runner.running) return;
-            const previousFoot = runner.y + 27;
-            runner.x += runner.vx * delta;
-            runner.y += runner.vy * delta;
-            runner.vy += 0.27 * delta;
-            runner.vx *= Math.pow(0.992, delta);
-            runner.x = Math.max(15, Math.min(500, runner.x));
-
-            if (runner.vy > 0) {
-                const platform = runner.platforms.find(item =>
-                    previousFoot <= item.y && runner.y + 27 >= item.y
-                    && runner.x + 13 >= item.x && runner.x - 13 <= item.x + item.width
-                );
-                if (platform) {
-                    runner.y = platform.y - 27;
-                    runner.vy = 0;
-                    runner.vx = 0;
-                    const altitude = Math.max(0, Math.floor((245 - runner.y) / 8));
-                    if (altitude > runner.score) {
-                        runner.score = altitude;
-                        document.getElementById('waiting-runner-score').textContent = String(altitude);
-                        if (altitude > runner.best) {
-                            runner.best = altitude;
-                            document.getElementById('waiting-runner-best').textContent = String(altitude);
-                        }
+            if (!runner.running || runner.grounded) return;
+            runner.tickBank = (runner.tickBank || 0) + delta;
+            while (runner.tickBank >= 1) {
+                runner.tickBank -= 1;
+                const platform = this.waitingPhysics(runner, runner.platforms);
+                if (!platform) continue;
+                runner.y = platform.y - 27;
+                runner.vy = 0;
+                runner.vx = 0;
+                runner.grounded = true;
+                const altitude = Math.max(0, Math.floor((251 - runner.y) / 8));
+                if (altitude > runner.score) {
+                    runner.score = altitude;
+                    document.getElementById('waiting-runner-score').textContent = String(altitude);
+                    if (altitude > runner.best) {
+                        runner.best = altitude;
+                        document.getElementById('waiting-runner-best').textContent = String(altitude);
                     }
                 }
+                break;
             }
             if (runner.y - runner.camera > 390) {
                 runner.running = false;
@@ -2540,6 +2675,508 @@
             context.restore();
         }
 
+        // ---- Simulated lobby players for the live previews: they fight each other and the demo player like a real match ----
+        initPreviewBots(demo, mode, game) {
+            const U = window.StudBudArcade.util;
+            const bots = [['b1', 'Nova', '#f472b6'], ['b2', 'Kite', '#facc15'], ['b3', 'Rook', '#4ade80']].map(([id, name, color], i) => ({
+                id, name, color, cos: {}, i, x: 0, y: 0, vx: 0, vy: 0, f: 0, a: 0, hp: 100, ex: {}, score: 0, tx: 0, ty: 0, respawn: 0, invuln: 0, stun: 0, cd: Math.random(), seen: performance.now()
+            }));
+            if (mode === 'duel') {
+                const sp = [[480, 440], [1080, 440], [790, 200]];
+                bots.forEach((b, i) => Object.assign(b, { w: 34, h: 56, sp: sp[i], x: sp[i][0], y: sp[i][1] - 60, dmg: 0, airJumps: 1, swingT: 0, swingCd: 0.5 + i * 0.4, f: 1 }));
+                demo.onEmit = ev => { if (ev.k === 'sw') this.duelSwing(demo, ev); };
+            } else if (mode === 'shooter') {
+                bots.forEach(b => { b.r = 16; b.strafe = 1; this.placeShooterBot(game, b); });
+            } else if (mode === 'sports') {
+                bots.forEach(b => {
+                    b.team = game.teamOf(b.id); b.dir = b.team === 0 ? 1 : -1; b.r = 15; b.dash = 0; b.dashCd = 1; b.cp = 0; b.dashA = 0;
+                    const mates = game.teamIds.filter(id => game.teamOf(id) === b.team);
+                    b.lane = game.H * (Math.max(0, mates.indexOf(b.id)) + 1) / (mates.length + 1);
+                    b.x = (b.dir > 0 ? 130 : game.W - 130) + b.dir * (500 + Math.random() * 500); b.y = b.lane;
+                });
+                demo.onEmit = ev => { if (ev.k === 'tk') { const t = bots.find(b => b.id === ev.to); if (t) this.resetSportsBot(game, t, true); } };
+            }
+            return bots;
+        }
+
+        duelSwing(demo, ev) {
+            const U = window.StudBudArcade.util, game = demo.game;
+            const dx = Math.cos(ev.a), dy = Math.sin(ev.a);
+            const box = { x: ev.x + dx * 70 - 65, y: ev.y + dy * 70 - 58, w: 130, h: 116 };
+            for (const t of demo.bots) {
+                if (t.id === ev.by || t.respawn > 0 || t.invuln > 0 || !U.overlap(box, t)) continue;
+                t.dmg += 9;
+                const force = 280 + t.dmg * 9;
+                t.vx = dx * force; t.vy = dy * force * 0.5 - (100 + t.dmg * 2); t.onGround = false;
+                t.stun = U.clamp(0.2 + t.dmg / 400, 0.2, 0.55); t.lastHit = ev.by;
+                game.particles.burst(t.x + 17, t.y + 28, '#fca5a5', 14, 260, 0.4, 5);
+                if (ev.by === demo.meId) game.shake = Math.max(game.shake, 0.12);
+            }
+        }
+
+        stepDuelBots(demo, dt) {
+            const U = window.StudBudArcade.util, game = demo.game, me = game.me, now = performance.now();
+            const meAlive = game.respawn <= 0;
+            for (const b of demo.bots) {
+                if (b.respawn > 0) {
+                    b.respawn -= dt; b.a = 5;
+                    if (b.respawn <= 0) { b.x = b.sp[0]; b.y = b.sp[1] - 60; b.vx = b.vy = 0; b.dmg = 0; b.invuln = 2; b.a = 0; }
+                    b.seen = now; continue;
+                }
+                b.stun = Math.max(0, b.stun - dt); b.invuln = Math.max(0, b.invuln - dt); b.swingT = Math.max(0, b.swingT - dt); b.swingCd -= dt;
+                let tgt = null, bd = 1e9;
+                const foes = demo.bots.filter(o => o !== b && o.respawn <= 0);
+                if (meAlive) foes.push({ x: me.x, y: me.y, id: demo.meId });
+                for (const o of foes) { const d = Math.hypot(o.x - b.x, o.y - b.y); if (d < bd) { bd = d; tgt = o; } }
+                const off = b.y + 56 > 525 && (b.x + 17 < 300 || b.x + 17 > 1300);
+                let want = 0;
+                if (off) want = Math.sign(800 - b.x);
+                else if (tgt && Math.abs(tgt.x - b.x) > 60) want = Math.sign(tgt.x - b.x);
+                if (b.stun <= 0) {
+                    const acc = (b.onGround ? 3000 : 1500) * dt;
+                    b.vx += U.clamp(want * 300 - b.vx, -acc, acc);
+                    if (tgt) b.f = tgt.x >= b.x ? 1 : -1;
+                }
+                b.vy = Math.min(1200, b.vy + 2400 * dt);
+                if (b.onGround) b.airJumps = 1;
+                if (b.stun <= 0) {
+                    if (off) { if (!b.onGround && b.vy > 0 && b.airJumps > 0) { b.vy = -820; b.airJumps--; } }
+                    else if (tgt && b.onGround && ((tgt.y < b.y - 50 && Math.abs(tgt.x - b.x) < 320) || (b.wall && want))) b.vy = -900;
+                    else if (tgt && !b.onGround && b.vy > 0 && b.airJumps > 0 && tgt.y < b.y - 40) { b.vy = -820; b.airJumps--; }
+                }
+                U.moveBody(b, game.solids, dt);
+                if (tgt && b.swingCd <= 0 && b.stun <= 0 && bd < 115) {
+                    const ang = Math.atan2(tgt.y - b.y, tgt.x - b.x);
+                    b.swingT = 0.22; b.swingCd = 0.6 + Math.random() * 0.5; b.swing = now; b.swingAim = ang;
+                    const ev = { k: 'sw', x: b.x + 17, y: b.y + 28, d: b.f, a: ang, p: 1, by: b.id, c: b.dmg };
+                    game.onEvent(ev, b); this.duelSwing(demo, ev);
+                }
+                if (b.x < -150 || b.x > 1750 || b.y > 950 || b.y < -500) {
+                    b.respawn = 1.4; game.particles.burst(b.x, Math.min(b.y, 880), b.color, 30, 500, 0.8, 6);
+                    if (b.lastHit === demo.meId) game.onEvent({ k: 'ko', by: demo.meId }, b);
+                    b.lastHit = null;
+                }
+                b.a = b.swingT > 0 ? 3 : !b.onGround ? 2 : Math.abs(b.vx) > 40 ? 1 : 0;
+                b.ex = { d: Math.round(b.dmg), h: 0, i: b.invuln > 0 ? 1 : 0, t: b.swingAim || 0 };
+                b.tx = b.x; b.ty = b.y; b.seen = now;
+            }
+        }
+
+        driveDuel(demo, hold, tap, session) {
+            const game = demo.game, me = game.me;
+            const foes = demo.bots.filter(b => b.respawn <= 0);
+            let tgt = null, bd = 1e9;
+            for (const b of foes) { const d = Math.hypot(b.x - me.x, b.y - me.y); if (d < bd) { bd = d; tgt = b; } }
+            const cx = me.x + 17;
+            if (me.y + 56 > 525 && (cx < 300 || cx > 1300)) {
+                hold.add(cx < 800 ? 'KeyD' : 'KeyA');
+                if (!me.onGround && me.vy > 0 && game.airJumps > 0) tap.add('Space');
+                return;
+            }
+            if (!tgt) return;
+            const dx = tgt.x - me.x;
+            if (Math.abs(dx) > 70) hold.add(dx > 0 ? 'KeyD' : 'KeyA');
+            if (me.onGround && ((tgt.y < me.y - 50 && Math.abs(dx) < 320) || (me.wall && Math.abs(dx) > 70))) tap.add('Space');
+            else if (!me.onGround && me.vy > 0 && game.airJumps > 0 && tgt.y < me.y - 40) tap.add('Space');
+            const z = game.view?.z || 1;
+            session.mouse.x = (game.offX || 0) + (tgt.x + 17) * z; session.mouse.y = (game.offY || 0) + (tgt.y + 28) * z;
+            session.mouse.pressed = bd < 120;
+        }
+
+        placeShooterBot(game, b) {
+            const U = window.StudBudArcade.util, me = game.me;
+            for (let i = 0; i < 20; i++) {
+                const a = Math.random() * U.TAU, d = 380 + Math.random() * 350;
+                const x = U.clamp(me.x + Math.cos(a) * d, 120, game.W - 120), y = U.clamp(me.y + Math.sin(a) * d, 120, game.H - 120);
+                if (game.walls.some(w => U.overlap({ x: x - 22, y: y - 22, w: 44, h: 44 }, w))) continue;
+                b.x = x; b.y = y; return;
+            }
+            b.x = game.W / 2; b.y = game.H / 2;
+        }
+
+        stepShooterBots(demo, dt) {
+            const U = window.StudBudArcade.util, game = demo.game, me = game.me, now = performance.now();
+            for (const b of demo.bots) {
+                b.seen = now;
+                if (b.respawn > 0) {
+                    b.respawn -= dt; b.a = 1;
+                    if (b.respawn <= 0) { this.placeShooterBot(game, b); b.hp = 100; b.a = 0; b.invuln = 1.5; }
+                    continue;
+                }
+                b.cd -= dt; b.invuln = Math.max(0, b.invuln - dt); b.sfT = (b.sfT || 0) - dt;
+                if (b.sfT <= 0) { b.strafe = -b.strafe; b.sfT = 1.2 + Math.random() * 1.8; }
+                let tgt = null, bd = 1e9;
+                const foes = demo.bots.filter(o => o !== b && o.respawn <= 0);
+                if (game.dead <= 0) foes.push(me);
+                for (const o of foes) { const d = Math.hypot(o.x - b.x, o.y - b.y); if (d < bd) { bd = d; tgt = o; } }
+                let mx = 0, my = 0;
+                if (tgt) {
+                    const ang = Math.atan2(tgt.y - b.y, tgt.x - b.x), dir = bd > 420 ? 1 : bd < 260 ? -1 : 0;
+                    mx = Math.cos(ang) * dir + Math.cos(ang + Math.PI / 2) * b.strafe * 0.8;
+                    my = Math.sin(ang) * dir + Math.sin(ang + Math.PI / 2) * b.strafe * 0.8;
+                    b.aim = ang + (Math.random() - 0.5) * 0.12;
+                    if (b.cd <= 0 && bd < 780) {
+                        b.cd = 0.3 + Math.random() * 0.3;
+                        game.onEvent({ k: 'sh', x: b.x + Math.cos(b.aim) * 24, y: b.y + Math.sin(b.aim) * 24, a: b.aim, by: b.id }, b);
+                    }
+                }
+                const k = Math.min(1, dt * 6);
+                b.vx = U.lerp(b.vx, mx * 230, k); b.vy = U.lerp(b.vy, my * 230, k);
+                b.x += b.vx * dt; b.y += b.vy * dt;
+                for (const w of game.walls) U.pushCircleOutOfRect(b, w);
+                b.x = U.clamp(b.x, 30, game.W - 30); b.y = U.clamp(b.y, 30, game.H - 30);
+                b.f = b.aim || 0; b.a = 0; b.ex = { o: 0 }; b.tx = b.x; b.ty = b.y;
+            }
+            for (const bl of game.bullets) {
+                if (bl.life <= 0) continue;
+                const atk = bl.own ? demo.meId : bl.by;
+                if (!atk) continue;
+                for (const b of demo.bots) {
+                    if (b.respawn > 0 || b.id === atk || b.invuln > 0 || Math.hypot(bl.x - b.x, bl.y - b.y) > b.r + 4) continue;
+                    bl.life = 0; b.hp -= bl.dmg;
+                    game.particles.burst(bl.x, bl.y, '#fde68a', 5, 120, 0.25, 3);
+                    if (atk === demo.meId) game.onEvent({ k: 'hit', by: demo.meId }, b);
+                    if (b.hp <= 0) {
+                        b.respawn = 2; game.particles.burst(b.x, b.y, b.color, 30, 380, 0.8, 6);
+                        if (atk === demo.meId) game.onEvent({ k: 'ko', by: demo.meId }, b);
+                    }
+                    break;
+                }
+            }
+        }
+
+        driveShooter(demo, hold, tap, session, c) {
+            const game = demo.game, me = game.me;
+            let tgt = null, best = 1e9;
+            for (const t of [...game.drones.filter(d => d.hp > 0), ...demo.bots.filter(b => b.respawn <= 0)]) {
+                const d = Math.hypot(t.x - me.x, t.y - me.y) - (t.id ? 150 : 0);
+                if (d < best) { best = d; tgt = t; }
+            }
+            if (!tgt) { hold.add('KeyD'); return; }
+            const d = Math.hypot(tgt.x - me.x, tgt.y - me.y), lead = d / 950;
+            const ax = tgt.x + (tgt.vx || 0) * lead, ay = tgt.y + (tgt.vy || 0) * lead;
+            const ang = Math.atan2(tgt.y - me.y, tgt.x - me.x), dir = d > 380 ? 1 : d < 230 ? -1 : 0, sg = Math.sin(c * 0.8) > 0 ? 1 : -1;
+            const mx = Math.cos(ang) * dir + Math.cos(ang + Math.PI / 2) * sg * 0.9, my = Math.sin(ang) * dir + Math.sin(ang + Math.PI / 2) * sg * 0.9;
+            if (mx > 0.3) hold.add('KeyD'); else if (mx < -0.3) hold.add('KeyA');
+            if (my > 0.3) hold.add('KeyS'); else if (my < -0.3) hold.add('KeyW');
+            const z = game.zoom || 1;
+            session.mouse.x = session.vw / 2 + (ax - game.cam.x) * z; session.mouse.y = session.vh / 2 + (ay - game.cam.y) * z;
+            session.mouse.down = d < 750;
+            if (Math.floor(c / 4) !== demo.lastDash) { demo.lastDash = Math.floor(c / 4); tap.add('Space'); }
+            if (game.drones.filter(o => Math.hypot(o.x - me.x, o.y - me.y) < 250).length >= 3) tap.add('KeyE');
+        }
+
+        resetSportsBot(game, b, keepCp) {
+            b.x = (b.dir > 0 ? 130 : game.W - 130) + (keepCp ? b.dir * b.cp : 0); b.y = b.lane; b.vx = b.vy = 0;
+            if (keepCp) b.stun = 1.3; else b.cp = 0;
+        }
+
+        stepSportsBots(demo, dt) {
+            const U = window.StudBudArcade.util, game = demo.game, me = game.me, now = performance.now();
+            for (const b of demo.bots) {
+                b.seen = now; b.ex = { b: 0 };
+                b.stun = Math.max(0, b.stun - dt); b.dashCd -= dt; b.dash = Math.max(0, b.dash - dt);
+                if (b.stun > 0) { b.vx *= 0.8; b.vy *= 0.8; b.a = 0; continue; }
+                const foes = demo.bots.filter(o => o.team !== b.team);
+                if (game.myTeam !== b.team) foes.push({ x: me.x, y: me.y, id: demo.meId, isMe: true });
+                let tgt = null, bd = 1e9;
+                for (const o of foes) {
+                    if ((o.x - b.x) * b.dir < -40) continue;
+                    const d = Math.hypot(o.x - b.x, o.y - b.y);
+                    if (d < bd) { bd = d; tgt = o; }
+                }
+                let ty = (b.lane - b.y) * 0.8, tx = b.dir * 255 * 1.25;
+                if (tgt && bd < 220) { ty = (b.y >= tgt.y ? 1 : -1) * 240; if (b.y < 120) ty = 240; if (b.y > game.H - 120) ty = -240; }
+                if (b.dash > 0) { tx = Math.cos(b.dashA) * 620; ty = Math.sin(b.dashA) * 620; }
+                else if (tgt && bd < 125 && b.dashCd <= 0) { b.dash = 0.22; b.dashCd = 1.4 + Math.random(); b.dashA = Math.atan2(tgt.y - b.y, tgt.x - b.x); }
+                const acc = 3000 * dt;
+                b.vx += U.clamp(tx - b.vx, -acc, acc); b.vy += U.clamp(ty - b.vy, -acc, acc);
+                b.x = U.clamp(b.x + b.vx * dt, b.r, game.W - b.r); b.y = U.clamp(b.y + b.vy * dt, b.r, game.H - b.r);
+                b.f = Math.atan2(b.vy, b.vx); b.a = 1; b.tx = b.x; b.ty = b.y;
+                if (b.dash > 0.08) {
+                    for (const o of foes) {
+                        if (Math.hypot(o.x - b.x, o.y - b.y) > 34) continue;
+                        if (o.isMe) game.onEvent({ k: 'tk', to: demo.meId }, b); else this.resetSportsBot(game, o, true);
+                        b.dash = 0; break;
+                    }
+                }
+                const forward = Math.max(0, b.dir > 0 ? b.x - 130 : game.W - 130 - b.x);
+                b.cp = Math.max(b.cp, Math.floor(forward / 400) * 400);
+                if (b.dir > 0 ? b.x > game.W - 190 : b.x < 190) { game.onEvent({ k: 'td' }, b); this.resetSportsBot(game, b, false); }
+            }
+        }
+
+        driveSports(demo, hold, tap) {
+            const game = demo.game, me = game.me, dir = game.dir;
+            let tgt = null, bd = 1e9;
+            for (const b of demo.bots) {
+                if (b.team === game.myTeam || (b.x - me.x) * dir < -30) continue;
+                const d = Math.hypot(b.x - me.x, b.y - me.y);
+                if (d < bd) { bd = d; tgt = b; }
+            }
+            hold.add('ShiftLeft');
+            if (tgt && bd < 120 && game.dashCd <= 0) {
+                hold.add(tgt.x > me.x ? 'KeyD' : 'KeyA'); hold.add(tgt.y > me.y ? 'KeyS' : 'KeyW');
+                tap.add('Space');
+                return;
+            }
+            hold.add(dir > 0 ? 'KeyD' : 'KeyA');
+            if (tgt && bd < 230) hold.add(me.y >= tgt.y ? 'KeyS' : 'KeyW');
+            if (me.y < 110) hold.add('KeyS'); else if (me.y > game.H - 110) hold.add('KeyW');
+        }
+
+        // ---- City Escape autoplay ----
+        // The course is generated from a fixed seed, so it never changes. The bot follows one fixed route through it: walk to the platform's edge, hop to the next platform on a set arc, repeat.
+        // Movement is scripted rather than physics-driven, so it clears every checkpoint every time.
+        skyRoute(game) {
+            if (game.botRoute) return game.botRoute;
+            const cps = game.checkpoints;
+            const list = [{ x: cps[0].x - 80, y: cps[0].y, w: 200, h: 14 }];
+            const flags = new Map(), cpNode = [0];
+            flags.set(0, cps[0].x + 20);
+            let last = list[0];
+            for (const p of game.solids) {
+                if (p.wall || p.wallJ || p.ground || p.slope || p.prop || p.w < 50 || p.y > last.y + 8) continue;
+                list.push(p); last = p;
+                cps.forEach((c, k) => {
+                    if (k > 0 && cpNode[k] === undefined && Math.abs(p.y - c.y) < 1 && c.x + 20 >= p.x && c.x + 20 <= p.x + p.w) { cpNode[k] = list.length - 1; flags.set(list.length - 1, c.x + 20); }
+                });
+            }
+            if (last !== game.summit) list.push(game.summit);
+            cps.forEach((c, k) => {
+                if (cpNode[k] !== undefined) return;
+                let best = 1, d = 1e9;
+                list.forEach((p, i) => { const dd = Math.abs(p.y - c.y) * 3 + Math.abs(p.x + p.w / 2 - c.x - 20); if (i > 0 && dd < d) { d = dd; best = i; } });
+                cpNode[k] = best; flags.set(best, c.x + 20);
+            });
+            return game.botRoute = { list, flags, cpNode, props: game.solids.filter(p => p.prop) };
+        }
+
+        // Advances a scripted runner (body = {x, y, w, h}) one frame along the route.
+        skyStep(game, b, st, dt, speed) {
+            const U = window.StudBudArcade.util, R = this.skyRoute(game), n = R.list[st.i], nx = R.list[st.i + 1];
+            const bw = b.w || 26, bh = b.h || 44;
+            st.air = false; st.moving = false;
+            if (st.wait > 0) { st.wait -= dt; b.y = n.y - bh; return; }
+            if (st.hop) {
+                const h = st.hop;
+                h.t += dt / h.dur;
+                const s = Math.min(1, h.t);
+                b.x = U.lerp(h.x0, nx.x + h.rel - bw / 2, s);
+                b.y = U.lerp(h.y0, nx.y - bh, s) - 4 * h.lift * s * (1 - s);
+                st.air = true;
+                if (s >= 1) { st.hop = null; st.i++; st.flagDone = false; st.wait = 0.05; }
+                return;
+            }
+            const cx = b.x + bw / 2, fx = R.flags.get(st.i);
+            let tx;
+            if (fx !== undefined && !st.flagDone) tx = fx;
+            else if (!nx) tx = n.x + n.w / 2;
+            else tx = U.clamp(nx.x + nx.w / 2, n.x + 14, n.x + n.w - 14);
+            const dx = tx - cx;
+            if (Math.abs(dx) > 3) {
+                const step = Math.min(Math.abs(dx), 320 * speed * dt);
+                b.x += Math.sign(dx) * step; b.face = Math.sign(dx); st.moving = true;
+            } else if (fx !== undefined && !st.flagDone) { st.flagDone = true; st.wait = 0.25; }
+            else if (nx) {
+                const rel = U.clamp(cx - nx.x, 16, nx.w - 16), rise = n.y - nx.y, run = Math.abs(nx.x + rel - cx);
+                st.hop = { t: 0, x0: b.x, y0: b.y, rel, dur: U.clamp(0.4 + run / 1100 + Math.max(0, rise) / 1600, 0.4, 1) / speed, lift: 60 + Math.max(0, rise) * 0.25 + run * 0.06 };
+                b.face = nx.x + rel >= cx ? 1 : -1;
+            }
+            b.x = U.clamp(b.x, n.x + 12 - bw / 2, n.x + n.w - 12 - bw / 2);
+            // Hop over rooftop props instead of walking through them
+            const c2 = b.x + bw / 2;
+            let lift = 0;
+            for (const p of R.props) {
+                if (Math.abs(p.y + p.h - n.y) > 2) continue;
+                const out = Math.max(p.x - c2, c2 - (p.x + p.w), 0);
+                lift = Math.max(lift, (n.y - p.y) * U.clamp((46 - out) / 46, 0, 1));
+            }
+            b.y = n.y - bh - lift;
+            if (lift > 2) st.air = true;
+        }
+
+        skylineBot(demo, game, c, dt, hold, tap) {
+            const me = game.me, R = this.skyRoute(game);
+            if (!demo.sky) {
+                demo.sky = { start: -1, cur: 0, lastProg: c, flagDone: true, jump: null };
+                game.hurt = () => { };
+                game.crumbles.length = 0; game.blinkers.length = 0;
+                this.skylineCut(demo, game, c);
+            }
+            const S = demo.sky;
+            if (game.finished) return;
+            if (game.cp.id > S.start) {
+                S.reachT = S.reachT ?? c;
+                if (c - S.reachT > 0.9) { this.skylineCut(demo, game, c); return; }
+            }
+            this.skyDrive(game, S, R, c, hold, tap);
+        }
+
+        skyPlace(game, S, node, c) {
+            const me = game.me;
+            me.x = node.x + node.w / 2 - me.w / 2; me.y = node.y - me.h; me.vx = 0; me.vy = 0;
+            Object.assign(game, { dash: 0, kick: 0, snapCam: true, stuckX: undefined });
+            S.jump = null; S.lastProg = c;
+        }
+
+        // Presses the same keys a player would; the real game physics does the movement. Gets teleported forward only if it ever stalls.
+        skyDrive(game, S, R, c, hold, tap) {
+            const me = game.me, list = R.list, cx = me.x + me.w / 2, feet = me.y + me.h;
+            const gi = list.indexOf(me.ground);
+            if (me.onGround && gi >= 0 && gi !== S.cur) {
+                if (gi > S.cur) S.lastProg = c;
+                S.cur = gi; S.flagDone = !R.flags.has(gi); S.jump = null; S.fail = 0; S.runBack = false;
+            }
+            const nx = list[S.cur + 1];
+            if (!nx) return;
+            if (feet > list[S.cur].y + 520) { this.skyPlace(game, S, list[S.cur], c); return; }
+            if (c - S.lastProg > 3) { S.cur = Math.min(list.length - 1, S.cur + 1); S.flagDone = true; this.skyPlace(game, S, list[S.cur], c); return; }
+            const ncx = nx.x + nx.w / 2;
+            if (me.onGround) {
+                const n = me.ground;
+                S.jump = null;
+                const fx = gi >= 0 ? R.flags.get(gi) : undefined;
+                if (fx !== undefined && !S.flagDone) {
+                    if (Math.abs(cx - fx) > 6) hold.add(fx > cx ? 'KeyD' : 'KeyA'); else S.flagDone = true;
+                    return;
+                }
+                const rise = n.y - nx.y;
+                const walls = rise > 250 ? game.solids.filter(w => w.wallJ && w.y + w.h > n.y - 320 && w.y < n.y && Math.abs(w.x + w.w / 2 - cx) < 420) : [];
+                if (walls.length) {
+                    const gx = (Math.min(...walls.map(w => w.x)) + Math.max(...walls.map(w => w.x + w.w))) / 2;
+                    const exitDir = ncx >= gx ? 1 : -1;
+                    const low = walls.reduce((a, w) => (w.y + w.h > a.y + a.h ? w : a), walls[0]);
+                    const lowSide = Math.sign(low.x + low.w / 2 - gx) || exitDir;
+                    S.shaft = { gx, top: Math.min(...walls.map(w => w.y)), exitDir, side: lowSide, best: feet };
+                    if (Math.abs(cx - gx) > 18) { hold.add(gx > cx ? 'KeyD' : 'KeyA'); return; }
+                    hold.add(lowSide > 0 ? 'KeyD' : 'KeyA'); hold.add('Space'); tap.add('Space');
+                    S.jump = { t: c, v: { dbl: 0.2, dash: null }, dbl: false, dash: false };
+                    return;
+                }
+                S.shaft = null;
+                // Jump pads: if the next platform is too high for a double jump, bounce off a spring on this platform
+                const spring = rise > 200 ? game.springs.find(sp => sp.x >= n.x - 4 && sp.x + sp.w <= n.x + n.w + 4 && Math.abs(sp.y + sp.h - n.y) < 6) : null;
+                if (spring) {
+                    const sx = spring.x + spring.w / 2;
+                    if (Math.abs(cx - sx) > 5) hold.add(sx > cx ? 'KeyD' : 'KeyA');
+                    else if (Math.abs(me.vx) > 40) hold.add(me.vx > 0 ? 'KeyA' : 'KeyD');
+                    else { hold.add(ncx > sx ? 'KeyD' : 'KeyA'); }
+                    return;
+                }
+                const d = ncx >= n.x + n.w / 2 ? 1 : -1;
+                const tx = Math.max(n.x + 12, Math.min(n.x + n.w - 12, d > 0 ? Math.min(n.x + n.w - 12, nx.x - 22) : Math.max(n.x + 12, nx.x + nx.w + 22)));
+                const atEdge = d * (cx - tx) >= -6;
+                if (nx.mover) {
+                    if (!atEdge) { hold.add(d > 0 ? 'KeyD' : 'KeyA'); return; }
+                    // Moving platforms: wait at the edge until the target swings (or rises) into jumping range
+                    const gap = Math.max(0, nx.x - (n.x + n.w), n.x - (nx.x + nx.w));
+                    if (nx.vert ? (rise > 130 || rise < -170) : gap > 190) { S.lastProg = c; return; }
+                    hold.add(d > 0 ? 'KeyD' : 'KeyA'); hold.add('Space'); tap.add('Space');
+                    S.jump = { t: c, v: { dbl: 0, dash: null }, dbl: false, dash: false };
+                    return;
+                }
+                // Try several jump styles from here and only jump when one is known to land on a platform further along the route
+                const variants = [{ dbl: 0.05, dash: null }, { dbl: 0.2, dash: null }, { dbl: 0.4, dash: null }, { dbl: 0.1, dash: 0.3 }, { dbl: 0.3, dash: 0.15 }, { dbl: 0.2, dash: 0.5 }, { dbl: 9, dash: 0.1 }, { dbl: 9, dash: null }];
+                let pick = null, bestIdx = S.cur;
+                for (const v of variants) {
+                    const idx = this.skyPredict(game, R, S, me, me.vx, d, v);
+                    if (idx > bestIdx && idx <= S.cur + 3) { bestIdx = idx; pick = v; if (idx === S.cur + 1) break; }
+                }
+                if (pick) {
+                    S.fail = 0; S.runBack = false;
+                    hold.add(d > 0 ? 'KeyD' : 'KeyA'); hold.add('Space'); tap.add('Space');
+                    S.jump = { t: c, v: pick, dbl: false, dash: false };
+                    return;
+                }
+                // No jump from here is known to land: back up for a longer run-up, and as a last resort skip this hop
+                if (S.runBack) {
+                    const far = d > 0 ? n.x + 14 : n.x + n.w - 14;
+                    if (Math.abs(cx - far) > 8) { hold.add(far > cx ? 'KeyD' : 'KeyA'); return; }
+                    S.runBack = false;
+                }
+                if (!atEdge) { hold.add(d > 0 ? 'KeyD' : 'KeyA'); return; }
+                S.fail = (S.fail || 0) + 1;
+                if (S.fail <= 2) { S.runBack = true; return; }
+                S.fail = 0; S.cur = Math.min(list.length - 1, S.cur + 1); S.flagDone = true;
+                this.skyPlace(game, S, list[S.cur], c);
+                return;
+            }
+            const sh = S.shaft;
+            if (sh && feet > sh.top + 24) {
+                if (feet < sh.best - 10) { sh.best = feet; S.lastProg = c; }
+                if (game.wallDir) {
+                    sh.side = -game.wallDir;
+                    if (c - (S.wjT || 0) > 0.14) { tap.add('Space'); S.wjT = c; }
+                }
+                hold.add('Space');
+                hold.add((feet < sh.top + 130 ? sh.exitDir : sh.side) > 0 ? 'KeyD' : 'KeyA');
+                return;
+            }
+            const j = S.jump || (S.jump = { t: c, v: { dbl: 0, dash: null }, dbl: false, dash: false });
+            const k = this.skyAirKeys({ x: me.x, y: me.y, w: me.w, h: me.h, vx: me.vx, vy: me.vy }, nx, j, c - j.t, game.airJumps, game.dashCd);
+            if (k.dir) hold.add(k.dir > 0 ? 'KeyD' : 'KeyA');
+            if (k.hold) hold.add('Space');
+            if (k.dbl) { tap.add('Space'); hold.add('Space'); j.dbl = true; }
+            if (k.dash) { tap.add('ShiftLeft'); j.dash = true; }
+        }
+
+        // The airborne controller. Shared by the live bot and by skyPredict, so a jump is only taken if the very same controller is known to land.
+        skyAirKeys(b, nx, j, tj, airJumps, dashCd) {
+            const cx = b.x + b.w / 2, feet = b.y + b.h, ncx = nx.x + nx.w / 2;
+            const over = cx > nx.x + 14 && cx < nx.x + nx.w - 14;
+            const out = { dir: 0, hold: b.vy < 0, dbl: false, dash: false };
+            if (!over || feet < nx.y - 30) out.dir = ncx > cx ? 1 : -1;
+            else if (Math.abs(b.vx) > 120) out.dir = b.vx > 0 ? -1 : 1;
+            const farX = Math.max(0, nx.x - cx, cx - (nx.x + nx.w));
+            if (!j.dbl && airJumps > 0 && tj >= j.v.dbl && b.vy > -150 && nx.y < feet - 8 && !(over && feet < nx.y)) { out.dbl = true; out.hold = true; }
+            else if (j.v.dash != null && !j.dash && tj >= j.v.dash && farX > 50 && dashCd <= 0 && feet < nx.y + 60) out.dash = true;
+            return out;
+        }
+
+        // Replays a jump with the game's real collision code and the same physics constants; returns the route index it lands on (-1 if it misses).
+        skyPredict(game, R, S, from, vx0, dirNow, v) {
+            const U = window.StudBudArcade.util, nx = R.list[S.cur + 1];
+            const near = game.solids.filter(p => !p.off && !p.wall && p.x < from.x + 900 && p.x + p.w > from.x - 900 && p.y < from.y + 800 && p.y + p.h > from.y - 900);
+            const b = { x: from.x, y: from.y, w: from.w, h: from.h, vx: vx0, vy: -850, onGround: false, ground: null, wall: 0 };
+            const j = { v, dbl: false, dash: false };
+            let airJumps = 1, dash = 0, dashCd = Math.max(0, game.dashCd || 0), face = dirNow || 1;
+            const DT = 1 / 60;
+            for (let i = 0; i < 170; i++) {
+                const tj = i * DT;
+                const k = this.skyAirKeys(b, nx, j, tj, airJumps, dashCd);
+                const dir = i === 0 ? dirNow : k.dir;
+                dashCd -= DT;
+                if (dash > 0) { dash -= DT; b.vx = face * 760; b.vy = 0; }
+                else {
+                    b.vx += U.clamp(dir * 340 - b.vx, -2300 * DT, 2300 * DT);
+                    if (dir) face = dir;
+                    b.vy = Math.min(1150, b.vy + 2300 * DT);
+                    if (!(k.hold || b.vy >= -250) ) b.vy += 2600 * DT;
+                    if (k.dbl) { b.vy = -780; airJumps--; j.dbl = true; }
+                    if (k.dash) { dash = 0.16; dashCd = 0.9; j.dash = true; }
+                }
+                U.moveBody(b, near, DT);
+                if (b.onGround && i > 2) return R.list.indexOf(b.ground);
+                if (b.y > from.y + 700) return -1;
+            }
+            return -1;
+        }
+
+        // Starts the preview runner at a random checkpoint; used at the start and each time the next checkpoint has been reached.
+        skylineCut(demo, game, c) {
+            const S = demo.sky, me = game.me, cps = game.checkpoints, R = this.skyRoute(game);
+            const pool = cps.map((cp, k) => k).filter(k => k !== S.start);
+            const k = pool[Math.floor(Math.random() * pool.length)];
+            const n = R.list[R.cpNode[k]];
+            S.start = k; S.reachT = undefined; S.cur = R.cpNode[k]; S.flagDone = true;
+            this.skyPlace(game, S, n, c);
+            me.x = cps[k].x + 20 - me.w / 2; me.face = 1;
+            Object.assign(game, { cp: cps[k], dead: 0, tideY: cps[k].y + 1000 });
+            game.maxH = Math.max(game.maxH, -cps[k].y);
+            demo.trail = [];
+        }
+
         // Runs the real game class with scripted bot input, so the lobby preview always matches the actual game.
         drawLivePreview(canvas, mode, now) {
             const A = window.StudBudArcade;
@@ -2550,34 +3187,63 @@
                     const hold = new Set(), tap = new Set();
                     const base = {
                         seed: 4242, local: { id: 'demo', color: '#38bdf8', nickname: 'You', cos: {} }, user: { id: 'demo' }, t: 0, startedAt: Date.now(), done: false, finishMs: 0, over: false, paused: false, question: null, score: 0,
-                        vw: canvas.width, vh: canvas.height, canvas: { style: {} }, roster: new Map(), keys: hold, mouse: { x: 0, y: 0, down: false, pressed: false },
+                        vw: canvas.width, vh: canvas.height, canvas: { style: {} }, overlay: null, roster: new Map(), keys: hold, mouse: { x: 0, y: 0, down: false, pressed: false, touchAt: 0 },
                         down: (...c) => c.some(k => hold.has(k)), pressed: (...c) => c.some(k => tap.has(k)),
                         axis: () => ({ x: (hold.has('KeyD') ? 1 : 0) - (hold.has('KeyA') ? 1 : 0), y: (hold.has('KeyS') ? 1 : 0) - (hold.has('KeyW') ? 1 : 0) }),
-                        spend: () => true, refill() { }, sfx() { }, toast() { }, ask() { return false; }, remoteList: () => [], emit() { }, send() { }, setGoal() { }, addScore() { }
+                        spend: () => true, refill() { }, sfx() { }, toast() { }, ask() { return false; }, remoteList: () => [], emit: ev => this.livePreview?.onEmit?.(ev), send() { }, setGoal() { }, addScore() { }
                     };
                     const session = new Proxy(base, { get: (target, key) => key in target ? target[key] : (() => undefined) });
+                    base.roster.set('demo', base.local);
+                    [['b1', 'Nova', '#f472b6'], ['b2', 'Kite', '#facc15'], ['b3', 'Rook', '#4ade80']].forEach(([id, nickname, color]) => base.roster.set(id, { id, nickname, color, cos: {} }));
                     const game = new A.games[mode](session);
                     session.game = game;
-                    demo = this.livePreview = { mode, session, game, hold, tap, last: now, clock: 0 };
+                    demo = this.livePreview = { mode, session, game, hold, tap, last: now, clock: 0, meId: 'demo' };
+                    demo.bots = this.initPreviewBots(demo, mode, game);
                 }
                 const { session, game, hold, tap } = demo;
                 const dt = Math.min(0.05, Math.max(0.001, (now - demo.last) / 1000));
                 demo.last = now; demo.clock += dt; session.t += dt;
                 const c = demo.clock;
                 hold.clear(); tap.clear();
-                const dir = Math.sin(c * 0.7) > 0 ? 'KeyD' : 'KeyA';
-                hold.add(dir);
-                if (Math.floor(c * 1.6) !== demo.lastJump) { demo.lastJump = Math.floor(c * 1.6); tap.add('Space'); }
-                if (Math.sin(c * 0.5) > 0.3) hold.add('Space');
-                if (game.res && game.res.value < 40) game.res.value = 100;
+                const me = game.me;
+                const bots = demo.bots;
+                session.remoteList = () => bots;
                 session.vw = canvas.width; session.vh = canvas.height;
+                const dir = Math.sin(c * 0.7) > 0 ? 'KeyD' : 'KeyA';
                 session.mouse.x = canvas.width / 2 + Math.cos(c * 1.3) * 260; session.mouse.y = canvas.height / 2 + Math.sin(c * 1.7) * 120;
                 session.mouse.down = Math.sin(c * 2) > 0.2;
-                if (mode === 'skyline' && game.checkpoints && Math.floor(c / 7) !== demo.lastHop) {
-                    demo.lastHop = Math.floor(c / 7);
-                    const cp = game.checkpoints[Math.min(game.checkpoints.length - 1, 2 + (demo.lastHop * 3) % 12)];
-                    game.me.x = cp.x; game.me.y = cp.y - 60; game.me.vy = 0; game.snapCam = true;
+                session.mouse.pressed = false;
+                if (mode === 'skyline') {
+                    demo.trail = demo.trail || [];
+                    demo.trail.push({ t: c, x: me.x, y: me.y, f: me.face || 1 });
+                    while (demo.trail.length > 400) demo.trail.shift();
+                    bots.forEach((b, i) => {
+                        const pt = demo.trail.find(p => p.t >= c - 1.4 * (i + 1)) || demo.trail[0];
+                        b.x = pt.x + (i - 1) * 34; b.y = pt.y; b.f = pt.f; b.a = 1; b.tx = b.x; b.ty = b.y; b.ex = {}; b.seen = performance.now();
+                    });
+                    this.skylineBot(demo, game, c, dt, hold, tap);
+                } else if (mode === 'duel') {
+                    this.stepDuelBots(demo, dt);
+                    this.driveDuel(demo, hold, tap, session);
+                } else if (mode === 'shooter') {
+                    this.stepShooterBots(demo, dt);
+                    this.driveShooter(demo, hold, tap, session, c);
+                } else if (mode === 'sports') {
+                    this.stepSportsBots(demo, dt);
+                    this.driveSports(demo, hold, tap);
+                } else {
+                    bots.forEach((b, i) => {
+                        const ph = c * (0.6 + i * 0.17) + i * 2.1;
+                        b.x = me.x + Math.cos(ph) * (180 + i * 90); b.y = me.y + Math.sin(ph * 1.3) * (130 + i * 50);
+                        b.f = Math.atan2(me.y - b.y, me.x - b.x); b.a = 1; b.hp = 100; b.tx = b.x; b.ty = b.y; b.ex = {}; b.seen = performance.now();
+                    });
+                    hold.add(dir);
+                    if (Math.floor(c * 1.6) !== demo.lastJump) { demo.lastJump = Math.floor(c * 1.6); tap.add('Space'); }
+                    if (Math.sin(c * 0.5) > 0.3) hold.add('Space');
                 }
+                if (game.res && game.res.value < 40) game.res.value = 100;
+                if (mode === 'skyline' && game.finished && !demo.endAt) demo.endAt = c;
+                if (mode === 'skyline' && demo.endAt && c - demo.endAt > 1.5) this.livePreview = null;
                 game.update(dt);
                 const context = canvas.getContext('2d');
                 context.setTransform(1, 0, 0, 1, 0, 0);
@@ -2920,17 +3586,26 @@
             const screenY = runner.y - camera;
             const x = runner.x;
             if (runner.aiming && runner.aimPoint) {
-                context.strokeStyle = '#ffed9d';
-                context.lineWidth = 3; context.setLineDash([6, 5]);
-                context.beginPath(); context.moveTo(x, screenY - 18);
-                context.lineTo(x + (x - runner.aimPoint.x) * 1.8, screenY - 18 + (screenY - runner.aimPoint.y) * 1.8);
-                context.stroke(); context.setLineDash([]);
+                const launch = this.waitingLaunchVelocity(runner, runner.aimPoint);
+                if (launch) {
+                    const sim = { x: runner.x, y: runner.y, vx: launch.vx, vy: launch.vy };
+                    context.fillStyle = '#ffed9d';
+                    for (let step = 0; step < 90; step++) {
+                        const landed = this.waitingPhysics(sim, runner.platforms);
+                        if (step % 4 === 3) { context.globalAlpha = 1 - step / 100; context.beginPath(); context.arc(sim.x, sim.y - camera - 18, 3, 0, Math.PI * 2); context.fill(); }
+                        if (landed) break;
+                    }
+                    context.globalAlpha = 1;
+                }
                 context.fillStyle = '#fff1a8';
                 context.font = '600 13px system-ui';
-                context.fillText('RELEASE TO LAUNCH', 15, 24);
+                context.fillText(launch ? 'RELEASE TO LAUNCH' : 'PULL BACK FURTHER', 15, 24);
             } else if (!runner.running) {
                 context.fillStyle = '#fff4df'; context.font = '600 13px system-ui';
-                context.fillText(runner.score ? 'MISSED THE LEDGE · CLIMB AGAIN' : 'PULL BACK FROM THE HAMMER, THEN RELEASE', 15, 24);
+                context.fillText(runner.score ? 'MISSED THE LEDGE · CLIMB AGAIN' : 'CLICK TO START, THEN DRAG BACK AND RELEASE', 15, 24);
+            } else if (runner.grounded && runner.score === 0) {
+                context.fillStyle = '#fff4df'; context.font = '600 13px system-ui';
+                context.fillText('DRAG DOWN AND BACK, THEN RELEASE TO JUMP', 15, 24);
             }
             this.drawCharacter(context, x, screenY - 18, '#e9a86d', 0.94, time, runner.aiming || Math.abs(runner.vy) > 0.2);
             context.fillStyle = '#33415a';
@@ -3117,9 +3792,9 @@
             const me = players.find(player => player.id === window.StudBudCloud.user.id);
             const modeNames = {
                 classic: 'Classic', rush: 'Rush', survival: 'Survival',
-                skyline: 'Rooftop Rumble', river: 'River Raiders', market: 'Market Mayhem',
-                miner: 'Crystal Cartel', duel: 'Hammerheart Showdown',
-                crypto: 'Crypto Exchange', shooter: 'Starfall Blasters', sports: 'Endzone Rally'
+                skyline: 'City Escape', river: 'River Fishing', market: 'Package Delivery',
+                miner: 'Crystal Mining', duel: 'King of the Hill',
+                crypto: 'Crypto Trading', shooter: 'Arena Shooter', sports: 'Team Football'
             };
             document.getElementById('hosted-room-title').textContent = `${room.deck_title} · ${modeNames[room.mode] || room.mode}`;
             const playerLimit = room.mode === 'duel' ? 8 : 16;
@@ -3159,9 +3834,9 @@
                     return `<li class="leaderboard-player${isSelf ? ' is-self' : ''}">${avatarFor(player)}<span class="leaderboard-name">${index + 1}. ${this.escapeHTML(player.nickname)}${isSelf ? ' · you' : ''}</span><span class="leaderboard-stat"><strong>${Number(player.score || 0).toLocaleString()} score</strong><small>${this.escapeHTML(progress)}</small></span>${kick}</li>`;
                 }).join('');
             const sceneNames = {
-                skyline: 'Rooftop Rumble', river: 'River Raiders', market: 'Market Mayhem',
-                miner: 'Crystal Cartel', duel: 'Hammerheart Showdown',
-                crypto: 'Crypto Exchange', shooter: 'Starfall Blasters', sports: 'Endzone Rally',
+                skyline: 'City Escape', river: 'River Fishing', market: 'Package Delivery',
+                miner: 'Crystal Mining', duel: 'King of the Hill',
+                crypto: 'Crypto Trading', shooter: 'Arena Shooter', sports: 'Team Football',
                 classic: 'Flashcard Face-off', rush: 'Rapid Recall', survival: 'Last Learner Standing'
             };
             document.getElementById('multiplayer-scene-name').textContent = sceneNames[room.mode] || 'Live match';
@@ -3181,7 +3856,7 @@
                     duel: ['Hold the glowing hill alone to score. Knock rivals off the stage.', 'A/D move · Space jump · click swing · Shift guard'],
                     crypto: ['Trade six assets, react to market news and build mining rigs.', '1-6 pick · B buy · S sell'],
                     shooter: ['Blast drones and other players in an arena.', 'WASD move · mouse aim · click fire · Q reload'],
-                    sports: ['Run to the far endzone and score. With 4+ players it is blue vs red.', 'WASD run · Shift sprint · Space dash · Q recharge']
+                    sports: ['Run to the far endzone and score. Players are split into blue and red teams; dash into rivals to tackle them.', 'WASD run · Shift sprint · Space dash-tackle · Q recharge']
                 }[room.mode] || ['Answer flashcard questions faster than everyone else.', 'Answer correctly to score points.'];
                 lobbyInfo.innerHTML = `<div class="lobby-mode"><strong>${this.escapeHTML(modeNames[room.mode] || 'Live game')}</strong><span>${this.escapeHTML(goalLabel)} · ${Number(room.state?.question_reward) || 20} coins per correct answer</span></div>
                     <p>${this.escapeHTML(info[0])}</p>
@@ -3283,16 +3958,61 @@
             const user = window.StudBudCloud.user;
             const me = (room.state?.players || []).find(player => player.id === user.id) || { id: user.id, nickname: 'You' };
             const deck = (AppState.get('flashcards') || []).find(item => item.id === room.deck_id || item.title === room.deck_title);
+            const botDefs = [['b1', 'Nova', '#f472b6'], ['b2', 'Kite', '#facc15'], ['b3', 'Rook', '#4ade80']];
             const fake = {
                 mode: room.mode, room_code: 'PRACTICE', goal_type: 'points', point_limit: 99999, host_id: user.id,
-                started_at: new Date().toISOString(), state: { players: [me] }
+                started_at: new Date().toISOString(),
+                state: { players: [me, ...botDefs.map(([id, nickname, color]) => ({ id, nickname, color }))] }
             };
-            this.practiceSession = new arcade.Session({
+            const s = this.practiceSession = new arcade.Session({
                 room: fake, user, api: window.StudBudCommunityGames, isHost: false, practice: true,
                 fallbackCards: (deck?.cards || []).filter(card => card.front && card.back),
                 onLeave: () => this.closePractice()
             });
             document.body.classList.add('mpg-active');
+            try {
+                const demo = { mode: room.mode, session: s, game: s.game, meId: user.id, clock: 0 };
+                demo.bots = this.initPreviewBots(demo, room.mode, s.game);
+                demo.bots.forEach(b => {
+                    const info = s.roster.get(b.id);
+                    if (info) { b.name = info.nickname; b.color = info.color; b.cos = info.cos; }
+                    s.remotes.set(b.id, b);
+                    b.st = { i: 0, flagDone: true, hop: null, wait: 1 + b.i * 0.8, air: false, moving: false };
+                });
+                const baseEmit = s.emit.bind(s);
+                s.emit = ev => { baseEmit(ev); demo.onEmit?.(ev); };
+                s.onTick = dt => {
+                    if (s.over || s.paused || s.countdown > 0) return;
+                    try { this.tickPracticeBots(demo, dt); } catch (error) { s.onTick = null; console.warn('[Practice] bots disabled:', error); }
+                };
+            } catch (error) {
+                console.warn('[Practice] Could not add bots:', error);
+            }
+        }
+
+        tickPracticeBots(demo, dt) {
+            const { mode, game, bots } = demo, me = game.me, now = performance.now();
+            demo.clock += dt;
+            const c = demo.clock;
+            if (mode === 'duel') this.stepDuelBots(demo, dt);
+            else if (mode === 'shooter') this.stepShooterBots(demo, dt);
+            else if (mode === 'sports') this.stepSportsBots(demo, dt);
+            else if (mode === 'skyline') {
+                const R = this.skyRoute(game);
+                bots.forEach((b, i) => {
+                    if (game.cp && b.st.i === 0 && !b.placed) { b.placed = true; b.x = R.list[0].x + 60 + i * 20; b.y = R.list[0].y - 44; }
+                    b.w = 26; b.h = 44;
+                    if (!R.list[b.st.i + 1]) { b.st.i = 0; b.st.hop = null; b.st.flagDone = true; b.x = R.list[0].x + 60; b.y = R.list[0].y - 44; }
+                    this.skyStep(game, b, b.st, dt, 0.8 + i * 0.07);
+                    b.f = b.face || 1; b.a = b.st.air ? 2 : b.st.moving ? 1 : 0; b.tx = b.x; b.ty = b.y; b.ex = {}; b.seen = now;
+                });
+            } else {
+                bots.forEach((b, i) => {
+                    const ph = c * (0.5 + i * 0.13) + i * 2.1;
+                    b.x = me.x + Math.cos(ph) * (200 + i * 90); b.y = me.y + Math.sin(ph * 1.3) * (140 + i * 50);
+                    b.f = Math.atan2(me.y - b.y, me.x - b.x); b.a = 1; b.hp = 100; b.tx = b.x; b.ty = b.y; b.ex = {}; b.seen = now;
+                });
+            }
         }
 
         async leaveHostedGame() {
@@ -3504,9 +4224,23 @@
             const list = document.getElementById('study-leaderboard-list');
             if (!list) return;
             const board = this.studyLeaderboardSnapshot?.leaderboard || [];
-            list.innerHTML = board.length ? board.map(player =>
-                `<li class="study-leaderboard-row${player.is_me ? ' is-self' : ''}"><span class="study-leaderboard-rank">${Number(player.rank) || '—'}</span><strong>${this.escapeHTML(player.username || 'Student')}${player.is_me ? ' · you' : ''}</strong><span>${this.formatStudyDuration(player.seconds)}</span></li>`
-            ).join('') : '<li class="empty-state">No study time logged for this period yet. Start a session to be first on the board.</li>';
+            const top = Math.max(1, ...board.map(p => Number(p.seconds) || 0));
+            const medal = ['🥇', '🥈', '🥉'];
+            const row = player => {
+                const rank = Number(player.rank) || 0;
+                const name = this.escapeHTML(player.username || 'Student');
+                const pct = Math.max(3, Math.round((Number(player.seconds) || 0) / top * 100));
+                return `<li class="study-leaderboard-row${player.is_me ? ' is-self' : ''}${rank >= 1 && rank <= 3 ? ` podium-${rank}` : ''}">
+                    <span class="study-leaderboard-rank">${rank >= 1 && rank <= 3 ? medal[rank - 1] : (rank || '—')}</span>
+                    <span class="study-leaderboard-avatar" aria-hidden="true">${name.charAt(0).toUpperCase()}</span>
+                    <div class="study-leaderboard-main"><strong>${name}${player.is_me ? ' <em class="you-badge">you</em>' : ''}</strong><span class="study-leaderboard-bar"><i style="width:${pct}%"></i></span></div>
+                    <span class="study-leaderboard-time">${this.formatStudyDuration(player.seconds)}</span></li>`;
+            };
+            const podium = board.length >= 3 ? `<li class="study-podium" aria-hidden="true">${[1, 0, 2].map(i => {
+                const p = board[i];
+                return `<div class="podium-spot podium-spot-${i + 1}"><span class="podium-medal">${medal[i]}</span><span class="study-leaderboard-avatar">${this.escapeHTML((p.username || 'S').charAt(0).toUpperCase())}</span><b>${this.escapeHTML(p.username || 'Student')}</b><small>${this.formatStudyDuration(p.seconds)}</small><div class="podium-block"></div></div>`;
+            }).join('')}</li>` : '';
+            list.innerHTML = board.length ? podium + board.map(row).join('') : '<li class="empty-state">No study time logged for this period yet. Start a session to be first on the board.</li>';
             const label = document.getElementById('study-leaderboard-period-label');
             if (label) label.textContent = this.studyLeaderboardPeriod === 'weekly' ? 'This week · UTC' : 'Today · UTC';
             document.querySelectorAll('[data-study-leaderboard-period]').forEach(button => {
@@ -3759,9 +4493,9 @@
                     (!selectedCourse || item.courseCode === selectedCourse.code)
                 ).length;
                 if (summary) summary.innerHTML = `
-                    <article><span>${selectedCourse ? 'Current class grade' : 'Classes with grades'}</span><strong>${selectedCourse ? (currentGrades[0] ? `${currentGrades[0].grade.toFixed(1)}%` : '—') : `${currentGrades.length} / ${courses.length}`}</strong></article>
+                    <article><span>${selectedCourse ? 'Current class grade' : 'Classes with grades'}</span><strong>${selectedCourse ? (currentGrades[0] ? `${currentGrades[0].grade.toFixed(2)}%` : '—') : `${currentGrades.length} / ${courses.length}`}</strong></article>
                     <article><span>Scored assignments</span><strong>${scoredCount}</strong></article>
-                    <article><span>Grade target</span><strong>${selectedCourse?.targetPct ? `${Number(selectedCourse.targetPct).toFixed(1)}%` : 'Optional'}</strong></article>`;
+                    <article><span>Grade target</span><strong>${selectedCourse?.targetPct ? `${Number(selectedCourse.targetPct).toFixed(2)}%` : 'Optional'}</strong></article>`;
             } else {
                 datasets = [{
                     label: metric === 'weighted' ? 'Weighted GPA' : 'Unweighted GPA',
@@ -3806,7 +4540,7 @@
                         legend: { display: metric !== 'class' || selectedCode === 'all' && datasets.length > 1, position: 'bottom' },
                         tooltip: {
                             callbacks: {
-                                label: context => `${context.dataset.label}: ${metric === 'class' ? `${Number(context.parsed.y).toFixed(1)}%` : Number(context.parsed.y).toFixed(2)}`
+                                label: context => `${context.dataset.label}: ${metric === 'class' ? `${Number(context.parsed.y).toFixed(2)}%` : Number(context.parsed.y).toFixed(2)}`
                             }
                         }
                     },
@@ -3832,7 +4566,7 @@
 
         async handleClick(event) {
             if (!event.target.closest('#course-modal')) this.hideCourseSuggestions();
-            if (event.target.closest('#current-flashcard') && document.getElementById('sm2-controls').classList.contains('hidden')) {
+            if (event.target.closest('#current-flashcard')) {
                 this.revealCard();
                 return;
             }
@@ -3944,6 +4678,8 @@
                     const remaining = scenarios.filter(item => item.id !== selectedId);
                     AppState.state.selectedGradeScenarioId = remaining[0]?.id || null;
                     this.saveGradeScenarioItems(remaining);
+                } else if (action === 'reset-scenario-override') {
+                    this.setScenarioOverride(target.dataset.id, '');
                 } else if (action === 'remove-scenario-item') {
                     const scenarios = (AppState.get('gradeScenarios') || []).map(item =>
                         item.id === AppState.get('selectedGradeScenarioId')
@@ -4032,8 +4768,20 @@
                     await this.importBackup();
                 } else if (id === 'factory-reset-btn') {
                     await this.factoryReset();
+                } else if (id === 'change-username-btn') {
+                    await this.submitUsernameChange(document.getElementById('settings-username').value, document.getElementById('username-status'));
                 } else if (id === 'process-import-btn') {
                     this.processFlashcardImport();
+                } else if (target.dataset.importerMode) {
+                    this.setImporterMode(target.dataset.importerMode);
+                } else if (id === 'add-manual-card-btn') {
+                    this.addManualCardRow(true);
+                } else if (id === 'create-manual-deck-btn') {
+                    this.createManualDeck();
+                } else if (action === 'remove-manual-card') {
+                    target.closest('.manual-card-row')?.remove();
+                    if (!document.querySelector('#manual-card-rows .manual-card-row')) this.addManualCardRow(false);
+                    this.renumberManualCards();
                 } else if (id === 'exit-arcade-btn') {
                     this.closeArcade();
                 } else if (target.matches('.play-game-btn')) {
@@ -4112,7 +4860,7 @@
             const studyArea = document.getElementById('active-study-area');
             if (studyArea && !studyArea.classList.contains('hidden') && !event.target.closest('input, textarea, select, button') && !this.studyKeyBusy) {
                 const revealed = !document.getElementById('sm2-controls').classList.contains('hidden');
-                if (!revealed && (event.key === ' ' || event.key === 'Enter')) {
+                if (event.key === ' ' || (event.key === 'Enter' && !revealed)) {
                     event.preventDefault();
                     this.revealCard();
                     return;
@@ -4236,6 +4984,10 @@
                     );
                     this.saveGradeScenarioItems(scenarios);
                 }
+            }
+            if (event.target.dataset && event.target.dataset.scenarioOverride) {
+                this.setScenarioOverride(event.target.dataset.scenarioOverride, event.target.value);
+                return;
             }
             if (event.target.id === 'ui-theme-select') {
                 AppState.set('settings', { ...AppState.get('settings'), theme: event.target.value });
@@ -4517,8 +5269,8 @@
             const current = (AppState.get('assignments') || []).find(item => item.id === id);
             const graded = document.querySelector('input[name="assignment-state"]:checked')?.value === 'graded';
             const kind = document.getElementById('assignment-kind').value;
-            const maxPoints = Number(document.getElementById('assignment-max-points').value) || 100;
-            const pointsEarned = graded ? Math.max(0, Number(document.getElementById('assignment-points').value) || 0) : 0;
+            const maxPoints = Math.round((Number(document.getElementById('assignment-max-points').value) || 100) * 100) / 100;
+            const pointsEarned = graded ? Math.round(Math.max(0, Number(document.getElementById('assignment-points').value) || 0) * 100) / 100 : 0;
             const assignment = {
                 id,
                 title: document.getElementById('assignment-name').value.trim(),
@@ -4704,9 +5456,15 @@
         revealCard() {
             const card = this.studyCards[this.activeCardIndex];
             if (!card) return;
+            const cardEl = document.getElementById('current-flashcard');
+            // After the first reveal the rating buttons stay visible and the card can be flipped back and forth
+            if (!document.getElementById('sm2-controls').classList.contains('hidden')) {
+                cardEl.classList.toggle('is-flipped');
+                return;
+            }
             clearTimeout(this.cardBackTimer);
             document.getElementById('card-back-content').textContent = card.back || '';
-            document.getElementById('current-flashcard').classList.add('is-flipped');
+            cardEl.classList.add('is-flipped');
             document.getElementById('reveal-card-btn').classList.add('hidden');
             document.getElementById('sm2-controls').classList.remove('hidden');
             if (card && window.SM2Engine) {
@@ -4839,6 +5597,102 @@
             await Promise.all(['flashcards', 'studyHistory', 'gameMetrics'].map(store => NexusDB.clear(store)));
             localStorage.removeItem(AppState.STORAGE_KEY);
             window.location.reload();
+        }
+
+        setImporterMode(mode) {
+            const manual = mode === 'manual';
+            document.querySelectorAll('.importer-mode-btn').forEach(button => {
+                const active = button.dataset.importerMode === mode;
+                button.classList.toggle('active', active);
+                button.setAttribute('aria-selected', String(active));
+            });
+            document.getElementById('importer-import-panel').classList.toggle('hidden', manual);
+            document.getElementById('importer-manual-panel').classList.toggle('hidden', !manual);
+            document.getElementById('importer-mode-hint').textContent = manual
+                ? 'Type each term and definition yourself. Add as many cards as you need.'
+                : 'Paste tabular flashcard text below. Terms and definitions should be separated by your chosen delimiter, with one card per line.';
+            if (manual && !document.querySelector('#manual-card-rows .manual-card-row')) {
+                for (let i = 0; i < 3; i++) this.addManualCardRow(false);
+            }
+        }
+
+        addManualCardRow(focus, front = '', back = '') {
+            const list = document.getElementById('manual-card-rows');
+            const row = document.createElement('div');
+            row.className = 'manual-card-row';
+            row.innerHTML = `<span class="manual-card-number"></span>
+                <textarea class="manual-card-front" rows="2" placeholder="Term / front" maxlength="500" aria-label="Card front"></textarea>
+                <textarea class="manual-card-back" rows="2" placeholder="Definition / back" maxlength="1000" aria-label="Card back"></textarea>
+                <button type="button" class="icon-btn" data-action="remove-manual-card" aria-label="Remove card" title="Remove"><i class="fas fa-xmark"></i></button>`;
+            const frontEl = row.querySelector('.manual-card-front'), backEl = row.querySelector('.manual-card-back');
+            frontEl.value = front; backEl.value = back;
+            row.addEventListener('input', () => { row.classList.remove('incomplete'); this.renumberManualCards(); });
+            // Enter moves to the next field (Shift+Enter adds a line); Enter or Tab in the last back field starts a new card
+            frontEl.addEventListener('keydown', event => {
+                if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); backEl.focus(); }
+            });
+            backEl.addEventListener('keydown', event => {
+                const last = row === list.lastElementChild;
+                if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    if (last) this.addManualCardRow(true); else row.nextElementSibling.querySelector('.manual-card-front').focus();
+                } else if (event.key === 'Tab' && !event.shiftKey && last && backEl.value.trim()) {
+                    event.preventDefault(); this.addManualCardRow(true);
+                }
+            });
+            // Pasting tab-separated lines (e.g. from a spreadsheet) fills one card per line
+            frontEl.addEventListener('paste', event => {
+                const text = event.clipboardData?.getData('text') || '';
+                if (!text.includes('\t') && !text.includes('\n')) return;
+                const lines = text.split(/\r?\n/).filter(line => line.trim());
+                const parsed = lines.map(line => { const at = line.indexOf('\t'); return at < 0 ? null : [line.slice(0, at).trim(), line.slice(at + 1).trim()]; });
+                if (!parsed.length || parsed.some(item => !item)) return;
+                event.preventDefault();
+                const empty = !frontEl.value.trim() && !backEl.value.trim();
+                parsed.forEach(([f, b], index) => {
+                    if (index === 0 && empty) { frontEl.value = f; backEl.value = b; } else this.addManualCardRow(false, f, b);
+                });
+                this.renumberManualCards();
+            });
+            list.appendChild(row);
+            this.renumberManualCards();
+            if (focus) { frontEl.focus(); row.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+        }
+
+        renumberManualCards() {
+            document.querySelectorAll('#manual-card-rows .manual-card-number').forEach((el, index) => { el.textContent = index + 1; });
+            const count = document.getElementById('manual-card-count');
+            if (count) {
+                const total = Array.from(document.querySelectorAll('#manual-card-rows .manual-card-row')).filter(row => row.querySelector('.manual-card-front').value.trim() && row.querySelector('.manual-card-back').value.trim()).length;
+                count.textContent = `${total} complete card${total === 1 ? '' : 's'}`;
+            }
+        }
+
+        createManualDeck() {
+            const nameInput = document.getElementById('import-deck-name');
+            const title = nameInput.value.trim();
+            const rows = Array.from(document.querySelectorAll('#manual-card-rows .manual-card-row'));
+            rows.forEach(row => row.classList.remove('incomplete'));
+            const cards = [];
+            let partial = 0;
+            rows.forEach(row => {
+                const front = row.querySelector('.manual-card-front').value.trim();
+                const back = row.querySelector('.manual-card-back').value.trim();
+                if (front && back) cards.push({ id: `card_${Date.now()}_${Math.random().toString(36).slice(2)}`, front, back, repetitions: 0, interval: 0, easeFactor: 2.5 });
+                else if (front || back) { partial++; row.classList.add('incomplete'); }
+            });
+            if (!title) { window.alert('Enter a deck name first.'); nameInput.focus(); return; }
+            if (partial) { window.alert(`${partial} card${partial === 1 ? ' is' : 's are'} missing a front or back (highlighted). Fill ${partial === 1 ? 'it' : 'them'} in or remove ${partial === 1 ? 'it' : 'them'}.`); return; }
+            if (!cards.length) { window.alert('Add at least one card with both a front and a back.'); return; }
+            AppState.saveFlashcardDeck({ id: `deck_${Date.now()}`, title, cards }).then(() => {
+                nameInput.value = '';
+                document.getElementById('manual-card-rows').innerHTML = '';
+                for (let i = 0; i < 3; i++) this.addManualCardRow(false);
+                Router.navigate('flashcard');
+            }).catch(error => {
+                console.error('[NexusApp] Manual deck creation failed:', error);
+                window.alert(`The deck could not be created. ${this.friendlyErrorMessage(error)}`);
+            });
         }
 
         processFlashcardImport() {
