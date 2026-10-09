@@ -59,13 +59,13 @@
                         <i class="fas fa-home"></i> <span>Dashboard</span>
                     </li>
                     <li class="nav-item" data-target="gpa-view" role="button" tabindex="0">
-                        <i class="fas fa-graduation-cap"></i> <span>GPA</span>
+                        <i class="fas fa-graduation-cap"></i> <span>GPA & Transcript</span>
                     </li>
                     <li class="nav-item" data-target="grade-scenarios-view" role="button" tabindex="0">
-                        <i class="fas fa-flask"></i> <span>What-If Grades</span>
+                        <i class="fas fa-flask"></i> <span>Hypothetical Grades</span>
                     </li>
                     <li class="nav-item" data-target="planner-view" role="button" tabindex="0">
-                        <i class="fas fa-calendar-check"></i> <span>Planner</span>
+                        <i class="fas fa-calendar-check"></i> <span>Planner & Schedule</span>
                     </li>
                     <li class="nav-item" data-target="calendar-view" role="button" tabindex="0">
                         <i class="fas fa-calendar-days"></i> <span>Calendar</span>
@@ -74,28 +74,25 @@
                         <i class="fas fa-clock"></i> <span>Class Schedule</span>
                     </li>
                     <li class="nav-item" data-target="flashcard-view" role="button" tabindex="0">
-                        <i class="fas fa-layer-group"></i> <span>Flashcards</span>
+                        <i class="fas fa-layer-group"></i> <span>Flashcard Studio</span>
                     </li>
                     <li class="nav-item" data-target="analytics-view" role="button" tabindex="0">
-                        <i class="fas fa-chart-line"></i> <span>Analytics</span>
+                        <i class="fas fa-chart-line"></i> <span>Analytics & Projections</span>
                     </li>
                     <li class="nav-item" data-target="leaderboard-view" role="button" tabindex="0" aria-label="Study streaks and leaderboards" title="Study streaks and leaderboards">
-                        <i class="fas fa-ranking-star" aria-hidden="true"></i> <span>Leaderboards</span>
+                        <i class="fas fa-ranking-star" aria-hidden="true"></i> <span>Study Leaderboards</span>
                     </li>
                     <li class="nav-item" data-target="exam-arcade-view" role="button" tabindex="0">
-                        <i class="fas fa-gamepad"></i> <span>Practice & Arcade</span>
+                        <i class="fas fa-gamepad"></i> <span>Practice Exams & Arcade</span>
                     </li>
                     <li class="nav-item" data-target="shop-view" role="button" tabindex="0">
-                        <i class="fas fa-store"></i> <span>Shop</span><strong id="multiplayer-sidebar-coins" class="sidebar-coin-count">0 <i class="fas fa-coins"></i></strong>
+                        <i class="fas fa-store"></i> <span>Shop &amp; Character</span><strong id="multiplayer-sidebar-coins" class="sidebar-coin-count">0 <i class="fas fa-coins"></i></strong>
                     </li>
                     <li class="nav-item" data-target="multiplayer-view" role="button" tabindex="0">
                         <i class="fas fa-users"></i> <span>Multiplayer</span>
                     </li>
                     <li class="nav-item" data-target="importer-view" role="button" tabindex="0">
-                        <i class="fas fa-file-import"></i> <span>Import Cards</span>
-                    </li>
-                    <li id="admin-nav-item" class="nav-item hidden" data-target="admin-view" role="button" tabindex="0">
-                        <i class="fas fa-user-shield"></i> <span>Admin</span>
+                        <i class="fas fa-file-import"></i> <span>Flashcard Importer</span>
                     </li>
                     <li class="nav-item" data-target="settings-view" data-also="appearance-view sound-view" role="button" tabindex="0">
                         <i class="fas fa-gear"></i> <span>Settings</span>
@@ -178,7 +175,7 @@
                         </section>
                         <div class="glass-card widget full-width focus-sprint-widget">
                             <div class="view-header">
-                                <div><h3><i class="fas fa-stopwatch"></i> Focus sprint</h3><p class="study-guidance-intro">Pick a task and start the timer.</p></div>
+                                <div><h3><i class="fas fa-stopwatch"></i> Focus sprint</h3><p class="study-guidance-intro">Pick one task, focus without distractions, then log the session.</p></div>
                                 <span id="focus-sprint-clock" class="focus-sprint-clock" aria-live="polite">25:00</span>
                             </div>
                             <div class="focus-sprint-controls">
@@ -193,17 +190,26 @@
                                 <button id="focus-sprint-start-btn" class="primary-btn" type="button"><i class="fas fa-play"></i> Start</button>
                                 <button id="focus-sprint-reset-btn" class="secondary-btn" type="button">Reset</button>
                             </div>
-                            <p id="focus-sprint-status" class="study-guidance-intro" role="status" aria-live="polite">Pick a task, then press Start.</p>
+                            <p id="focus-sprint-status" class="study-guidance-intro" role="status" aria-live="polite">A short, single-task session is a good place to start.</p>
                         </div>
                         <div class="glass-card widget full-width">
                             <h3>Upcoming quizzes &amp; tests</h3>
-                            <p class="study-guidance-intro">Start with the top item.</p>
+                            <p class="study-guidance-intro">Study for the top item first. Time estimates reflect deadlines, class goals, and your study logs.</p>
                             <div id="study-priority-list" class="study-guidance-list"></div>
                         </div>
                         <div class="glass-card widget full-width">
                             <h3><i class="fas fa-stopwatch"></i> Today's study plan</h3>
                             <p id="today-study-total" class="study-guidance-intro"></p>
                             <div id="today-study-by-class" class="study-progress-summary"></div>
+                        </div>
+                        <div class="glass-card widget full-width study-tips-widget">
+                            <h3><i class="fas fa-lightbulb"></i> Study smarter</h3>
+                            <ul>
+                                <li>Start with a 5-minute setup: choose one outcome and put away distractions.</li>
+                                <li>Use active recall before rereading; write what you remember, then check gaps.</li>
+                                <li>Break big tests into topics and review one topic per session.</li>
+                                <li>Take a short break after focused blocks, and protect sleep before tests.</li>
+                            </ul>
                         </div>
                         <div class="glass-card widget full-width">
                             <div class="view-header">
@@ -285,22 +291,22 @@
                 <section id="planner-view" class="view hidden">
                     <div class="planner-grid">
                         <div class="glass-card full-width">
-                            <h2>Priorities</h2>
+                            <h2>Eisenhower Priority Matrix</h2>
                             <div class="eisenhower-matrix">
                                 <div class="matrix-quadrant quadrant-1">
-                                    <h4>Do first</h4>
+                                    <h4>Do First (Urgent & Important)</h4>
                                     <ul id="quad-1-list"></ul>
                                 </div>
                                 <div class="matrix-quadrant quadrant-2">
-                                    <h4>Plan for later</h4>
+                                    <h4>Schedule (Important, Not Urgent)</h4>
                                     <ul id="quad-2-list"></ul>
                                 </div>
                                 <div class="matrix-quadrant quadrant-3">
-                                    <h4>Quick / delegate</h4>
+                                    <h4>Delegate/Automate (Urgent, Not Important)</h4>
                                     <ul id="quad-3-list"></ul>
                                 </div>
                                 <div class="matrix-quadrant quadrant-4">
-                                    <h4>Skip if needed</h4>
+                                    <h4>Eliminate (Not Urgent, Not Important)</h4>
                                     <ul id="quad-4-list"></ul>
                                 </div>
                             </div>
@@ -573,13 +579,14 @@
                                         <span id="multiplayer-identity-badge" class="community-badge">Player</span>
                                     </div>
                                     <div class="multiplayer-mode-picker" role="group" aria-label="Choose a game mode">
-                                        <button type="button" class="multiplayer-mode selected" data-mode="skyline"><span class="mode-art mode-rooftop" aria-hidden="true"></span><strong>Rooftop Rumble</strong><small>Climb a rooftop obstacle course</small></button>
-                                        <button type="button" class="multiplayer-mode" data-mode="river"><span class="mode-art mode-river" aria-hidden="true"></span><strong>River Raiders</strong><small>Steer a boat and catch fish</small></button>
-                                        <button type="button" class="multiplayer-mode" data-mode="market"><span class="mode-art mode-market" aria-hidden="true"></span><strong>Market Mayhem</strong><small>Deliver packages, dodge cars</small></button>
-                                        <button type="button" class="multiplayer-mode" data-mode="miner"><span class="mode-art mode-miner" aria-hidden="true"></span><strong>Crystal Cartel</strong><small>Dig crystals, avoid lava</small></button>
-                                        <button type="button" class="multiplayer-mode" data-mode="duel"><span class="mode-art mode-duel" aria-hidden="true"></span><strong>Hammerheart Showdown</strong><small>King of the Hill: hold the zone, knock rivals off</small></button>
-                                        <button type="button" class="multiplayer-mode" data-mode="shooter"><span class="mode-art mode-shooter" aria-hidden="true"></span><strong>Starfall Blasters</strong><small>Blast waves of drones</small></button>
-                                        <button type="button" class="multiplayer-mode" data-mode="sports"><span class="mode-art mode-sports" aria-hidden="true"></span><strong>Endzone Rally</strong><small>Run for touchdowns, teams of 4+</small></button>
+                                        <button type="button" class="multiplayer-mode selected" data-mode="skyline"><span class="mode-art mode-rooftop" aria-hidden="true"></span><strong>Rooftop Rumble</strong><small>Explore a sprawling rooftop course with shortcuts, hazards, and checkpoints</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="river"><span class="mode-art mode-river" aria-hidden="true"></span><strong>River Raiders</strong><small>Cast from changing spots; safe catches or a lucky rare haul</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="market"><span class="mode-art mode-market" aria-hidden="true"></span><strong>Market Mayhem</strong><small>Make deliveries, trade for a gamble, and keep your streak alive</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="miner"><span class="mode-art mode-miner" aria-hidden="true"></span><strong>Crystal Cartel</strong><small>Pick a careful drill or a risky blast through branching caverns</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="duel"><span class="mode-art mode-duel" aria-hidden="true"></span><strong>Hammerheart Showdown</strong><small>King of the Hill: hold the moving zone and knock rivals off the stage</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="crypto"><span class="mode-art mode-crypto" aria-hidden="true"></span><strong>Crypto Exchange</strong><small>Pick from six investments, ride market news, and build mining rigs</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="shooter"><span class="mode-art mode-shooter" aria-hidden="true"></span><strong>Starfall Blasters</strong><small>Pick precision or a scatter burst to clear waves of drones</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="sports"><span class="mode-art mode-sports" aria-hidden="true"></span><strong>Endzone Rally</strong><small>Call a run or pass, gain yards, and drive for touchdowns</small></button>
                                     </div>
                                     <div class="hosted-game-setup">
                                     <form id="host-game-form" class="hosted-game-form">
@@ -588,7 +595,11 @@
                                         <label>Flashcard set<select id="host-game-deck" name="deckId" required></select></label>
                                         <input id="host-game-mode" name="mode" type="hidden" value="skyline">
                                         <div class="multiplayer-goals">
-                                            <label class="time-slider">Time limit: <strong id="host-game-time-value">5 min</strong><input id="host-game-time" name="timeLimit" type="range" min="1" max="60" step="1" value="5"></label>
+                                            <label>Match ends at<select id="host-game-goal-type" name="goalType"><option value="points">Point limit</option><option value="time">Time limit</option></select></label>
+                                            <label id="host-game-point-goal">Points<select name="pointLimit"><option value="500">500</option><option value="1000">1,000</option><option value="2000">2,000</option></select></label>
+                                            <label id="host-game-time-goal" class="hidden">Minutes<select name="timeLimit"><option value="2">2 minutes</option><option value="5" selected>5 minutes</option><option value="10">10 minutes</option></select></label>
+                                            <label>Reward per correct answer<select name="questionReward"><option value="10">Small (10)</option><option value="20" selected>Medium (20)</option><option value="30">Large (30)</option><option value="50">Huge (50)</option></select></label>
+                                        </div>
                                         <button class="primary-btn" type="submit"><i class="fas fa-door-open"></i> Create room</button>
                                     </form>
                                     </div>
@@ -638,22 +649,6 @@
                                 <div class="waiting-practice"><span>Want a full-screen warm-up?</span><button id="waiting-practice-btn" class="primary-btn" type="button"><i class="fas fa-gamepad"></i> Practice this game</button></div>
                             </section>
                         </main>
-                    </div>
-                </section>
-
-                <!-- Admin (only shown to the admin account) -->
-                <section id="admin-view" class="view hidden">
-                    <div class="glass-card admin-panel">
-                        <div class="admin-tabs">
-                            <button type="button" class="secondary-btn selected" data-admin-tab="decks">Public flashcards</button>
-                            <button type="button" class="secondary-btn" data-admin-tab="users">Users</button>
-                        </div>
-                        <form id="admin-search-form" class="admin-search">
-                            <input id="admin-search" type="search" placeholder="Search by title or username" autocomplete="off">
-                            <button class="primary-btn" type="submit"><i class="fas fa-magnifying-glass"></i> Search</button>
-                        </form>
-                        <p id="admin-status" class="muted" role="status"></p>
-                        <div id="admin-list" class="admin-list"></div>
                     </div>
                 </section>
 
@@ -1158,6 +1153,7 @@
     <script src="multiplayerEngine.js" defer></script>
     <script src="multiplayerGames.js" defer></script>
     <script src="multiplayerGames2.js" defer></script>
+    <script src="multiplayerGames3.js" defer></script>
     <script src="app.js" defer></script>
     <script>
         if ('serviceWorker' in navigator && ['http:', 'https:'].includes(window.location.protocol)) {
