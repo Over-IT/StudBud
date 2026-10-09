@@ -212,6 +212,31 @@
             return data;
         }
 
+        async claimDailyReward() {
+            const { data, error } = await this.getClient().rpc('studbud_claim_daily_reward');
+            if (error) throw new Error(`Could not claim daily reward: ${error.message}`);
+            return data;
+        }
+
+        async isAdmin() {
+            const { data, error } = await this.getClient().rpc('studbud_is_admin');
+            return !error && data === true;
+        }
+
+        async adminCall(fn, args = {}) {
+            const { data, error } = await this.getClient().rpc(fn, args);
+            if (error) throw new Error(error.message.includes('Could not find the function')
+                ? 'Admin tools are not set up yet. Re-run supabase-setup.sql in Supabase.'
+                : error.message);
+            return data;
+        }
+
+        async awardSoloCoins(correct, total) {
+            const { data, error } = await this.getClient().rpc('studbud_award_solo_coins', { p_correct: correct, p_total: total });
+            if (error) throw new Error(`Could not award coins: ${error.message}`);
+            return data;
+        }
+
         async recordWaitingGameBest(score) {
             const { data, error } = await this.getClient().rpc('studbud_record_waiting_game_best', {
                 p_score: score

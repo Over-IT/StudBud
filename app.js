@@ -282,8 +282,7 @@
             if (!saveStatus) return;
             saveStatus.textContent = message;
             saveStatus.dataset.state = state;
-            if (state === 'error') window.StudBudSfx?.play('error', 'ui', 800);
-            else if (state === 'saved' && /saved|synced/i.test(message)) window.StudBudSfx?.play('success', 'ui', 1500);
+            if (state === 'error') { /* silent: errors are shown as text */ }
         }
 
         get(key) {
@@ -480,7 +479,7 @@
         constructor() {
             this.routes = [
                 "dashboard", "gpa", "grade-scenarios", "planner", "calendar", "schedule", "flashcard",
-                "analytics", "leaderboard", "exam-arcade", "multiplayer", "importer", "settings", "appearance", "sound"
+                "analytics", "leaderboard", "exam-arcade", "multiplayer", "shop", "importer", "settings", "appearance", "sound", "admin"
             ];
             this.activeRoute = "dashboard";
         }
@@ -511,6 +510,7 @@
 
         navigate(route, updateHash = true) {
             if (route !== 'class' && !this.routes.includes(route)) route = "dashboard";
+            if (route === 'admin' && !window.NexusApp?.isAdmin) route = "dashboard";
 
             this.activeRoute = route;
             AppState.set('currentView', route);
@@ -1030,7 +1030,7 @@
             })[character]);
         }
 
-        friendlyErrorMessage(error, fallback = 'Please try again.') {
+        friendlyErrorMessage(error, fallback = 'Something went wrong. Please try again in a moment.') {
             const message = String(error?.message || error || '').trim();
             const code = String(error?.code || '');
             if (/PGRST202|PGRST204|PGRST205|42883|42P01|schema cache|could not find the function|function .* does not exist|relation .* does not exist/i.test(`${code} ${message}`)) {
@@ -1039,8 +1039,32 @@
             if (/failed to fetch|networkerror|network request failed|load failed/i.test(message)) {
                 return 'Could not reach the server. Check your internet connection and try again.';
             }
-            if (/jwt expired|invalid jwt|not authenticated|auth session missing/i.test(message)) {
+            if (/jwt expired|invalid jwt|not authenticated|auth session missing|not signed in|sign in/i.test(message)) {
                 return 'Your sign-in has expired. Sign in again and retry.';
+            }
+            if (/row-level security|permission denied|not allowed|forbidden|42501|403/i.test(`${code} ${message}`)) {
+                return 'You do not have permission to do that. If you think this is a mistake, sign out and back in.';
+            }
+            if (/timeout|timed out|aborted/i.test(message)) {
+                return 'That took too long. Check your connection and try again.';
+            }
+            if (/quota|storage is full|QuotaExceeded/i.test(`${error?.name || ''} ${message}`)) {
+                return 'Your device is out of storage space. Free some space or export a backup, then try again.';
+            }
+            if (/rate limit|too many requests|429/i.test(`${code} ${message}`)) {
+                return 'You are going too fast. Wait a few seconds and try again.';
+            }
+            if (/room.*(not found|does not exist|closed|ended)|no (such )?room|invalid room/i.test(message)) {
+                return 'That room was not found. Check the 6-character code, or ask the host if the game has ended.';
+            }
+            if (/room.*full|game.*full/i.test(message)) {
+                return 'That room is full.';
+            }
+            if (/already (started|in progress)|game has started/i.test(message)) {
+                return 'That game has already started, so new players cannot join.';
+            }
+            if (/not enough coins|insufficient/i.test(message)) {
+                return 'You do not have enough coins for that yet. Play a game or claim your daily reward.';
             }
 
             const readableMessage = message
@@ -1058,11 +1082,7 @@
         }
 
         bindUI() {
-            document.addEventListener('click', event => {
-                const target = event.target.closest?.('button, .nav-item, .scheme-option, [data-action]');
-                if (!target || target.disabled || target.closest('.mpg-overlay')) return;
-                window.StudBudSfx?.play(target.classList.contains('nav-item') ? 'tick' : 'click', 'ui');
-            }, true);
+            // Quiet by default: only a few controls (shop and rewards) make UI sounds, called where they happen
             document.addEventListener('click', event => this.handleClick(event));
             document.addEventListener('keydown', event => this.handleKeydown(event));
             document.addEventListener('submit', event => this.handleSubmit(event));
@@ -1088,7 +1108,7 @@
                 if (event.target.matches('#join-game-code')) {
                     event.target.value = event.target.value.toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g, '').slice(0, 6);
                 }
-                if (event.target.id === 'host-game-goal-type') this.updateMultiplayerGoalInputs();
+                if (event.target.id === 'host-game-time') this.updateMultiplayerGoalInputs();
                 if (event.target.matches('input[type="range"][id^="vol-"]')) this.setMixerLevel(event.target, false);
                 if (event.target.id === 'sfx-volume') {
                     const volume = Number(event.target.value) / 100;
@@ -1124,6 +1144,8 @@
                 if (route === 'grade-scenarios') this.renderGradeScenarios();
                 if (route === 'analytics') this.renderGradeProgress();
                 if (route === 'leaderboard') this.refreshStudyLeaderboard(this.studyLeaderboardPeriod || 'daily');
+                if (route === 'shop') this.renderMultiplayerProfile(true);
+                if (route === 'admin') this.loadAdminList();
                 if (route === 'multiplayer') {
                     this.renderHostedGameDecks();
                     this.renderMultiplayerProfile(true);
@@ -1333,21 +1355,21 @@
                         categoryGroups.push({ id: 'uncategorized', name: 'Other assignments', weight: null, assignments: uncategorized });
                     }
                     const categoryMarkup = categoryGroups.map(group => {
-                        const graded = group.assignments.filter(item => item.status === 'completed' || Number(item.pointsEarned) > 0);
+                        const graded = group.assignments.filter(item => this.isGradedItem(item));
                         const pointsEarned = graded.reduce((sum, item) => sum + Number(item.pointsEarned || 0), 0);
                         const pointsPossible = graded.reduce((sum, item) => sum + Number(item.maxPoints || 0), 0);
                         const categoryGrade = pointsPossible > 0 ? `${(pointsEarned / pointsPossible * 100).toFixed(1)}%` : '—';
                         const assignmentMarkup = group.assignments.length ? group.assignments.map(item => {
-                            const hasScore = item.pointsEarned !== undefined && item.pointsEarned !== null && item.maxPoints;
+                            const hasScore = this.isGradedItem(item);
                             return `<article class="transcript-assignment ${item.status === 'completed' ? 'is-complete' : ''}">
                                 <span class="assignment-status-dot" aria-hidden="true"></span>
                                 <div class="transcript-assignment-main">
                                     <strong>${this.escapeHTML(item.title)}</strong>
-                                    <span>${this.escapeHTML(item.kind || 'Assignment')} · Due ${this.escapeHTML(item.dueDate || 'No due date')} · ${Number(item.estimatedMinutes || 30)} min planned</span>
+                                    <span>${this.escapeHTML(item.kind || 'Assignment')}${hasScore ? '' : ` · Due ${this.escapeHTML(item.dueDate || 'No due date')}`}</span>
                                 </div>
                                 <strong class="transcript-assignment-score">${hasScore ? `${Number(item.pointsEarned || 0)} / ${Number(item.maxPoints || 0)}` : 'Not graded'}</strong>
                                 <div class="transcript-assignment-actions">
-                                    <button class="secondary-btn" data-action="toggle-assignment" data-id="${this.escapeHTML(item.id)}">${item.status === 'completed' ? 'Reopen' : 'Complete'}</button>
+                                    ${hasScore ? '' : `<button class="secondary-btn" data-action="toggle-assignment" data-id="${this.escapeHTML(item.id)}">${item.status === 'completed' ? 'Reopen' : 'Done'}</button>`}
                                     <button class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}" aria-label="Edit ${this.escapeHTML(item.title)}">Edit</button>
                                     <button class="danger-btn" data-action="delete-assignment" data-id="${this.escapeHTML(item.id)}" aria-label="Delete ${this.escapeHTML(item.title)}">Delete</button>
                                 </div>
@@ -1361,7 +1383,7 @@
                                 <strong class="transcript-category-grade">${categoryGrade}</strong>
                                 <span class="transcript-item-count">${group.assignments.length} item${group.assignments.length === 1 ? '' : 's'}</span>
                             </summary>
-                            <div class="transcript-assignment-list">${assignmentMarkup}</div>
+                            <div class="transcript-assignment-list">${assignmentMarkup}<button class="secondary-btn transcript-add-btn" data-action="add-assignment-to-category" data-course="${this.escapeHTML(course.code)}" data-category="${this.escapeHTML(group.id === 'uncategorized' ? '' : group.id)}"><i class="fas fa-plus"></i> Add assignment</button></div>
                         </details>`;
                     }).join('');
                     return `<article class="transcript-class">
@@ -1426,7 +1448,7 @@
         calculateCourseGrade(course, assignments = AppState.get('assignments') || []) {
             const courseAssignments = assignments.filter(item =>
                 item.courseCode === course.code &&
-                (item.status === 'completed' || Number(item.pointsEarned) > 0)
+                (this.isGradedItem(item))
             );
             if (!courseAssignments.length) return null;
 
@@ -1478,23 +1500,25 @@
             const sumWeights = categories.reduce((sum, category) => sum + Number(category.weight || 0), 0);
             const categoryRows = categories.map(category => {
                 const items = assignments.filter(item => item.categoryId === category.id);
-                const earned = items.reduce((sum, item) => sum + Number(item.pointsEarned || 0), 0);
-                const possible = items.reduce((sum, item) => sum + Number(item.maxPoints || 0), 0);
+                const gradedItems = items.filter(item => this.isGradedItem(item));
+                const earned = gradedItems.reduce((sum, item) => sum + Number(item.pointsEarned || 0), 0);
+                const possible = gradedItems.reduce((sum, item) => sum + Number(item.maxPoints || 0), 0);
                 const categoryGrade = possible > 0 ? `${(earned / possible * 100).toFixed(1)}%` : 'No graded work';
                 return `<div class="category-row">
                     <div><strong>${this.escapeHTML(category.name)}</strong><span>${categoryGrade} · ${items.length} items</span></div>
                     <strong>${Number(category.weight || 0).toFixed(1)}%</strong>
+                    <button class="secondary-btn" data-action="add-assignment-to-category" data-course="${this.escapeHTML(course.code)}" data-category="${this.escapeHTML(category.id)}" aria-label="Add assignment to ${this.escapeHTML(category.name)}"><i class="fas fa-plus"></i> Add</button>
                     <button class="danger-btn" data-action="remove-category" data-id="${this.escapeHTML(category.id)}" aria-label="Remove ${this.escapeHTML(category.name)}">Remove</button>
                 </div>`;
             }).join('');
             const workRows = assignments.length ? assignments.map(item => `
                 <tr>
-                    <td><button class="secondary-btn" data-action="toggle-assignment" data-id="${this.escapeHTML(item.id)}">${item.status === 'completed' ? 'Done' : 'Open'}</button></td>
+                    <td>${this.isGradedItem(item) ? 'Graded' : `<button class="secondary-btn" data-action="toggle-assignment" data-id="${this.escapeHTML(item.id)}">${item.status === 'completed' ? 'Done' : 'Open'}</button>`}</td>
                     <td>${this.escapeHTML(item.title)}</td>
                     <td>${this.escapeHTML((categories.find(category => category.id === item.categoryId) || {}).name || 'Uncategorized')}</td>
                     <td>${this.escapeHTML(item.kind || 'assignment')}</td>
-                    <td>${this.escapeHTML(item.dueDate || 'No date')}</td>
-                    <td>${item.pointsEarned ?? 0} / ${item.maxPoints ?? 100}</td>
+                    <td>${this.isGradedItem(item) ? '—' : this.escapeHTML(item.dueDate || 'No date')}</td>
+                    <td>${this.isGradedItem(item) ? `${item.pointsEarned ?? 0} / ${item.maxPoints ?? 100}` : 'Not graded'}</td>
                     <td class="actions">
                         <button class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit</button>
                         <button class="danger-btn" data-action="delete-assignment" data-id="${this.escapeHTML(item.id)}">Delete</button>
@@ -1537,7 +1561,7 @@
                         <button class="focus-play-btn" aria-label="Start class focus timer"><i class="fas fa-play"></i></button>
                     </div>
                 </section>
-                <section class="glass-card"><h3>Study guidance</h3><div class="study-guidance-list">${this.getStudyRecommendations().filter(item => item.courseCode === course.code).slice(0, 4).map(item => `<p><strong>${this.escapeHTML(item.title)}</strong> — ${item.sessionMinutes} min today (about ${item.totalStudyMinutes} min total). ${this.escapeHTML(item.reason)} <strong>Method:</strong> ${this.escapeHTML(item.studyMethod)}</p>`).join('') || '<p>You are on track for this class. Keep up with spaced review.</p>'}</div></section>`;
+                <section class="glass-card"><h3>Study guidance</h3><div class="study-guidance-list">${this.getStudyRecommendations().filter(item => item.courseCode === course.code).slice(0, 4).map(item => `<p><strong>${this.escapeHTML(item.title)}</strong> — ${item.sessionMinutes} min today (about ${item.totalStudyMinutes} min total). ${this.escapeHTML(item.reason)} <strong>Method:</strong> ${this.escapeHTML(item.studyMethod)}</p>`).join('') || '<p>No quizzes or tests to study for in this class right now.</p>'}</div></section>`;
             this.updateFocusTimerDisplay();
         }
 
@@ -1552,43 +1576,43 @@
             return null;
         }
 
+        getPeriodMap() {
+            // One period per class; legacy odd/even entries are folded in
+            const schedule = AppState.get('schedule') || {};
+            return { ...(schedule.odd || {}), ...(schedule.even || {}), ...(schedule.all || {}) };
+        }
+
         renderSchedulePage() {
             const container = document.getElementById('schedule-course-list');
             if (!container) return;
             const courses = AppState.get('courses') || [];
-            const schedule = AppState.get('schedule') || { all: {}, odd: {}, even: {} };
             if (!courses.length) {
                 container.innerHTML = '<p class="empty-state">Add a class before assigning it to a period.</p>';
                 return;
             }
-            const patterns = [
-                ['all', 'All day'],
-                ['odd', 'Odd day'],
-                ['even', 'Even day']
-            ];
+            const periodMap = this.getPeriodMap();
             const periodOptions = '<option value="">Not scheduled</option>' +
-                [1, 2, 3, 5, 6, 7, 8].map(number => `<option value="${number}">Period ${number}</option>`).join('');
+                [1, 2, 3, 5, 6, 7, 8].map(number => `<option value="${number}">Period ${number} · ${number % 2 ? 'Odd' : 'Even'} days</option>`).join('');
             container.innerHTML = `
-                <div class="schedule-pattern-headings"><span>Class</span>${patterns.map(([, label]) => `<span>${label}</span>`).join('')}</div>
+                <div class="schedule-pattern-headings"><span>Class</span><span>Period</span></div>
                 ${courses.map(course => `<div class="schedule-course-row">
                     <strong>${this.escapeHTML(course.title)}</strong>
-                    ${patterns.map(([pattern, label]) => `<label class="schedule-period-select"><select aria-label="${this.escapeHTML(course.title)} period on ${this.escapeHTML(label)}" data-schedule-pattern="${pattern}" data-course="${this.escapeHTML(course.code)}">${periodOptions}</select></label>`).join('')}
+                    <label class="schedule-period-select"><select aria-label="${this.escapeHTML(course.title)} period" data-course="${this.escapeHTML(course.code)}">${periodOptions}</select></label>
                 </div>`).join('')}`;
-            patterns.forEach(([pattern]) => {
-                container.querySelectorAll(`select[data-schedule-pattern="${pattern}"]`).forEach(select => {
-                    const courseCode = select.dataset.course;
-                    const assignedPeriod = Object.entries(schedule[pattern] || {}).find(([, code]) => code === courseCode)?.[0];
-                    if (assignedPeriod) select.value = assignedPeriod;
-                });
+            container.querySelectorAll('select[data-course]').forEach(select => {
+                const assignedPeriod = Object.entries(periodMap).find(([, code]) => code === select.dataset.course)?.[0];
+                if (assignedPeriod) select.value = assignedPeriod;
             });
         }
 
         saveSchedule() {
-            const schedule = { all: {}, odd: {}, even: {} };
-            document.querySelectorAll('#schedule-course-list select[data-schedule-pattern]').forEach(select => {
-                if (select.value) schedule[select.dataset.schedulePattern][select.value] = select.dataset.course;
+            const all = {};
+            document.querySelectorAll('#schedule-course-list select[data-course]').forEach(select => {
+                if (!select.value) return;
+                if (all[select.value]) throw new Error(`Two classes are set to period ${select.value}. Give each class its own period.`);
+                all[select.value] = select.dataset.course;
             });
-            AppState.set('schedule', schedule);
+            AppState.set('schedule', { all, odd: {}, even: {} });
             this.renderDashboard();
             this.renderCalendar();
             window.alert('Class schedule saved.');
@@ -1597,7 +1621,7 @@
         getScheduleEntries(date) {
             const pchsSchedule = this.getSchoolSchedule(date);
             const pattern = this.getSchedulePattern(pchsSchedule);
-            const periodMap = (AppState.get('schedule') || {})[pattern] || {};
+            const periodMap = this.getPeriodMap();
             const courses = AppState.get('courses') || [];
             const entries = (pchsSchedule?.classes || []).map(slot => {
                 const match = String(slot.period).match(/^\s*(\d+)/);
@@ -1682,7 +1706,8 @@
             const eventItems = events.length ? events.map(item => {
                 const course = (AppState.get('courses') || []).find(entry => entry.code === item.courseCode);
                 const recommendation = this.getStudyRecommendations().find(entry => entry.id === item.id);
-                return `<article class="calendar-event"><div><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(course ? course.title : 'No class')} · ${this.escapeHTML(item.kind || 'assignment')}</span><small>Study today: ${recommendation?.sessionMinutes || Number(item.estimatedMinutes || 30)} min · ${this.escapeHTML(recommendation?.studyMethod || 'Break the work into focused steps.')}</small></div><button class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit</button></article>`;
+                const studyNote = recommendation ? `<small>Study today: ${recommendation.sessionMinutes} min · ${this.escapeHTML(recommendation.studyMethod)}</small>` : '';
+                return `<article class="calendar-event"><div><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(course ? course.title : 'No class')} · ${this.escapeHTML(item.kind || 'assignment')}</span>${studyNote}</div><button class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit</button></article>`;
             }).join('') : '<p class="empty-state">Nothing due this day. Add homework, a quiz, or a test.</p>';
             agenda.innerHTML = `${scheduleItems}<h4>Due this day</h4>${eventItems}`;
         }
@@ -1697,7 +1722,8 @@
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             const history = AppState.get('studyHistory') || [];
-            const recommended = assignments.filter(item => item.status !== 'completed').map(item => {
+            // Only quizzes and tests need studying; homework is just done and turned in
+            const recommended = assignments.filter(item => item.status !== 'completed' && ['quiz', 'test'].includes(String(item.kind || 'assignment').toLowerCase())).map(item => {
                 const course = courses.find(entry => entry.code === item.courseCode);
                 const grade = course ? this.calculateCourseGrade(course) : 0;
                 const target = course ? Number(course.targetPct) : NaN;
@@ -1886,11 +1912,12 @@
                 body.innerHTML = visibleAssignments.length ? visibleAssignments.map(item => {
                     const course = courses.find(entry => entry.code === item.courseCode);
                     const status = item.status || 'pending';
+                    const graded = this.isGradedItem(item);
                     return `<tr>
-                        <td><button class="secondary-btn" data-action="toggle-assignment" data-id="${this.escapeHTML(item.id)}">${status === 'completed' ? 'Done' : 'Pending'}</button></td>
+                        <td>${graded ? 'Graded' : `<button class="secondary-btn" data-action="toggle-assignment" data-id="${this.escapeHTML(item.id)}">${status === 'completed' ? 'Done' : 'Pending'}</button>`}</td>
                         <td>${this.escapeHTML(item.title)}</td>
                         <td>${this.escapeHTML(course ? course.title : item.courseCode || 'Unassigned')}</td>
-                        <td>${this.escapeHTML(item.dueDate || 'No due date')}</td>
+                        <td>${graded ? `${Number(item.pointsEarned || 0)} / ${Number(item.maxPoints || 0)}` : this.escapeHTML(item.dueDate || 'No due date')}</td>
                         <td>${this.escapeHTML(item.priority || 'Normal')}</td>
                         <td class="actions">
                             <button class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit</button>
@@ -1955,9 +1982,9 @@
                 completeCards: (deck.cards || []).filter(card =>
                     String(card.front || '').trim() && String(card.back || '').trim()
                 )
-            })).filter(deck => deck.completeCards.length >= 1 && deck.completeCards.length <= 50);
+            })).filter(deck => deck.completeCards.length >= 1);
             select.innerHTML = decks.length
-                ? decks.map(deck => `<option value="${this.escapeHTML(deck.id)}">${this.escapeHTML(deck.title)} · ${deck.completeCards.length} cards</option>`).join('')
+                ? decks.map(deck => `<option value="${this.escapeHTML(deck.id)}">${this.escapeHTML(deck.title)} · ${deck.completeCards.length} cards${deck.completeCards.length > 50 ? ' (first 50 used)' : ''}</option>`).join('')
                 : '<option value="">Add a set with at least 1 complete card</option>';
             if (decks.some(deck => deck.id === previous)) select.value = previous;
             const nickname = this.multiplayerDisplayName().replace(/[^A-Za-z0-9 _-]/g, '').slice(0, 20);
@@ -2030,10 +2057,13 @@
                     ${games.constructor.boxes.map(box => `<article class="multiplayer-shop-item box-card box-${box.id}"><span class="mystery-capsule"><i class="fas ${box.icon}"></i></span><div><strong>${box.name}</strong><small>${box.odds}</small></div><button type="button" class="secondary-btn" data-action="multiplayer-mystery" data-id="${box.id}" ${profile.coins < box.price ? 'disabled' : ''}>Open · ${box.price} <i class="fas fa-coins"></i></button></article>`).join('')}
                     <p class="settings-hint">Boxes can contain characters, hats, accessories, colors and pets. Duplicates refund coins.</p>`;
             } else {
-                const items = catalog.filter(item => item.type === tab);
+                const allItems = catalog.filter(item => item.type === tab);
+                const items = tab === 'pet' ? allItems.filter(item => owned.includes(item.id)) : allItems;
+                const hiddenPets = allItems.length - items.length;
                 const count = items.filter(item => owned.includes(item.id)).length;
                 const remove = slotKey[tab] ? `<button type="button" class="ghost-btn shop-unequip" data-action="multiplayer-unequip" data-slot="${tab === 'accessory' ? 'accessory' : tab}">Remove</button>` : '';
-                body = `<h4 class="shop-category-title">${count} / ${items.length} collected ${remove}</h4>${items.map(itemCard).join('')}`;
+                const more = hiddenPets > 0 ? `<article class="multiplayer-shop-item"><span class="player-avatar char-avatar pet-locked"><b>?</b></span><div><strong>${hiddenPets} undiscovered</strong><small class="rarity-label">Open mystery boxes to find them</small></div></article>` : '';
+                body = `<h4 class="shop-category-title">${count} / ${allItems.length} collected ${remove}</h4>${items.map(itemCard).join('')}${more}`;
             }
             document.getElementById('multiplayer-shop-items').innerHTML = `
                 <div class="shop-tabs" role="tablist">${tabs.map(([id, label]) => `<button type="button" class="shop-tab${tab === id ? ' selected' : ''}" role="tab" aria-selected="${tab === id}" data-shop-tab="${id}">${label}</button>`).join('')}</div>
@@ -2081,7 +2111,8 @@
                 const wins = document.getElementById('multiplayer-wins');
                 if (wins) wins.textContent = Number(profile.wins).toLocaleString();
                 this.renderMultiplayerShop(profile);
-                shopStatus.textContent = 'Coins are earned and spent only in Multiplayer.';
+                shopStatus.textContent = 'Earn coins from practice games, multiplayer matches and your daily reward.';
+                this.renderDailyReward(profile);
                 const best = document.getElementById('waiting-runner-best');
                 if (best) {
                     this.waitingRunner.best = Number(profile.best_wait_score || 0);
@@ -2091,6 +2122,102 @@
             } catch (error) {
                 console.error('[NexusApp] Multiplayer profile could not load:', error);
                 shopStatus.textContent = `Your multiplayer profile could not load. ${this.friendlyErrorMessage(error, 'Please refresh the page and try again.')}`;
+            }
+        }
+
+        renderDailyReward(profile) {
+            const button = document.getElementById('daily-reward-btn');
+            const text = document.getElementById('daily-reward-text');
+            if (!button || !text) return;
+            const claimed = Boolean(profile?.daily_claimed);
+            const streak = Number(profile?.daily_streak || 0);
+            button.disabled = claimed;
+            button.textContent = claimed ? 'Claimed today' : 'Claim reward';
+            text.textContent = claimed
+                ? `Come back tomorrow to keep your ${streak}-day streak going. Practice games earn coins too.`
+                : `Claim free coins once a day. Keep a streak going for bigger rewards (up to 85 coins). Practice games earn coins too.`;
+        }
+
+        // Admin tools. The server re-checks the account on every call; this only controls what is shown.
+        async refreshAdminAccess() {
+            this.isAdmin = false;
+            try { this.isAdmin = await window.StudBudCommunityGames.isAdmin(); } catch (error) { this.isAdmin = false; }
+            window.NexusApp.isAdmin = this.isAdmin;
+            document.getElementById('admin-nav-item')?.classList.toggle('hidden', !this.isAdmin);
+        }
+
+        async loadAdminList() {
+            const list = document.getElementById('admin-list');
+            const status = document.getElementById('admin-status');
+            if (!list || !this.isAdmin) return;
+            const tab = this.adminTab || 'decks';
+            const query = document.getElementById('admin-search')?.value.trim() || '';
+            const searchBox = document.getElementById('admin-search');
+            if (searchBox) searchBox.placeholder = tab === 'users' ? 'Search by username' : 'Search by deck title or owner';
+            status.textContent = 'Loading…';
+            try {
+                const games = window.StudBudCommunityGames;
+                const rows = await games.adminCall(tab === 'users' ? 'studbud_admin_list_users' : 'studbud_admin_list_decks', { p_query: query });
+                status.textContent = rows.length ? `${rows.length} ${tab === 'users' ? 'user' : 'deck'}${rows.length === 1 ? '' : 's'} shown` : (query ? 'No matches. Try a different search.' : 'Nothing here yet.');
+                const esc = value => this.escapeHTML(String(value ?? ''));
+                list.innerHTML = tab === 'users'
+                    ? rows.map(user => `<article class="admin-row">
+                        <div><strong>${esc(user.username)}</strong>${user.banned ? ' <span class="admin-badge">banned</span>' : ''}
+                        <small>${Number(user.coins)} coins · ${Number(user.wins)} wins · ${Number(user.decks)} public decks · joined ${esc(new Date(user.created_at).toLocaleDateString())}</small></div>
+                        <div class="admin-actions">
+                            <button type="button" class="secondary-btn" data-admin-action="coins" data-id="${esc(user.id)}" data-name="${esc(user.username)}">Coins</button>
+                            <button type="button" class="secondary-btn" data-admin-action="remove-decks" data-id="${esc(user.id)}" data-name="${esc(user.username)}">Remove decks</button>
+                            <button type="button" class="${user.banned ? 'secondary-btn' : 'danger-btn'}" data-admin-action="${user.banned ? 'unban' : 'ban'}" data-id="${esc(user.id)}" data-name="${esc(user.username)}">${user.banned ? 'Unban' : 'Ban'}</button>
+                        </div></article>`).join('')
+                    : rows.map(deck => `<article class="admin-row">
+                        <div><strong>${esc(deck.title)}</strong> <small>by ${esc(deck.owner)} · ${Number(deck.card_count)} cards · ${Number(deck.study_count)} studies</small>
+                        ${deck.description ? `<small>${esc(deck.description)}</small>` : ''}
+                        <small class="admin-preview">${(deck.preview || []).map(card => `${esc(card.front)} → ${esc(card.back)}`).join(' · ')}</small></div>
+                        <div class="admin-actions"><button type="button" class="danger-btn" data-admin-action="delete-deck" data-id="${esc(deck.id)}" data-name="${esc(deck.title)}">Delete</button></div></article>`).join('');
+            } catch (error) {
+                status.textContent = this.friendlyErrorMessage(error, 'Could not load admin data.');
+                list.innerHTML = '';
+            }
+        }
+
+        async runAdminAction(action, data) {
+            const games = window.StudBudCommunityGames;
+            const status = document.getElementById('admin-status');
+            try {
+                if (action === 'delete-deck') {
+                    if (!confirm(`Delete the public deck "${data.name}"?`)) return;
+                    await games.adminCall('studbud_admin_delete_deck', { p_deck_id: data.id });
+                } else if (action === 'remove-decks') {
+                    if (!confirm(`Remove all public decks from ${data.name}?`)) return;
+                    await games.adminCall('studbud_admin_remove_user_decks', { p_user_id: data.id });
+                } else if (action === 'ban') {
+                    const reason = prompt(`Ban ${data.name}? They will lose their public decks and can't publish new ones. Reason (optional):`);
+                    if (reason === null) return;
+                    await games.adminCall('studbud_admin_set_ban', { p_user_id: data.id, p_banned: true, p_reason: reason });
+                } else if (action === 'unban') {
+                    await games.adminCall('studbud_admin_set_ban', { p_user_id: data.id, p_banned: false });
+                } else if (action === 'coins') {
+                    const amount = Number(prompt(`Add or remove coins for ${data.name} (use a negative number to remove):`, '100'));
+                    if (!Number.isInteger(amount) || amount === 0) return;
+                    await games.adminCall('studbud_admin_adjust_coins', { p_user_id: data.id, p_delta: amount });
+                }
+                await this.loadAdminList();
+                const done = { 'delete-deck': 'Deck deleted.', 'remove-decks': 'Public decks removed.', ban: 'User banned.', unban: 'User unbanned.', coins: 'Coins updated.' };
+                status.textContent = `${done[action] || 'Done.'} ${status.textContent}`;
+            } catch (error) {
+                status.textContent = this.friendlyErrorMessage(error, 'That admin action failed.');
+            }
+        }
+
+        async claimDailyReward() {
+            try {
+                const profile = await window.StudBudCommunityGames.claimDailyReward();
+                this.multiplayerProfile = profile;
+                await this.renderMultiplayerProfile(true);
+                window.StudBudSfx?.play('win', 'ui');
+                document.getElementById('multiplayer-shop-status').textContent = `You claimed ${profile.daily_reward} coins! Streak: ${profile.daily_streak} day${profile.daily_streak === 1 ? '' : 's'}.`;
+            } catch (error) {
+                document.getElementById('multiplayer-shop-status').textContent = this.friendlyErrorMessage(error, 'Could not claim your reward right now.');
             }
         }
 
@@ -2143,39 +2270,25 @@
         }
 
         updateMultiplayerGoalInputs() {
-            const type = document.getElementById('host-game-goal-type')?.value;
-            document.getElementById('host-game-point-goal')?.classList.toggle('hidden', type !== 'points');
-            document.getElementById('host-game-time-goal')?.classList.toggle('hidden', type !== 'time');
+            const minutes = Number(document.getElementById('host-game-time')?.value || 5);
+            const label = document.getElementById('host-game-time-value');
+            if (label) label.textContent = minutes >= 60 ? '1 hour' : `${minutes} min`;
         }
 
         updateMultiplayerModeSetup(mode) {
             const labels = {
-                skyline: ['Rooftop Rumble', 'A long rooftop route with branching shortcuts and checkpoint towers.'],
-                river: ['River Raiders', 'Choose safe casts or risk the deep water for a rare catch.'],
-                market: ['Market Mayhem', 'Deliver orders or gamble on changing market stalls.'],
-                miner: ['Crystal Cartel', 'Drill safely or blast for high-value crystal pockets.'],
-                duel: ['Hammerheart Showdown', 'Swing for a hard hit or guard and counter-climb.'],
-                crypto: ['Crypto Exchange', 'Invest in six different assets, react to market news, research with questions and build mining rigs.'],
-                fishing: ['Fishing Frenzy', 'Charge a cast, hook the bite, and win the reel minigame. Rare fish and treasure chests score big.'],
-                hack: ['Crypto Hack', 'Mine crypto at terminals, crack codes at hack stations, and steal from rivals in a server room.'],
-                shooter: ['Starfall Blasters', 'Aim with the mouse in a top-down arena and blast drone waves.'],
-                sports: ['Endzone Rally', 'Run the field, juke tacklers, and score touchdowns against real opponents.']
+                skyline: ['Rooftop Rumble', 'Climb a rooftop obstacle course before the tide.'],
+                river: ['River Raiders', 'Steer a boat, dodge obstacles and catch fish.'],
+                market: ['Market Mayhem', 'Deliver packages across town and dodge cars.'],
+                miner: ['Crystal Cartel', 'Dig crystals, bank them at base, avoid lava.'],
+                duel: ['Hammerheart Showdown', 'King of the Hill: hold the glowing zone to score and knock rivals off.'],
+                crypto: ['Crypto Exchange', 'Trade six assets and answer questions for cash.'],
+                shooter: ['Starfall Blasters', 'Aim and blast drone waves.'],
+                sports: ['Endzone Rally', 'Run to the endzone. Teams of blue vs red with 4+ players.']
             };
             const [title, description] = labels[mode] || labels.skyline;
             document.getElementById('multiplayer-preview-title').textContent = title;
             document.getElementById('multiplayer-preview-description').textContent = description;
-            const goal = document.querySelector('#host-game-point-goal select');
-            if (mode === 'sports') {
-                goal.innerHTML = '<option value="1">1 touchdown</option><option value="3" selected>3 touchdowns</option><option value="5">5 touchdowns</option>';
-            } else if (mode === 'shooter') {
-                goal.innerHTML = '<option value="5">5 targets</option><option value="10" selected>10 targets</option><option value="20">20 targets</option>';
-            } else {
-                goal.innerHTML = '<option value="500">500</option><option value="1000" selected>1,000</option><option value="2000">2,000</option>';
-            }
-            const label = document.getElementById('host-game-point-goal');
-            if (label?.firstChild?.nodeType === Node.TEXT_NODE) {
-                label.firstChild.textContent = mode === 'sports' ? 'Touchdowns ' : mode === 'shooter' ? 'Drone targets ' : 'Points ';
-            }
         }
 
         setMultiplayerScreen(screen) {
@@ -2326,9 +2439,9 @@
                 const delta = Math.min(2.5, Math.max(0.25, (now - this.multiplayerFrameTime) / 16.67));
                 this.multiplayerFrameTime = now;
                 if (Router.activeRoute === 'multiplayer') {
-                    const roomActive = this.hostedGameRoom && !document.getElementById('hosted-game-room').classList.contains('hidden');
-                    const previewActive = !roomActive && !document.getElementById('multiplayer-host-flow').classList.contains('hidden');
-                    if (previewActive) this.drawMultiplayerScene(
+                    const roomActive = this.hostedGameRoom && this.hostedGameRoom.status !== 'waiting' && !document.getElementById('hosted-game-room').classList.contains('hidden');
+                    const previewActive = !document.getElementById('multiplayer-host-flow').classList.contains('hidden');
+                    if (previewActive && !this.drawLivePreview(document.getElementById('multiplayer-game-canvas'), this.selectedMultiplayerMode, now)) this.drawMultiplayerScene(
                         document.getElementById('multiplayer-game-canvas'),
                         this.selectedMultiplayerMode,
                         [{ nickname: this.multiplayerDisplayName(), score: 280, skin: this.multiplayerProfile?.equipped_skin, hat: this.multiplayerProfile?.equipped_hat, accessory: this.multiplayerProfile?.equipped_accessory, pet: this.multiplayerProfile?.equipped_pet, streak: 2 }, { nickname: 'Rival', score: 140, skin: 'skin_robot', streak: 1 }],
@@ -2429,12 +2542,63 @@
             context.restore();
         }
 
+        // Runs the real game class with scripted bot input, so the lobby preview always matches the actual game.
+        drawLivePreview(canvas, mode, now) {
+            const A = window.StudBudArcade;
+            if (!canvas || !A?.games?.[mode]) return false;
+            try {
+                let demo = this.livePreview;
+                if (!demo || demo.mode !== mode || demo.failed) {
+                    const hold = new Set(), tap = new Set();
+                    const base = {
+                        seed: 4242, local: { id: 'demo', color: '#38bdf8', nickname: 'You', cos: {} }, user: { id: 'demo' }, t: 0, startedAt: Date.now(), done: false, finishMs: 0, over: false, paused: false, question: null, score: 0,
+                        vw: canvas.width, vh: canvas.height, canvas: { style: {} }, roster: new Map(), keys: hold, mouse: { x: 0, y: 0, down: false, pressed: false },
+                        down: (...c) => c.some(k => hold.has(k)), pressed: (...c) => c.some(k => tap.has(k)),
+                        axis: () => ({ x: (hold.has('KeyD') ? 1 : 0) - (hold.has('KeyA') ? 1 : 0), y: (hold.has('KeyS') ? 1 : 0) - (hold.has('KeyW') ? 1 : 0) }),
+                        spend: () => true, refill() { }, sfx() { }, toast() { }, ask() { return false; }, remoteList: () => [], emit() { }, send() { }, setGoal() { }, addScore() { }
+                    };
+                    const session = new Proxy(base, { get: (target, key) => key in target ? target[key] : (() => undefined) });
+                    const game = new A.games[mode](session);
+                    session.game = game;
+                    demo = this.livePreview = { mode, session, game, hold, tap, last: now, clock: 0 };
+                }
+                const { session, game, hold, tap } = demo;
+                const dt = Math.min(0.05, Math.max(0.001, (now - demo.last) / 1000));
+                demo.last = now; demo.clock += dt; session.t += dt;
+                const c = demo.clock;
+                hold.clear(); tap.clear();
+                const dir = Math.sin(c * 0.7) > 0 ? 'KeyD' : 'KeyA';
+                hold.add(dir);
+                if (Math.floor(c * 1.6) !== demo.lastJump) { demo.lastJump = Math.floor(c * 1.6); tap.add('Space'); }
+                if (Math.sin(c * 0.5) > 0.3) hold.add('Space');
+                if (game.res && game.res.value < 40) game.res.value = 100;
+                session.vw = canvas.width; session.vh = canvas.height;
+                session.mouse.x = canvas.width / 2 + Math.cos(c * 1.3) * 260; session.mouse.y = canvas.height / 2 + Math.sin(c * 1.7) * 120;
+                session.mouse.down = Math.sin(c * 2) > 0.2;
+                if (mode === 'skyline' && game.checkpoints && Math.floor(c / 7) !== demo.lastHop) {
+                    demo.lastHop = Math.floor(c / 7);
+                    const cp = game.checkpoints[Math.min(game.checkpoints.length - 1, 2 + (demo.lastHop * 3) % 12)];
+                    game.me.x = cp.x; game.me.y = cp.y - 60; game.me.vy = 0; game.snapCam = true;
+                }
+                game.update(dt);
+                const context = canvas.getContext('2d');
+                context.setTransform(1, 0, 0, 1, 0, 0);
+                game.draw(context, canvas.width, canvas.height);
+                context.fillStyle = 'rgba(8,12,28,.7)'; context.fillRect(10, 10, 150, 26);
+                context.fillStyle = '#fff'; context.font = 'bold 13px system-ui'; context.textAlign = 'left';
+                context.fillText('LIVE GAME PREVIEW', 20, 28);
+                return true;
+            } catch (error) {
+                if (this.livePreview) this.livePreview.failed = true;
+                console.warn('[NexusApp] Live preview unavailable, using the static scene:', error);
+                return false;
+            }
+        }
+
         drawMultiplayerScene(canvas, mode, players, time, preview) {
             if (!canvas) return;
             const context = canvas.getContext('2d');
             if (!context) return;
-            if (mode === 'fishing') mode = 'river';
-            else if (mode === 'hack') mode = 'crypto';
             const width = canvas.width, height = canvas.height;
             const phase = time * 0.8;
             const ranked = players.length ? players : [{ score: 300 }, { score: 150 }];
@@ -2866,9 +3030,9 @@
                 throw new Error('Hosted game terms and definitions must be 1000 characters or fewer.');
             }
             const options = {
-                goal_type: form.elements.goalType.value,
-                point_limit: Number(form.elements.pointLimit.value),
-                time_limit_seconds: Number(form.elements.timeLimit.value) * 60,
+                goal_type: 'time',
+                point_limit: 1000,
+                time_limit_seconds: Math.min(60, Math.max(1, Number(form.elements.timeLimit.value) || 5)) * 60,
                 question_reward: Number(form.elements.questionReward.value)
             };
             let room;
@@ -2957,10 +3121,10 @@
                 classic: 'Classic', rush: 'Rush', survival: 'Survival',
                 skyline: 'Rooftop Rumble', river: 'River Raiders', market: 'Market Mayhem',
                 miner: 'Crystal Cartel', duel: 'Hammerheart Showdown',
-                crypto: 'Crypto Exchange', shooter: 'Starfall Blasters', sports: 'Endzone Rally', fishing: 'Fishing Frenzy', hack: 'Crypto Hack'
+                crypto: 'Crypto Exchange', shooter: 'Starfall Blasters', sports: 'Endzone Rally'
             };
             document.getElementById('hosted-room-title').textContent = `${room.deck_title} · ${modeNames[room.mode] || room.mode}`;
-            const playerLimit = room.mode === 'duel' ? 2 : 16;
+            const playerLimit = room.mode === 'duel' ? 8 : 16;
             const remainingSeconds = room.goal_type === 'time' && room.started_at
                 ? Math.max(0, Math.ceil((new Date(room.started_at).getTime() + Number(room.time_limit_seconds) * 1000 - Date.now()) / 1000))
                 : null;
@@ -2977,8 +3141,14 @@
             const rankedPlayers = players.slice().sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
             const avatarFor = player => this.multiplayerAvatarMarkup({ skin: player.skin, hat: player.hat, acc: player.accessory, pet: player.pet });
             document.getElementById('hosted-leaderboard-count').textContent = `${players.length} player${players.length === 1 ? '' : 's'}`;
+            document.getElementById('hosted-leaderboard-title').textContent = room.status === 'waiting' ? 'Lobby' : 'Leaderboard';
             document.getElementById('hosted-room-players').innerHTML = rankedPlayers
                 .map((player, index) => {
+                    const isSelf = player.id === window.StudBudCloud.user.id;
+                    const kick = isHost && player.id !== room.host_id && room.status !== 'finished' ? `<button class="host-kick-btn" type="button" data-action="hosted-kick-player" data-id="${this.escapeHTML(player.id)}" aria-label="Remove ${this.escapeHTML(player.nickname)}">Remove</button>` : '';
+                    if (room.status === 'waiting') {
+                        return `<li class="leaderboard-player lobby-player${isSelf ? ' is-self' : ''}">${avatarFor(player)}<span class="leaderboard-name">${this.escapeHTML(player.nickname)}${isSelf ? ' · you' : ''}</span><span class="lobby-tag${player.id === room.host_id ? ' is-host' : ''}">${player.id === room.host_id ? '<i class="fas fa-crown"></i> Host' : 'Ready'}</span>${kick}</li>`;
+                    }
                     const progress = room.mode === 'sports' ? `${Number(player.touchdowns || 0)} TD · ${Number(player.yards || 0)} yd`
                         : room.mode === 'shooter' ? `${Number(player.targets || 0)} targets · wave ${Number(player.wave || 1)}`
                             : room.mode === 'skyline' ? `${Number(player.distance || 0)} / 36 nodes · checkpoint ${Number(player.checkpoint || 0)}`
@@ -2986,21 +3156,40 @@
                                     : room.mode === 'market' ? `${Number(player.deliveries || 0)} deliveries · ${Number(player.streak || 0)} streak`
                                         : room.mode === 'miner' ? `${Number(player.depth || 0)} depth · ${Number(player.loot || 0)} ore`
                                             : room.mode === 'crypto' ? `${Number(player.loot || 0)} chips · ${player.last_action || 'ready'}`
-                                                : room.mode === 'duel' ? `${Number(player.distance || 0)} climb · ${Number(player.streak || 0)} combo`
+                                                : room.mode === 'duel' ? `${Number(player.score || 0)} pts`
                                                     : `${Number(player.score || 0)} points · ${Number(player.streak || 0)} streak`;
-                    return `<li class="leaderboard-player${player.id === window.StudBudCloud.user.id ? ' is-self' : ''}">${avatarFor(player)}<span class="leaderboard-name">${index + 1}. ${this.escapeHTML(player.nickname)}${player.id === window.StudBudCloud.user.id ? ' · you' : ''}</span><span class="leaderboard-stat"><strong>${Number(player.score || 0).toLocaleString()} score</strong><small>${this.escapeHTML(progress)}</small></span>${isHost && player.id !== room.host_id && room.status !== 'finished' ? `<button class="host-kick-btn" type="button" data-action="hosted-kick-player" data-id="${this.escapeHTML(player.id)}" aria-label="Remove ${this.escapeHTML(player.nickname)}">Remove</button>` : ''}</li>`;
+                    return `<li class="leaderboard-player${isSelf ? ' is-self' : ''}">${avatarFor(player)}<span class="leaderboard-name">${index + 1}. ${this.escapeHTML(player.nickname)}${isSelf ? ' · you' : ''}</span><span class="leaderboard-stat"><strong>${Number(player.score || 0).toLocaleString()} score</strong><small>${this.escapeHTML(progress)}</small></span>${kick}</li>`;
                 }).join('');
             const sceneNames = {
                 skyline: 'Rooftop Rumble', river: 'River Raiders', market: 'Market Mayhem',
                 miner: 'Crystal Cartel', duel: 'Hammerheart Showdown',
                 crypto: 'Crypto Exchange', shooter: 'Starfall Blasters', sports: 'Endzone Rally',
-                fishing: 'Fishing Frenzy', hack: 'Crypto Hack',
                 classic: 'Flashcard Face-off', rush: 'Rapid Recall', survival: 'Last Learner Standing'
             };
             document.getElementById('multiplayer-scene-name').textContent = sceneNames[room.mode] || 'Live match';
             document.getElementById('multiplayer-scene-goal').textContent =
                 room.status === 'playing' ? goalLabel : room.status === 'waiting' ? `${players.length} players in lobby` : 'Match complete';
             const feed = document.getElementById('multiplayer-scene-feed');
+            const lobbyInfo = document.getElementById('lobby-info');
+            const inLobby = room.status === 'waiting';
+            lobbyInfo.classList.toggle('hidden', !inLobby);
+            document.getElementById('multiplayer-arena').classList.toggle('hidden', inLobby);
+            if (inLobby) {
+                const info = {
+                    skyline: ['Climb to the summit past moving platforms, spikes, saws and wind. A rising tide chases you.', 'A/D run · Space jump (twice) · Shift dash'],
+                    river: ['Steer a boat, dodge obstacles and catch fish.', 'WASD steer · click cast · Q recharge'],
+                    market: ['Deliver packages across town and dodge cars.', 'WASD move · Shift sprint · Q recharge'],
+                    miner: ['Dig through the cavern, haul ore back to base and avoid lava.', 'WASD move · hold click dig · Q recharge'],
+                    duel: ['Hold the glowing hill alone to score. Knock rivals off the stage.', 'A/D move · Space jump · click swing · Shift guard'],
+                    crypto: ['Trade six assets, react to market news and build mining rigs.', '1-6 pick · B buy · S sell'],
+                    shooter: ['Blast drones and other players in an arena.', 'WASD move · mouse aim · click fire · Q reload'],
+                    sports: ['Run to the far endzone and score. With 4+ players it is blue vs red.', 'WASD run · Shift sprint · Space dash · Q recharge']
+                }[room.mode] || ['Answer flashcard questions faster than everyone else.', 'Answer correctly to score points.'];
+                lobbyInfo.innerHTML = `<div class="lobby-mode"><strong>${this.escapeHTML(modeNames[room.mode] || 'Live game')}</strong><span>${this.escapeHTML(goalLabel)} · ${Number(room.state?.question_reward) || 20} coins per correct answer</span></div>
+                    <p>${this.escapeHTML(info[0])}</p>
+                    <p class="lobby-controls"><i class="fas fa-keyboard"></i> ${this.escapeHTML(info[1])}</p>
+                    <p class="lobby-controls"><i class="fas fa-circle-question"></i> Answering questions powers you up. Press Q in game to open one.</p>`;
+            }
             const latest = rankedPlayers.filter(player => player.last_correct !== undefined)
                 .sort((a, b) => Number(b.answered_count || 0) - Number(a.answered_count || 0))[0];
             feed.textContent = latest
@@ -3012,7 +3201,7 @@
             const finishButton = document.getElementById('hosted-finish-btn');
             startButton.classList.toggle('hidden', !isHost || room.status !== 'waiting');
             startButton.disabled = players.length < 2;
-            startButton.textContent = room.mode === 'duel' ? 'Start 1v1 showdown' : 'Start the game';
+            startButton.textContent = room.mode === 'duel' ? 'Start the hill brawl' : 'Start the game';
             finishButton.classList.toggle('hidden', !isHost || room.status === 'finished');
             this.syncArcadeSession(room, isHost);
             const waitingCard = document.getElementById('waiting-arcade-card');
@@ -3265,7 +3454,7 @@
                 const recommendations = this.getStudyRecommendations().slice(0, 5);
                 priorityList.innerHTML = recommendations.length ? recommendations.map((item, index) =>
                     `<article class="study-priority-item"><span class="priority-rank">${index + 1}</span><div><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(item.courseTitle)} · ${this.escapeHTML(item.kind || 'assignment')} · ${item.sessionMinutes} min today (about ${item.remainingStudyMinutes} min remaining)</span><small>${this.escapeHTML(item.reason)}</small><p><strong>Study method:</strong> ${this.escapeHTML(item.studyMethod)}</p><button class="secondary-btn" data-action="log-study" data-id="${this.escapeHTML(item.id)}"><i class="fas fa-stopwatch"></i> Log study session</button></div></article>`
-                ).join('') : '<p class="empty-state">Add classes and upcoming work to get personalized study suggestions.</p>';
+                ).join('') : '<p class="empty-state">Add an upcoming quiz or test to get study suggestions.</p>';
             }
             this.renderStudyProgress();
             this.renderDailyStudyHabit();
@@ -3379,7 +3568,7 @@
             if (!select) return;
             const recommendations = this.getStudyRecommendations().slice(0, 12);
             const currentId = this.dashboardSprintAssignmentId || select.value;
-            select.innerHTML = '<option value="">Choose an assignment</option>' + recommendations.map(item =>
+            select.innerHTML = '<option value="">Choose a quiz or test</option>' + recommendations.map(item =>
                 `<option value="${this.escapeHTML(item.id)}">${this.escapeHTML(item.title)} · ${this.escapeHTML(item.courseTitle)}</option>`
             ).join('');
             if (recommendations.some(item => item.id === currentId)) {
@@ -3395,7 +3584,7 @@
             startButton.disabled = !select.value;
             this.updateFocusSprintDisplay();
             const status = document.getElementById('focus-sprint-status');
-            if (!recommendations.length) status.textContent = 'Add an upcoming assignment to start a focused study session.';
+            if (!recommendations.length) status.textContent = 'Add an upcoming quiz or test to start a focused study session.';
         }
 
         updateFocusSprintDisplay() {
@@ -3494,11 +3683,11 @@
             const totalMinutes = Array.from(byClass.values()).reduce((sum, item) => sum + item.minutes, 0);
             const dueCardCount = dueCards.reduce((sum, deck) => sum + deck.count, 0);
             totalElement.textContent = totalMinutes
-                ? `Plan for about ${Math.floor(totalMinutes / 60)} hr ${totalMinutes % 60} min today across assignments${dueCardCount ? ` and ${dueCardCount} flashcard review${dueCardCount === 1 ? '' : 's'}` : ''}. Estimates use due dates, task size, and your study logs.`
-                : 'No upcoming assignment or flashcard review blocks today. Add due dates and study cards to get a personalized time estimate.';
+                ? `Plan for about ${Math.floor(totalMinutes / 60)} hr ${totalMinutes % 60} min today across upcoming quizzes and tests${dueCardCount ? ` and ${dueCardCount} flashcard review${dueCardCount === 1 ? '' : 's'}` : ''}. Estimates use due dates, task size, and your study logs.`
+                : 'Nothing to study today. Add an upcoming quiz or test, or some flashcards, to get a study time estimate.';
             classContainer.innerHTML = byClass.size ? Array.from(byClass.values()).map(item =>
                 `<article class="study-progress-item"><strong>${this.escapeHTML(item.title)}</strong><span>${item.minutes} min · ${item.items} task${item.items === 1 ? '' : 's'}</span></article>`
-            ).join('') : '<p class="empty-state">Add classes and assignments to create a daily plan.</p>';
+            ).join('') : '<p class="empty-state">Add a quiz or test to create a study plan.</p>';
         }
 
         setCloudChartControls() {
@@ -3531,7 +3720,7 @@
             const range = document.getElementById('grade-progress-range');
             if (courseControl) courseControl.classList.toggle('hidden', metric !== 'class');
             const datedAssignments = assignments.filter(item =>
-                (item.status === 'completed' || Number(item.pointsEarned) > 0) && (item.gradedAt || item.dueDate)
+                (this.isGradedItem(item)) && (item.gradedAt || item.dueDate)
             );
             const dateFor = item => {
                 const value = String(item.gradedAt || item.dueDate);
@@ -3568,7 +3757,7 @@
                     grade: this.calculateCourseGrade(course)
                 })).filter(item => Number.isFinite(item.grade));
                 const scoredCount = assignments.filter(item =>
-                    (item.status === 'completed' || Number(item.pointsEarned) > 0) &&
+                    (this.isGradedItem(item)) &&
                     (!selectedCourse || item.courseCode === selectedCourse.code)
                 ).length;
                 if (summary) summary.innerHTML = `
@@ -3601,7 +3790,7 @@
                 if (summary) summary.innerHTML = `
                     <article><span>Current ${metric} GPA</span><strong>${Number(currentGpa[metric]).toFixed(2)}</strong></article>
                     <article><span>Classes tracked</span><strong>${courses.length}</strong></article>
-                    <article><span>Scored assignments</span><strong>${assignments.filter(item => item.status === 'completed' || Number(item.pointsEarned) > 0).length}</strong></article>`;
+                    <article><span>Scored assignments</span><strong>${assignments.filter(item => this.isGradedItem(item)).length}</strong></article>`;
             }
 
             const hasHistory = labels.length > 0 && datasets.some(dataset => dataset.data.some(value => Number.isFinite(value)));
@@ -3645,6 +3834,10 @@
 
         async handleClick(event) {
             if (!event.target.closest('#course-modal')) this.hideCourseSuggestions();
+            if (event.target.closest('#current-flashcard') && document.getElementById('sm2-controls').classList.contains('hidden')) {
+                this.revealCard();
+                return;
+            }
             const target = event.target.closest('button, .nav-item[data-target]');
             if (!target) return;
 
@@ -3682,6 +3875,14 @@
                     await this.copyHostedRoomCode();
                 } else if (action === 'study-leaderboard-retry') {
                     await this.refreshStudyLeaderboard(this.studyLeaderboardPeriod);
+                } else if (target.matches('[data-admin-tab]')) {
+                    this.adminTab = target.dataset.adminTab;
+                    document.querySelectorAll('[data-admin-tab]').forEach(button => button.classList.toggle('selected', button === target));
+                    await this.loadAdminList();
+                } else if (target.matches('[data-admin-action]')) {
+                    await this.runAdminAction(target.dataset.adminAction, target.dataset);
+                } else if (action === 'claim-daily-reward') {
+                    await this.claimDailyReward();
                 } else if (action === 'multiplayer-buy' || action === 'multiplayer-equip') {
                     await this.updateMultiplayerShop(action, target.dataset.id);
                 } else if (action === 'multiplayer-unequip') {
@@ -3784,6 +3985,10 @@
                     await this.copyHostedRoomCode();
                 } else if (id === 'quick-add-task-btn') {
                     this.openAssignmentForm();
+                } else if (id === 'save-add-another-assignment-btn') {
+                    this.saveAssignmentAndContinue();
+                } else if (action === 'add-assignment-to-category') {
+                    this.openAssignmentForm(null, target.dataset.course, '', target.dataset.category || '');
                 } else if (id === 'add-course-btn') {
                     this.openCourseForm();
                 } else if (id === 'create-deck-btn') {
@@ -3906,6 +4111,22 @@
                 }
             }
             const navItem = event.target.closest('.nav-item[data-target]');
+            const studyArea = document.getElementById('active-study-area');
+            if (studyArea && !studyArea.classList.contains('hidden') && !event.target.closest('input, textarea, select, button') && !this.studyKeyBusy) {
+                const revealed = !document.getElementById('sm2-controls').classList.contains('hidden');
+                if (!revealed && (event.key === ' ' || event.key === 'Enter')) {
+                    event.preventDefault();
+                    this.revealCard();
+                    return;
+                }
+                const quality = { 1: 1, 2: 3, 3: 4, 4: 5 }[event.key];
+                if (revealed && quality) {
+                    event.preventDefault();
+                    this.studyKeyBusy = true;
+                    this.rateCurrentCard(quality).catch(error => console.error('[NexusApp] Card rating failed:', error)).finally(() => { this.studyKeyBusy = false; });
+                    return;
+                }
+            }
             if (navItem && (event.key === 'Enter' || event.key === ' ')) {
                 event.preventDefault();
                 navItem.click();
@@ -3919,6 +4140,11 @@
 
         async handleSubmit(event) {
             const form = event.target;
+            if (form.id === 'admin-search-form') {
+                event.preventDefault();
+                await this.loadAdminList();
+                return;
+            }
             if (form.id === 'community-deck-search-form') {
                 event.preventDefault();
                 await this.searchCommunityDecks(document.getElementById('community-deck-query').value);
@@ -3993,6 +4219,7 @@
                 this.renderGradeProgress();
             }
             if (event.target.id === 'assignment-course') this.updateAssignmentCategories();
+            if (event.target.id === 'assignment-kind' || event.target.name === 'assignment-state') this.syncAssignmentForm();
             if (event.target.id === 'assignment-course-filter' || event.target.id === 'assignment-status-filter') {
                 this.renderAssignments();
             } else if (event.target.id === 'grade-scenario-select') {
@@ -4020,7 +4247,6 @@
                 this.applyAppearance();
             } else if (event.target.id === 'sfx-ui' || event.target.id === 'sfx-game') {
                 window.StudBudSfx.update({ [event.target.id === 'sfx-ui' ? 'ui' : 'game']: event.target.checked });
-                window.StudBudSfx.play('toggle', 'ui');
             } else if (event.target.id === 'music-on') {
                 window.StudBudSfx.update({ music: event.target.checked });
                 if (!event.target.checked) window.StudBudSfx.stopMusic();
@@ -4197,21 +4423,49 @@
                 `${catalogCourse.isWeighted ? 'Weighted' : 'Regular'} · ${weightedScale}`;
         }
 
-        openAssignmentForm(assignment, courseCode = '', dueDate = '') {
+        isGradedItem(item) {
+            if (typeof item.graded === 'boolean') return item.graded;
+            return item.status === 'completed' || Number(item.pointsEarned) > 0;
+        }
+
+        openAssignmentForm(assignment, courseCode = '', dueDate = '', categoryId = '') {
             const form = document.getElementById('assignment-form');
             form.reset();
+            const graded = assignment ? this.isGradedItem(assignment) : false;
             document.getElementById('assignment-id').value = assignment ? assignment.id : '';
             document.getElementById('assignment-modal-title').textContent = assignment ? 'Edit Assignment' : 'Add Assignment';
             document.getElementById('assignment-name').value = assignment ? assignment.title : '';
             document.getElementById('assignment-course').value = assignment ? assignment.courseCode : courseCode;
-            document.getElementById('assignment-due-date').value = assignment ? assignment.dueDate : (dueDate || '');
+            document.getElementById('assignment-due-date').value = assignment ? assignment.dueDate || '' : (dueDate || '');
             document.getElementById('assignment-points').value = assignment ? assignment.pointsEarned ?? 0 : 0;
             document.getElementById('assignment-max-points').value = assignment ? assignment.maxPoints ?? 100 : 100;
             document.getElementById('assignment-kind').value = assignment ? assignment.kind || 'assignment' : 'assignment';
             document.getElementById('assignment-size').value = assignment ? assignment.estimatedMinutes || 30 : 30;
             document.getElementById('assignment-importance').value = assignment ? assignment.importance || 3 : 3;
-            this.updateAssignmentCategories(assignment ? assignment.categoryId : '');
+            form.querySelector(`input[name="assignment-state"][value="${graded ? 'graded' : 'todo'}"]`).checked = true;
+            // A class chosen from a category button is already known, so hide the picker
+            document.getElementById('assignment-course-group').classList.toggle('hidden', !assignment && Boolean(courseCode));
+            document.getElementById('save-add-another-assignment-btn').classList.toggle('hidden', Boolean(assignment));
+            this.updateAssignmentCategories(assignment ? assignment.categoryId : categoryId);
+            this.syncAssignmentForm();
             this.openModal('assignment-modal');
+            setTimeout(() => document.getElementById('assignment-name').focus(), 50);
+        }
+
+        syncAssignmentForm() {
+            const graded = document.querySelector('input[name="assignment-state"]:checked')?.value === 'graded';
+            const kind = document.getElementById('assignment-kind').value;
+            document.getElementById('assignment-todo-fields').classList.toggle('hidden', graded);
+            document.getElementById('assignment-graded-fields').classList.toggle('hidden', !graded);
+            document.getElementById('assignment-study-options').classList.toggle('hidden', graded || kind === 'assignment');
+            document.getElementById('assignment-due-date').required = !graded;
+            document.getElementById('assignment-max-points').required = graded;
+            document.getElementById('assignment-points').required = graded;
+            // The type picker stays useful for graded work, so keep it visible beside the score
+            const kindField = document.getElementById('assignment-kind').closest('.half-width');
+            const gradedRow = document.getElementById('assignment-graded-fields');
+            if (graded && kindField.parentElement !== gradedRow) gradedRow.appendChild(kindField);
+            else if (!graded && kindField.parentElement === gradedRow) document.getElementById('assignment-todo-fields').appendChild(kindField);
         }
 
         updateAssignmentCategories(selectedId = null) {
@@ -4220,7 +4474,7 @@
             const select = document.getElementById('assignment-category');
             if (!select) return;
             const selected = selectedId ?? select.value;
-            select.innerHTML = '<option value="">No category / unweighted average</option>' +
+            select.innerHTML = '<option value="">None</option>' +
                 (course?.categories || []).map(category => `<option value="${this.escapeHTML(category.id)}">${this.escapeHTML(category.name)} (${Number(category.weight || 0)}%)</option>`).join('');
             if ((course?.categories || []).some(category => category.id === selected)) select.value = selected;
         }
@@ -4263,24 +4517,40 @@
         saveAssignment() {
             const id = document.getElementById('assignment-id').value || `asgn_${Date.now()}`;
             const current = (AppState.get('assignments') || []).find(item => item.id === id);
-            const pointsEarned = Number(document.getElementById('assignment-points').value) || 0;
+            const graded = document.querySelector('input[name="assignment-state"]:checked')?.value === 'graded';
+            const kind = document.getElementById('assignment-kind').value;
+            const maxPoints = Number(document.getElementById('assignment-max-points').value) || 100;
+            const pointsEarned = graded ? Math.max(0, Number(document.getElementById('assignment-points').value) || 0) : 0;
             const assignment = {
                 id,
                 title: document.getElementById('assignment-name').value.trim(),
                 courseCode: document.getElementById('assignment-course').value,
-                dueDate: document.getElementById('assignment-due-date').value,
+                dueDate: graded ? (current?.dueDate || '') : document.getElementById('assignment-due-date').value,
                 pointsEarned,
-                maxPoints: Number(document.getElementById('assignment-max-points').value) || 100,
+                maxPoints,
                 categoryId: document.getElementById('assignment-category').value || null,
-                kind: document.getElementById('assignment-kind').value,
+                kind,
                 estimatedMinutes: Number(document.getElementById('assignment-size').value) || 30,
                 importance: Number(document.getElementById('assignment-importance').value) || 3,
                 priority: current ? current.priority : 'high',
-                status: current ? current.status : 'pending',
-                gradedAt: pointsEarned > 0 ? (current?.gradedAt || localDateKey(new Date())) : current?.gradedAt || null
+                graded,
+                status: graded ? 'completed' : (current?.status === 'completed' && !this.isGradedItem(current) ? 'completed' : 'pending'),
+                gradedAt: graded ? (current?.gradedAt || localDateKey(new Date())) : null
             };
             if (current) AppState.updateAssignment(id, assignment);
             else AppState.addAssignment(assignment);
+        }
+
+        saveAssignmentAndContinue() {
+            const form = document.getElementById('assignment-form');
+            if (!form.reportValidity()) return;
+            const title = document.getElementById('assignment-name').value.trim();
+            this.saveAssignment();
+            document.getElementById('assignment-id').value = '';
+            document.getElementById('assignment-name').value = '';
+            document.getElementById('assignment-points').value = 0;
+            document.getElementById('assignment-modal-title').textContent = `Added "${title}" — add another`;
+            document.getElementById('assignment-name').focus();
         }
 
         async saveCard() {
@@ -4320,7 +4590,7 @@
                     const status = assignment.status === 'completed' ? 'pending' : 'completed';
                     AppState.updateAssignment(id, {
                         status,
-                        gradedAt: status === 'completed' ? (assignment.gradedAt || localDateKey(new Date())) : assignment.gradedAt
+                        graded: assignment.graded ?? Number(assignment.pointsEarned) > 0
                     });
                 }
             }
@@ -4411,11 +4681,15 @@
                 (AppState.get('flashcards') || []).find(deck => deck.id === this.activeDeckId)?.title || 'Flashcards';
             const remaining = this.studyCards.length - this.activeCardIndex;
             document.getElementById('study-progress').textContent = `${remaining} left${this.cramMode ? ' · cram mode' : ''}`;
+            const cardEl = document.getElementById('current-flashcard');
+            const backEl = document.getElementById('card-back-content');
             document.getElementById('card-front-content').textContent = card.front || '';
-            document.getElementById('card-back-content').textContent = card.back || '';
-            document.getElementById('current-flashcard').classList.remove('flipped');
-            document.getElementById('card-back-content').classList.add('hidden');
-            document.getElementById('card-front-content').classList.remove('hidden');
+            const wasFlipped = cardEl.classList.contains('is-flipped');
+            cardEl.classList.remove('is-flipped');
+            // Hold the new back text until the card has flipped away so the answer never flashes
+            clearTimeout(this.cardBackTimer);
+            if (wasFlipped) this.cardBackTimer = setTimeout(() => { backEl.textContent = card.back || ''; }, 350);
+            else backEl.textContent = card.back || '';
             document.getElementById('reveal-card-btn').classList.remove('hidden');
             document.getElementById('sm2-controls').classList.add('hidden');
         }
@@ -4428,8 +4702,10 @@
 
         revealCard() {
             const card = this.studyCards[this.activeCardIndex];
-            document.getElementById('card-front-content').classList.add('hidden');
-            document.getElementById('card-back-content').classList.remove('hidden');
+            if (!card) return;
+            clearTimeout(this.cardBackTimer);
+            document.getElementById('card-back-content').textContent = card.back || '';
+            document.getElementById('current-flashcard').classList.add('is-flipped');
             document.getElementById('reveal-card-btn').classList.add('hidden');
             document.getElementById('sm2-controls').classList.remove('hidden');
             if (card && window.SM2Engine) {
@@ -4626,9 +4902,7 @@
 
         startArcade(game) {
             const title = {
-                asteroids: 'Asteroid Definitions',
                 match: 'Memory Match Tower',
-                runner: 'Exam Runner',
                 lightning: 'Lightning Round',
                 streak: 'Streak Builder',
                 survival: 'Survival Mode',
@@ -4724,24 +4998,17 @@
             }
             content.innerHTML = `
                 <form id="practice-test-config-form" class="practice-test-setup">
-                    <p>Choose the source deck, test length, and question styles. Mixed mode alternates between selected styles.</p>
+                    <p>Choose a deck, then how many questions of each type you want. Use 0 to skip a type.</p>
                     <label>Flashcard deck
                         <select name="deckId" required>${usableDecks.map(deck =>
                             `<option value="${this.escapeHTML(deck.id)}">${this.escapeHTML(deck.title)} · ${(deck.cards || []).filter(card => card.front && card.back).length} cards</option>`
                         ).join('')}</select>
                     </label>
-                    <label>Number of questions
-                        <select name="questionCount">
-                            <option value="5">5 questions</option>
-                            <option value="10" selected>10 questions</option>
-                            <option value="20">20 questions</option>
-                            <option value="all">All cards in deck</option>
-                        </select>
-                    </label>
-                    <fieldset>
-                        <legend>Question styles</legend>
-                        <label><input type="checkbox" name="multipleChoice" checked> Multiple choice</label>
-                        <label><input type="checkbox" name="writtenAnswer"> Written answer</label>
+                    <fieldset class="practice-spread">
+                        <legend>Question spread</legend>
+                        <label>Multiple choice <input type="number" name="mcCount" min="0" max="50" value="5"></label>
+                        <label>Matching (up to 4 pairs each) <input type="number" name="matchCount" min="0" max="50" value="2"></label>
+                        <label>Typing <input type="number" name="typeCount" min="0" max="50" value="3"></label>
                     </fieldset>
                     <button class="primary-btn" type="submit"><i class="fas fa-play"></i> Start practice test</button>
                 </form>`;
@@ -4752,22 +5019,26 @@
             const deck = (AppState.get('flashcards') || []).find(item => item.id === data.get('deckId'));
             if (!deck) throw new Error('Choose an available flashcard deck.');
             const availableCards = (deck.cards || []).filter(card => card.front && card.back);
-            const hasMultipleChoice = data.has('multipleChoice');
-            const hasWrittenAnswer = data.has('writtenAnswer');
-            if (!hasMultipleChoice && !hasWrittenAnswer) throw new Error('Select at least one question style.');
-            const requestedCount = data.get('questionCount');
-            const questionCount = requestedCount === 'all'
-                ? availableCards.length
-                : Math.min(Number(requestedCount), availableCards.length);
-            if (!Number.isInteger(questionCount) || questionCount < 1) throw new Error('Select a valid number of questions.');
-
-            this.practiceTestCards = [...availableCards].sort(() => Math.random() - 0.5).slice(0, questionCount);
-            const styles = [
-                ...(hasMultipleChoice ? ['multiple-choice'] : []),
-                ...(hasWrittenAnswer ? ['written'] : [])
-            ];
-            this.practiceTestQuestionTypes = this.practiceTestCards.map((_, index) => styles[index % styles.length]);
+            if (availableCards.length < 2) throw new Error('Choose a deck with at least two complete cards.');
+            const count = name => Math.max(0, Math.min(50, Math.floor(Number(data.get(name)) || 0)));
+            const counts = { 'multiple-choice': count('mcCount'), matching: count('matchCount'), written: count('typeCount') };
+            if (!counts['multiple-choice'] && !counts.matching && !counts.written) throw new Error('Enter how many questions of at least one type you want.');
+            const shuffle = list => [...list].sort(() => Math.random() - 0.5);
+            let pool = shuffle(availableCards);
+            const draw = () => { if (!pool.length) pool = shuffle(availableCards); return pool.pop(); };
+            const items = [];
+            for (let i = 0; i < counts['multiple-choice']; i++) items.push({ type: 'multiple-choice', cards: [draw()] });
+            for (let i = 0; i < counts.written; i++) items.push({ type: 'written', cards: [draw()] });
+            for (let i = 0; i < counts.matching; i++) {
+                const group = shuffle(availableCards).slice(0, Math.min(4, availableCards.length));
+                items.push({ type: 'matching', cards: group });
+            }
+            const ordered = shuffle(items);
+            this.practiceTestCards = ordered.map(item => item.cards[0]);
+            this.practiceTestGroups = ordered.map(item => item.cards);
+            this.practiceTestQuestionTypes = ordered.map(item => item.type);
             this.practiceTestAnswers = [];
+            this.arcadeMode = 'test';
             this.arcadeQuestionIndex = 0;
             this.arcadeScore = 0;
             this.arcadeStudyStartedAt = Date.now();
@@ -4810,9 +5081,33 @@
                 });
                 form.dataset.correctAnswer = String(choices.findIndex(option => option === card));
                 form.append(options);
+            } else if (questionType === 'matching') {
+                const group = this.practiceTestGroups[index];
+                const definitions = [...group].sort(() => Math.random() - 0.5);
+                question.textContent = 'Match each term with its definition';
+                const rows = document.createElement('div');
+                rows.className = 'practice-matching';
+                group.forEach((item, rowIndex) => {
+                    const row = document.createElement('label');
+                    row.className = 'practice-matching-row';
+                    const term = document.createElement('strong');
+                    term.textContent = item.front;
+                    const select = document.createElement('select');
+                    select.name = `match${rowIndex}`;
+                    select.required = true;
+                    select.innerHTML = '<option value="">Choose a definition…</option>';
+                    definitions.forEach((def, defIndex) => {
+                        const option = document.createElement('option');
+                        option.value = String(defIndex);
+                        option.textContent = def.back;
+                        select.append(option);
+                    });
+                    row.append(term, select);
+                    rows.append(row);
+                });
+                form.dataset.defOrder = JSON.stringify(definitions.map(def => group.indexOf(def)));
+                form.append(rows);
             } else {
-                const label = document.createElement('label');
-                label.className = 'practice-test-written';
                 label.htmlFor = 'practice-test-written-answer';
                 label.textContent = 'Your answer';
                 const answer = document.createElement('textarea');
@@ -4839,7 +5134,16 @@
             const data = new FormData(form);
             let correct;
             let givenAnswer;
-            if (form.dataset.questionType === 'multiple-choice') {
+            let recorded = card;
+            if (form.dataset.questionType === 'matching') {
+                const group = this.practiceTestGroups[this.arcadeQuestionIndex];
+                const order = JSON.parse(form.dataset.defOrder || '[]');
+                const picks = group.map((_, i) => order[Number(data.get(`match${i}`))]);
+                if (picks.some(pick => pick === undefined)) throw new Error('Pick a definition for every term.');
+                correct = picks.every((pick, i) => pick === i);
+                givenAnswer = group.map((item, i) => `${item.front} → ${group[picks[i]].back}`).join('; ');
+                recorded = { front: `Matching: ${group.map(item => item.front).join(', ')}`, back: group.map(item => `${item.front} → ${item.back}`).join('; ') };
+            } else if (form.dataset.questionType === 'multiple-choice') {
                 const selected = data.get('answer');
                 if (selected === null) throw new Error('Choose an answer first.');
                 correct = selected === form.dataset.correctAnswer;
@@ -4851,11 +5155,11 @@
                 correct = normalize(givenAnswer) === normalize(card.back);
             }
             if (correct) this.arcadeScore += 1;
-            this.practiceTestAnswers.push({ card, givenAnswer, correct });
+            this.practiceTestAnswers.push({ card: recorded, givenAnswer, correct });
 
             const feedback = document.createElement('p');
             feedback.className = `practice-test-feedback ${correct ? 'is-correct' : 'is-incorrect'}`;
-            feedback.textContent = correct ? 'Correct!' : `Not quite. Correct answer: ${card.back}`;
+            feedback.textContent = correct ? 'Correct!' : `Not quite. Correct answer: ${recorded.back}`;
             const next = document.createElement('button');
             next.className = 'primary-btn';
             next.textContent = this.arcadeQuestionIndex + 1 === this.practiceTestCards.length ? 'See results' : 'Next question';
@@ -5079,9 +5383,28 @@
             this.arcadeQuestionIndex += 1;
         }
 
+        async awardSoloCoins() {
+            const mode = this.arcadeMode;
+            const correct = Number(this.arcadeScore) || 0;
+            const total = mode === 'test' ? (this.practiceTestAnswers || []).length
+                : mode === 'match' ? Math.floor((this.memoryCards || []).length / 2)
+                    : Number(this.arcadeQuestionIndex) || 0;
+            if (!total || !correct || !window.StudBudCloud?.user || !window.StudBudCommunityGames) return;
+            try {
+                const profile = await window.StudBudCommunityGames.awardSoloCoins(Math.min(correct, total), total);
+                this.multiplayerProfile = profile;
+                this.renderMultiplayerProfile(true);
+                const earned = Number(profile.coins_awarded || 0);
+                AppState.setSaveStatus(earned ? `You earned ${earned} coins!` : 'Daily game coin limit reached. Come back tomorrow!', 'saved');
+            } catch (error) {
+                console.error('[NexusApp] Coins could not be awarded:', error);
+            }
+        }
+
         async finishArcadeStudySession() {
             if (!this.arcadeStudyStartedAt || this.arcadeStudyRecorded) return;
             this.arcadeStudyRecorded = true;
+            this.awardSoloCoins();
             const durationSec = Math.min(21600, Math.floor((Date.now() - this.arcadeStudyStartedAt) / 1000));
             this.arcadeStudyStartedAt = null;
             if (!durationSec) return;

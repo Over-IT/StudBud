@@ -13,7 +13,7 @@
         battle: { name: 'Battle Drive', bpm: 140, chords: [[52, 1], [52, 1], [55, 0], [50, 0]], bass: '1011101110111011', lead: '1000100110001001', arp: [0, 2, 3, 2, 3, 1], leadWave: 'sawtooth', bassWave: 'sawtooth', kick: '1001100110011001', snare: '0000100000001000', hat: '1111111111111111' },
         neon: { name: 'Neon Exchange', bpm: 108, chords: [[57, 1], [55, 0], [53, 0], [52, 0]], bass: '1100110011001100', lead: '1010101010101010', arp: [0, 1, 2, 3, 3, 2, 1, 0], leadWave: 'square', bassWave: 'square', kick: '1000100010001000', snare: '0000100000001000', hat: '0101010101010101' }
     };
-    const MODE_STYLE = { skyline: 'summit', river: 'lagoon', fishing: 'lagoon', market: 'bazaar', miner: 'cavern', duel: 'battle', shooter: 'battle', sports: 'bazaar', crypto: 'neon', hack: 'neon' };
+    const MODE_STYLE = { skyline: 'summit', river: 'lagoon', market: 'bazaar', miner: 'cavern', duel: 'battle', shooter: 'battle', sports: 'bazaar', crypto: 'neon' };
 
     // Every sound is synthesized on the fly, so there are no audio files to load.
     const RECIPES = {
@@ -51,6 +51,10 @@
             this.last = {};
             this.settings = { ...defaults };
             try { Object.assign(this.settings, JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')); } catch (error) { /* use defaults */ }
+            // Browsers keep audio suspended until the player interacts, so resume on the next input.
+            ['pointerdown', 'keydown', 'touchstart'].forEach(name => window.addEventListener(name, () => {
+                if (this.ctx && this.ctx.state !== 'running') this.ctx.resume?.().catch(() => { });
+            }, { passive: true }));
         }
 
         save() {
@@ -62,10 +66,16 @@
             this.save();
             if ('musicVolume' in patch) this.applyMusicLevel();
             if (patch.music === false) this.stopMusic();
+            else if (patch.music === true && this.activeMode && !this.mus) this.startMusic(this.activeMode);
+            else if ('musicStyle' in patch && this.activeMode) this.startMusic(this.activeMode);
         }
 
         applyMusicLevel() {
-            if (this.musicGain) this.musicGain.gain.setTargetAtTime(Math.pow(this.settings.musicVolume, 1.6) * 0.6, this.ctx.currentTime, 0.05);
+            if (!this.musicGain) return;
+            const g = this.musicGain.gain, t = this.ctx.currentTime;
+            g.cancelScheduledValues(t);
+            g.setValueAtTime(g.value, t);
+            g.setTargetAtTime(Math.pow(this.settings.musicVolume, 1.4) * 2.2, t, 0.05);
         }
 
         styleFor(mode) {
@@ -74,14 +84,20 @@
         }
 
         // mode is a game id (or a style id for previews); restarts only when the style changes.
+        // Call when a match ends: stops the music and forgets the active mode so settings changes don't restart it.
+        endMusic() { this.activeMode = null; this.stopMusic(); }
+
         startMusic(mode, forceRestart = false) {
+            if (!MUSIC[mode]) this.activeMode = mode;
             if (!this.settings.music || !this.settings.musicVolume || !this.unlock()) return;
             const style = MUSIC[mode] ? mode : this.styleFor(mode);
             if (this.mus && this.mus.style === style && !forceRestart) return;
             this.stopMusic();
             if (!this.musicGain) {
                 this.musicGain = this.ctx.createGain();
-                this.musicGain.connect(this.ctx.destination);
+                this.musicGain.gain.value = 0.0001;
+                const comp = this.ctx.createDynamicsCompressor();
+                this.musicGain.connect(comp); comp.connect(this.ctx.destination);
                 const length = this.ctx.sampleRate;
                 this.noiseBuf = this.ctx.createBuffer(1, length, this.ctx.sampleRate);
                 const data = this.noiseBuf.getChannelData(0);
@@ -97,13 +113,14 @@
             this.mus = null;
             if (this.musicGain) {
                 const g = this.musicGain.gain, t = this.ctx.currentTime;
-                g.cancelScheduledValues(t); g.setValueAtTime(g.value, t); g.linearRampToValueAtTime(0.0001, t + 0.25);
+                g.cancelScheduledValues(t); g.setValueAtTime(Math.max(g.value, 0.0001), t); g.exponentialRampToValueAtTime(0.0001, t + 0.25);
             }
         }
 
         pumpMusic() {
             const m = this.mus;
             if (!m) return;
+            if (this.ctx.state !== 'running') { this.ctx.resume?.().catch(() => { }); m.next = this.ctx.currentTime + 0.1; return; }
             const T = MUSIC[m.style], spb = 60 / T.bpm / 4, now = this.ctx.currentTime;
             if (m.next < now - 0.3) m.next = now + 0.05;
             while (m.next < now + 0.7) { this.musicStep(T, m.step, m.next, spb); m.next += spb; m.step++; }
@@ -213,4 +230,18 @@
     }
 
     window.StudBudSfx = new Sfx();
+    // Pause everything while the tab is hidden so music never plays in the background
+    document.addEventListener('visibilitychange', () => {
+        const c = window.StudBudSfx.ctx;
+        if (!c) return;
+        if (document.hidden) c.suspend?.().catch(() => { });
+        else if (window.StudBudSfx.mus) c.resume?.().catch(() => { });
+    });
+    // Browsers keep audio suspended until the user interacts; wake it on the first gesture
+    const wake = () => {
+        const sfx = window.StudBudSfx;
+        if (sfx.ctx && sfx.ctx.state === 'suspended') sfx.ctx.resume();
+        else if (!sfx.ctx) sfx.unlock();
+    };
+    ['pointerdown', 'keydown', 'touchstart'].forEach(type => window.addEventListener(type, wake, { passive: true }));
 })(window);

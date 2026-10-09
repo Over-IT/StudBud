@@ -1,0 +1,42 @@
+<!doctype html><meta charset="utf-8"><title>King of the Hill - practice</title>
+<style>html,body{margin:0;height:100%;background:#0b1020;overflow:hidden;font-family:system-ui}canvas{display:block;width:100vw;height:100vh}#hud{position:fixed;top:8px;left:12px;color:#fff;font:600 14px system-ui;text-shadow:0 1px 3px #000;pointer-events:none}</style>
+<canvas id="c"></canvas><div id="hud"></div>
+<script src="multiplayerEngine.js"></script>
+<script src="multiplayerGames.js"></script>
+<script>
+const A = window.StudBudArcade, cv = document.getElementById('c'), ctx = cv.getContext('2d'), hud = document.getElementById('hud');
+const bots = [
+    { id: 'b1', name: 'Bot A', color: '#f87171', x: 500, y: 460, f: 1, a: 0, ex: { d: 20 } },
+    { id: 'b2', name: 'Bot B', color: '#4ade80', x: 1050, y: 460, f: -1, a: 0, ex: { d: 60 } }
+];
+const s = {
+    seed: 7, user: { id: 'me' }, local: { color: '#38bdf8', cos: {} }, t: 0, startedAt: Date.now(), done: false, over: false, paused: false, question: null, score: 0, vw: 0, vh: 0,
+    keys: new Set(), just: new Set(), mouse: { x: 0, y: 0, down: false, pressed: false },
+    down(...c) { return c.some(k => this.keys.has(k)) || (c.includes('Mouse0') && this.mouse.down); },
+    pressed(...c) { return c.some(k => this.just.has(k)) || (c.includes('Mouse0') && this.mouse.pressed); },
+    axis() { return { x: (this.keys.has('KeyD') || this.keys.has('ArrowRight') ? 1 : 0) - (this.keys.has('KeyA') || this.keys.has('ArrowLeft') ? 1 : 0), y: 0 }; },
+    spend(n) { return this.game.res.spend(n); },
+    refill() { this.game.res.add(40); }, sfx() { }, addScore() { }, toast(t) { hud.dataset.msg = t; }, ask(cb) { cb(true); return true; },
+    remoteList() { return bots; }, emit() { }, send() { }, rewardAmount() { return 40; }
+};
+const g = new A.games.duel(s); s.game = g;
+addEventListener('keydown', e => { if (!e.repeat) s.just.add(e.code); s.keys.add(e.code); if (e.code === 'KeyQ') s.refill(); if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault(); });
+addEventListener('keyup', e => s.keys.delete(e.code));
+addEventListener('mousedown', () => { s.mouse.down = s.mouse.pressed = true; });
+addEventListener('mouseup', () => { s.mouse.down = false; });
+let last = performance.now();
+function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    const dpr = devicePixelRatio || 1, w = innerWidth, h = innerHeight;
+    if (cv.width !== w * dpr) { cv.width = w * dpr; cv.height = h * dpr; }
+    s.vw = w; s.vh = h; s.t += dt;
+    bots[0].x = 700 + Math.sin(s.t * 0.8) * 250; bots[1].x = 800 + Math.cos(s.t * 0.6) * 300;
+    if (g.res.value < 30) g.res.value = 100;
+    g.update(dt); s.just.clear(); s.mouse.pressed = false;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.draw(ctx, w, h);
+    hud.textContent = `Score ${Math.round(s.score)}  |  A/D move · Space jump · click/J hit · Shift dash · stand in the gold zone to score  |  ${hud.dataset.msg || ''}`;
+    requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>

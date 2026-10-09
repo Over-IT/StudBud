@@ -36,6 +36,12 @@
         return PALETTE[hashStr(String(player?.id || 'x')) % PALETTE.length];
     }
 
+    // Slope solids: slope: 1 rises to the right, -1 rises to the left; the box is x/y/w/h and the surface runs corner to corner.
+    function slopeY(s, cx) {
+        const t = clamp((cx - s.x) / s.w, 0, 1);
+        return s.slope > 0 ? s.y + s.h - t * s.h : s.y + t * s.h;
+    }
+
     // Axis-aligned body vs. rectangles. Solids may carry dx/dy (moving platforms) and `oneway`/`off` flags.
     function moveBody(b, solids, dt) {
         b.onGround = false;
@@ -43,14 +49,33 @@
         b.ground = null;
         b.x += b.vx * dt;
         for (const s of solids) {
-            if (s.oneway || s.off || !overlap(b, s)) continue;
+            if (s.oneway || s.off || s.slope || !overlap(b, s)) continue;
             if (b.vx > 0 || (b.vx === 0 && b.x + b.w / 2 < s.x + s.w / 2)) { b.x = s.x - b.w; b.wall = 1; }
             else { b.x = s.x + s.w; b.wall = -1; }
             b.vx = 0;
         }
+        for (const s of solids) {
+            if (!s.slope || !overlap(b, s)) continue;
+            const ratio = s.h / s.w, sy = slopeY(s, b.x + b.w / 2);
+            if (b.y + b.h > sy + ratio * Math.abs(b.vx) * dt + 12) {
+                if (b.vx > 0 || (b.vx === 0 && b.x + b.w / 2 < s.x + s.w / 2)) { b.x = s.x - b.w; b.wall = 1; }
+                else { b.x = s.x + s.w; b.wall = -1; }
+                b.vx = 0;
+            }
+        }
         const prevBottom = b.y + b.h;
         b.y += b.vy * dt;
         for (const s of solids) {
+            if (s.slope && !s.off) {
+                const cx = b.x + b.w / 2;
+                if (cx < s.x || cx > s.x + s.w || b.vy < 0) continue;
+                const sy = slopeY(s, cx), ratio = s.h / s.w, bottom = b.y + b.h;
+                const reach = ratio * Math.abs(b.vx) * dt + 3;
+                if ((bottom >= sy && prevBottom <= sy + reach + 12 + b.vy * dt) || (bottom < sy && sy - bottom <= reach && b.vy < 400 && prevBottom >= sy - reach - 2)) {
+                    b.y = sy - b.h; b.vy = 0; b.onGround = true; b.ground = s;
+                }
+                continue;
+            }
             if (s.off || !overlap(b, s)) continue;
             if (s.oneway) {
                 if (b.vy >= 0 && prevBottom <= s.y + 6) { b.y = s.y - b.h; b.vy = 0; b.onGround = true; b.ground = s; }
@@ -140,7 +165,7 @@
         has(n = 1) { return this.value >= n; }
         spend(n = 1) { if (this.value < n) return false; this.value -= n; return true; }
         drain(n) { this.value = Math.max(0, this.value - n); }
-        add(n) { this.value = Math.min(this.max, this.value + n); }
+        add(n) { this.value += n; }
     }
 
     class BaseGame {
@@ -368,6 +393,7 @@
             this.closeQuestion(true);
             this.renderResults();
             const me = this.standingsCache.findIndex(row => row.id === this.user.id);
+            window.StudBudSfx?.stopMusic();
             sfx(me === 0 ? 'win' : 'lose');
         }
 
@@ -401,8 +427,7 @@
         // Player-triggered question that refills the game's resource.
         recharge() {
             const res = this.game.res;
-            if (!res || this.paused || this.over || this.countdown > 0) return;
-            if (res.value >= res.max) { this.toast(`${res.label} is already full`, res.color); return; }
+            if (!res || this.paused || this.question || this.over || this.countdown > 0) return;
             this.ask(correct => {
                 if (correct) this.refill();
                 else if (correct === false) this.toast(`Wrong answer — no ${res.label.toLowerCase()}`, '#f87171');
@@ -410,7 +435,7 @@
         }
 
         ask(callback, note) {
-            if (this.paused || this.over || this.countdown > 0) return false;
+            if (this.paused || this.question || this.over || this.countdown > 0) return false;
             if (!this.cards.length) { this.toast('Questions are still loading…', '#fbbf24'); return false; }
             let index = Math.floor(Math.random() * this.cards.length);
             if (this.cards.length > 1 && index === this.lastCard) index = (index + 1) % this.cards.length;
@@ -421,8 +446,7 @@
             const options = wrong.slice(0, 3).concat(card.back);
             for (let i = options.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [options[i], options[j]] = [options[j], options[i]]; }
             this.question = { card, options, callback, locked: false };
-            this.paused = true;
-            this.keys.clear();
+            this.keys.clear(); this.mouse.down = false; this.mouse.rdown = false;
             const box = this.overlay.querySelector('.mpg-question');
             box.querySelector('.mpg-q-prompt').textContent = card.front;
             box.querySelector('.mpg-q-options').innerHTML = options.map((option, i) =>
@@ -562,6 +586,20 @@
                     <button type="button" class="mpg-recharge">Answer a question <kbd>Q</kbd></button>
                 </div>
                 <div class="mpg-hint"></div>
+                <div class="mpg-touch" aria-label="Touch controls">
+                    <div class="mpg-pad">
+                        <button type="button" data-k="KeyA" aria-label="Left">◀</button>
+                        <button type="button" data-k="KeyD" aria-label="Right">▶</button>
+                        <button type="button" data-k="KeyW" aria-label="Up">▲</button>
+                        <button type="button" data-k="KeyS" aria-label="Down">▼</button>
+                    </div>
+                    <div class="mpg-btns">
+                        <button type="button" data-k="Space" class="b-main">Jump</button>
+                        <button type="button" data-k="ShiftLeft">Dash</button>
+                        <button type="button" data-k="KeyJ" data-click="1">Hit</button>
+                        <button type="button" data-q="1" class="b-q">Q</button>
+                    </div>
+                </div>
                 <div class="mpg-toasts"></div>
                 <div class="mpg-countdown"></div>
                 <div class="mpg-question hidden" role="dialog" aria-modal="true" aria-label="Question">
@@ -580,6 +618,34 @@
             this.canvas = overlay.querySelector('.mpg-canvas');
             this.ctx = this.canvas.getContext('2d');
             overlay.querySelector('.mpg-name').textContent = this.game?.title || this.mode;
+            this.bindTouch(overlay);
+        }
+
+        // On-screen buttons feed the same key state as the keyboard, so every game works on phones.
+        bindTouch(overlay) {
+            const pad = overlay.querySelector('.mpg-touch');
+            if (!pad) return;
+            if (window.matchMedia?.('(pointer: coarse)').matches || navigator.maxTouchPoints > 0) overlay.classList.add('has-touch');
+            const release = btn => {
+                const code = btn.dataset.k;
+                if (code) this.keys.delete(code);
+                if (btn.dataset.click) this.mouse.down = false;
+                btn.classList.remove('on');
+            };
+            pad.querySelectorAll('button').forEach(btn => {
+                btn.addEventListener('pointerdown', e => {
+                    e.preventDefault();
+                    btn.setPointerCapture?.(e.pointerId);
+                    if (this.question || this.over) return;
+                    btn.classList.add('on');
+                    if (btn.dataset.q) { if (this.game?.res) this.recharge(); return; }
+                    this.justPressed.add(btn.dataset.k);
+                    this.keys.add(btn.dataset.k);
+                    if (btn.dataset.click) { this.mouse.down = true; this.mouse.pressed = true; }
+                });
+                for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) btn.addEventListener(type, () => release(btn));
+                btn.addEventListener('contextmenu', e => e.preventDefault());
+            });
         }
 
         resize() {
@@ -615,7 +681,7 @@
             box.classList.remove('hidden');
             const value = Math.round(res.value);
             box.querySelector('.mpg-meter-label').textContent = res.label;
-            box.querySelector('.mpg-meter-value').textContent = `${value} / ${res.max}`;
+            box.querySelector('.mpg-meter-value').textContent = `${value}`;
             const fill = box.querySelector('.mpg-meter-bar i');
             fill.style.width = `${Math.max(0, Math.min(100, res.value / res.max * 100))}%`;
             fill.style.background = res.color;
@@ -680,7 +746,7 @@
 
         destroy() {
             this.destroyed = true;
-            window.StudBudSfx?.stopMusic();
+            window.StudBudSfx?.endMusic();
             cancelAnimationFrame(this.raf);
             clearInterval(this.sendTimer);
             clearInterval(this.hudTimer);

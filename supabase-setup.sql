@@ -297,10 +297,10 @@ alter table public.studbud_game_rooms
     add constraint studbud_game_rooms_goal_type_check check (goal_type in ('points', 'time'));
 alter table public.studbud_game_rooms drop constraint if exists studbud_game_rooms_point_limit_check;
 alter table public.studbud_game_rooms
-    add constraint studbud_game_rooms_point_limit_check check (point_limit in (1, 3, 5, 10, 20, 500, 1000, 2000));
+    add constraint studbud_game_rooms_point_limit_check check (point_limit > 0);
 alter table public.studbud_game_rooms drop constraint if exists studbud_game_rooms_time_limit_seconds_check;
 alter table public.studbud_game_rooms
-    add constraint studbud_game_rooms_time_limit_seconds_check check (time_limit_seconds in (120, 300, 600));
+    add constraint studbud_game_rooms_time_limit_seconds_check check (time_limit_seconds between 60 and 3600);
 
 alter table public.studbud_game_rooms enable row level security;
 revoke all on table public.studbud_game_rooms from anon, authenticated;
@@ -329,7 +329,11 @@ alter table public.studbud_multiplayer_profiles
 update public.studbud_multiplayer_profiles set equipped_accessory = '' where equipped_accessory = 'accessory_default';
 
 alter table public.studbud_multiplayer_profiles
-    add column if not exists equipped_pet text not null default '';
+    add column if not exists equipped_pet text not null default '',
+    add column if not exists last_daily_claim date,
+    add column if not exists daily_streak integer not null default 0,
+    add column if not exists solo_coins_day date,
+    add column if not exists solo_coins_today integer not null default 0;
 
 -- Single source of truth for priced items and rarity (pets are box-only, so price is null).
 create or replace function public.studbud_shop_items()
@@ -404,8 +408,63 @@ begin
         'equipped_hat', v_profile.equipped_hat,
         'equipped_accessory', v_profile.equipped_accessory,
         'equipped_pet', v_profile.equipped_pet,
-        'best_wait_score', v_profile.best_wait_score
+        'best_wait_score', v_profile.best_wait_score,
+        'daily_claimed', v_profile.last_daily_claim = current_date,
+        'daily_streak', v_profile.daily_streak,
+        'solo_coins_today', case when v_profile.solo_coins_day = current_date then v_profile.solo_coins_today else 0 end
     );
+end;
+$$;
+
+create or replace function public.studbud_claim_daily_reward()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_user_id uuid := auth.uid();
+    v_profile public.studbud_multiplayer_profiles%rowtype;
+    v_streak integer;
+    v_reward integer;
+begin
+    if v_user_id is null then raise exception 'Sign in to claim your daily reward.'; end if;
+    perform public.studbud_get_multiplayer_profile();
+    select * into v_profile from public.studbud_multiplayer_profiles where user_id = v_user_id for update;
+    if v_profile.last_daily_claim = current_date then raise exception 'You already claimed today''s reward. Come back tomorrow!'; end if;
+    v_streak := case when v_profile.last_daily_claim = current_date - 1 then least(v_profile.daily_streak + 1, 7) else 1 end;
+    v_reward := 25 + (v_streak - 1) * 10;
+    update public.studbud_multiplayer_profiles
+        set coins = coins + v_reward, last_daily_claim = current_date, daily_streak = v_streak, updated_at = now()
+        where user_id = v_user_id;
+    return public.studbud_get_multiplayer_profile() || jsonb_build_object('daily_reward', v_reward);
+end;
+$$;
+
+create or replace function public.studbud_award_solo_coins(p_correct integer, p_total integer)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_user_id uuid := auth.uid();
+    v_profile public.studbud_multiplayer_profiles%rowtype;
+    v_used integer;
+    v_award integer;
+begin
+    if v_user_id is null then raise exception 'Sign in to earn coins.'; end if;
+    if p_correct is null or p_total is null or p_correct < 0 or p_total < 1 or p_correct > p_total or p_total > 100 then
+        raise exception 'That game result is invalid.';
+    end if;
+    perform public.studbud_get_multiplayer_profile();
+    select * into v_profile from public.studbud_multiplayer_profiles where user_id = v_user_id for update;
+    v_used := case when v_profile.solo_coins_day = current_date then v_profile.solo_coins_today else 0 end;
+    v_award := greatest(0, least(least(p_correct * 2, 30), 150 - v_used));
+    update public.studbud_multiplayer_profiles
+        set coins = coins + v_award, solo_coins_day = current_date, solo_coins_today = v_used + v_award, updated_at = now()
+        where user_id = v_user_id;
+    return public.studbud_get_multiplayer_profile() || jsonb_build_object('coins_awarded', v_award);
 end;
 $$;
 
@@ -713,8 +772,8 @@ declare
     v_room public.studbud_game_rooms%rowtype;
     v_nickname text := btrim(p_nickname);
     v_cards jsonb := p_cards;
-    v_goal_type text := coalesce(p_options ->> 'goal_type', 'points');
-    v_point_limit integer := coalesce((p_options ->> 'point_limit')::integer, 1000);
+    v_goal_type text := 'time';
+    v_point_limit integer := 1000;
     v_time_limit integer := coalesce((p_options ->> 'time_limit_seconds')::integer, 300);
     v_reward integer := coalesce((p_options ->> 'question_reward')::integer, 20);
     v_cosmetics jsonb;
@@ -726,11 +785,8 @@ begin
     end if;
     if coalesce(p_mode, '') not in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'sports', 'fishing', 'hack') then raise exception 'Choose a valid game mode.'; end if;
     if v_goal_type not in ('points', 'time') then raise exception 'Choose a valid match goal.'; end if;
-    if (p_mode = 'sports' and v_point_limit not in (1, 3, 5))
-        or (p_mode = 'shooter' and v_point_limit not in (5, 10, 20))
-        or (p_mode not in ('sports', 'shooter') and v_point_limit not in (500, 1000, 2000))
-        or v_time_limit not in (120, 300, 600) then
-        raise exception 'Choose a supported point or time limit.';
+    if v_time_limit not between 60 and 3600 then
+        raise exception 'Choose a time limit between 1 minute and 1 hour.';
     end if;
     if v_reward not in (10, 20, 30, 50) then raise exception 'Choose a supported question reward.'; end if;
     if jsonb_typeof(v_cards) is distinct from 'array' then raise exception 'The selected deck is invalid.'; end if;
@@ -827,7 +883,7 @@ begin
         select 1 from jsonb_array_elements(v_players) as item(player)
         where player ->> 'id' = v_user_id::text
     ) then return public.studbud_game_room_view(v_room); end if;
-    if v_room.mode = 'duel' and jsonb_array_length(v_players) >= 2 then
+    if v_room.mode = 'duel' and jsonb_array_length(v_players) >= 8 then
         raise exception 'This 1v1 room already has both players.';
     end if;
     if jsonb_array_length(v_players) >= 16 then raise exception 'This room is full (16 players maximum).'; end if;
@@ -1380,3 +1436,180 @@ revoke all on function public.studbud_kick_game_player(text, uuid) from public, 
 grant execute on function public.studbud_kick_game_player(text, uuid) to authenticated;
 revoke all on function public.studbud_leave_game_room(text) from public, anon;
 grant execute on function public.studbud_leave_game_room(text) to authenticated;
+
+
+-- ============================================================================
+-- Admin tools: only the "overit" account (email overit@accounts.studbud.invalid)
+-- Every function re-checks the caller on the server, so the client can't bypass it.
+-- ============================================================================
+create table if not exists public.studbud_banned_users (
+    user_id uuid primary key references auth.users (id) on delete cascade,
+    reason text not null default '',
+    banned_at timestamptz not null default now()
+);
+alter table public.studbud_banned_users enable row level security;
+revoke all on table public.studbud_banned_users from anon, authenticated;
+
+create or replace function public.studbud_is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+    select exists (
+        select 1 from auth.users
+        where id = auth.uid() and lower(email) = 'overit@accounts.studbud.invalid'
+    );
+$$;
+
+create or replace function public.studbud_require_admin()
+returns void
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    if not public.studbud_is_admin() then raise exception 'Only the admin can do this.'; end if;
+end;
+$$;
+
+-- Banned users can't publish community decks.
+drop policy if exists "Deck owners can publish community decks" on public.studbud_community_decks;
+create policy "Deck owners can publish community decks"
+    on public.studbud_community_decks for insert
+    to authenticated with check (
+        auth.uid() = owner_id
+        and not exists (select 1 from public.studbud_banned_users b where b.user_id = auth.uid())
+    );
+
+create or replace function public.studbud_admin_list_users(p_query text default '')
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    perform public.studbud_require_admin();
+    return coalesce((
+        select jsonb_agg(row_to_json(u)) from (
+            select a.id,
+                coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student') as username,
+                a.created_at,
+                a.last_sign_in_at,
+                coalesce(p.coins, 0) as coins,
+                coalesce(p.wins, 0) as wins,
+                (select count(*) from public.studbud_community_decks d where d.owner_id = a.id) as decks,
+                exists (select 1 from public.studbud_banned_users b where b.user_id = a.id) as banned
+            from auth.users a
+            left join public.studbud_multiplayer_profiles p on p.user_id = a.id
+            where coalesce(p_query, '') = ''
+                or coalesce(a.raw_user_meta_data ->> 'username', '') ilike '%' || replace(replace(p_query, '%', ''), '_', '') || '%'
+            order by a.created_at desc
+            limit 100
+        ) u
+    ), '[]'::jsonb);
+end;
+$$;
+
+create or replace function public.studbud_admin_list_decks(p_query text default '')
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    perform public.studbud_require_admin();
+    return coalesce((
+        select jsonb_agg(row_to_json(d)) from (
+            select c.id, c.title, c.description, c.card_count, c.study_count, c.updated_at, c.owner_id,
+                coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student') as owner,
+                (select jsonb_agg(card) from (select jsonb_array_elements(c.cards) as card limit 5) preview) as preview
+            from public.studbud_community_decks c
+            left join auth.users a on a.id = c.owner_id
+            where coalesce(p_query, '') = ''
+                or c.title ilike '%' || replace(replace(p_query, '%', ''), '_', '') || '%'
+                or coalesce(a.raw_user_meta_data ->> 'username', '') ilike '%' || replace(replace(p_query, '%', ''), '_', '') || '%'
+            order by c.updated_at desc
+            limit 100
+        ) d
+    ), '[]'::jsonb);
+end;
+$$;
+
+create or replace function public.studbud_admin_delete_deck(p_deck_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    perform public.studbud_require_admin();
+    delete from public.studbud_community_decks where id = p_deck_id;
+end;
+$$;
+
+create or replace function public.studbud_admin_set_ban(p_user_id uuid, p_banned boolean, p_reason text default '')
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    perform public.studbud_require_admin();
+    if p_user_id = auth.uid() then raise exception 'You can''t ban your own account.'; end if;
+    if p_banned then
+        insert into public.studbud_banned_users (user_id, reason) values (p_user_id, left(coalesce(p_reason, ''), 200))
+        on conflict (user_id) do update set reason = excluded.reason, banned_at = now();
+        delete from public.studbud_community_decks where owner_id = p_user_id;
+    else
+        delete from public.studbud_banned_users where user_id = p_user_id;
+    end if;
+end;
+$$;
+
+create or replace function public.studbud_admin_adjust_coins(p_user_id uuid, p_delta integer)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    perform public.studbud_require_admin();
+    update public.studbud_multiplayer_profiles
+        set coins = greatest(0, coins + p_delta), updated_at = now()
+        where user_id = p_user_id;
+    if not found then raise exception 'That user has no game profile yet.'; end if;
+end;
+$$;
+
+create or replace function public.studbud_admin_remove_user_decks(p_user_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    perform public.studbud_require_admin();
+    delete from public.studbud_community_decks where owner_id = p_user_id;
+end;
+$$;
+
+revoke all on function public.studbud_is_admin() from public, anon;
+grant execute on function public.studbud_is_admin() to authenticated;
+revoke all on function public.studbud_require_admin() from public, anon, authenticated;
+revoke all on function public.studbud_admin_list_users(text) from public, anon;
+grant execute on function public.studbud_admin_list_users(text) to authenticated;
+revoke all on function public.studbud_admin_list_decks(text) from public, anon;
+grant execute on function public.studbud_admin_list_decks(text) to authenticated;
+revoke all on function public.studbud_admin_delete_deck(uuid) from public, anon;
+grant execute on function public.studbud_admin_delete_deck(uuid) to authenticated;
+revoke all on function public.studbud_admin_set_ban(uuid, boolean, text) from public, anon;
+grant execute on function public.studbud_admin_set_ban(uuid, boolean, text) to authenticated;
+revoke all on function public.studbud_admin_adjust_coins(uuid, integer) from public, anon;
+grant execute on function public.studbud_admin_adjust_coins(uuid, integer) to authenticated;
+revoke all on function public.studbud_admin_remove_user_decks(uuid) from public, anon;
+grant execute on function public.studbud_admin_remove_user_decks(uuid) to authenticated;

@@ -221,7 +221,7 @@
 
         ex() { return { c: this.carry }; }
         goalText() { return `Banked ${this.banked} · Bag ${this.items}/${this.cap} (${this.carry})`; }
-        hint() { return 'WASD move · hold click / Space to dig (uses energy) · bank ore at the base · avoid lava · press Q for a question to recharge energy'; }
+        hint() { return 'WASD move · hold click to dig · bank ore at base · avoid lava · Q = recharge'; }
 
         draw(ctx, w, h) {
             const s = this.s, me = this.me;
@@ -395,7 +395,7 @@
                         if (correct) { s.refill(); s.addScore(90); this.haul += 90; s.toast('Treasure chest: +90', '#fbbf24'); this.particles.burst(c.x, c.y, '#fbbf24', 28, 300, 0.8, 5); }
                         else if (correct === false) s.toast('The chest sank!', '#f87171');
                     });
-                    if (opened) { c.until = now + 30; s.emit({ k: 'ch', i: c.i, u: +(now + 30).toFixed(1) }); }
+                    if (opened) { c.until = now + 1e6; s.emit({ k: 'ch', i: c.i, u: +(now + 1e6).toFixed(1) }); }
                 }
             }
             s.setGoal(this.haul);
@@ -407,7 +407,7 @@
         }
 
         goalText() { return `Haul ${this.haul} · ${this.catches} fish${this.combo > 1 ? ` · combo x${this.combo}` : ''}`; }
-        hint() { return 'WASD steer the boat · click to cast your net (10 bait) · dodge logs, rocks & whirlpools · press Q for a question to restock bait'; }
+        hint() { return 'WASD steer · click to cast net · dodge obstacles · Q = restock bait'; }
         ex() { return { n: this.cast ? 1 : 0 }; }
 
         draw(ctx, w, h) {
@@ -584,14 +584,14 @@
                     if (correct) { s.addScore(40); this.earned += 40; this.boost = 8; s.refill(); s.toast('Snack break: +40 and a speed boost!', '#38bdf8'); }
                     else if (correct === false) s.toast('Machine ate your coin.', '#f87171');
                 });
-                if (opened) v.until = now + 25;
+                if (opened) v.until = now + 1e6;
             }
             s.setGoal(this.deliveries);
         }
 
         ex() { return { p: this.pkg ? 1 : 0 }; }
         goalText() { return `${this.deliveries} deliveries · streak ${this.streak}`; }
-        hint() { return 'WASD move · hold Shift to sprint (uses energy) · deliver packages to marked houses · dodge cars · press Q for a question to recharge energy'; }
+        hint() { return 'WASD move · Shift sprint · deliver to marked houses · dodge cars · Q = recharge'; }
 
         draw(ctx, w, h) {
             const s = this.s, me = this.me, now = clock(s), t = this.anim;
@@ -664,6 +664,11 @@
             this.me.y = this.H / 2; this.baseSpeed = 255;
             this.res = new A.Resource('Energy', '#38bdf8', 100, 60, 2);
             this.dash = 0; this.dashCd = 0; this.bull = 0; this.msg = '';
+            // With four or more players the match splits into two teams that attack opposite endzones
+            this.teamIds = [...s.roster.keys()].sort();
+            this.teamsOn = this.teamIds.length >= 4;
+            this.myTeam = this.teamsOn ? this.teamIds.indexOf(s.user.id) % 2 : -1;
+            if (this.teamsOn && this.myTeam === 1) this.dir = -1;
             this.defenders = []; this.pads = [];
             this.newDrive();
             this.cam.x = this.me.x; this.cam.y = this.me.y;
@@ -683,8 +688,36 @@
             for (let i = 0; i < 3; i++) this.pads.push({ x: 500 + r() * (this.W - 1000), y: 120 + r() * (this.H - 240), used: false });
         }
 
+        teamOf(id) { return this.teamsOn ? this.teamIds.indexOf(id) % 2 : -1; }
+
+        tackled(msg = 'Tackled! Back to the last marker.') {
+            const s = this.s, me = this.me;
+            this.stun = 1.3; this.msg = 'TACKLED!';
+            s.toast(msg, '#f87171');
+            this.particles.burst(me.x, me.y, '#fecaca', 22, 280, 0.6, 5);
+            me.x = (this.dir > 0 ? 130 : this.W - 130) + this.dir * this.checkpoint; me.y = this.H / 2; me.vx = me.vy = 0;
+            this.defenders = this.defenders.filter(o => dist(o.x, o.y, me.x, me.y) > 380);
+        }
+
+        onEvent(ev, from) {
+            if (ev.k === 'tk' && ev.to === this.s.user.id && this.stun <= 0 && this.bull <= 0) {
+                this.tackled(`${from.name} tackled you!`);
+            }
+        }
+
         update(dt) {
             const s = this.s, me = this.me;
+            if (this.teamsOn && this.stun <= 0 && (this.bull > 0 || this.dash > 0.08)) {
+                for (const r of s.remoteList()) {
+                    if (this.teamOf(r.id) === this.myTeam || dist(r.x, r.y, me.x, me.y) > 34) continue;
+                    if (!this.tkCd || this.tkCd[r.id] === undefined || performance.now() - this.tkCd[r.id] > 1500) {
+                        this.tkCd = this.tkCd || {};
+                        this.tkCd[r.id] = performance.now();
+                        s.emit({ k: 'tk', to: r.id });
+                        s.addScore(15); s.toast(`Tackled ${r.name}! +15`, '#fde047');
+                    }
+                }
+            }
             this.dashCd -= dt; this.bull = Math.max(0, this.bull - dt); this.dash = Math.max(0, this.dash - dt);
             const wantsSprint = s.down('ShiftLeft', 'ShiftRight') && this.moving;
             const sprint = wantsSprint && this.res.has(1);
@@ -729,11 +762,7 @@
                         this.particles.burst(d.x, d.y, '#fca5a5', 12, 240, 0.4, 4);
                         if (this.bull > 0) s.addScore(5);
                     } else {
-                        this.stun = 1.3; this.msg = 'TACKLED!';
-                        s.toast('Tackled! Back to the last marker.', '#f87171');
-                        this.particles.burst(me.x, me.y, '#fecaca', 22, 280, 0.6, 5);
-                        me.x = (this.dir > 0 ? 130 : this.W - 130) + this.dir * this.checkpoint; me.y = this.H / 2; me.vx = me.vy = 0;
-                        this.defenders = this.defenders.filter(o => dist(o.x, o.y, me.x, me.y) > 380);
+                        this.tackled();
                         break;
                     }
                 }
@@ -752,14 +781,15 @@
                 s.toast(`TOUCHDOWN! (${this.td})`, '#fde047');
                 this.particles.burst(me.x, me.y, '#fde047', 50, 420, 1, 6);
                 s.emit({ k: 'td', n: this.td });
-                this.dir *= -1; this.newDrive(); this.stun = 0.6;
+                if (!this.teamsOn) this.dir *= -1;
+                this.newDrive(); this.stun = 0.6;
             }
             s.setGoal(this.td);
         }
 
         ex() { return { b: this.bull > 0 ? 1 : 0 }; }
         goalText() { return `${this.td} TD · ${Math.round(this.yards / 1)} yds`; }
-        hint() { return 'WASD run · hold Shift to sprint · Space juke-dash (15 energy) · press Q for a question to recharge energy · reach the far endzone'; }
+        hint() { return this.teamsOn ? `\${this.myTeam === 0 ? 'Blue' : 'Red'} team · WASD run · Shift sprint · Space tackle rivals · Q = recharge` : 'WASD run · Shift sprint · Space dash · reach the far endzone · Q = recharge'; }
 
         draw(ctx, w, h) {
             const me = this.me, t = this.anim;
@@ -785,6 +815,7 @@
                 drawFigureTop(ctx, { color: '#ef4444' }, d.x, d.y, 15, Math.atan2(d.vy, d.vx || 0.01), d.anim);
             }
             this.drawPlayers(ctx, (c, x, y, r) => {
+                if (this.teamsOn) this.ring(c, x, y, 21, this.teamOf(r ? r.id : this.s.user.id) === 0 ? '#60a5fa' : '#f87171', 3);
                 c.fillStyle = '#92400e'; c.beginPath(); c.ellipse(x + 14, y + 6, 8, 5, 0.4, 0, TAU); c.fill();
                 if (r ? r.ex?.b : this.bull > 0) { this.ring(c, x, y, 26, 'rgba(253,224,71,.8)', 3); }
             });

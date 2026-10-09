@@ -228,6 +228,7 @@
             document.getElementById('app-container')?.classList.remove('hidden');
             this.setCloudStatus(this.initialSnapshot ? 'Synced to your account.' : 'Saving your account data…');
             this.queueSync();
+            window.NexusApp?.refreshAdminAccess?.();
         }
 
         reportAccountError(error) {
