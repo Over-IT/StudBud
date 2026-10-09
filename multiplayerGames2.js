@@ -108,6 +108,7 @@
         constructor(s) {
             super(s, COLS * TS, ROWS * TS);
             this.title = 'Crystal Cartel';
+            this.touchMain = 'Dig';
             const r = mulberry32(s.seed);
             const T = this.T = new Uint8Array(COLS * ROWS);
             for (let y = 4; y < ROWS; y++) {
@@ -659,6 +660,7 @@
         constructor(s) {
             super(s, 2600, 900);
             this.title = 'Endzone Rally';
+            this.touchMain = 'Tackle';
             this.scoreGoal = false;
             this.dir = 1; this.td = 0; this.yards = 0; this.progress = 0; this.best = 0;
             this.me.y = this.H / 2; this.baseSpeed = 255;

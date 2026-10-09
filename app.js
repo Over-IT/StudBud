@@ -2140,8 +2140,10 @@
 
         // Admin tools. The server re-checks the account on every call; this only controls what is shown.
         async refreshAdminAccess() {
-            this.isAdmin = false;
-            try { this.isAdmin = await window.StudBudCommunityGames.isAdmin(); } catch (error) { this.isAdmin = false; }
+            // Show the tab to the "overit" account even if the server isn't set up yet, so the page can explain what is missing.
+            const name = String(window.StudBudCloud?.user?.user_metadata?.username || '').toLowerCase();
+            this.isAdmin = name === 'overit';
+            try { if (await window.StudBudCommunityGames.isAdmin()) this.isAdmin = true; } catch (error) { /* keep the name check */ }
             window.NexusApp.isAdmin = this.isAdmin;
             document.getElementById('admin-nav-item')?.classList.toggle('hidden', !this.isAdmin);
         }
@@ -2152,13 +2154,11 @@
             if (!list || !this.isAdmin) return;
             const tab = this.adminTab || 'decks';
             const query = document.getElementById('admin-search')?.value.trim() || '';
-            const searchBox = document.getElementById('admin-search');
-            if (searchBox) searchBox.placeholder = tab === 'users' ? 'Search by username' : 'Search by deck title or owner';
             status.textContent = 'Loading…';
             try {
                 const games = window.StudBudCommunityGames;
                 const rows = await games.adminCall(tab === 'users' ? 'studbud_admin_list_users' : 'studbud_admin_list_decks', { p_query: query });
-                status.textContent = rows.length ? `${rows.length} ${tab === 'users' ? 'user' : 'deck'}${rows.length === 1 ? '' : 's'} shown` : (query ? 'No matches. Try a different search.' : 'Nothing here yet.');
+                status.textContent = rows.length ? `${rows.length} shown` : 'Nothing found.';
                 const esc = value => this.escapeHTML(String(value ?? ''));
                 list.innerHTML = tab === 'users'
                     ? rows.map(user => `<article class="admin-row">
@@ -2202,8 +2202,6 @@
                     await games.adminCall('studbud_admin_adjust_coins', { p_user_id: data.id, p_delta: amount });
                 }
                 await this.loadAdminList();
-                const done = { 'delete-deck': 'Deck deleted.', 'remove-decks': 'Public decks removed.', ban: 'User banned.', unban: 'User unbanned.', coins: 'Coins updated.' };
-                status.textContent = `${done[action] || 'Done.'} ${status.textContent}`;
             } catch (error) {
                 status.textContent = this.friendlyErrorMessage(error, 'That admin action failed.');
             }
@@ -4695,9 +4693,12 @@
         }
 
         formatReviewInterval(card, quality) {
-            const result = window.SM2Engine.evaluate(card, quality);
-            if (!result.interval) return '10 min';
-            return result.interval === 1 ? '1 day' : result.interval < 30 ? `${result.interval} days` : result.interval < 365 ? `${Math.round(result.interval / 30)} mo` : `${(result.interval / 365).toFixed(1)} yr`;
+            const result = window.SM2Engine.evaluate(card, quality, { fuzz: false });
+            const ms = new Date(result.nextReviewDate).getTime() - Date.now();
+            if (ms < 3600000) return `${Math.max(1, Math.round(ms / 60000))} min`;
+            if (ms < 86400000) return `${Math.round(ms / 3600000)} hr`;
+            const d = Math.round(ms / 86400000);
+            return d === 1 ? '1 day' : d < 30 ? `${d} days` : d < 365 ? `${Math.round(d / 30)} mo` : `${(d / 365).toFixed(1)} yr`;
         }
 
         revealCard() {
@@ -4722,8 +4723,9 @@
             const card = this.studyCards[this.activeCardIndex];
             if (!window.SM2Engine) throw new Error('The spaced-repetition scheduler did not load.');
             if (!this.cramMode) Object.assign(card, window.SM2Engine.evaluate(card, quality));
-            // A forgotten card comes back before the session ends
-            if (quality < 3) this.studyCards.push(card);
+            // Cards still in a learning step (due within minutes) come back before the session ends
+            const soon = !this.cramMode && new Date(card.nextReviewDate).getTime() - Date.now() < 3600000;
+            if (this.cramMode ? quality < 3 : soon) this.studyCards.push(card);
             deck.studiedAt = deck.studiedAt || new Date().toISOString();
             deck.studiedCount = Number(deck.studiedCount || 0) + 1;
             await AppState.saveFlashcardDeck(deck);

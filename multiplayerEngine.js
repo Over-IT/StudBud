@@ -68,6 +68,10 @@
         for (const s of solids) {
             if (s.slope && !s.off) {
                 const cx = b.x + b.w / 2;
+                if (cx >= s.x && cx <= s.x + s.w && b.vy < 0 && b.y < s.y + s.h && prevBottom - b.h >= s.y + s.h - 1) {
+                    b.y = s.y + s.h; b.vy = 0;
+                    continue;
+                }
                 if (cx < s.x || cx > s.x + s.w || b.vy < 0) continue;
                 const sy = slopeY(s, cx), ratio = s.h / s.w, bottom = b.y + b.h;
                 const reach = ratio * Math.abs(b.vx) * dt + 3;
@@ -544,6 +548,7 @@
                 this.mouse.y = (e.clientY - b.top) / this.scale;
             });
             canvas.addEventListener('pointerdown', e => {
+                if (e.pointerType === 'touch') this.mouse.touchAt = performance.now();
                 const b = canvas.getBoundingClientRect();
                 this.mouse.x = (e.clientX - b.left) / this.scale;
                 this.mouse.y = (e.clientY - b.top) / this.scale;
@@ -597,6 +602,7 @@
                         <button type="button" data-k="Space" class="b-main">Jump</button>
                         <button type="button" data-k="ShiftLeft">Dash</button>
                         <button type="button" data-k="KeyJ" data-click="1">Hit</button>
+                        <button type="button" data-k="KeyE" class="b-e hidden">Blast</button>
                         <button type="button" data-q="1" class="b-q">Q</button>
                     </div>
                 </div>
@@ -670,6 +676,9 @@
                 ? `${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, '0')}`
                 : `${Math.floor(this.t / 60)}:${String(Math.floor(this.t) % 60).padStart(2, '0')}`;
             o.querySelector('.mpg-hint').textContent = this.question ? '' : this.game.hint();
+            o.querySelector('.b-e')?.classList.toggle('hidden', !this.game.touchBlast);
+            const mainBtn = o.querySelector('.b-main'), mainText = this.game.touchMain || 'Jump';
+            if (mainBtn && mainBtn.textContent !== mainText) mainBtn.textContent = mainText;
             o.querySelector('.mpg-board').innerHTML = this.standings().slice(0, 6).map((row, i) =>
                 `<li class="${row.id === this.user.id ? 'me' : ''}"><i style="background:${row.color}"></i><span>${i + 1}. ${esc(row.n)}</span><b>${row.s.toLocaleString()}</b></li>`).join('');
         }

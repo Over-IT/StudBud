@@ -188,7 +188,7 @@
                         const sl = s.mover && !s.vert ? s.bx - s.amp : s.x, sr = s.mover && !s.vert ? s.bx + s.w + s.amp : s.x + s.w;
                         if (!(c - wd / 2 < sr + 30 && c + wd / 2 > sl - 30)) return false;
                         // never overlap anything at the same height or leave less than a body of headroom
-                        if (s.y < ny + 20 && s.y + s.h > ny - 64) return true;
+                        if (s.y < ny + 20 && s.y + s.h > ny - 130) return true;
                         const dy = s.y - ny;
                         return !(extra && extra.jt) && walkable(s) && dy > 0 && dy <= 150;
                     });
@@ -367,6 +367,11 @@
                     for (let i = 0; i < n; i++) {
                         const rise = 120 + Math.round(r() * 60), sw = 360 + Math.round(r() * 80);
                         if (d > 0 ? a.x + a.w + sw + 260 > W - 60 : a.x - sw - 260 < 60) d = -d;
+                        const clash = dd => {
+                            const x0 = dd > 0 ? a.x + a.w : a.x - sw - 220, x1 = dd > 0 ? a.x + a.w + sw + 220 : a.x;
+                            return solids.some(o => !o.wall && !o.ground && o.x < x1 && o.x + o.w > x0 && o.y < a.y + 150 && o.y + o.h > a.y - rise - 140);
+                        };
+                        if (clash(d)) { d = -d; if (clash(d)) break; }
                         const sx = d > 0 ? a.x + a.w : a.x - sw;
                         solids.push({ x: sx, y: a.y - rise, w: sw, h: rise, slope: d > 0 ? 1 : -1, bi: b });
                         const top = { x: d > 0 ? sx + sw : sx - 220, y: a.y - rise, w: 220, h: 14, thin: true, bi: b };
@@ -703,6 +708,17 @@
             for (const q of solids) {
                 if (!q.thin || q.jt || q.mover || q.crumble || q.wall || q.ground) continue;
                 if (solids.some(p => p !== q && walkable(p) && !p.mover && p.y - q.y > 0 && p.y - q.y <= 150 && p.x < q.x + q.w - 10 && p.x + p.w > q.x + 10)) q.jt = true;
+            }
+            // a slope's body must never leave a cramped slot over a platform: nudge that platform down so there is real headroom
+            for (const sl of solids) {
+                if (!sl.slope) continue;
+                for (const q of solids) {
+                    if (q === sl || q.slope || q.mover || q.wall || q.ground) continue;
+                    const gap = q.y - (sl.y + sl.h);
+                    if (gap <= 0 || gap >= 130 || q.x >= sl.x + sl.w || q.x + q.w <= sl.x) continue;
+                    const ny = q.y + (130 - gap);
+                    if (!solids.some(o => o !== q && o.x < q.x + q.w && o.x + o.w > q.x && o.y < ny + q.h + 10 && o.y + o.h > q.y)) q.y = ny;
+                }
             }
             for (const p of solids) p.oneway = !!p.jt;
             // purely visual rooftop clutter, placed only in free gaps (no props, spikes, springs, boxes, flags or ceilings)
@@ -1472,6 +1488,7 @@
         constructor(s) {
             super(s);
             this.title = 'Starfall Blasters';
+            this.touchBlast = true; this.touchMain = 'Dash';
             this.scoreGoal = false;
             this.W = 2600; this.H = 1700;
             const r = mulberry32(s.seed);
@@ -1544,6 +1561,12 @@
                 if (this.dead <= 0) { this.respawnAt(); this.hp = 100; this.invuln = 2; this.drones = this.drones.filter(d => dist(d.x, d.y, me.x, me.y) > 500); }
             } else {
                 me.aim = Math.atan2(my - me.y, mx - me.x);
+                // On phones the Hit button fires at the nearest target unless you just tapped the screen to aim
+                if (s.overlay?.classList.contains('has-touch') && s.keys.has('KeyJ') && performance.now() - (s.mouse.touchAt || 0) > 1500) {
+                    let best = null, bd = 900;
+                    for (const t of [...this.drones, ...s.remoteList()]) { const d = dist(t.x, t.y, me.x, me.y); if (d < bd && !t.dead) { bd = d; best = t; } }
+                    if (best) me.aim = Math.atan2(best.y - me.y, best.x - me.x);
+                }
                 const a = s.axis();
                 const len = Math.hypot(a.x, a.y) || 1;
                 const speed = this.dashT > 0 ? 760 : 270;

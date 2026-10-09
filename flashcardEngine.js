@@ -1,7 +1,7 @@
 /**
  * NEXUS STUDENT HUB
  * FILE: flashcardEngine.js (7 of 9)
- * DESCRIPTION: Advanced Spaced Repetition (SuperMemo SM-2), Bayesian Knowledge Tracing (BKT),
+ * DESCRIPTION: Advanced Spaced Repetition (FSRS-6, as used by Anki), Bayesian Knowledge Tracing (BKT),
  * Strict Context-Linked Hierarchy Bus, and Multi-Format Convertible Exporter.
  */
 
@@ -44,76 +44,168 @@
     }
 
     // ============================================================================
-    // 2. SUPERMEMO SM-2 ALGORITHM ENGINE
+    // 2. FSRS-6 SCHEDULER (the algorithm used by current Anki, with its default parameters)
     // ============================================================================
     class SM2Engine {
-        /**
-         * Calculates new SM-2 parameters after a review response.
-         * Quality (q): 0 (Blackout) to 5 (Perfect recall)
-         */
-        static evaluate(card, q) {
-            if (!Number.isInteger(q) || q < 0 || q > 5) {
-                throw new RangeError('Review quality must be an integer from 0 through 5.');
-            }
-            let repetitions = card.repetitions || 0;
-            let easeFactor = card.easeFactor || 2.5;
-            let interval = card.interval || 0;
-            let lapses = card.lapses || 0;
-            const reviewedAt = Date.now();
-            let dueInMs;
+        static W = [0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722, 0.1666, 0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014, 1.8729, 0.5425, 0.0912, 0.0658, 0.1542];
+        static RETENTION = 0.9;
+        static MAX_INTERVAL = 36500;
+        static LEARNING_STEPS = [1, 10]; // minutes
+        static RELEARNING_STEPS = [10];
+        static DAY = 86400000;
 
-            if (q >= 3) {
-                // Anki-style grades: 3 = Hard, 4 = Good, 5 = Easy
-                if (repetitions === 0) {
-                    interval = q === 5 ? 4 : 1;
-                } else if (repetitions === 1) {
-                    interval = q === 3 ? 4 : q === 5 ? 8 : 6;
-                } else if (q === 3) {
-                    interval = Math.max(interval + 1, Math.round(interval * 1.2));
-                } else if (q === 4) {
-                    interval = Math.max(interval + 1, Math.round(interval * easeFactor));
-                } else {
-                    interval = Math.max(interval + 1, Math.round(interval * easeFactor * 1.3));
-                }
-                // Fuzz longer intervals slightly so cards from the same session don't all return together
-                if (interval >= 7) interval = Math.max(1, Math.round(interval * (0.95 + Math.random() * 0.1)));
-                interval = Math.max(1, Math.min(interval, 36500));
-                repetitions += 1;
-                dueInMs = interval * 86400000;
+        static get decay() { return -SM2Engine.W[20]; }
+        static get factor() { return Math.pow(0.9, 1 / SM2Engine.decay) - 1; }
+
+        static forgetting(days, stability) {
+            return Math.pow(1 + SM2Engine.factor * days / stability, SM2Engine.decay);
+        }
+
+        static initialDifficulty(grade, clamp = true) {
+            const d = SM2Engine.W[4] - Math.exp(SM2Engine.W[5] * (grade - 1)) + 1;
+            return clamp ? Math.min(10, Math.max(1, d)) : d;
+        }
+
+        static nextDifficulty(d, grade) {
+            const W = SM2Engine.W;
+            const delta = -W[6] * (grade - 3);
+            const damped = d + (10 - d) * delta / 9;
+            const next = W[7] * SM2Engine.initialDifficulty(4, false) + (1 - W[7]) * damped;
+            return Math.min(10, Math.max(1, next));
+        }
+
+        static shortTermStability(s, grade) {
+            const W = SM2Engine.W;
+            let inc = Math.exp(W[17] * (grade - 3 + W[18])) * Math.pow(s, -W[19]);
+            if (grade >= 2) inc = Math.max(inc, 1);
+            return Math.max(0.001, s * inc);
+        }
+
+        static nextStability(d, s, r, grade) {
+            const W = SM2Engine.W;
+            let next;
+            if (grade === 1) {
+                const longTerm = W[11] * Math.pow(d, -W[12]) * (Math.pow(s + 1, W[13]) - 1) * Math.exp((1 - r) * W[14]);
+                const shortTerm = s / Math.exp(W[17] * W[18]);
+                next = Math.min(longTerm, shortTerm);
             } else {
-                // Lapse: relearn within the session (about 10 minutes) and shrink the next interval
-                repetitions = 0;
-                interval = 0;
-                lapses += 1;
-                dueInMs = 10 * 60000;
+                const hard = grade === 2 ? W[15] : 1, easy = grade === 4 ? W[16] : 1;
+                next = s * (1 + Math.exp(W[8]) * (11 - d) * Math.pow(s, -W[9]) * (Math.exp((1 - r) * W[10]) - 1) * hard * easy);
             }
+            return Math.max(0.001, next);
+        }
 
-            // Ease factor update: Again/Hard lower it, Easy raises it, Good leaves it roughly unchanged
-            const easeDelta = q <= 2 ? -0.2 : q === 3 ? -0.15 : q === 4 ? 0 : 0.15;
-            easeFactor = Math.min(3.5, Math.max(1.3, easeFactor + easeDelta));
+        static nextIntervalDays(s) {
+            const raw = s / SM2Engine.factor * (Math.pow(SM2Engine.RETENTION, 1 / SM2Engine.decay) - 1);
+            return Math.min(SM2Engine.MAX_INTERVAL, Math.max(1, Math.round(raw)));
+        }
 
-            const lastReviewed = new Date(reviewedAt).toISOString();
-            const nextReviewDate = new Date(reviewedAt + dueInMs).toISOString();
+        static fuzz(days) {
+            if (days < 2.5) return days;
+            let delta = 1;
+            for (const [start, end, f] of [[2.5, 7, 0.15], [7, 20, 0.1], [20, Infinity, 0.05]]) {
+                delta += f * Math.max(Math.min(days, end) - start, 0);
+            }
+            let lo = Math.max(2, Math.round(days - delta));
+            const hi = Math.min(Math.round(days + delta), SM2Engine.MAX_INTERVAL);
+            lo = Math.min(lo, hi);
+            return Math.floor(Math.random() * (hi - lo + 1) + lo);
+        }
 
-            return {
-                repetitions,
-                easeFactor: parseFloat(easeFactor.toFixed(3)),
-                interval,
-                lapses,
-                lastReviewed,
-                nextReviewDate
-            };
+        // Cards saved by the older scheduler have no stability yet, so derive it from their interval and ease
+        static normalize(card) {
+            if (card.stability && (card.difficulty || card.state === 'learning' || card.state === 'relearning')) return card;
+            if (card.state === 'new') return card;
+            if (card.stability) return { ...card, state: card.state || 'review', difficulty: card.difficulty || 5 };
+            if (card.lastReviewed && card.interval > 0) {
+                const ease = card.easeFactor || 2.5;
+                return { ...card, state: 'review', stability: Math.max(0.1, card.interval), difficulty: Math.min(10, Math.max(1, 11 - (ease - 1.3) * 9 / 2.2)) };
+            }
+            return { ...card, state: 'new', stability: null, difficulty: null, step: 0 };
         }
 
         /**
-         * Ebbinghaus Retrievability Decay: R(t) = e^(-t/S)
+         * Grades: q <= 2 = Again, 3 = Hard, 4 = Good, 5 = Easy. Returns the card's new scheduling fields.
+         * Pass { fuzz: false } to preview a result without random interval fuzz.
          */
+        static evaluate(card, q, options = {}) {
+            if (!Number.isInteger(q) || q < 0 || q > 5) {
+                throw new RangeError('Review quality must be an integer from 0 through 5.');
+            }
+            const grade = q <= 2 ? 1 : q - 1;
+            const S = SM2Engine;
+            const c = S.normalize(card);
+            const now = Date.now();
+            const days = c.lastReviewed ? Math.max(0, Math.floor((now - new Date(c.lastReviewed).getTime()) / S.DAY)) : null;
+            const sameDay = days !== null && days < 1;
+            const recall = () => c.stability > 0 ? S.forgetting(days || 0, c.stability) : 1;
+            let { state, step = 0, stability, difficulty } = { state: c.state === 'new' ? 'learning' : c.state, step: c.step || 0, stability: c.stability, difficulty: c.difficulty };
+            let lapses = card.lapses || 0, repetitions = card.repetitions || 0;
+            let dueMs = null, dueDays = null;
+
+            const graduate = () => { state = 'review'; step = 0; dueDays = S.nextIntervalDays(stability); };
+            const stepResult = steps => {
+                if (!steps.length || (step >= steps.length && grade >= 2)) return graduate();
+                if (grade === 1) { step = 0; dueMs = steps[0] * 60000; }
+                else if (grade === 2) {
+                    if (step === 0) dueMs = (steps.length === 1 ? steps[0] * 1.5 : (steps[0] + steps[1]) / 2) * 60000;
+                    else dueMs = steps[step] * 60000;
+                } else if (grade === 3) {
+                    if (step + 1 >= steps.length) graduate();
+                    else { step += 1; dueMs = steps[step] * 60000; }
+                } else graduate();
+            };
+
+            if (state === 'review') {
+                stability = sameDay ? S.shortTermStability(stability, grade) : S.nextStability(difficulty, stability, recall(), grade);
+                difficulty = S.nextDifficulty(difficulty, grade);
+                if (grade === 1) {
+                    lapses += 1;
+                    state = 'relearning'; step = 0;
+                    if (S.RELEARNING_STEPS.length) dueMs = S.RELEARNING_STEPS[0] * 60000;
+                    else dueDays = S.nextIntervalDays(stability);
+                } else dueDays = S.nextIntervalDays(stability);
+            } else {
+                if (!stability || !difficulty) {
+                    stability = Math.max(0.001, S.W[grade - 1]);
+                    difficulty = S.initialDifficulty(grade);
+                } else if (sameDay) {
+                    stability = S.shortTermStability(stability, grade);
+                    difficulty = S.nextDifficulty(difficulty, grade);
+                } else {
+                    stability = S.nextStability(difficulty, stability, recall(), grade);
+                    difficulty = S.nextDifficulty(difficulty, grade);
+                }
+                stepResult(state === 'relearning' ? S.RELEARNING_STEPS : S.LEARNING_STEPS);
+            }
+
+            let interval = 0;
+            if (dueDays !== null) {
+                interval = options.fuzz === false || state !== 'review' ? dueDays : S.fuzz(dueDays);
+                dueMs = interval * S.DAY;
+            }
+            repetitions = grade === 1 ? 0 : repetitions + 1;
+
+            return {
+                state,
+                step,
+                stability: parseFloat(stability.toFixed(4)),
+                difficulty: parseFloat(difficulty.toFixed(4)),
+                repetitions,
+                easeFactor: card.easeFactor || 2.5,
+                interval,
+                lapses,
+                lastReviewed: new Date(now).toISOString(),
+                nextReviewDate: new Date(now + dueMs).toISOString()
+            };
+        }
+
+        /** Probability (0-100) that you can still recall the card right now: R = (1 + F·t/S)^-decay */
         static calculateRetrievability(card) {
-            if (!card.lastReviewed || !card.interval) return 0.0;
-            const elapsedDays = (Date.now() - new Date(card.lastReviewed).getTime()) / (1000 * 60 * 60 * 24);
-            const stability = Math.max(1, card.interval); // S factor
-            const retrievability = Math.exp(-elapsedDays / stability);
-            return parseFloat((retrievability * 100).toFixed(1));
+            const c = SM2Engine.normalize(card);
+            if (!c.lastReviewed || !c.stability) return 0.0;
+            const elapsedDays = Math.max(0, (Date.now() - new Date(c.lastReviewed).getTime()) / SM2Engine.DAY);
+            return parseFloat((SM2Engine.forgetting(elapsedDays, c.stability) * 100).toFixed(1));
         }
     }
 
@@ -230,7 +322,7 @@
             deck.cards.forEach((c, idx) => {
                 md += `### ${idx + 1}. ${c.front}\n`;
                 md += `**Answer:** ${c.back}\n\n`;
-                md += `- *Ease Factor:* ${c.easeFactor || 2.5} | *Interval:* ${c.interval || 0} days | *Lapses:* ${c.lapses || 0}\n\n`;
+                md += `- *Stability:* ${c.stability ? c.stability.toFixed(1) : 0} days | *Difficulty:* ${c.difficulty ? c.difficulty.toFixed(1) : '-'} | *Interval:* ${c.interval || 0} days | *Lapses:* ${c.lapses || 0}\n\n`;
             });
 
             const blob = new Blob([md], { type: 'text/markdown' });
@@ -318,7 +410,7 @@
                     // BKT Data Mini-Tag
                     ctx.fillStyle = '#94a3b8';
                     ctx.font = '9px monospace';
-                    ctx.fillText(`EF: ${card.easeFactor || 2.5}`, nodeX, nodeY + 16);
+                    ctx.fillText(`D: ${card.difficulty ? card.difficulty.toFixed(1) : '–'}`, nodeX, nodeY + 16);
                 });
             };
 
@@ -348,7 +440,7 @@
                     <div class="border-b border-slate-700/60 pb-5">
                         <h1 class="text-3xl font-bold text-white">Flashcard Studio</h1>
                         <p class="text-slate-400 mt-1 flex gap-2">
-                            <span class="px-2 bg-indigo-500/10 text-indigo-400 rounded">SM-2 ENGINE</span>
+                            <span class="px-2 bg-indigo-500/10 text-indigo-400 rounded">FSRS-6 ENGINE</span>
                             <span class="px-2 bg-emerald-500/10 text-emerald-400 rounded">BKT TRACING</span>
                         </p>
                     </div>
@@ -450,7 +542,7 @@
         processRating(deck, q) {
             const card = deck.cards[this.activeCardIndex];
             
-            // SM-2 evaluation
+            // FSRS evaluation
             const sm2Result = SM2Engine.evaluate(card, q);
             Object.assign(card, sm2Result);
 

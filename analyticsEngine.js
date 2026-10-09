@@ -93,8 +93,9 @@
                     totalR += 0; // Unseen cards have 0 retrievability
                 } else {
                     const elapsedDays = (Date.now() - new Date(card.lastReviewed).getTime()) / (1000 * 60 * 60 * 24);
-                    const stability = Math.max(1, card.interval);
-                    totalR += Math.exp(-elapsedDays / stability);
+                    const SM = window.SM2Engine;
+                    const stability = card.stability || Math.max(0.1, card.interval);
+                    totalR += SM ? SM.forgetting(elapsedDays, stability) : Math.exp(-elapsedDays / stability);
                 }
             });
             return (totalR / deck.cards.length) * 100;
@@ -338,7 +339,7 @@
                                             <div class="mt-1 w-2 h-2 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.6)]"></div>
                                             <div>
                                                 <p class="text-slate-200 font-medium">${deck.title}</p>
-                                                <p class="text-xs text-slate-500 mt-0.5">BKT Mastery is critically low (${Math.round(deck.bktMastery * 100)}%). Recommend intensive SM-2 review session today.</p>
+                                                <p class="text-xs text-slate-500 mt-0.5">BKT Mastery is critically low (${Math.round(deck.bktMastery * 100)}%). Recommend an intensive review session today.</p>
                                             </div>
                                         </li>
                                     `).join('')}
