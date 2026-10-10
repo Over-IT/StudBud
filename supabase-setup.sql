@@ -1479,6 +1479,21 @@ create table if not exists public.studbud_banned_users (
 alter table public.studbud_banned_users enable row level security;
 revoke all on table public.studbud_banned_users from anon, authenticated;
 
+create or replace function public.studbud_current_user_can_publish_community_decks()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+    select auth.uid() is not null
+        and not exists (
+            select 1 from public.studbud_banned_users b where b.user_id = auth.uid()
+        );
+$$;
+revoke all on function public.studbud_current_user_can_publish_community_decks() from public, anon, authenticated;
+grant execute on function public.studbud_current_user_can_publish_community_decks() to authenticated;
+
 create or replace function public.studbud_is_admin()
 returns boolean
 language sql
@@ -1510,7 +1525,7 @@ create policy "Deck owners can publish community decks"
     on public.studbud_community_decks for insert
     to authenticated with check (
         auth.uid() = owner_id
-        and not exists (select 1 from public.studbud_banned_users b where b.user_id = auth.uid())
+        and public.studbud_current_user_can_publish_community_decks()
     );
 
 -- Username changes: once every 7 days, or immediately when the admin forces a rename.
