@@ -1,0 +1,16 @@
+{
+  "showStreak": true,
+  "showWeek": true,
+  "showGoal": true,
+  "showAssignments": true,
+  "showGrades": false,
+  "streak": 0,
+  "streakLabel": "0 day streak",
+  "status": "Open StudBud to load your streak.",
+  "weekText": "○ ○ ○ ○ ○ ○ ○",
+  "goalText": "0 of 15 min studied today",
+  "assignments": [],
+  "gpaText": "No grades yet",
+  "grades": [],
+  "updated": "—"
+}

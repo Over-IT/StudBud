@@ -9,7 +9,13 @@
     /* Immediate-mode button helper shared by the canvas-UI games. */
     class Ui {
         constructor(session) { this.s = session; this.rects = []; this.prev = []; }
-        begin() { this.prev = this.rects; this.rects = []; }
+        begin() { this.prev = this.rects; this.rects = []; this.transform = null; }
+        addRect(rect) {
+            const t = this.transform;
+            const mapped = t ? { ...rect, x: t.x + rect.x * t.scale, y: t.y + rect.y * t.scale, w: rect.w * t.scale, h: rect.h * t.scale } : rect;
+            this.rects.push(mapped);
+            return mapped;
+        }
         inside(r) {
             const m = this.s.mouse;
             return Boolean(r && r.on && m.x >= r.x && m.x <= r.x + r.w && m.y >= r.y && m.y <= r.y + r.h);
@@ -21,8 +27,7 @@
         }
         button(ctx, id, x, y, w, h, label, on = true, color = '#6366f1', sub = '') {
             const rect = { id, x, y, w, h, on };
-            this.rects.push(rect);
-            const hov = this.inside(rect);
+            const hov = this.inside(this.addRect(rect));
             ctx.fillStyle = on ? (hov ? color : color + 'cc') : 'rgba(71,85,105,.55)';
             roundRect(ctx, x, y, w, h, 10); ctx.fill();
             ctx.strokeStyle = on ? 'rgba(255,255,255,.35)' : 'rgba(255,255,255,.08)'; ctx.lineWidth = 2; ctx.stroke();
@@ -195,13 +200,16 @@
             ctx.strokeStyle = 'rgba(56,189,248,.05)'; ctx.lineWidth = 1;
             for (let x = 0; x < w; x += 50) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
 
+            if (s.vw < 900 || s.overlay.classList.contains('has-touch')) { this.drawCompact(ctx); return; }
+            ui.transform = s.placeHud(ctx, 0, 60, 1200, 660, 'center');
+            w = 1200; h = 720;
             const lx = 18, lw = 300, top = 82, rw = 300, rx = w - rw - 18, cx = lx + lw + 18, cw = Math.max(300, rx - cx - 18);
             ctx.fillStyle = '#94a3b8'; ctx.font = '800 12px system-ui'; ctx.textAlign = 'left'; ctx.fillText('MARKETS', lx, top - 8);
             ASSETS.forEach((a, i) => {
                 const y = top + i * 74;
                 const p = this.price(i, t), prev = this.price(i, Math.max(0, t - 20));
                 const ch = (p - prev) / prev;
-                ui.rects.push({ id: `sel${i}`, x: lx, y, w: lw, h: 66, on: true });
+                ui.addRect({ id: `sel${i}`, x: lx, y, w: lw, h: 66, on: true });
                 ctx.fillStyle = this.sel === i ? 'rgba(99,102,241,.35)' : 'rgba(15,23,42,.7)'; roundRect(ctx, lx, y, lw, 66, 12); ctx.fill();
                 ctx.strokeStyle = this.sel === i ? a.color : 'rgba(148,163,184,.2)'; ctx.lineWidth = this.sel === i ? 3 : 1.5; ctx.stroke();
                 ctx.fillStyle = a.color; ctx.beginPath(); ctx.arc(lx + 26, y + 33, 14, 0, TAU); ctx.fill();
@@ -258,6 +266,30 @@
                 ctx.globalAlpha = 1 - f.t / 1.4; ctx.fillStyle = f.color; ctx.font = '900 22px system-ui'; ctx.textAlign = 'center';
                 ctx.fillText(f.text, cx + cw / 2, top + 230 - f.t * 50); ctx.globalAlpha = 1;
             }
+            ctx.restore();
+        }
+
+        drawCompact(ctx) {
+            const s = this.s, ui = this.ui, t = clock(s), wide = s.vw > s.vh * 1.2;
+            const width = wide ? 700 : 340, height = wide ? 280 : 430;
+            ui.transform = s.placeHud(ctx, 0, 0, width, height, 'center');
+            ctx.fillStyle = 'rgba(15,23,42,.92)'; roundRect(ctx, 0, 0, width, height, 12); ctx.fill();
+            const a = ASSETS[this.sel], p = this.price(this.sel, t), own = this.units[this.sel];
+            ctx.textAlign = 'left'; ctx.fillStyle = '#fde047'; ctx.font = '800 18px system-ui'; ctx.fillText(`Net worth ${money(this.netWorth(t))}`, 12, 27);
+            ctx.fillStyle = '#cbd5e1'; ctx.font = '700 12px system-ui'; ctx.fillText(`Cash ${money(this.cash)} · Mining ${money(this.rigs * 7)}/s`, 12, 48, 316);
+            ASSETS.forEach((asset, i) => ui.button(ctx, `sel${i}`, 12 + (i % 3) * 108, 60 + Math.floor(i / 3) * 39, 100, 32, asset.sym, true, this.sel === i ? '#4f46e5' : '#334155'));
+            ctx.fillStyle = a.color; ctx.font = '800 16px system-ui'; ctx.textAlign = 'left'; ctx.fillText(`${a.name} · ${money(p)} · Own ${own}`, 12, 158, 316);
+            this.chart(ctx, this.sel, 12, 168, 316, wide ? 100 : 72, t, true);
+            const bx = wide ? 368 : 12, by = wide ? 12 : 248;
+            ui.button(ctx, 'b1', bx, by, 73, 38, 'Buy 1', this.cash >= p, '#16a34a');
+            ui.button(ctx, 'bmax', bx + 81, by, 73, 38, 'Buy max', this.cash >= p, '#15803d');
+            ui.button(ctx, 's1', bx + 162, by, 73, 38, 'Sell 1', own > 0, '#dc2626');
+            ui.button(ctx, 'sall', bx + 243, by, 73, 38, 'Sell all', own > 0, '#b91c1c');
+            const rh = wide ? 56 : 36, gap = wide ? 64 : 44;
+            ui.button(ctx, 'research', bx, by + 46, 316, rh, this.researchCd > 0 ? `Research ready in ${Math.ceil(this.researchCd)}s` : `Research question · ${money(150 + this.intern * 40)}`, this.researchCd <= 0, '#0284c7');
+            ui.button(ctx, 'rig', bx, by + 46 + gap, 316, rh, `Build rig · ${money(this.rigCost())} · ${this.rigs} owned`, this.cash >= this.rigCost(), '#c2410c');
+            ui.button(ctx, 'intern', bx, by + 46 + gap * 2, 316, rh, `Hire analyst · ${money(this.internCost())} · ${this.intern} hired`, this.cash >= this.internCost(), '#4f46e5');
+            ctx.restore();
         }
     }
 
@@ -420,15 +452,17 @@
                 ctx.strokeStyle = `rgba(255,255,255,${1 - sp.t / 0.8})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.ellipse(x, wy + 2, 10 + sp.t * 50, 4 + sp.t * 14, 0, 0, TAU); ctx.stroke();
             }
             if (this.st === 1) {
+                s.placeHud(ctx, w / 2 - 160, h - 116, 320, 52, 'bottom-center');
                 const mx = w / 2 - 160, my = h - 90;
                 ctx.fillStyle = 'rgba(8,12,24,.7)'; roundRect(ctx, mx, my, 320, 26, 13); ctx.fill();
                 const g = ctx.createLinearGradient(mx, 0, mx + 320, 0); g.addColorStop(0, '#4ade80'); g.addColorStop(1, '#ef4444');
                 ctx.fillStyle = g; roundRect(ctx, mx + 3, my + 3, Math.max(8, 314 * this.power), 20, 10); ctx.fill();
-                ctx.fillStyle = '#fff'; ctx.font = '800 13px system-ui'; ctx.textAlign = 'center'; ctx.fillText('Release to cast — farther = deeper = rarer', w / 2, my - 8);
+                ctx.fillStyle = '#fff'; ctx.font = '800 13px system-ui'; ctx.textAlign = 'center'; ctx.fillText('Release to cast — farther = deeper = rarer', w / 2, my - 8); ctx.restore();
             }
-            if (this.st === 3) { ctx.fillStyle = '#fde047'; ctx.font = '900 54px system-ui'; ctx.textAlign = 'center'; ctx.fillText('BITE! CLICK!', w / 2, h * 0.28); }
+            if (this.st === 3) { s.placeHud(ctx, 0, 0, 340, 60, 'top-center'); ctx.fillStyle = '#fde047'; ctx.font = '900 48px system-ui'; ctx.textAlign = 'center'; ctx.fillText('BITE! CLICK!', 170, 45); ctx.restore(); }
             if (this.st === 4) {
-                const px = w / 2 - 40, py = h / 2 - 90;
+                s.placeHud(ctx, 0, 0, 260, 340, 'center');
+                const px = 70, py = 30;
                 ctx.fillStyle = 'rgba(8,12,24,.82)'; roundRect(ctx, px - 70, py - 30, 260, 340, 18); ctx.fill();
                 ctx.fillStyle = '#0c4a6e'; roundRect(ctx, px, py, 60, 300, 12); ctx.fill();
                 ctx.fillStyle = 'rgba(74,222,128,.75)'; roundRect(ctx, px + 2, py + this.zone.y, 56, 70, 8); ctx.fill();
@@ -436,11 +470,17 @@
                 ctx.fillStyle = '#0f172a'; ctx.beginPath(); ctx.arc(px + 38, py + 33 + this.fishY, 2.5, 0, TAU); ctx.fill();
                 ctx.fillStyle = 'rgba(255,255,255,.12)'; roundRect(ctx, px + 82, py, 22, 300, 8); ctx.fill();
                 ctx.fillStyle = this.prog > 0.5 ? '#4ade80' : '#fbbf24'; roundRect(ctx, px + 82, py + 300 * (1 - this.prog), 22, Math.max(6, 300 * this.prog), 8); ctx.fill();
-                ctx.fillStyle = '#e2e8f0'; ctx.font = '800 13px system-ui'; ctx.textAlign = 'center'; ctx.fillText(this.target.name, px + 55, py - 8);
+                ctx.fillStyle = '#e2e8f0'; ctx.font = '800 13px system-ui'; ctx.textAlign = 'center'; ctx.fillText(this.target.name, px + 55, py - 8); ctx.restore();
             }
-            if (this.msgT > 0) { ctx.globalAlpha = Math.min(1, this.msgT); ctx.fillStyle = this.msgColor; ctx.font = '900 28px system-ui'; ctx.textAlign = 'center'; ctx.fillText(this.msg, w / 2, h * 0.2); ctx.globalAlpha = 1; }
-            this.bag.forEach((f, i) => { ctx.fillStyle = f.color; ctx.beginPath(); ctx.ellipse(40 + i * 40, h - 40, 14, 7, 0, 0, TAU); ctx.fill(); });
-            if (this.chests > 0) this.ui.button(ctx, 'chest', w - 230, h - 80, 210, 56, `Open treasure chest (${this.chests})`, this.st === 0, '#7c3aed', 'Answer a question for loot · C');
+            if (this.msgT > 0 && this.st !== 4 && this.st !== 3 && !this.chests) { s.placeHud(ctx, 0, 0, 340, 40, 'top-center'); ctx.globalAlpha = Math.min(1, this.msgT); ctx.fillStyle = this.msgColor; ctx.font = '900 24px system-ui'; ctx.textAlign = 'center'; ctx.fillText(this.msg, 170, 28); ctx.restore(); }
+            if (this.st === 0 && this.bag.length) {
+                s.placeHud(ctx, 0, 0, Math.max(40, this.bag.length * 40), 24, 'bottom-left');
+                this.bag.forEach((f, i) => { ctx.fillStyle = f.color; ctx.beginPath(); ctx.ellipse(20 + i * 40, 12, 14, 7, 0, 0, TAU); ctx.fill(); }); ctx.restore();
+            }
+            if (this.chests > 0 && this.st === 0) {
+                this.ui.transform = s.placeHud(ctx, 0, 0, 210, 56, 'top-center');
+                this.ui.button(ctx, 'chest', 0, 0, 210, 56, `Open treasure chest (${this.chests})`, true, '#7c3aed', 'Answer a question for loot · C'); ctx.restore();
+            }
         }
     }
 
@@ -592,13 +632,15 @@
         drawHack(ctx, w, h) {
             const g = this.hk, ui = this.ui;
             ctx.fillStyle = 'rgba(2,6,16,.82)'; ctx.fillRect(0, 0, w, h);
-            const bx = w / 2 - 230, by = Math.max(10, h / 2 - 270);
+            ui.transform = this.s.placeHud(ctx, 0, 0, 460, 540, 'center');
+            w = 460; h = 540;
+            const bx = 0, by = 0;
             ctx.fillStyle = '#04120b'; roundRect(ctx, bx, by, 460, 540, 18); ctx.fill();
             ctx.strokeStyle = '#22c55e'; ctx.lineWidth = 3; ctx.stroke();
             ctx.fillStyle = '#4ade80'; ctx.font = '900 22px "Courier New", monospace'; ctx.textAlign = 'center';
             ctx.fillText('> BREACH TERMINAL', w / 2, by + 40);
             ctx.font = '600 13px "Courier New", monospace'; ctx.fillStyle = '#86efac';
-            ctx.fillText('Crack the 3-digit code (digits 1-5). ■ right spot  □ wrong spot', w / 2, by + 66);
+            ctx.fillText('Crack the 3-digit code (digits 1-5). ■ right spot  □ wrong spot', w / 2, by + 66, 420);
             ctx.fillText(`Attempts left: ${Math.max(0, g.tries)}`, w / 2, by + 88);
             g.rows.slice(-6).forEach((row, i) => {
                 const y = by + 124 + i * 34;
@@ -622,8 +664,9 @@
             } else {
                 ctx.fillStyle = '#4ade80'; ctx.font = '900 26px "Courier New", monospace'; ctx.fillText('TRANSFER STARTED…', w / 2, by + 400);
             }
+            ctx.restore();
         }
     }
 
-    Object.assign(A.games, { crypto: Crypto });
+    Object.assign(A.games, { crypto: Crypto, frenzy: Fishing, fishing: Fishing, hack: Hack });
 })(window);

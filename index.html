@@ -161,6 +161,35 @@
                             <div class="tutorial-banner-text"><h3 id="tutorial-banner-title">New to StudBud? Take the 2-minute tour</h3><p class="study-guidance-intro">We'll walk through every part of the app so you know where things are and what they do.</p></div>
                             <div class="tutorial-banner-actions"><button class="primary-btn" type="button" data-action="start-tutorial"><i class="fas fa-play"></i> Start tour</button><button class="secondary-btn" type="button" data-action="dismiss-tutorial">Maybe later</button></div>
                         </section>
+                        <section class="glass-card widget full-width daily-study-card home-widget" aria-labelledby="daily-study-heading">
+                            <div class="home-widget-head">
+                                <h3 id="daily-study-heading"><i class="fas fa-fire-flame-curved" aria-hidden="true"></i> Today at a glance</h3>
+                                <div class="home-widget-head-actions">
+                                    <button class="secondary-btn" type="button" data-target="leaderboard-view"><i class="fas fa-ranking-star" aria-hidden="true"></i> <span>Leaderboards</span></button>
+                                    <button class="secondary-btn" type="button" data-action="toggle-home-widget-settings" aria-expanded="false" aria-controls="home-widget-settings"><i class="fas fa-sliders" aria-hidden="true"></i> <span>Customize</span></button>
+                                </div>
+                            </div>
+                            <div id="home-widget-settings" class="home-widget-settings hidden">
+                                <p class="study-guidance-intro">Choose what this widget shows. The same items appear on your device's home-screen widget where supported.</p>
+                                <div class="home-widget-options">
+                                    <label class="settings-check"><input type="checkbox" data-home-widget-pref="streak"> Streak</label>
+                                    <label class="settings-check"><input type="checkbox" data-home-widget-pref="week"> This week</label>
+                                    <label class="settings-check"><input type="checkbox" data-home-widget-pref="goal"> Daily goal</label>
+                                    <label class="settings-check"><input type="checkbox" data-home-widget-pref="assignments"> Assignments to work on</label>
+                                    <label class="settings-check"><input type="checkbox" data-home-widget-pref="grades"> Grades &amp; GPA</label>
+                                    <label class="settings-check"><input type="checkbox" data-home-widget-pref="badge"> Show streak on the app icon</label>
+                                    <label class="settings-check">Assignments to show
+                                        <select data-home-widget-pref="assignmentCount" aria-label="Number of assignments to show"><option value="2">2</option><option value="3">3</option><option value="5">5</option><option value="8">8</option></select>
+                                    </label>
+                                </div>
+                                <div class="home-widget-install">
+                                    <button class="primary-btn" type="button" data-action="install-home-widget"><i class="fas fa-mobile-screen-button" aria-hidden="true"></i> Add StudBud to home screen</button>
+                                    <p id="home-widget-install-note" class="settings-hint">Installing StudBud puts your streak on the app icon and adds shortcuts. On Windows 11 you can also pin the StudBud widget from the Widgets board.</p>
+                                </div>
+                            </div>
+                            <div id="home-widget-body" class="home-widget-body"><p class="study-guidance-intro">Loading today's progress…</p></div>
+                            <p id="daily-study-note" class="sr-only" role="status" aria-live="polite"></p>
+                        </section>
                         <div class="glass-card widget schedule-widget">
                             <div class="view-header">
                                 <div><h3 id="daily-schedule-title">Today's PCHS Schedule</h3><p id="daily-schedule-type" class="schedule-day-type"></p></div>
@@ -176,15 +205,6 @@
                             <button id="quick-add-task-btn" class="primary-btn"><i class="fas fa-plus"></i> Add Assignment</button>
                         </div>
 
-                        <section class="glass-card widget daily-study-card" aria-labelledby="daily-study-heading">
-                            <div class="daily-study-topline">
-                                <div><h3 id="daily-study-heading"><i class="fas fa-fire-flame-curved" aria-hidden="true"></i> Your study streak</h3><p class="study-guidance-intro">Study for 15 minutes each day to keep your streak alive.</p></div>
-                                <span id="daily-study-streak" class="daily-study-streak">0 days</span>
-                            </div>
-                            <div class="daily-study-stats"><strong id="daily-study-time">0 min</strong><span>of 15 min today</span></div>
-                            <progress id="daily-study-progress" class="daily-study-progress" max="900" value="0" aria-label="0 of 15 study minutes completed today"></progress>
-                            <div class="daily-study-footer"><p id="daily-study-note" role="status" aria-live="polite">Loading today's progress…</p><button class="secondary-btn" type="button" data-target="leaderboard-view"><i class="fas fa-ranking-star" aria-hidden="true"></i> View leaderboards</button></div>
-                        </section>
                         <div class="glass-card widget gpa-widget">
                             <h3>GPA Snapshot</h3>
                             <div class="gpa-stats">
@@ -501,24 +521,31 @@
                         <div><h2>Study streaks &amp; leaderboards</h2><p class="study-guidance-intro">Build a daily learning habit: 15 minutes of study keeps your streak going. Compare study time with other StudBud students.</p></div>
                     </div>
                     <section class="glass-card daily-study-card leaderboard-habit-card">
-                        <div class="daily-study-topline">
-                            <div><h3><i class="fas fa-fire-flame-curved" aria-hidden="true"></i> Daily goal</h3><p class="study-guidance-intro">Your study time and streak update as sessions sync.</p></div>
-                            <span id="leaderboard-streak-display" class="daily-study-streak">0 day streak</span>
-                        </div>
+                        <div id="leaderboard-streak-hero"></div>
                         <div class="daily-study-stats"><strong id="leaderboard-today-time">0 min</strong><span>of 15 min today</span></div>
                         <progress id="leaderboard-study-progress" class="daily-study-progress" max="900" value="0" aria-label="0 of 15 study minutes completed today"></progress>
                         <p id="leaderboard-goal-note" class="study-guidance-intro" role="status"></p>
+                        <div id="leaderboard-streak-stats" class="streak-stats"></div>
                     </section>
                     <section class="glass-card study-leaderboard-panel">
                         <div class="study-leaderboard-heading">
                             <div><h3><i class="fas fa-trophy" aria-hidden="true"></i> Study time leaderboard</h3><p id="study-leaderboard-period-label" class="study-guidance-intro">Today · UTC</p></div>
+                            <button class="secondary-btn" type="button" data-action="study-leaderboard-retry" aria-label="Refresh leaderboard"><i class="fas fa-rotate" aria-hidden="true"></i> <span>Refresh</span></button>
+                        </div>
+                        <div class="study-leaderboard-filters">
                             <div class="study-leaderboard-tabs" role="group" aria-label="Leaderboard period">
-                                <button class="secondary-btn selected" type="button" data-study-leaderboard-period="daily" aria-pressed="true">Daily</button>
-                                <button class="secondary-btn" type="button" data-study-leaderboard-period="weekly" aria-pressed="false">Weekly</button>
-                                <button class="secondary-btn" type="button" data-action="study-leaderboard-retry"><i class="fas fa-rotate" aria-hidden="true"></i> Refresh</button>
+                                <button class="secondary-btn selected" type="button" data-study-leaderboard-period="daily" aria-pressed="true">Today</button>
+                                <button class="secondary-btn" type="button" data-study-leaderboard-period="weekly" aria-pressed="false">Week</button>
+                                <button class="secondary-btn" type="button" data-study-leaderboard-period="monthly" aria-pressed="false">Month</button>
+                                <button class="secondary-btn" type="button" data-study-leaderboard-period="alltime" aria-pressed="false">All time</button>
+                            </div>
+                            <div class="study-leaderboard-tabs study-leaderboard-scope" role="group" aria-label="Who to compare with">
+                                <button class="secondary-btn selected" type="button" data-study-leaderboard-scope="global" aria-pressed="true"><i class="fas fa-earth-americas" aria-hidden="true"></i> Everyone</button>
+                                <button class="secondary-btn" type="button" data-study-leaderboard-scope="friends" aria-pressed="false"><i class="fas fa-user-group" aria-hidden="true"></i> Friends</button>
                             </div>
                         </div>
                         <p id="study-leaderboard-status" class="community-status" role="status" aria-live="polite">Loading study progress…</p>
+                        <div id="study-leaderboard-me" class="study-leaderboard-me"></div>
                         <ol id="study-leaderboard-list" class="study-leaderboard-list"></ol>
                         <p class="settings-hint">Leaderboard periods use UTC. Usernames are visible to signed-in StudBud students. Study time is synced from the time users log or spend in supported study activities.</p>
                     </section>
@@ -721,6 +748,17 @@
                             <label for="import-deck-name">New Deck Name</label>
                             <input type="text" id="import-deck-name" placeholder="e.g., AP Bio Unit 1">
                         </div>
+                        <div class="form-group row-group deck-link-fields">
+                            <div class="half-width">
+                                <label for="import-deck-course">Class</label>
+                                <select id="import-deck-course" data-deck-course-select></select>
+                            </div>
+                            <div class="half-width">
+                                <label for="import-deck-assessment">Test / quiz</label>
+                                <select id="import-deck-assessment"></select>
+                            </div>
+                        </div>
+                        <p class="deck-link-hint"><i class="fas fa-eye"></i> If you share this set, only the class is shown publicly. The test or quiz stays private.</p>
                         
                         <div id="importer-import-panel">
                         <div class="form-group">

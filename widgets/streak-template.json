@@ -1,0 +1,46 @@
+{
+  "type": "AdaptiveCard",
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "version": "1.5",
+  "body": [
+    {
+      "type": "ColumnSet",
+      "$when": "${showStreak}",
+      "columns": [
+        { "type": "Column", "width": "auto", "verticalContentAlignment": "Center", "items": [{ "type": "TextBlock", "text": "🔥 ${streak}", "size": "ExtraLarge", "weight": "Bolder", "color": "Warning" }] },
+        { "type": "Column", "width": "stretch", "items": [
+          { "type": "TextBlock", "text": "${streakLabel}", "weight": "Bolder", "wrap": true },
+          { "type": "TextBlock", "text": "${status}", "isSubtle": true, "size": "Small", "wrap": true, "spacing": "None" }
+        ] }
+      ]
+    },
+    { "type": "TextBlock", "$when": "${showWeek}", "text": "${weekText}", "size": "Medium", "spacing": "Small" },
+    { "type": "TextBlock", "$when": "${showGoal}", "text": "${goalText}", "size": "Small", "isSubtle": true, "spacing": "Small", "wrap": true },
+    {
+      "type": "Container", "$when": "${showAssignments}", "separator": true, "spacing": "Medium",
+      "items": [
+        { "type": "TextBlock", "text": "Work on next", "weight": "Bolder", "size": "Small" },
+        { "type": "TextBlock", "$when": "${count(assignments) == 0}", "text": "Nothing due. Nice!", "size": "Small", "isSubtle": true },
+        { "type": "ColumnSet", "$data": "${assignments}", "spacing": "Small", "columns": [
+          { "type": "Column", "width": "stretch", "items": [{ "type": "TextBlock", "text": "${title}", "size": "Small", "maxLines": 1, "wrap": true }] },
+          { "type": "Column", "width": "auto", "items": [{ "type": "TextBlock", "text": "${due}", "size": "Small", "isSubtle": true }] }
+        ] }
+      ]
+    },
+    {
+      "type": "Container", "$when": "${showGrades}", "separator": true, "spacing": "Medium",
+      "items": [
+        { "type": "TextBlock", "text": "${gpaText}", "weight": "Bolder", "size": "Small", "wrap": true },
+        { "type": "ColumnSet", "$data": "${grades}", "spacing": "Small", "columns": [
+          { "type": "Column", "width": "stretch", "items": [{ "type": "TextBlock", "text": "${title}", "size": "Small", "maxLines": 1, "wrap": true }] },
+          { "type": "Column", "width": "auto", "items": [{ "type": "TextBlock", "text": "${grade}", "size": "Small", "weight": "Bolder" }] }
+        ] }
+      ]
+    },
+    { "type": "TextBlock", "text": "Updated ${updated}", "size": "Small", "isSubtle": true, "horizontalAlignment": "Right", "spacing": "Small" }
+  ],
+  "actions": [
+    { "type": "Action.Execute", "title": "Open StudBud", "verb": "open" },
+    { "type": "Action.Execute", "title": "Study now", "verb": "study" }
+  ]
+}

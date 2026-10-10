@@ -28,6 +28,37 @@
 
     const PALETTE = ['#f87171', '#fb923c', '#fbbf24', '#a3e635', '#34d399', '#22d3ee', '#60a5fa', '#a78bfa', '#f472b6', '#e879f9', '#2dd4bf', '#facc15'];
 
+    // Pinch / double-tap zoom breaks game layouts on phones, so block it while a game is on screen.
+    const GAME_SURFACES = '.mpg-overlay, #arcade-canvas-container, #waiting-runner-canvas, #game-canvas';
+    const inGame = target => document.body.classList.contains('mpg-active') || Boolean(target?.closest?.(GAME_SURFACES));
+    let savedViewport = null;
+    function lockViewportZoom(on) {
+        const meta = document.querySelector('meta[name="viewport"]');
+        if (!meta) return;
+        if (on) {
+            if (savedViewport === null) savedViewport = meta.getAttribute('content') || '';
+            meta.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover');
+        } else if (savedViewport !== null) {
+            meta.setAttribute('content', savedViewport);
+            savedViewport = null;
+        }
+    }
+    if (!window.__studbudZoomGuard) {
+        window.__studbudZoomGuard = true;
+        const block = e => { if (inGame(e.target)) e.preventDefault(); };
+        ['gesturestart', 'gesturechange', 'gestureend'].forEach(type => document.addEventListener(type, block, { passive: false }));
+        document.addEventListener('touchmove', e => { if (e.touches.length > 1 && inGame(e.target)) e.preventDefault(); }, { passive: false });
+        document.addEventListener('dblclick', block, { passive: false });
+        document.addEventListener('wheel', e => { if (e.ctrlKey && inGame(e.target)) e.preventDefault(); }, { passive: false });
+        let lastTouchEnd = 0;
+        document.addEventListener('touchend', e => {
+            const now = performance.now();
+            // A quick second tap on a game surface (not a button) would otherwise double-tap-zoom on iOS.
+            if (now - lastTouchEnd < 320 && inGame(e.target) && !e.target.closest?.('button, input, select, textarea, a')) e.preventDefault();
+            lastTouchEnd = now;
+        }, { passive: false });
+    }
+
     function playerColor(player) {
         const palette = String(player?.palette || '');
         if (palette.includes('ocean')) return '#38bdf8';
@@ -343,8 +374,8 @@
                 const isMe = info.id === this.user.id;
                 rows.push({
                     id: info.id, n: info.nickname, color: info.color,
-                    s: Math.round(isMe ? this.score : r ? r.score : info.score),
-                    g: Math.round(isMe ? this.goal : r ? r.goal : (this.game?.scoreGoal === false ? info.score || 0 : 0)),
+                    s: Math.round(Number(isMe ? this.score : r ? r.score : info.score) || 0),
+                    g: Math.round(Number(isMe ? this.goal : r ? r.goal : (this.game?.scoreGoal === false ? info.score || 0 : 0)) || 0),
                     d: isMe ? this.done : Boolean(r?.done)
                 });
             }
@@ -467,6 +498,8 @@
         }
 
         showQuestion(card, options, note) {
+            this.resetTouchStick?.();
+            this.overlay?.querySelectorAll('.mpg-touch button.on').forEach(b => b.classList.remove('on'));
             this.keys.clear(); this.mouse.down = false; this.mouse.rdown = false;
             const box = this.overlay.querySelector('.mpg-question');
             box.querySelector('.mpg-q-prompt').textContent = card.front;
@@ -517,12 +550,13 @@
 
         toast(text, color = '#e2e8f0') {
             const holder = this.overlay.querySelector('.mpg-toasts');
+            if ([...holder.children].some(el => el.textContent === text)) return;
             const item = document.createElement('div');
             item.textContent = text;
             item.style.borderColor = color;
             holder.appendChild(item);
             setTimeout(() => item.remove(), 2400);
-            while (holder.children.length > 4) holder.firstChild.remove();
+            while (holder.children.length > 2) holder.firstChild.remove();
         }
 
         // ---------- input ----------
@@ -553,7 +587,7 @@
                     this.keys.add(e.code);
                 },
                 keyup: e => this.keys.delete(e.code),
-                blur: () => { this.keys.clear(); this.mouse.down = false; this.mouse.rdown = false; },
+                blur: () => { this.keys.clear(); this.mouse.down = false; this.mouse.rdown = false; this.aimPointer = null; this.resetTouchStick?.(); },
                 resize: () => this.resize()
             };
             window.addEventListener('keydown', this.handlers.keydown);
@@ -562,11 +596,14 @@
             window.addEventListener('resize', this.handlers.resize);
             const canvas = this.canvas;
             canvas.addEventListener('pointermove', e => {
+                if (this.aimPointer != null && e.pointerId !== this.aimPointer) return;
                 const b = canvas.getBoundingClientRect();
                 this.mouse.x = (e.clientX - b.left) / this.scale;
                 this.mouse.y = (e.clientY - b.top) / this.scale;
             });
             canvas.addEventListener('pointerdown', e => {
+                if (e.button !== 2 && this.aimPointer != null) return;
+                if (e.button !== 2) this.aimPointer = e.pointerId;
                 if (e.pointerType === 'touch') this.mouse.touchAt = performance.now();
                 const b = canvas.getBoundingClientRect();
                 this.mouse.x = (e.clientX - b.left) / this.scale;
@@ -575,12 +612,16 @@
                 else { this.mouse.down = true; this.mouse.pressed = true; }
                 canvas.setPointerCapture?.(e.pointerId);
             });
-            canvas.addEventListener('pointerup', e => { if (e.button === 2) this.mouse.rdown = false; else this.mouse.down = false; });
+            const releaseAim = e => {
+                if (e.button === 2) this.mouse.rdown = false;
+                if (e.pointerId === this.aimPointer) { this.aimPointer = null; this.mouse.down = false; }
+            };
+            for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.addEventListener(type, releaseAim);
             canvas.addEventListener('contextmenu', e => e.preventDefault());
             this.overlay.addEventListener('click', e => {
                 const target = e.target.closest('button');
                 if (!target) return;
-                if (target.dataset.q !== undefined) this.answerQuestion(Number(target.dataset.q));
+                if (target.dataset.q !== undefined && !target.classList.contains('mpg-qbtn')) this.answerQuestion(Number(target.dataset.q));
                 else if (target.classList.contains('mpg-q-skip')) this.skipQuestion();
                 else if (target.classList.contains('mpg-recharge')) this.recharge();
                 else if (target.classList.contains('mpg-leave') || target.classList.contains('mpg-exit')) this.onLeave?.();
@@ -610,6 +651,7 @@
                     <button type="button" class="mpg-recharge">Answer a question <kbd>Q</kbd></button>
                 </div>
                 <div class="mpg-hint"></div>
+                <div class="mpg-stick-zone" aria-hidden="true"></div>
                 <div class="mpg-touch" aria-label="Touch controls">
                     <div class="mpg-stick" role="application" aria-label="Movement joystick"><i class="mpg-knob"></i></div>
                     <div class="mpg-btns"></div>
@@ -628,11 +670,21 @@
                 <div class="mpg-results hidden"></div>`;
             document.body.appendChild(overlay);
             document.body.classList.add('mpg-active');
+            lockViewportZoom(true);
             this.overlay = overlay;
             this.canvas = overlay.querySelector('.mpg-canvas');
             this.ctx = this.canvas.getContext('2d');
             overlay.querySelector('.mpg-name').textContent = this.game?.title || this.mode;
+            const hud = document.createElement('div');
+            hud.className = 'mpg-hud';
+            const status = document.createElement('div');
+            status.className = 'mpg-status';
+            for (const selector of ['.mpg-score', '.mpg-meter', '.mpg-board']) status.appendChild(overlay.querySelector(selector));
+            hud.append(overlay.querySelector('.mpg-top'), status, overlay.querySelector('.mpg-toasts'));
+            overlay.appendChild(hud);
             this.bindTouch(overlay);
+            this.hudObserver = new ResizeObserver(() => this.layoutHud());
+            for (const el of [hud, overlay.querySelector('.mpg-touch'), overlay.querySelector('.mpg-hint')]) this.hudObserver.observe(el);
         }
 
         // On-screen buttons feed the same key state as the keyboard, so every game works on phones.
@@ -647,9 +699,12 @@
                 btn.classList.remove('on');
             };
             const stick = pad.querySelector('.mpg-stick'), knob = stick?.querySelector('.mpg-knob');
+            const zone = overlay.querySelector('.mpg-stick-zone');
+            const buzz = ms => { try { navigator.vibrate?.(ms); } catch (_) { /* unsupported */ } };
             if (stick) {
-                const dirs = { KeyA: false, KeyD: false, KeyW: false, KeyS: false };
-                let activeId = null;
+                const NONE = { KeyA: false, KeyD: false, KeyW: false, KeyS: false };
+                const dirs = { ...NONE };
+                let activeId = null, origin = null;
                 const setDirs = next => {
                     for (const code in dirs) {
                         if (next[code] && !dirs[code]) this.justPressed.add(code);
@@ -657,31 +712,75 @@
                         dirs[code] = next[code];
                     }
                 };
+                // Platformers bind up/down to jump/shield/drop, so vertical input there needs a firm, mostly-vertical push.
+                const resolve = (dx, dy, max) => {
+                    const n = Math.hypot(dx, dy) / max;
+                    if (n < 0.22) return { ...NONE };
+                    if (this.stickPlatform) {
+                        const steepNeed = dirs.KeyW || dirs.KeyS ? 1.0 : 1.5;
+                        const pushNeed = dirs.KeyW || dirs.KeyS ? 0.5 : 0.7;
+                        const vertical = Math.abs(dy) > Math.abs(dx) * steepNeed && n > pushNeed;
+                        const horizDead = vertical ? 0.4 : 0.22;
+                        return { KeyA: dx < -max * horizDead, KeyD: dx > max * horizDead, KeyW: vertical && dy < 0, KeyS: vertical && dy > 0 };
+                    }
+                    // 8 equal sectors so a "mostly right" push never leaks into up or down.
+                    const sector = ((Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) % 8) + 8) % 8;
+                    return {
+                        KeyD: sector === 0 || sector === 1 || sector === 7,
+                        KeyS: sector === 1 || sector === 2 || sector === 3,
+                        KeyA: sector === 3 || sector === 4 || sector === 5,
+                        KeyW: sector === 5 || sector === 6 || sector === 7
+                    };
+                };
                 const reset = () => {
                     activeId = null;
-                    setDirs({ KeyA: false, KeyD: false, KeyW: false, KeyS: false });
+                    origin = null;
+                    setDirs({ ...NONE });
                     knob.style.transform = '';
+                    stick.style.transform = '';
+                    stick.classList.remove('active');
                 };
                 const move = e => {
                     const b = stick.getBoundingClientRect();
                     const max = b.width / 2;
-                    let dx = e.clientX - (b.left + max), dy = e.clientY - (b.top + max);
+                    const cx = origin ? origin.x : b.left + max, cy = origin ? origin.y : b.top + max;
+                    let dx = e.clientX - cx, dy = e.clientY - cy;
                     const len = Math.hypot(dx, dy);
                     if (len > max) { dx = dx / len * max; dy = dy / len * max; }
                     knob.style.transform = `translate(${dx}px, ${dy}px)`;
-                    if (this.question || this.over) { setDirs({ KeyA: false, KeyD: false, KeyW: false, KeyS: false }); return; }
-                    const dead = max * 0.3;
-                    setDirs({ KeyA: dx < -dead, KeyD: dx > dead, KeyW: dy < -dead, KeyS: dy > dead });
+                    if (this.question || this.over) { setDirs({ ...NONE }); return; }
+                    setDirs(resolve(dx, dy, max));
                 };
-                stick.addEventListener('pointerdown', e => {
+                const begin = (e, floating) => {
+                    if (activeId !== null) return;
                     e.preventDefault();
                     activeId = e.pointerId;
-                    stick.setPointerCapture?.(e.pointerId);
+                    try { (floating ? zone : stick).setPointerCapture?.(e.pointerId); } catch (_) { /* pointer already gone */ }
+                    stick.classList.add('active');
+                    if (floating) {
+                        // Floating joystick: re-centre the stick under the thumb wherever it lands on the left side.
+                        stick.style.transform = '';
+                        const b = stick.getBoundingClientRect();
+                        const z = zone.getBoundingClientRect(), radius = b.width / 2;
+                        origin = { x: Math.max(z.left + radius + 8, Math.min(e.clientX, z.right - radius)), y: Math.max(z.top + radius, Math.min(e.clientY, z.bottom - radius - 8)) };
+                        stick.style.transform = `translate(${origin.x - (b.left + radius)}px, ${origin.y - (b.top + radius)}px)`;
+                    } else {
+                        const b = stick.getBoundingClientRect();
+                        origin = { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+                    }
                     move(e);
-                });
+                };
+                stick.addEventListener('pointerdown', e => begin(e, false));
                 stick.addEventListener('pointermove', e => { if (e.pointerId === activeId) move(e); });
-                for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) stick.addEventListener(type, reset);
+                for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) stick.addEventListener(type, e => { if (e.pointerId === activeId) reset(); });
                 stick.addEventListener('contextmenu', e => e.preventDefault());
+                if (zone) {
+                    zone.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') begin(e, true); });
+                    zone.addEventListener('pointermove', e => { if (e.pointerId === activeId) move(e); });
+                    for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) zone.addEventListener(type, e => { if (e.pointerId === activeId) reset(); });
+                    zone.addEventListener('contextmenu', e => e.preventDefault());
+                }
+                this.resetTouchStick = reset;
             }
             const bindBtn = btn => {
                 btn.addEventListener('pointerdown', e => {
@@ -689,7 +788,8 @@
                     btn.setPointerCapture?.(e.pointerId);
                     if (this.question || this.over) return;
                     btn.classList.add('on');
-                    if (btn.dataset.q) { if (this.game?.res) this.recharge(); return; }
+                    buzz(btn.dataset.q ? 15 : 8);
+                    if (btn.dataset.q) { if (this.game?.res) { this.resetTouchStick?.(); this.recharge(); } return; }
                     this.justPressed.add(btn.dataset.k);
                     this.keys.add(btn.dataset.k);
                     if (btn.dataset.click) { this.mouse.down = true; this.mouse.pressed = true; }
@@ -704,35 +804,84 @@
                 const key = JSON.stringify(layout) + (this.game?.res ? 'q' : '');
                 if (key === this.touchLayoutKey) return;
                 this.touchLayoutKey = key;
+                this.stickPlatform = layout.platform ?? (layout.buttons || []).some(b => b.k === 'Space' && /jump/i.test(b.label || ''));
                 const box = pad.querySelector('.mpg-btns');
                 box.innerHTML = '';
-                const list = (layout.buttons || []).concat(this.game?.res ? [{ q: true, label: 'Q', cls: 'q' }] : []);
+                const list = layout.buttons || [];
                 for (const def of list) {
                     const btn = document.createElement('button');
                     btn.type = 'button';
                     btn.textContent = def.label;
-                    if (def.q) btn.dataset.q = '1'; else btn.dataset.k = def.k;
+                    btn.dataset.k = def.k;
                     if (def.click) btn.dataset.click = '1';
                     if (def.cls) btn.className = `b-${def.cls}`;
                     if (def.small) btn.classList.add('b-small');
                     bindBtn(btn);
                     box.appendChild(btn);
                 }
+                // The question button sits apart from the action buttons so it isn't hit by accident mid-game.
+                overlay.querySelector('.mpg-qbtn')?.remove();
+                if (this.game?.res) {
+                    const q = document.createElement('button');
+                    q.type = 'button';
+                    q.className = 'mpg-qbtn b-q';
+                    q.dataset.q = '1';
+                    q.setAttribute('aria-label', 'Answer a question to recharge');
+                    q.innerHTML = '<span aria-hidden="true">?</span> Recharge';
+                    bindBtn(q);
+                    overlay.querySelector('.mpg-status').appendChild(q);
+                }
                 box.style.setProperty('--cols', String(Math.min(3, Math.max(2, layout.cols || 2))));
                 pad.classList.toggle('no-stick', layout.stick === false);
+                overlay.classList.toggle('touch-no-stick', layout.stick === false);
+                overlay.classList.toggle('touch-local-stick', layout.stickZone === 'local');
                 pad.dataset.game = this.mode || '';
+                const measure = () => pad.style.setProperty('--btns-h', `${list.length ? (box.offsetHeight || 170) : 0}px`);
+                measure();
+                requestAnimationFrame(() => { measure(); this.layoutHud(); });
             };
         }
 
         resize() {
             const dpr = window.devicePixelRatio || 1;
-            const w = window.innerWidth, h = window.innerHeight;
+            const w = this.overlay.clientWidth, h = this.overlay.clientHeight;
             this.canvas.width = Math.floor(w * dpr);
             this.canvas.height = Math.floor(h * dpr);
             this.dpr = dpr;
             this.scale = Math.max(0.45, h / 720);
             this.vw = w / this.scale;
-            this.vh = 720;
+            this.vh = h / this.scale;
+            this.layoutHud();
+        }
+
+        layoutHud() {
+            if (!this.overlay || !this.scale) return;
+            const root = this.overlay.getBoundingClientRect();
+            const header = this.overlay.querySelector('.mpg-hud').getBoundingClientRect();
+            let bottom = 8;
+            const touch = this.overlay.classList.contains('has-touch');
+            for (const selector of touch ? ['.mpg-stick', '.mpg-btns', '.mpg-stick-zone'] : ['.mpg-hint']) {
+                const el = this.overlay.querySelector(selector);
+                const rect = el.getBoundingClientRect();
+                if (el.offsetWidth && el.offsetHeight) bottom = Math.max(bottom, root.bottom - rect.top + 8);
+            }
+            this.hudInsets = { top: (header.bottom - root.top + 8) / this.scale, left: 8 / this.scale, right: 8 / this.scale, bottom: bottom / this.scale };
+        }
+
+        hudBounds() {
+            const i = this.hudInsets || { top: 90, left: 12, right: 12, bottom: 90 };
+            return { x: i.left, y: i.top, w: Math.max(1, this.vw - i.left - i.right), h: Math.max(1, this.vh - i.top - i.bottom) };
+        }
+
+        // Fit a canvas HUD group without changing world-camera coordinates; caller restores the context.
+        placeHud(ctx, x, y, w, h, anchor = 'top-left', offset = 0) {
+            const b = this.hudBounds();
+            const scale = Math.min(Math.max(1, 1 / this.scale), b.w / w, Math.max(1, b.h - offset) / h);
+            const px = anchor.endsWith('right') ? b.x + b.w - w * scale : anchor.endsWith('center') || anchor === 'center' ? b.x + (b.w - w * scale) / 2 : b.x;
+            const py = anchor.startsWith('bottom') ? b.y + b.h - h * scale - offset : anchor === 'center' ? b.y + (b.h - h * scale) / 2 : b.y + offset;
+            const transform = { x: px - x * scale, y: py - y * scale, scale };
+            ctx.save(); ctx.translate(transform.x, transform.y); ctx.scale(scale, scale);
+            return transform;
         }
 
         updateHud() {
@@ -752,6 +901,7 @@
                 : `${Math.floor(this.t / 60)}:${String(Math.floor(this.t) % 60).padStart(2, '0')}`;
             o.querySelector('.mpg-hint').textContent = this.question ? '' : this.game.hint();
             this.applyTouchLayout?.();
+            this.layoutHud();
             o.querySelector('.mpg-board').innerHTML = this.standings().slice(0, 6).map((row, i) =>
                 `<li class="${row.id === this.user.id ? 'me' : ''}"><i style="background:${row.color}"></i><span>${i + 1}. ${esc(row.n)}</span><b>${this.valueText(row)}</b></li>`).join('');
         }
@@ -830,6 +980,7 @@
             this.destroyed = true;
             window.StudBudSfx?.endMusic();
             cancelAnimationFrame(this.raf);
+            this.hudObserver?.disconnect();
             clearInterval(this.sendTimer);
             clearInterval(this.hudTimer);
             clearInterval(this.reportTimer);
@@ -840,6 +991,7 @@
             try { if (this.channel) this.api.getClient().removeChannel(this.channel); } catch (error) { /* already closed */ }
             this.overlay.remove();
             document.body.classList.remove('mpg-active');
+            lockViewportZoom(false);
             if (document.fullscreenElement) document.exitFullscreen?.().catch(() => { });
         }
     }
@@ -860,6 +1012,12 @@
         skin_crystal: { body: '#67e8f9', head: '#cffafe', eye: '#164e63', trim: '#0891b2', alpha: 0.92 },
         skin_shadow: { body: '#312e81', head: '#4c1d95', eye: '#f0abfc', trim: '#1e1b4b', alpha: 0.9 },
         skin_galaxy: { body: '#1e1b4b', head: '#312e81', eye: '#fde047', trim: '#a78bfa' },
+        skin_bee: { body: '#facc15', head: '#fde68a', eye: '#1c1917', trim: '#1c1917' },
+        skin_ocean: { body: '#0e7490', head: '#a5f3fc', eye: '#083344', trim: '#f59e0b' },
+        skin_forest: { body: '#166534', head: '#bbf7d0', eye: '#14532d', trim: '#a16207' },
+        skin_ice: { body: '#bae6fd', head: '#f0f9ff', eye: '#1e3a8a', trim: '#60a5fa', alpha: 0.94 },
+        skin_chrome: { body: '#94a3b8', head: '#e2e8f0', eye: '#22d3ee', trim: '#475569' },
+        skin_cosmic: { body: '#0f0a1f', head: '#2e1065', eye: '#f0abfc', trim: '#22d3ee' },
         skin_dragon: { body: '#15803d', head: '#4ade80', eye: '#fde047', trim: '#7f1d1d' },
         skin_candy: { body: '#fb7185', head: '#fecdd3', eye: '#4c0519', trim: '#fff1f2' },
         skin_mummy: { body: '#d6c7a1', head: '#e7dcc0', eye: '#1c1917', trim: '#a8946a' },
@@ -983,6 +1141,30 @@
             fill('#fcd34d', () => ctx.ellipse(0, r * 0.35, r * 1.8, r * 0.3, 0, 0, TAU));
             fill('#fbbf24', () => ctx.arc(0, r * 0.3, r * 0.85, Math.PI, TAU));
             ctx.fillStyle = '#dc2626'; ctx.fillRect(-r * 0.85, r * 0.05, r * 1.7, r * 0.2);
+        } else if (hat === 'hat_beret') {
+            fill('#be123c', () => ctx.ellipse(-r * 0.1, r * 0.05, r * 1.1, r * 0.45, -0.12, 0, TAU));
+            ctx.fillStyle = '#881337'; ctx.fillRect(-r * 0.08, -r * 0.6, r * 0.16, r * 0.3);
+        } else if (hat === 'hat_sombrero') {
+            fill('#d97706', () => ctx.ellipse(0, r * 0.4, r * 2.1, r * 0.35, 0, 0, TAU));
+            fill('#f59e0b', () => { ctx.moveTo(-r * 0.75, r * 0.35); ctx.quadraticCurveTo(0, -r * 1.8, r * 0.75, r * 0.35); });
+            ctx.fillStyle = '#16a34a'; ctx.fillRect(-r * 0.72, r * 0.08, r * 1.44, r * 0.18);
+            ctx.fillStyle = '#dc2626'; ctx.fillRect(-r * 1.9, r * 0.33, r * 3.8, r * 0.1);
+        } else if (hat === 'hat_frog') {
+            fill('#22c55e', () => ctx.arc(0, r * 0.45, r * 1.0, Math.PI, TAU));
+            fill('#f8fafc', () => { ctx.arc(-r * 0.5, -r * 0.45, r * 0.34, 0, TAU); ctx.arc(r * 0.5, -r * 0.45, r * 0.34, 0, TAU); });
+            fill('#0f172a', () => { ctx.arc(-r * 0.45, -r * 0.45, r * 0.15, 0, TAU); ctx.arc(r * 0.55, -r * 0.45, r * 0.15, 0, TAU); });
+        } else if (hat === 'hat_mushroom') {
+            fill('#dc2626', () => { ctx.ellipse(0, r * 0.2, r * 1.35, r * 0.95, 0, Math.PI, TAU); });
+            fill('#f8fafc', () => { ctx.arc(-r * 0.6, -r * 0.2, r * 0.2, 0, TAU); ctx.arc(r * 0.15, -r * 0.5, r * 0.24, 0, TAU); ctx.arc(r * 0.8, -r * 0.05, r * 0.17, 0, TAU); });
+        } else if (hat === 'hat_unicorn') {
+            fill('#fde68a', () => { ctx.moveTo(-r * 0.3, r * 0.2); ctx.lineTo(0, -r * 1.7); ctx.lineTo(r * 0.3, r * 0.2); });
+            ctx.strokeStyle = '#f472b6'; ctx.lineWidth = r * 0.1; ctx.beginPath(); ctx.moveTo(-r * 0.22, -r * 0.1); ctx.lineTo(r * 0.2, -r * 0.4); ctx.moveTo(-r * 0.14, -r * 0.7); ctx.lineTo(r * 0.12, -r * 0.95); ctx.stroke();
+            fill('#c084fc', () => ctx.arc(-r * 0.75, r * 0.15, r * 0.25, 0, TAU));
+            fill('#f9a8d4', () => ctx.arc(r * 0.75, r * 0.15, r * 0.25, 0, TAU));
+        } else if (hat === 'hat_tiara') {
+            fill('#e5e7eb', () => { ctx.moveTo(-r * 0.9, r * 0.3); ctx.lineTo(-r * 0.6, -r * 0.2); ctx.lineTo(-r * 0.3, r * 0.05); ctx.lineTo(0, -r * 0.65); ctx.lineTo(r * 0.3, r * 0.05); ctx.lineTo(r * 0.6, -r * 0.2); ctx.lineTo(r * 0.9, r * 0.3); });
+            fill('#ec4899', () => ctx.arc(0, -r * 0.25, r * 0.16, 0, TAU));
+            fill('#38bdf8', () => { ctx.arc(-r * 0.6, r * 0.05, r * 0.1, 0, TAU); ctx.arc(r * 0.6, r * 0.05, r * 0.1, 0, TAU); });
         }
         ctx.restore();
     }
@@ -1053,6 +1235,13 @@
         ctx.fillStyle = c.skin?.trim || '#1e293b';
         ctx.fillRect(cx - 8 + run * 5, y + h - 14, 7, 14);
         ctx.fillRect(cx + 1 - run * 5, y + h - 14, 7, 14);
+        if (c.acc === 'acc_guitar') {
+            ctx.save(); ctx.translate(cx - face * w * 0.55, y + 26 + bob); ctx.rotate(face * 0.5);
+            ctx.fillStyle = '#92400e'; ctx.beginPath(); ctx.ellipse(0, 6, 7, 9, 0, 0, TAU); ctx.fill();
+            ctx.fillStyle = '#451a03'; ctx.fillRect(-1.5, -20, 3, 22); ctx.beginPath(); ctx.arc(0, 6, 2.4, 0, TAU); ctx.fill();
+            ctx.restore();
+        }
+        if (c.acc === 'acc_lightning') { ctx.strokeStyle = 'rgba(250,204,21,' + (0.45 + Math.abs(Math.sin(time * 14)) * 0.5) + ')'; ctx.lineWidth = 2; ctx.beginPath(); for (let i = 0; i < 2; i++) { const sx = i ? x + w + 4 : x - 4; ctx.moveTo(sx, y + 6); ctx.lineTo(sx + (i ? 4 : -4), y + 18); ctx.lineTo(sx, y + 20); ctx.lineTo(sx + (i ? 5 : -5), y + 34); } ctx.stroke(); }
         ctx.fillStyle = body;
         roundRect(ctx, x, y + 12 + bob, w, h - 24, 8);
         ctx.fill();
@@ -1072,6 +1261,9 @@
         if (c.acc === 'acc_sparkles') { ctx.font = '10px serif'; ctx.textAlign = 'center'; for (let i = 0; i < 3; i++) { const a = time * 2 + i * 2.1; ctx.globalAlpha = 0.6 + Math.sin(time * 6 + i) * 0.4; ctx.fillText('✨', cx + Math.cos(a) * (w * 0.9), y + 22 + Math.sin(a) * 18); } ctx.globalAlpha = alpha; }
         const orbit = { acc_hearts: '❤️', acc_stars: '⭐', acc_snow: '❄️' }[c.acc];
         if (orbit) { ctx.font = '9px serif'; ctx.textAlign = 'center'; for (let i = 0; i < 3; i++) { const a = time * 1.6 + i * 2.1; ctx.fillText(orbit, cx + Math.cos(a) * (w * 0.85), y + 20 + Math.sin(a) * 20); } }
+        if (c.acc === 'acc_lei') { const lei = ['#f472b6', '#facc15', '#a78bfa', '#fb923c']; for (let i = 0; i < 6; i++) { ctx.fillStyle = lei[i % 4]; ctx.beginPath(); ctx.arc(x + 2 + i * (w - 4) / 5, y + 18 + bob + Math.sin(i / 5 * Math.PI) * 4, 2.6, 0, TAU); ctx.fill(); } }
+        if (c.acc === 'acc_notes' || c.acc === 'acc_leaves') { const glyph = c.acc === 'acc_notes' ? '♪' : '🍃'; ctx.font = c.acc === 'acc_notes' ? 'bold 11px sans-serif' : '9px serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#c084fc'; for (let i = 0; i < 3; i++) { const t = (time * 0.7 + i / 3) % 1; ctx.globalAlpha = alpha * (1 - t); ctx.fillText(glyph, cx + Math.sin(t * 6 + i) * (w * 0.8), y + 8 - t * 22); } ctx.globalAlpha = alpha; }
+        if (c.acc === 'acc_bubbles') { ctx.strokeStyle = 'rgba(125,211,252,.85)'; ctx.lineWidth = 1.2; for (let i = 0; i < 4; i++) { const t = (time * 0.5 + i / 4) % 1; ctx.beginPath(); ctx.arc(cx - face * (w * 0.5 + t * 10) + Math.sin(t * 9) * 3, y + h - 14 - t * 40, 2 + i % 2 * 1.5, 0, TAU); ctx.stroke(); } }
         if (c.acc === 'acc_glasses') { ctx.strokeStyle = '#111827'; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.arc(cx + face * 5, y + 11 + bob, 4, 0, TAU); ctx.moveTo(cx + face * 1, y + 11 + bob); ctx.lineTo(cx - face * 10, y + 9 + bob); ctx.stroke(); }
         if (c.acc === 'acc_mask') { ctx.fillStyle = '#7c3aed'; ctx.fillRect(cx - 10, y + 7 + bob, 20, 6); ctx.fillStyle = '#f8fafc'; ctx.fillRect(cx + face * 4 - 1.5, y + 8.5 + bob, 3, 3); }
         if (c.acc === 'acc_headband') { ctx.fillStyle = '#ef4444'; ctx.fillRect(cx - 11, y + 3 + bob, 22, 3.5); ctx.beginPath(); ctx.moveTo(cx - face * 10, y + 4 + bob); ctx.lineTo(cx - face * 19, y + 7 + bob + run * 2); ctx.lineTo(cx - face * 10, y + 7.5 + bob); ctx.fill(); }
@@ -1118,7 +1310,10 @@
         if (c.acc === 'acc_headband' || c.acc === 'acc_bandana') { ctx.strokeStyle = c.acc === 'acc_headband' ? '#ef4444' : '#2563eb'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(r * 0.1, 0, r * 0.62, -1.2, 1.2); ctx.stroke(); }
         if (c.acc === 'acc_glasses' || c.acc === 'acc_goggles' || c.acc === 'acc_mask') { ctx.fillStyle = c.acc === 'acc_mask' ? '#7c3aed' : '#0f172a'; ctx.fillRect(r * 0.4, -r * 0.34, r * 0.26, r * 0.68); }
         if (c.acc === 'acc_medal' || c.acc === 'acc_chain') { ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(r * 0.3, 0, r * 0.14, 0, TAU); ctx.fill(); }
-        const orbitTop = { acc_hearts: '❤️', acc_stars: '⭐', acc_snow: '❄️' }[c.acc];
+        if (c.acc === 'acc_lei') { const lei = ['#f472b6', '#facc15', '#a78bfa', '#fb923c']; for (let i = 0; i < 8; i++) { ctx.fillStyle = lei[i % 4]; ctx.beginPath(); ctx.arc(Math.cos(i / 8 * TAU) * r * 0.82, Math.sin(i / 8 * TAU) * r * 0.82, r * 0.15, 0, TAU); ctx.fill(); } }
+        if (c.acc === 'acc_guitar') { ctx.fillStyle = '#92400e'; ctx.beginPath(); ctx.ellipse(-r * 1.15, r * 0.3, r * 0.4, r * 0.5, 0, 0, TAU); ctx.fill(); ctx.fillStyle = '#451a03'; ctx.fillRect(-r * 1.2, -r * 1.0, r * 0.12, r * 1.0); }
+        if (c.acc === 'acc_lightning') { ctx.strokeStyle = 'rgba(250,204,21,' + (0.45 + Math.abs(Math.sin(time * 14)) * 0.5) + ')'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, r * 1.3, time * 4, time * 4 + 1.2); ctx.moveTo(Math.cos(time * 4 + 3) * r * 1.3, Math.sin(time * 4 + 3) * r * 1.3); ctx.arc(0, 0, r * 1.3, time * 4 + 3, time * 4 + 4); ctx.stroke(); }
+        const orbitTop = { acc_hearts: '❤️', acc_stars: '⭐', acc_snow: '❄️', acc_notes: '🎵', acc_leaves: '🍃', acc_bubbles: '🫧' }[c.acc];
         ctx.restore();
         if (orbitTop) { ctx.font = `${Math.round(r * 0.7)}px serif`; ctx.textAlign = 'center'; for (let i = 0; i < 3; i++) { const a = time * 1.6 + i * 2.1; ctx.fillText(orbitTop, Math.cos(a) * r * 1.5, Math.sin(a) * r * 1.5); } }
         if (c.hat) drawHat(ctx, c.hat, 0, -r * 0.55, r * 0.55);

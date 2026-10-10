@@ -538,6 +538,12 @@
 
             const activeItem = Array.from(document.querySelectorAll('.nav-item[data-target]'))
                 .find(item => `${item.dataset.target} ${item.dataset.also || ''}`.split(' ').includes(viewId));
+            const nav = document.getElementById('main-nav');
+            if (activeItem && nav && nav.scrollWidth > nav.clientWidth + 4 && !document.getElementById('tutorial-root')) {
+                const navRect = nav.getBoundingClientRect();
+                const itemRect = activeItem.getBoundingClientRect();
+                nav.scrollTo({ left: nav.scrollLeft + itemRect.left - navRect.left - (navRect.width - itemRect.width) / 2, behavior: 'smooth' });
+            }
             const title = activeItem && activeItem.querySelector('span');
             const titleElement = document.getElementById('active-view-title');
             if (title && titleElement) titleElement.textContent = title.textContent.trim();
@@ -932,6 +938,7 @@
             this.activeDeckId = null;
             this.activeStudyStartedAt = null;
             this.studyLeaderboardPeriod = 'daily';
+            this.studyLeaderboardScope = 'global';
             this.studyLeaderboardSnapshot = null;
             this.studyLeaderboardError = '';
             this.activeCardIndex = 0;
@@ -2002,19 +2009,151 @@
             const grid = document.getElementById('deck-grid');
             if (!grid) return;
             const decks = AppState.get('flashcards') || [];
-            grid.innerHTML = decks.length ? decks.map(deck => `
-                <article class="glass-card">
+            const myId = window.StudBudCloud?.user?.id;
+            grid.innerHTML = decks.length ? decks.map(deck => {
+                // Sets added from the community belong to their author: credit them and don't allow reposting.
+                const borrowed = Boolean(deck.communitySourceId && deck.communitySourceOwnerId && deck.communitySourceOwnerId !== myId);
+                const author = borrowed
+                    ? `<small class="deck-author">by <button type="button" class="link-btn" data-action="view-profile" data-id="${this.escapeHTML(deck.communitySourceOwnerId)}">${this.escapeHTML(deck.communitySourceAuthor || 'another student')}</button></small>`
+                    : deck.communityPublished ? '<small class="deck-author">by you · shared</small>' : '';
+                const share = borrowed
+                    ? '<button class="secondary-btn" type="button" disabled title="Sets added from other students can\'t be reposted"><i class="fas fa-lock"></i> Not yours to share</button>'
+                    : deck.communityPublished ? `<button class="secondary-btn" data-action="unpublish-community-deck" data-id="${this.escapeHTML(deck.id)}">Stop sharing</button>`
+                        : `<button class="secondary-btn" data-action="publish-community-deck" data-id="${this.escapeHTML(deck.id)}"><i class="fas fa-users"></i> Share</button>`;
+                const link = this.deckLinkInfo(deck);
+                const tags = link.course || link.assessment ? `<div class="deck-tags">
+                        ${link.course ? `<span class="deck-chip" title="Shown publicly if you share this set"><i class="fas fa-book"></i> ${this.escapeHTML(link.course.title || link.course.code)}</span>` : ''}
+                        ${link.assessment ? `<span class="deck-chip private" title="Only you can see this"><i class="fas fa-lock"></i> ${this.escapeHTML(this.deckAssessmentLabel(link.assessment))}</span>` : ''}
+                    </div>` : '';
+                const linkEditor = `<details class="deck-link-edit">
+                        <summary><i class="fas fa-tag"></i> Class &amp; test</summary>
+                        <div class="deck-link-fields">
+                            <label>Class<select data-deck-link="course" data-id="${this.escapeHTML(deck.id)}">${this.deckCourseOptions(link.courseCode)}</select></label>
+                            <label>Test / quiz<select data-deck-link="assessment" data-id="${this.escapeHTML(deck.id)}">${this.deckAssessmentOptions(link.courseCode, deck.assessmentId)}</select></label>
+                        </div>
+                    </details>`;
+                return `
+                <article class="glass-card deck-card">
                     <h3>${this.escapeHTML(deck.title)}</h3>
-                    <p>${(deck.cards || []).length} cards · ${(deck.cards || []).filter(card => this.isCardDue(card)).length} to review</p>
+                    ${author}
+                    ${tags}
+                    <p>${(deck.cards || []).length} cards</p>
+                    ${linkEditor}
                     <div class="actions">
                         <button class="primary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}">Study</button>
                         <button class="secondary-btn" data-action="add-card" data-id="${this.escapeHTML(deck.id)}">Add Card</button>
-                        ${deck.communityPublished ? `<button class="secondary-btn" data-action="unpublish-community-deck" data-id="${this.escapeHTML(deck.id)}">Stop sharing</button>` :
-                            `<button class="secondary-btn" data-action="publish-community-deck" data-id="${this.escapeHTML(deck.id)}"><i class="fas fa-users"></i> Share</button>`}
+                        ${share}
                         <button class="danger-btn" data-action="delete-deck" data-id="${this.escapeHTML(deck.id)}">Delete</button>
                     </div>
-                </article>
-            `).join('') : '<div class="empty-state glass-card full-width">No decks available. Create one or import flashcards.</div>';
+                </article>`;
+            }).join('') : '<div class="empty-state glass-card full-width">No decks available. Create one or import flashcards.</div>';
+            const missingAuthors = decks.filter(deck => deck.communitySourceOwnerId && !deck.communitySourceAuthor);
+            if (missingAuthors.length && myId && !this.deckAuthorBackfillStarted) {
+                this.deckAuthorBackfillStarted = true;
+                window.StudBudCommunityGames?.getAuthorNames(missingAuthors.map(deck => deck.communitySourceOwnerId))
+                    .then(async names => {
+                        for (const deck of missingAuthors) {
+                            if (names[deck.communitySourceOwnerId]) await AppState.saveFlashcardDeck({ ...deck, communitySourceAuthor: names[deck.communitySourceOwnerId] });
+                        }
+                    })
+                    .catch(error => console.warn('[NexusApp] Deck authors could not load:', error));
+            }
+            this.syncDeckLinkSelects(document.getElementById('import-deck-course'), document.getElementById('import-deck-assessment'), false);
+        }
+
+        deckAssessments() {
+            return (AppState.get('assignments') || [])
+                .filter(item => ['quiz', 'test'].includes(String(item.kind || '').toLowerCase()))
+                .sort((a, b) => String(a.dueDate || '9999').localeCompare(String(b.dueDate || '9999')));
+        }
+
+        deckAssessmentOptionsIds() {
+            const today = new Date().toISOString().slice(0, 10);
+            return this.deckAssessments().filter(item => item.status !== 'completed' && (!item.dueDate || String(item.dueDate).slice(0, 10) >= today)).map(item => String(item.id));
+        }
+
+        deckAssessmentLabel(item) {
+            const kind = String(item.kind).toLowerCase() === 'test' ? 'Test' : 'Quiz';
+            const due = item.dueDate ? new Date(`${String(item.dueDate).slice(0, 10)}T00:00:00`) : null;
+            const date = due && Number.isFinite(due.getTime()) ? ` · ${due.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : '';
+            return `${kind}: ${item.title || 'Untitled'}${date}`;
+        }
+
+        deckLinkInfo(deck) {
+            const courses = AppState.get('courses') || [];
+            const assessment = deck.assessmentId ? this.deckAssessments().find(item => String(item.id) === String(deck.assessmentId)) || null : null;
+            const courseCode = deck.courseCode || assessment?.courseCode || '';
+            const course = courseCode ? courses.find(item => item.code === courseCode) || { code: courseCode, title: deck.courseTitle || courseCode }
+                : deck.courseTitle ? { code: '', title: deck.courseTitle } : null;
+            return { courseCode, course, assessment };
+        }
+
+        deckCourseOptions(selected = '') {
+            const courses = AppState.get('courses') || [];
+            const known = courses.some(course => course.code === selected);
+            return `<option value="">No class</option>${courses.map(course =>
+                `<option value="${this.escapeHTML(course.code)}"${course.code === selected ? ' selected' : ''}>${this.escapeHTML(course.title || course.code)}</option>`).join('')}${selected && !known ? `<option value="${this.escapeHTML(selected)}" selected>${this.escapeHTML(selected)}</option>` : ''}`;
+        }
+
+        deckAssessmentOptions(courseCode = '', selected = '') {
+            const courses = AppState.get('courses') || [];
+            const today = new Date().toISOString().slice(0, 10);
+            // Upcoming quizzes/tests for the chosen class (or all classes); keep the current pick even if it has passed.
+            const items = this.deckAssessments().filter(item =>
+                (!courseCode || item.courseCode === courseCode) &&
+                (String(item.id) === String(selected) || (item.status !== 'completed' && (!item.dueDate || String(item.dueDate).slice(0, 10) >= today))));
+            const classTitle = code => courses.find(course => course.code === code)?.title || code || '';
+            return `<option value="">${items.length ? 'No test or quiz' : 'No upcoming tests or quizzes'}</option>${items.map(item =>
+                `<option value="${this.escapeHTML(item.id)}"${String(item.id) === String(selected) ? ' selected' : ''}>${this.escapeHTML(`${courseCode ? '' : `${classTitle(item.courseCode)} – `}${this.deckAssessmentLabel(item)}`)}</option>`).join('')}`;
+        }
+
+        syncDeckLinkSelects(courseSelect, assessmentSelect, assessmentChanged) {
+            if (!courseSelect || !assessmentSelect) return;
+            let courseCode = courseSelect.value;
+            let assessmentId = assessmentSelect.value;
+            if (assessmentChanged && assessmentId) {
+                courseCode = this.deckAssessments().find(item => String(item.id) === assessmentId)?.courseCode || courseCode;
+            } else if (assessmentId && this.deckAssessments().find(item => String(item.id) === assessmentId)?.courseCode !== courseCode && courseCode) {
+                assessmentId = '';
+            }
+            courseSelect.innerHTML = this.deckCourseOptions(courseCode);
+            assessmentSelect.innerHTML = this.deckAssessmentOptions(courseCode, assessmentId);
+        }
+
+        importerDeckLink() {
+            const courseCode = document.getElementById('import-deck-course')?.value || '';
+            const assessmentId = document.getElementById('import-deck-assessment')?.value || '';
+            const assessment = assessmentId ? this.deckAssessments().find(item => String(item.id) === assessmentId) : null;
+            return { courseCode: courseCode || assessment?.courseCode || '', assessmentId };
+        }
+
+        resetImporterDeckLink() {
+            const course = document.getElementById('import-deck-course');
+            const assessment = document.getElementById('import-deck-assessment');
+            if (course) course.value = '';
+            if (assessment) assessment.value = '';
+            this.syncDeckLinkSelects(course, assessment, false);
+        }
+
+        async updateDeckLink(deckId, field, value) {
+            const deck = (AppState.get('flashcards') || []).find(item => item.id === deckId);
+            if (!deck) return;
+            const next = { ...deck };
+            if (field === 'course') {
+                next.courseCode = value;
+                const current = this.deckAssessments().find(item => String(item.id) === String(deck.assessmentId));
+                if (current && current.courseCode !== value) next.assessmentId = '';
+            } else {
+                next.assessmentId = value;
+                const picked = this.deckAssessments().find(item => String(item.id) === value);
+                if (picked?.courseCode) next.courseCode = picked.courseCode;
+            }
+            await AppState.saveFlashcardDeck(next);
+            // Shared sets only expose the class, so refresh the public copy when the class changes.
+            if (next.communityPublished && next.courseCode !== deck.courseCode) {
+                window.StudBudCommunityGames.publishDeck({ ...next, courseTitle: this.deckLinkInfo(next).course?.title || '' })
+                    .catch(error => console.warn('[NexusApp] Shared deck class could not update:', error));
+            }
         }
 
         renderHostedGameDecks() {
@@ -3674,7 +3813,7 @@
                 results.dataset.loaded = 'true';
                 results.innerHTML = decks.length ? decks.map(deck => `
                     <article class="community-deck-card">
-                        <div><strong>${this.escapeHTML(deck.title)}</strong><p>${this.escapeHTML(deck.description || 'A student-shared study set.')}</p>
+                        <div><strong>${this.escapeHTML(deck.title)}</strong>${deck.course ? ` <span class="deck-chip"><i class="fas fa-book"></i> ${this.escapeHTML(deck.course)}</span>` : ''}<p>${this.escapeHTML(deck.description || 'A student-shared study set.')}</p>
                             <small>${Number(deck.card_count)} cards · studied by ${Number(deck.study_count)} ${Number(deck.study_count) === 1 ? 'student' : 'students'}</small>
                             <small class="deck-author">by <button type="button" class="link-btn" data-action="view-profile" data-id="${this.escapeHTML(deck.owner_id)}">${this.escapeHTML(deck.author_name || 'Student')}</button></small></div>
                         <button class="secondary-btn" type="button" data-action="import-community-deck" data-id="${this.escapeHTML(deck.id)}"><i class="fas fa-download"></i> Add to my decks</button>
@@ -3692,14 +3831,14 @@
             if (!deck) throw new Error('That deck could not be found.');
             let published;
             try {
-                published = await window.StudBudCommunityGames.publishDeck(deck);
+                published = await window.StudBudCommunityGames.publishDeck({ ...deck, courseTitle: this.deckLinkInfo(deck).course?.title || '' });
             } catch (error) {
                 const message = String(error?.message || error);
-                if (/already shared|same title|identical|duplicate/i.test(message)) { window.alert(message); return; }
+                if (/already shared|same title|identical|duplicate|already exists|reposted|reposting/i.test(message)) { window.alert(message); return; }
                 throw error;
             }
             await AppState.saveFlashcardDeck({ ...deck, communityPublished: true, communityDeckId: published.id });
-            window.alert('Deck shared. Its title, card terms and definitions, and any source attribution are visible to signed-in StudBud users. You can stop sharing it at any time.');
+            window.alert('Deck shared. Its title, class, card terms and definitions, and any source attribution are visible to signed-in StudBud users. Your linked test or quiz stays private. You can stop sharing it at any time.');
         }
 
         async unpublishCommunityDeck(deckId) {
@@ -3732,6 +3871,11 @@
                 communitySourceId: shared.id,
                 communitySourceOwnerId: shared.owner_id,
                 communitySourceTitle: shared.title,
+                communitySourceAuthor: shared.author_name || 'Student',
+                // Match the shared class to one of the user's own classes when possible.
+                courseCode: shared.course ? ((AppState.get('courses') || []).find(course =>
+                    [course.title, course.code].some(name => String(name || '').trim().toLowerCase() === String(shared.course).trim().toLowerCase()))?.code || '') : '',
+                courseTitle: shared.course || '',
                 studiedCount: 0
             };
             await AppState.saveFlashcardDeck(localDeck);
@@ -4062,7 +4206,7 @@
                     this.skyStep(game, b, b.st, dt, 0.8 + i * 0.07);
                     b.f = b.face || 1; b.a = b.st.air ? 2 : b.st.moving ? 1 : 0; b.tx = b.x; b.ty = b.y; b.ex = {}; b.seen = now;
                 });
-            } else {
+            } else if (me) {
                 bots.forEach((b, i) => {
                     const ph = c * (0.5 + i * 0.13) + i * 2.1;
                     b.x = me.x + Math.cos(ph) * (200 + i * 90); b.y = me.y + Math.sin(ph * 1.3) * (140 + i * 50);
@@ -4252,7 +4396,7 @@
             try {
                 const data = await games.friendCall('studbud_friend_overview');
                 this.friendOverview = data;
-                const person = (row, buttons) => `<li class="friend-row"><span class="friend-initial" aria-hidden="true">${this.escapeHTML((row.username || 'S').charAt(0).toUpperCase())}</span><strong>${this.escapeHTML(row.username)}</strong><span class="friend-actions">${buttons}</span></li>`;
+                const person = (row, buttons) => `<li class="friend-row">${this.multiplayerAvatarMarkup({ skin: row.skin || '', hat: row.hat || '', acc: row.accessory || '' }, false, 'friend-avatar')}<strong>${this.escapeHTML(row.username)}</strong><span class="friend-actions">${buttons}</span></li>`;
                 const attrs = row => `data-id="${this.escapeHTML(row.friendship_id)}" data-name="${this.escapeHTML(row.username)}"`;
                 lists.friends.innerHTML = data.friends.length
                     ? data.friends.map(row => person(row, `<button type="button" class="secondary-btn" data-action="friend-view" data-id="${this.escapeHTML(row.user_id)}">Profile</button><button type="button" class="ghost-btn" data-action="friend-remove" ${attrs(row)}>Remove</button>`)).join('')
@@ -4317,7 +4461,7 @@
                 const avatar = this.multiplayerAvatarMarkup({ skin: p.skin, hat: p.hat, acc: p.accessory }, true);
                 const stat = (label, value) => `<div class="friend-stat"><strong>${value}</strong><small>${label}</small></div>`;
                 const facts = [p.grade_level && `🎓 ${p.grade_level}`, p.favorite_subject && `⭐ ${p.favorite_subject}`, p.study_goal && `🎯 ${p.study_goal}`].filter(Boolean).map(f => `<span class="friend-chip">${this.escapeHTML(f)}</span>`).join('');
-                const decks = (p.decks || []).map(d => `<li class="friend-row"><div><strong>${this.escapeHTML(d.title)}</strong><br><small>${Number(d.card_count)} cards · studied by ${Number(d.study_count)}</small></div>${p.is_me ? '' : `<button type="button" class="secondary-btn" data-action="import-community-deck" data-id="${this.escapeHTML(d.id)}">Add</button>`}</li>`).join('');
+                const decks = (p.decks || []).map(d => `<li class="friend-row"><div><strong>${this.escapeHTML(d.title)}</strong>${d.course ? ` <span class="deck-chip"><i class="fas fa-book"></i> ${this.escapeHTML(d.course)}</span>` : ''}<br><small>${Number(d.card_count)} cards · studied by ${Number(d.study_count)}</small></div>${p.is_me ? '' : `<button type="button" class="secondary-btn" data-action="import-community-deck" data-id="${this.escapeHTML(d.id)}">Add</button>`}</li>`).join('');
                 modal.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.username)}${p.is_me ? ' <em class="you-badge">you</em>' : ''}</h3></div><button type="button" class="ghost-btn" data-action="close-user-profile" aria-label="Close profile"><i class="fas fa-xmark"></i></button></div>
                     ${p.bio ? `<p class="friend-bio">${this.escapeHTML(p.bio)}</p>` : ''}${facts ? `<div class="friend-chips">${facts}</div>` : ''}
                     <div class="friend-stats">${p.show_stats === false ? stat('Match wins', Number(p.wins) || 0) : `${stat('Studied today', this.formatStudyDuration(p.today_seconds))}${stat('This week', this.formatStudyDuration(p.week_seconds))}${stat('All time', this.formatStudyDuration(p.total_seconds))}${stat('Day streak', `${Number(p.streak_days) || 0} 🔥`)}${stat('Match wins', Number(p.wins) || 0)}`}</div>
@@ -4352,7 +4496,7 @@
                 { title: 'Welcome to StudBud', text: 'StudBud keeps your classes, grades, study plans, flashcards and games in one place. This quick tour shows what each part does. You can leave at any time.' },
                 { route: 'dashboard', sel: '#sidebar', title: 'Your menu', text: 'Everything lives in this menu. On a phone it sits along the top: swipe it sideways to see every page.' },
                 { route: 'dashboard', sel: '.priority-widget', title: 'Dashboard: what is due', text: 'See your most urgent assignments here, and use Add Assignment to put new work on your list.' },
-                { route: 'dashboard', sel: '.daily-study-card', title: 'Study streak', text: 'Study at least 15 minutes a day to keep your streak going. Your time shows up on the leaderboards.' },
+                { route: 'dashboard', sel: '.daily-study-card', title: 'Your home widget', text: 'Your streak, this week, today’s 15-minute goal, assignments to work on and your grades in one card. Tap Customize to choose what it shows or add StudBud to your home screen.' },
                 { route: 'dashboard', sel: '#study-priority-list', title: 'Quizzes & tests', text: 'Add an upcoming quiz or test with the "Add quiz or test" button and StudBud suggests what to study today, how long, and the best way to do it.' },
                 { route: 'dashboard', sel: '.focus-sprint-widget', title: 'Focus sprint', text: 'Pick a quiz or test, choose anywhere from 5 to 90 minutes, and start a timer. Finished sprints are logged as study time.' },
                 { route: 'gpa', sel: '#add-course-btn', title: 'Classes & grades', text: 'Add your classes, set up grade categories and log assignment scores (decimals like 23.21/25 work). Your GPA updates automatically.' },
@@ -4363,7 +4507,7 @@
                 { route: 'flashcard', sel: nav('flashcard'), title: 'Flashcards', text: 'Study decks with spaced repetition. Tap a card to flip it as many times as you like, then rate how well you knew it.' },
                 { route: 'importer', sel: nav('importer'), title: 'Import or create cards', text: 'Paste a list to import cards in bulk, or switch to manual mode to type them one at a time.' },
                 { route: 'analytics', sel: nav('analytics'), title: 'Analytics', text: 'Charts of your grades, study time and habits so you can spot what is working.' },
-                { route: 'leaderboard', sel: nav('leaderboard'), title: 'Leaderboards', text: 'Compare daily and weekly study time with other students. Banned accounts and accounts waiting on a username change are hidden.' },
+                { route: 'leaderboard', sel: nav('leaderboard'), title: 'Leaderboards', text: 'See your streak calendar and milestones, then compare study time today, this week, this month or all time, with everyone or just your friends.' },
                 { route: 'friends', sel: nav('friends'), title: 'Friends', text: 'Send a friend request by username, accept requests from others, and open a friend\'s profile to see their study time, streak and match wins.' },
                 { route: 'exam-arcade', sel: nav('exam-arcade'), title: 'Practice & Arcade', text: 'Practice exams and quick arcade games that use your own flashcards.' },
                 { route: 'multiplayer', sel: nav('multiplayer'), title: 'Multiplayer', text: 'Host or join a room and play City Escape, Soccer, King of the Hill and more. Every game has its own touch controls on phones, and a live leaderboard that ranks by what wins that game.' },
@@ -4399,6 +4543,8 @@
             this.tutorialResize = () => this.positionTutorialSpot();
             document.addEventListener('keydown', this.tutorialKeys);
             window.addEventListener('resize', this.tutorialResize);
+            window.addEventListener('scroll', this.tutorialResize, { capture: true, passive: true });
+            document.body.classList.add('tutorial-active');
             this.showTutorialStep(0);
         }
 
@@ -4417,30 +4563,61 @@
             root.querySelector('[data-tour="next"]').textContent = this.tutorialStep === steps.length - 1 ? 'Finish' : 'Next';
             root.querySelector('[data-tour="skip"]').hidden = this.tutorialStep === steps.length - 1;
             this.tutorialSel = step.sel || '';
+            const spot = root.querySelector('.tutorial-spot');
+            if (!this.tutorialSel && spot) spot.hidden = true;
             setTimeout(() => {
-                const el = this.tutorialSel && document.querySelector(this.tutorialSel);
-                if (el && el.getBoundingClientRect().width) el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+                const el = this.tutorialSel ? document.querySelector(this.tutorialSel) : null;
+                if (el && el.getBoundingClientRect().width) {
+                    // Tall targets on small screens are pinned to the top so the tour card never hides them.
+                    const tall = el.getBoundingClientRect().height > window.innerHeight * 0.45;
+                    const inNav = Boolean(el.closest('#sidebar'));
+                    if (inNav && window.matchMedia('(max-width: 768px)').matches) window.scrollTo({ top: 0, behavior: 'smooth' });
+                    el.scrollIntoView({ block: inNav ? 'nearest' : (tall ? 'start' : 'center'), inline: 'center', behavior: 'smooth' });
+                }
                 this.positionTutorialSpot();
-                setTimeout(() => this.positionTutorialSpot(), 350);
+                setTimeout(() => this.positionTutorialSpot(), 400);
+                setTimeout(() => this.positionTutorialSpot(), 900);
             }, 80);
             root.querySelector('[data-tour="next"]').focus({ preventScroll: true });
         }
 
         positionTutorialSpot() {
-            const spot = document.querySelector('#tutorial-root .tutorial-spot');
-            if (!spot) return;
-            const el = this.tutorialSel && document.querySelector(this.tutorialSel);
-            const rect = el?.getBoundingClientRect();
-            if (!rect || !rect.width || !rect.height) { spot.hidden = true; return; }
-            spot.hidden = false;
+            const root = document.getElementById('tutorial-root');
+            const spot = root?.querySelector('.tutorial-spot');
+            const card = root?.querySelector('.tutorial-card');
+            if (!spot || !card) return;
+            const el = this.tutorialSel ? document.querySelector(this.tutorialSel) : null;
+            const rect = el ? el.getBoundingClientRect() : null;
+            const viewH = window.innerHeight;
+            if (!rect || !rect.width || !rect.height) {
+                spot.hidden = true;
+                card.classList.remove('tutorial-card-top');
+                return;
+            }
+            // Put the card on whichever side of the screen has more room than the highlighted element.
+            const spaceAbove = rect.top;
+            const spaceBelow = viewH - rect.bottom;
+            card.classList.toggle('tutorial-card-top', spaceAbove > spaceBelow && rect.top + rect.height / 2 > viewH * 0.4);
+            const cardRect = card.getBoundingClientRect();
             const pad = 6;
-            Object.assign(spot.style, { left: `${rect.left - pad}px`, top: `${rect.top - pad}px`, width: `${rect.width + pad * 2}px`, height: `${rect.height + pad * 2}px` });
+            let top = Math.max(4, rect.top - pad);
+            let bottom = Math.min(viewH - 4, rect.bottom + pad);
+            if (card.classList.contains('tutorial-card-top')) top = Math.max(top, Math.min(bottom - 40, cardRect.bottom + 8));
+            else bottom = Math.min(bottom, Math.max(top + 40, cardRect.top - 8));
+            const left = Math.max(4, rect.left - pad);
+            const right = Math.min(window.innerWidth - 4, rect.right + pad);
+            spot.hidden = false;
+            Object.assign(spot.style, { left: `${left}px`, top: `${top}px`, width: `${Math.max(24, right - left)}px`, height: `${Math.max(24, bottom - top)}px` });
         }
 
         endTutorialUI() {
             document.getElementById('tutorial-root')?.remove();
             if (this.tutorialKeys) document.removeEventListener('keydown', this.tutorialKeys);
-            if (this.tutorialResize) window.removeEventListener('resize', this.tutorialResize);
+            if (this.tutorialResize) {
+                window.removeEventListener('resize', this.tutorialResize);
+                window.removeEventListener('scroll', this.tutorialResize, { capture: true });
+            }
+            document.body.classList.remove('tutorial-active');
             this.tutorialKeys = this.tutorialResize = null;
         }
 
@@ -4451,6 +4628,7 @@
         }
 
         renderDashboard() {
+            this.renderHomeWidget();
             const courses = AppState.get('courses') || [];
             const calculator = window.GPACalculator;
             if (calculator) {
@@ -4483,46 +4661,275 @@
             return minutes ? `${minutes} min${remainder ? ` ${remainder} sec` : ''}` : `${remainder} sec`;
         }
 
+        formatLongDuration(seconds) {
+            const total = Math.max(0, Math.floor(Number(seconds) || 0));
+            if (total < 3600) return this.formatStudyDuration(total);
+            const hours = Math.floor(total / 3600);
+            const minutes = Math.floor((total % 3600) / 60);
+            return `${hours.toLocaleString()} h${minutes ? ` ${minutes} min` : ''}`;
+        }
+
+        studyStreakState() {
+            const snap = this.studyLeaderboardSnapshot || {};
+            const goal = Number(snap.daily_goal_seconds) || 900;
+            const dayKey = time => {
+                const date = new Date(time);
+                return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : '';
+            };
+            const todayKey = dayKey(Date.now());
+            let week = Array.isArray(snap.week) && snap.week.length
+                ? snap.week.map(day => ({ date: String(day.date).slice(0, 10), seconds: Number(day.seconds) || 0 }))
+                : null;
+            if (!week) {
+                // Older servers don't send the week, so fall back to sessions logged on this device.
+                const byDay = {};
+                (AppState.state?.studyHistory || []).forEach(session => {
+                    const key = dayKey(session.timestamp);
+                    if (key) byDay[key] = (byDay[key] || 0) + (Number(session.durationSec) || 0);
+                });
+                week = Array.from({ length: 7 }, (_, i) => {
+                    const key = dayKey(Date.now() - (6 - i) * 86400000);
+                    return { date: key, seconds: byDay[key] || 0 };
+                });
+            }
+            const today = snap.today_seconds != null ? Number(snap.today_seconds) || 0 : (week.find(day => day.date === todayKey)?.seconds || 0);
+            week = week.map(day => day.date === todayKey ? { ...day, seconds: Math.max(day.seconds, today) } : day);
+            const streak = Number(snap.streak_days) || 0;
+            const now = new Date();
+            const msLeft = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1) - now.getTime();
+            const milestones = [3, 7, 14, 30, 50, 100, 150, 200, 365, 500, 1000];
+            const next = milestones.find(m => m > streak) || (Math.floor(streak / 500) + 1) * 500;
+            const prev = [...milestones].reverse().find(m => m <= streak) || 0;
+            return {
+                goal, today, streak, week, msLeft, next, prev, todayKey,
+                best: Math.max(streak, Number(snap.best_streak) || 0),
+                done: today >= goal,
+                loaded: Boolean(this.studyLeaderboardSnapshot)
+            };
+        }
+
+        streakStatusText(st) {
+            const hours = Math.floor(st.msLeft / 3600000);
+            const mins = Math.floor(st.msLeft / 60000) % 60;
+            const left = hours ? `${hours}h ${mins}m` : `${mins}m`;
+            const need = Math.max(1, Math.ceil((st.goal - st.today) / 60));
+            if (!st.loaded) return this.studyLeaderboardError || 'Loading your streak…';
+            if (st.done) return st.streak > 1 ? `Goal done! Your ${st.streak}-day streak is safe today.` : 'Goal done! Your streak has started.';
+            if (st.streak) return `Study ${need} more min in the next ${left} to keep your streak.`;
+            return `Study ${need} min today to start a streak.`;
+        }
+
+        streakHeroMarkup(st) {
+            const state = st.done ? 'is-safe' : st.streak ? 'is-risk' : 'is-cold';
+            const pct = Math.round(Math.min(1, Math.max(0, (st.streak - st.prev) / Math.max(1, st.next - st.prev))) * 100);
+            const toGo = st.next - st.streak;
+            return `<div class="streak-hero ${state}">
+                <div class="streak-flame" aria-hidden="true"><i class="fas fa-fire"></i><b>${st.streak}</b></div>
+                <div class="streak-hero-text">
+                    <strong>${st.streak} day streak</strong>
+                    <span>${this.escapeHTML(this.streakStatusText(st))}</span>
+                    <div class="streak-milestone" title="Next milestone: ${st.next} days">
+                        <span class="streak-milestone-bar"><i style="width:${pct}%"></i></span>
+                        <small>${toGo} day${toGo === 1 ? '' : 's'} to the ${st.next}-day milestone · best ${st.best}</small>
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        streakWeekMarkup(st) {
+            const names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            return `<ol class="streak-week" aria-label="Daily goal over the last 7 days">${st.week.map(day => {
+                const name = names[new Date(`${day.date}T00:00:00Z`).getUTCDay()] || '';
+                const hit = day.seconds >= st.goal;
+                const part = !hit && day.seconds > 0;
+                const label = `${name}: ${hit ? 'goal met' : part ? `${Math.round(day.seconds / 60)} of ${Math.round(st.goal / 60)} min` : 'no study'}`;
+                return `<li class="${hit ? 'hit' : part ? 'part' : 'miss'}${day.date === st.todayKey ? ' today' : ''}" title="${label}" aria-label="${label}"><span>${name.slice(0, 2)}</span><i class="fas ${hit ? 'fa-fire' : part ? 'fa-circle-half-stroke' : 'fa-circle'}" aria-hidden="true"></i></li>`;
+            }).join('')}</ol>`;
+        }
+
+        homeWidgetPrefs() {
+            const defaults = { streak: true, week: true, goal: true, assignments: true, assignmentCount: 3, grades: true, badge: true };
+            return { ...defaults, ...(AppState.get('settings')?.homeWidget || {}) };
+        }
+
+        saveHomeWidgetPrefs(patch) {
+            const settings = AppState.get('settings') || {};
+            AppState.set('settings', { ...settings, homeWidget: { ...this.homeWidgetPrefs(), ...patch } });
+            this.renderHomeWidget();
+        }
+
+        dueLabel(dateKey) {
+            if (!dateKey) return { text: 'No due date', tone: '' };
+            const today = new Date(`${localDateKey(new Date())}T00:00:00`);
+            const due = new Date(`${dateKey}T00:00:00`);
+            if (!Number.isFinite(due.getTime())) return { text: dateKey, tone: '' };
+            const diff = Math.round((due - today) / 86400000);
+            if (diff < 0) return { text: `Overdue ${-diff}d`, tone: 'is-overdue' };
+            if (diff === 0) return { text: 'Due today', tone: 'is-soon' };
+            if (diff === 1) return { text: 'Due tomorrow', tone: 'is-soon' };
+            if (diff < 7) return { text: `Due ${due.toLocaleDateString(undefined, { weekday: 'short' })}`, tone: '' };
+            return { text: `Due ${due.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`, tone: '' };
+        }
+
+        homeWidgetData(st = this.studyStreakState(), prefs = this.homeWidgetPrefs()) {
+            const courses = AppState.get('courses') || [];
+            const courseTitle = code => courses.find(course => course.code === code)?.title || code || '';
+            const open = (AppState.get('assignments') || [])
+                .filter(item => item.status !== 'completed' && !this.isGradedItem(item))
+                .sort((a, b) => (a.dueDate || '9999-12-31').localeCompare(b.dueDate || '9999-12-31'));
+            const assignments = open.slice(0, Math.max(1, Number(prefs.assignmentCount) || 3)).map(item => {
+                const due = this.dueLabel(item.dueDate);
+                return { id: item.id, title: item.title || 'Untitled', course: courseTitle(item.courseCode), due: due.text, tone: due.tone };
+            });
+            const grades = courses.map(course => {
+                const grade = this.calculateCourseGrade(course);
+                return Number.isFinite(grade) ? { code: course.code, title: course.title || course.code, percent: Math.round(grade * 10) / 10, letter: this.gradeForPercentage(grade) } : null;
+            }).filter(Boolean);
+            const gpa = grades.length ? this.calculateTrackedGPA(courses) : null;
+            const status = this.streakStatusText(st);
+            const weekText = st.week.map(day => day.seconds >= st.goal ? '🔥' : day.seconds > 0 ? '◐' : '○').join(' ');
+            return {
+                prefs, st, assignments, openCount: open.length, grades, gpa,
+                card: {
+                    showStreak: Boolean(prefs.streak), showWeek: Boolean(prefs.week), showGoal: Boolean(prefs.goal),
+                    showAssignments: Boolean(prefs.assignments), showGrades: Boolean(prefs.grades && grades.length),
+                    streak: st.streak, streakLabel: `${st.streak} day streak · best ${st.best}`, status, weekText,
+                    goalText: `${Math.floor(st.today / 60)} of ${Math.round(st.goal / 60)} min studied today`,
+                    assignments: assignments.map(item => ({ title: item.title, due: item.due })),
+                    gpaText: gpa ? `GPA ${Number(gpa.weighted).toFixed(2)} weighted · ${Number(gpa.unweighted).toFixed(2)} unweighted` : 'No grades yet',
+                    grades: grades.slice(0, 4).map(item => ({ title: item.title, grade: `${item.letter} (${item.percent}%)` })),
+                    updated: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+                }
+            };
+        }
+
+        renderHomeWidget(st = this.studyStreakState()) {
+            const prefs = this.homeWidgetPrefs();
+            document.querySelectorAll('[data-home-widget-pref]').forEach(input => {
+                const value = prefs[input.dataset.homeWidgetPref];
+                if (input.type === 'checkbox') input.checked = Boolean(value);
+                else input.value = String(value);
+            });
+            const data = this.homeWidgetData(st, prefs);
+            this.updateAppBadge(prefs.badge && st.loaded ? st.streak : 0);
+            this.pushHomeWidgetData(data.card);
+            const body = document.getElementById('home-widget-body');
+            if (!body) return;
+            const esc = value => this.escapeHTML(String(value ?? ''));
+            const habit = [];
+            if (prefs.streak) habit.push(this.streakHeroMarkup(st));
+            if (prefs.week) habit.push(this.streakWeekMarkup(st));
+            if (prefs.goal) {
+                habit.push(`<div class="home-widget-goal"><div class="daily-study-stats"><strong>${this.formatStudyDuration(st.today)}</strong><span>of ${Math.round(st.goal / 60)} min today</span></div>
+                    <progress class="daily-study-progress" max="${st.goal}" value="${Math.min(st.today, st.goal)}" aria-label="${Math.floor(st.today / 60)} of ${Math.round(st.goal / 60)} study minutes completed today"></progress></div>`);
+            }
+            const sections = [];
+            if (habit.length) sections.push(`<div class="home-widget-section home-widget-habit">${habit.join('')}</div>`);
+            if (prefs.assignments) {
+                sections.push(`<div class="home-widget-section">
+                    <div class="home-widget-section-head"><h4><i class="fas fa-list-check" aria-hidden="true"></i> Work on next</h4><button type="button" class="link-btn" data-target="planner-view">${data.openCount > data.assignments.length ? `All ${data.openCount}` : 'Planner'}</button></div>
+                    ${data.assignments.length ? `<ul class="home-widget-list">${data.assignments.map(item => `<li><div><strong>${esc(item.title)}</strong><small>${esc(item.course)}</small></div><span class="home-widget-due ${item.tone}">${esc(item.due)}</span></li>`).join('')}</ul>`
+                        : '<p class="home-widget-empty"><i class="fas fa-circle-check" aria-hidden="true"></i> Nothing to work on. Nice!</p>'}
+                </div>`);
+            }
+            if (prefs.grades) {
+                sections.push(`<div class="home-widget-section">
+                    <div class="home-widget-section-head"><h4><i class="fas fa-graduation-cap" aria-hidden="true"></i> Grades</h4><button type="button" class="link-btn" data-target="gpa-view">Classes</button></div>
+                    ${data.grades.length ? `<div class="home-widget-gpa"><div><b>${Number(data.gpa.weighted).toFixed(2)}</b><small>Weighted GPA</small></div><div><b>${Number(data.gpa.unweighted).toFixed(2)}</b><small>Unweighted</small></div></div>
+                        <ul class="home-widget-list home-widget-grades">${data.grades.slice(0, 5).map(item => `<li><a href="#/class/${encodeURIComponent(item.code)}">${esc(item.title)}</a><span class="home-widget-grade grade-${esc(item.letter.charAt(0).toLowerCase())}">${esc(item.letter)} · ${item.percent}%</span></li>`).join('')}</ul>`
+                        : '<p class="home-widget-empty">Add graded work to a class to see your grades here.</p>'}
+                </div>`);
+            }
+            body.innerHTML = sections.length
+                ? `<div class="home-widget-grid">${sections.join('')}</div>`
+                : '<p class="home-widget-empty">Everything is hidden. Tap Customize to choose what this widget shows.</p>';
+        }
+
+        updateAppBadge(count) {
+            if (!('setAppBadge' in navigator)) return;
+            const request = count > 0 ? navigator.setAppBadge(count) : navigator.clearAppBadge();
+            Promise.resolve(request).catch(() => { });
+        }
+
+        pushHomeWidgetData(card) {
+            const worker = navigator.serviceWorker?.controller;
+            if (!worker) return;
+            const { updated, ...stable } = card;
+            const key = JSON.stringify(stable);
+            if (key === this.lastHomeWidgetPayload) return;
+            this.lastHomeWidgetPayload = key;
+            worker.postMessage({ type: 'studbud-widget-data', data: card });
+        }
+
+        installHomeWidget() {
+            const note = document.getElementById('home-widget-install-note');
+            const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+            const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+            const installBtn = document.getElementById('install-app-button');
+            let text;
+            if (standalone) {
+                text = /windows/i.test(navigator.userAgent)
+                    ? 'StudBud is installed. Open the Widgets board (Windows key + W), choose Add widgets and pick StudBud to pin this widget. Your streak also shows on the app icon.'
+                    : ios
+                        ? 'StudBud is on your home screen. Your streak shows as a badge on the icon once notifications are allowed for StudBud.'
+                        : 'StudBud is installed. Your streak shows on the app icon, and long-pressing the icon gives quick shortcuts to your streak, planner and flashcards.';
+                if (ios && window.Notification?.permission === 'default') window.Notification.requestPermission().then(() => this.renderHomeWidget()).catch(() => { });
+            } else if (installBtn && !installBtn.classList.contains('hidden') && !ios) {
+                installBtn.click();
+                text = 'Follow your browser\'s prompt to install StudBud. Once installed, your streak appears on the app icon.';
+            } else {
+                text = ios
+                    ? 'In Safari, tap the Share button, then "Add to Home Screen". Open StudBud from the new icon to see your streak badge.'
+                    : 'Open your browser menu and choose "Install app" or "Add to Home screen". Once installed, your streak appears on the app icon.';
+            }
+            if (note) note.textContent = text;
+        }
+
         renderDailyStudyHabit() {
-            const snapshot = this.studyLeaderboardSnapshot;
-            const seconds = Number(snapshot?.today_seconds || 0);
-            const goal = Number(snapshot?.daily_goal_seconds || 900);
-            const streak = Number(snapshot?.streak_days || 0);
-            const time = document.getElementById('daily-study-time');
-            const streakNode = document.getElementById('daily-study-streak');
-            const progress = document.getElementById('daily-study-progress');
+            const st = this.studyStreakState();
+            const { today: seconds, goal } = st;
             const note = document.getElementById('daily-study-note');
             const boardTime = document.getElementById('leaderboard-today-time');
-            const boardStreak = document.getElementById('leaderboard-streak-display');
             const boardProgress = document.getElementById('leaderboard-study-progress');
             const boardNote = document.getElementById('leaderboard-goal-note');
-            if (time) time.textContent = this.formatStudyDuration(seconds);
-            if (streakNode) streakNode.textContent = `${streak} day${streak === 1 ? '' : 's'}`;
+            const hero = document.getElementById('leaderboard-streak-hero');
+            const stats = document.getElementById('leaderboard-streak-stats');
             if (boardTime) boardTime.textContent = this.formatStudyDuration(seconds);
-            if (boardStreak) boardStreak.textContent = `${streak} day streak`;
-            if (progress) {
-                progress.max = goal;
-                progress.value = Math.min(seconds, goal);
-                progress.setAttribute('aria-label', `${Math.floor(seconds / 60)} of 15 study minutes completed today`);
-            }
             if (boardProgress) {
                 boardProgress.max = goal;
                 boardProgress.value = Math.min(seconds, goal);
-                boardProgress.setAttribute('aria-label', `${Math.floor(seconds / 60)} of 15 study minutes completed today`);
+                boardProgress.setAttribute('aria-label', `${Math.floor(seconds / 60)} of ${Math.round(goal / 60)} study minutes completed today`);
             }
             const goalNote = seconds >= goal
                 ? 'Daily goal complete. Come back tomorrow to keep your streak growing.'
-                : `${Math.ceil((goal - seconds) / 60)} more minute${Math.ceil((goal - seconds) / 60) === 1 ? '' : 's'} to reach today’s 15-minute goal.`;
+                : `${Math.ceil((goal - seconds) / 60)} more minute${Math.ceil((goal - seconds) / 60) === 1 ? '' : 's'} to reach today’s ${Math.round(goal / 60)}-minute goal.`;
             if (note) note.textContent = this.studyLeaderboardError || goalNote;
             if (boardNote) boardNote.textContent = this.studyLeaderboardError || goalNote;
+            if (hero) hero.innerHTML = this.streakHeroMarkup(st) + this.streakWeekMarkup(st);
+            if (stats) {
+                const snap = this.studyLeaderboardSnapshot || {};
+                const items = [
+                    ['fa-trophy', 'Best streak', `${st.best} day${st.best === 1 ? '' : 's'}`],
+                    ['fa-calendar-check', 'Days goal met', snap.active_days != null ? Number(snap.active_days).toLocaleString() : '—'],
+                    ['fa-hourglass-half', 'All-time study', snap.total_seconds != null ? this.formatLongDuration(snap.total_seconds) : '—']
+                ];
+                stats.innerHTML = items.map(([icon, label, value]) => `<div class="streak-stat"><i class="fas ${icon}" aria-hidden="true"></i><b>${this.escapeHTML(value)}</b><small>${label}</small></div>`).join('');
+            }
+            this.renderHomeWidget(st);
         }
 
         renderStudyLeaderboard() {
             const list = document.getElementById('study-leaderboard-list');
             if (!list) return;
-            const board = this.studyLeaderboardSnapshot?.leaderboard || [];
+            const snap = this.studyLeaderboardSnapshot || {};
+            const board = snap.leaderboard || [];
+            const friends = this.studyLeaderboardScope === 'friends';
             const top = Math.max(1, ...board.map(p => Number(p.seconds) || 0));
             const medal = ['🥇', '🥈', '🥉'];
+            const fmt = seconds => this.formatLongDuration(seconds);
+            const streakChip = player => Number(player.streak_days) > 0
+                ? `<span class="study-leaderboard-streak" title="${Number(player.streak_days)}-day streak"><i class="fas fa-fire" aria-hidden="true"></i>${Number(player.streak_days)}</span>`
+                : '';
             const row = player => {
                 const rank = Number(player.rank) || 0;
                 const name = this.escapeHTML(player.username || 'Student');
@@ -4530,18 +4937,48 @@
                 return `<li class="study-leaderboard-row${player.is_me ? ' is-self' : ''}${rank >= 1 && rank <= 3 ? ` podium-${rank}` : ''}">
                     <span class="study-leaderboard-rank">${rank >= 1 && rank <= 3 ? medal[rank - 1] : (rank || '—')}</span>
                     ${this.multiplayerAvatarMarkup(this.profileCosmetics(player), false, 'study-leaderboard-avatar')}
-                    <div class="study-leaderboard-main"><strong>${name}${player.is_me ? ' <em class="you-badge">you</em>' : ''}</strong><span class="study-leaderboard-bar"><i style="width:${pct}%"></i></span></div>
-                    <span class="study-leaderboard-time">${this.formatStudyDuration(player.seconds)}</span>${player.user_id ? `<button type="button" class="secondary-btn" data-action="view-profile" data-id="${this.escapeHTML(player.user_id)}">Profile</button>` : ''}</li>`;
+                    <div class="study-leaderboard-main"><strong>${player.user_id ? `<button type="button" class="link-btn study-leaderboard-name" data-action="view-profile" data-id="${this.escapeHTML(player.user_id)}">${name}</button>` : name}${player.is_me ? ' <em class="you-badge">you</em>' : ''}${streakChip(player)}</strong><span class="study-leaderboard-bar"><i style="width:${pct}%"></i></span></div>
+                    <span class="study-leaderboard-time">${fmt(player.seconds)}</span>${player.user_id && !player.is_me ? `<button type="button" class="secondary-btn study-leaderboard-profile" data-action="view-profile" data-id="${this.escapeHTML(player.user_id)}" aria-label="View ${name}'s profile"><i class="fas fa-user" aria-hidden="true"></i><span> Profile</span></button>` : '<span class="study-leaderboard-profile-spacer"></span>'}</li>`;
             };
-            const podium = board.length >= 3 ? `<li class="study-podium" aria-hidden="true">${[1, 0, 2].map(i => {
+            const podium = board.length >= 3 ? `<li class="study-podium">${[1, 0, 2].map(i => {
                 const p = board[i];
-                return `<div class="podium-spot podium-spot-${i + 1}"><span class="podium-medal">${medal[i]}</span>${this.multiplayerAvatarMarkup(this.profileCosmetics(p), false, 'study-leaderboard-avatar')}<b>${this.escapeHTML(p.username || 'Student')}</b><small>${this.formatStudyDuration(p.seconds)}</small><div class="podium-block"></div></div>`;
+                const inner = `<span class="podium-medal">${medal[i]}</span>${this.multiplayerAvatarMarkup(this.profileCosmetics(p), false, 'study-leaderboard-avatar')}<b>${this.escapeHTML(p.username || 'Student')}</b><small>${fmt(p.seconds)}</small><div class="podium-block"></div>`;
+                return p.user_id
+                    ? `<button type="button" class="podium-spot podium-spot-${i + 1}" data-action="view-profile" data-id="${this.escapeHTML(p.user_id)}" aria-label="View ${this.escapeHTML(p.username || 'Student')}'s profile">${inner}</button>`
+                    : `<div class="podium-spot podium-spot-${i + 1}">${inner}</div>`;
             }).join('')}</li>` : '';
-            list.innerHTML = board.length ? podium + board.map(row).join('') : '<li class="empty-state">No study time logged for this period yet. Start a session to be first on the board.</li>';
+            const empty = friends
+                ? '<li class="empty-state">None of your friends have studied in this period yet. Add friends from the Friends page and challenge them!</li>'
+                : '<li class="empty-state">No study time logged for this period yet. Start a session to be first on the board.</li>';
+            list.innerHTML = board.length ? podium + board.map(row).join('') : empty;
+
+            const me = document.getElementById('study-leaderboard-me');
+            if (me) {
+                const mine = snap.me || board.find(p => p.is_me) || null;
+                const myRank = Number(mine?.rank) || 0;
+                const mySeconds = Number(mine?.seconds) || 0;
+                const above = myRank > 1 ? board.find(p => Number(p.rank) === myRank - 1) : null;
+                const gap = above ? Math.max(60, (Number(above.seconds) || 0) - mySeconds + 60) : 0;
+                const participants = Number(snap.participants) || board.length;
+                let text;
+                if (!this.studyLeaderboardSnapshot) text = '';
+                else if (!myRank) text = `You haven't studied in this period yet. Log ${Math.round((Number(snap.daily_goal_seconds) || 900) / 60)} minutes to get on the board.`;
+                else if (myRank === 1) text = participants > 1 ? `You're #1 of ${participants}! Keep studying to stay ahead.` : 'You\'re #1. Invite friends to compete!';
+                else text = `You're #${myRank} of ${participants} with ${fmt(mySeconds)}.${above ? ` Study about ${Math.ceil(gap / 60)} more min to pass ${above.username || 'the next student'}.` : ''}`;
+                me.innerHTML = text ? `<i class="fas fa-location-crosshairs" aria-hidden="true"></i><span>${this.escapeHTML(text)}</span>` : '';
+                me.classList.toggle('hidden', !text);
+            }
+
             const label = document.getElementById('study-leaderboard-period-label');
-            if (label) label.textContent = this.studyLeaderboardPeriod === 'weekly' ? 'This week · UTC' : 'Today · UTC';
+            const periodText = { daily: 'Today', weekly: 'This week', monthly: 'This month', alltime: 'All time' }[this.studyLeaderboardPeriod] || 'Today';
+            if (label) label.textContent = `${periodText} · ${friends ? 'You and your friends' : 'All StudBud students'}${this.studyLeaderboardPeriod === 'alltime' ? '' : ' · UTC'}`;
             document.querySelectorAll('[data-study-leaderboard-period]').forEach(button => {
                 const selected = button.dataset.studyLeaderboardPeriod === this.studyLeaderboardPeriod;
+                button.classList.toggle('selected', selected);
+                button.setAttribute('aria-pressed', String(selected));
+            });
+            document.querySelectorAll('[data-study-leaderboard-scope]').forEach(button => {
+                const selected = button.dataset.studyLeaderboardScope === (friends ? 'friends' : 'global');
                 button.classList.toggle('selected', selected);
                 button.setAttribute('aria-pressed', String(selected));
             });
@@ -4549,16 +4986,22 @@
 
         async refreshStudyLeaderboard(period = 'daily') {
             if (!window.StudBudCloud?.user) return;
-            this.studyLeaderboardPeriod = period === 'weekly' ? 'weekly' : 'daily';
+            this.studyLeaderboardPeriod = ['weekly', 'monthly', 'alltime'].includes(period) ? period : 'daily';
+            const scope = this.studyLeaderboardScope === 'friends' ? 'friends' : 'global';
             const status = document.getElementById('study-leaderboard-status');
             if (status) status.textContent = 'Loading study progress…';
+            const requestId = (this.studyLeaderboardRequest || 0) + 1;
+            this.studyLeaderboardRequest = requestId;
             try {
-                this.studyLeaderboardSnapshot = await window.StudBudCommunityGames.getStudyLeaderboard(this.studyLeaderboardPeriod);
+                const snapshot = await window.StudBudCommunityGames.getStudyLeaderboard(this.studyLeaderboardPeriod, scope);
+                if (requestId !== this.studyLeaderboardRequest) return;
+                this.studyLeaderboardSnapshot = snapshot;
                 this.studyLeaderboardError = '';
                 if (status) status.textContent = 'Study time is recorded from flashcard reviews, solo study games, focus logs, and manual study logs.';
                 this.renderStudyLeaderboard();
                 this.renderDailyStudyHabit();
             } catch (error) {
+                if (requestId !== this.studyLeaderboardRequest) return;
                 console.error('[NexusApp] Study leaderboard could not load:', error);
                 this.studyLeaderboardError = `Study progress could not load. ${this.friendlyErrorMessage(error, 'Check your connection and try again.')}`;
                 if (status) status.textContent = this.studyLeaderboardError;
@@ -4698,23 +5141,21 @@
                 current.items += 1;
                 byClass.set(item.courseCode, current);
             });
-            const dueCards = (AppState.get('flashcards') || []).flatMap(deck => {
-                const count = (deck.cards || []).filter(card => this.isCardDue(card)).length;
-                return count ? [{ courseCode: deck.courseCode, title: deck.title, count }] : [];
-            });
-            dueCards.forEach(deck => {
-                const key = deck.courseCode || `review_${deck.title}`;
-                const course = (AppState.get('courses') || []).find(item => item.code === deck.courseCode);
-                const current = byClass.get(key) || { title: course?.title || `${deck.title} review`, minutes: 0, items: 0 };
-                current.minutes += Math.ceil(deck.count / 5) * 5;
+            // Decks tagged for an upcoming quiz/test get practice time under that class.
+            const upcomingIds = new Set(this.deckAssessmentOptionsIds());
+            const linkedDecks = (AppState.get('flashcards') || []).filter(deck => deck.assessmentId && upcomingIds.has(String(deck.assessmentId)) && (deck.cards || []).length);
+            linkedDecks.forEach(deck => {
+                const link = this.deckLinkInfo(deck);
+                const key = link.courseCode || `deck_${deck.id}`;
+                const current = byClass.get(key) || { title: link.course?.title || deck.title, minutes: 0, items: 0 };
+                current.minutes += Math.min(30, Math.max(10, Math.ceil((deck.cards || []).length / 10) * 5));
                 current.items += 1;
                 byClass.set(key, current);
             });
             const totalMinutes = Array.from(byClass.values()).reduce((sum, item) => sum + item.minutes, 0);
-            const dueCardCount = dueCards.reduce((sum, deck) => sum + deck.count, 0);
             totalElement.textContent = totalMinutes
-                ? `Plan for about ${Math.floor(totalMinutes / 60)} hr ${totalMinutes % 60} min today across upcoming quizzes and tests${dueCardCount ? ` and ${dueCardCount} flashcard review${dueCardCount === 1 ? '' : 's'}` : ''}. Estimates use due dates, task size, and your study logs.`
-                : 'Nothing to study today. Add an upcoming quiz or test, or some flashcards, to get a study time estimate.';
+                ? `Plan for about ${Math.floor(totalMinutes / 60)} hr ${totalMinutes % 60} min today across upcoming quizzes and tests${linkedDecks.length ? `, including ${linkedDecks.length} flashcard deck${linkedDecks.length === 1 ? '' : 's'} to practice` : ''}. Estimates use due dates, task size, and your study logs.`
+                : 'Nothing to study today. Add an upcoming quiz or test to get a study time estimate.';
             classContainer.innerHTML = byClass.size ? Array.from(byClass.values()).map(item =>
                 `<article class="study-progress-item"><strong>${this.escapeHTML(item.title)}</strong><span>${item.minutes} min · ${item.items} task${item.items === 1 ? '' : 's'}</span></article>`
             ).join('') : '<div class="empty-state empty-state-cta"><p>Add a quiz or test to create a study plan.</p><button class="primary-btn" type="button" data-action="add-quiz"><i class="fas fa-plus"></i> Add a quiz or test</button></div>';
@@ -4901,6 +5342,15 @@
                 } else if (target.matches('[data-study-leaderboard-period]')) {
                     this.studyLeaderboardPeriod = target.dataset.studyLeaderboardPeriod;
                     await this.refreshStudyLeaderboard(this.studyLeaderboardPeriod);
+                } else if (target.matches('[data-study-leaderboard-scope]')) {
+                    this.studyLeaderboardScope = target.dataset.studyLeaderboardScope === 'friends' ? 'friends' : 'global';
+                    await this.refreshStudyLeaderboard(this.studyLeaderboardPeriod);
+                } else if (action === 'toggle-home-widget-settings') {
+                    const panel = document.getElementById('home-widget-settings');
+                    const open = panel?.classList.toggle('hidden') === false;
+                    target.setAttribute('aria-expanded', String(open));
+                } else if (action === 'install-home-widget') {
+                    this.installHomeWidget();
                 } else if (action === 'copy-hosted-room-code') {
                     await this.copyHostedRoomCode();
                 } else if (action === 'study-leaderboard-retry') {
@@ -5267,6 +5717,20 @@
         }
 
         handleChange(event) {
+            const widgetPref = event.target.dataset?.homeWidgetPref;
+            if (widgetPref) {
+                const value = event.target.type === 'checkbox' ? event.target.checked : Number(event.target.value) || 3;
+                this.saveHomeWidgetPrefs({ [widgetPref]: value });
+                return;
+            }
+            if (event.target.id === 'import-deck-course' || event.target.id === 'import-deck-assessment') {
+                this.syncDeckLinkSelects(document.getElementById('import-deck-course'), document.getElementById('import-deck-assessment'), event.target.id === 'import-deck-assessment');
+                return;
+            }
+            if (event.target.dataset?.deckLink) {
+                this.updateDeckLink(event.target.dataset.id, event.target.dataset.deckLink, event.target.value);
+                return;
+            }
             const audioType = event.target.id?.startsWith('vol-') ? event.target.id.slice(4) : null;
             if (audioType) {
                 this.setMixerLevel(event.target, true);
@@ -5719,38 +6183,49 @@
         startStudy(deckId, dueOnly) {
             const deck = (AppState.get('flashcards') || []).find(item => item.id === deckId);
             if (!deck) throw new Error('The selected deck no longer exists.');
-            this.activeDeckId = deckId;
-            const now = Date.now();
             const cards = deck.cards || [];
-            let due = cards.filter(card => this.isCardDue(card, now));
-            this.cramMode = false;
-            if (!due.length) {
-                if (!cards.length) {
-                    window.alert('This deck has no cards yet.');
-                    return;
-                }
-                if (dueOnly || !window.confirm('Nothing is due in this deck. Cram all cards anyway? (This will not change your review schedule.)')) return;
-                due = cards.slice();
-                this.cramMode = true;
+            if (!cards.length) {
+                window.alert('This deck has no cards yet.');
+                return;
             }
-            // Learning/relearning cards first, then the oldest due cards, then new cards, capped like Anki's daily limit
-            const rank = card => !card.lastReviewed ? 2 : Number(card.interval || 0) === 0 ? 0 : 1;
-            this.studyCards = due.sort((a, b) => rank(a) - rank(b) || (new Date(a.nextReviewDate || 0) - new Date(b.nextReviewDate || 0)) || Math.random() - 0.5);
-            if (!this.cramMode) this.studyCards = this.studyCards.slice(0, 100);
-            this.studyTotal = this.studyCards.length;
+            if (window.SM2Engine?.migrateDeck?.(deck)) AppState.saveFlashcardDeck(deck).catch(error => console.error('[NexusApp] Deck migration could not be saved:', error));
+            this.activeDeckId = deckId;
+            this.cramMode = false;
+            this.studySession = null;
+            // Anki queue: due learning cards, then reviews (daily limit), then new cards (daily limit)
+            const session = window.SM2Engine?.createSession ? window.SM2Engine.createSession(cards, { deck }) : null;
+            if (session && session.remaining) {
+                this.studySession = session;
+                this.studyCards = [];
+            } else {
+                const limitHit = cards.some(card => this.isCardDue(card, Date.now()));
+                const prompt = limitHit
+                    ? 'You have reached today\'s new/review limit for this deck. Cram all cards anyway? (This will not change your review schedule.)'
+                    : 'Nothing is due in this deck. Cram all cards anyway? (This will not change your review schedule.)';
+                if (dueOnly || !window.confirm(prompt)) { this.activeDeckId = null; return; }
+                this.cramMode = true;
+                this.studyCards = cards.slice().sort(() => Math.random() - 0.5);
+            }
             this.activeCardIndex = 0;
+            this.currentStudyCard = null;
             this.activeStudyStartedAt = Date.now();
             document.getElementById('active-study-area').classList.remove('hidden');
             this.renderStudyCard();
         }
 
         renderStudyCard() {
-            const card = this.studyCards[this.activeCardIndex];
+            const card = this.studySession ? this.studySession.next() : this.studyCards[this.activeCardIndex];
+            this.currentStudyCard = card || null;
             if (!card) return this.closeStudy();
             document.getElementById('study-deck-title').textContent =
                 (AppState.get('flashcards') || []).find(deck => deck.id === this.activeDeckId)?.title || 'Flashcards';
-            const remaining = this.studyCards.length - this.activeCardIndex;
-            document.getElementById('study-progress').textContent = `${remaining} left${this.cramMode ? ' · cram mode' : ''}`;
+            const progress = document.getElementById('study-progress');
+            if (this.studySession) {
+                const n = this.studySession.counts();
+                progress.innerHTML = `<span class="anki-count anki-new" title="New">${n.new}</span> <span class="anki-count anki-learn" title="Learning">${n.learning}</span> <span class="anki-count anki-review" title="To review">${n.review}</span>`;
+            } else {
+                progress.textContent = `${this.studyCards.length - this.activeCardIndex} left · cram mode`;
+            }
             const cardEl = document.getElementById('current-flashcard');
             const backEl = document.getElementById('card-back-content');
             document.getElementById('card-front-content').textContent = card.front || '';
@@ -5765,16 +6240,11 @@
         }
 
         formatReviewInterval(card, quality) {
-            const result = window.SM2Engine.evaluate(card, quality, { fuzz: false });
-            const ms = new Date(result.nextReviewDate).getTime() - Date.now();
-            if (ms < 3600000) return `${Math.max(1, Math.round(ms / 60000))} min`;
-            if (ms < 86400000) return `${Math.round(ms / 3600000)} hr`;
-            const d = Math.round(ms / 86400000);
-            return d === 1 ? '1 day' : d < 30 ? `${d} days` : d < 365 ? `${Math.round(d / 30)} mo` : `${(d / 365).toFixed(1)} yr`;
+            if (this.cramMode) return quality < 3 ? 'again' : 'done';
+            return window.SM2Engine.getIntervalLabel(card, quality);
         }
-
         revealCard() {
-            const card = this.studyCards[this.activeCardIndex];
+            const card = this.currentStudyCard;
             if (!card) return;
             const cardEl = document.getElementById('current-flashcard');
             // After the first reveal the rating buttons stay visible and the card can be flipped back and forth
@@ -5798,12 +6268,15 @@
         async rateCurrentCard(quality) {
             const deck = (AppState.get('flashcards') || []).find(item => item.id === this.activeDeckId);
             if (!deck) throw new Error('The selected deck no longer exists.');
-            const card = this.studyCards[this.activeCardIndex];
+            const card = this.currentStudyCard;
+            if (!card) return;
             if (!window.SM2Engine) throw new Error('The spaced-repetition scheduler did not load.');
-            if (!this.cramMode) Object.assign(card, window.SM2Engine.evaluate(card, quality));
-            // Cards still in a learning step (due within minutes) come back before the session ends
-            const soon = !this.cramMode && new Date(card.nextReviewDate).getTime() - Date.now() < 3600000;
-            if (this.cramMode ? quality < 3 : soon) this.studyCards.push(card);
+            if (this.studySession) {
+                const result = this.studySession.answer(card, quality);
+                if (result.leechTriggered) AppState.setSaveStatus('Leech: this card keeps slipping — consider rewording or splitting it.', 'error');
+            } else if (quality < 3) {
+                this.studyCards.push(card);
+            }
             deck.studiedAt = deck.studiedAt || new Date().toISOString();
             deck.studiedCount = Number(deck.studiedCount || 0) + 1;
             await AppState.saveFlashcardDeck(deck);
@@ -5817,9 +6290,8 @@
                     AppState.setSaveStatus(`Card progress saved, but the community study count could not sync. ${this.friendlyErrorMessage(error)}`, 'error');
                 }
             }
-            this.activeCardIndex += 1;
-            if (this.activeCardIndex < this.studyCards.length) this.renderStudyCard();
-            else this.closeStudy();
+            if (!this.studySession) this.activeCardIndex += 1;
+            this.renderStudyCard();
         }
 
         closeStudy() {
@@ -5845,6 +6317,8 @@
             }
             this.activeDeckId = null;
             this.studyCards = [];
+            this.studySession = null;
+            this.currentStudyCard = null;
             this.renderDashboard();
         }
 
@@ -6004,8 +6478,9 @@
             if (!title) { window.alert('Enter a deck name first.'); nameInput.focus(); return; }
             if (partial) { window.alert(`${partial} card${partial === 1 ? ' is' : 's are'} missing a front or back (highlighted). Fill ${partial === 1 ? 'it' : 'them'} in or remove ${partial === 1 ? 'it' : 'them'}.`); return; }
             if (!cards.length) { window.alert('Add at least one card with both a front and a back.'); return; }
-            AppState.saveFlashcardDeck({ id: `deck_${Date.now()}`, title, cards }).then(() => {
+            AppState.saveFlashcardDeck({ id: `deck_${Date.now()}`, title, cards, ...this.importerDeckLink() }).then(() => {
                 nameInput.value = '';
+                this.resetImporterDeckLink();
                 document.getElementById('manual-card-rows').innerHTML = '';
                 for (let i = 0; i < 3; i++) this.addManualCardRow(false);
                 Router.navigate('flashcard');
@@ -6029,10 +6504,11 @@
                 window.alert('Enter a deck name and at least one valid term/definition row.');
                 return;
             }
-            AppState.saveFlashcardDeck({ id: `deck_${Date.now()}`, title, cards }).then(() => {
+            AppState.saveFlashcardDeck({ id: `deck_${Date.now()}`, title, cards, ...this.importerDeckLink() }).then(() => {
                 Router.navigate('flashcard');
                 document.getElementById('import-deck-name').value = '';
                 document.getElementById('flashcard-import-data').value = '';
+                this.resetImporterDeckLink();
             }).catch(error => {
                 console.error('[NexusApp] Flashcard import failed:', error);
                 window.alert(`The flashcards could not be imported. ${this.friendlyErrorMessage(error)}`);

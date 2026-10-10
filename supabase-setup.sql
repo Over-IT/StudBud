@@ -44,6 +44,11 @@ alter table public.studbud_community_decks drop constraint if exists studbud_com
 alter table public.studbud_community_decks
     add constraint studbud_community_decks_cards_check
     check (jsonb_typeof(cards) = 'array' and jsonb_array_length(cards) >= 2);
+-- The class a shared set is for (e.g. "AP Biology"). Personal quiz/test links stay private.
+alter table public.studbud_community_decks add column if not exists course text not null default '';
+alter table public.studbud_community_decks drop constraint if exists studbud_community_decks_course_check;
+alter table public.studbud_community_decks
+    add constraint studbud_community_decks_course_check check (char_length(course) <= 100);
 
 alter table public.studbud_community_decks enable row level security;
 revoke all on table public.studbud_community_decks from anon, authenticated;
@@ -143,7 +148,31 @@ begin
 end;
 $$;
 
-create or replace function public.studbud_get_study_leaderboard(p_period text default 'daily')
+-- Current streak for any user: consecutive UTC days with at least 15 minutes, ending today or yesterday.
+create or replace function public.studbud_current_streak(p_user_id uuid)
+returns integer
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+    select coalesce(max(runs.len) filter (where runs.last_day >= timezone('utc', now())::date - 1), 0)::integer
+    from (
+        select count(*)::integer as len, max(days.study_date) as last_day
+        from (
+            select study_date, study_date - (row_number() over (order by study_date))::integer as grp
+            from public.studbud_study_time_entries
+            where user_id = p_user_id
+            group by study_date
+            having sum(seconds) >= 900
+        ) days
+        group by days.grp
+    ) runs;
+$$;
+revoke all on function public.studbud_current_streak(uuid) from public, anon, authenticated;
+
+drop function if exists public.studbud_get_study_leaderboard(text);
+create or replace function public.studbud_get_study_leaderboard(p_period text default 'daily', p_scope text default 'global')
 returns jsonb
 language plpgsql
 stable
@@ -154,16 +183,25 @@ declare
     v_user_id uuid := auth.uid();
     v_today date := timezone('utc', now())::date;
     v_start date;
-    v_streak_day date;
-    v_day_seconds integer;
     v_today_seconds integer;
     v_streak integer := 0;
+    v_best integer := 0;
+    v_active_days integer := 0;
+    v_total_seconds integer := 0;
+    v_week jsonb;
     v_board jsonb;
+    v_me jsonb;
+    v_participants integer := 0;
 begin
     if v_user_id is null then raise exception 'Sign in to open study leaderboards.'; end if;
-    if p_period is null or p_period not in ('daily', 'weekly') then raise exception 'Choose a daily or weekly leaderboard.'; end if;
-    v_start := case when p_period = 'weekly'
-        then date_trunc('week', v_today::timestamp)::date
+    if p_period is null or p_period not in ('daily', 'weekly', 'monthly', 'alltime') then
+        raise exception 'Choose a daily, weekly, monthly or all-time leaderboard.';
+    end if;
+    if p_scope is null or p_scope not in ('global', 'friends') then raise exception 'Choose the global or friends leaderboard.'; end if;
+    v_start := case p_period
+        when 'weekly' then date_trunc('week', v_today::timestamp)::date
+        when 'monthly' then date_trunc('month', v_today::timestamp)::date
+        when 'alltime' then date '2000-01-01'
         else v_today
     end;
 
@@ -171,58 +209,92 @@ begin
     from public.studbud_study_time_entries
     where user_id = v_user_id and study_date = v_today;
 
-    v_streak_day := v_today;
-    if v_today_seconds < 900 then v_streak_day := v_today - 1; end if;
-    loop
-        select coalesce(sum(seconds), 0)::integer into v_day_seconds
-        from public.studbud_study_time_entries
-        where user_id = v_user_id and study_date = v_streak_day;
-        exit when v_day_seconds < 900;
-        v_streak := v_streak + 1;
-        v_streak_day := v_streak_day - 1;
-    end loop;
+    select coalesce(sum(seconds), 0)::integer into v_total_seconds
+    from public.studbud_study_time_entries
+    where user_id = v_user_id;
 
-    select coalesce(jsonb_agg(
-        jsonb_build_object(
+    select coalesce(max(runs.len), 0)::integer,
+        coalesce(max(runs.len) filter (where runs.last_day >= v_today - 1), 0)::integer,
+        coalesce(sum(runs.len), 0)::integer
+    into v_best, v_streak, v_active_days
+    from (
+        select count(*)::integer as len, max(days.study_date) as last_day
+        from (
+            select study_date, study_date - (row_number() over (order by study_date))::integer as grp
+            from public.studbud_study_time_entries
+            where user_id = v_user_id
+            group by study_date
+            having sum(seconds) >= 900
+        ) days
+        group by days.grp
+    ) runs;
+
+    select jsonb_agg(jsonb_build_object(
+        'date', day.d::date,
+        'seconds', coalesce((
+            select sum(e.seconds) from public.studbud_study_time_entries e
+            where e.user_id = v_user_id and e.study_date = day.d::date
+        ), 0)::integer
+    ) order by day.d)
+    into v_week
+    from generate_series((v_today - 6)::timestamp, v_today::timestamp, interval '1 day') as day(d);
+
+    with pool as (
+        select v_user_id as user_id
+        union
+        select case when f.requester_id = v_user_id then f.addressee_id else f.requester_id end
+        from public.studbud_friendships f
+        where f.status = 'accepted' and v_user_id in (f.requester_id, f.addressee_id)
+    ), totals as (
+        select entry.user_id, sum(entry.seconds)::integer as seconds
+        from public.studbud_study_time_entries entry
+        where entry.study_date between v_start and v_today
+          and (p_scope = 'global' or entry.user_id in (select pool.user_id from pool))
+        group by entry.user_id
+    ), visible as (
+        select totals.user_id, totals.seconds,
+            coalesce(nullif(account.raw_user_meta_data ->> 'username', ''), 'Student') as username
+        from totals
+        join auth.users account on account.id = totals.user_id
+        where not public.studbud_is_hidden_user(totals.user_id)
+    ), ranked as (
+        select row_number() over (order by visible.seconds desc, visible.username)::integer as rank,
+            visible.user_id, visible.seconds, visible.username
+        from visible
+    )
+    select coalesce(jsonb_agg(jsonb_build_object(
             'rank', ranked.rank,
             'user_id', ranked.user_id,
             'username', ranked.username,
             'seconds', ranked.seconds,
             'minutes', floor(ranked.seconds / 60.0)::integer,
-            'skin', ranked.equipped_skin,
-            'hat', ranked.equipped_hat,
-            'accessory', ranked.equipped_accessory,
+            'streak_days', public.studbud_current_streak(ranked.user_id),
+            'skin', coalesce(cosmetics.equipped_skin, ''),
+            'hat', coalesce(cosmetics.equipped_hat, ''),
+            'accessory', coalesce(cosmetics.equipped_accessory, ''),
             'is_me', ranked.user_id = v_user_id
-        ) order by ranked.seconds desc, ranked.username
-    ), '[]'::jsonb)
-    into v_board
-    from (
-        select row_number() over (order by sum(entry.seconds) desc, coalesce(nullif(account.raw_user_meta_data ->> 'username', ''), 'Student'))::integer as rank,
-            entry.user_id,
-            coalesce(nullif(account.raw_user_meta_data ->> 'username', ''), 'Student') as username,
-            sum(entry.seconds)::integer as seconds,
-            coalesce(cosmetics.equipped_skin, '') as equipped_skin,
-            coalesce(cosmetics.equipped_hat, '') as equipped_hat,
-            coalesce(cosmetics.equipped_accessory, '') as equipped_accessory
-        from public.studbud_study_time_entries entry
-        join auth.users account on account.id = entry.user_id
-        left join public.studbud_multiplayer_profiles cosmetics on cosmetics.user_id = entry.user_id
-        where entry.study_date between v_start and v_today
-          and not public.studbud_is_hidden_user(entry.user_id)
-        group by entry.user_id, account.raw_user_meta_data,
-            cosmetics.equipped_skin, cosmetics.equipped_hat, cosmetics.equipped_accessory
-        order by sum(entry.seconds) desc, username
-        limit 50
-    ) ranked;
+        ) order by ranked.rank) filter (where ranked.rank <= 50), '[]'::jsonb),
+        (jsonb_agg(jsonb_build_object('rank', ranked.rank, 'seconds', ranked.seconds)) filter (where ranked.user_id = v_user_id)) -> 0,
+        count(*)::integer
+    into v_board, v_me, v_participants
+    from ranked
+    left join public.studbud_multiplayer_profiles cosmetics on cosmetics.user_id = ranked.user_id;
 
     return jsonb_build_object(
         'period', p_period,
+        'scope', p_scope,
         'starts_on', v_start,
         'ends_on', v_today,
         'today_seconds', v_today_seconds,
         'today_minutes', floor(v_today_seconds / 60.0)::integer,
         'daily_goal_seconds', 900,
         'streak_days', v_streak,
+        'best_streak', greatest(v_best, v_streak),
+        'active_days', v_active_days,
+        'total_seconds', v_total_seconds,
+        'week', coalesce(v_week, '[]'::jsonb),
+        'me', v_me,
+        'participants', v_participants,
         'leaderboard', v_board
     );
 end;
@@ -392,7 +464,11 @@ as $$
         ('acc_glasses', 70), ('acc_headband', 70), ('acc_bandana', 80), ('acc_mask', 90), ('acc_tie', 90), ('acc_mustache', 100),
         ('acc_goggles', 120), ('acc_chain', 130), ('acc_beard', 130), ('acc_medal', 150), ('acc_tail', 170), ('acc_sword', 190),
         ('acc_hearts', 200), ('acc_snow', 210), ('acc_jetpack', 240), ('acc_fairy', 260), ('acc_stars', 280), ('acc_flame', 300),
-        ('acc_phoenix', 420)
+        ('acc_phoenix', 420),
+        ('skin_bee', 150), ('skin_ocean', 200), ('skin_forest', 210), ('skin_ice', 350), ('skin_chrome', 380), ('skin_cosmic', 520),
+        ('hat_beret', 90), ('hat_sombrero', 140), ('hat_frog', 150), ('hat_mushroom', 160), ('hat_unicorn', 230), ('hat_tiara', 300),
+        ('acc_lei', 90), ('acc_leaves', 190), ('acc_guitar', 210), ('acc_notes', 220), ('acc_bubbles', 230), ('acc_lightning', 320),
+        ('palette_sunrise', 150), ('palette_arctic', 170), ('palette_toxic', 200), ('palette_royal', 320)
     ), pets(id, rarity) as (values
         ('pet_puppy', 'common'), ('pet_kitten', 'common'), ('pet_hamster', 'common'), ('pet_bunny', 'common'),
         ('pet_chick', 'common'), ('pet_frog', 'common'), ('pet_turtle', 'common'), ('pet_goldfish', 'common'),
@@ -1456,8 +1532,8 @@ revoke all on function public.studbud_record_community_deck_study(uuid) from pub
 grant execute on function public.studbud_record_community_deck_study(uuid) to authenticated;
 revoke all on function public.studbud_record_study_time(text, integer, date) from public, anon;
 grant execute on function public.studbud_record_study_time(text, integer, date) to authenticated;
-revoke all on function public.studbud_get_study_leaderboard(text) from public, anon;
-grant execute on function public.studbud_get_study_leaderboard(text) to authenticated;
+revoke all on function public.studbud_get_study_leaderboard(text, text) from public, anon;
+grant execute on function public.studbud_get_study_leaderboard(text, text) to authenticated;
 revoke all on function public.studbud_protect_community_deck_study_count() from public, anon, authenticated;
 revoke all on function public.studbud_game_make_question(jsonb, integer) from public, anon, authenticated;
 revoke all on function public.studbud_game_room_view(public.studbud_game_rooms) from public, anon, authenticated;
@@ -1803,10 +1879,14 @@ begin
             select jsonb_agg(jsonb_build_object(
                 'friendship_id', f.id,
                 'user_id', a.id,
-                'username', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student')
+                'username', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student'),
+                'skin', coalesce(mp.equipped_skin, ''),
+                'hat', coalesce(mp.equipped_hat, ''),
+                'accessory', coalesce(mp.equipped_accessory, '')
             ) order by coalesce(a.raw_user_meta_data ->> 'username', ''))
             from public.studbud_friendships f
             join auth.users a on a.id = case when f.requester_id = v_uid then f.addressee_id else f.requester_id end
+            left join public.studbud_multiplayer_profiles mp on mp.user_id = a.id
             where f.status = 'accepted' and v_uid in (f.requester_id, f.addressee_id)
               and not public.studbud_is_hidden_user(a.id)
         ), '[]'::jsonb),
@@ -1814,10 +1894,14 @@ begin
             select jsonb_agg(jsonb_build_object(
                 'friendship_id', f.id,
                 'user_id', a.id,
-                'username', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student')
+                'username', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student'),
+                'skin', coalesce(mp.equipped_skin, ''),
+                'hat', coalesce(mp.equipped_hat, ''),
+                'accessory', coalesce(mp.equipped_accessory, '')
             ) order by f.created_at)
             from public.studbud_friendships f
             join auth.users a on a.id = f.requester_id
+            left join public.studbud_multiplayer_profiles mp on mp.user_id = a.id
             where f.status = 'pending' and f.addressee_id = v_uid
               and not public.studbud_is_hidden_user(a.id)
         ), '[]'::jsonb),
@@ -1825,10 +1909,14 @@ begin
             select jsonb_agg(jsonb_build_object(
                 'friendship_id', f.id,
                 'user_id', a.id,
-                'username', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student')
+                'username', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student'),
+                'skin', coalesce(mp.equipped_skin, ''),
+                'hat', coalesce(mp.equipped_hat, ''),
+                'accessory', coalesce(mp.equipped_accessory, '')
             ) order by f.created_at)
             from public.studbud_friendships f
             join auth.users a on a.id = f.addressee_id
+            left join public.studbud_multiplayer_profiles mp on mp.user_id = a.id
             where f.status = 'pending' and f.requester_id = v_uid
         ), '[]'::jsonb)
     );
@@ -2022,6 +2110,15 @@ grant execute on function public.studbud_friend_profile(uuid) to authenticated;
 alter table public.studbud_community_decks add column if not exists title_key text;
 alter table public.studbud_community_decks add column if not exists content_hash text;
 
+create or replace function public.studbud_card_key(p_card jsonb)
+returns text
+language sql
+immutable
+as $$
+    select lower(regexp_replace(btrim(coalesce(p_card ->> 'front', '')), '\s+', ' ', 'g')) || E'\x1f' ||
+           lower(regexp_replace(btrim(coalesce(p_card ->> 'back', '')), '\s+', ' ', 'g'));
+$$;
+
 create or replace function public.studbud_community_deck_guard()
 returns trigger
 language plpgsql
@@ -2041,6 +2138,23 @@ begin
     end if;
     if exists (select 1 from public.studbud_community_decks d where d.id <> new.id and d.content_hash = new.content_hash) then
         raise exception 'A shared set with exactly these cards already exists.';
+    end if;
+    -- Reposting: most of these cards already live in someone else's shared set.
+    if exists (
+        select 1
+        from public.studbud_community_decks d
+        cross join lateral (
+            select count(*) as hits
+            from jsonb_array_elements(new.cards) nc
+            where exists (
+                select 1 from jsonb_array_elements(d.cards) dc
+                where public.studbud_card_key(dc) = public.studbud_card_key(nc)
+            )
+        ) m
+        where d.id <> new.id and d.owner_id <> new.owner_id
+          and m.hits >= 2 and m.hits * 2 >= jsonb_array_length(new.cards)
+    ) then
+        raise exception 'Most of these cards are already in another student''s shared set. Study their set instead of reposting it.';
     end if;
     return new;
 end;
@@ -2099,7 +2213,7 @@ begin
         v_streak := v_streak + 1;
         v_day := v_day - 1;
     end loop;
-    select coalesce(jsonb_agg(jsonb_build_object('id', d.id, 'title', d.title, 'description', d.description,
+    select coalesce(jsonb_agg(jsonb_build_object('id', d.id, 'title', d.title, 'description', d.description, 'course', d.course,
         'card_count', d.card_count, 'study_count', d.study_count) order by d.study_count desc, d.updated_at desc), '[]'::jsonb)
     into v_decks
     from public.studbud_community_decks d where d.owner_id = p_user_id;

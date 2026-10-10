@@ -34,13 +34,32 @@
                 { id: 'hat_grad', name: 'Graduation Cap', icon: 'fa-graduation-cap', price: 100, type: 'hat' },
                 { id: 'hat_propeller', name: 'Propeller Cap', icon: 'fa-fan', price: 130, type: 'hat' },
                 { id: 'hat_helmet', name: 'Knight Helmet', icon: 'fa-shield-halved', price: 150, type: 'hat' },
+                { id: 'skin_bee', name: 'Bumble Bee', icon: 'fa-bug', price: 150, type: 'skin' },
+                { id: 'skin_ocean', name: 'Deep Sea Diver', icon: 'fa-water', price: 200, type: 'skin' },
+                { id: 'skin_forest', name: 'Forest Sprite', icon: 'fa-leaf', price: 210, type: 'skin' },
+                { id: 'skin_ice', name: 'Ice Monarch', icon: 'fa-icicles', price: 350, type: 'skin' },
+                { id: 'skin_chrome', name: 'Chrome Bot', icon: 'fa-robot', price: 380, type: 'skin' },
+                { id: 'skin_cosmic', name: 'Cosmic Void', icon: 'fa-meteor', price: 520, type: 'skin' },
+                { id: 'hat_beret', name: 'Artist Beret', icon: 'fa-palette', price: 90, type: 'hat' },
+                { id: 'hat_sombrero', name: 'Sombrero', icon: 'fa-sun', price: 140, type: 'hat' },
+                { id: 'hat_frog', name: 'Froggy Hat', icon: 'fa-frog', price: 150, type: 'hat' },
+                { id: 'hat_mushroom', name: 'Mushroom Cap', icon: 'fa-seedling', price: 160, type: 'hat' },
+                { id: 'hat_unicorn', name: 'Unicorn Horn', icon: 'fa-horse-head', price: 230, type: 'hat' },
+                { id: 'hat_tiara', name: 'Jeweled Tiara', icon: 'fa-gem', price: 300, type: 'hat' },
+                { id: 'acc_lei', name: 'Flower Lei', icon: 'fa-spa', price: 90, type: 'accessory' },
+                { id: 'acc_leaves', name: 'Leaf Swirl', icon: 'fa-leaf', price: 190, type: 'accessory' },
+                { id: 'acc_guitar', name: 'Back Guitar', icon: 'fa-guitar', price: 210, type: 'accessory' },
+                { id: 'acc_notes', name: 'Music Notes', icon: 'fa-music', price: 220, type: 'accessory' },
+                { id: 'acc_bubbles', name: 'Bubble Trail', icon: 'fa-circle', price: 230, type: 'accessory' },
+                { id: 'acc_lightning', name: 'Storm Aura', icon: 'fa-bolt', price: 320, type: 'accessory' },
                 ...[
                     ['rose', 'Rose Garden', 340, 350, 110], ['lime', 'Lime Fizz', 90, 80, 110], ['mint', 'Fresh Mint', 150, 160, 120],
                     ['mocha', 'Mocha', 25, 35, 120], ['teal', 'Deep Teal', 175, 165, 130], ['peach', 'Peach Fuzz', 20, 30, 130],
                     ['lavender', 'Lavender', 265, 275, 140], ['gold', 'Golden Hour', 40, 45, 150], ['slate', 'Slate Storm', 215, 205, 150],
                     ['jungle', 'Jungle', 130, 100, 160], ['crimson', 'Crimson Night', 355, 10, 170], ['glacier', 'Glacier', 195, 210, 180],
                     ['sakura', 'Sakura', 330, 340, 190], ['ember', 'Ember', 15, 40, 210], ['cyber', 'Cyber Pink', 320, 180, 240],
-                    ['galaxy', 'Galaxy', 275, 320, 280], ['prism', 'Prism', 300, 60, 420]
+                    ['galaxy', 'Galaxy', 275, 320, 280], ['prism', 'Prism', 300, 60, 420],
+                    ['sunrise', 'Sunrise', 30, 350, 150], ['arctic', 'Arctic', 190, 230, 170], ['toxic', 'Toxic', 100, 140, 200], ['royal', 'Royal', 250, 45, 320]
                 ].map(([color, name, hue, hue2, price]) => ({ id: `palette_${color}`, name, color, hue, hue2, price, type: 'palette' })),
                 { id: 'acc_glasses', name: 'Round Glasses', icon: 'fa-glasses', price: 70, type: 'accessory' },
                 { id: 'acc_headband', name: 'Sport Headband', icon: 'fa-ribbon', price: 70, type: 'accessory' },
@@ -141,14 +160,19 @@
 
         async searchDecks(query = '') {
             const client = this.getClient();
-            const term = String(query || '').trim().replace(/[%_]/g, '');
-            let request = client.from('studbud_community_decks')
-                .select('id,owner_id,title,description,card_count,study_count,updated_at')
-                .order('study_count', { ascending: false })
-                .order('updated_at', { ascending: false })
-                .limit(30);
-            if (term) request = request.ilike('title', `%${term}%`);
-            const { data, error } = await request;
+            const term = String(query || '').trim().replace(/[%_,()]/g, '');
+            const build = withCourse => {
+                let request = client.from('studbud_community_decks')
+                    .select(withCourse ? 'id,owner_id,title,description,course,card_count,study_count,updated_at' : 'id,owner_id,title,description,card_count,study_count,updated_at')
+                    .order('study_count', { ascending: false })
+                    .order('updated_at', { ascending: false })
+                    .limit(30);
+                if (term) request = withCourse ? request.or(`title.ilike.%${term}%,course.ilike.%${term}%`) : request.ilike('title', `%${term}%`);
+                return request;
+            };
+            let { data, error } = await build(true);
+            // Servers that haven't re-run supabase-setup.sql don't have the course column yet.
+            if (error && /course/i.test(error.message)) ({ data, error } = await build(false));
             if (error) throw new Error(`Could not search community decks: ${error.message}`);
             const rows = data || [];
             const ids = [...new Set(rows.map(row => row.owner_id))];
@@ -159,6 +183,14 @@
             return rows;
         }
 
+        async getAuthorNames(ids) {
+            const list = [...new Set((ids || []).filter(Boolean))];
+            if (!list.length) return {};
+            const { data, error } = await this.getClient().rpc('studbud_community_authors', { p_ids: list });
+            if (error) throw new Error(error.message);
+            return data || {};
+        }
+
         async getUserProfile(userId) {
             const { data, error } = await this.getClient().rpc('studbud_view_profile', { p_user_id: userId });
             if (error) throw new Error(error.message);
@@ -166,6 +198,10 @@
         }
 
         async publishDeck(deck) {
+            if (deck.communitySourceId && deck.communitySourceOwnerId && deck.communitySourceOwnerId !== this.getUserId()) {
+                const author = deck.communitySourceAuthor ? ` by ${deck.communitySourceAuthor}` : '';
+                throw new Error(`“${deck.title}” was added from another student's shared set${author}, so it can't be reposted. Make your own set to share it.`);
+            }
             const title = String(deck.title || '').trim();
             if (!title || title.length > 100) throw new Error('Deck titles must be between 1 and 100 characters to share.');
             const cards = (deck.cards || []).map(card => ({
@@ -176,16 +212,25 @@
             if (cards.some(card => card.front.length > 5000 || card.back.length > 5000)) {
                 throw new Error('Shared card terms and definitions must be 5000 characters or fewer.');
             }
-            const { data, error } = await this.getClient().from('studbud_community_decks').upsert({
+            const row = {
                 owner_id: this.getUserId(),
                 source_deck_id: String(deck.id),
                 title,
                 description: deck.communitySourceTitle
                     ? `Adapted from the shared set “${String(deck.communitySourceTitle).slice(0, 240)}”.`
                     : '',
+                // Only the class is public; the linked quiz/test stays on this device.
+                course: String(deck.courseTitle || '').trim().slice(0, 100),
                 cards,
                 updated_at: new Date().toISOString()
-            }, { onConflict: 'owner_id,source_deck_id' }).select('id').single();
+            };
+            const save = payload => this.getClient().from('studbud_community_decks')
+                .upsert(payload, { onConflict: 'owner_id,source_deck_id' }).select('id').single();
+            let { data, error } = await save(row);
+            if (error && /course/i.test(error.message)) {
+                const { course, ...withoutCourse } = row;
+                ({ data, error } = await save(withoutCourse));
+            }
             if (error) throw new Error(`Could not share this deck: ${error.message}`);
             return data;
         }
@@ -199,12 +244,20 @@
         }
 
         async importDeck(deckId) {
-            const { data, error } = await this.getClient().from('studbud_community_decks')
-                .select('id,owner_id,title,description,cards')
+            const load = columns => this.getClient().from('studbud_community_decks')
+                .select(columns)
                 .eq('id', deckId)
                 .single();
+            let { data, error } = await load('id,owner_id,title,description,course,cards');
+            if (error && /course/i.test(error.message)) ({ data, error } = await load('id,owner_id,title,description,cards'));
             if (error) throw new Error(`Could not load this community deck: ${error.message}`);
             if (!Array.isArray(data.cards) || data.cards.length < 2) throw new Error('This community deck no longer contains enough cards to study.');
+            try {
+                const { data: names } = await this.getClient().rpc('studbud_community_authors', { p_ids: [data.owner_id] });
+                data.author_name = names?.[data.owner_id] || 'Student';
+            } catch (_) {
+                data.author_name = 'Student';
+            }
             return data;
         }
 
@@ -235,10 +288,16 @@
             return data;
         }
 
-        async getStudyLeaderboard(period = 'daily') {
-            const { data, error } = await this.getClient().rpc('studbud_get_study_leaderboard', {
-                p_period: period
-            });
+        async getStudyLeaderboard(period = 'daily', scope = 'global') {
+            const client = this.getClient();
+            let { data, error } = await client.rpc('studbud_get_study_leaderboard', { p_period: period, p_scope: scope });
+            // Older databases only know the one-argument daily/weekly version; keep the board working until setup is re-run.
+            if (error && /p_scope|function|schema cache/i.test(error.message || '')) {
+                if (scope !== 'global' || !['daily', 'weekly'].includes(period)) {
+                    throw new Error('Friends, monthly and all-time boards need the latest supabase-setup.sql. Ask the site admin to run it.');
+                }
+                ({ data, error } = await client.rpc('studbud_get_study_leaderboard', { p_period: period }));
+            }
             if (error) throw new Error(`Could not load the study leaderboard: ${error.message}`);
             return data;
         }

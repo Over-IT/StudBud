@@ -162,7 +162,7 @@
             this.cp = c;
             this.cam = { x: 0, y: 0 };
             this.coyote = 0; this.buffer = 0; this.airJumps = 1; this.dash = 0; this.dashCd = 0;
-            this.boost = 0; this.slow = 0; this.dead = 0; this.maxH = 0; this.bonus = 0; this.deaths = 0;
+            this.boost = 0; this.slow = 0; this.dead = 0; this.maxH = 0; this.deaths = 0;
             this.res = new A.Resource('Energy', '#facc15', 100, 50, 2);
             this.anim = 0; this.finished = false; this.state = 0; this.carry = null;
             this.tideY = 1100; this.kick = 0; this.wallDir = 0; this.tideWarn = false;
@@ -936,13 +936,12 @@
                 if (me.onGround && me.ground === this.summit) {
                     this.finished = true;
                     s.done = true; s.finishMs = Math.round(s.t * 1000);
-                    this.bonus += 400 + Math.max(0, Math.round(500 - s.t * 2));
                     s.toast('FINISH! Waiting for the others…', '#facc15');
                     this.particles.burst(me.x, me.y, '#facc15', 40, 400, 1, 6);
                 }
             }
             this.maxH = Math.max(this.maxH, -(me.y + me.h));
-            s.score = Math.floor(Math.min(1, this.maxH / this.summitH) * 900) + this.bonus;
+            s.score = Math.round(this.maxH / 40);
             s.setGoal(Math.round(this.maxH / 40));
             const bi = Math.min(3, Math.floor(this.maxH / this.summitH * 4));
             if (bi > this.biomeSeen) { this.biomeSeen = bi; s.toast(`Entering ${SKY_BIOMES[bi].name}`, '#fbbf24'); s.sfx('powerup'); }
@@ -955,7 +954,7 @@
             return { x: Math.round(m.x), y: Math.round(m.y), vx: Math.round(m.vx), vy: Math.round(m.vy), f: m.face, a: this.state };
         }
 
-        goalText() { const last = this.checkpoints.length - 1; return `${this.cp.id ? `Checkpoint ${this.cp.id}/${last}` : 'Start'} · ${Math.round(this.maxH / 40)}m / ${Math.round(this.summitH / 40)}m · ${SKY_BIOMES[Math.min(3, Math.floor(this.maxH / this.summitH * 4))].name}`; }
+        goalText() { const last = this.checkpoints.length - 1; const current = Math.max(0, -(this.me.y + this.me.h)); return `${this.cp.id ? `Checkpoint ${this.cp.id}/${last}` : 'Start'} · Height ${Math.round(current / 40)}m · Best ${Math.round(this.maxH / 40)}m / ${Math.round(this.summitH / 40)}m · ${SKY_BIOMES[Math.min(3, Math.floor(this.maxH / this.summitH * 4))].name}`; }
         touchLayout() { return { stick: true, buttons: [{ k: 'Space', label: 'Jump', cls: 'main' }, { k: 'ShiftLeft', label: 'Dash' }] }; }
         hint() { return 'A/D run · Space jump (twice) · Shift dash · R = back to checkpoint · climb to the summit before the tide · Q = recharge'; }
 
@@ -1290,6 +1289,19 @@
             const hz = ctx.createLinearGradient(0, h * 0.8, 0, h);
             hz.addColorStop(0, 'rgba(148,163,184,0)'); hz.addColorStop(1, 'rgba(148,163,184,.14)');
             ctx.fillStyle = hz; ctx.fillRect(0, h * 0.8, w, h * 0.2);
+            const currentHeight = Math.max(0, -(this.me.y + this.me.h));
+            const heightLabel = `Height ${Math.round(currentHeight / 40)}m · Best ${Math.round(this.maxH / 40)}m`;
+            ctx.save();
+            ctx.font = '700 15px system-ui';
+            const labelWidth = ctx.measureText(heightLabel).width;
+            const panelWidth = Math.min(w - 24, labelWidth + 30);
+            const panelX = 0, panelY = 0;
+            s.placeHud(ctx, 0, 0, panelWidth, 34, 'top-right');
+            ctx.fillStyle = 'rgba(15,23,42,.78)'; roundRect(ctx, panelX, panelY, panelWidth, 34, 10); ctx.fill();
+            ctx.strokeStyle = 'rgba(250,204,21,.7)'; ctx.lineWidth = 1.5; roundRect(ctx, panelX, panelY, panelWidth, 34, 10); ctx.stroke();
+            ctx.fillStyle = '#fef3c7'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(heightLabel, panelX + panelWidth / 2, panelY + 17);
+            ctx.restore(); ctx.restore();
         }
     }
 
@@ -1313,9 +1325,10 @@
             this.spawn = spawns[hashStr(s.user.id) % spawns.length];
             this.me.x = this.spawn[0]; this.me.y = this.spawn[1] - 60;
             this.dmg = 0; this.stun = 0; this.invuln = 1.5; this.swingT = 0; this.swingCd = 0;
-            this.guard = false; this.airJumps = 1; this.coyote = 0; this.hammer = 0; this.kos = 0; this.respawn = 0;
+            this.guard = false; this.airJumps = 1; this.coyote = 0; this.hammer = 0; this.kos = 0; this.falls = 0; this.respawn = 0;
             this.lastHit = { by: null, at: 0 }; this.anim = 0; this.orb = { x: 800, y: 150, t: 0 }; this.state = 0; this.shake = 0;
-            this.hitFlash = 0; this.view = { z: 1 }; this.aim = 0; this.swingAim = 0; this.offY = 0;
+            this.hitFlash = 0; this.hitlag = 0; this.dropTimer = 0; this.dodge = 0; this.dodgeCd = 0; this.shieldBreak = 0;
+            this.view = { z: 1, x: this.me.x + 17, y: this.me.y + 28 }; this.aim = 0; this.swingAim = 0; this.offX = 0; this.offY = 0; this.touchAim = null;
             this.hillTick = 0; this.hillState = 'away';
             this.zones = [
                 { x: 690, y: 270, w: 220, name: 'Top ledge' }, { x: 640, y: 520, w: 320, name: 'Center stage' },
@@ -1338,11 +1351,23 @@
 
         update(dt) {
             const s = this.s, me = this.me;
+            this.updateCamera(s.vw, s.vh, dt);
             this.anim += dt; this.shake = Math.max(0, this.shake - dt); this.hitFlash = Math.max(0, this.hitFlash - dt);
             this.orb.t = Math.max(0, this.orb.t - dt);
             this.invuln = Math.max(0, this.invuln - dt);
             this.hammer = Math.max(0, this.hammer - dt);
-            this.swingCd -= dt; this.swingT = Math.max(0, this.swingT - dt); this.stun = Math.max(0, this.stun - dt);
+            this.swingCd = Math.max(0, this.swingCd - dt); this.swingT = Math.max(0, this.swingT - dt); this.stun = Math.max(0, this.stun - dt);
+            this.dodgeCd = Math.max(0, this.dodgeCd - dt); this.dodge = Math.max(0, this.dodge - dt);
+            this.shieldBreak = Math.max(0, this.shieldBreak - dt);
+            if (this.dropTimer > 0) {
+                this.dropTimer = Math.max(0, this.dropTimer - dt);
+                if (this.dropTimer === 0) for (const p of this.solids) if (p.oneway) p.off = false;
+            }
+            if (this.hitlag > 0) {
+                this.hitlag = Math.max(0, this.hitlag - dt);
+                this.particles.update(dt, 300);
+                return;
+            }
             if (this.respawn > 0) {
                 this.respawn -= dt;
                 if (this.respawn <= 0) {
@@ -1352,11 +1377,23 @@
                 this.state = 5; this.particles.update(dt, 500);
                 return;
             }
-            const ax = this.stun > 0 ? 0 : s.axis().x;
-            this.guard = this.stun <= 0 && s.down('KeyS', 'ArrowDown', 'ShiftLeft', 'ShiftRight') && me.onGround;
-            const target = this.guard ? 0 : ax * 320;
-            const acc = (me.onGround ? 3000 : 1500) * dt;
-            me.vx += clamp(target - me.vx, -acc, acc);
+            const ax = this.stun > 0 || this.dodge > 0 ? 0 : s.axis().x;
+            this.guard = this.stun <= 0 && this.dodge <= 0 && this.shieldBreak <= 0 && s.down('KeyS', 'ShiftLeft', 'ShiftRight');
+            if (this.guard) {
+                this.res.drain(dt * 16);
+                if (this.res.value <= 0) { this.guard = false; this.shieldBreak = 0.8; s.sfx('click'); }
+            }
+            if (this.stun <= 0 && this.dodgeCd <= 0 && s.pressed('KeyL')) {
+                this.dodge = 0.18; this.dodgeCd = 0.85; this.invuln = Math.max(this.invuln, 0.16);
+                me.vx = (ax || me.face || 1) * 760; me.vy *= 0.45; this.guard = false; s.sfx('dash');
+            }
+            if (this.stun <= 0 && me.onGround && me.ground?.oneway && s.pressed('ArrowDown')) {
+                this.dropTimer = 0.24; me.y += 3; me.vy = 120;
+                for (const p of this.solids) if (p.oneway) p.off = true;
+            }
+            const target = this.guard ? 0 : ax * 340;
+            const acc = (me.onGround ? 3000 : 2100) * dt;
+            if (this.dodge <= 0) me.vx += clamp(target - me.vx, -acc, acc);
             const mouseAim = this.aimAngle();
             if (mouseAim !== null) {
                 // The player always looks toward the cursor
@@ -1366,15 +1403,17 @@
                 if (ax && this.swingT <= 0) me.face = ax;
                 this.aim = me.face > 0 ? 0 : Math.PI;
             }
-            me.vy = Math.min(1200, me.vy + 2400 * dt);
+            const fastFalling = !me.onGround && s.down('ArrowDown') && this.stun <= 0;
+            me.vy = Math.min(fastFalling ? 1650 : 1200, me.vy + (fastFalling ? 3200 : 2400) * dt);
             if (me.onGround) { this.airJumps = 1; this.coyote = 0.1; } else this.coyote -= dt;
             if (this.stun <= 0 && s.pressed('Space', 'KeyW', 'ArrowUp')) {
                 if (this.coyote > 0) { me.vy = -900; this.coyote = 0; s.sfx('jump'); }
                 else if (this.airJumps > 0) { me.vy = -820; this.airJumps--; s.sfx('jump'); this.particles.burst(me.x + 17, me.y + 56, '#bae6fd', 8, 120, 0.3, 4); }
             }
-            if (this.stun <= 0 && !this.guard && this.swingCd <= 0 && (s.mouse.pressed || s.pressed('KeyJ', 'KeyK')) && s.spend(8)) {
-                this.swingT = 0.22; this.swingCd = 0.5; s.sfx('swing'); this.swingAim = this.aim;
-                s.emit({ k: 'sw', x: Math.round(me.x + 17), y: Math.round(me.y + 28), d: me.face, a: +this.aim.toFixed(2), p: this.hammer > 0 ? 1.6 : 1, by: s.user.id, c: (this.dmg | 0) });
+            if (this.stun <= 0 && !this.guard && this.dodge <= 0 && this.swingCd <= 0 && (s.mouse.pressed || s.pressed('KeyJ', 'KeyK')) && s.spend(8)) {
+                const heavy = s.pressed('KeyK') && !s.pressed('KeyJ');
+                this.swingT = heavy ? 0.28 : 0.22; this.swingCd = heavy ? 0.78 : 0.52; s.sfx('swing'); this.swingAim = this.aim;
+                s.emit({ k: 'sw', x: Math.round(me.x + 17), y: Math.round(me.y + 28), d: me.face, a: +this.aim.toFixed(2), p: (this.hammer > 0 ? 1.6 : 1) * (heavy ? 1.2 : 1), by: s.user.id, c: (this.dmg | 0) });
                 this.particles.burst(me.x + 17 + Math.cos(this.aim) * 70, me.y + 28 + Math.sin(this.aim) * 70, '#fde68a', 8, 200, 0.25, 4);
             }
             moveBody(me, this.solids, dt);
@@ -1388,7 +1427,7 @@
                 });
                 if (opened) this.orb.t = 1e9;
             }
-            if (me.x < -150 || me.x > 1750 || me.y > 950 || me.y < -500) this.ko();
+            if (this.respawn <= 0 && (me.x < -180 || me.x > 1780 || me.y > 920 || me.y < -650)) this.ko();
             if (!s.question && this.respawn <= 0) {
                 const zone = this.hill().zone;
                 const mine = this.inHill(me, zone);
@@ -1399,26 +1438,70 @@
                     if (this.hillTick >= 1) { this.hillTick -= 1; this.hillSecs = (this.hillSecs || 0) + 1; s.setGoal(this.hillSecs); s.addScore(12); s.sfx('coin', 300); this.particles.burst(me.x + 17, me.y, '#fde047', 4, 120, 0.4, 3); }
                 } else this.hillTick = 0;
             }
-            this.state = this.guard ? 4 : this.swingT > 0 ? 3 : !me.onGround ? 2 : Math.abs(me.vx) > 40 ? 1 : 0;
+            this.state = this.guard ? 4 : this.dodge > 0 ? 6 : this.swingT > 0 ? 3 : !me.onGround ? 2 : Math.abs(me.vx) > 40 ? 1 : 0;
             this.particles.update(dt, 300);
         }
 
         screenToWorldX(sx) { return (sx - this.offX) / this.view.z; }
 
-        // Angle from the player's centre to the cursor in world space, or null when no mouse is in use (touch play)
         aimAngle() {
             const m = this.s.mouse, me = this.me;
-            if (this.offX === undefined || !(m.x || m.y) || (m.touchAt && performance.now() - m.touchAt < 3000)) return null;
+            const touch = this.s.overlay.classList.contains('has-touch');
+            if (touch && !m.down && !m.pressed) return this.touchAim;
+            if (!touch && !(m.x || m.y || m.pressed)) return null;
             const wx = (m.x - this.offX) / this.view.z, wy = (m.y - this.offY) / this.view.z;
-            return Math.atan2(wy - (me.y + 28), wx - (me.x + 17));
+            const angle = Math.atan2(wy - (me.y + 28), wx - (me.x + 17));
+            if (touch) this.touchAim = angle;
+            return angle;
+        }
+
+        updateCamera(w, h, dt = 0) {
+            const mobile = this.s.overlay.classList.contains('has-touch') && w < 760;
+            const z = mobile ? Math.min(1.15, Math.max(0.85, w / 480)) : Math.min(w / 1700, h / 900);
+            this.view.z = z;
+            if (mobile) {
+                const halfW = w / (2 * z), halfH = h / (2 * z);
+                const tx = clamp(this.me.x + 17, halfW - 80, 1680 - halfW);
+                const ty = clamp(this.me.y + 28, halfH - 160, 920 - halfH);
+                const follow = 1 - Math.exp(-dt * 8);
+                this.view.x = lerp(this.view.x, tx, follow); this.view.y = lerp(this.view.y, ty, follow);
+                this.view.x = clamp(this.view.x, halfW - 80, 1680 - halfW);
+                this.view.y = clamp(this.view.y, halfH - 160, 920 - halfH);
+                this.offX = w / 2 - this.view.x * z; this.offY = h / 2 - this.view.y * z;
+            } else {
+                this.offX = (w - 1600 * z) / 2; this.offY = h * 0.14;
+            }
+        }
+
+        edgeArrow(ctx, x, y, label, color, w, h) {
+            const sx = x * this.view.z + this.offX, sy = y * this.view.z + this.offY;
+            const safe = this.s.hudBounds(), cx = safe.x + safe.w / 2, cy = safe.y + safe.h / 2;
+            if (sx > safe.x + 24 && sx < safe.x + safe.w - 24 && sy > safe.y + 30 && sy < safe.y + safe.h - 30) return;
+            const dx = sx - cx, dy = sy - cy;
+            const scale = Math.min(Math.max(1, safe.w / 2 - 32) / Math.max(1, Math.abs(dx)), Math.max(1, safe.h / 2 - 32) / Math.max(1, Math.abs(dy)));
+            const px = cx + dx * scale, py = cy + dy * scale;
+            ctx.save(); ctx.translate(px, py); ctx.rotate(Math.atan2(dy, dx));
+            ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(12, 0); ctx.lineTo(-8, -8); ctx.lineTo(-8, 8); ctx.closePath(); ctx.fill(); ctx.restore();
+            ctx.font = '800 13px system-ui'; ctx.textAlign = 'center'; ctx.fillStyle = color;
+            ctx.fillText(label, clamp(px, safe.x + 50, safe.x + safe.w - 50), py + (py < cy ? 23 : -17));
         }
 
         ko() {
+            if (this.respawn > 0) return;
             const s = this.s;
             this.particles.burst(this.me.x, this.me.y, s.local.color, 30, 500, 0.8, 6); s.sfx('boom');
             const by = Date.now() - this.lastHit.at < 6000 ? this.lastHit.by : null;
-            s.emit({ k: 'ko', to: s.user.id, by });
+            this.falls++;
+            s.emit({ k: 'ko', to: s.user.id, by, falls: this.falls });
             this.respawn = 1.4; this.shake = 0.4; this.dmg = 0; this.lastHit = { by: null, at: 0 };
+        }
+
+        attackHits(ev, body) {
+            const angle = typeof ev.a === 'number' ? ev.a : (ev.d > 0 ? 0 : Math.PI);
+            const cx = body.x + body.w / 2, cy = body.y + body.h / 2;
+            const dx = cx - ev.x, dy = cy - ev.y, radius = Math.hypot(dx, dy);
+            const delta = Math.atan2(Math.sin(Math.atan2(dy, dx) - angle), Math.cos(Math.atan2(dy, dx) - angle));
+            return radius < 146 && radius > 8 && Math.abs(delta) < 0.86;
         }
 
         onEvent(ev, from) {
@@ -1426,25 +1509,23 @@
             if (ev.k === 'sw') {
                 from.swing = performance.now();
                 from.swingAim = typeof ev.a === 'number' ? ev.a : (ev.d > 0 ? 0 : Math.PI);
-                if (this.respawn > 0 || this.invuln > 0 || this.stun > 0.2) return;
-                const ang = typeof ev.a === 'number' ? ev.a : (ev.d > 0 ? 0 : Math.PI);
-                const dx = Math.cos(ang), dy = Math.sin(ang);
-                const box = { x: ev.x + dx * 70 - 65, y: ev.y + dy * 70 - 58, w: 130, h: 116 };
-                if (!overlap(box, me)) return;
+                if (this.respawn > 0 || this.invuln > 0 || this.stun > 0.2 || !this.attackHits(ev, me)) return;
+                const angle = from.swingAim, dx = Math.cos(angle), dy = Math.sin(angle);
                 const power = ev.p || 1;
                 const blocked = this.guard && me.face === -(dx >= 0 ? 1 : -1);
                 const base = 9 * power;
-                const taken = blocked ? base * 0.3 : base;
-                this.dmg += taken;
-                const force = (280 + this.dmg * 9) * power * (blocked ? 0.25 : 1);
-                me.vx = dx * force; me.vy = blocked ? 0 : dy * force * 0.5 - (100 + this.dmg * 2);
+                this.dmg = Math.min(999, this.dmg + (blocked ? base * 0.22 : base));
+                const force = clamp((360 + this.dmg * 12) * power * (blocked ? 0.24 : 1), 0, 1700);
+                me.vx = dx * force; me.vy = blocked ? 0 : dy * force * 0.58 - (150 + this.dmg * 2.2);
                 me.onGround = false;
-                this.stun = blocked ? 0.08 : clamp(0.2 + this.dmg / 400, 0.2, 0.55);
-                this.hitFlash = 0.2; this.shake = 0.18; s.sfx(blocked ? 'click' : 'hit', 60);
+                this.stun = blocked ? 0.1 : clamp(0.18 + this.dmg / 180, 0.18, 0.82);
+                this.hitlag = blocked ? 0.035 : 0.055; this.hitFlash = 0.2; this.shake = 0.24;
+                s.sfx(blocked ? 'click' : 'hit', 60);
                 this.lastHit = { by: ev.by, at: Date.now() };
-                this.particles.burst(me.x + 17, me.y + 28, blocked ? '#7dd3fc' : '#fca5a5', 14, 260, 0.4, 5);
+                this.particles.burst(me.x + 17, me.y + 28, blocked ? '#7dd3fc' : '#fca5a5', 14, 320, 0.45, 5);
                 s.emit({ k: 'hit', by: ev.by, blocked });
             } else if (ev.k === 'hit' && ev.by === s.user.id) {
+                this.hitlag = Math.max(this.hitlag, 0.04); this.shake = 0.18;
                 s.addScore(ev.blocked ? 3 : 10); s.sfx('pop', 60);
                 this.particles.burst(from.x + 17, from.y + 28, '#fde68a', 8, 200, 0.3, 4);
             } else if (ev.k === 'ko' && ev.by === s.user.id) {
@@ -1454,12 +1535,13 @@
 
         net() {
             const m = this.me;
-            return { x: Math.round(m.x), y: Math.round(m.y), vx: Math.round(m.vx), vy: Math.round(m.vy), f: m.face, a: this.state,             ex: { d: Math.round(this.dmg), h: this.hammer > 0 ? 1 : 0, i: this.invuln > 0 ? 1 : 0, t: +(this.aim || 0).toFixed(2) } };
+            return { x: Math.round(m.x), y: Math.round(m.y), vx: Math.round(m.vx), vy: Math.round(m.vy), f: m.face, a: this.state,
+                ex: { d: Math.round(this.dmg), h: this.hammer > 0 ? 1 : 0, i: this.invuln > 0 ? 1 : 0, t: +(this.aim || 0).toFixed(2), k: this.kos, f: this.falls } };
         }
 
-        goalText() { return `${this.kos} KOs · ${Math.round(this.dmg)}% damage`; }
-        touchLayout() { return { stick: true, buttons: [{ k: 'KeyJ', label: 'Swing', cls: 'main' }, { k: 'Space', label: 'Jump' }, { k: 'ShiftLeft', label: 'Guard' }] }; }
-        hint() { return 'A/D move · Space jump · Click to swing the hammer at your cursor · Shift guard · hold the glowing hill alone to score · Q = recharge'; }
+        goalText() { return `${this.kos} KOs · ${this.falls} KOs against · ${Math.round(this.dmg)}% damage`; }
+        touchLayout() { return { stick: true, platform: true, buttons: [{ k: 'Space', label: 'Jump' }, { k: 'ShiftLeft', label: 'Shield' }, { k: 'KeyK', label: 'Heavy', small: true }, { k: 'KeyL', label: 'Dodge' }] }; }
+        hint() { return 'A/D move · Space jump twice · Down fast-fall / drop through ledges · Click or tap canvas to aim and swing · K heavy (last tap / facing) · Shift shield · L dodge · Q recharge'; }
 
                     drawFighter(ctx, x, y, who, face, state, dmg, name, hammer, swingAge, alpha, you, aim, swingAim) {
             const color = who.color;
@@ -1470,23 +1552,26 @@
             ctx.translate(cx, cy);
                         // The hammer points at the cursor and sweeps around the aim direction captured when the swing started
                         const base = swinging && typeof swingAim === 'number' ? swingAim : (typeof aim === 'number' ? aim : (face > 0 ? 0 : Math.PI));
-                        const sweepProgress = Math.min(1, swingAge < 0.22 ? swingAge / 0.22 : 0.5);
-                        const angle = base + (swinging ? (-1.2 + sweepProgress * 2.6) * face : -0.35 * face);
-                        ctx.rotate(angle);
+                        const sweepProgress = Math.max(0, Math.min(1, swingAge < 0.22 ? swingAge / 0.22 : 0.5));
+                        const angle = base + (swinging ? -0.8 + sweepProgress * 1.6 : -0.35);
                         ctx.globalAlpha = alpha;
+                        if (swinging) {
+                            ctx.fillStyle = 'rgba(253,230,138,.16)'; ctx.strokeStyle = 'rgba(253,230,138,.85)'; ctx.lineWidth = 4;
+                            ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, 136, base - 0.86, base + 0.86); ctx.closePath(); ctx.fill(); ctx.stroke();
+                        }
+                        ctx.rotate(angle);
                         ctx.fillStyle = '#92400e'; ctx.fillRect(0, -3, 62, 6);
                         ctx.fillStyle = hammer ? '#f472b6' : '#9ca3af'; roundRect(ctx, 52, -17, 30, 34, 6); ctx.fill();
-                        if (swinging) { ctx.strokeStyle = 'rgba(253,230,138,.6)'; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(0, 0, 80, -0.9, 0.9); ctx.stroke(); }
                         ctx.restore();
+            if (state === 6) { ctx.strokeStyle = 'rgba(56,189,248,.9)'; ctx.lineWidth = 3; ctx.strokeRect(x - 3, y - 3, 40, 62); }
             if (state === 4) { ctx.strokeStyle = 'rgba(125,211,252,.85)'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(cx, cy, 44, 0, TAU); ctx.stroke(); }
             nameTag(ctx, `${you ? 'You' : name} · ${Math.round(dmg)}%`, cx, y - 14, you ? '#fff' : color);
         }
 
         draw(ctx, w, h) {
             const s = this.s, me = this.me;
-            const z = Math.min(w / 1700, h / 900);
-            this.view.z = z;
-            this.offX = (w - 1600 * z) / 2;
+            this.updateCamera(w, h);
+            const z = this.view.z;
             const g = ctx.createLinearGradient(0, 0, 0, h);
             g.addColorStop(0, '#0b1230'); g.addColorStop(1, '#3b1a5c');
             ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
@@ -1496,8 +1581,7 @@
             }
             ctx.save();
             const sh = this.shake > 0 ? 8 : 0;
-            ctx.translate(this.offX + (Math.random() - 0.5) * sh, h * 0.14 + (Math.random() - 0.5) * sh);
-            this.offY = h * 0.14;
+            ctx.translate(this.offX + (Math.random() - 0.5) * sh, this.offY + (Math.random() - 0.5) * sh);
             ctx.scale(z, z);
             for (const p of this.solids) {
                 if (p.main) {
@@ -1535,6 +1619,8 @@
             }
             this.particles.draw(ctx);
             ctx.restore();
+            this.edgeArrow(ctx, hz.x + hz.w / 2, hz.y - 75, `HILL ${Math.ceil(hill.left)}s`, '#facc15', w, h);
+            for (const r of s.remoteList()) if (r.a !== 5) this.edgeArrow(ctx, r.x + 17, r.y + 28, r.name, r.color, w, h);
         }
     }
 
@@ -1571,6 +1657,15 @@
             this.dashT = 0; this.dashCd = 0; this.nova = 0; this.novaCd = 0; this.overdrive = 0; this.jam = 0; this.kills = 0; this.pk = 0; this.deaths = 0;
             this.res = new A.Resource('Ammo', '#67e8f9', 150, 60, 3);
             this.cam = { x: this.me.x, y: this.me.y }; this.anim = 0; this.shake = 0; this.hitmark = 0; this.flash = 0; this.dx = 1; this.dy = 0;
+            this.weapon = 'blaster'; this.weaponT = 0; this.damageTexts = []; this.streak = 0; this.streakT = 0; this.wave = 1;
+            this.pickups = [];
+            const types = ['shotgun', 'rapid', 'rail', 'health'];
+            for (let i = 0; i < 16; i++) {
+                const p = { x: 140 + r() * (this.W - 280), y: 140 + r() * (this.H - 280), type: types[i % types.length], t: 0 };
+                if (!this.walls.some(w => overlap({ x: p.x - 30, y: p.y - 30, w: 60, h: 60 }, w))) this.pickups.push(p);
+            }
+            this.pickups.push({ x: this.me.x, y: this.me.y, type: 'shotgun', t: 0 });
+            this.zoom = this.cameraZoom(s.vw, s.vh);
             s.canvas.style.cursor = 'none';
         }
 
@@ -1590,24 +1685,58 @@
             const r = Math.random;
             const wave = 1 + Math.floor(this.s.t / 35);
             const shooter = this.s.t > 25 && r() < Math.min(0.4, 0.12 + wave * 0.04);
-            const heavy = !shooter && this.s.t > 60 && r() < 0.15;
+            const heavy = !shooter && this.s.t > 20 && r() < 0.18;
+            const fast = !shooter && !heavy && r() < 0.3;
             for (let i = 0; i < 12; i++) {
                 const ang = r() * TAU, d = 650 + r() * 250;
                 const x = clamp(this.me.x + Math.cos(ang) * d, 80, this.W - 80), y = clamp(this.me.y + Math.sin(ang) * d, 80, this.H - 80);
                 if (this.walls.some(w => overlap({ x: x - 20, y: y - 20, w: 40, h: 40 }, w))) continue;
-                this.drones.push({ x, y, r: heavy ? 24 : 16, hp: shooter ? 60 : heavy ? 120 : 30, max: shooter ? 60 : heavy ? 120 : 30, heavy, shooter, fire: 1 + r() * 1.5, vx: 0, vy: 0, hit: 0, ph: r() * 6 });
+                this.drones.push({ x, y, r: heavy ? 24 : fast ? 12 : 16, hp: shooter ? 60 : heavy ? 120 : fast ? 22 : 30, max: shooter ? 60 : heavy ? 120 : fast ? 22 : 30, heavy, shooter, fast, fire: 1 + r() * 1.5, vx: 0, vy: 0, hit: 0, ph: r() * 6 });
                 return;
             }
         }
 
-        fire(angle, speed, own, by, dmg, color) {
-            this.bullets.push({ x: this.me.x + Math.cos(angle) * 24, y: this.me.y + Math.sin(angle) * 24, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, life: 0.9, own, by, dmg, color });
+        cameraZoom(w = this.s.vw || 1280, h = this.s.vh || 720) {
+            return this.s.overlay.classList.contains('has-touch') && w < 760 ? 1.05 : clamp(h / 900, 0.7, 1.2);
+        }
+
+        weaponInfo(type = this.weapon) {
+            return {
+                blaster: { name: 'Blaster', cd: 0.16, speed: 950, dmg: 25, life: 0.9, color: '#67e8f9', pellets: 1, cost: 1 },
+                shotgun: { name: 'Scattergun', cd: 0.55, speed: 820, dmg: 16, life: 0.48, color: '#fbbf24', pellets: 5, cost: 3 },
+                rapid: { name: 'Rapid pulse', cd: 0.065, speed: 1050, dmg: 16, life: 0.85, color: '#a78bfa', pellets: 1, cost: 1 },
+                rail: { name: 'Rail sniper', cd: 0.75, speed: 1900, dmg: 85, life: 0.85, color: '#f472b6', pellets: 1, cost: 4 }
+            }[type] || this.weaponInfo('blaster');
+        }
+
+        fire(angle, speed, own, by, dmg, color, life = 0.9) {
+            this.bullets.push({ x: this.me.x + Math.cos(angle) * 24, y: this.me.y + Math.sin(angle) * 24, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, life, own, by, dmg, color });
+        }
+
+        showDamage(x, y, amount, color = '#fde68a') {
+            this.damageTexts.push({ x, y, amount: Math.round(amount), color, t: 0.7 });
+            if (this.damageTexts.length > 40) this.damageTexts.shift();
+            this.hitmark = 0.16; this.shake = Math.max(this.shake, 0.09);
+        }
+
+        registerKill() {
+            this.streak = this.streakT > 0 ? this.streak + 1 : 1; this.streakT = 5;
+            if (this.streak === 3 || this.streak === 5 || this.streak % 10 === 0) this.s.toast(`${this.streak} KILL STREAK!`, '#fbbf24');
         }
 
         update(dt) {
             const s = this.s, me = this.me;
             this.anim += dt; this.shake = Math.max(0, this.shake - dt); this.hitmark = Math.max(0, this.hitmark - dt); this.flash = Math.max(0, this.flash - dt);
             this.overdrive = Math.max(0, this.overdrive - dt); this.jam = Math.max(0, this.jam - dt);
+            this.weaponT = Math.max(0, this.weaponT - dt); if (!this.weaponT) this.weapon = 'blaster';
+            this.streakT = Math.max(0, this.streakT - dt);
+            for (const n of this.damageTexts) { n.t -= dt; n.y -= 38 * dt; }
+            this.damageTexts = this.damageTexts.filter(n => n.t > 0);
+            for (const p of this.pickups) p.t = Math.max(0, p.t - dt);
+            for (const p of this.packs) p.t = (p.t ?? 18) - dt;
+            this.packs = this.packs.filter(p => p.t > 0);
+            const wave = 1 + Math.floor(s.t / 35);
+            if (wave !== this.wave) { this.wave = wave; s.toast(`WAVE ${wave} · reinforcements incoming`, '#a78bfa'); }
             this.invuln = Math.max(0, this.invuln - dt); this.fireCd -= dt; this.dashCd -= dt; this.novaCd -= dt; this.nova = Math.max(0, this.nova - dt);
             const zoom = this.zoom || 1;
             const mx = this.cam.x + (s.mouse.x - s.vw / 2) / zoom, my = this.cam.y + (s.mouse.y - s.vh / 2) / zoom;
@@ -1617,13 +1746,7 @@
                 this.dead -= dt;
                 if (this.dead <= 0) { this.respawnAt(); this.hp = 100; this.invuln = 2; this.drones = this.drones.filter(d => dist(d.x, d.y, me.x, me.y) > 500); }
             } else {
-                me.aim = Math.atan2(my - me.y, mx - me.x);
-                // On phones the Hit button fires at the nearest target unless you just tapped the screen to aim
-                if (s.overlay?.classList.contains('has-touch') && s.keys.has('KeyJ') && performance.now() - (s.mouse.touchAt || 0) > 1500) {
-                    let best = null, bd = 900;
-                    for (const t of [...this.drones, ...s.remoteList()]) { const d = dist(t.x, t.y, me.x, me.y); if (d < bd && !t.dead) { bd = d; best = t; } }
-                    if (best) me.aim = Math.atan2(best.y - me.y, best.x - me.x);
-                }
+                if (!s.overlay.classList.contains('has-touch') || s.mouse.down || s.mouse.pressed) me.aim = Math.atan2(my - me.y, mx - me.x);
                 const a = s.axis();
                 const len = Math.hypot(a.x, a.y) || 1;
                 const speed = this.dashT > 0 ? 760 : 270;
@@ -1635,20 +1758,30 @@
                 if (s.pressed('Space', 'ShiftLeft') && this.dashCd <= 0) { this.dashT = 0.16; this.dashCd = 1.1; this.invuln = Math.max(this.invuln, 0.2); this.particles.burst(me.x, me.y, '#7dd3fc', 12, 200, 0.3, 4); }
                 if (s.pressed('KeyE') && this.novaCd <= 0 && s.spend(30)) {
                     this.novaCd = 7; this.nova = 0.45;                     this.shake = 0.25; s.sfx('boom'); this.particles.burst(me.x, me.y, '#67e8f9', 40, 520, 0.5, 5);
-                    for (const d of this.drones) if (dist(d.x, d.y, me.x, me.y) < 280) { d.hp -= 60; d.hit = 0.2; const a = Math.atan2(d.y - me.y, d.x - me.x); d.vx = Math.cos(a) * 500; d.vy = Math.sin(a) * 500; if (d.hp <= 0) this.killDrone(d); }
+                    for (const d of this.drones) if (dist(d.x, d.y, me.x, me.y) < 280) { d.hp -= 60; d.hit = 0.2; this.showDamage(d.x, d.y - d.r, 60); const a = Math.atan2(d.y - me.y, d.x - me.x); d.vx = Math.cos(a) * 500; d.vy = Math.sin(a) * 500; if (d.hp <= 0) this.killDrone(d); }
                     this.bullets = this.bullets.filter(b => b.own || dist(b.x, b.y, me.x, me.y) > 280);
                 }
                 this.dashT = Math.max(0, this.dashT - dt);
                 me.x += me.vx * dt; me.y += me.vy * dt;
                 for (const w of this.walls) pushCircleOutOfRect(me, w);
-                const cd = this.overdrive > 0 ? 0.075 : 0.16;
-                if ((s.mouse.down || s.down('KeyJ')) && this.fireCd <= 0 && this.jam <= 0 && s.spend(1)) {
+                const weapon = this.weaponInfo();
+                const cd = this.overdrive > 0 ? weapon.cd * 0.55 : weapon.cd;
+                if ((s.mouse.down || s.down('KeyJ')) && this.fireCd <= 0 && this.jam <= 0 && s.spend(weapon.cost)) {
                     this.fireCd = cd; s.sfx('shoot', 40);
-                    const spread = (Math.random() - 0.5) * (this.overdrive > 0 ? 0.1 : 0.04);
-                    this.fire(me.aim + spread, 950, true, s.user.id, 25, '#67e8f9');
-                    s.emit({ k: 'sh', x: Math.round(me.x + Math.cos(me.aim) * 24), y: Math.round(me.y + Math.sin(me.aim) * 24), a: +(me.aim + spread).toFixed(3), by: s.user.id });
+                    for (let i = 0; i < weapon.pellets; i++) {
+                        const spread = weapon.pellets > 1 ? (i - 2) * 0.12 : (Math.random() - 0.5) * (this.weapon === 'rail' ? 0 : 0.04);
+                        const angle = me.aim + spread;
+                        this.fire(angle, weapon.speed, true, s.user.id, weapon.dmg, weapon.color, weapon.life);
+                        s.emit({ k: 'sh', x: Math.round(me.x + Math.cos(angle) * 24), y: Math.round(me.y + Math.sin(angle) * 24), a: +angle.toFixed(3), by: s.user.id, w: this.weapon, v: weapon.speed, dmg: weapon.dmg, life: weapon.life });
+                    }
                     me.vx -= Math.cos(me.aim) * 25; me.vy -= Math.sin(me.aim) * 25;
-                    this.shake = Math.max(this.shake, 0.05); this.muzzle = 0.05;
+                    this.shake = Math.max(this.shake, this.weapon === 'rail' ? 0.12 : 0.05); this.muzzle = 0.07;
+                }
+                for (const p of this.pickups) {
+                    if (p.t > 0 || dist(me.x, me.y, p.x, p.y) > 34 || (p.type === 'health' && this.hp >= this.maxHp)) continue;
+                    if (p.type === 'health') { this.hp = Math.min(this.maxHp, this.hp + 35); s.toast('Repair +35 HP', '#4ade80'); }
+                    else { this.weapon = p.type; this.weaponT = 14; s.toast(`${this.weaponInfo().name} · 14 seconds`, this.weaponInfo().color); }
+                    p.t = 24; s.sfx('coin'); this.particles.burst(p.x, p.y, p.type === 'health' ? '#4ade80' : this.weaponInfo().color, 12, 160, 0.4, 4);
                 }
                 for (const o of this.orbs) {
                     o.t = Math.max(0, o.t - dt);
@@ -1677,7 +1810,7 @@
                 if (!targets) { d.vx *= 0.95; d.vy *= 0.95; }
                 else {
                     const dx = me.x - d.x, dy = me.y - d.y, dd = Math.hypot(dx, dy) || 1;
-                    let wantX = dx / dd, wantY = dy / dd, sp = d.shooter ? 130 : d.heavy ? 95 : 150 + Math.min(70, s.t * 0.4);
+                    let wantX = dx / dd, wantY = dy / dd, sp = d.shooter ? 130 : d.heavy ? 95 : d.fast ? 260 + Math.min(40, s.t * 0.2) : 150 + Math.min(70, s.t * 0.4);
                     if (d.shooter) {
                         if (dd < 300) { wantX = -dx / dd * 0.6 + -dy / dd * 0.8; wantY = -dy / dd * 0.6 + dx / dd * 0.8; }
                         d.fire -= dt;
@@ -1701,14 +1834,14 @@
             // bullets
             for (const b of this.bullets) {
                 b.life -= dt;
-                const steps = 2;
+                const steps = Math.max(2, Math.ceil(Math.hypot(b.vx, b.vy) * dt / 10));
                 for (let i = 0; i < steps && b.life > 0; i++) {
                     b.x += b.vx * dt / steps; b.y += b.vy * dt / steps;
                     if (this.walls.some(w => b.x > w.x && b.x < w.x + w.w && b.y > w.y && b.y < w.y + w.h)) { b.life = 0; this.particles.burst(b.x, b.y, '#94a3b8', 4, 80, 0.2, 3); break; }
                     if (b.own) {
                         for (const d of this.drones) {
                             if (d.hp > 0 && dist(b.x, b.y, d.x, d.y) < d.r + 4) {
-                                d.hp -= b.dmg; d.hit = 0.1; b.life = 0; this.hitmark = 0.12;
+                                d.hp -= b.dmg; d.hit = 0.1; b.life = 0; this.showDamage(d.x, d.y - d.r, b.dmg);
                                 this.particles.burst(b.x, b.y, '#fde68a', 5, 120, 0.25, 3);
                                 if (d.hp <= 0) this.killDrone(d);
                                 break;
@@ -1723,14 +1856,21 @@
             this.bullets = this.bullets.filter(b => b.life > 0);
             this.drones = this.drones.filter(d => d.hp > 0);
 
-            const tx = me.x + (this.mouseWorld.x - me.x) * 0.18, ty = me.y + (this.mouseWorld.y - me.y) * 0.18;
-            this.cam.x = lerp(this.cam.x, tx, 0.14); this.cam.y = lerp(this.cam.y, ty, 0.14);
+            this.zoom = this.cameraZoom(s.vw, s.vh);
+            const halfW = s.vw / this.zoom / 2, halfH = s.vh / this.zoom / 2;
+            const touch = s.overlay.classList.contains('has-touch');
+            const look = touch && !s.mouse.down ? 0 : 0.18;
+            const tx = clamp(me.x + clamp((this.mouseWorld.x - me.x) * look, -110, 110), halfW, this.W - halfW);
+            const ty = clamp(me.y + clamp((this.mouseWorld.y - me.y) * look, -90, 90), halfH, this.H - halfH);
+            const follow = 1 - Math.exp(-dt * 9);
+            this.cam.x = clamp(lerp(this.cam.x, tx, follow), halfW, this.W - halfW);
+            this.cam.y = clamp(lerp(this.cam.y, ty, follow), halfH, this.H - halfH);
             s.setGoal(this.kills + this.pk * 3);
             this.particles.update(dt, 0);
         }
 
         killDrone(d) {
-            this.kills++;
+            this.kills++; this.registerKill();
             this.s.addScore(d.heavy ? 30 : d.shooter ? 15 : 10); this.s.sfx('pop', 50);
             this.particles.burst(d.x, d.y, d.shooter ? '#f97316' : '#a78bfa', 16, 260, 0.5, 5);
             if (Math.random() < (d.heavy ? 0.6 : 0.14)) this.packs.push({ x: d.x, y: d.y });
@@ -1741,9 +1881,9 @@
             this.hp -= amount; this.flash = 0.2; this.shake = 0.2; this.s.sfx('hit', 80);
             this.particles.burst(this.me.x, this.me.y, '#f87171', 8, 160, 0.3, 4);
             if (drone) { this.invuln = 0.5; const a = Math.atan2(this.me.y - drone.y, this.me.x - drone.x); this.me.vx += Math.cos(a) * 320; this.me.vy += Math.sin(a) * 320; drone.vx = -Math.cos(a) * 200; drone.vy = -Math.sin(a) * 200; }
-            if (by) this.s.emit({ k: 'hit', by });
+            if (by) this.s.emit({ k: 'hit', by, dmg: Math.round(amount) });
             if (this.hp <= 0) {
-                this.dead = 2; this.deaths++;
+                this.dead = 2; this.deaths++; this.streak = 0; this.streakT = 0; this.weaponT = 0; this.weapon = 'blaster';
                 this.particles.burst(this.me.x, this.me.y, this.s.local.color, 30, 380, 0.8, 6);
                 this.s.emit({ k: 'ko', by: by || null, to: this.s.user.id });
             }
@@ -1752,20 +1892,24 @@
         onEvent(ev, from) {
             const s = this.s;
             if (ev.k === 'sh') {
-                this.bullets.push({ x: ev.x, y: ev.y, vx: Math.cos(ev.a) * 950, vy: Math.sin(ev.a) * 950, life: 0.9, own: false, by: ev.by, dmg: 20, color: from.color });
+                const weapon = this.weaponInfo(ev.w || 'blaster');
+                const speed = Number.isFinite(ev.v) ? clamp(ev.v, 300, 1900) : 950;
+                const dmg = Number.isFinite(ev.dmg) ? clamp(ev.dmg, 1, 85) : 20;
+                const life = Number.isFinite(ev.life) ? clamp(ev.life, 0.1, 1.2) : 0.9;
+                this.bullets.push({ x: ev.x, y: ev.y, vx: Math.cos(ev.a) * speed, vy: Math.sin(ev.a) * speed, life, own: false, by: ev.by, dmg, color: ev.w ? weapon.color : from.color });
                 from.muzzle = performance.now();
-            } else if (ev.k === 'hit' && ev.by === s.user.id) { s.addScore(4); this.hitmark = 0.15; }
-            else if (ev.k === 'ko' && ev.by === s.user.id) { this.pk++; s.addScore(100); s.toast(`You eliminated ${from.name}!`, '#facc15'); }
+            } else if (ev.k === 'hit' && ev.by === s.user.id) { s.addScore(4); this.showDamage(from.x, from.y - 25, Number.isFinite(ev.dmg) ? ev.dmg : 20); }
+            else if (ev.k === 'ko' && ev.by === s.user.id) { this.pk++; this.registerKill(); s.addScore(100); s.toast(`You eliminated ${from.name}!`, '#facc15'); }
         }
 
         net() {
             const m = this.me;
-            return { x: Math.round(m.x), y: Math.round(m.y), vx: Math.round(m.vx), vy: Math.round(m.vy), f: +m.aim.toFixed(2), a: this.dead > 0 ? 1 : 0, hp: Math.round(this.hp), ex: { o: this.overdrive > 0 ? 1 : 0 } };
+            return { x: Math.round(m.x), y: Math.round(m.y), vx: Math.round(m.vx), vy: Math.round(m.vy), f: +m.aim.toFixed(2), a: this.dead > 0 ? 1 : 0, hp: Math.round(this.hp), ex: { o: this.overdrive > 0 ? 1 : 0, w: this.weapon } };
         }
 
         goalText() { return `${this.kills} drones · ${this.pk} players · HP ${Math.max(0, Math.round(this.hp))}`; }
-        touchLayout() { return { stick: true, buttons: [{ k: 'KeyJ', label: 'Fire', cls: 'main' }, { k: 'Space', label: 'Dash' }, { k: 'KeyE', label: 'Blast', cls: 'e' }] }; }
-        hint() { return 'WASD move · mouse aim · click fire · Space dash · E = shockwave · Q = reload'; }
+        touchLayout() { return { stick: true, buttons: [{ k: 'Space', label: 'Dash' }, { k: 'KeyE', label: 'Blast', cls: 'e' }] }; }
+        hint() { return 'WASD move · hold click / canvas touch to aim and fire · Space dash · E shockwave · colored pickups = timed weapons / repairs · Q reload'; }
 
         drawShip(ctx, x, y, aim, who, hp, name, you, alpha = 1, over = false) {
             const color = who.color;
@@ -1786,7 +1930,7 @@
 
         draw(ctx, w, h) {
             const s = this.s, me = this.me;
-            const zoom = this.zoom = clamp(h / 900, 0.7, 1.2);
+            const zoom = this.zoom = this.cameraZoom(w, h);
             ctx.fillStyle = '#070b17'; ctx.fillRect(0, 0, w, h);
             ctx.save();
             const sh = this.shake > 0 ? 7 : 0;
@@ -1795,6 +1939,13 @@
             ctx.translate(-this.cam.x, -this.cam.y);
             const x0 = this.cam.x - w / zoom / 2, y0 = this.cam.y - h / zoom / 2;
             ctx.fillStyle = '#0d1428'; ctx.fillRect(0, 0, this.W, this.H);
+            for (let gy = Math.max(0, Math.floor(y0 / 80) * 80); gy < Math.min(this.H, y0 + h / zoom + 80); gy += 80) {
+                for (let gx = Math.max(0, Math.floor(x0 / 80) * 80); gx < Math.min(this.W, x0 + w / zoom + 80); gx += 80) {
+                    const tile = (gx / 80 + gy / 80) % 2;
+                    ctx.fillStyle = tile ? '#111c31' : '#0e182b'; ctx.fillRect(gx + 2, gy + 2, 76, 76);
+                    ctx.fillStyle = 'rgba(148,163,184,.08)'; ctx.fillRect(gx + 9, gy + 11, 20, 2); ctx.fillRect(gx + 67, gy + 67, 3, 3);
+                }
+            }
             ctx.strokeStyle = 'rgba(99,102,241,.14)'; ctx.lineWidth = 1;
             ctx.beginPath();
             for (let gx = Math.max(0, Math.floor(x0 / 80) * 80); gx < Math.min(this.W, x0 + w / zoom + 80); gx += 80) { ctx.moveTo(gx, Math.max(0, y0)); ctx.lineTo(gx, Math.min(this.H, y0 + h / zoom + 80)); }
@@ -1802,8 +1953,13 @@
             ctx.stroke();
             for (const wl of this.walls) {
                 if (wl.x > x0 + w / zoom + 50 || wl.x + wl.w < x0 - 50 || wl.y > y0 + h / zoom + 50 || wl.y + wl.h < y0 - 50) continue;
+                ctx.fillStyle = 'rgba(0,0,0,.38)'; ctx.fillRect(wl.x + 10, wl.y + 13, wl.w, wl.h);
                 ctx.fillStyle = '#1e293b'; ctx.fillRect(wl.x, wl.y, wl.w, wl.h);
-                ctx.strokeStyle = '#6366f1'; ctx.lineWidth = 3; ctx.strokeRect(wl.x + 1.5, wl.y + 1.5, wl.w - 3, wl.h - 3);
+                ctx.fillStyle = '#34445f'; ctx.fillRect(wl.x, wl.y, wl.w, 8);
+                ctx.fillStyle = '#101a2c'; ctx.fillRect(wl.x, wl.y + wl.h - 9, wl.w, 9);
+                ctx.strokeStyle = '#6366f1'; ctx.lineWidth = 2; ctx.strokeRect(wl.x + 1.5, wl.y + 1.5, wl.w - 3, wl.h - 3);
+                ctx.fillStyle = '#fbbf24';
+                for (let i = 12; i < wl.w - 8; i += 36) ctx.fillRect(wl.x + i, wl.y + wl.h - 7, 12, 3);
             }
             for (const o of this.orbs) {
                 if (o.t > 0) continue;
@@ -1812,16 +1968,36 @@
                 ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(o.x, o.y, 20 * pulse, 0, TAU); ctx.fill(); ctx.shadowBlur = 0;
                 ctx.fillStyle = '#78350f'; ctx.font = '900 22px system-ui'; ctx.textAlign = 'center'; ctx.fillText('?', o.x, o.y + 8);
             }
-            for (const p of this.packs) { ctx.fillStyle = '#4ade80'; ctx.fillRect(p.x - 10, p.y - 3, 20, 6); ctx.fillRect(p.x - 3, p.y - 10, 6, 20); }
+            for (const p of this.pickups) {
+                if (p.t > 0) continue;
+                const info = this.weaponInfo(p.type), color = p.type === 'health' ? '#4ade80' : info.color;
+                const bob = Math.sin(this.anim * 3 + p.x) * 3;
+                ctx.save(); ctx.translate(p.x, p.y + bob);
+                ctx.fillStyle = '#101a2c'; ctx.strokeStyle = color; ctx.lineWidth = 3;
+                roundRect(ctx, -19, -19, 38, 38, 8); ctx.fill(); ctx.stroke();
+                ctx.fillStyle = color; ctx.font = '900 16px system-ui'; ctx.textAlign = 'center';
+                ctx.fillText(p.type === 'health' ? '+' : p.type === 'shotgun' ? 'S' : p.type === 'rapid' ? 'R' : '⚡', 0, 6);
+                ctx.font = '700 11px system-ui'; ctx.fillText(p.type === 'health' ? 'REPAIR' : info.name.toUpperCase(), 0, -28); ctx.restore();
+            }
+            for (const p of this.packs) {
+                ctx.fillStyle = '#123528'; roundRect(ctx, p.x - 15, p.y - 15, 30, 30, 6); ctx.fill();
+                ctx.fillStyle = '#4ade80'; ctx.fillRect(p.x - 10, p.y - 3, 20, 6); ctx.fillRect(p.x - 3, p.y - 10, 6, 20);
+            }
             for (const d of this.drones) {
                 ctx.save(); ctx.translate(d.x, d.y); ctx.rotate(this.anim * 2 + d.ph);
-                ctx.fillStyle = d.hit > 0 ? '#fff' : d.shooter ? '#f97316' : '#8b5cf6';
+                ctx.fillStyle = d.hit > 0 ? '#fff' : d.shooter ? '#f97316' : d.heavy ? '#ef4444' : d.fast ? '#2dd4bf' : '#8b5cf6';
                 ctx.beginPath();
                 for (let i = 0; i < 6; i++) { const a = i / 6 * TAU; ctx.lineTo(Math.cos(a) * d.r, Math.sin(a) * d.r); }
                 ctx.fill();
                 ctx.fillStyle = '#0f172a'; ctx.beginPath(); ctx.arc(0, 0, 6, 0, TAU); ctx.fill();
                 ctx.fillStyle = d.shooter ? '#fde68a' : '#ddd6fe'; ctx.beginPath(); ctx.arc(0, 0, 3, 0, TAU); ctx.fill();
+                if (d.heavy) { ctx.strokeStyle = '#fca5a5'; ctx.lineWidth = 3; ctx.strokeRect(-18, -18, 36, 36); }
+                if (d.shooter) { ctx.fillStyle = '#fdba74'; ctx.fillRect(6, -4, 20, 8); }
                 ctx.restore();
+                if (d.hp < d.max) {
+                    ctx.fillStyle = '#111827'; ctx.fillRect(d.x - 18, d.y - d.r - 10, 36, 4);
+                    ctx.fillStyle = '#f87171'; ctx.fillRect(d.x - 18, d.y - d.r - 10, 36 * Math.max(0, d.hp / d.max), 4);
+                }
             }
             for (const b of this.bullets) {
                 ctx.strokeStyle = b.color; ctx.lineWidth = b.enemy ? 5 : 4; ctx.lineCap = 'round';
@@ -1832,6 +2008,9 @@
             for (const r of s.remoteList()) {
                 if (r.a === 1) continue;
                 this.drawShip(ctx, r.x, r.y, r.f || 0, r, r.hp, r.name, false, 0.95, r.ex?.o);
+                if (r.muzzle && performance.now() - r.muzzle < 70) {
+                    ctx.fillStyle = '#fef08a'; ctx.beginPath(); ctx.arc(r.x + Math.cos(r.f || 0) * 34, r.y + Math.sin(r.f || 0) * 34, 8, 0, TAU); ctx.fill();
+                }
             }
             if (this.dead <= 0) {
                 const alpha = this.invuln > 0 ? 0.55 + Math.sin(this.anim * 24) * 0.3 : 1;
@@ -1841,7 +2020,17 @@
                 ctx.beginPath(); ctx.moveTo(me.x + Math.cos(me.aim) * 30, me.y + Math.sin(me.aim) * 30); ctx.lineTo(me.x + Math.cos(me.aim) * 330, me.y + Math.sin(me.aim) * 330); ctx.stroke(); ctx.setLineDash([]);
             }
             this.particles.draw(ctx);
+            for (const n of this.damageTexts) {
+                ctx.globalAlpha = Math.min(1, n.t * 3); ctx.fillStyle = n.color; ctx.font = '900 20px system-ui'; ctx.textAlign = 'center';
+                ctx.fillText(n.amount, n.x, n.y); ctx.globalAlpha = 1;
+            }
             ctx.restore();
+            s.placeHud(ctx, 14, 142, 270, 58, 'top-left');
+            ctx.fillStyle = 'rgba(8,12,24,.8)'; roundRect(ctx, 14, 142, 270, 58, 9); ctx.fill();
+            ctx.textAlign = 'left'; ctx.font = '800 14px system-ui'; ctx.fillStyle = '#e2e8f0';
+            ctx.fillText(`WAVE ${this.wave} · ${this.drones.length} drones${this.streakT > 0 && this.streak > 1 ? ` · ${this.streak} streak` : ''}`, 25, 163, 248);
+            const weapon = this.weaponInfo(); ctx.fillStyle = weapon.color;
+            ctx.fillText(`${weapon.name}${this.weaponT > 0 ? ` · ${Math.ceil(this.weaponT)}s` : ''} · HP ${Math.max(0, Math.round(this.hp))}`, 25, 185, 248); ctx.restore();
             if (this.flash > 0) { ctx.fillStyle = `rgba(239,68,68,${this.flash * 1.4})`; ctx.fillRect(0, 0, w, h); }
             if (this.dead > 0) { ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.fillRect(0, 0, w, h); ctx.fillStyle = '#fff'; ctx.font = '800 36px system-ui'; ctx.textAlign = 'center'; ctx.fillText(`Respawning in ${Math.ceil(this.dead)}…`, w / 2, h / 2); }
             else {
@@ -1852,13 +2041,19 @@
                 ctx.moveTo(cx, cy - gap - 8); ctx.lineTo(cx, cy - gap); ctx.moveTo(cx, cy + gap); ctx.lineTo(cx, cy + gap + 8); ctx.stroke();
             }
             // minimap
-            const mw = 170, mh = mw * this.H / this.W, mx = w - mw - 16, my = h - mh - 16;
+            const touch = s.overlay.classList.contains('has-touch');
+            const mw = touch ? 106 : 170, mh = mw * this.H / this.W, mx = 0, my = 0;
+            s.placeHud(ctx, 0, 0, mw, mh, 'bottom-right');
+            ctx.beginPath(); ctx.rect(0, 0, mw, mh); ctx.clip();
             ctx.fillStyle = 'rgba(8,12,24,.7)'; ctx.fillRect(mx, my, mw, mh);
             ctx.fillStyle = '#334155';
             for (const wl of this.cover) ctx.fillRect(mx + wl.x / this.W * mw, my + wl.y / this.H * mh, Math.max(2, wl.w / this.W * mw), Math.max(2, wl.h / this.H * mh));
             ctx.fillStyle = '#a78bfa'; for (const d of this.drones) ctx.fillRect(mx + d.x / this.W * mw - 1, my + d.y / this.H * mh - 1, 2, 2);
             for (const r of s.remoteList()) { ctx.fillStyle = r.color; ctx.fillRect(mx + r.x / this.W * mw - 2, my + r.y / this.H * mh - 2, 4, 4); }
-            ctx.fillStyle = '#fff'; ctx.fillRect(mx + me.x / this.W * mw - 3, my + me.y / this.H * mh - 3, 6, 6);
+            for (const p of this.pickups) if (p.t <= 0) { ctx.fillStyle = p.type === 'health' ? '#4ade80' : this.weaponInfo(p.type).color; ctx.fillRect(mx + p.x / this.W * mw - 2, my + p.y / this.H * mh - 2, 4, 4); }
+            ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 1;
+            ctx.strokeRect(mx + (this.cam.x - w / zoom / 2) / this.W * mw, my + (this.cam.y - h / zoom / 2) / this.H * mh, w / zoom / this.W * mw, h / zoom / this.H * mh);
+            ctx.fillStyle = '#fff'; ctx.fillRect(mx + me.x / this.W * mw - 3, my + me.y / this.H * mh - 3, 6, 6); ctx.restore();
         }
     }
 
