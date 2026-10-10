@@ -185,6 +185,7 @@ begin
     select coalesce(jsonb_agg(
         jsonb_build_object(
             'rank', ranked.rank,
+            'user_id', ranked.user_id,
             'username', ranked.username,
             'seconds', ranked.seconds,
             'minutes', floor(ranked.seconds / 60.0)::integer,
@@ -380,7 +381,18 @@ as $$
         ('hat_wizard', 160), ('hat_pirate', 170), ('hat_viking', 190), ('hat_horns', 200), ('hat_halo', 250), ('hat_crown', 400),
         ('acc_bowtie', 70), ('acc_shades', 80), ('acc_eyepatch', 90), ('acc_scarf', 90), ('acc_backpack', 100),
         ('acc_monocle', 140), ('acc_cape', 180), ('acc_sparkles', 220), ('acc_wings', 350),
-        ('accessory_cap', 75), ('accessory_halo', 125), ('accessory_headphones', 150)
+        ('accessory_cap', 75), ('accessory_halo', 125), ('accessory_headphones', 150),
+        ('skin_candy', 140), ('skin_pixel', 190), ('skin_mummy', 170), ('skin_vampire', 270), ('skin_samurai', 290),
+        ('skin_steampunk', 310), ('skin_neon', 330), ('skin_rainbow', 480),
+        ('hat_straw', 80), ('hat_grad', 100), ('hat_propeller', 130), ('hat_helmet', 150),
+        ('palette_rose', 110), ('palette_lime', 110), ('palette_mint', 120), ('palette_mocha', 120), ('palette_teal', 130),
+        ('palette_peach', 130), ('palette_lavender', 140), ('palette_gold', 150), ('palette_slate', 150), ('palette_jungle', 160),
+        ('palette_crimson', 170), ('palette_glacier', 180), ('palette_sakura', 190), ('palette_ember', 210), ('palette_cyber', 240),
+        ('palette_galaxy', 280), ('palette_prism', 420),
+        ('acc_glasses', 70), ('acc_headband', 70), ('acc_bandana', 80), ('acc_mask', 90), ('acc_tie', 90), ('acc_mustache', 100),
+        ('acc_goggles', 120), ('acc_chain', 130), ('acc_beard', 130), ('acc_medal', 150), ('acc_tail', 170), ('acc_sword', 190),
+        ('acc_hearts', 200), ('acc_snow', 210), ('acc_jetpack', 240), ('acc_fairy', 260), ('acc_stars', 280), ('acc_flame', 300),
+        ('acc_phoenix', 420)
     ), pets(id, rarity) as (values
         ('pet_puppy', 'common'), ('pet_kitten', 'common'), ('pet_hamster', 'common'), ('pet_bunny', 'common'),
         ('pet_chick', 'common'), ('pet_frog', 'common'), ('pet_turtle', 'common'), ('pet_goldfish', 'common'),
@@ -393,7 +405,7 @@ as $$
         ('pet_star', 'legendary'), ('pet_planet', 'legendary'), ('pet_rainbow', 'legendary'),
         ('pet_elder', 'legendary'), ('pet_brain', 'legendary'), ('pet_trophy', 'legendary')
     )
-    select priced.id, priced.price,
+    select priced.id, (round(priced.price * 2.5 / 5) * 5)::integer,
         case when priced.price < 100 then 'common' when priced.price < 160 then 'uncommon'
              when priced.price < 260 then 'rare' when priced.price < 400 then 'epic' else 'legendary' end
     from priced
@@ -513,6 +525,7 @@ declare
     v_rarity text;
     v_refund integer := 0;
     v_duplicate boolean := false;
+    v_prefix text := '%';
 begin
     if v_user_id is null then raise exception 'Sign in to open a mystery box.'; end if;
     if p_box = 'basic' then
@@ -524,6 +537,21 @@ begin
     elsif p_box = 'legendary' then
         v_cost := 500;
         v_rarity := case when v_roll < 0.20 then 'uncommon' when v_roll < 0.60 then 'rare' when v_roll < 0.90 then 'epic' else 'legendary' end;
+    elsif p_box = 'hat' then
+        v_cost := 130; v_prefix := 'hat\_%';
+        v_rarity := case when v_roll < 0.40 then 'common' when v_roll < 0.72 then 'uncommon' when v_roll < 0.92 then 'rare' when v_roll < 0.99 then 'epic' else 'legendary' end;
+    elsif p_box = 'accessory' then
+        v_cost := 140; v_prefix := 'acc\_%';
+        v_rarity := case when v_roll < 0.40 then 'common' when v_roll < 0.72 then 'uncommon' when v_roll < 0.92 then 'rare' when v_roll < 0.99 then 'epic' else 'legendary' end;
+    elsif p_box = 'palette' then
+        v_cost := 160; v_prefix := 'palette\_%';
+        v_rarity := case when v_roll < 0.50 then 'uncommon' when v_roll < 0.85 then 'rare' when v_roll < 0.98 then 'epic' else 'legendary' end;
+    elsif p_box = 'skin' then
+        v_cost := 260; v_prefix := 'skin\_%';
+        v_rarity := case when v_roll < 0.40 then 'uncommon' when v_roll < 0.75 then 'rare' when v_roll < 0.95 then 'epic' else 'legendary' end;
+    elsif p_box = 'mythic' then
+        v_cost := 1000;
+        v_rarity := case when v_roll < 0.55 then 'epic' else 'legendary' end;
     else
         raise exception 'Unknown mystery box.';
     end if;
@@ -532,21 +560,21 @@ begin
     select * into v_profile from public.studbud_multiplayer_profiles where user_id = v_user_id for update;
     if v_profile.coins < v_cost then raise exception 'You need % multiplayer coins to open that box.', v_cost; end if;
 
-    select id into v_item_id
-    from public.studbud_shop_items()
-    where rarity = v_rarity and id not like 'accessory\_%'
-    order by random()
+    select s.id into v_item_id
+    from public.studbud_shop_items() s
+    where s.id not like 'accessory\_%' and s.id not like 'pet\_%' and s.id like v_prefix
+      and not (s.id = any(v_profile.owned_items))
+    order by case s.rarity when v_rarity then 0 else 1 end,
+             abs(array_position(array['common','uncommon','rare','epic','legendary'], s.rarity)
+               - array_position(array['common','uncommon','rare','epic','legendary'], v_rarity)),
+             random()
     limit 1;
-    if v_item_id is null then raise exception 'That box is empty right now.'; end if;
-
-    if v_item_id = any(v_profile.owned_items) then
-        v_duplicate := true;
-        v_refund := case v_rarity when 'common' then 15 when 'uncommon' then 30 when 'rare' then 60 when 'epic' then 120 else 250 end;
-    end if;
+    if v_item_id is null then raise exception 'You already own every item that box can contain!'; end if;
+    select s.rarity into v_rarity from public.studbud_shop_items() s where s.id = v_item_id;
 
     update public.studbud_multiplayer_profiles
-    set coins = coins - v_cost + v_refund,
-        owned_items = case when v_duplicate then owned_items else array_append(owned_items, v_item_id) end,
+    set coins = coins - v_cost,
+        owned_items = array_append(owned_items, v_item_id),
         updated_at = now()
     where user_id = v_user_id;
     return public.studbud_get_multiplayer_profile()
@@ -1989,3 +2017,113 @@ revoke all on function public.studbud_friend_remove(uuid) from public, anon;
 grant execute on function public.studbud_friend_remove(uuid) to authenticated;
 revoke all on function public.studbud_friend_profile(uuid) from public, anon;
 grant execute on function public.studbud_friend_profile(uuid) to authenticated;
+
+-- Shared-deck rules: no duplicate titles and no identical card sets.
+alter table public.studbud_community_decks add column if not exists title_key text;
+alter table public.studbud_community_decks add column if not exists content_hash text;
+
+create or replace function public.studbud_community_deck_guard()
+returns trigger
+language plpgsql
+set search_path = public, pg_temp
+as $$
+begin
+    new.title_key := lower(regexp_replace(btrim(new.title), '\s+', ' ', 'g'));
+    select md5(coalesce(string_agg(pair, E'\x1e' order by pair), ''))
+    into new.content_hash
+    from (
+        select lower(regexp_replace(btrim(c ->> 'front'), '\s+', ' ', 'g')) || E'\x1f' ||
+               lower(regexp_replace(btrim(c ->> 'back'), '\s+', ' ', 'g')) as pair
+        from jsonb_array_elements(new.cards) as c
+    ) pairs;
+    if exists (select 1 from public.studbud_community_decks d where d.id <> new.id and d.title_key = new.title_key) then
+        raise exception 'A shared set with that name already exists. Rename your deck to share it.';
+    end if;
+    if exists (select 1 from public.studbud_community_decks d where d.id <> new.id and d.content_hash = new.content_hash) then
+        raise exception 'A shared set with exactly these cards already exists.';
+    end if;
+    return new;
+end;
+$$;
+
+drop trigger if exists studbud_community_deck_guard_trg on public.studbud_community_decks;
+create trigger studbud_community_deck_guard_trg
+    before insert or update of title, cards on public.studbud_community_decks
+    for each row execute function public.studbud_community_deck_guard();
+
+create or replace function public.studbud_community_authors(p_ids uuid[])
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+    select coalesce(jsonb_object_agg(a.id::text, coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student')), '{}'::jsonb)
+    from auth.users a
+    where auth.uid() is not null and a.id = any(p_ids) and not public.studbud_is_hidden_user(a.id);
+$$;
+revoke all on function public.studbud_community_authors(uuid[]) from public, anon;
+grant execute on function public.studbud_community_authors(uuid[]) to authenticated;
+
+-- Any signed-in user can open another student's public profile.
+create or replace function public.studbud_view_profile(p_user_id uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_uid uuid := auth.uid();
+    v_today date := timezone('utc', now())::date;
+    v_week date := date_trunc('week', timezone('utc', now()))::date;
+    v_streak integer := 0;
+    v_day date;
+    v_prof public.studbud_multiplayer_profiles;
+    v_pub public.studbud_public_profiles;
+    v_show boolean;
+    v_name text;
+    v_decks jsonb;
+begin
+    if v_uid is null then raise exception 'Sign in first.'; end if;
+    if public.studbud_is_hidden_user(p_user_id) then raise exception 'This profile is unavailable.'; end if;
+    select coalesce(nullif(raw_user_meta_data ->> 'username', ''), 'Student') into v_name from auth.users where id = p_user_id;
+    if v_name is null then raise exception 'This profile is unavailable.'; end if;
+    select * into v_prof from public.studbud_multiplayer_profiles where user_id = p_user_id;
+    select * into v_pub from public.studbud_public_profiles where user_id = p_user_id;
+    v_show := coalesce(v_pub.show_stats, true);
+    v_day := v_today;
+    if coalesce((select sum(seconds) from public.studbud_study_time_entries where user_id = p_user_id and study_date = v_day), 0) < 900 then v_day := v_day - 1; end if;
+    loop
+        exit when coalesce((select sum(seconds) from public.studbud_study_time_entries where user_id = p_user_id and study_date = v_day), 0) < 900;
+        v_streak := v_streak + 1;
+        v_day := v_day - 1;
+    end loop;
+    select coalesce(jsonb_agg(jsonb_build_object('id', d.id, 'title', d.title, 'description', d.description,
+        'card_count', d.card_count, 'study_count', d.study_count) order by d.study_count desc, d.updated_at desc), '[]'::jsonb)
+    into v_decks
+    from public.studbud_community_decks d where d.owner_id = p_user_id;
+    return jsonb_build_object(
+        'user_id', p_user_id,
+        'username', v_name,
+        'is_me', p_user_id = v_uid,
+        'bio', coalesce(v_pub.bio, ''),
+        'favorite_subject', coalesce(v_pub.favorite_subject, ''),
+        'grade_level', coalesce(v_pub.grade_level, ''),
+        'study_goal', coalesce(v_pub.study_goal, ''),
+        'show_stats', v_show,
+        'wins', coalesce(v_prof.wins, 0),
+        'skin', coalesce(v_prof.equipped_skin, ''),
+        'hat', coalesce(v_prof.equipped_hat, ''),
+        'accessory', coalesce(v_prof.equipped_accessory, ''),
+        'palette', coalesce(v_prof.equipped_palette, 'palette_default'),
+        'decks', v_decks,
+        'today_seconds', case when v_show then coalesce((select sum(seconds) from public.studbud_study_time_entries where user_id = p_user_id and study_date = v_today), 0) end,
+        'week_seconds', case when v_show then coalesce((select sum(seconds) from public.studbud_study_time_entries where user_id = p_user_id and study_date between v_week and v_today), 0) end,
+        'total_seconds', case when v_show then coalesce((select sum(seconds) from public.studbud_study_time_entries where user_id = p_user_id), 0) end,
+        'streak_days', case when v_show then v_streak end
+    );
+end;
+$$;
+revoke all on function public.studbud_view_profile(uuid) from public, anon;
+grant execute on function public.studbud_view_profile(uuid) to authenticated;

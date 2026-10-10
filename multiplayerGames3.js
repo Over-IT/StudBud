@@ -53,6 +53,7 @@
         constructor(s) {
             super(s);
             this.title = 'Crypto Trading';
+            this.scoreGoal = false; this.goalLabel = 'Net worth'; this.formatValue = v => money(v);
             this.ui = new Ui(s);
             const r = mulberry32(s.seed);
             this.params = ASSETS.map(a => ({

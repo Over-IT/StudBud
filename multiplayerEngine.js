@@ -33,6 +33,8 @@
         if (palette.includes('ocean')) return '#38bdf8';
         if (palette.includes('sunset')) return '#fb923c';
         if (palette.includes('violet')) return '#a78bfa';
+        const themed = palette && (window.StudBudCommunityGames?.catalog || []).find(item => item.id === palette && item.hue != null);
+        if (themed) return `hsl(${themed.hue2} 80% 62%)`;
         return PALETTE[hashStr(String(player?.id || 'x')) % PALETTE.length];
     }
 
@@ -342,7 +344,7 @@
                 rows.push({
                     id: info.id, n: info.nickname, color: info.color,
                     s: Math.round(isMe ? this.score : r ? r.score : info.score),
-                    g: Math.round(isMe ? this.goal : r ? r.goal : 0),
+                    g: Math.round(isMe ? this.goal : r ? r.goal : (this.game?.scoreGoal === false ? info.score || 0 : 0)),
                     d: isMe ? this.done : Boolean(r?.done)
                 });
             }
@@ -353,7 +355,8 @@
 
         // What the leaderboard shows for a player: the number their game is actually won by.
         valueText(row) {
-            return this.game?.scoreGoal === false ? `${row.g.toLocaleString()} ${this.game.goalUnit || 'pts'}` : `${row.s.toLocaleString()} pts`;
+            if (this.game?.scoreGoal === false) return this.game.formatValue ? this.game.formatValue(row.g) : `${row.g.toLocaleString()} ${this.game.goalUnit || 'pts'}`;
+            return `${row.s.toLocaleString()} pts`;
         }
 
         checkEnd() {
@@ -389,9 +392,10 @@
             if (this.practice) return;
             const last = this.lastReport;
             const answered = this.answered + Math.floor(this.t / 20);
-            if (!force && last.score === this.score && last.answered === answered && last.correct === this.correct) return;
-            this.lastReport = { score: this.score, answered, correct: this.correct, at: Date.now() };
-            try { await this.api.reportScore(this.code, this.score, answered, this.correct); } catch (error) { /* rewards are best effort */ }
+            const value = this.game?.scoreGoal === false ? Math.max(0, Math.round(this.goal)) : this.score;
+            if (!force && last.score === value && last.answered === answered && last.correct === this.correct) return;
+            this.lastReport = { score: value, answered, correct: this.correct, at: Date.now() };
+            try { await this.api.reportScore(this.code, value, answered, this.correct); } catch (error) { /* rewards are best effort */ }
         }
 
         finish(standings) {
@@ -444,19 +448,25 @@
         }
 
         // Automatic triggers (mystery boxes, chests, pads) are blocked briefly after any question closes.
-        ask(callback, note, manual) {
+        ask(callback, note, manual, opts) {
+            if (opts?.force && this.question) this.closeQuestion(true);
             if (this.paused || this.question || this.over || this.countdown > 0) return false;
             if (!manual && performance.now() < (this.askCooldownUntil || 0)) return false;
             if (!this.cards.length) { this.toast('Questions are still loading…', '#fbbf24'); return false; }
-            let index = Math.floor(Math.random() * this.cards.length);
-            if (this.cards.length > 1 && index === this.lastCard) index = (index + 1) % this.cards.length;
+            let index = opts?.cardIndex !== undefined ? opts.cardIndex % this.cards.length : Math.floor(Math.random() * this.cards.length);
+            if (opts?.cardIndex === undefined && this.cards.length > 1 && index === this.lastCard) index = (index + 1) % this.cards.length;
             this.lastCard = index;
+            this.lastCardIndex = index;
             const card = this.cards[index];
             const wrong = [...new Set(this.cards.filter(c => c.back !== card.back).map(c => c.back))];
             for (let i = wrong.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [wrong[i], wrong[j]] = [wrong[j], wrong[i]]; }
             const options = wrong.slice(0, 3).concat(card.back);
             for (let i = options.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [options[i], options[j]] = [options[j], options[i]]; }
-            this.question = { card, options, callback, locked: false };
+            this.question = { card, options, callback, locked: false, onAnswer: opts?.onAnswer };
+            return this.showQuestion(card, options, note);
+        }
+
+        showQuestion(card, options, note) {
             this.keys.clear(); this.mouse.down = false; this.mouse.rdown = false;
             const box = this.overlay.querySelector('.mpg-question');
             box.querySelector('.mpg-q-prompt').textContent = card.front;
@@ -476,6 +486,7 @@
             const correct = q.options[index] === q.card.back;
             this.answered++;
             if (correct) this.correct++;
+            try { q.onAnswer?.(correct); } catch (error) { console.error(error); }
             sfx(correct ? 'correct' : 'wrong');
             const box = this.overlay.querySelector('.mpg-question');
             box.querySelectorAll('[data-q]').forEach((button, i) => {
@@ -729,7 +740,12 @@
             const o = this.overlay;
             o.querySelector('.mpg-name').textContent = this.game.title || '';
             o.querySelector('.mpg-goal').textContent = this.game.goalText();
-            o.querySelector('.mpg-score strong').textContent = Math.round(this.score).toLocaleString();
+            const objective = this.game.scoreGoal === false;
+            const scoreBox = o.querySelector('.mpg-score');
+            scoreBox.querySelector('span').textContent = objective ? (this.game.goalLabel || 'Score') : 'Score';
+            scoreBox.querySelector('strong').textContent = objective
+                ? (this.game.formatValue ? this.game.formatValue(Math.round(this.goal)) : Math.round(this.goal).toLocaleString())
+                : Math.round(this.score).toLocaleString();
             const left = Math.max(0, this.deadline - Date.now());
             o.querySelector('.mpg-timer').textContent = this.room.goal_type === 'time' && Number.isFinite(left)
                 ? `${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, '0')}`
@@ -844,7 +860,15 @@
         skin_crystal: { body: '#67e8f9', head: '#cffafe', eye: '#164e63', trim: '#0891b2', alpha: 0.92 },
         skin_shadow: { body: '#312e81', head: '#4c1d95', eye: '#f0abfc', trim: '#1e1b4b', alpha: 0.9 },
         skin_galaxy: { body: '#1e1b4b', head: '#312e81', eye: '#fde047', trim: '#a78bfa' },
-        skin_dragon: { body: '#15803d', head: '#4ade80', eye: '#fde047', trim: '#7f1d1d' }
+        skin_dragon: { body: '#15803d', head: '#4ade80', eye: '#fde047', trim: '#7f1d1d' },
+        skin_candy: { body: '#fb7185', head: '#fecdd3', eye: '#4c0519', trim: '#fff1f2' },
+        skin_mummy: { body: '#d6c7a1', head: '#e7dcc0', eye: '#1c1917', trim: '#a8946a' },
+        skin_vampire: { body: '#7f1d1d', head: '#f1e4e4', eye: '#ef4444', trim: '#1c1917' },
+        skin_samurai: { body: '#b91c1c', head: '#fde7c8', eye: '#111827', trim: '#facc15' },
+        skin_neon: { body: '#22d3ee', head: '#e879f9', eye: '#0f172a', trim: '#a3e635' },
+        skin_pixel: { body: '#4ade80', head: '#bbf7d0', eye: '#052e16', trim: '#166534' },
+        skin_steampunk: { body: '#a16207', head: '#fcd9a8', eye: '#422006', trim: '#78350f' },
+        skin_rainbow: { body: '#a855f7', head: '#fde047', eye: '#0f172a', trim: '#22c55e' }
     };
 
     const LEGACY_HATS = { accessory_cap: 'hat_cap', accessory_halo: 'hat_halo', accessory_headphones: 'hat_headphones' };
@@ -942,6 +966,23 @@
             fill('#dc2626', () => { ctx.moveTo(-r, r * 0.4); ctx.quadraticCurveTo(-r * 0.2, -r * 1.7, r * 1.2, -r * 0.3); ctx.lineTo(r, r * 0.4); });
             ctx.fillStyle = '#f8fafc'; ctx.fillRect(-r * 1.05, r * 0.1, r * 2.1, r * 0.34);
             fill('#f8fafc', () => ctx.arc(r * 1.2, -r * 0.3, r * 0.3, 0, TAU));
+        } else if (hat === 'hat_grad') {
+            ctx.fillStyle = '#111827'; ctx.fillRect(-r * 0.7, -r * 0.2, r * 1.4, r * 0.6);
+            fill('#1f2937', () => { ctx.moveTo(0, -r * 0.9); ctx.lineTo(r * 1.5, -r * 0.4); ctx.lineTo(0, r * 0.1); ctx.lineTo(-r * 1.5, -r * 0.4); });
+            ctx.strokeStyle = '#facc15'; ctx.lineWidth = r * 0.12;
+            ctx.beginPath(); ctx.moveTo(r * 1.2, -r * 0.35); ctx.lineTo(r * 1.2, r * 0.5); ctx.stroke();
+        } else if (hat === 'hat_propeller') {
+            fill('#3b82f6', () => ctx.arc(0, r * 0.4, r * 0.95, Math.PI, TAU));
+            ctx.fillStyle = '#ef4444'; ctx.fillRect(-r * 0.12, -r * 0.9, r * 0.24, r * 0.5);
+            fill('#facc15', () => { ctx.ellipse(-r * 0.6, -r * 0.95, r * 0.65, r * 0.14, 0, 0, TAU); ctx.ellipse(r * 0.6, -r * 0.95, r * 0.65, r * 0.14, 0, 0, TAU); });
+        } else if (hat === 'hat_helmet') {
+            fill('#64748b', () => ctx.arc(0, r * 0.4, r * 1.1, Math.PI, TAU));
+            ctx.fillStyle = '#e2e8f0'; ctx.fillRect(-r * 0.12, -r * 0.7, r * 0.24, r * 1.1);
+            ctx.fillStyle = '#334155'; ctx.fillRect(-r * 1.1, r * 0.25, r * 2.2, r * 0.2);
+        } else if (hat === 'hat_straw') {
+            fill('#fcd34d', () => ctx.ellipse(0, r * 0.35, r * 1.8, r * 0.3, 0, 0, TAU));
+            fill('#fbbf24', () => ctx.arc(0, r * 0.3, r * 0.85, Math.PI, TAU));
+            ctx.fillStyle = '#dc2626'; ctx.fillRect(-r * 0.85, r * 0.05, r * 1.7, r * 0.2);
         }
         ctx.restore();
     }
@@ -970,6 +1011,45 @@
         if (c.acc === 'acc_backpack') {
             ctx.fillStyle = '#b45309'; roundRect(ctx, cx - face * w * 0.78 - 5, y + 16 + bob, 10, 20, 3); ctx.fill();
         }
+        if (c.acc === 'acc_phoenix') {
+            const flap = Math.sin(time * 9) * 5;
+            ctx.fillStyle = '#f97316';
+            ctx.beginPath(); ctx.moveTo(cx - face * w * 0.3, y + 16); ctx.quadraticCurveTo(cx - face * w * 1.8, y - 10 + flap, cx - face * w * 1.2, y + 34); ctx.lineTo(cx - face * w * 0.3, y + 28); ctx.fill();
+            ctx.fillStyle = '#fde047';
+            ctx.beginPath(); ctx.moveTo(cx - face * w * 0.3, y + 18); ctx.quadraticCurveTo(cx - face * w * 1.2, y + 2 + flap, cx - face * w * 0.9, y + 28); ctx.fill();
+        }
+        if (c.acc === 'acc_fairy') {
+            const flap = Math.sin(time * 12) * 0.15;
+            ctx.fillStyle = 'rgba(244,114,182,.65)';
+            ctx.beginPath(); ctx.ellipse(cx - face * w * 0.55, y + 14 + bob, 6, 15, -face * (0.5 + flap), 0, TAU); ctx.fill();
+            ctx.fillStyle = 'rgba(147,197,253,.65)';
+            ctx.beginPath(); ctx.ellipse(cx - face * w * 0.5, y + 28 + bob, 5, 10, face * (0.6 + flap), 0, TAU); ctx.fill();
+        }
+        if (c.acc === 'acc_jetpack') {
+            ctx.fillStyle = '#64748b'; roundRect(ctx, cx - face * w * 0.78 - 6, y + 14 + bob, 12, 22, 3); ctx.fill();
+            ctx.fillStyle = '#f97316';
+            const fl = 6 + Math.sin(time * 30) * 3;
+            ctx.beginPath(); ctx.moveTo(cx - face * w * 0.78 - 4, y + 36 + bob); ctx.lineTo(cx - face * w * 0.78, y + 36 + fl + bob); ctx.lineTo(cx - face * w * 0.78 + 4, y + 36 + bob); ctx.fill();
+        }
+        if (c.acc === 'acc_sword') {
+            ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.moveTo(cx - face * 3, y + 36 + bob); ctx.lineTo(cx - face * 15, y + 2 + bob); ctx.stroke();
+            ctx.strokeStyle = '#92400e'; ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.moveTo(cx - face * 2, y + 40 + bob); ctx.lineTo(cx - face * 4, y + 34 + bob); ctx.stroke();
+        }
+        if (c.acc === 'acc_tail') {
+            const wag = Math.sin(time * 6) * 0.25;
+            ctx.fillStyle = '#f97316';
+            ctx.beginPath(); ctx.ellipse(cx - face * w * 0.8, y + h - 20 + bob, 6, 13, face * (0.7 + wag), 0, TAU); ctx.fill();
+            ctx.fillStyle = '#f8fafc';
+            ctx.beginPath(); ctx.arc(cx - face * (w * 0.8 + 6), y + h - 30 + bob, 4, 0, TAU); ctx.fill();
+        }
+        if (c.acc === 'acc_flame') {
+            for (let i = 0; i < 4; i++) {
+                ctx.fillStyle = i % 2 ? 'rgba(251,191,36,.8)' : 'rgba(249,115,22,.75)';
+                ctx.beginPath(); ctx.ellipse(x + w * (i / 3), y + h * 0.6, 4, 11 + Math.sin(time * 9 + i * 1.7) * 4, 0, 0, TAU); ctx.fill();
+            }
+        }
         ctx.fillStyle = c.skin?.trim || '#1e293b';
         ctx.fillRect(cx - 8 + run * 5, y + h - 14, 7, 14);
         ctx.fillRect(cx + 1 - run * 5, y + h - 14, 7, 14);
@@ -990,6 +1070,18 @@
         if (c.acc === 'acc_eyepatch') { ctx.fillStyle = '#0f172a'; ctx.fillRect(cx + face * 4 - 3, y + 8 + bob, 6, 5); ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(cx - 11, y + 5 + bob); ctx.lineTo(cx + 11, y + 12 + bob); ctx.stroke(); }
         if (c.acc === 'acc_bowtie') { ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.moveTo(cx, y + 21 + bob); ctx.lineTo(cx - 7, y + 17 + bob); ctx.lineTo(cx - 7, y + 25 + bob); ctx.moveTo(cx, y + 21 + bob); ctx.lineTo(cx + 7, y + 17 + bob); ctx.lineTo(cx + 7, y + 25 + bob); ctx.fill(); }
         if (c.acc === 'acc_sparkles') { ctx.font = '10px serif'; ctx.textAlign = 'center'; for (let i = 0; i < 3; i++) { const a = time * 2 + i * 2.1; ctx.globalAlpha = 0.6 + Math.sin(time * 6 + i) * 0.4; ctx.fillText('✨', cx + Math.cos(a) * (w * 0.9), y + 22 + Math.sin(a) * 18); } ctx.globalAlpha = alpha; }
+        const orbit = { acc_hearts: '❤️', acc_stars: '⭐', acc_snow: '❄️' }[c.acc];
+        if (orbit) { ctx.font = '9px serif'; ctx.textAlign = 'center'; for (let i = 0; i < 3; i++) { const a = time * 1.6 + i * 2.1; ctx.fillText(orbit, cx + Math.cos(a) * (w * 0.85), y + 20 + Math.sin(a) * 20); } }
+        if (c.acc === 'acc_glasses') { ctx.strokeStyle = '#111827'; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.arc(cx + face * 5, y + 11 + bob, 4, 0, TAU); ctx.moveTo(cx + face * 1, y + 11 + bob); ctx.lineTo(cx - face * 10, y + 9 + bob); ctx.stroke(); }
+        if (c.acc === 'acc_mask') { ctx.fillStyle = '#7c3aed'; ctx.fillRect(cx - 10, y + 7 + bob, 20, 6); ctx.fillStyle = '#f8fafc'; ctx.fillRect(cx + face * 4 - 1.5, y + 8.5 + bob, 3, 3); }
+        if (c.acc === 'acc_headband') { ctx.fillStyle = '#ef4444'; ctx.fillRect(cx - 11, y + 3 + bob, 22, 3.5); ctx.beginPath(); ctx.moveTo(cx - face * 10, y + 4 + bob); ctx.lineTo(cx - face * 19, y + 7 + bob + run * 2); ctx.lineTo(cx - face * 10, y + 7.5 + bob); ctx.fill(); }
+        if (c.acc === 'acc_bandana') { ctx.fillStyle = '#2563eb'; ctx.fillRect(cx - 11, y + 2 + bob, 22, 5); ctx.beginPath(); ctx.moveTo(cx - face * 10, y + 3 + bob); ctx.lineTo(cx - face * 18, y + 9 + bob + run * 2); ctx.lineTo(cx - face * 10, y + 7 + bob); ctx.fill(); }
+        if (c.acc === 'acc_goggles') { ctx.fillStyle = '#0f172a'; ctx.fillRect(cx - 11, y + 3 + bob, 22, 3); ctx.fillStyle = '#38bdf8'; ctx.beginPath(); ctx.arc(cx + face * 3, y + 4.5 + bob, 5, 0, TAU); ctx.fill(); ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 1.5; ctx.stroke(); }
+        if (c.acc === 'acc_mustache') { ctx.fillStyle = '#451a03'; ctx.beginPath(); ctx.ellipse(cx + face * 6, y + 15.5 + bob, 5, 2, 0, 0, TAU); ctx.fill(); }
+        if (c.acc === 'acc_beard') { ctx.fillStyle = '#92400e'; ctx.beginPath(); ctx.arc(cx, y + 13 + bob, 10.5, 0.15, Math.PI - 0.15); ctx.fill(); }
+        if (c.acc === 'acc_chain') { ctx.strokeStyle = '#facc15'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(cx, y + 15 + bob, 7, 0.2, Math.PI - 0.2); ctx.stroke(); ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(cx, y + 24 + bob, 2.5, 0, TAU); ctx.fill(); }
+        if (c.acc === 'acc_tie') { ctx.fillStyle = '#2563eb'; ctx.beginPath(); ctx.moveTo(cx - 3, y + 18 + bob); ctx.lineTo(cx + 3, y + 18 + bob); ctx.lineTo(cx + 2.5, y + 30 + bob); ctx.lineTo(cx, y + 33 + bob); ctx.lineTo(cx - 2.5, y + 30 + bob); ctx.fill(); }
+        if (c.acc === 'acc_medal') { ctx.strokeStyle = '#dc2626'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx - 6, y + 15 + bob); ctx.lineTo(cx, y + 26 + bob); ctx.lineTo(cx + 6, y + 15 + bob); ctx.stroke(); ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(cx, y + 28 + bob, 4, 0, TAU); ctx.fill(); }
         drawHat(ctx, c.hat, cx, y + 3 + bob, 10, face * 0.08);
         ctx.restore();
     }
@@ -1008,6 +1100,10 @@
         if (c.acc === 'acc_cape') { ctx.fillStyle = '#dc2626'; ctx.beginPath(); ctx.moveTo(-r * 0.2, -r * 0.9); ctx.lineTo(-r * 1.7, 0); ctx.lineTo(-r * 0.2, r * 0.9); ctx.fill(); }
         if (c.acc === 'acc_wings') { ctx.fillStyle = 'rgba(226,232,240,.9)'; const f = Math.sin(time * 10) * 0.12; ctx.beginPath(); ctx.ellipse(-r * 0.3, -r * 1.15, r * 0.35, r * (1 + f), 0.4, 0, TAU); ctx.ellipse(-r * 0.3, r * 1.15, r * 0.35, r * (1 + f), -0.4, 0, TAU); ctx.fill(); }
         if (c.acc === 'acc_backpack') { ctx.fillStyle = '#b45309'; roundRect(ctx, -r * 1.25, -r * 0.5, r * 0.7, r, 3); ctx.fill(); }
+        if (c.acc === 'acc_jetpack') { ctx.fillStyle = '#64748b'; roundRect(ctx, -r * 1.3, -r * 0.5, r * 0.7, r, 3); ctx.fill(); ctx.fillStyle = '#f97316'; ctx.fillRect(-r * 1.6 - Math.sin(time * 30) * 2, -r * 0.25, r * 0.4, r * 0.5); }
+        if (c.acc === 'acc_tail') { ctx.fillStyle = '#f97316'; ctx.beginPath(); ctx.ellipse(-r * 1.3, Math.sin(time * 6) * r * 0.3, r * 0.6, r * 0.28, 0, 0, TAU); ctx.fill(); }
+        if (c.acc === 'acc_fairy' || c.acc === 'acc_phoenix') { ctx.fillStyle = c.acc === 'acc_fairy' ? 'rgba(244,114,182,.7)' : 'rgba(249,115,22,.85)'; const f = Math.sin(time * 10) * 0.12; ctx.beginPath(); ctx.ellipse(-r * 0.3, -r * 1.15, r * 0.35, r * (1 + f), 0.4, 0, TAU); ctx.ellipse(-r * 0.3, r * 1.15, r * 0.35, r * (1 + f), -0.4, 0, TAU); ctx.fill(); }
+        if (c.acc === 'acc_flame') { ctx.fillStyle = 'rgba(249,115,22,.55)'; ctx.beginPath(); ctx.arc(0, 0, r * (1.35 + Math.sin(time * 9) * 0.1), 0, TAU); ctx.fill(); }
         ctx.fillStyle = body;
         ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
         ctx.fillStyle = c.skin?.trim || 'rgba(0,0,0,.25)';
@@ -1019,7 +1115,12 @@
         ctx.beginPath(); ctx.arc(r * 0.5, -r * 0.2, r * 0.1, 0, TAU); ctx.arc(r * 0.5, r * 0.2, r * 0.1, 0, TAU); ctx.fill();
         if (c.acc === 'acc_shades') { ctx.fillStyle = '#0f172a'; ctx.fillRect(r * 0.4, -r * 0.34, r * 0.26, r * 0.68); }
         if (c.acc === 'acc_monocle') { ctx.strokeStyle = '#facc15'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(r * 0.55, r * 0.2, r * 0.18, 0, TAU); ctx.stroke(); }
+        if (c.acc === 'acc_headband' || c.acc === 'acc_bandana') { ctx.strokeStyle = c.acc === 'acc_headband' ? '#ef4444' : '#2563eb'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(r * 0.1, 0, r * 0.62, -1.2, 1.2); ctx.stroke(); }
+        if (c.acc === 'acc_glasses' || c.acc === 'acc_goggles' || c.acc === 'acc_mask') { ctx.fillStyle = c.acc === 'acc_mask' ? '#7c3aed' : '#0f172a'; ctx.fillRect(r * 0.4, -r * 0.34, r * 0.26, r * 0.68); }
+        if (c.acc === 'acc_medal' || c.acc === 'acc_chain') { ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(r * 0.3, 0, r * 0.14, 0, TAU); ctx.fill(); }
+        const orbitTop = { acc_hearts: '❤️', acc_stars: '⭐', acc_snow: '❄️' }[c.acc];
         ctx.restore();
+        if (orbitTop) { ctx.font = `${Math.round(r * 0.7)}px serif`; ctx.textAlign = 'center'; for (let i = 0; i < 3; i++) { const a = time * 1.6 + i * 2.1; ctx.fillText(orbitTop, Math.cos(a) * r * 1.5, Math.sin(a) * r * 1.5); } }
         if (c.hat) drawHat(ctx, c.hat, 0, -r * 0.55, r * 0.55);
         ctx.restore();
     }

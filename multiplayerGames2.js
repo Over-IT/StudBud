@@ -103,11 +103,13 @@
     const TS = 48, COLS = 70, ROWS = 46;
     const DIG_TIME = [0, 0.28, 0.62, 0.4, 0.55, 0.7, 0, 0.5, 9999];
     const ORE_VALUE = { 3: 5, 4: 15, 5: 40 };
+    const LAVA_REACH = 5;
 
     class Miner extends Arena {
         constructor(s) {
             super(s, COLS * TS, ROWS * TS);
             this.title = 'Crystal Mining';
+            this.scoreGoal = false; this.goalUnit = 'crystals'; this.goalLabel = 'Crystals';
             this.touchMain = 'Dig';
             const r = mulberry32(s.seed);
             const T = this.T = new Uint8Array(COLS * ROWS);
@@ -142,6 +144,41 @@
             this.carry = 0; this.items = 0; this.cap = 14; this.dig = { tx: -1, ty: -1, p: 0 }; this.banked = 0;
             this.baseSpeed = 235; this.aimLocked = false; this.depthMax = 0;
             this.res = new A.Resource('Energy', '#facc15', 100, 70, 2);
+            this.F = new Uint8Array(COLS * ROWS);
+            this.flowing = new Set();
+            this.flowClock = 0;
+        }
+
+        // Minecraft-style lava: once a block next to lava is opened the lava creeps outward and downward, thinning with distance.
+        wakeLava(tx, ty) {
+            for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
+                const x = tx + dx, y = ty + dy;
+                if (x >= 0 && y >= 0 && x < COLS && y < ROWS && this.T[y * COLS + x] === 6) this.flowing.add(y * COLS + x);
+            }
+        }
+
+        flowLava(dt) {
+            if (!this.flowing.size) return;
+            this.flowClock += dt;
+            if (this.flowClock < 0.45) return;
+            this.flowClock = 0;
+            const active = [...this.flowing];
+            this.flowing.clear();
+            for (const idx of active) {
+                const d = this.F[idx];
+                if (this.T[idx] !== 6 || d >= LAVA_REACH) continue;
+                const x = idx % COLS, y = Math.floor(idx / COLS);
+                for (const [dx, dy] of [[0, 1], [-1, 0], [1, 0]]) {
+                    const nx = x + dx, ny = y + dy;
+                    if (nx < 1 || nx >= COLS - 1 || ny < 4 || ny >= ROWS - 1) continue;
+                    if (ny < 6 && nx >= 27 && nx < 43) continue;
+                    const n = ny * COLS + nx;
+                    if (this.T[n] !== 0) continue;
+                    this.T[n] = 6; this.F[n] = d + 1;
+                    this.flowing.add(n);
+                    this.particles.burst(nx * TS + TS / 2, ny * TS + TS / 2, '#fb923c', 5, 90, 0.4, 3);
+                }
+            }
         }
 
         tile(tx, ty) { return tx < 0 || ty < 0 || tx >= COLS || ty >= ROWS ? 8 : this.T[ty * COLS + tx]; }
@@ -162,6 +199,7 @@
                 me.x = 35 * TS; me.y = 2.3 * TS; me.vx = me.vy = 0; this.stun = 1.2;
             }
             this.depthMax = Math.max(this.depthMax, Math.floor(me.y / TS) - 3);
+            this.flowLava(dt);
 
             const m = this.mouseWorld();
             const digging = s.mouse.down || s.down('Space', 'KeyE');
@@ -199,6 +237,7 @@
 
         breakTile(tx, ty, t, mine) {
             this.T[ty * COLS + tx] = 0;
+            this.wakeLava(tx, ty);
             const cx = tx * TS + TS / 2, cy = ty * TS + TS / 2;
             const color = { 1: '#a16207', 2: '#94a3b8', 3: '#fb923c', 4: '#facc15', 5: '#22d3ee', 7: '#c084fc' }[t] || '#a16207';
             this.particles.burst(cx, cy, color, t > 2 ? 14 : 8, 170, 0.5, 4);
@@ -245,9 +284,10 @@
                     continue;
                 }
                 if (t === 6) {
+                    const fd = this.F[ty * COLS + tx];
                     ctx.fillStyle = '#2b1b0c'; ctx.fillRect(x, y, TS, TS);
-                    ctx.fillStyle = `rgba(249,115,22,${0.75 + Math.sin(time * 4 + tx) * 0.2})`; ctx.fillRect(x + 3, y + 3, TS - 6, TS - 6);
-                    ctx.fillStyle = '#fde047'; ctx.fillRect(x + 12 + Math.sin(time * 3 + ty) * 6, y + 14, 10, 6);
+                    ctx.fillStyle = `rgba(${fd ? 251 : 249},${fd ? 146 : 115},22,${(fd ? 0.8 - fd * 0.1 : 0.75) + Math.sin(time * 4 + tx) * 0.15})`; ctx.fillRect(x + 3, y + 3, TS - 6, TS - 6);
+                    if (!fd) { ctx.fillStyle = '#fde047'; ctx.fillRect(x + 12 + Math.sin(time * 3 + ty) * 6, y + 14, 10, 6); }
                     continue;
                 }
                 ctx.fillStyle = t === 2 ? '#64748b' : t === 8 ? '#0f172a' : '#92591c';
@@ -300,6 +340,7 @@
         constructor(s) {
             super(s, 3600, 1800);
             this.title = 'River Fishing';
+            this.scoreGoal = false; this.goalUnit = 'fish pts'; this.goalLabel = 'Haul';
             const r = mulberry32(s.seed);
             this.bank = 210;
             this.me.x = 400; this.me.y = this.H / 2; this.baseSpeed = 235;
@@ -311,14 +352,15 @@
                 this.fish.push({ i, type, y0: 300 + r() * (this.H - 600), amp: 20 + r() * 80, fq: 0.4 + r() * 0.8, ph: r() * TAU, x0: r() * this.W, spd: (type === 3 ? 140 : 40 + r() * 80) * (r() < 0.5 ? 1 : -1) });
             }
             this.logs = [];
-            for (let i = 0; i < 7; i++) this.logs.push({ y: 300 + r() * (this.H - 600), x0: r() * this.W, spd: 55 + r() * 60 });
+            for (let i = 0; i < 11; i++) this.logs.push({ y: 300 + r() * (this.H - 600), x0: r() * this.W, spd: 70 + r() * 80 });
             this.rocks = [];
-            for (let i = 0; i < 14; i++) this.rocks.push({ x: 600 + r() * (this.W - 900), y: 330 + r() * (this.H - 660), r: 28 + r() * 22 });
+            for (let i = 0; i < 22; i++) this.rocks.push({ x: 600 + r() * (this.W - 900), y: 330 + r() * (this.H - 660), r: 30 + r() * 24 });
             this.pools = [];
             for (let i = 0; i < 3; i++) this.pools.push({ x: 900 + i * 1050 + r() * 300, y: 450 + r() * (this.H - 900), r: 130 });
             this.chests = [];
             for (let i = 0; i < 10; i++) this.chests.push({ i, x: 700 + r() * (this.W - 1000), y: 330 + r() * (this.H - 660), until: 0 });
             this.away = new Map();
+            this.duelCd = new Map(); this.duel = null;
             this.cast = null; this.castCd = 0; this.hurt = 0; this.haul = 0; this.catches = 0; this.combo = 0; this.comboT = 0;
             this.wake = [];
             this.res = new A.Resource('Bait', '#7dd3fc', 100, 50, 2);
@@ -340,13 +382,17 @@
             if (me.x > this.W - 60) me.x = 120;
             for (const rock of this.rocks) {
                 const d = dist(me.x, me.y, rock.x, rock.y);
-                if (d < rock.r + me.r) { me.x = rock.x + (me.x - rock.x) / d * (rock.r + me.r); me.y = rock.y + (me.y - rock.y) / d * (rock.r + me.r); me.vx *= 0.5; me.vy *= 0.5; }
+                if (d < rock.r + me.r) {
+                    me.x = rock.x + (me.x - rock.x) / d * (rock.r + me.r); me.y = rock.y + (me.y - rock.y) / d * (rock.r + me.r); me.vx *= 0.5; me.vy *= 0.5;
+                    if (this.hurt <= 0) { this.hurt = 1; this.loseFish(); this.particles.burst(me.x, me.y, '#94a3b8', 10, 160, 0.4, 3); }
+                }
             }
             for (const lg of this.logs) {
                 const x = mod(lg.x0 + lg.spd * now, this.W);
-                const rect = { x: x - 60, y: lg.y - 15, w: 120, h: 30 };
-                if (pushCircleOutOfRect(me, rect) && this.hurt <= 0) { this.hurt = 0.8; me.vx = 140; this.particles.burst(me.x, me.y, '#a16207', 10, 160, 0.4, 3); }
+                const rect = { x: x - 70, y: lg.y - 18, w: 140, h: 36 };
+                if (pushCircleOutOfRect(me, rect) && this.hurt <= 0) { this.hurt = 1; me.vx = 160; this.loseFish(); this.particles.burst(me.x, me.y, '#a16207', 10, 160, 0.4, 3); }
             }
+            this.duelCheck(now);
             for (const p of this.pools) {
                 const d = dist(me.x, me.y, p.x, p.y);
                 if (d < p.r) {
@@ -403,9 +449,79 @@
             s.setGoal(this.haul);
         }
 
-        onEvent(ev) {
+        onEvent(ev, from) {
             if (ev.k === 'tk') this.away.set(ev.i, ev.u);
             else if (ev.k === 'ch' && this.chests[ev.i]) this.chests[ev.i].until = ev.u;
+            else if (ev.k === 'dq' && ev.to === this.s.user.id) this.duelStart(from.id, ev.ci, ev.i, false);
+            else if (ev.k === 'dw' && ev.to === this.s.user.id) this.duelLost(ev);
+        }
+
+        loseFish() {
+            const s = this.s;
+            const lose = Math.ceil(this.haul * 0.1);
+            if (lose > 0) {
+                this.haul -= lose; s.addScore(-lose);
+                this.catches = Math.max(0, this.catches - Math.ceil(this.catches * 0.1));
+                s.toast(`Crash! Lost ${lose} fish pts`, '#f87171');
+            } else s.toast('Crash!', '#f87171');
+            s.sfx('hit');
+        }
+
+        // Boats that bump each other face the same question; the first correct answer steals 25% of the loser's haul.
+        duelCheck(now) {
+            const s = this.s, me = this.me;
+            if (s.question || s.countdown > 0 || s.paused) return;
+            for (const r of s.remoteList()) {
+                if (s.user.id > r.id || r.done || (this.duelCd.get(r.id) || 0) > now) continue;
+                if (dist(me.x, me.y, r.x, r.y) > 40 || !s.cards.length) continue;
+                const ci = Math.floor(Math.random() * s.cards.length);
+                const token = Math.floor(now * 1000);
+                s.emit({ k: 'dq', to: r.id, ci, i: token });
+                this.duelStart(r.id, ci, token, true);
+                break;
+            }
+        }
+
+        duelStart(oppId, ci, token, initiator) {
+            const s = this.s, now = clock(s);
+            if ((this.duelCd.get(oppId) || 0) > now && !initiator) return;
+            this.duelCd.set(oppId, now + 20);
+            this.duel = { opp: oppId, token, resolved: false, won: null };
+            const name = s.roster.get(oppId)?.nickname || 'a rival';
+            this.hurt = Math.max(this.hurt, 0.5);
+            s.ask(() => { }, `Duel with ${name}! First correct answer steals 25% of their fish`, true, {
+                cardIndex: ci, force: true,
+                onAnswer: correct => { if (correct) this.duelWin(oppId, token); }
+            });
+        }
+
+        duelWin(oppId, token) {
+            const s = this.s;
+            const d = this.duel;
+            if (!d || d.token !== token || d.resolved) return;
+            const opp = s.remotes.get(oppId);
+            const amt = Math.max(0, Math.floor((opp?.goal || 0) * 0.25));
+            d.resolved = true; d.won = { amt, t: clock(s) };
+            this.haul += amt; s.addScore(amt);
+            s.emit({ k: 'dw', to: oppId, i: token, a: amt, t: d.won.t });
+            s.toast(amt ? `Duel won! Stole ${amt} fish pts` : 'Duel won!', '#4ade80');
+            this.particles.burst(this.me.x, this.me.y, '#4ade80', 20, 240, 0.6, 4);
+        }
+
+        duelLost(ev) {
+            const s = this.s;
+            const d = this.duel;
+            if (!d || d.token !== ev.i) return;
+            if (d.won) {
+                if (ev.t >= d.won.t) return;
+                this.haul -= d.won.amt; s.addScore(-d.won.amt); d.won = null;
+            }
+            if (d.resolved && d.lost) return;
+            d.resolved = true; d.lost = true;
+            const lose = Math.min(this.haul, ev.a || 0);
+            this.haul -= lose; s.addScore(-lose);
+            if (s.question) s.closeQuestion(true);
+            s.toast(lose ? `Too slow! They stole ${lose} fish pts` : 'Too slow! They won the duel', '#f87171');
         }
 
         goalText() { return `Haul ${this.haul} · ${this.catches} fish${this.combo > 1 ? ` · combo x${this.combo}` : ''}`; }
@@ -462,8 +578,8 @@
             for (const lg of this.logs) {
                 const x = mod(lg.x0 + lg.spd * now, this.W);
                 if (!this.seen(x, lg.y, 120)) continue;
-                ctx.fillStyle = '#78350f'; roundRect(ctx, x - 60, lg.y - 15, 120, 30, 14); ctx.fill();
-                ctx.fillStyle = '#a16207'; ctx.beginPath(); ctx.ellipse(x + 56, lg.y, 6, 12, 0, 0, TAU); ctx.fill();
+                ctx.fillStyle = '#78350f'; roundRect(ctx, x - 70, lg.y - 18, 140, 36, 16); ctx.fill();
+                ctx.fillStyle = '#a16207'; ctx.beginPath(); ctx.ellipse(x + 66, lg.y, 7, 14, 0, 0, TAU); ctx.fill();
             }
             for (const c of this.chests) {
                 if (c.until > now || !this.seen(c.x, c.y)) continue;
@@ -520,10 +636,22 @@
             for (let k = 0; k < BR + 1; k++) for (let j = 0; j < 2; j++) this.cars.push({ horiz: true, c: ROAD / 2 + k * (BH + ROAD), p0: r() * this.W, spd: (130 + r() * 90) * (j ? -1 : 1), lane: j ? -26 : 26, color: ['#ef4444', '#3b82f6', '#22c55e', '#a855f7', '#f97316'][Math.floor(r() * 5)] });
             for (let k = 0; k < BC + 1; k++) this.cars.push({ horiz: false, c: ROAD / 2 + k * (BW + ROAD), p0: r() * this.H, spd: (130 + r() * 90) * (r() < 0.5 ? 1 : -1), lane: r() < 0.5 ? 26 : -26, color: ['#ef4444', '#3b82f6', '#22c55e', '#a855f7', '#f97316'][Math.floor(r() * 5)] });
             this.vending = [];
-            for (let i = 0; i < 6; i++) {
-                const col = 1 + Math.floor(r() * BC - 0.01), row = 1 + Math.floor(r() * BR - 0.01);
-                this.vending.push({ i, x: col * (BW + ROAD) - ROAD / 2 + (i % 2 ? 62 : -62), y: row * (BH + ROAD) - ROAD / 2 + (i % 3 ? 62 : -62), until: 0 });
+            for (let i = 0; i < 24; i++) {
+                const side = i % 2 ? 56 : -56;
+                if (i < 8) {
+                    const col = 1 + Math.floor(r() * BC - 0.01), row = 1 + Math.floor(r() * BR - 0.01);
+                    this.vending.push({ i, x: col * (BW + ROAD) - ROAD / 2 + (i % 2 ? 62 : -62), y: row * (BH + ROAD) - ROAD / 2 + (i % 3 ? 62 : -62), until: 0 });
+                } else if (i % 3 === 0) {
+                    const k = Math.floor(r() * (BR + 1));
+                    this.vending.push({ i, x: 120 + r() * (this.W - 240), y: ROAD / 2 + k * (BH + ROAD) + side, until: 0 });
+                } else {
+                    const k = Math.floor(r() * (BC + 1));
+                    this.vending.push({ i, x: ROAD / 2 + k * (BW + ROAD) + side, y: 120 + r() * (this.H - 240), until: 0 });
+                }
             }
+            this.trees = [];
+            for (const b of this.blocks) for (let k = 0; k < 4; k++) this.trees.push({ x: b.x + (k % 2 ? b.w + 30 : -30), y: b.y + (k < 2 ? 20 : b.h - 20) + r() * 40, r: 12 + r() * 6 });
+            this.scoreGoal = false; this.goalUnit = 'deliveries'; this.goalLabel = 'Deliveries';
             this.me.x = this.W / 2; this.me.y = ROAD / 2 + BH + ROAD; this.cam.x = this.me.x; this.cam.y = this.me.y;
             this.baseSpeed = 245; this.boost = 0;
             this.res = new A.Resource('Energy', '#38bdf8', 100, 60, 2);
@@ -537,11 +665,15 @@
 
         update(dt) {
             const s = this.s, me = this.me, now = clock(s);
-            const sprint = s.down('ShiftLeft', 'ShiftRight') && this.res.has(1) && this.moving;
-            if (sprint) this.res.drain(14 * dt);
-            else if (s.down('ShiftLeft', 'ShiftRight') && this.moving) s.spend(1);
+            const wantsSprint = s.down('ShiftLeft', 'ShiftRight') && this.moving;
+            const winded = this.moving && !this.res.has(1);
+            const sprint = wantsSprint && this.res.has(1);
+            if (this.moving) {
+                if (winded) s.spend(1);
+                else this.res.drain((sprint ? 14 : 3) * dt);
+            }
             this.boost = Math.max(0, this.boost - dt);
-            this.speedMul = (sprint ? 1.5 : 1) * (this.boost > 0 ? 1.35 : 1);
+            this.speedMul = (winded ? 0.5 : sprint ? 1.5 : 1) * (this.boost > 0 ? 1.35 : 1);
             this.step(dt);
             const hit = { x: me.x - 12, y: me.y - 12, w: 24, h: 24 };
             if (this.stun <= 0) {
@@ -595,7 +727,7 @@
         ex() { return { p: this.pkg ? 1 : 0 }; }
         goalText() { return `${this.deliveries} deliveries · streak ${this.streak}`; }
         touchLayout() { return { stick: true, buttons: [{ k: 'ShiftLeft', label: 'Sprint', cls: 'main' }] }; }
-        hint() { return 'WASD move · Shift sprint · deliver to marked houses · dodge cars · Q = recharge'; }
+        hint() { return 'WASD move (uses a little energy) · Shift sprint (more energy) · deliver to marked houses · dodge cars · Q = recharge'; }
 
         draw(ctx, w, h) {
             const s = this.s, me = this.me, now = clock(s), t = this.anim;
@@ -606,16 +738,44 @@
             for (let k = 0; k < BR + 1; k++) { const y = ROAD / 2 + k * (BH + ROAD); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(this.W, y); ctx.stroke(); }
             for (let k = 0; k < BC + 1; k++) { const x = ROAD / 2 + k * (BW + ROAD); ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, this.H); ctx.stroke(); }
             ctx.setLineDash([]);
+            ctx.fillStyle = 'rgba(241,245,249,.5)';
+            for (let kr = 0; kr < BR + 1; kr++) for (let kc = 0; kc < BC + 1; kc++) {
+                const ix = ROAD / 2 + kc * (BW + ROAD), iy = ROAD / 2 + kr * (BH + ROAD);
+                if (!this.seen(ix, iy, 200)) continue;
+                for (let j = -3; j <= 3; j++) {
+                    ctx.fillRect(ix + j * 20 - 5, iy - ROAD / 2 + 4, 10, 18); ctx.fillRect(ix + j * 20 - 5, iy + ROAD / 2 - 22, 10, 18);
+                    ctx.fillRect(ix - ROAD / 2 + 4, iy + j * 20 - 5, 18, 10); ctx.fillRect(ix + ROAD / 2 - 22, iy + j * 20 - 5, 18, 10);
+                }
+            }
             for (const b of this.blocks) {
                 if (!this.seen(b.x + b.w / 2, b.y + b.h / 2, 300)) continue;
                 ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(b.x + 10, b.y + 12, b.w, b.h);
+                ctx.fillStyle = '#9ca3af'; ctx.fillRect(b.x - 22, b.y - 22, b.w + 44, b.h + 44);
                 ctx.fillStyle = '#6b7280'; ctx.fillRect(b.x - 10, b.y - 10, b.w + 20, b.h + 20);
                 ctx.fillStyle = b.color; ctx.fillRect(b.x, b.y, b.w, b.h);
                 ctx.fillStyle = b.roof; ctx.fillRect(b.x + 18, b.y + 18, b.w - 36, b.h - 36);
                 ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fillRect(b.x + 18, b.y + 18, b.w - 36, 22);
                 ctx.fillStyle = b.shop ? '#fff' : 'rgba(255,255,255,.7)'; ctx.font = '900 26px system-ui'; ctx.textAlign = 'center';
                 ctx.fillText(b.shop ? 'MARKET' : 'HOME', b.x + b.w / 2, b.y + b.h / 2 + 8);
+                for (let wx = 0; wx < 5; wx++) {
+                    ctx.fillStyle = 'rgba(253,230,138,.85)'; ctx.fillRect(b.x + 48 + wx * 60, b.y + b.h - 54, 34, 24);
+                    ctx.fillStyle = 'rgba(15,23,42,.5)'; ctx.fillRect(b.x + 64 + wx * 60, b.y + b.h - 54, 2, 24);
+                }
+                if (b.shop) {
+                    for (let st = 0; st < 8; st++) { ctx.fillStyle = st % 2 ? '#f8fafc' : '#ef4444'; ctx.fillRect(b.door.x - 64 + st * 16, b.y + b.h - 4, 16, 14); }
+                } else {
+                    ctx.fillStyle = '#7f1d1d'; ctx.fillRect(b.x + b.w - 70, b.y + 4, 20, 16);
+                    ctx.fillStyle = '#e2e8f0'; ctx.fillRect(b.door.x + 36, b.y + b.h + 6, 12, 10);
+                    ctx.fillStyle = '#ef4444'; ctx.fillRect(b.door.x + 36, b.y + b.h + 4, 12, 4);
+                }
                 ctx.fillStyle = b.shop ? '#fde047' : '#1e293b'; ctx.fillRect(b.door.x - 24, b.y + b.h - 8, 48, 8);
+            }
+            for (const tr of this.trees) {
+                if (!this.seen(tr.x, tr.y)) continue;
+                ctx.fillStyle = 'rgba(0,0,0,.28)'; ctx.beginPath(); ctx.ellipse(tr.x + 5, tr.y + 8, tr.r, tr.r * 0.7, 0, 0, TAU); ctx.fill();
+                ctx.fillStyle = '#78350f'; ctx.fillRect(tr.x - 2, tr.y, 4, 9);
+                ctx.fillStyle = '#16a34a'; ctx.beginPath(); ctx.arc(tr.x, tr.y - 4, tr.r, 0, TAU); ctx.fill();
+                ctx.fillStyle = '#22c55e'; ctx.beginPath(); ctx.arc(tr.x - 3, tr.y - 7, tr.r * 0.55, 0, TAU); ctx.fill();
             }
             for (const shop of this.shops) {
                 if (this.pkg) continue;
@@ -664,7 +824,7 @@
             super(s, 2400, 1100);
             this.title = 'Soccer';
             this.touchMain = 'Kick';
-            this.scoreGoal = false; this.goalUnit = 'goals';
+            this.scoreGoal = false; this.goalUnit = 'goals'; this.goalLabel = 'Team goals';
             this.dir = 1; this.td = 0; this.yards = 0;
             this.me.y = this.H / 2; this.baseSpeed = 250;
             this.res = new A.Resource('Energy', '#38bdf8', 100, 60, 2);
@@ -703,22 +863,49 @@
 
         inMouth(y, pad = 0) { return Math.abs(y - this.H / 2) < this.goalH / 2 - pad; }
 
-        // Moves the ball one step; returns the team that scored if it reached a goal.
+        // Moves the ball in sub-steps (so fast shots can't tunnel); returns the team that scored if it reached a goal.
         stepBall(dt) {
-            const b = this.ball, W = this.W, H = this.H, r = b.r;
-            b.x += b.vx * dt; b.y += b.vy * dt;
-            const drag = Math.exp(-1.15 * dt);
+            const b = this.ball;
+            const speed = Math.hypot(b.vx, b.vy);
+            if (speed > 1250) { b.vx *= 1250 / speed; b.vy *= 1250 / speed; }
+            const steps = clamp(Math.ceil(Math.min(speed, 1250) * dt / (b.r * 0.6)), 1, 10);
+            const h = dt / steps;
+            for (let i = 0; i < steps; i++) {
+                const scored = this.subStepBall(h);
+                if (scored >= 0) return scored;
+            }
+            // rolling resistance plus air drag
+            const drag = Math.exp(-0.55 * dt);
             b.vx *= drag; b.vy *= drag;
-            if (Math.hypot(b.vx, b.vy) < 6) b.vx = b.vy = 0;
-            if (b.y < r) { b.y = r; b.vy = Math.abs(b.vy) * 0.8; }
-            if (b.y > H - r) { b.y = H - r; b.vy = -Math.abs(b.vy) * 0.8; }
+            const sp = Math.hypot(b.vx, b.vy);
+            if (sp < 8) b.vx = b.vy = 0;
+            else { const k = Math.max(0, sp - 40 * dt) / sp; b.vx *= k; b.vy *= k; }
+            return -1;
+        }
+
+        subStepBall(dt) {
+            const b = this.ball, W = this.W, H = this.H, r = b.r, bounce = 0.78;
+            b.x += b.vx * dt; b.y += b.vy * dt;
+            if (b.y < r) { b.y = r; b.vy = Math.abs(b.vy) * bounce; b.vx *= 0.97; }
+            if (b.y > H - r) { b.y = H - r; b.vy = -Math.abs(b.vy) * bounce; b.vx *= 0.97; }
+            // goal posts are solid circles
+            const gy0 = H / 2 - this.goalH / 2;
+            for (const px of [4, W - 4]) for (const py of [gy0, gy0 + this.goalH]) {
+                const dx = b.x - px, dy = b.y - py, d = Math.hypot(dx, dy), min = r + 9;
+                if (d < min) {
+                    const nx = dx / (d || 1), ny = dy / (d || 1);
+                    b.x = px + nx * min; b.y = py + ny * min;
+                    const vn = b.vx * nx + b.vy * ny;
+                    if (vn < 0) { b.vx -= (1 + 0.8) * vn * nx; b.vy -= (1 + 0.8) * vn * ny; }
+                }
+            }
             if (b.x < r) {
                 if (this.teamsOn && this.inMouth(b.y, r)) { if (b.x < 40) return 1; }
-                else { b.x = r; b.vx = Math.abs(b.vx) * 0.8; }
+                else { b.x = r; b.vx = Math.abs(b.vx) * bounce; b.vy *= 0.97; }
             }
             if (b.x > W - r) {
                 if (this.inMouth(b.y, r)) { if (b.x > W - 40) return 0; }
-                else { b.x = W - r; b.vx = -Math.abs(b.vx) * 0.8; }
+                else { b.x = W - r; b.vx = -Math.abs(b.vx) * bounce; b.vy *= 0.97; }
             }
             return -1;
         }
@@ -732,11 +919,11 @@
                 if (mine) {
                     this.teamTd[team]++;
                     s.emit({ k: 'gl', team });
-                    if (team === this.myTeam) { this.td++; s.addScore(100); s.setGoal(this.td); s.toast(`GOAL! (${this.td})`, '#fde047'); s.sfx('score'); }
-                    else s.toast('Own goal!', '#f87171');
+                    if (team === this.myTeam) { this.td++; s.addScore(100); s.toast(`GOAL! (${this.td})`, '#fde047'); s.sfx('score'); }
+                    else s.toast(`Own goal! It counts for ${team === 0 ? 'Blue' : 'Red'}`, '#f87171');
                 } else this.unclaimed = team;
             } else if (mine) {
-                this.td++; s.addScore(100); s.setGoal(this.td); s.toast(`GOAL! (${this.td})`, '#fde047'); s.sfx('score');
+                this.td++; s.addScore(100); s.toast(`GOAL! (${this.td})`, '#fde047'); s.sfx('score');
             }
             this.kickoff();
             this.stun = 0.5;
@@ -744,8 +931,20 @@
 
         onEvent(ev, from) {
             if (ev.k === 'kick' && this.freeze <= 0) {
-                Object.assign(this.ball, { x: ev.x, y: ev.y, vx: ev.vx, vy: ev.vy });
-                this.lastTouch = from ? from.id : this.lastTouch;
+                const b = this.ball, mine = this.lastSent;
+                if (mine && performance.now() - mine.at < 220) {
+                    // Both players hit the ball at once: combine the two impulses identically on every client
+                    const pvx = (mine.pvx + (ev.pvx ?? mine.pvx)) / 2, pvy = (mine.pvy + (ev.pvy ?? mine.pvy)) / 2;
+                    let vx = mine.vx + ev.vx - pvx, vy = mine.vy + ev.vy - pvy;
+                    const sp = Math.hypot(vx, vy);
+                    if (sp > 1250) { vx *= 1250 / sp; vy *= 1250 / sp; }
+                    Object.assign(b, { x: (b.x + ev.x) / 2, y: (b.y + ev.y) / 2, vx, vy });
+                    this.lastSent = null;
+                    this.lastTouch = this.lastTouch || (from ? from.id : null);
+                } else {
+                    Object.assign(b, { x: ev.x, y: ev.y, vx: ev.vx, vy: ev.vy });
+                    this.lastTouch = from ? from.id : this.lastTouch;
+                }
             } else if (ev.k === 'gl' && this.teamsOn) {
                 if (this.unclaimed === ev.team || this.freeze <= 0) {
                     this.teamTd[ev.team]++;
@@ -759,9 +958,11 @@
             }
         }
 
-        sendKick() {
-            const b = this.ball;
-            this.s.emit({ k: 'kick', x: Math.round(b.x), y: Math.round(b.y), vx: Math.round(b.vx), vy: Math.round(b.vy) });
+        sendKick(pre) {
+            const b = this.ball, p = pre || b;
+            const msg = { x: Math.round(b.x), y: Math.round(b.y), vx: Math.round(b.vx), vy: Math.round(b.vy), pvx: Math.round(p.vx), pvy: Math.round(p.vy) };
+            this.lastSent = { ...msg, at: performance.now() };
+            this.s.emit({ k: 'kick', ...msg });
         }
 
         update(dt) {
@@ -771,29 +972,38 @@
             this.freeze = Math.max(0, this.freeze - dt);
             const wantsSprint = s.down('ShiftLeft', 'ShiftRight') && this.moving;
             const free = this.turbo > 0;
+            const winded = this.moving && !free && !this.res.has(1);
             const sprint = wantsSprint && (free || this.res.has(1));
-            if (sprint && !free) this.res.drain(16 * dt);
-            else if (wantsSprint && !free) s.spend(1);
-            this.speedMul = (sprint ? 1.4 : 1) * (free ? 1.15 : 1);
+            if (this.moving && !free) {
+                if (winded) s.spend(1);
+                else this.res.drain((sprint ? 16 : 3) * dt);
+            }
+            this.speedMul = (winded ? 0.5 : sprint ? 1.4 : 1) * (free ? 1.15 : 1);
             this.step(dt, 3000);
 
             if (this.freeze <= 0) {
                 if (wasFrozen) this.lastTouch = null;
                 const dx = b.x - me.x, dy = b.y - me.y, d = Math.hypot(dx, dy), min = me.r + b.r;
                 if (this.stun <= 0) {
+                    const pre = { vx: b.vx, vy: b.vy };
                     // Walking into the ball dribbles it; Space is a power kick that costs energy
                     if (d < min) {
-                        const nx = dx / (d || 1), ny = dy / (d || 1);
+                        const nx = dx / (d || 1), ny = dy / (d || 1), tx = -ny, ty = nx;
                         b.x = me.x + nx * min; b.y = me.y + ny * min;
-                        b.vx = me.vx * 1.12 + nx * 150; b.vy = me.vy * 1.12 + ny * 150;
+                        const pvn = me.vx * nx + me.vy * ny, bvn = b.vx * nx + b.vy * ny;
+                        const bvt = b.vx * tx + b.vy * ty, pvt = me.vx * tx + me.vy * ty;
+                        let outN = bvn - pvn < 0 ? pvn - (bvn - pvn) * 0.55 : bvn;
+                        outN = Math.max(outN, pvn * 1.08 + 70);
+                        const outT = bvt + (pvt - bvt) * 0.3;
+                        b.vx = nx * outN + tx * outT; b.vy = ny * outN + ty * outT;
                         this.lastTouch = s.user.id;
-                        if (this.touchT <= 0) { this.touchT = 0.1; this.sendKick(); s.sfx('act', 90); }
+                        if (this.touchT <= 0) { this.touchT = 0.1; this.sendKick(pre); s.sfx('act', 90); }
                     }
                     if (s.pressed('Space') && this.kickCd <= 0 && d < 64 && s.spend(15)) {
                         const a = d > 1 ? Math.atan2(dy, dx) * 0.35 + me.aim * 0.65 : me.aim;
-                        b.vx = Math.cos(a) * 980; b.vy = Math.sin(a) * 980;
+                        b.vx = Math.cos(a) * 1050; b.vy = Math.sin(a) * 1050;
                         this.kickCd = 0.45; this.lastTouch = s.user.id;
-                        this.sendKick(); s.sfx('shoot');
+                        this.sendKick(pre); s.sfx('shoot');
                         this.particles.burst(b.x, b.y, '#fde68a', 12, 220, 0.35, 3);
                     }
                 }
@@ -810,7 +1020,7 @@
                 if (opened) p.used = true;
             }
             this.yards = this.td;
-            s.setGoal(this.td);
+            s.setGoal(this.teamsOn ? this.teamTd[this.myTeam] : this.td);
         }
 
         ex() { return { t: this.turbo > 0 ? 1 : 0 }; }
@@ -818,7 +1028,7 @@
             return this.teamsOn ? `Blue ${this.teamTd[0]} – ${this.teamTd[1]} Red · You ${this.td} goal${this.td === 1 ? '' : 's'}` : `${this.td} goal${this.td === 1 ? '' : 's'}`;
         }
         touchLayout() { return { stick: true, buttons: [{ k: 'Space', label: 'Kick', cls: 'main' }, { k: 'ShiftLeft', label: 'Sprint' }] }; }
-        hint() { return `${this.teamsOn ? `${this.myTeam === 0 ? 'Blue' : 'Red'} team · ` : ''}WASD run · walk into the ball to dribble · Shift sprint (energy) · Space power kick (15 energy) · Q = recharge`; }
+        hint() { return `${this.teamsOn ? `${this.myTeam === 0 ? 'Blue' : 'Red'} team · ` : ''}WASD run (uses a little energy) · walk into the ball to dribble · Shift sprint (more energy) · Space power kick (15 energy) · Q = recharge`; }
 
         draw(ctx, w, h) {
             const me = this.me, t = this.anim, b = this.ball, W = this.W, H = this.H, gy0 = H / 2 - this.goalH / 2;

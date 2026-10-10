@@ -22,6 +22,45 @@
                 { id: 'skin_crystal', name: 'Crystal Knight', icon: 'fa-gem', price: 320, type: 'skin' },
                 { id: 'skin_galaxy', name: 'Galaxy Guardian', icon: 'fa-star', price: 450, type: 'skin' },
                 { id: 'skin_dragon', name: 'Dragon Lord', icon: 'fa-dragon', price: 500, type: 'skin' },
+                { id: 'skin_candy', name: 'Candy Cane', icon: 'fa-candy-cane', price: 140, type: 'skin' },
+                { id: 'skin_pixel', name: 'Pixel Pal', icon: 'fa-gamepad', price: 190, type: 'skin' },
+                { id: 'skin_mummy', name: 'Mummy', icon: 'fa-user', price: 170, type: 'skin' },
+                { id: 'skin_vampire', name: 'Vampire', icon: 'fa-droplet', price: 270, type: 'skin' },
+                { id: 'skin_samurai', name: 'Samurai', icon: 'fa-user-shield', price: 290, type: 'skin' },
+                { id: 'skin_steampunk', name: 'Steampunk', icon: 'fa-gear', price: 310, type: 'skin' },
+                { id: 'skin_neon', name: 'Neon Runner', icon: 'fa-bolt', price: 330, type: 'skin' },
+                { id: 'skin_rainbow', name: 'Rainbow Hero', icon: 'fa-rainbow', price: 480, type: 'skin' },
+                { id: 'hat_straw', name: 'Straw Hat', icon: 'fa-sun', price: 80, type: 'hat' },
+                { id: 'hat_grad', name: 'Graduation Cap', icon: 'fa-graduation-cap', price: 100, type: 'hat' },
+                { id: 'hat_propeller', name: 'Propeller Cap', icon: 'fa-fan', price: 130, type: 'hat' },
+                { id: 'hat_helmet', name: 'Knight Helmet', icon: 'fa-shield-halved', price: 150, type: 'hat' },
+                ...[
+                    ['rose', 'Rose Garden', 340, 350, 110], ['lime', 'Lime Fizz', 90, 80, 110], ['mint', 'Fresh Mint', 150, 160, 120],
+                    ['mocha', 'Mocha', 25, 35, 120], ['teal', 'Deep Teal', 175, 165, 130], ['peach', 'Peach Fuzz', 20, 30, 130],
+                    ['lavender', 'Lavender', 265, 275, 140], ['gold', 'Golden Hour', 40, 45, 150], ['slate', 'Slate Storm', 215, 205, 150],
+                    ['jungle', 'Jungle', 130, 100, 160], ['crimson', 'Crimson Night', 355, 10, 170], ['glacier', 'Glacier', 195, 210, 180],
+                    ['sakura', 'Sakura', 330, 340, 190], ['ember', 'Ember', 15, 40, 210], ['cyber', 'Cyber Pink', 320, 180, 240],
+                    ['galaxy', 'Galaxy', 275, 320, 280], ['prism', 'Prism', 300, 60, 420]
+                ].map(([color, name, hue, hue2, price]) => ({ id: `palette_${color}`, name, color, hue, hue2, price, type: 'palette' })),
+                { id: 'acc_glasses', name: 'Round Glasses', icon: 'fa-glasses', price: 70, type: 'accessory' },
+                { id: 'acc_headband', name: 'Sport Headband', icon: 'fa-ribbon', price: 70, type: 'accessory' },
+                { id: 'acc_bandana', name: 'Bandana', icon: 'fa-ribbon', price: 80, type: 'accessory' },
+                { id: 'acc_mask', name: 'Hero Mask', icon: 'fa-mask', price: 90, type: 'accessory' },
+                { id: 'acc_tie', name: 'Neck Tie', icon: 'fa-user-tie', price: 90, type: 'accessory' },
+                { id: 'acc_mustache', name: 'Fancy Mustache', icon: 'fa-face-smile', price: 100, type: 'accessory' },
+                { id: 'acc_goggles', name: 'Pilot Goggles', icon: 'fa-glasses', price: 120, type: 'accessory' },
+                { id: 'acc_chain', name: 'Gold Chain', icon: 'fa-link', price: 130, type: 'accessory' },
+                { id: 'acc_beard', name: 'Wise Beard', icon: 'fa-face-grin-beam', price: 130, type: 'accessory' },
+                { id: 'acc_medal', name: 'Champion Medal', icon: 'fa-medal', price: 150, type: 'accessory' },
+                { id: 'acc_tail', name: 'Fox Tail', icon: 'fa-paw', price: 170, type: 'accessory' },
+                { id: 'acc_sword', name: 'Back Sword', icon: 'fa-khanda', price: 190, type: 'accessory' },
+                { id: 'acc_hearts', name: 'Heart Cloud', icon: 'fa-heart', price: 200, type: 'accessory' },
+                { id: 'acc_snow', name: 'Snow Flurry', icon: 'fa-snowflake', price: 210, type: 'accessory' },
+                { id: 'acc_jetpack', name: 'Jetpack', icon: 'fa-rocket', price: 240, type: 'accessory' },
+                { id: 'acc_fairy', name: 'Fairy Wings', icon: 'fa-wand-magic', price: 260, type: 'accessory' },
+                { id: 'acc_stars', name: 'Orbit Stars', icon: 'fa-star', price: 280, type: 'accessory' },
+                { id: 'acc_flame', name: 'Flame Aura', icon: 'fa-fire-flame-curved', price: 300, type: 'accessory' },
+                { id: 'acc_phoenix', name: 'Phoenix Wings', icon: 'fa-dove', price: 420, type: 'accessory' },
                 { id: 'hat_cap', name: 'Sporty Cap', icon: 'fa-hat-cowboy-side', price: 60, type: 'hat' },
                 { id: 'hat_party', name: 'Party Hat', icon: 'fa-cake-candles', price: 70, type: 'hat' },
                 { id: 'hat_beanie', name: 'Cozy Beanie', icon: 'fa-mitten', price: 70, type: 'hat' },
@@ -48,9 +87,9 @@
                 { id: 'acc_cape', name: 'Hero Cape', icon: 'fa-mask', price: 180, type: 'accessory' },
                 { id: 'acc_sparkles', name: 'Sparkle Aura', icon: 'fa-wand-magic-sparkles', price: 220, type: 'accessory' },
                 { id: 'acc_wings', name: 'Jet Wings', icon: 'fa-dove',                 price: 350, type: 'accessory' },
-                { id: 'palette_aurora', name: 'Aurora Drift', color: 'aurora', price: 160, type: 'palette' },
-                { id: 'palette_coral', name: 'Coral Reef', color: 'coral', price: 160, type: 'palette' },
-                { id: 'palette_midnight', name: 'Midnight', color: 'midnight', price: 180, type: 'palette' },
+                { id: 'palette_aurora', name: 'Aurora Drift', color: 'aurora', hue: 165, hue2: 260, price: 160, type: 'palette' },
+                { id: 'palette_coral', name: 'Coral Reef', color: 'coral', hue: 10, hue2: 40, price: 160, type: 'palette' },
+                { id: 'palette_midnight', name: 'Midnight', color: 'midnight', hue: 230, hue2: 270, price: 180, type: 'palette' },
                 { id: 'accessory_cap', legacy: true, name: 'Comet Cap', icon: 'fa-hat-cowboy-side', price: 75, type: 'hat' },
                 { id: 'accessory_halo', legacy: true, name: 'Halo Headband', icon: 'fa-circle', price: 125, type: 'hat' },
                 { id: 'accessory_headphones', legacy: true, name: 'Cloud Headphones', icon: 'fa-headphones',                                 price: 150, type: 'hat' },
@@ -66,7 +105,10 @@
                                     ['star', 'Star Spirit', '🌟', 'legendary'], ['planet', 'Planet Pal', '🪐', 'legendary'], ['rainbow', 'Rainbow', '🌈', 'legendary'],
                                     ['elder', 'Elder Dragon', '🐲', 'legendary'], ['brain', 'Big Brain', '🧠', 'legendary'], ['trophy', 'Golden Trophy', '🏆', 'legendary']
                                 ].map(([key, name, emoji, rarity]) => ({ id: `pet_${key}`, name, emoji, rarity, price: null, type: 'pet' }))
-                            ].map(item => ({ ...item, rarity: item.rarity || StudBudCommunityGames.rarityForPrice(item.price) }));
+                            ].map(item => {
+                                const rarity = item.rarity || StudBudCommunityGames.rarityForPrice(item.price);
+                                return { ...item, rarity, price: item.price == null ? null : Math.round(item.price * 2.5 / 5) * 5 };
+                            });
                         }
 
                         static rarityForPrice(price) {
@@ -75,9 +117,14 @@
 
                         static get boxes() {
                             return [
-                                { id: 'basic', name: 'Study Box', price: 80, icon: 'fa-box', odds: 'Mostly common, small chance of rare' },
+                                { id: 'basic', name: 'Study Box', price: 80, icon: 'fa-box', odds: 'Mostly common, small chance of rare · always something new' },
                                 { id: 'rare', name: 'Honors Box', price: 200, icon: 'fa-box-open', odds: 'Uncommon and rare finds, epics possible' },
-                                { id: 'legendary', name: 'Valedictorian Box', price: 500, icon: 'fa-gem', odds: 'Rare or better, 10% legendary' }
+                                { id: 'legendary', name: 'Valedictorian Box', price: 500, icon: 'fa-gem', odds: 'Rare or better, 10% legendary' },
+                                { id: 'hat', name: 'Hat Box', price: 130, icon: 'fa-hat-wizard', odds: 'Hats only · mostly common/uncommon' },
+                                { id: 'accessory', name: 'Style Box', price: 140, icon: 'fa-glasses', odds: 'Accessories only · mostly common/uncommon' },
+                                { id: 'palette', name: 'Color Box', price: 160, icon: 'fa-palette', odds: 'Color palettes only · uncommon or better' },
+                                { id: 'skin', name: 'Character Box', price: 260, icon: 'fa-user-astronaut', odds: 'Characters only · uncommon or better' },
+                                { id: 'mythic', name: 'Mythic Box', price: 1000, icon: 'fa-dragon', odds: 'Anything · epic or legendary (45%)' }
                             ];
                         }
 
@@ -103,7 +150,19 @@
             if (term) request = request.ilike('title', `%${term}%`);
             const { data, error } = await request;
             if (error) throw new Error(`Could not search community decks: ${error.message}`);
-            return data || [];
+            const rows = data || [];
+            const ids = [...new Set(rows.map(row => row.owner_id))];
+            if (ids.length) {
+                const { data: names } = await client.rpc('studbud_community_authors', { p_ids: ids });
+                rows.forEach(row => { row.author_name = names?.[row.owner_id] || 'Student'; });
+            }
+            return rows;
+        }
+
+        async getUserProfile(userId) {
+            const { data, error } = await this.getClient().rpc('studbud_view_profile', { p_user_id: userId });
+            if (error) throw new Error(error.message);
+            return data;
         }
 
         async publishDeck(deck) {

@@ -152,6 +152,8 @@
         constructor(s) {
             super(s);
             this.title = 'City Escape';
+            this.scoreGoal = false; this.goalUnit = 'm'; this.goalLabel = 'Meters';
+            this.formatValue = v => `${v.toLocaleString()} m`;
             this.race = true;
             this.WIDTH = 2000; this.SUMMIT = 48000; this.biomeSeen = 0;
             this.build();
@@ -941,6 +943,7 @@
             }
             this.maxH = Math.max(this.maxH, -(me.y + me.h));
             s.score = Math.floor(Math.min(1, this.maxH / this.summitH) * 900) + this.bonus;
+            s.setGoal(Math.round(this.maxH / 40));
             const bi = Math.min(3, Math.floor(this.maxH / this.summitH * 4));
             if (bi > this.biomeSeen) { this.biomeSeen = bi; s.toast(`Entering ${SKY_BIOMES[bi].name}`, '#fbbf24'); s.sfx('powerup'); }
             this.state = this.dash > 0 ? 3 : !me.onGround ? 2 : Math.abs(me.vx) > 40 ? 1 : 0;
@@ -1297,6 +1300,8 @@
         constructor(s) {
             super(s);
             this.title = 'King of the Hill';
+            this.scoreGoal = false; this.goalUnit = 'sec on hill'; this.goalLabel = 'On the hill';
+            this.formatValue = v => `${v}s`;
             this.solids = [
                 { x: 300, y: 520, w: 1000, h: 260, main: true },
                 { x: 400, y: 390, w: 220, h: 14, oneway: true },
@@ -1391,7 +1396,7 @@
                 this.hillState = !mine ? 'away' : rivals ? 'contested' : 'holding';
                 if (this.hillState === 'holding') {
                     this.hillTick += dt;
-                    if (this.hillTick >= 1) { this.hillTick -= 1; s.addScore(12); s.sfx('coin', 300); this.particles.burst(me.x + 17, me.y, '#fde047', 4, 120, 0.4, 3); }
+                    if (this.hillTick >= 1) { this.hillTick -= 1; this.hillSecs = (this.hillSecs || 0) + 1; s.setGoal(this.hillSecs); s.addScore(12); s.sfx('coin', 300); this.particles.burst(me.x + 17, me.y, '#fde047', 4, 120, 0.4, 3); }
                 } else this.hillTick = 0;
             }
             this.state = this.guard ? 4 : this.swingT > 0 ? 3 : !me.onGround ? 2 : Math.abs(me.vx) > 40 ? 1 : 0;
@@ -1666,7 +1671,7 @@
                 const cap = Math.min(22, 5 + Math.floor(s.t / 12));
                 if (this.spawnT <= 0 && this.drones.length < cap) { this.spawnDrone(); this.spawnT = Math.max(0.5, 1.9 - s.t / 100); }
             }
-            const targets = this.dead > 0 ? null : me;
+            const targets = this.dead > 0 || s.question ? null : me;
             for (const d of this.drones) {
                 d.hit = Math.max(0, d.hit - dt);
                 if (!targets) { d.vx *= 0.95; d.vy *= 0.95; }
@@ -1687,7 +1692,7 @@
                         if (od > 0 && od < 40) { wantX += ox / od * 0.8; wantY += oy / od * 0.8; }
                     }
                     d.vx = lerp(d.vx, wantX * sp, 0.08); d.vy = lerp(d.vy, wantY * sp, 0.08);
-                    if (dd < d.r + me.r && this.invuln <= 0) this.damage(15, null, d);
+                    if (dd < d.r + me.r && this.invuln <= 0 && !s.question) this.damage(15, null, d);
                 }
                 d.x += d.vx * dt; d.y += d.vy * dt;
                 for (const w of this.cover) pushCircleOutOfRect(d, w);
@@ -1709,7 +1714,7 @@
                                 break;
                             }
                         }
-                    } else if (this.dead <= 0 && this.invuln <= 0 && dist(b.x, b.y, me.x, me.y) < me.r + 4) {
+                    } else if (this.dead <= 0 && this.invuln <= 0 && !s.question && dist(b.x, b.y, me.x, me.y) < me.r + 4) {
                         b.life = 0;
                         this.damage(b.dmg, b.by, null);
                     }

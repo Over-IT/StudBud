@@ -2081,13 +2081,15 @@
             const tab = this.shopTab || 'boxes';
             const catalog = games.catalog.filter(item => !item.legacy && item.type !== 'pet');
             const equippedBy = { skin: profile.equipped_skin, hat: profile.equipped_hat, accessory: profile.equipped_accessory, palette: profile.equipped_palette };
-            const tabs = [['boxes', 'Mystery boxes'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['palette', 'Colors']];
+            const tabs = [['boxes', 'Mystery boxes'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['palette', 'Colors'], ['inventory', 'Inventory']];
             const slotKey = { skin: 'skin', hat: 'hat', accessory: 'acc' };
             const itemCard = item => {
                 const has = owned.includes(item.id);
                 const equipped = equippedBy[item.type] === item.id;
                 let preview;
-                if (item.type === 'palette') preview = `<span class="shop-palette ${this.escapeHTML(item.color)}"></span>`;
+                if (item.type === 'palette') preview = item.hue != null
+                    ? `<span class="shop-palette" style="background: linear-gradient(135deg, hsl(${item.hue} 75% 55%), hsl(${item.hue2} 80% 40%))"></span>`
+                    : `<span class="shop-palette ${this.escapeHTML(item.color)}"></span>`;
                 else preview = this.multiplayerAvatarMarkup({ skin: '', hat: '', acc: '', [slotKey[item.type]]: item.id });
                 const price = item.price == null ? '' : ` · ${item.price} <i class="fas fa-coins"></i>`;
                 let button;
@@ -2102,9 +2104,21 @@
             if (tab === 'boxes') {
                 const drop = this.lastDrop;
                 const dropItem = drop && games.catalog.find(entry => entry.id === drop.unlocked_item && entry.type !== 'pet');
-                body = `${dropItem ? `<div class="box-reveal rarity-${this.escapeHTML(drop.rarity)}">${this.multiplayerAvatarMarkup({ skin: '', hat: '', acc: '', [slotKey[dropItem.type]]: dropItem.id }, true)}<div><small>${this.escapeHTML(drop.rarity)}</small><strong>${this.escapeHTML(dropItem.name)}</strong><span>${drop.duplicate ? `Duplicate! Refunded ${Number(drop.refund)} coins.` : 'New item added to your collection!'}</span></div></div>` : ''}
+                body = `${dropItem ? `<div class="box-reveal rarity-${this.escapeHTML(dropItem.rarity)}">${dropItem.type === 'palette' ? `<span class="shop-palette" style="background: linear-gradient(135deg, hsl(${dropItem.hue} 75% 55%), hsl(${dropItem.hue2} 80% 40%))"></span>` : this.multiplayerAvatarMarkup({ skin: '', hat: '', acc: '', [slotKey[dropItem.type]]: dropItem.id }, true)}<div><small>${this.escapeHTML(dropItem.rarity)}</small><strong>${this.escapeHTML(dropItem.name)}</strong><span>New item added to your inventory!</span></div></div>` : ''}
                     ${games.constructor.boxes.map(box => `<article class="multiplayer-shop-item box-card box-${box.id}"><span class="mystery-capsule"><i class="fas ${box.icon}"></i></span><div><strong>${box.name}</strong><small>${box.odds}</small></div><button type="button" class="secondary-btn" data-action="multiplayer-mystery" data-id="${box.id}" ${profile.coins < box.price ? 'disabled' : ''}>Open · ${box.price} <i class="fas fa-coins"></i></button></article>`).join('')}
-                    <p class="settings-hint">Boxes can contain characters, hats, accessories,                     colors. Duplicates refund coins.</p>`;
+                    <p class="settings-hint">Boxes can contain characters, hats, accessories and colors you don't own yet. Boxes are the cheapest way to collect.</p>`;
+                                } else if (tab === 'inventory') {
+                                    const typeNames = { skin: 'Characters', hat: 'Hats', accessory: 'Accessories', palette: 'Colors' };
+                                    const order = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
+                                    const mine = games.catalog.filter(item => item.type !== 'pet' && owned.includes(item.id));
+                                    const total = catalog.length;
+                                    const sections = Object.keys(typeNames).map(type => {
+                                        const list = mine.filter(item => item.type === type || (type === 'hat' && item.type === 'hat'))
+                                            .sort((a, b) => order.indexOf(b.rarity) - order.indexOf(a.rarity));
+                                        if (!list.length) return '';
+                                        return `<h4 class="shop-category-title">${typeNames[type]} · ${list.length}</h4>${list.map(itemCard).join('')}`;
+                                    }).join('');
+                                    body = `<h4 class="shop-category-title">${mine.filter(item => !item.legacy).length} / ${total} items collected</h4>${sections || '<p class="settings-hint">Nothing here yet — open a mystery box or buy something!</p>'}`;
                                 } else {
                                     const items = catalog.filter(item => item.type === tab);
                                     const count = items.filter(item => owned.includes(item.id)).length;
@@ -2388,8 +2402,8 @@
             await this.renderMultiplayerProfile(true);
             if (action === 'multiplayer-mystery') {
                 const item = window.StudBudCommunityGames.catalog.find(entry => entry.id === unlockedItem);
-                document.getElementById('multiplayer-shop-status').textContent = `${profile.duplicate ? 'Duplicate' : 'New'} ${profile.rarity} drop: ${item?.name || 'cosmetic'}!`;
-                window.StudBudSfx?.play(profile.rarity === 'epic' || profile.rarity === 'legendary' ? 'win' : 'success', 'ui', 0);
+                document.getElementById('multiplayer-shop-status').textContent = `New ${item?.rarity || profile.rarity} drop: ${item?.name || 'cosmetic'}!`;
+                window.StudBudSfx?.play(['epic', 'legendary'].includes(item?.rarity || profile.rarity) ? 'win' : 'success', 'ui', 0);
             }
             if (action === 'multiplayer-equip' && itemId.startsWith('palette_')) {
                 const colorScheme = itemId.slice('palette_'.length);
@@ -3303,7 +3317,7 @@
             const phase = time * 0.8;
             const ranked = players.length ? players : [{ score: 300 }, { score: 150 }];
             const palette = this.multiplayerProfile?.equipped_palette || 'palette_default';
-            const accent = palette.includes('ocean') ? '#39d2f2'
+                const accent = palette.includes('ocean') ? '#39d2f2'
                 : palette.includes('sunset') || palette.includes('coral') ? '#ff835f'
                     : palette.includes('violet') || palette.includes('aurora') ? '#bd8cff'
                         : palette.includes('midnight') ? '#91a5ff' : '#68e0ac';
@@ -3661,7 +3675,8 @@
                 results.innerHTML = decks.length ? decks.map(deck => `
                     <article class="community-deck-card">
                         <div><strong>${this.escapeHTML(deck.title)}</strong><p>${this.escapeHTML(deck.description || 'A student-shared study set.')}</p>
-                            <small>${Number(deck.card_count)} cards · studied by ${Number(deck.study_count)} ${Number(deck.study_count) === 1 ? 'student' : 'students'}</small></div>
+                            <small>${Number(deck.card_count)} cards · studied by ${Number(deck.study_count)} ${Number(deck.study_count) === 1 ? 'student' : 'students'}</small>
+                            <small class="deck-author">by <button type="button" class="link-btn" data-action="view-profile" data-id="${this.escapeHTML(deck.owner_id)}">${this.escapeHTML(deck.author_name || 'Student')}</button></small></div>
                         <button class="secondary-btn" type="button" data-action="import-community-deck" data-id="${this.escapeHTML(deck.id)}"><i class="fas fa-download"></i> Add to my decks</button>
                     </article>`).join('') : '<p class="empty-state">No shared decks found. Try another search, or share one of your own after studying it.</p>';
                 status.textContent = `${decks.length} community deck${decks.length === 1 ? '' : 's'} found.`;
@@ -3675,7 +3690,14 @@
         async publishCommunityDeck(deckId) {
             const deck = (AppState.get('flashcards') || []).find(item => item.id === deckId);
             if (!deck) throw new Error('That deck could not be found.');
-            const published = await window.StudBudCommunityGames.publishDeck(deck);
+            let published;
+            try {
+                published = await window.StudBudCommunityGames.publishDeck(deck);
+            } catch (error) {
+                const message = String(error?.message || error);
+                if (/already shared|same title|identical|duplicate/i.test(message)) { window.alert(message); return; }
+                throw error;
+            }
             await AppState.saveFlashcardDeck({ ...deck, communityPublished: true, communityDeckId: published.id });
             window.alert('Deck shared. Its title, card terms and definitions, and any source attribution are visible to signed-in StudBud users. You can stop sharing it at any time.');
         }
@@ -3861,7 +3883,10 @@
                                             : room.mode === 'crypto' ? `${Number(player.loot || 0)} chips · ${player.last_action || 'ready'}`
                                                 : room.mode === 'duel' ? `${Number(player.score || 0)} pts`
                                                     : `${Number(player.score || 0)} points · ${Number(player.streak || 0)} streak`;
-                    return `<li class="leaderboard-player${isSelf ? ' is-self' : ''}">${avatarFor(player)}<span class="leaderboard-name">${index + 1}. ${this.escapeHTML(player.nickname)}${isSelf ? ' · you' : ''}</span><span class="leaderboard-stat"><strong>${Number(player.score || 0).toLocaleString()} score</strong><small>${this.escapeHTML(progress)}</small></span>${kick}</li>`;
+                    const unit = { sports: 'goals', shooter: 'kill pts', skyline: 'm', river: 'fish pts', market: 'deliveries', miner: 'crystals', duel: 'sec on hill' }[room.mode];
+                    const valueLabel = room.mode === 'crypto' ? `$${Number(player.score || 0).toLocaleString()}` : `${Number(player.score || 0).toLocaleString()} ${unit || 'score'}`;
+                    const profileBtn = `<button class="host-kick-btn" type="button" data-action="view-profile" data-id="${this.escapeHTML(player.id)}">Profile</button>`;
+                    return `<li class="leaderboard-player${isSelf ? ' is-self' : ''}">${avatarFor(player)}<span class="leaderboard-name">${index + 1}. ${this.escapeHTML(player.nickname)}${isSelf ? ' · you' : ''}</span><span class="leaderboard-stat"><strong>${this.escapeHTML(valueLabel)}</strong><small>${this.escapeHTML(progress)}</small></span>${profileBtn}${kick}</li>`;
                 }).join('');
             const sceneNames = {
                 skyline: 'City Escape', river: 'River Fishing', market: 'Package Delivery',
@@ -3926,8 +3951,9 @@
                 document.getElementById('hosted-room-status').textContent = 'Game over · final scores and multiplayer coin rewards are shown below.';
                 const rewards = state.coin_rewards || {};
                 document.getElementById('hosted-podium').classList.remove('hidden');
+                const podiumUnit = { sports: 'goals', shooter: 'kill pts', skyline: 'm', river: 'fish pts', market: 'deliveries', miner: 'crystals', duel: 'sec on hill', crypto: '' }[room.mode] ?? 'points';
                 document.getElementById('hosted-podium').innerHTML = rankedPlayers.slice(0, 3).map((player, index) =>
-                    `<div class="podium-place place-${index + 1}"><span class="podium-rank">0${index + 1}</span><strong>${avatarFor(player)} ${this.escapeHTML(player.nickname)}</strong><small>${Number(player.score || 0).toLocaleString()} points · +${Number(rewards[player.id] || 0)} coins</small></div>`
+                    `<div class="podium-place place-${index + 1}"><span class="podium-rank">0${index + 1}</span><strong>${avatarFor(player)} ${this.escapeHTML(player.nickname)}</strong><small>${room.mode === 'crypto' ? '$' : ''}${Number(player.score || 0).toLocaleString()} ${podiumUnit} · +${Number(rewards[player.id] || 0)} coins <button class="host-kick-btn" type="button" data-action="view-profile" data-id="${this.escapeHTML(player.id)}">Profile</button></small></div>`
                 ).join('');
             } else {
                 document.getElementById('hosted-podium').classList.add('hidden');
@@ -4090,10 +4116,31 @@
             this.applyAppearance();
         }
 
+        // Adds a picker button for every shop palette that has no hand-written button in index.html
+        ensureSchemeButtons() {
+            const picker = document.querySelector('.scheme-picker');
+            const catalog = window.StudBudCommunityGames?.catalog;
+            if (!picker || !catalog) return;
+            const mono = picker.querySelector('[data-color-scheme="monochrome"]');
+            catalog.filter(item => item.type === 'palette').forEach(item => {
+                if (picker.querySelector(`[data-color-scheme="${item.color}"]`)) return;
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'scheme-option';
+                button.dataset.colorScheme = item.color;
+                button.dataset.shopItem = item.id;
+                button.innerHTML = `<span class="scheme-swatch" style="--swatch: linear-gradient(90deg, hsl(${item.hue} 75% 55%), hsl(${item.hue2} 80% 68%))"></span><span>${this.escapeHTML(item.name)}</span><small class="scheme-lock-note">Unlock in multiplayer shop</small>`;
+                picker.insertBefore(button, mono || null);
+            });
+        }
+
         applyAppearance() {
+            this.ensureSchemeButtons();
             const settings = AppState.get('settings') || {};
             const theme = settings.theme === 'light' ? 'light' : 'dark';
-            const colorScheme = ['forest', 'ocean', 'violet', 'sunset', 'monochrome', 'aurora', 'coral', 'midnight'].includes(settings.colorScheme) ? settings.colorScheme : 'forest';
+            const knownSchemes = ['forest', 'ocean', 'violet', 'sunset', 'monochrome', 'aurora', 'coral', 'midnight',
+                ...(window.StudBudCommunityGames?.catalog || []).filter(item => item.type === 'palette').map(item => item.color)];
+            const colorScheme = knownSchemes.includes(settings.colorScheme) ? settings.colorScheme : 'forest';
             document.body.classList.toggle('dark-theme', theme === 'dark');
             document.body.classList.toggle('light-theme', theme === 'light');
             document.body.classList.toggle('compact-ui', Boolean(settings.compactUi));
@@ -4249,6 +4296,35 @@
                 await this.loadFriends();
             } catch (error) {
                 this.setFriendStatus(error.message || 'That did not work.', true);
+            }
+        }
+
+        async openUserProfile(userId) {
+            let overlay = document.getElementById('user-profile-overlay');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'user-profile-overlay';
+                overlay.className = 'user-profile-overlay';
+                overlay.innerHTML = '<div class="user-profile-modal glass-card" role="dialog" aria-modal="true" aria-label="Student profile"></div>';
+                overlay.addEventListener('click', event => { if (event.target === overlay || event.target.closest('[data-action="close-user-profile"]')) overlay.classList.add('hidden'); });
+                document.body.appendChild(overlay);
+            }
+            const modal = overlay.firstElementChild;
+            overlay.classList.remove('hidden');
+            modal.innerHTML = '<p class="community-status">Loading profile…</p><button type="button" class="ghost-btn" data-action="close-user-profile">Close</button>';
+            try {
+                const p = await window.StudBudCommunityGames.getUserProfile(userId);
+                const avatar = this.multiplayerAvatarMarkup({ skin: p.skin, hat: p.hat, acc: p.accessory }, true);
+                const stat = (label, value) => `<div class="friend-stat"><strong>${value}</strong><small>${label}</small></div>`;
+                const facts = [p.grade_level && `🎓 ${p.grade_level}`, p.favorite_subject && `⭐ ${p.favorite_subject}`, p.study_goal && `🎯 ${p.study_goal}`].filter(Boolean).map(f => `<span class="friend-chip">${this.escapeHTML(f)}</span>`).join('');
+                const decks = (p.decks || []).map(d => `<li class="friend-row"><div><strong>${this.escapeHTML(d.title)}</strong><br><small>${Number(d.card_count)} cards · studied by ${Number(d.study_count)}</small></div>${p.is_me ? '' : `<button type="button" class="secondary-btn" data-action="import-community-deck" data-id="${this.escapeHTML(d.id)}">Add</button>`}</li>`).join('');
+                modal.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.username)}${p.is_me ? ' <em class="you-badge">you</em>' : ''}</h3></div><button type="button" class="ghost-btn" data-action="close-user-profile" aria-label="Close profile"><i class="fas fa-xmark"></i></button></div>
+                    ${p.bio ? `<p class="friend-bio">${this.escapeHTML(p.bio)}</p>` : ''}${facts ? `<div class="friend-chips">${facts}</div>` : ''}
+                    <div class="friend-stats">${p.show_stats === false ? stat('Match wins', Number(p.wins) || 0) : `${stat('Studied today', this.formatStudyDuration(p.today_seconds))}${stat('This week', this.formatStudyDuration(p.week_seconds))}${stat('All time', this.formatStudyDuration(p.total_seconds))}${stat('Day streak', `${Number(p.streak_days) || 0} 🔥`)}${stat('Match wins', Number(p.wins) || 0)}`}</div>
+                    <h4>Shared flashcard sets</h4>
+                    <ul class="friend-list">${decks || '<li class="empty-state">No shared sets yet.</li>'}</ul>`;
+            } catch (error) {
+                modal.innerHTML = `<p class="community-status error">${this.escapeHTML(error.message || 'Could not open that profile.')}</p><button type="button" class="ghost-btn" data-action="close-user-profile">Close</button>`;
             }
         }
 
@@ -4455,7 +4531,7 @@
                     <span class="study-leaderboard-rank">${rank >= 1 && rank <= 3 ? medal[rank - 1] : (rank || '—')}</span>
                     ${this.multiplayerAvatarMarkup(this.profileCosmetics(player), false, 'study-leaderboard-avatar')}
                     <div class="study-leaderboard-main"><strong>${name}${player.is_me ? ' <em class="you-badge">you</em>' : ''}</strong><span class="study-leaderboard-bar"><i style="width:${pct}%"></i></span></div>
-                    <span class="study-leaderboard-time">${this.formatStudyDuration(player.seconds)}</span></li>`;
+                    <span class="study-leaderboard-time">${this.formatStudyDuration(player.seconds)}</span>${player.user_id ? `<button type="button" class="secondary-btn" data-action="view-profile" data-id="${this.escapeHTML(player.user_id)}">Profile</button>` : ''}</li>`;
             };
             const podium = board.length >= 3 ? `<li class="study-podium" aria-hidden="true">${[1, 0, 2].map(i => {
                 const p = board[i];
@@ -4925,6 +5001,8 @@
                     this.openAssignmentForm(null, '', '', '', 'quiz');
                 } else if (action === 'friend-accept' || action === 'friend-decline' || action === 'friend-remove') {
                     await this.friendAction(action, target.dataset.id, target.dataset.name);
+                } else if (action === 'view-profile') {
+                    await this.openUserProfile(target.dataset.id);
                 } else if (action === 'friend-view') {
                     await this.showFriendProfile(target.dataset.id);
                 } else if (action === 'friend-profile-close') {
