@@ -1565,7 +1565,10 @@ body.compact-ui .glass-card { padding: 14px; }
 .community-deck-card p { margin: 2px 0; color: var(--text-secondary); font-size: 0.84rem; }
 .community-deck-card small, .deck-sharing-hint { color: var(--text-muted); font-size: 0.76rem; }
 .community-deck-card button { flex: 0 0 auto; }
-.deck-sharing-hint { display: block; width: 100%; }
+.deck-sharing-hint { display: block; width: 100%; order: 5; }
+#deck-grid .actions { display: flex; flex-wrap: wrap; gap: var(--spacing-sm); }
+#deck-grid .actions button { flex: 1 1 auto; min-width: 0; white-space: nowrap; }
+#deck-grid .glass-card { min-width: 0; overflow-wrap: anywhere; }
 .hosted-game-setup { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--spacing-md); margin-top: var(--spacing-md); }
 .hosted-game-form { display: grid; align-content: start; gap: var(--spacing-sm); min-width: 0; padding: var(--spacing-md); border: 1px solid var(--border-glass); border-radius: var(--border-radius-sm); background: var(--bg-glass); }
 .hosted-game-form h4 { margin: 0; }

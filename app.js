@@ -2010,8 +2010,7 @@
                         <button class="primary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}">Study</button>
                         <button class="secondary-btn" data-action="add-card" data-id="${this.escapeHTML(deck.id)}">Add Card</button>
                         ${deck.communityPublished ? `<button class="secondary-btn" data-action="unpublish-community-deck" data-id="${this.escapeHTML(deck.id)}">Stop sharing</button>` :
-                            Number(deck.studiedCount || 0) > 0 ? `<button class="secondary-btn" data-action="publish-community-deck" data-id="${this.escapeHTML(deck.id)}"><i class="fas fa-users"></i> Share with community</button>` :
-                                '<small class="deck-sharing-hint">Study a card to make this deck eligible to share.</small>'}
+                            `<button class="secondary-btn" data-action="publish-community-deck" data-id="${this.escapeHTML(deck.id)}"><i class="fas fa-users"></i> Share</button>`}
                         <button class="danger-btn" data-action="delete-deck" data-id="${this.escapeHTML(deck.id)}">Delete</button>
                     </div>
                 </article>
@@ -3675,7 +3674,7 @@
 
         async publishCommunityDeck(deckId) {
             const deck = (AppState.get('flashcards') || []).find(item => item.id === deckId);
-            if (!deck || Number(deck.studiedCount || 0) < 1) throw new Error('Study at least one card before sharing this deck.');
+            if (!deck) throw new Error('That deck could not be found.');
             const published = await window.StudBudCommunityGames.publishDeck(deck);
             await AppState.saveFlashcardDeck({ ...deck, communityPublished: true, communityDeckId: published.id });
             window.alert('Deck shared. Its title, card terms and definitions, and any source attribution are visible to signed-in StudBud users. You can stop sharing it at any time.');
