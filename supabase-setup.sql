@@ -1847,6 +1847,19 @@ begin
 end;
 $$;
 
+-- What a student chooses to show their friends.
+create table if not exists public.studbud_public_profiles (
+    user_id uuid primary key references auth.users (id) on delete cascade,
+    bio text not null default '',
+    favorite_subject text not null default '',
+    grade_level text not null default '',
+    study_goal text not null default '',
+    show_stats boolean not null default true,
+    updated_at timestamptz not null default now()
+);
+alter table public.studbud_public_profiles enable row level security;
+revoke all on table public.studbud_public_profiles from anon, authenticated;
+
 create or replace function public.studbud_friend_profile(p_user_id uuid)
 returns jsonb
 language plpgsql
@@ -1903,19 +1916,6 @@ begin
     );
 end;
 $$;
-
--- What a student chooses to show their friends.
-create table if not exists public.studbud_public_profiles (
-    user_id uuid primary key references auth.users (id) on delete cascade,
-    bio text not null default '',
-    favorite_subject text not null default '',
-    grade_level text not null default '',
-    study_goal text not null default '',
-    show_stats boolean not null default true,
-    updated_at timestamptz not null default now()
-);
-alter table public.studbud_public_profiles enable row level security;
-revoke all on table public.studbud_public_profiles from anon, authenticated;
 
 create or replace function public.studbud_get_public_profile()
 returns jsonb
