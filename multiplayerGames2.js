@@ -222,6 +222,7 @@
 
         ex() { return { c: this.carry }; }
         goalText() { return `Banked ${this.banked} · Bag ${this.items}/${this.cap} (${this.carry})`; }
+        touchLayout() { return { stick: true, buttons: [{ k: 'Space', label: 'Dig', cls: 'main' }] }; }
         hint() { return 'WASD move · hold click to dig · bank ore at base · avoid lava · Q = recharge'; }
 
         draw(ctx, w, h) {
@@ -408,6 +409,7 @@
         }
 
         goalText() { return `Haul ${this.haul} · ${this.catches} fish${this.combo > 1 ? ` · combo x${this.combo}` : ''}`; }
+        touchLayout() { return { stick: true, buttons: [{ k: 'KeyJ', label: 'Cast', cls: 'main', click: true }] }; }
         hint() { return 'WASD steer · click to cast net · dodge obstacles · Q = restock bait'; }
         ex() { return { n: this.cast ? 1 : 0 }; }
 
@@ -592,6 +594,7 @@
 
         ex() { return { p: this.pkg ? 1 : 0 }; }
         goalText() { return `${this.deliveries} deliveries · streak ${this.streak}`; }
+        touchLayout() { return { stick: true, buttons: [{ k: 'ShiftLeft', label: 'Sprint', cls: 'main' }] }; }
         hint() { return 'WASD move · Shift sprint · deliver to marked houses · dodge cars · Q = recharge'; }
 
         draw(ctx, w, h) {
@@ -654,28 +657,33 @@
     }
 
     /* ------------------------------------------------------------------ */
-    /* Endzone Rally: top-down football run                                */
+    /* Soccer: two teams, one ball, energy for sprinting and power kicks    */
     /* ------------------------------------------------------------------ */
     class Sports extends Arena {
         constructor(s) {
-            super(s, 2600, 900);
-            this.title = 'Team Football';
-            this.touchMain = 'Tackle';
-            this.scoreGoal = false;
-            this.dir = 1; this.td = 0; this.yards = 0; this.progress = 0; this.best = 0;
-            this.me.y = this.H / 2; this.baseSpeed = 255;
+            super(s, 2400, 1100);
+            this.title = 'Soccer';
+            this.touchMain = 'Kick';
+            this.scoreGoal = false; this.goalUnit = 'goals';
+            this.dir = 1; this.td = 0; this.yards = 0;
+            this.me.y = this.H / 2; this.baseSpeed = 250;
             this.res = new A.Resource('Energy', '#38bdf8', 100, 60, 2);
-            this.dash = 0; this.dashCd = 0; this.bull = 0; this.msg = '';
-            // Everyone is split into two teams (blue vs red) that attack opposite endzones; rivals are the only defenders
+            this.kickCd = 0; this.turbo = 0; this.freeze = 0; this.touchT = 0; this.msg = '';
+            this.goalH = 340; this.netD = 70;
+            this.ball = { x: this.W / 2, y: this.H / 2, vx: 0, vy: 0, r: 13 };
+            this.lastTouch = null; this.unclaimed = null;
+            // Everyone is split into two teams (blue vs red) that attack opposite goals
             this.teamIds = [...s.roster.keys()].sort();
             this.teamsOn = this.teamIds.length >= 2;
             this.myTeam = this.teamsOn ? this.teamIds.indexOf(s.user.id) % 2 : -1;
             if (this.teamsOn && this.myTeam === 1) this.dir = -1;
             this.teamTd = [0, 0];
             this.pads = [];
-            this.newDrive();
+            this.kickoff();
             this.cam.x = this.me.x; this.cam.y = this.me.y;
         }
+
+        teamOf(id) { return this.teamsOn ? this.teamIds.indexOf(id) % 2 : -1; }
 
         spawnY() {
             if (!this.teamsOn) return this.H / 2;
@@ -684,125 +692,179 @@
             return this.H * (slot + 1) / (mates.length + 1);
         }
 
-        newDrive() {
+        // Puts the ball back on the centre spot, sends everyone home and respawns the power-up pads
+        kickoff() {
             const me = this.me, r = Math.random;
-            me.x = this.dir > 0 ? 130 : this.W - 130; me.y = this.spawnY(); me.vx = me.vy = 0;
-            this.progress = 0; this.best = 0; this.checkpoint = 0;
+            Object.assign(this.ball, { x: this.W / 2, y: this.H / 2, vx: 0, vy: 0 });
+            me.x = this.W * (this.dir > 0 ? 0.3 : 0.7); me.y = this.spawnY(); me.vx = me.vy = 0;
             this.pads = [];
-            for (let i = 0; i < 3; i++) this.pads.push({ x: 500 + r() * (this.W - 1000), y: 120 + r() * (this.H - 240), used: false });
+            for (let i = 0; i < 3; i++) this.pads.push({ x: 500 + r() * (this.W - 1000), y: 140 + r() * (this.H - 280), used: false });
         }
 
-        teamOf(id) { return this.teamsOn ? this.teamIds.indexOf(id) % 2 : -1; }
+        inMouth(y, pad = 0) { return Math.abs(y - this.H / 2) < this.goalH / 2 - pad; }
 
-        tackled(msg = 'Tackled! Back to the last marker.') {
-            const s = this.s, me = this.me;
-            this.stun = 1.3; this.msg = 'TACKLED!';
-            s.toast(msg, '#f87171');
-            this.particles.burst(me.x, me.y, '#fecaca', 22, 280, 0.6, 5);
-            me.x = (this.dir > 0 ? 130 : this.W - 130) + this.dir * this.checkpoint; me.y = this.spawnY(); me.vx = me.vy = 0;
+        // Moves the ball one step; returns the team that scored if it reached a goal.
+        stepBall(dt) {
+            const b = this.ball, W = this.W, H = this.H, r = b.r;
+            b.x += b.vx * dt; b.y += b.vy * dt;
+            const drag = Math.exp(-1.15 * dt);
+            b.vx *= drag; b.vy *= drag;
+            if (Math.hypot(b.vx, b.vy) < 6) b.vx = b.vy = 0;
+            if (b.y < r) { b.y = r; b.vy = Math.abs(b.vy) * 0.8; }
+            if (b.y > H - r) { b.y = H - r; b.vy = -Math.abs(b.vy) * 0.8; }
+            if (b.x < r) {
+                if (this.teamsOn && this.inMouth(b.y, r)) { if (b.x < 40) return 1; }
+                else { b.x = r; b.vx = Math.abs(b.vx) * 0.8; }
+            }
+            if (b.x > W - r) {
+                if (this.inMouth(b.y, r)) { if (b.x > W - 40) return 0; }
+                else { b.x = W - r; b.vx = -Math.abs(b.vx) * 0.8; }
+            }
+            return -1;
+        }
+
+        goalScored(team) {
+            const s = this.s, b = this.ball;
+            this.freeze = 1.8;
+            this.particles.burst(b.x, b.y, team === 0 ? '#60a5fa' : '#f87171', 50, 420, 1, 6);
+            const mine = this.lastTouch === s.user.id;
+            if (this.teamsOn) {
+                if (mine) {
+                    this.teamTd[team]++;
+                    s.emit({ k: 'gl', team });
+                    if (team === this.myTeam) { this.td++; s.addScore(100); s.setGoal(this.td); s.toast(`GOAL! (${this.td})`, '#fde047'); s.sfx('score'); }
+                    else s.toast('Own goal!', '#f87171');
+                } else this.unclaimed = team;
+            } else if (mine) {
+                this.td++; s.addScore(100); s.setGoal(this.td); s.toast(`GOAL! (${this.td})`, '#fde047'); s.sfx('score');
+            }
+            this.kickoff();
+            this.stun = 0.5;
         }
 
         onEvent(ev, from) {
-            if (ev.k === 'tk' && ev.to === this.s.user.id && this.stun <= 0 && this.bull <= 0) {
-                this.tackled(`${from.name} tackled you!`);
-            } else if (ev.k === 'td' && from && this.teamsOn) {
-                const team = this.teamOf(from.id);
-                if (team >= 0) this.teamTd[team]++;
+            if (ev.k === 'kick' && this.freeze <= 0) {
+                Object.assign(this.ball, { x: ev.x, y: ev.y, vx: ev.vx, vy: ev.vy });
+                this.lastTouch = from ? from.id : this.lastTouch;
+            } else if (ev.k === 'gl' && this.teamsOn) {
+                if (this.unclaimed === ev.team || this.freeze <= 0) {
+                    this.teamTd[ev.team]++;
+                    this.freeze = 1.8;
+                    const b = this.ball;
+                    this.particles.burst(b.x, b.y, ev.team === 0 ? '#60a5fa' : '#f87171', 40, 380, 0.9, 5);
+                    Object.assign(b, { x: this.W / 2, y: this.H / 2, vx: 0, vy: 0 });
+                    if (from) this.s.toast(`${from.name} scored for ${ev.team === 0 ? 'Blue' : 'Red'}!`, ev.team === 0 ? '#60a5fa' : '#f87171');
+                }
+                this.unclaimed = null;
             }
         }
 
+        sendKick() {
+            const b = this.ball;
+            this.s.emit({ k: 'kick', x: Math.round(b.x), y: Math.round(b.y), vx: Math.round(b.vx), vy: Math.round(b.vy) });
+        }
+
         update(dt) {
-            const s = this.s, me = this.me;
-            if (this.teamsOn && this.stun <= 0 && (this.bull > 0 || this.dash > 0.08)) {
-                for (const r of s.remoteList()) {
-                    if (this.teamOf(r.id) === this.myTeam || dist(r.x, r.y, me.x, me.y) > 34) continue;
-                    if (!this.tkCd || this.tkCd[r.id] === undefined || performance.now() - this.tkCd[r.id] > 1500) {
-                        this.tkCd = this.tkCd || {};
-                        this.tkCd[r.id] = performance.now();
-                        s.emit({ k: 'tk', to: r.id });
-                        s.addScore(15); s.toast(`Tackled ${r.name}! +15`, '#fde047');
+            const s = this.s, me = this.me, b = this.ball;
+            this.kickCd -= dt; this.turbo = Math.max(0, this.turbo - dt); this.touchT -= dt;
+            const wasFrozen = this.freeze > 0;
+            this.freeze = Math.max(0, this.freeze - dt);
+            const wantsSprint = s.down('ShiftLeft', 'ShiftRight') && this.moving;
+            const free = this.turbo > 0;
+            const sprint = wantsSprint && (free || this.res.has(1));
+            if (sprint && !free) this.res.drain(16 * dt);
+            else if (wantsSprint && !free) s.spend(1);
+            this.speedMul = (sprint ? 1.4 : 1) * (free ? 1.15 : 1);
+            this.step(dt, 3000);
+
+            if (this.freeze <= 0) {
+                if (wasFrozen) this.lastTouch = null;
+                const dx = b.x - me.x, dy = b.y - me.y, d = Math.hypot(dx, dy), min = me.r + b.r;
+                if (this.stun <= 0) {
+                    // Walking into the ball dribbles it; Space is a power kick that costs energy
+                    if (d < min) {
+                        const nx = dx / (d || 1), ny = dy / (d || 1);
+                        b.x = me.x + nx * min; b.y = me.y + ny * min;
+                        b.vx = me.vx * 1.12 + nx * 150; b.vy = me.vy * 1.12 + ny * 150;
+                        this.lastTouch = s.user.id;
+                        if (this.touchT <= 0) { this.touchT = 0.1; this.sendKick(); s.sfx('act', 90); }
+                    }
+                    if (s.pressed('Space') && this.kickCd <= 0 && d < 64 && s.spend(15)) {
+                        const a = d > 1 ? Math.atan2(dy, dx) * 0.35 + me.aim * 0.65 : me.aim;
+                        b.vx = Math.cos(a) * 980; b.vy = Math.sin(a) * 980;
+                        this.kickCd = 0.45; this.lastTouch = s.user.id;
+                        this.sendKick(); s.sfx('shoot');
+                        this.particles.burst(b.x, b.y, '#fde68a', 12, 220, 0.35, 3);
                     }
                 }
+                const scored = this.stepBall(dt);
+                if (scored >= 0) this.goalScored(scored);
             }
-            this.dashCd -= dt; this.bull = Math.max(0, this.bull - dt); this.dash = Math.max(0, this.dash - dt);
-            const wantsSprint = s.down('ShiftLeft', 'ShiftRight') && this.moving;
-            const sprint = wantsSprint && this.res.has(1);
-            if (sprint) this.res.drain(16 * dt);
-            else if (wantsSprint) s.spend(1);
-            this.speedMul = (sprint ? 1.4 : 1) * (this.bull > 0 ? 1.2 : 1) * (this.dash > 0 ? 2.4 : 1);
-            if (s.pressed('Space') && this.dashCd <= 0 && this.stun <= 0 && s.spend(15)) {
-                this.dash = 0.22; this.dashCd = 1.1; s.sfx('dash');
-                const a = s.axis();
-                if (a.x || a.y) me.aim = Math.atan2(a.y, a.x);
-                me.vx = Math.cos(me.aim) * 620; me.vy = Math.sin(me.aim) * 620;
-                this.particles.burst(me.x, me.y, '#fde68a', 10, 160, 0.3, 3);
-            }
-            this.step(dt, 3000);
-            const forward = this.dir > 0 ? me.x - 130 : this.W - 130 - me.x;
-            this.progress = Math.max(0, forward);
-            if (this.progress > this.best) {
-                const gain = (this.progress - this.best) / 20;
-                this.yards += gain; s.addScore(gain); this.best = this.progress;
-            }
-            this.checkpoint = Math.max(this.checkpoint, Math.floor(this.progress / 400) * 400);
 
             for (const p of this.pads) {
                 if (p.used || dist(me.x, me.y, p.x, p.y) > 40) continue;
                 const opened = s.ask(correct => {
-                    if (correct) { this.bull = 8; s.refill(); s.addScore(40); s.toast('BULLDOZER! Rivals cannot tackle you', '#fde047'); }
-                    else if (correct === false) s.toast('Fumbled the play call.', '#f87171');
+                    if (correct) { this.turbo = 10; s.refill(); s.addScore(40); s.toast('TURBO! Free sprint and extra speed', '#fde047'); }
+                    else if (correct === false) s.toast('Missed the play call.', '#f87171');
                 });
                 if (opened) p.used = true;
             }
-            const inEnd = this.dir > 0 ? me.x > this.W - 190 : me.x < 190;
-            if (inEnd) {
-                this.td++; s.addScore(100); s.setGoal(this.td);
-                if (this.teamsOn) this.teamTd[this.myTeam]++;
-                s.toast(`TOUCHDOWN! (${this.td})`, '#fde047');
-                this.particles.burst(me.x, me.y, '#fde047', 50, 420, 1, 6);
-                s.emit({ k: 'td', n: this.td });
-                if (!this.teamsOn) this.dir *= -1;
-                this.newDrive(); this.stun = 0.6;
-            }
+            this.yards = this.td;
             s.setGoal(this.td);
         }
 
-        ex() { return { b: this.bull > 0 ? 1 : 0 }; }
+        ex() { return { t: this.turbo > 0 ? 1 : 0 }; }
         goalText() {
-            const mine = `${this.td} TD · ${Math.round(this.yards)} yds`;
-            return this.teamsOn ? `Blue ${this.teamTd[0]} – ${this.teamTd[1]} Red · ${mine}` : mine;
+            return this.teamsOn ? `Blue ${this.teamTd[0]} – ${this.teamTd[1]} Red · You ${this.td} goal${this.td === 1 ? '' : 's'}` : `${this.td} goal${this.td === 1 ? '' : 's'}`;
         }
-        hint() { return this.teamsOn ? `${this.myTeam === 0 ? 'Blue' : 'Red'} team · WASD run · Shift sprint · Space dash-tackle rivals · Q = recharge` : 'WASD run · Shift sprint · Space dash · reach the far endzone · Q = recharge'; }
+        touchLayout() { return { stick: true, buttons: [{ k: 'Space', label: 'Kick', cls: 'main' }, { k: 'ShiftLeft', label: 'Sprint' }] }; }
+        hint() { return `${this.teamsOn ? `${this.myTeam === 0 ? 'Blue' : 'Red'} team · ` : ''}WASD run · walk into the ball to dribble · Shift sprint (energy) · Space power kick (15 energy) · Q = recharge`; }
 
         draw(ctx, w, h) {
-            const me = this.me, t = this.anim;
+            const me = this.me, t = this.anim, b = this.ball, W = this.W, H = this.H, gy0 = H / 2 - this.goalH / 2;
             ctx.fillStyle = '#14532d'; ctx.fillRect(0, 0, w, h);
-            this.begin(ctx, w, h, 760);
-            for (let i = 0; i < 26; i++) { ctx.fillStyle = i % 2 ? '#15803d' : '#16a34a'; ctx.fillRect(i * 100, 0, 100, this.H); }
-            ctx.fillStyle = '#1d4ed8'; ctx.fillRect(0, 0, 190, this.H);
-            ctx.fillStyle = '#dc2626'; ctx.fillRect(this.W - 190, 0, 190, this.H);
-            ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.font = '900 54px system-ui'; ctx.textAlign = 'center';
-            ctx.save(); ctx.translate(95, this.H / 2); ctx.rotate(-Math.PI / 2); ctx.fillText('ENDZONE', 0, 18); ctx.restore();
-            ctx.save(); ctx.translate(this.W - 95, this.H / 2); ctx.rotate(Math.PI / 2); ctx.fillText('ENDZONE', 0, 18); ctx.restore();
-            ctx.fillStyle = 'rgba(255,255,255,.7)';
-            for (let x = 190; x <= this.W - 190; x += 200) {
-                ctx.fillRect(x - 2, 0, 4, this.H);
-                ctx.font = '800 26px system-ui'; ctx.fillText(String(Math.round(Math.min(x - 190, this.W - 190 - x) / 20)), x, 60);
+            this.begin(ctx, w, h, 800);
+            for (let i = 0; i < 24; i++) { ctx.fillStyle = i % 2 ? '#15803d' : '#16a34a'; ctx.fillRect(i * 100, 0, 100, H); }
+            ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 5;
+            ctx.strokeRect(3, 3, W - 6, H - 6);
+            ctx.beginPath(); ctx.moveTo(W / 2, 0); ctx.lineTo(W / 2, H); ctx.stroke();
+            ctx.beginPath(); ctx.arc(W / 2, H / 2, 130, 0, TAU); ctx.stroke();
+            ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.beginPath(); ctx.arc(W / 2, H / 2, 6, 0, TAU); ctx.fill();
+            for (const side of [0, 1]) {
+                const bx = side ? W - 260 : 0;
+                ctx.strokeRect(bx, H / 2 - 260, 260, 520);
+                ctx.strokeRect(side ? W - 110 : 0, H / 2 - 150, 110, 300);
+                const nx = side ? W - this.netD : 0;
+                ctx.fillStyle = side ? 'rgba(248,113,113,.22)' : (this.teamsOn ? 'rgba(96,165,250,.22)' : 'rgba(255,255,255,.1)');
+                ctx.fillRect(nx, gy0, this.netD, this.goalH);
+                ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 2; ctx.beginPath();
+                for (let k = 0; k <= this.goalH; k += 20) { ctx.moveTo(nx, gy0 + k); ctx.lineTo(nx + this.netD, gy0 + k); }
+                for (let k = 0; k <= this.netD; k += 20) { ctx.moveTo(nx + k, gy0); ctx.lineTo(nx + k, gy0 + this.goalH); }
+                ctx.stroke();
+                ctx.fillStyle = '#f8fafc'; ctx.fillRect(side ? W - 6 : 0, gy0 - 6, 6, this.goalH + 12);
+                ctx.beginPath(); ctx.arc(side ? W - 4 : 4, gy0, 9, 0, TAU); ctx.arc(side ? W - 4 : 4, gy0 + this.goalH, 9, 0, TAU); ctx.fill();
+                ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 5;
             }
-            ctx.strokeStyle = 'rgba(253,224,71,.8)'; ctx.lineWidth = 6;
-            const goalX = this.dir > 0 ? this.W - 190 : 190;
-            ctx.beginPath(); ctx.moveTo(goalX, 0); ctx.lineTo(goalX, this.H); ctx.stroke();
             for (const p of this.pads) { if (!p.used) this.qMark(ctx, p.x, p.y, '#7c3aed', t); }
+            // ball: shadow, white body with dark patches; glows when a power kick is in reach
+            const near = dist(me.x, me.y, b.x, b.y) < 64 && this.kickCd <= 0;
+            ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(b.x + 3, b.y + 6, b.r, b.r * 0.6, 0, 0, TAU); ctx.fill();
+            if (near) this.ring(ctx, b.x, b.y, b.r + 9, 'rgba(253,224,71,.85)', 3);
+            ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, TAU); ctx.fill();
+            ctx.fillStyle = '#1e293b';
+            const spin = (b.x + b.y) * 0.04;
+            for (let k = 0; k < 5; k++) { const a = spin + k * TAU / 5; ctx.beginPath(); ctx.arc(b.x + Math.cos(a) * b.r * 0.58, b.y + Math.sin(a) * b.r * 0.58, 3, 0, TAU); ctx.fill(); }
+            ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, TAU); ctx.fill();
             this.drawPlayers(ctx, (c, x, y, r) => {
                 if (this.teamsOn) this.ring(c, x, y, 21, this.teamOf(r ? r.id : this.s.user.id) === 0 ? '#60a5fa' : '#f87171', 3);
-                c.fillStyle = '#92400e'; c.beginPath(); c.ellipse(x + 14, y + 6, 8, 5, 0.4, 0, TAU); c.fill();
-                if (r ? r.ex?.b : this.bull > 0) { this.ring(c, x, y, 26, 'rgba(253,224,71,.8)', 3); }
+                if (r ? r.ex?.t : this.turbo > 0) { this.ring(c, x, y, 26, 'rgba(253,224,71,.8)', 3); }
             });
             this.particles.draw(ctx);
             this.end(ctx);
-            const frac = clamp(this.progress / (this.W - 380), 0, 1);
-            ctx.fillStyle = 'rgba(8,12,24,.6)'; roundRect(ctx, w / 2 - 160, 70, 320, 12, 6); ctx.fill();
-            ctx.fillStyle = '#fde047'; roundRect(ctx, w / 2 - 160, 70, 320 * frac, 12, 6); ctx.fill();
+            if (this.freeze > 0) {
+                ctx.fillStyle = '#fde047'; ctx.font = '900 54px system-ui'; ctx.textAlign = 'center';
+                ctx.fillText('GOAL!', w / 2, h / 2 - 60); ctx.textAlign = 'left';
+            }
         }
     }
 

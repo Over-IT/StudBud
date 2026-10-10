@@ -156,6 +156,7 @@
 
         net() { return { x: 0, y: 0, ex: {} }; }
         goalText() { return `Net worth ${money(this.s.score)}`; }
+        touchLayout() { return { stick: false, buttons: [{ k: 'KeyB', label: 'Buy', cls: 'buy' }, { k: 'KeyS', label: 'Sell', cls: 'sell' }, { k: 'ShiftLeft', label: 'Max', cls: 'max' }], cols: 3 }; }
         hint() { return '1-6 pick an asset · B / S buy & sell (Shift = max) · Research questions pay cash (set by the host) · build mining rigs for passive income'; }
 
         chart(ctx, i, x, y, w, h, t, detailed) {
@@ -357,6 +358,7 @@
 
         net() { return { x: 0, y: 0, ex: { st: this.st, d: +this.depth.toFixed(2), p: +this.power.toFixed(2) } }; }
         goalText() { return `${this.caught} fish${this.combo > 1 ? ` · combo x${this.combo}` : ''}${this.chests ? ` · ${this.chests} chest` : ''}`; }
+        touchLayout() { return { stick: false, buttons: [{ k: 'Space', label: 'Cast / Reel', cls: 'main' }, { k: 'KeyC', label: 'Chest' }] }; }
         hint() {
             return ['Click / Space to cast (10 bait) · Q for a question to restock bait', 'Release at the right strength — deeper water holds rarer fish', 'Waiting for a bite… click to pull back', 'BITE! Click now!', 'Hold click / Space to lift the green zone onto the fish'][this.st];
         }
@@ -554,6 +556,7 @@
 
         ex() { return { sh: this.shield > 0 ? 1 : 0 }; }
         goalText() { return `${Math.round(this.crypto)} crypto · stolen ${this.stolen}`; }
+        touchLayout() { return { stick: !this.hk, buttons: [] }; }
         hint() { return this.hk ? '1–5 type the code · Backspace delete · Esc abort' : 'WASD move · green terminals mine crypto (question) · red terminals crack a code to steal from rivals'; }
 
         draw(ctx, w, h) {

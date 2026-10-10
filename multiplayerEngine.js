@@ -252,7 +252,7 @@
                 ids.add(player.id);
                 this.roster.set(player.id, {
                     id: player.id, nickname: player.nickname, score: Number(player.score || 0), color: playerColor(player), avatar: player.avatar,
-                    cos: { skin: player.skin || '', hat: player.hat || '', acc: player.accessory || '', pet: player.pet || '' }
+                    cos: { skin: player.skin || '', hat: player.hat || '', acc: player.accessory || '' }
                 });
             });
             for (const id of [...this.roster.keys()]) if (!ids.has(id)) { this.roster.delete(id); this.remotes.delete(id); }
@@ -346,10 +346,15 @@
                     d: isMe ? this.done : Boolean(r?.done)
                 });
             }
-            return rows.sort((a, b) => b.s - a.s);
+            return rows.sort((a, b) => (this.metric(b) - this.metric(a)) || (b.s - a.s));
         }
 
-        metric(row) { return this.game.scoreGoal === false ? row.g : row.s; }
+        metric(row) { return this.game?.scoreGoal === false ? row.g : row.s; }
+
+        // What the leaderboard shows for a player: the number their game is actually won by.
+        valueText(row) {
+            return this.game?.scoreGoal === false ? `${row.g.toLocaleString()} ${this.game.goalUnit || 'pts'}` : `${row.s.toLocaleString()} pts`;
+        }
 
         checkEnd() {
             if (this.practice || this.over || this.ending || !this.isHost || this.countdown > 0) return;
@@ -596,13 +601,7 @@
                 <div class="mpg-hint"></div>
                 <div class="mpg-touch" aria-label="Touch controls">
                     <div class="mpg-stick" role="application" aria-label="Movement joystick"><i class="mpg-knob"></i></div>
-                    <div class="mpg-btns">
-                        <button type="button" data-k="Space" class="b-main">Jump</button>
-                        <button type="button" data-k="ShiftLeft">Dash</button>
-                        <button type="button" data-k="KeyJ" data-click="1">Hit</button>
-                        <button type="button" data-k="KeyE" class="b-e hidden">Blast</button>
-                        <button type="button" data-q="1" class="b-q">Q</button>
-                    </div>
+                    <div class="mpg-btns"></div>
                 </div>
                 <div class="mpg-toasts"></div>
                 <div class="mpg-countdown"></div>
@@ -673,7 +672,7 @@
                 for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) stick.addEventListener(type, reset);
                 stick.addEventListener('contextmenu', e => e.preventDefault());
             }
-            pad.querySelectorAll('button').forEach(btn => {
+            const bindBtn = btn => {
                 btn.addEventListener('pointerdown', e => {
                     e.preventDefault();
                     btn.setPointerCapture?.(e.pointerId);
@@ -686,7 +685,32 @@
                 });
                 for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) btn.addEventListener(type, () => release(btn));
                 btn.addEventListener('contextmenu', e => e.preventDefault());
-            });
+            };
+            // Each game describes its own on-screen controls: { stick, buttons: [{ k, label, cls, click }] }. The recharge button is added automatically.
+            const DEFAULT_LAYOUT = { stick: true, buttons: [{ k: 'Space', label: 'Jump', cls: 'main' }, { k: 'ShiftLeft', label: 'Dash' }] };
+            this.applyTouchLayout = () => {
+                const layout = this.game?.touchLayout?.() || DEFAULT_LAYOUT;
+                const key = JSON.stringify(layout) + (this.game?.res ? 'q' : '');
+                if (key === this.touchLayoutKey) return;
+                this.touchLayoutKey = key;
+                const box = pad.querySelector('.mpg-btns');
+                box.innerHTML = '';
+                const list = (layout.buttons || []).concat(this.game?.res ? [{ q: true, label: 'Q', cls: 'q' }] : []);
+                for (const def of list) {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.textContent = def.label;
+                    if (def.q) btn.dataset.q = '1'; else btn.dataset.k = def.k;
+                    if (def.click) btn.dataset.click = '1';
+                    if (def.cls) btn.className = `b-${def.cls}`;
+                    if (def.small) btn.classList.add('b-small');
+                    bindBtn(btn);
+                    box.appendChild(btn);
+                }
+                box.style.setProperty('--cols', String(Math.min(3, Math.max(2, layout.cols || 2))));
+                pad.classList.toggle('no-stick', layout.stick === false);
+                pad.dataset.game = this.mode || '';
+            };
         }
 
         resize() {
@@ -711,11 +735,9 @@
                 ? `${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, '0')}`
                 : `${Math.floor(this.t / 60)}:${String(Math.floor(this.t) % 60).padStart(2, '0')}`;
             o.querySelector('.mpg-hint').textContent = this.question ? '' : this.game.hint();
-            o.querySelector('.b-e')?.classList.toggle('hidden', !this.game.touchBlast);
-            const mainBtn = o.querySelector('.b-main'), mainText = this.game.touchMain || 'Jump';
-            if (mainBtn && mainBtn.textContent !== mainText) mainBtn.textContent = mainText;
+            this.applyTouchLayout?.();
             o.querySelector('.mpg-board').innerHTML = this.standings().slice(0, 6).map((row, i) =>
-                `<li class="${row.id === this.user.id ? 'me' : ''}"><i style="background:${row.color}"></i><span>${i + 1}. ${esc(row.n)}</span><b>${row.s.toLocaleString()}</b></li>`).join('');
+                `<li class="${row.id === this.user.id ? 'me' : ''}"><i style="background:${row.color}"></i><span>${i + 1}. ${esc(row.n)}</span><b>${this.valueText(row)}</b></li>`).join('');
         }
 
         updateMeter() {
@@ -740,7 +762,7 @@
             panel.innerHTML = `<div class="mpg-results-card">
                 <small>Match over</small>
                 <h2>${winner ? `${esc(winner.n)} wins!` : 'Game over'}</h2>
-                <ol>${rows.map((row, i) => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${i + 1}</span><i style="background:${row.color}"></i><strong>${esc(row.n)}</strong><b>${row.s.toLocaleString()} pts</b><em>${this.rewards ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
+                <ol>${rows.map((row, i) => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${i + 1}</span><i style="background:${row.color}"></i><strong>${esc(row.n)}</strong><b>${this.valueText(row)}</b><em>${this.rewards ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
                 <p>${this.rewards ? 'Coins have been added to your multiplayer wallet.' : 'Tallying coin rewards…'}</p>
                 <button type="button" class="mpg-exit">Back to lobby</button>
             </div>`;
@@ -848,9 +870,9 @@
 
     // Accepts either a colour string or a player-like object ({ color, cos }).
     function who(p) {
-        if (typeof p === 'string') return { color: p, skin: null, hat: '', acc: '', pet: '' };
+        if (typeof p === 'string') return { color: p, skin: null, hat: '', acc: '' };
         const cos = p?.cos || {};
-        return { color: p?.color || '#94a3b8', skin: SKINS[cos.skin] || null, hat: LEGACY_HATS[cos.hat] || cos.hat || '', acc: cos.acc || '', pet: petEmoji(cos.pet) };
+        return { color: p?.color || '#94a3b8', skin: SKINS[cos.skin] || null, hat: LEGACY_HATS[cos.hat] || cos.hat || '', acc: cos.acc || '' };
     }
 
     function drawHat(ctx, hat, cx, top, r, tilt = 0) {
@@ -969,7 +991,6 @@
         if (c.acc === 'acc_bowtie') { ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.moveTo(cx, y + 21 + bob); ctx.lineTo(cx - 7, y + 17 + bob); ctx.lineTo(cx - 7, y + 25 + bob); ctx.moveTo(cx, y + 21 + bob); ctx.lineTo(cx + 7, y + 17 + bob); ctx.lineTo(cx + 7, y + 25 + bob); ctx.fill(); }
         if (c.acc === 'acc_sparkles') { ctx.font = '10px serif'; ctx.textAlign = 'center'; for (let i = 0; i < 3; i++) { const a = time * 2 + i * 2.1; ctx.globalAlpha = 0.6 + Math.sin(time * 6 + i) * 0.4; ctx.fillText('✨', cx + Math.cos(a) * (w * 0.9), y + 22 + Math.sin(a) * 18); } ctx.globalAlpha = alpha; }
         drawHat(ctx, c.hat, cx, y + 3 + bob, 10, face * 0.08);
-        drawPet(ctx, c.pet, cx - face * (w * 0.5 + 18), y + h - 8, 18, time);
         ctx.restore();
     }
 
@@ -1000,7 +1021,6 @@
         if (c.acc === 'acc_monocle') { ctx.strokeStyle = '#facc15'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(r * 0.55, r * 0.2, r * 0.18, 0, TAU); ctx.stroke(); }
         ctx.restore();
         if (c.hat) drawHat(ctx, c.hat, 0, -r * 0.55, r * 0.55);
-        drawPet(ctx, c.pet, -r * 2, r * 1.2, r * 1.1, time);
         ctx.restore();
     }
 

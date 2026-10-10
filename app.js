@@ -479,7 +479,7 @@
         constructor() {
             this.routes = [
                 "dashboard", "gpa", "grade-scenarios", "planner", "calendar", "schedule", "flashcard",
-                "analytics", "leaderboard", "exam-arcade", "multiplayer", "shop", "importer", "settings", "appearance", "sound", "admin"
+                "analytics", "leaderboard", "exam-arcade", "multiplayer", "shop", "importer", "settings", "appearance", "sound", "admin", "about", "friends"
             ];
             this.activeRoute = "dashboard";
         }
@@ -1145,6 +1145,7 @@
                 if (route === 'analytics') this.renderGradeProgress();
                 if (route === 'leaderboard') this.refreshStudyLeaderboard(this.studyLeaderboardPeriod || 'daily');
                 if (route === 'shop') this.renderMultiplayerProfile(true);
+                if (route === 'friends') this.loadFriends();
                 if (route === 'admin') this.loadAdminList();
                 if (route === 'multiplayer') {
                     this.renderHostedGameDecks();
@@ -2048,13 +2049,13 @@
         }
 
         profileCosmetics(profile) {
-            return { skin: profile?.equipped_skin || '', hat: profile?.equipped_hat || '', acc: profile?.equipped_accessory || '', pet: profile?.equipped_pet || '' };
+            return { skin: profile?.equipped_skin || '', hat: profile?.equipped_hat || '', acc: profile?.equipped_accessory || '' };
         }
 
         // Draws the same animated-game character to a cached image so lobby avatars match in-game characters.
         multiplayerAvatarMarkup(cos = {}, large = false) {
             const util = window.StudBudArcade?.util;
-            const key = [cos.skin, cos.hat, cos.acc, cos.pet, cos.color].join('|');
+            const key = [cos.skin, cos.hat, cos.acc, cos.color].join('|');
             this.characterCache = this.characterCache || new Map();
             let url = this.characterCache.get(key);
             if (!url && util) {
@@ -2064,7 +2065,7 @@
                 const ctx = canvas.getContext('2d');
                 ctx.scale(3, 3);
                 ctx.imageSmoothingQuality = 'high';
-                util.drawFigureSide(ctx, { color: cos.color || '#34d399', cos }, 29, 26, 26, 42, 1, 0, false);
+                util.drawFigureSide(ctx, { color: cos.color || '#34d399', cos }, 27, 25, 26, 42, 1, 0, false);
                 url = canvas.toDataURL('image/png');
                 this.characterCache.set(key, url);
             }
@@ -2075,41 +2076,38 @@
             const games = window.StudBudCommunityGames;
             const owned = profile.owned_items || [];
             const tab = this.shopTab || 'boxes';
-            const catalog = games.catalog.filter(item => !item.legacy);
-            const equippedBy = { skin: profile.equipped_skin, hat: profile.equipped_hat, accessory: profile.equipped_accessory, pet: profile.equipped_pet, palette: profile.equipped_palette };
-            const tabs = [['boxes', 'Mystery boxes'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['pet', 'Collection'], ['palette', 'Colors']];
-            const slotKey = { skin: 'skin', hat: 'hat', accessory: 'acc', pet: 'pet' };
+            const catalog = games.catalog.filter(item => !item.legacy && item.type !== 'pet');
+            const equippedBy = { skin: profile.equipped_skin, hat: profile.equipped_hat, accessory: profile.equipped_accessory, palette: profile.equipped_palette };
+            const tabs = [['boxes', 'Mystery boxes'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['palette', 'Colors']];
+            const slotKey = { skin: 'skin', hat: 'hat', accessory: 'acc' };
             const itemCard = item => {
                 const has = owned.includes(item.id);
                 const equipped = equippedBy[item.type] === item.id;
                 let preview;
                 if (item.type === 'palette') preview = `<span class="shop-palette ${this.escapeHTML(item.color)}"></span>`;
-                else if (item.type === 'pet' && !has) preview = '<span class="player-avatar char-avatar pet-locked"><b>?</b></span>';
-                else preview = this.multiplayerAvatarMarkup({ skin: '', hat: '', acc: '', pet: '', [slotKey[item.type]]: item.id });
+                else preview = this.multiplayerAvatarMarkup({ skin: '', hat: '', acc: '', [slotKey[item.type]]: item.id });
                 const price = item.price == null ? '' : ` · ${item.price} <i class="fas fa-coins"></i>`;
                 let button;
-                if (has) button = `<button type="button" class="secondary-btn" data-action="multiplayer-equip" data-id="${this.escapeHTML(item.id)}" ${equipped ? 'disabled' : ''}>${equipped ? 'Equipped' : 'Equip'}</button>`;
+                if (has && equipped && equippedBy[item.type] !== undefined) button = `<button type="button" class="ghost-btn" data-action="multiplayer-unequip" data-slot="${item.type}">Unequip</button>`;
+                else if (has) button = `<button type="button" class="secondary-btn" data-action="multiplayer-equip" data-id="${this.escapeHTML(item.id)}">Equip</button>`;
                 else if (item.price == null) button = '<button type="button" class="secondary-btn" disabled>Box only</button>';
                 else button = `<button type="button" class="secondary-btn" data-action="multiplayer-buy" data-id="${this.escapeHTML(item.id)}" ${profile.coins < item.price ? 'disabled' : ''}>Buy${price}</button>`;
-                const name = item.type === 'pet' && !has ? 'Unknown pet' : item.name;
+                const name = item.name;
                 return `<article class="multiplayer-shop-item rarity-${item.rarity}${equipped ? ' equipped' : ''}">${preview}<div><strong>${this.escapeHTML(name)}</strong><small class="rarity-label">${item.rarity}</small></div>${button}</article>`;
             };
             let body;
             if (tab === 'boxes') {
                 const drop = this.lastDrop;
-                const dropItem = drop && games.catalog.find(entry => entry.id === drop.unlocked_item);
-                body = `${dropItem ? `<div class="box-reveal rarity-${this.escapeHTML(drop.rarity)}">${this.multiplayerAvatarMarkup({ skin: '', hat: '', acc: '', pet: '', [slotKey[dropItem.type]]: dropItem.id }, true)}<div><small>${this.escapeHTML(drop.rarity)}</small><strong>${this.escapeHTML(dropItem.name)}</strong><span>${drop.duplicate ? `Duplicate! Refunded ${Number(drop.refund)} coins.` : 'New item added to your collection!'}</span></div></div>` : ''}
+                const dropItem = drop && games.catalog.find(entry => entry.id === drop.unlocked_item && entry.type !== 'pet');
+                body = `${dropItem ? `<div class="box-reveal rarity-${this.escapeHTML(drop.rarity)}">${this.multiplayerAvatarMarkup({ skin: '', hat: '', acc: '', [slotKey[dropItem.type]]: dropItem.id }, true)}<div><small>${this.escapeHTML(drop.rarity)}</small><strong>${this.escapeHTML(dropItem.name)}</strong><span>${drop.duplicate ? `Duplicate! Refunded ${Number(drop.refund)} coins.` : 'New item added to your collection!'}</span></div></div>` : ''}
                     ${games.constructor.boxes.map(box => `<article class="multiplayer-shop-item box-card box-${box.id}"><span class="mystery-capsule"><i class="fas ${box.icon}"></i></span><div><strong>${box.name}</strong><small>${box.odds}</small></div><button type="button" class="secondary-btn" data-action="multiplayer-mystery" data-id="${box.id}" ${profile.coins < box.price ? 'disabled' : ''}>Open · ${box.price} <i class="fas fa-coins"></i></button></article>`).join('')}
-                    <p class="settings-hint">Boxes can contain characters, hats, accessories, colors and pets. Duplicates refund coins.</p>`;
-            } else {
-                const allItems = catalog.filter(item => item.type === tab);
-                const items = tab === 'pet' ? allItems.filter(item => owned.includes(item.id)) : allItems;
-                const hiddenPets = allItems.length - items.length;
-                const count = items.filter(item => owned.includes(item.id)).length;
-                const remove = slotKey[tab] ? `<button type="button" class="ghost-btn shop-unequip" data-action="multiplayer-unequip" data-slot="${tab === 'accessory' ? 'accessory' : tab}">Remove</button>` : '';
-                const more = hiddenPets > 0 ? `<article class="multiplayer-shop-item"><span class="player-avatar char-avatar pet-locked"><b>?</b></span><div><strong>${hiddenPets} undiscovered</strong><small class="rarity-label">Open mystery boxes to find them</small></div></article>` : '';
-                body = `<h4 class="shop-category-title">${count} / ${allItems.length} collected ${remove}</h4>${items.map(itemCard).join('')}${more}`;
-            }
+                    <p class="settings-hint">Boxes can contain characters, hats, accessories,                     colors. Duplicates refund coins.</p>`;
+                                } else {
+                                    const items = catalog.filter(item => item.type === tab);
+                                    const count = items.filter(item => owned.includes(item.id)).length;
+                                    const remove = slotKey[tab] ? `<button type="button" class="ghost-btn shop-unequip" data-action="multiplayer-unequip" data-slot="${tab === 'accessory' ? 'accessory' : tab}">Remove</button>` : '';
+                                    body = `<h4 class="shop-category-title">${count} / ${items.length} collected ${remove}</h4>${items.map(itemCard).join('')}`;
+                                }
             document.getElementById('multiplayer-shop-items').innerHTML = `
                 <div class="shop-tabs" role="tablist">${tabs.map(([id, label]) => `<button type="button" class="shop-tab${tab === id ? ' selected' : ''}" role="tab" aria-selected="${tab === id}" data-shop-tab="${id}">${label}</button>`).join('')}</div>
                 <div class="shop-grid">${body}</div>`;
@@ -2260,6 +2258,39 @@
             window.NexusApp.isAdmin = this.isAdmin;
             document.getElementById('admin-nav-item')?.classList.toggle('hidden', !this.isAdmin);
             this.refreshUsernameCard();
+            this.loadPublicProfileCard();
+        }
+
+        async loadPublicProfileCard() {
+            if (!document.getElementById('public-bio') || !window.StudBudCloud?.user) return;
+            try {
+                const p = await window.StudBudCommunityGames.friendCall('studbud_get_public_profile');
+                document.getElementById('public-bio').value = p.bio || '';
+                document.getElementById('public-subject').value = p.favorite_subject || '';
+                document.getElementById('public-grade').value = p.grade_level || '';
+                document.getElementById('public-goal').value = p.study_goal || '';
+                document.getElementById('public-show-stats').checked = p.show_stats !== false;
+            } catch (error) {
+                const status = document.getElementById('public-profile-status');
+                if (status) status.textContent = 'Profile sharing is unavailable right now. Re-run supabase-setup.sql in Supabase.';
+            }
+        }
+
+        async savePublicProfile() {
+            const status = document.getElementById('public-profile-status');
+            status.textContent = 'Saving…';
+            try {
+                await window.StudBudCommunityGames.friendCall('studbud_set_public_profile', {
+                    p_bio: document.getElementById('public-bio').value,
+                    p_favorite_subject: document.getElementById('public-subject').value,
+                    p_grade_level: document.getElementById('public-grade').value,
+                    p_study_goal: document.getElementById('public-goal').value,
+                    p_show_stats: document.getElementById('public-show-stats').checked
+                });
+                status.textContent = 'Saved. Your friends will see this on your profile.';
+            } catch (error) {
+                status.textContent = this.friendlyErrorMessage(error, 'Could not save your profile.');
+            }
         }
 
         async loadAdminList() {
@@ -2402,7 +2433,7 @@
                 duel: ['King of the Hill', 'King of the Hill: hold the glowing zone to score and knock rivals off.'],
                 crypto: ['Crypto Trading', 'Trade six assets and answer questions for cash.'],
                 shooter: ['Arena Shooter', 'Twin-stick arena: aim with the mouse, dash, blast drone waves and rival pilots.'],
-                sports: ['Team Football', 'Blue vs red: players are split into two teams. Run to the far endzone and tackle rivals.']
+                sports: ['Soccer', 'Blue vs red: players are split into two teams. Dribble the ball, spend energy on power kicks and score in the rival goal.']
             };
             const [title, description] = labels[mode] || labels.skyline;
             document.getElementById('multiplayer-preview-title').textContent = title;
@@ -2577,7 +2608,7 @@
                     if (previewActive && !this.drawLivePreview(document.getElementById('multiplayer-game-canvas'), this.selectedMultiplayerMode, now)) this.drawMultiplayerScene(
                         document.getElementById('multiplayer-game-canvas'),
                         this.selectedMultiplayerMode,
-                        [{ nickname: this.multiplayerDisplayName(), score: 280, skin: this.multiplayerProfile?.equipped_skin, hat: this.multiplayerProfile?.equipped_hat, accessory: this.multiplayerProfile?.equipped_accessory, pet: this.multiplayerProfile?.equipped_pet, streak: 2 }, { nickname: 'Rival', score: 140, skin: 'skin_robot', streak: 1 }],
+                        [{ nickname: this.multiplayerDisplayName(), score: 280, skin: this.multiplayerProfile?.equipped_skin, hat: this.multiplayerProfile?.equipped_hat, accessory: this.multiplayerProfile?.equipped_accessory, streak: 2 }, { nickname: 'Rival', score: 140, skin: 'skin_robot', streak: 1 }],
                         now / 1000,
                         true
                     );
@@ -2689,12 +2720,12 @@
                 bots.forEach(b => { b.r = 16; b.strafe = 1; this.placeShooterBot(game, b); });
             } else if (mode === 'sports') {
                 bots.forEach(b => {
-                    b.team = game.teamOf(b.id); b.dir = b.team === 0 ? 1 : -1; b.r = 15; b.dash = 0; b.dashCd = 1; b.cp = 0; b.dashA = 0;
+                    b.team = game.teamOf(b.id); b.dir = b.team === 0 ? 1 : -1; b.r = 15; b.kickCd = 0; b.turbo = 0; b.stun = 0;
                     const mates = game.teamIds.filter(id => game.teamOf(id) === b.team);
                     b.lane = game.H * (Math.max(0, mates.indexOf(b.id)) + 1) / (mates.length + 1);
-                    b.x = (b.dir > 0 ? 130 : game.W - 130) + b.dir * (500 + Math.random() * 500); b.y = b.lane;
+                    b.home = [game.W * (b.dir > 0 ? 0.3 : 0.7), b.lane];
+                    b.x = b.home[0] + (Math.random() - 0.5) * 200; b.y = b.lane;
                 });
-                demo.onEmit = ev => { if (ev.k === 'tk') { const t = bots.find(b => b.id === ev.to); if (t) this.resetSportsBot(game, t, true); } };
             }
             return bots;
         }
@@ -2866,63 +2897,65 @@
             if (game.drones.filter(o => Math.hypot(o.x - me.x, o.y - me.y) < 250).length >= 3) tap.add('KeyE');
         }
 
-        resetSportsBot(game, b, keepCp) {
-            b.x = (b.dir > 0 ? 130 : game.W - 130) + (keepCp ? b.dir * b.cp : 0); b.y = b.lane; b.vx = b.vy = 0;
-            if (keepCp) b.stun = 1.3; else b.cp = 0;
-        }
-
+        // Soccer preview: bots chase the ball with their team's closest player, dribble it toward the rival goal and shoot when close.
         stepSportsBots(demo, dt) {
-            const U = window.StudBudArcade.util, game = demo.game, me = game.me, now = performance.now();
+            const U = window.StudBudArcade.util, game = demo.game, me = game.me, ball = game.ball, now = performance.now();
+            const mates = demo.bots.map(b => ({ x: b.x, y: b.y, team: b.team, id: b.id }));
+            mates.push({ x: me.x, y: me.y, team: game.myTeam, id: demo.meId });
             for (const b of demo.bots) {
-                b.seen = now; b.ex = { b: 0 };
-                b.stun = Math.max(0, b.stun - dt); b.dashCd -= dt; b.dash = Math.max(0, b.dash - dt);
-                if (b.stun > 0) { b.vx *= 0.8; b.vy *= 0.8; b.a = 0; continue; }
-                const foes = demo.bots.filter(o => o.team !== b.team);
-                if (game.myTeam !== b.team) foes.push({ x: me.x, y: me.y, id: demo.meId, isMe: true });
-                let tgt = null, bd = 1e9;
-                for (const o of foes) {
-                    if ((o.x - b.x) * b.dir < -40) continue;
-                    const d = Math.hypot(o.x - b.x, o.y - b.y);
-                    if (d < bd) { bd = d; tgt = o; }
+                b.seen = now; b.ex = { t: 0 };
+                b.kickCd -= dt;
+                const own = mates.filter(o => o.team === b.team);
+                const closest = own.reduce((best, o) => Math.hypot(o.x - ball.x, o.y - ball.y) < Math.hypot(best.x - ball.x, best.y - ball.y) ? o : best, own[0]);
+                const chaser = closest.id === b.id || Math.hypot(b.x - ball.x, b.y - ball.y) < 260;
+                const goalX = b.dir > 0 ? game.W : 0, goalY = game.H / 2;
+                let tx, ty, speed = 255 * 1.1;
+                if (game.freeze > 0) { tx = b.home[0]; ty = b.lane; }
+                else if (chaser) {
+                    const ax = goalX - ball.x, ay = goalY - ball.y, al = Math.hypot(ax, ay) || 1;
+                    tx = ball.x - (ax / al) * 34; ty = ball.y - (ay / al) * 34; speed = 255 * 1.3;
+                } else {
+                    tx = U.clamp(ball.x - b.dir * 380, 200, game.W - 200); ty = U.clamp(b.lane + (ball.y - game.H / 2) * 0.3, 120, game.H - 120);
                 }
-                let ty = (b.lane - b.y) * 0.8, tx = b.dir * 255 * 1.25;
-                if (tgt && bd < 220) { ty = (b.y >= tgt.y ? 1 : -1) * 240; if (b.y < 120) ty = 240; if (b.y > game.H - 120) ty = -240; }
-                if (b.dash > 0) { tx = Math.cos(b.dashA) * 620; ty = Math.sin(b.dashA) * 620; }
-                else if (tgt && bd < 125 && b.dashCd <= 0) { b.dash = 0.22; b.dashCd = 1.4 + Math.random(); b.dashA = Math.atan2(tgt.y - b.y, tgt.x - b.x); }
+                const dx = tx - b.x, dy = ty - b.y, dl = Math.hypot(dx, dy) || 1, k = dl > 14 ? 1 : dl / 14;
                 const acc = 3000 * dt;
-                b.vx += U.clamp(tx - b.vx, -acc, acc); b.vy += U.clamp(ty - b.vy, -acc, acc);
+                b.vx += U.clamp(dx / dl * speed * k - b.vx, -acc, acc); b.vy += U.clamp(dy / dl * speed * k - b.vy, -acc, acc);
                 b.x = U.clamp(b.x + b.vx * dt, b.r, game.W - b.r); b.y = U.clamp(b.y + b.vy * dt, b.r, game.H - b.r);
                 b.f = Math.atan2(b.vy, b.vx); b.a = 1; b.tx = b.x; b.ty = b.y;
-                if (b.dash > 0.08) {
-                    for (const o of foes) {
-                        if (Math.hypot(o.x - b.x, o.y - b.y) > 34) continue;
-                        if (o.isMe) game.onEvent({ k: 'tk', to: demo.meId }, b); else this.resetSportsBot(game, o, true);
-                        b.dash = 0; break;
-                    }
+                if (game.freeze > 0) continue;
+                const bx = ball.x - b.x, by = ball.y - b.y, bd = Math.hypot(bx, by), min = b.r + ball.r;
+                if (bd < min) {
+                    const nx = bx / (bd || 1), ny = by / (bd || 1);
+                    ball.x = b.x + nx * min; ball.y = b.y + ny * min;
+                    const ga = Math.atan2(goalY + (Math.random() - 0.5) * 180 - ball.y, goalX - ball.x);
+                    const shoot = b.kickCd <= 0 && Math.abs(goalX - ball.x) < 700;
+                    const sp = shoot ? 900 : 330;
+                    ball.vx = Math.cos(ga) * sp; ball.vy = Math.sin(ga) * sp;
+                    if (shoot) b.kickCd = 1.2;
+                    game.lastTouch = b.id;
                 }
-                const forward = Math.max(0, b.dir > 0 ? b.x - 130 : game.W - 130 - b.x);
-                b.cp = Math.max(b.cp, Math.floor(forward / 400) * 400);
-                if (b.dir > 0 ? b.x > game.W - 190 : b.x < 190) { game.onEvent({ k: 'td' }, b); this.resetSportsBot(game, b, false); }
+            }
+            // a goal the demo player didn't score is credited to the bot that touched the ball last
+            if (game.unclaimed !== null && game.unclaimed !== undefined) {
+                const scorer = demo.bots.find(b => b.id === game.lastTouch) || demo.bots[0];
+                game.onEvent({ k: 'gl', team: game.unclaimed }, scorer);
             }
         }
 
         driveSports(demo, hold, tap) {
-            const game = demo.game, me = game.me, dir = game.dir;
-            let tgt = null, bd = 1e9;
-            for (const b of demo.bots) {
-                if (b.team === game.myTeam || (b.x - me.x) * dir < -30) continue;
-                const d = Math.hypot(b.x - me.x, b.y - me.y);
-                if (d < bd) { bd = d; tgt = b; }
-            }
+            const game = demo.game, me = game.me, ball = game.ball, dir = game.dir;
+            const goalX = dir > 0 ? game.W : 0, goalY = game.H / 2;
             hold.add('ShiftLeft');
-            if (tgt && bd < 120 && game.dashCd <= 0) {
-                hold.add(tgt.x > me.x ? 'KeyD' : 'KeyA'); hold.add(tgt.y > me.y ? 'KeyS' : 'KeyW');
-                tap.add('Space');
-                return;
-            }
-            hold.add(dir > 0 ? 'KeyD' : 'KeyA');
-            if (tgt && bd < 230) hold.add(me.y >= tgt.y ? 'KeyS' : 'KeyW');
-            if (me.y < 110) hold.add('KeyS'); else if (me.y > game.H - 110) hold.add('KeyW');
+            const ax = goalX - ball.x, ay = goalY - ball.y, al = Math.hypot(ax, ay) || 1;
+            const dBall = Math.hypot(ball.x - me.x, ball.y - me.y);
+            // line up behind the ball so walking into it pushes it toward the goal
+            let tx = ball.x - (ax / al) * 36, ty = ball.y - (ay / al) * 36;
+            if (dBall < 120 && (ball.x - me.x) * dir > 0) { tx = ball.x; ty = ball.y; }
+            if (game.freeze > 0) { tx = game.W * (dir > 0 ? 0.3 : 0.7); ty = game.spawnY(); }
+            const dx = tx - me.x, dy = ty - me.y;
+            if (Math.abs(dx) > 8) hold.add(dx > 0 ? 'KeyD' : 'KeyA');
+            if (Math.abs(dy) > 8) hold.add(dy > 0 ? 'KeyS' : 'KeyW');
+            if (dBall < 52 && Math.abs(goalX - ball.x) < 760 && Math.abs(ball.y - goalY) < 260 && (ball.x - me.x) * dir > 0) tap.add('Space');
         }
 
         // ---- City Escape autoplay ----
@@ -3450,23 +3483,18 @@
                     context.fillRect(stripe * 112, 66, 112, 294);
                 }
                 context.strokeStyle = 'rgba(246,255,241,.65)'; context.lineWidth = 3;
-                for (let yard = 0; yard <= 10; yard++) {
-                    const x = yard * 90 - ((phase * 20) % 90);
-                    context.beginPath(); context.moveTo(x, 76); context.lineTo(x, 350); context.stroke();
-                    if (yard % 2 === 0) {
-                        context.fillStyle = 'rgba(245,255,240,.76)'; context.font = '13px system-ui';
-                        context.fillText(`${Math.abs(50 - yard * 10)}`, x + 5, 107);
-                    }
-                }
-                context.fillStyle = '#ffd56c'; context.fillRect(12, 70, 8, 282); context.fillRect(width - 22, 70, 8, 282);
-                context.fillStyle = '#fff3c1'; context.font = 'bold 19px system-ui'; context.textAlign = 'center'; context.fillText('ENDZONE DRIVE', width / 2, 43); context.textAlign = 'left';
-                const yards = Number(players[0]?.yards || 0);
-                const ballX = 90 + (yards / 100) * 660;
-                context.fillStyle = '#c77747'; context.beginPath(); context.ellipse(ballX, 225, 13, 8, -0.3, 0, Math.PI * 2); context.fill();
-                context.fillStyle = '#fff'; context.fillRect(ballX - 5, 222, 1.5, 6); context.fillRect(ballX + 1, 222, 1.5, 6);
-                this.drawCharacter(context, ballX - 25, 222, accent, 0.93, time, players[0]?.last_action === 'run', players[0]?.accessory);
-                this.drawCharacter(context, Math.min(width - 95, ballX + 86), 225, '#f78278', 0.88, time + 1, true, players[1]?.accessory);
-                context.fillStyle = '#f4f8e8'; context.font = 'bold 15px system-ui'; context.fillText(`${yards} YD LINE · ${Number(players[0]?.touchdowns || 0)} TD`, 25, height - 18);
+                context.beginPath(); context.moveTo(width / 2, 70); context.lineTo(width / 2, 352); context.stroke();
+                context.beginPath(); context.arc(width / 2, 211, 44, 0, Math.PI * 2); context.stroke();
+                context.strokeRect(12, 120, 70, 182); context.strokeRect(width - 82, 120, 70, 182);
+                context.fillStyle = '#f4f8e8'; context.fillRect(8, 150, 6, 122); context.fillRect(width - 14, 150, 6, 122);
+                context.fillStyle = '#fff3c1'; context.font = 'bold 19px system-ui'; context.textAlign = 'center'; context.fillText('SOCCER', width / 2, 43); context.textAlign = 'left';
+                const goals = Number(players[0]?.touchdowns || 0);
+                const ballX = width / 2 + Math.sin(phase * 1.6) * 150;
+                this.drawCharacter(context, ballX - 40, 222, accent, 0.93, time, true, players[0]?.accessory);
+                this.drawCharacter(context, ballX + 70, 225, '#f78278', 0.88, time + 1, true, players[1]?.accessory);
+                context.fillStyle = '#fff'; context.beginPath(); context.arc(ballX, 238, 9, 0, Math.PI * 2); context.fill();
+                context.fillStyle = '#1e293b'; context.beginPath(); context.arc(ballX, 238, 3.5, 0, Math.PI * 2); context.fill();
+                context.fillStyle = '#f4f8e8'; context.font = 'bold 15px system-ui'; context.fillText(`${goals} GOAL${goals === 1 ? '' : 'S'}`, 25, height - 18);
             } else {
                 const runner = players[0] || { score: 280, distance: 5 };
                 const mapLength = 36;
@@ -3551,7 +3579,7 @@
             const sceneLabel = {
                 skyline: 'ROOFTOP DISTRICT', river: 'RIVER HAUL', market: 'BAZAAR RUN',
                 miner: 'CRYSTAL CAVERN', duel: 'RIVAL CLIMB', crypto: 'LIVE MARKET',
-                shooter: 'DRONE ASSAULT', sports: 'ENDZONE DRIVE'
+                shooter: 'DRONE ASSAULT', sports: 'SOCCER'
             };
             context.fillText(preview ? 'LIVE GAME PREVIEW' : (sceneLabel[mode] || 'LIVE MATCH'), 18, 28);
             context.shadowBlur = 0;
@@ -3794,8 +3822,7 @@
                 classic: 'Classic', rush: 'Rush', survival: 'Survival',
                 skyline: 'City Escape', river: 'River Fishing', market: 'Package Delivery',
                 miner: 'Crystal Mining', duel: 'King of the Hill',
-                crypto: 'Crypto Trading', shooter: 'Arena Shooter', sports: 'Team Football'
-            };
+                crypto: 'Crypto Trading', shooter: 'Arena Shooter', sports: 'Soccer'            };
             document.getElementById('hosted-room-title').textContent = `${room.deck_title} · ${modeNames[room.mode] || room.mode}`;
             const playerLimit = room.mode === 'duel' ? 8 : 16;
             const remainingSeconds = room.goal_type === 'time' && room.started_at
@@ -3806,13 +3833,13 @@
                     ? `${Math.round(Number(room.time_limit_seconds) / 60)} minute limit`
                     : `Time left · ${Math.floor(remainingSeconds / 60)}:${String(remainingSeconds % 60).padStart(2, '0')}`
                 : room.mode === 'skyline' ? '36-section rooftop route'
-                    : room.mode === 'sports' ? `${room.point_limit} touchdown${Number(room.point_limit) === 1 ? '' : 's'}`
+                    : room.mode === 'sports' ? `${room.point_limit} goal${Number(room.point_limit) === 1 ? '' : 's'}`
                     : room.mode === 'shooter' ? `${room.point_limit} drone targets`
                         : `${Number(room.point_limit).toLocaleString()} point goal`;
             document.getElementById('hosted-room-meta').textContent = `${goalLabel} · ${players.length} / ${playerLimit} players`;
             document.getElementById('hosted-room-code').textContent = room.room_code;
             const rankedPlayers = players.slice().sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
-            const avatarFor = player => this.multiplayerAvatarMarkup({ skin: player.skin, hat: player.hat, acc: player.accessory, pet: player.pet });
+            const avatarFor = player => this.multiplayerAvatarMarkup({ skin: player.skin, hat: player.hat, acc: player.accessory });
             document.getElementById('hosted-leaderboard-count').textContent = `${players.length} player${players.length === 1 ? '' : 's'}`;
             document.getElementById('hosted-leaderboard-title').textContent = room.status === 'waiting' ? 'Lobby' : 'Leaderboard';
             document.getElementById('hosted-room-players').innerHTML = rankedPlayers
@@ -3822,7 +3849,7 @@
                     if (room.status === 'waiting') {
                         return `<li class="leaderboard-player lobby-player${isSelf ? ' is-self' : ''}">${avatarFor(player)}<span class="leaderboard-name">${this.escapeHTML(player.nickname)}${isSelf ? ' · you' : ''}</span><span class="lobby-tag${player.id === room.host_id ? ' is-host' : ''}">${player.id === room.host_id ? '<i class="fas fa-crown"></i> Host' : 'Ready'}</span>${kick}</li>`;
                     }
-                    const progress = room.mode === 'sports' ? `${Number(player.touchdowns || 0)} TD · ${Number(player.yards || 0)} yd`
+                    const progress = room.mode === 'sports' ? `${Number(player.touchdowns || 0)} goals`
                         : room.mode === 'shooter' ? `${Number(player.targets || 0)} targets · wave ${Number(player.wave || 1)}`
                             : room.mode === 'skyline' ? `${Number(player.distance || 0)} / 36 nodes · checkpoint ${Number(player.checkpoint || 0)}`
                                 : room.mode === 'river' ? `${Number(player.loot || 0)} haul · ${player.last_action === 'deep_cast' ? 'deep cast' : 'shore'}`
@@ -3836,7 +3863,7 @@
             const sceneNames = {
                 skyline: 'City Escape', river: 'River Fishing', market: 'Package Delivery',
                 miner: 'Crystal Mining', duel: 'King of the Hill',
-                crypto: 'Crypto Trading', shooter: 'Arena Shooter', sports: 'Team Football',
+                crypto: 'Crypto Trading', shooter: 'Arena Shooter', sports: 'Soccer',
                 classic: 'Flashcard Face-off', rush: 'Rapid Recall', survival: 'Last Learner Standing'
             };
             document.getElementById('multiplayer-scene-name').textContent = sceneNames[room.mode] || 'Live match';
@@ -3856,7 +3883,7 @@
                     duel: ['Hold the glowing hill alone to score. Knock rivals off the stage.', 'A/D move · Space jump · click swing · Shift guard'],
                     crypto: ['Trade six assets, react to market news and build mining rigs.', '1-6 pick · B buy · S sell'],
                     shooter: ['Blast drones and other players in an arena.', 'WASD move · mouse aim · click fire · Q reload'],
-                    sports: ['Run to the far endzone and score. Players are split into blue and red teams; dash into rivals to tackle them.', 'WASD run · Shift sprint · Space dash-tackle · Q recharge']
+                    sports: ['Dribble the ball into the rival goal. Players are split into blue and red teams; sprinting and power kicks use energy.', 'WASD run · walk into the ball to dribble · Shift sprint · Space power kick · Q recharge']
                 }[room.mode] || ['Answer flashcard questions faster than everyone else.', 'Answer correctly to score points.'];
                 lobbyInfo.innerHTML = `<div class="lobby-mode"><strong>${this.escapeHTML(modeNames[room.mode] || 'Live game')}</strong><span>${this.escapeHTML(goalLabel)} · ${Number(room.state?.question_reward) || 20} coins per correct answer</span></div>
                     <p>${this.escapeHTML(info[0])}</p>
@@ -4154,6 +4181,196 @@
             });
         }
 
+        syncTutorialUI() {
+            const seen = Boolean(AppState.get('settings')?.tutorialSeen);
+            document.getElementById('tutorial-banner')?.classList.toggle('hidden', seen);
+            document.getElementById('tutorial-card')?.classList.toggle('hidden', !seen);
+        }
+
+        // ---- Friends ----
+        setFriendStatus(message, isError = false) {
+            const node = document.getElementById('friend-status');
+            if (!node) return;
+            node.textContent = message || '';
+            node.classList.toggle('error', Boolean(isError && message));
+        }
+
+        async loadFriends() {
+            const games = window.StudBudCommunityGames;
+            const lists = { friends: document.getElementById('friend-list'), incoming: document.getElementById('friend-incoming'), outgoing: document.getElementById('friend-outgoing') };
+            if (!lists.friends || !games) return;
+            try {
+                const data = await games.friendCall('studbud_friend_overview');
+                this.friendOverview = data;
+                const person = (row, buttons) => `<li class="friend-row"><span class="friend-initial" aria-hidden="true">${this.escapeHTML((row.username || 'S').charAt(0).toUpperCase())}</span><strong>${this.escapeHTML(row.username)}</strong><span class="friend-actions">${buttons}</span></li>`;
+                const attrs = row => `data-id="${this.escapeHTML(row.friendship_id)}" data-name="${this.escapeHTML(row.username)}"`;
+                lists.friends.innerHTML = data.friends.length
+                    ? data.friends.map(row => person(row, `<button type="button" class="secondary-btn" data-action="friend-view" data-id="${this.escapeHTML(row.user_id)}">Profile</button><button type="button" class="ghost-btn" data-action="friend-remove" ${attrs(row)}>Remove</button>`)).join('')
+                    : '<li class="empty-state">No friends yet. Send a request using a username above.</li>';
+                lists.incoming.innerHTML = data.incoming.length
+                    ? data.incoming.map(row => person(row, `<button type="button" class="primary-btn" data-action="friend-accept" ${attrs(row)}>Accept</button><button type="button" class="ghost-btn" data-action="friend-decline" ${attrs(row)}>Decline</button>`)).join('')
+                    : '<li class="empty-state">No pending requests.</li>';
+                lists.outgoing.innerHTML = data.outgoing.length
+                    ? data.outgoing.map(row => person(row, `<button type="button" class="ghost-btn" data-action="friend-remove" ${attrs(row)}>Cancel</button>`)).join('')
+                    : '<li class="empty-state">No requests sent.</li>';
+                const badge = document.getElementById('friend-nav-badge');
+                if (badge) { badge.textContent = String(data.incoming.length); badge.classList.toggle('hidden', !data.incoming.length); }
+                this.setFriendStatus('');
+            } catch (error) {
+                this.setFriendStatus(this.friendlyErrorMessage(error, 'Could not load your friends.'), true);
+            }
+        }
+
+        async sendFriendRequest(input) {
+            const name = input?.value.trim();
+            if (!name) return;
+            try {
+                const result = await window.StudBudCommunityGames.friendCall('studbud_friend_request', { p_username: name });
+                input.value = '';
+                this.setFriendStatus(result?.status === 'accepted' ? `You and ${name} are now friends!` : `Friend request sent to ${name}.`);
+                await this.loadFriends();
+            } catch (error) {
+                this.setFriendStatus(error.message || 'Could not send that request.', true);
+            }
+        }
+
+        async friendAction(action, id, name) {
+            const games = window.StudBudCommunityGames;
+            try {
+                if (action === 'friend-accept') await games.friendCall('studbud_friend_respond', { p_friendship_id: id, p_accept: true });
+                else if (action === 'friend-decline') await games.friendCall('studbud_friend_respond', { p_friendship_id: id, p_accept: false });
+                else await games.friendCall('studbud_friend_remove', { p_friendship_id: id });
+                this.setFriendStatus(action === 'friend-accept' ? `You are now friends with ${name}.` : '');
+                const panel = document.getElementById('friend-profile');
+                if (panel && action === 'friend-remove') { panel.classList.add('hidden'); panel.innerHTML = ''; }
+                await this.loadFriends();
+            } catch (error) {
+                this.setFriendStatus(error.message || 'That did not work.', true);
+            }
+        }
+
+        async showFriendProfile(userId) {
+            const panel = document.getElementById('friend-profile');
+            if (!panel) return;
+            try {
+                const p = await window.StudBudCommunityGames.friendCall('studbud_friend_profile', { p_user_id: userId });
+                const avatar = this.multiplayerAvatarMarkup({ skin: p.skin, hat: p.hat, acc: p.accessory }, true);
+                const stat = (label, value) => `<div class="friend-stat"><strong>${value}</strong><small>${label}</small></div>`;
+                const facts = [p.grade_level && `🎓 ${p.grade_level}`, p.favorite_subject && `⭐ ${p.favorite_subject}`, p.study_goal && `🎯 ${p.study_goal}`].filter(Boolean).map(f => `<span class="friend-chip">${this.escapeHTML(f)}</span>`).join('');
+                panel.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.username)}</h3><small>Friend</small></div><button type="button" class="ghost-btn" data-action="friend-profile-close" aria-label="Close profile"><i class="fas fa-xmark"></i></button></div>
+                    ${p.bio ? `<p class="friend-bio">${this.escapeHTML(p.bio)}</p>` : ''}${facts ? `<div class="friend-chips">${facts}</div>` : ''}
+                    <div class="friend-stats">${p.show_stats === false ? stat('Match wins', Number(p.wins) || 0) : `${stat('Studied today', this.formatStudyDuration(p.today_seconds))}${stat('This week', this.formatStudyDuration(p.week_seconds))}${stat('All time', this.formatStudyDuration(p.total_seconds))}${stat('Day streak', `${Number(p.streak_days) || 0} 🔥`)}${stat('Match wins', Number(p.wins) || 0)}`}</div>`;
+                panel.classList.remove('hidden');
+                panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } catch (error) {
+                this.setFriendStatus(error.message || 'Could not open that profile.', true);
+            }
+        }
+
+        tutorialSteps() {
+            const nav = view => `.nav-item[data-target="${view}-view"]`;
+            return [
+                { title: 'Welcome to StudBud', text: 'StudBud keeps your classes, grades, study plans, flashcards and games in one place. This quick tour shows what each part does. You can leave at any time.' },
+                { route: 'dashboard', sel: '#sidebar', title: 'Your menu', text: 'Everything lives in this menu. On a phone it sits along the top: swipe it sideways to see every page.' },
+                { route: 'dashboard', sel: '.priority-widget', title: 'Dashboard: what is due', text: 'See your most urgent assignments here, and use Add Assignment to put new work on your list.' },
+                { route: 'dashboard', sel: '.daily-study-card', title: 'Study streak', text: 'Study at least 15 minutes a day to keep your streak going. Your time shows up on the leaderboards.' },
+                { route: 'dashboard', sel: '#study-priority-list', title: 'Quizzes & tests', text: 'Add an upcoming quiz or test with the "Add quiz or test" button and StudBud suggests what to study today, how long, and the best way to do it.' },
+                { route: 'dashboard', sel: '.focus-sprint-widget', title: 'Focus sprint', text: 'Pick a quiz or test, choose anywhere from 5 to 90 minutes, and start a timer. Finished sprints are logged as study time.' },
+                { route: 'gpa', sel: '#add-course-btn', title: 'Classes & grades', text: 'Add your classes, set up grade categories and log assignment scores (decimals like 23.21/25 work). Your GPA updates automatically.' },
+                { route: 'grade-scenarios', sel: nav('grade-scenarios'), title: 'What-If Grades', text: 'Try out possible scores, or change an existing grade, to see how your class grade and GPA would change. Nothing here touches your real transcript.' },
+                { route: 'planner', sel: nav('planner'), title: 'Planner', text: 'Turns your due dates and study logs into a day-by-day plan.' },
+                { route: 'calendar', sel: nav('calendar'), title: 'Calendar', text: 'A month view of everything due. Click a day to add an event.' },
+                { route: 'schedule', sel: nav('schedule'), title: 'Class schedule', text: 'Set your daily bell schedule so the dashboard always shows today\'s classes.' },
+                { route: 'flashcard', sel: nav('flashcard'), title: 'Flashcards', text: 'Study decks with spaced repetition. Tap a card to flip it as many times as you like, then rate how well you knew it.' },
+                { route: 'importer', sel: nav('importer'), title: 'Import or create cards', text: 'Paste a list to import cards in bulk, or switch to manual mode to type them one at a time.' },
+                { route: 'analytics', sel: nav('analytics'), title: 'Analytics', text: 'Charts of your grades, study time and habits so you can spot what is working.' },
+                { route: 'leaderboard', sel: nav('leaderboard'), title: 'Leaderboards', text: 'Compare daily and weekly study time with other students. Banned accounts and accounts waiting on a username change are hidden.' },
+                { route: 'friends', sel: nav('friends'), title: 'Friends', text: 'Send a friend request by username, accept requests from others, and open a friend\'s profile to see their study time, streak and match wins.' },
+                { route: 'exam-arcade', sel: nav('exam-arcade'), title: 'Practice & Arcade', text: 'Practice exams and quick arcade games that use your own flashcards.' },
+                { route: 'multiplayer', sel: nav('multiplayer'), title: 'Multiplayer', text: 'Host or join a room and play City Escape, Soccer, King of the Hill and more. Every game has its own touch controls on phones, and a live leaderboard that ranks by what wins that game.' },
+                { route: 'shop', sel: nav('shop'), title: 'Shop & your character', text: 'Earn coins from games and open mystery boxes for characters, hats, accessories and colors. Equip items to wear them, and press Unequip on a worn item to take it off again.' },
+                { route: 'shop', sel: '#multiplayer-profile-button', title: 'Your profile button', text: 'This button in the top bar shows your character and name. Tap it any time to jump to your shop and character.' },
+                { route: 'about', sel: nav('about'), title: 'About', text: 'What StudBud is for, how to use it, and who to email with questions or suggestions.' },
+                { route: 'settings', sel: '#public-profile-card', title: 'Public profile', text: 'Write a short bio, favorite subject, grade and study goal for your friends to see, and choose whether to share your study stats.' },
+                { route: 'settings', sel: nav('settings'), title: 'Settings', text: 'Set your graduation year and target GPA, change your username (once a week), back up or restore your data, and replay this tutorial any time.' },
+                { route: 'appearance', sel: '#appearance-view .settings-tabs', title: 'Appearance', text: 'Switch between light and dark, pick a color theme you have unlocked, and turn on compact mode. The sun/moon button in the top bar toggles light and dark quickly.' },
+                { route: 'sound', sel: '#sound-view .settings-tabs', title: 'Sound & music', text: 'Adjust the volume of interface sounds, game effects and music separately, or mute everything.' },
+                { route: 'dashboard', title: 'You are all set!', text: 'Start by adding a class, then an assignment or quiz. Have fun and happy studying!' }
+            ];
+        }
+
+        startTutorial() {
+            this.endTutorialUI();
+            this.tutorialStep = 0;
+            const root = document.createElement('div');
+            root.id = 'tutorial-root';
+            root.innerHTML = '<div class="tutorial-spot" hidden></div><div class="tutorial-card" role="dialog" aria-modal="true" aria-labelledby="tutorial-title"><div class="tutorial-progress"><span class="tutorial-progress-bar"></span></div><small class="tutorial-count"></small><h3 id="tutorial-title"></h3><p class="tutorial-text"></p><div class="tutorial-buttons"><button type="button" class="text-btn" data-tour="skip">Skip</button><span class="tutorial-spacer"></span><button type="button" class="secondary-btn" data-tour="back">Back</button><button type="button" class="primary-btn" data-tour="next">Next</button></div></div>';
+            document.body.appendChild(root);
+            root.addEventListener('click', event => {
+                const button = event.target.closest('[data-tour]');
+                if (!button) return;
+                event.stopPropagation();
+                const kind = button.dataset.tour;
+                if (kind === 'skip') this.finishTutorial();
+                else if (kind === 'back') this.showTutorialStep(this.tutorialStep - 1);
+                else if (this.tutorialStep >= this.tutorialSteps().length - 1) this.finishTutorial();
+                else this.showTutorialStep(this.tutorialStep + 1);
+            });
+            this.tutorialKeys = event => { if (event.key === 'Escape') this.finishTutorial(); };
+            this.tutorialResize = () => this.positionTutorialSpot();
+            document.addEventListener('keydown', this.tutorialKeys);
+            window.addEventListener('resize', this.tutorialResize);
+            this.showTutorialStep(0);
+        }
+
+        showTutorialStep(index) {
+            const steps = this.tutorialSteps();
+            const root = document.getElementById('tutorial-root');
+            if (!root) return;
+            this.tutorialStep = Math.max(0, Math.min(steps.length - 1, index));
+            const step = steps[this.tutorialStep];
+            if (step.route) Router.navigate(step.route);
+            root.querySelector('.tutorial-count').textContent = `Step ${this.tutorialStep + 1} of ${steps.length}`;
+            root.querySelector('.tutorial-progress-bar').style.width = `${((this.tutorialStep + 1) / steps.length) * 100}%`;
+            root.querySelector('#tutorial-title').textContent = step.title;
+            root.querySelector('.tutorial-text').textContent = step.text;
+            root.querySelector('[data-tour="back"]').hidden = this.tutorialStep === 0;
+            root.querySelector('[data-tour="next"]').textContent = this.tutorialStep === steps.length - 1 ? 'Finish' : 'Next';
+            root.querySelector('[data-tour="skip"]').hidden = this.tutorialStep === steps.length - 1;
+            this.tutorialSel = step.sel || '';
+            setTimeout(() => {
+                const el = this.tutorialSel && document.querySelector(this.tutorialSel);
+                if (el && el.getBoundingClientRect().width) el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+                this.positionTutorialSpot();
+                setTimeout(() => this.positionTutorialSpot(), 350);
+            }, 80);
+            root.querySelector('[data-tour="next"]').focus({ preventScroll: true });
+        }
+
+        positionTutorialSpot() {
+            const spot = document.querySelector('#tutorial-root .tutorial-spot');
+            if (!spot) return;
+            const el = this.tutorialSel && document.querySelector(this.tutorialSel);
+            const rect = el?.getBoundingClientRect();
+            if (!rect || !rect.width || !rect.height) { spot.hidden = true; return; }
+            spot.hidden = false;
+            const pad = 6;
+            Object.assign(spot.style, { left: `${rect.left - pad}px`, top: `${rect.top - pad}px`, width: `${rect.width + pad * 2}px`, height: `${rect.height + pad * 2}px` });
+        }
+
+        endTutorialUI() {
+            document.getElementById('tutorial-root')?.remove();
+            if (this.tutorialKeys) document.removeEventListener('keydown', this.tutorialKeys);
+            if (this.tutorialResize) window.removeEventListener('resize', this.tutorialResize);
+            this.tutorialKeys = this.tutorialResize = null;
+        }
+
+        finishTutorial() {
+            this.endTutorialUI();
+            AppState.set('settings', { ...AppState.get('settings'), tutorialSeen: true });
+            this.syncTutorialUI();
+        }
+
         renderDashboard() {
             const courses = AppState.get('courses') || [];
             const calculator = window.GPACalculator;
@@ -4172,10 +4389,11 @@
                 const recommendations = this.getStudyRecommendations().slice(0, 5);
                 priorityList.innerHTML = recommendations.length ? recommendations.map((item, index) =>
                     `<article class="study-priority-item"><span class="priority-rank">${index + 1}</span><div><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(item.courseTitle)} · ${this.escapeHTML(item.kind || 'assignment')} · ${item.sessionMinutes} min today (about ${item.remainingStudyMinutes} min remaining)</span><small>${this.escapeHTML(item.reason)}</small><p><strong>Study method:</strong> ${this.escapeHTML(item.studyMethod)}</p><button class="secondary-btn" data-action="log-study" data-id="${this.escapeHTML(item.id)}"><i class="fas fa-stopwatch"></i> Log study session</button></div></article>`
-                ).join('') : '<p class="empty-state">Add an upcoming quiz or test to get study suggestions.</p>';
+                ).join('') : '<div class="empty-state empty-state-cta"><p>Add an upcoming quiz or test to get study suggestions.</p><button class="primary-btn" type="button" data-action="add-quiz"><i class="fas fa-plus"></i> Add a quiz or test</button></div>';
             }
             this.renderStudyProgress();
             this.renderDailyStudyHabit();
+            this.syncTutorialUI();
         }
 
         formatStudyDuration(seconds) {
@@ -4316,7 +4534,8 @@
             startButton.disabled = !select.value;
             this.updateFocusSprintDisplay();
             const status = document.getElementById('focus-sprint-status');
-            if (!recommendations.length) status.textContent = 'Add an upcoming quiz or test to start a focused study session.';
+            if (!recommendations.length) status.innerHTML = 'Add an upcoming quiz or test to start a focused study session. <button class="text-btn" type="button" data-action="add-quiz">Add one now</button>';
+            else if (!this.dashboardSprintInterval && status.querySelector('[data-action="add-quiz"]')) status.textContent = 'Pick a task, then press Start.';
         }
 
         updateFocusSprintDisplay() {
@@ -4419,7 +4638,7 @@
                 : 'Nothing to study today. Add an upcoming quiz or test, or some flashcards, to get a study time estimate.';
             classContainer.innerHTML = byClass.size ? Array.from(byClass.values()).map(item =>
                 `<article class="study-progress-item"><strong>${this.escapeHTML(item.title)}</strong><span>${item.minutes} min · ${item.items} task${item.items === 1 ? '' : 's'}</span></article>`
-            ).join('') : '<p class="empty-state">Add a quiz or test to create a study plan.</p>';
+            ).join('') : '<div class="empty-state empty-state-cta"><p>Add a quiz or test to create a study plan.</p><button class="primary-btn" type="button" data-action="add-quiz"><i class="fas fa-plus"></i> Add a quiz or test</button></div>';
         }
 
         setCloudChartControls() {
@@ -4699,6 +4918,19 @@
                     }
                     AppState.set('settings', { ...AppState.get('settings'), colorScheme: scheme });
                     this.applyAppearance();
+                } else if (action === 'add-quiz') {
+                    this.openAssignmentForm(null, '', '', '', 'quiz');
+                } else if (action === 'friend-accept' || action === 'friend-decline' || action === 'friend-remove') {
+                    await this.friendAction(action, target.dataset.id, target.dataset.name);
+                } else if (action === 'friend-view') {
+                    await this.showFriendProfile(target.dataset.id);
+                } else if (action === 'friend-profile-close') {
+                    const panel = document.getElementById('friend-profile');
+                    if (panel) { panel.classList.add('hidden'); panel.innerHTML = ''; }
+                } else if (action === 'start-tutorial') {
+                    this.startTutorial();
+                } else if (action === 'dismiss-tutorial') {
+                    this.finishTutorial();
                 } else if (action === 'log-study') {
                     this.openStudyLog(target.dataset.id);
                 } else if (action === 'publish-community-deck') {
@@ -4770,6 +5002,8 @@
                     await this.factoryReset();
                 } else if (id === 'change-username-btn') {
                     await this.submitUsernameChange(document.getElementById('settings-username').value, document.getElementById('username-status'));
+                } else if (id === 'save-public-profile-btn') {
+                    await this.savePublicProfile();
                 } else if (id === 'process-import-btn') {
                     this.processFlashcardImport();
                 } else if (target.dataset.importerMode) {
@@ -4886,6 +5120,11 @@
 
         async handleSubmit(event) {
             const form = event.target;
+            if (form.id === 'friend-add-form') {
+                event.preventDefault();
+                await this.sendFriendRequest(document.getElementById('friend-username'));
+                return;
+            }
             if (form.id === 'admin-search-form') {
                 event.preventDefault();
                 await this.loadAdminList();
@@ -5178,7 +5417,7 @@
             return item.status === 'completed' || Number(item.pointsEarned) > 0;
         }
 
-        openAssignmentForm(assignment, courseCode = '', dueDate = '', categoryId = '') {
+        openAssignmentForm(assignment, courseCode = '', dueDate = '', categoryId = '', kind = '') {
             const form = document.getElementById('assignment-form');
             form.reset();
             const graded = assignment ? this.isGradedItem(assignment) : false;
@@ -5189,7 +5428,7 @@
             document.getElementById('assignment-due-date').value = assignment ? assignment.dueDate || '' : (dueDate || '');
             document.getElementById('assignment-points').value = assignment ? assignment.pointsEarned ?? 0 : 0;
             document.getElementById('assignment-max-points').value = assignment ? assignment.maxPoints ?? 100 : 100;
-            document.getElementById('assignment-kind').value = assignment ? assignment.kind || 'assignment' : 'assignment';
+            document.getElementById('assignment-kind').value = assignment ? assignment.kind || 'assignment' : (kind || 'assignment');
             document.getElementById('assignment-size').value = assignment ? assignment.estimatedMinutes || 30 : 30;
             document.getElementById('assignment-importance').value = assignment ? assignment.importance || 3 : 3;
             form.querySelector(`input[name="assignment-state"][value="${graded ? 'graded' : 'todo'}"]`).checked = true;

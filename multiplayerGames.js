@@ -189,6 +189,8 @@
                     const lo = 90 + wd / 2, hi = W - 90 - wd / 2;
                     const blocked = c => (ny > -330 && c - wd / 2 < W / 2 + 150 && c + wd / 2 > W / 2 - 150) || solids.some(s => {
                         if (s.wall || s.ground) return false;
+                        // keep the space above a wall-jump shaft open, so a low roof can never trap you at the top of it
+                        if (s.wallJ && ny < s.y - 20 && ny > s.y - 330 && c - wd / 2 < s.x + s.w + 200 && c + wd / 2 > s.x - 200) return true;
                         const sl = s.mover && !s.vert ? s.bx - s.amp : s.x, sr = s.mover && !s.vert ? s.bx + s.w + s.amp : s.x + s.w;
                         if (!(c - wd / 2 < sr + 30 && c + wd / 2 > sl - 30)) return false;
                         // never overlap anything at the same height or leave less than a body of headroom
@@ -295,7 +297,7 @@
                         solids.push(m); this.movers.push(m);
                         y -= 105; cx = mx; d = flip(d);
                     }
-                    this.winds.push({ x: 60, y: y - 100, w: W - 120, h: y0 - y + 200, fx: (r() < 0.5 ? -1 : 1) * 200 });
+                    this.winds.push({ x: 60, y: y - 100, w: W - 120, h: y0 - y + 200, fx: (r() < 0.5 ? -1 : 1) * 90 });
                     ledge(d * 200, 105, 180);
                 },
                 // ---- Glass platforms: you pass up through them, so stacks and tight spots are climbable ----
@@ -559,7 +561,7 @@
                     this.boxes.push({ x: gx, y: base.y - 330, t: 0 });
                 },
                 wind: () => {
-                    const y0 = y, fx = (r() < 0.5 ? -1 : 1) * (150 + r() * 50);
+                    const y0 = y, fx = (r() < 0.5 ? -1 : 1) * (70 + r() * 30);
                     let d = dirNow();
                     for (let i = 0; i < 6; i++) { ledge(d * (150 + r() * 50), 100, 130); d = flip(d); }
                     this.winds.push({ x: 60, y: y - 160, w: W - 120, h: y0 - y + 200, fx });
@@ -611,7 +613,7 @@
                     let d = dirNow();
                     for (let i = 0; i < 3; i++) {
                         const p = ledge(d * 230, 110, 140);
-                        if (i === 1) this.winds.push({ x: p.x - 160, y: p.y - 200, w: 460, h: 260, fx: d * -170 });
+                        if (i === 1) this.winds.push({ x: p.x - 160, y: p.y - 200, w: 460, h: 260, fx: d * -80 });
                         const mx = clamp(cx + d * 270, 260, W - 260);
                         const m = { x: mx - 50, y: y - 80, w: 100, h: 18, bx: mx - 50, by: y - 80, amp: 90, speed: 1.1 + r() * 0.5, phase: r() * 6, dx: 0, dy: 0, mover: true, oneway: true, bi: biome() };
                         solids.push(m); this.movers.push(m);
@@ -711,7 +713,11 @@
             // any thin platform with another walkable one right under it becomes a jump-through glass platform, so tight spots never bonk you
             for (const q of solids) {
                 if (!q.thin || q.jt || q.mover || q.crumble || q.wall || q.ground) continue;
-                if (solids.some(p => p !== q && walkable(p) && !p.mover && p.y - q.y > 0 && p.y - q.y <= 150 && p.x < q.x + q.w - 10 && p.x + p.w > q.x + 10)) q.jt = true;
+                if (solids.some(p => {
+                    if (p === q || !walkable(p)) return false;
+                    const py = p.mover ? (p.by !== undefined ? p.by : p.y) : p.y, rx = p.mover && !p.vert ? p.amp || 0 : 0, ry = p.mover && p.vert ? p.amp || 0 : 0;
+                    return py + ry - q.y > 0 && py - ry - q.y <= 150 && p.x - rx < q.x + q.w - 10 && p.x + p.w + rx > q.x + 10;
+                })) q.jt = true;
             }
             // a slope's body must never leave a cramped slot over a platform: nudge that platform down so there is real headroom
             for (const sl of solids) {
@@ -730,9 +736,8 @@
                 if (!q.thin || q.roof || q.prop || q.wall || q.ground || q.mover || q === this.summit) continue;
                 if (solids.some(p => p !== q && (p.roof || p.prop) && !p.slope && q.x < p.x + p.w - 4 && q.x + q.w > p.x + 4 && q.y + q.h > p.y + 4 && q.y < p.y + p.h - 4)) solids.splice(i, 1);
             }
-            // Every platform you can stand on is jump-through with no side walls, so no ledge edge or underside can ever snag or trap you.
-            // Only roofs, props, slopes, wall-jump walls and the ground stay fully solid.
-            for (const p of solids) p.oneway = !!(p.jt || p.mover || p.pipe || ((p.thin || p.roof) && !p.prop && !p.slope && !p.wallJ && !p.wall && !p.ground));
+            // Only the blue arrow glass platforms can be jumped up through; everything else, including moving platforms, is solid from below.
+            for (const p of solids) p.oneway = !!p.jt;
             // purely visual rooftop clutter, placed only in free gaps (no props, spikes, springs, boxes, flags or ceilings)
             const rd = mulberry32((this.s.seed ^ 0x9e3779b1) >>> 0), DW = [80, 110, 80, 100, 110, 110, 90, 70, 100];
             for (const p of solids) {
@@ -838,8 +843,15 @@
                     if (overlap(R, p)) { this.wallDir = 1; break; }
                 }
             }
+            // Wind never overpowers a player: it is weaker in the air than a run, ignored while dashing, and nearly cancelled when pushing against it.
+            let windPush = 0;
             for (const wz of this.winds) {
-                if (overlap(me, wz)) me.x += wz.fx * dt;
+                if (overlap(me, wz) && Math.abs(wz.fx) > Math.abs(windPush)) windPush = wz.fx;
+            }
+            if (windPush && this.dash <= 0) {
+                const inputAx = this.finished ? 0 : s.axis().x;
+                const against = inputAx && Math.sign(inputAx) === -Math.sign(windPush);
+                me.x += windPush * dt * (me.onGround ? 0.7 : 1.15) * (against ? 0.75 : 1);
             }
 
             const ax = this.finished || exhausted ? 0 : s.axis().x;
@@ -941,6 +953,7 @@
         }
 
         goalText() { const last = this.checkpoints.length - 1; return `${this.cp.id ? `Checkpoint ${this.cp.id}/${last}` : 'Start'} · ${Math.round(this.maxH / 40)}m / ${Math.round(this.summitH / 40)}m · ${SKY_BIOMES[Math.min(3, Math.floor(this.maxH / this.summitH * 4))].name}`; }
+        touchLayout() { return { stick: true, buttons: [{ k: 'Space', label: 'Jump', cls: 'main' }, { k: 'ShiftLeft', label: 'Dash' }] }; }
         hint() { return 'A/D run · Space jump (twice) · Shift dash · R = back to checkpoint · climb to the summit before the tide · Q = recharge'; }
 
         drawProp(ctx, p) {
@@ -1440,6 +1453,7 @@
         }
 
         goalText() { return `${this.kos} KOs · ${Math.round(this.dmg)}% damage`; }
+        touchLayout() { return { stick: true, buttons: [{ k: 'KeyJ', label: 'Swing', cls: 'main' }, { k: 'Space', label: 'Jump' }, { k: 'ShiftLeft', label: 'Guard' }] }; }
         hint() { return 'A/D move · Space jump · Click to swing the hammer at your cursor · Shift guard · hold the glowing hill alone to score · Q = recharge'; }
 
                     drawFighter(ctx, x, y, who, face, state, dmg, name, hammer, swingAge, alpha, you, aim, swingAim) {
@@ -1527,7 +1541,7 @@
             super(s);
             this.title = 'Arena Shooter';
             this.touchBlast = true; this.touchMain = 'Dash';
-            this.scoreGoal = false;
+            this.scoreGoal = false; this.goalUnit = 'kill pts';
             this.W = 2600; this.H = 1700;
             const r = mulberry32(s.seed);
             this.walls = [
@@ -1745,6 +1759,7 @@
         }
 
         goalText() { return `${this.kills} drones · ${this.pk} players · HP ${Math.max(0, Math.round(this.hp))}`; }
+        touchLayout() { return { stick: true, buttons: [{ k: 'KeyJ', label: 'Fire', cls: 'main' }, { k: 'Space', label: 'Dash' }, { k: 'KeyE', label: 'Blast', cls: 'e' }] }; }
         hint() { return 'WASD move · mouse aim · click fire · Space dash · E = shockwave · Q = reload'; }
 
         drawShip(ctx, x, y, aim, who, hp, name, you, alpha = 1, over = false) {

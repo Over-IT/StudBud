@@ -244,6 +244,13 @@
             return data;
         }
 
+        async friendCall(fn, args = {}) {
+            const { data, error } = await this.getClient().rpc(fn, args);
+            if (error) throw new Error(error.message.includes('Could not find the function')
+                ? 'Friends are not set up yet. Re-run supabase-setup.sql in Supabase.' : error.message);
+            return data;
+        }
+
         async awardSoloCoins(correct, total) {
             const { data, error } = await this.getClient().rpc('studbud_award_solo_coins', { p_correct: correct, p_total: total });
             if (error) throw new Error(`Could not award coins: ${error.message}`);

@@ -82,6 +82,9 @@
                     <li class="nav-item" data-target="leaderboard-view" role="button" tabindex="0" aria-label="Study streaks and leaderboards" title="Study streaks and leaderboards">
                         <i class="fas fa-ranking-star" aria-hidden="true"></i> <span>Leaderboards</span>
                     </li>
+                    <li class="nav-item" data-target="friends-view" role="button" tabindex="0">
+                        <i class="fas fa-user-group" aria-hidden="true"></i> <span>Friends</span><strong id="friend-nav-badge" class="sidebar-coin-count hidden">0</strong>
+                    </li>
                     <li class="nav-item" data-target="exam-arcade-view" role="button" tabindex="0">
                         <i class="fas fa-gamepad"></i> <span>Practice & Arcade</span>
                     </li>
@@ -96,6 +99,9 @@
                     </li>
                     <li id="admin-nav-item" class="nav-item hidden" data-target="admin-view" role="button" tabindex="0">
                         <i class="fas fa-user-shield"></i> <span>Admin</span>
+                    </li>
+                    <li class="nav-item" data-target="about-view" role="button" tabindex="0">
+                        <i class="fas fa-circle-info"></i> <span>About</span>
                     </li>
                     <li class="nav-item" data-target="settings-view" data-also="appearance-view sound-view" role="button" tabindex="0">
                         <i class="fas fa-gear"></i> <span>Settings</span>
@@ -150,6 +156,11 @@
                 <!-- 1. Dashboard View -->
                 <section id="dashboard-view" class="view active">
                     <div class="dashboard-grid">
+                        <section id="tutorial-banner" class="glass-card widget full-width tutorial-banner hidden" aria-labelledby="tutorial-banner-title">
+                            <div class="tutorial-banner-icon" aria-hidden="true"><i class="fas fa-wand-magic-sparkles"></i></div>
+                            <div class="tutorial-banner-text"><h3 id="tutorial-banner-title">New to StudBud? Take the 2-minute tour</h3><p class="study-guidance-intro">We'll walk through every part of the app so you know where things are and what they do.</p></div>
+                            <div class="tutorial-banner-actions"><button class="primary-btn" type="button" data-action="start-tutorial"><i class="fas fa-play"></i> Start tour</button><button class="secondary-btn" type="button" data-action="dismiss-tutorial">Maybe later</button></div>
+                        </section>
                         <div class="glass-card widget schedule-widget">
                             <div class="view-header">
                                 <div><h3 id="daily-schedule-title">Today's PCHS Schedule</h3><p id="daily-schedule-type" class="schedule-day-type"></p></div>
@@ -190,9 +201,16 @@
                                 <select id="focus-assignment"><option value="">Choose a quiz or test</option></select>
                                 <label for="focus-duration">Focus</label>
                                 <select id="focus-duration">
+                                    <option value="5">5 min (quick burst)</option>
+                                    <option value="10">10 min</option>
                                     <option value="15">15 min</option>
-                                    <option value="25" selected>25 min</option>
+                                    <option value="20">20 min</option>
+                                    <option value="25" selected>25 min (classic Pomodoro)</option>
+                                    <option value="30">30 min</option>
                                     <option value="45">45 min</option>
+                                    <option value="50">50 min</option>
+                                    <option value="60">60 min</option>
+                                    <option value="90">90 min (deep work)</option>
                                 </select>
                                 <button id="focus-sprint-start-btn" class="primary-btn" type="button"><i class="fas fa-play"></i> Start</button>
                                 <button id="focus-sprint-reset-btn" class="secondary-btn" type="button">Reset</button>
@@ -200,8 +218,7 @@
                             <p id="focus-sprint-status" class="study-guidance-intro" role="status" aria-live="polite">Pick a task, then press Start.</p>
                         </div>
                         <div class="glass-card widget full-width">
-                            <h3>Upcoming quizzes &amp; tests</h3>
-                            
+                            <div class="view-header"><h3>Upcoming quizzes &amp; tests</h3><button class="secondary-btn" type="button" data-action="add-quiz"><i class="fas fa-plus"></i> Add quiz or test</button></div>
                             <div id="study-priority-list" class="study-guidance-list"></div>
                         </div>
                         <div class="glass-card widget full-width">
@@ -584,7 +601,7 @@
                                         <button type="button" class="multiplayer-mode" data-mode="miner"><span class="mode-art mode-miner" aria-hidden="true"></span><strong>Crystal Mining</strong><small>Dig crystals, avoid lava</small></button>
                                         <button type="button" class="multiplayer-mode" data-mode="duel"><span class="mode-art mode-duel" aria-hidden="true"></span><strong>King of the Hill</strong><small>King of the Hill: hold the zone, knock rivals off</small></button>
                                         <button type="button" class="multiplayer-mode" data-mode="shooter"><span class="mode-art mode-shooter" aria-hidden="true"></span><strong>Arena Shooter</strong><small>Aim, dash and blast drones and rivals</small></button>
-                                        <button type="button" class="multiplayer-mode" data-mode="sports"><span class="mode-art mode-sports" aria-hidden="true"></span><strong>Team Football</strong><small>Blue vs red teams, run for touchdowns</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="sports"><span class="mode-art mode-sports" aria-hidden="true"></span><strong>Soccer</strong><small>Blue vs red teams, dribble and score goals</small></button>
                                     </div>
                                     <div class="hosted-game-setup">
                                     <form id="host-game-form" class="hosted-game-form">
@@ -684,7 +701,7 @@
                         </section>
                     </div>
                     <section class="glass-card multiplayer-shop" id="multiplayer-shop">
-                        <div class="view-header"><div><h3><i class="fas fa-store"></i> Shop &amp; inventory</h3><p>Open mystery boxes, collect characters, hats, accessories and pets, then equip them to show off in every game.</p></div></div>
+                        <div class="view-header"><div><h3><i class="fas fa-store"></i> Shop &amp; inventory</h3><p>Open mystery boxes, collect characters, hats and accessories, then equip them to show off in every game.</p></div></div>
                         <p id="multiplayer-shop-status" class="community-status" role="status" aria-live="polite"></p>
                         <div id="multiplayer-shop-items" class="multiplayer-shop-items"></div>
                     </section>
@@ -736,6 +753,46 @@
                 </section>
 
                 <!-- 8. Settings View -->
+                <section id="friends-view" class="view hidden">
+                    <header class="view-header"><h2><i class="fas fa-user-group"></i> Friends</h2></header>
+                    <div class="glass-card friends-card">
+                        <h3>Add a friend</h3>
+                        <form id="friend-add-form" class="friend-add-form">
+                            <input type="text" id="friend-username" maxlength="24" autocomplete="off" placeholder="Their username" aria-label="Friend's username" required>
+                            <button class="primary-btn" type="submit"><i class="fas fa-user-plus"></i> Send request</button>
+                        </form>
+                        <p id="friend-status" class="settings-hint" role="status" aria-live="polite"></p>
+                    </div>
+                    <div id="friend-profile" class="glass-card friends-card hidden"></div>
+                    <div class="glass-card friends-card"><h3>Requests for you</h3><ul id="friend-incoming" class="friend-list"></ul></div>
+                    <div class="glass-card friends-card"><h3>Your friends</h3><ul id="friend-list" class="friend-list"></ul></div>
+                    <div class="glass-card friends-card"><h3>Requests you sent</h3><ul id="friend-outgoing" class="friend-list"></ul></div>
+                </section>
+
+                <section id="about-view" class="view hidden">
+                    <header class="view-header"><h2><i class="fas fa-circle-info"></i> About StudBud</h2></header>
+                    <div class="glass-card about-card">
+                        <h3>Purpose</h3>
+                        <p>StudBud is a study companion built for students. It keeps your grades, GPA, assignments, schedule and flashcards in one place, and makes studying more rewarding with leaderboards, an arcade, and multiplayer games that run on your own flashcards.</p>
+                    </div>
+                    <div class="glass-card about-card">
+                        <h3>How to use it</h3>
+                        <ul class="about-list">
+                            <li><strong>Dashboard:</strong> see upcoming quizzes, study suggestions and your progress at a glance. Add a quiz or test to get a study plan.</li>
+                            <li><strong>GPA &amp; What-If:</strong> enter classes and assignments (decimals like 23.21/25 work), then try What-If scenarios by editing or adding grades.</li>
+                            <li><strong>Planner, Calendar &amp; Schedule:</strong> track assignments, due dates and your school day.</li>
+                            <li><strong>Flashcards &amp; Import Cards:</strong> create cards by hand or import them, then flip and study them as many times as you like.</li>
+                            <li><strong>Practice &amp; Arcade / Multiplayer:</strong> answer questions from your cards to power games, alone or with other students.</li>
+                            <li><strong>Leaderboards &amp; Shop:</strong> compete on study time and spend coins on avatar items.</li>
+                            <li><strong>Settings:</strong> change your username (once a week), theme, sounds, and replay the tutorial.</li>
+                        </ul>
+                    </div>
+                    <div class="glass-card about-card">
+                        <h3>Questions or suggestions?</h3>
+                        <p>Contact <a href="mailto:villareala8873@parkwayschools.net">villareala8873@parkwayschools.net</a>. Bug reports, ideas and feedback are all welcome.</p>
+                    </div>
+                </section>
+
                 <section id="settings-view" class="view hidden">
                     <nav class="settings-tabs" aria-label="Settings sections">
                         <button type="button" class="settings-tab active" data-target="settings-view"><i class="fas fa-user-cog"></i> Profile &amp; Data</button>
@@ -771,6 +828,12 @@
                             <button id="save-profile-btn" class="primary-btn">Save Profile</button>
                         </div>
 
+                        <div class="glass-card hidden" id="tutorial-card">
+                            <h2>Tutorial</h2>
+                            <p>Need a refresher? Replay the guided tour of every part of StudBud.</p>
+                            <button class="primary-btn" type="button" data-action="start-tutorial"><i class="fas fa-circle-play"></i> Replay tutorial</button>
+                        </div>
+
                         <div class="glass-card" id="username-card">
                             <h2>Username</h2>
                             <div class="form-group">
@@ -782,6 +845,20 @@
                             <button id="change-username-btn" class="primary-btn" type="button">Change username</button>
                         </div>
                         
+                        <div class="glass-card" id="public-profile-card">
+                            <h2>Public profile</h2>
+                            <p class="settings-hint">Your friends can see this when they open your profile. Don't share personal contact details.</p>
+                            <div class="form-group"><label for="public-bio">About me</label><textarea id="public-bio" maxlength="160" rows="2" placeholder="A short bio"></textarea></div>
+                            <div class="form-group"><label for="public-subject">Favorite subject</label><input type="text" id="public-subject" maxlength="40" autocomplete="off"></div>
+                            <div class="form-group"><label for="public-grade">Grade / year</label>
+                                <select id="public-grade"><option value="">Prefer not to say</option><option>Freshman</option><option>Sophomore</option><option>Junior</option><option>Senior</option><option>Other</option></select>
+                            </div>
+                            <div class="form-group"><label for="public-goal">Study goal</label><input type="text" id="public-goal" maxlength="80" autocomplete="off" placeholder="e.g. Get an A in Chemistry"></div>
+                            <label class="settings-check"><input type="checkbox" id="public-show-stats" checked> Show my study time, streak and match wins</label>
+                            <p id="public-profile-status" class="community-status" role="status" aria-live="polite"></p>
+                            <button id="save-public-profile-btn" class="primary-btn" type="button">Save public profile</button>
+                        </div>
+
                         <div class="glass-card">
                             <h2>Data Management</h2>
                             <p>Your classes, assignments, grades, study tools, history, profile, and UI preferences are synced to your signed-in account. A device cache supports the active session; exported backups remain available.</p>

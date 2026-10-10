@@ -128,6 +128,21 @@ begin
 end;
 $$;
 
+-- True when the account is banned or still has to pick a new username; such accounts never appear on leaderboards or in friend lists.
+create or replace function public.studbud_is_hidden_user(p_user_id uuid)
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    return exists (select 1 from public.studbud_banned_users b where b.user_id = p_user_id)
+        or exists (select 1 from public.studbud_username_state s where s.user_id = p_user_id and s.force_change)
+        or exists (select 1 from auth.users a where a.id = p_user_id and a.banned_until is not null and a.banned_until > now());
+end;
+$$;
+
 create or replace function public.studbud_get_study_leaderboard(p_period text default 'daily')
 returns jsonb
 language plpgsql
@@ -185,7 +200,7 @@ begin
         from public.studbud_study_time_entries entry
         join auth.users account on account.id = entry.user_id
         where entry.study_date between v_start and v_today
-          and not exists (select 1 from public.studbud_banned_users banned where banned.user_id = entry.user_id)
+          and not public.studbud_is_hidden_user(entry.user_id)
         group by entry.user_id, account.raw_user_meta_data
         order by sum(entry.seconds) desc, username
         limit 50
@@ -624,6 +639,7 @@ begin
     if p_slot = 'skin' then update public.studbud_multiplayer_profiles set equipped_skin = '', updated_at = now() where user_id = v_user_id;
     elsif p_slot = 'hat' then update public.studbud_multiplayer_profiles set equipped_hat = '', updated_at = now() where user_id = v_user_id;
     elsif p_slot = 'accessory' then update public.studbud_multiplayer_profiles set equipped_accessory = '', updated_at = now() where user_id = v_user_id;
+    elsif p_slot = 'palette' then update public.studbud_multiplayer_profiles set equipped_palette = 'palette_default', updated_at = now() where user_id = v_user_id;
     elsif p_slot = 'pet' then update public.studbud_multiplayer_profiles set equipped_pet = '', updated_at = now() where user_id = v_user_id;
     else raise exception 'Unknown slot.'; end if;
     return public.studbud_get_multiplayer_profile();
@@ -1704,3 +1720,249 @@ revoke all on function public.studbud_change_username(text) from public, anon;
 grant execute on function public.studbud_change_username(text) to authenticated;
 revoke all on function public.studbud_admin_force_username(uuid, boolean) from public, anon;
 grant execute on function public.studbud_admin_force_username(uuid, boolean) to authenticated;
+
+-- ============================================================================
+-- Friends: requests, accepting, removing and viewing a friend's profile.
+-- ============================================================================
+create table if not exists public.studbud_friendships (
+    id uuid primary key default gen_random_uuid(),
+    requester_id uuid not null references auth.users (id) on delete cascade,
+    addressee_id uuid not null references auth.users (id) on delete cascade,
+    status text not null default 'pending' check (status in ('pending', 'accepted')),
+    created_at timestamptz not null default now(),
+    check (requester_id <> addressee_id)
+);
+create unique index if not exists studbud_friendships_pair_idx
+    on public.studbud_friendships (least(requester_id, addressee_id), greatest(requester_id, addressee_id));
+alter table public.studbud_friendships enable row level security;
+revoke all on table public.studbud_friendships from anon, authenticated;
+
+create or replace function public.studbud_friend_overview()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare v_uid uuid := auth.uid();
+begin
+    if v_uid is null then raise exception 'Sign in first.'; end if;
+    return jsonb_build_object(
+        'friends', coalesce((
+            select jsonb_agg(jsonb_build_object(
+                'friendship_id', f.id,
+                'user_id', a.id,
+                'username', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student')
+            ) order by coalesce(a.raw_user_meta_data ->> 'username', ''))
+            from public.studbud_friendships f
+            join auth.users a on a.id = case when f.requester_id = v_uid then f.addressee_id else f.requester_id end
+            where f.status = 'accepted' and v_uid in (f.requester_id, f.addressee_id)
+              and not public.studbud_is_hidden_user(a.id)
+        ), '[]'::jsonb),
+        'incoming', coalesce((
+            select jsonb_agg(jsonb_build_object(
+                'friendship_id', f.id,
+                'user_id', a.id,
+                'username', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student')
+            ) order by f.created_at)
+            from public.studbud_friendships f
+            join auth.users a on a.id = f.requester_id
+            where f.status = 'pending' and f.addressee_id = v_uid
+              and not public.studbud_is_hidden_user(a.id)
+        ), '[]'::jsonb),
+        'outgoing', coalesce((
+            select jsonb_agg(jsonb_build_object(
+                'friendship_id', f.id,
+                'user_id', a.id,
+                'username', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student')
+            ) order by f.created_at)
+            from public.studbud_friendships f
+            join auth.users a on a.id = f.addressee_id
+            where f.status = 'pending' and f.requester_id = v_uid
+        ), '[]'::jsonb)
+    );
+end;
+$$;
+
+create or replace function public.studbud_friend_request(p_username text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_uid uuid := auth.uid();
+    v_name text := lower(trim(coalesce(p_username, '')));
+    v_target uuid;
+    v_existing public.studbud_friendships;
+begin
+    if v_uid is null then raise exception 'Sign in first.'; end if;
+    if v_name = '' then raise exception 'Enter a username.'; end if;
+    select id into v_target from auth.users
+        where lower(coalesce(raw_user_meta_data ->> 'username', '')) = v_name limit 1;
+    if v_target is null or public.studbud_is_hidden_user(v_target) then raise exception 'No student with that username was found.'; end if;
+    if v_target = v_uid then raise exception 'You can''t add yourself.'; end if;
+    select * into v_existing from public.studbud_friendships
+        where least(requester_id, addressee_id) = least(v_uid, v_target) and greatest(requester_id, addressee_id) = greatest(v_uid, v_target);
+    if found then
+        if v_existing.status = 'accepted' then raise exception 'You are already friends.'; end if;
+        if v_existing.requester_id = v_uid then raise exception 'Friend request already sent.'; end if;
+        update public.studbud_friendships set status = 'accepted' where id = v_existing.id;
+        return jsonb_build_object('status', 'accepted');
+    end if;
+    insert into public.studbud_friendships (requester_id, addressee_id) values (v_uid, v_target);
+    return jsonb_build_object('status', 'pending');
+end;
+$$;
+
+create or replace function public.studbud_friend_respond(p_friendship_id uuid, p_accept boolean)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    if auth.uid() is null then raise exception 'Sign in first.'; end if;
+    if p_accept then
+        update public.studbud_friendships set status = 'accepted'
+            where id = p_friendship_id and addressee_id = auth.uid() and status = 'pending';
+    else
+        delete from public.studbud_friendships
+            where id = p_friendship_id and addressee_id = auth.uid() and status = 'pending';
+    end if;
+end;
+$$;
+
+-- Removes a friend, declines or cancels a request, whichever applies.
+create or replace function public.studbud_friend_remove(p_friendship_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    if auth.uid() is null then raise exception 'Sign in first.'; end if;
+    delete from public.studbud_friendships
+        where id = p_friendship_id and auth.uid() in (requester_id, addressee_id);
+end;
+$$;
+
+create or replace function public.studbud_friend_profile(p_user_id uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_uid uuid := auth.uid();
+    v_today date := timezone('utc', now())::date;
+    v_week date := date_trunc('week', timezone('utc', now()))::date;
+    v_streak integer := 0;
+    v_day date;
+    v_prof public.studbud_multiplayer_profiles;
+    v_pub public.studbud_public_profiles;
+    v_show boolean;
+    v_name text;
+begin
+    if v_uid is null then raise exception 'Sign in first.'; end if;
+    if not exists (
+        select 1 from public.studbud_friendships f
+        where f.status = 'accepted'
+          and ((f.requester_id = v_uid and f.addressee_id = p_user_id) or (f.addressee_id = v_uid and f.requester_id = p_user_id))
+    ) then raise exception 'You can only view the profiles of your friends.'; end if;
+    if public.studbud_is_hidden_user(p_user_id) then raise exception 'This profile is unavailable.'; end if;
+    select coalesce(nullif(raw_user_meta_data ->> 'username', ''), 'Student') into v_name from auth.users where id = p_user_id;
+    select * into v_prof from public.studbud_multiplayer_profiles where user_id = p_user_id;
+    select * into v_pub from public.studbud_public_profiles where user_id = p_user_id;
+    v_show := coalesce(v_pub.show_stats, true);
+    v_day := v_today;
+    if coalesce((select sum(seconds) from public.studbud_study_time_entries where user_id = p_user_id and study_date = v_day), 0) < 900 then v_day := v_day - 1; end if;
+    loop
+        exit when coalesce((select sum(seconds) from public.studbud_study_time_entries where user_id = p_user_id and study_date = v_day), 0) < 900;
+        v_streak := v_streak + 1;
+        v_day := v_day - 1;
+    end loop;
+    return jsonb_build_object(
+        'user_id', p_user_id,
+        'username', v_name,
+        'bio', coalesce(v_pub.bio, ''),
+        'favorite_subject', coalesce(v_pub.favorite_subject, ''),
+        'grade_level', coalesce(v_pub.grade_level, ''),
+        'study_goal', coalesce(v_pub.study_goal, ''),
+        'show_stats', v_show,
+        'wins', coalesce(v_prof.wins, 0),
+        'skin', coalesce(v_prof.equipped_skin, ''),
+        'hat', coalesce(v_prof.equipped_hat, ''),
+        'accessory', coalesce(v_prof.equipped_accessory, ''),
+        'palette', coalesce(v_prof.equipped_palette, 'palette_default'),
+        'today_seconds', case when v_show then coalesce((select sum(seconds) from public.studbud_study_time_entries where user_id = p_user_id and study_date = v_today), 0) end,
+        'week_seconds', case when v_show then coalesce((select sum(seconds) from public.studbud_study_time_entries where user_id = p_user_id and study_date between v_week and v_today), 0) end,
+        'total_seconds', case when v_show then coalesce((select sum(seconds) from public.studbud_study_time_entries where user_id = p_user_id), 0) end,
+        'streak_days', case when v_show then v_streak end
+    );
+end;
+$$;
+
+-- What a student chooses to show their friends.
+create table if not exists public.studbud_public_profiles (
+    user_id uuid primary key references auth.users (id) on delete cascade,
+    bio text not null default '',
+    favorite_subject text not null default '',
+    grade_level text not null default '',
+    study_goal text not null default '',
+    show_stats boolean not null default true,
+    updated_at timestamptz not null default now()
+);
+alter table public.studbud_public_profiles enable row level security;
+revoke all on table public.studbud_public_profiles from anon, authenticated;
+
+create or replace function public.studbud_get_public_profile()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare v public.studbud_public_profiles;
+begin
+    if auth.uid() is null then raise exception 'Sign in first.'; end if;
+    select * into v from public.studbud_public_profiles where user_id = auth.uid();
+    return jsonb_build_object('bio', coalesce(v.bio, ''), 'favorite_subject', coalesce(v.favorite_subject, ''),
+        'grade_level', coalesce(v.grade_level, ''), 'study_goal', coalesce(v.study_goal, ''), 'show_stats', coalesce(v.show_stats, true));
+end;
+$$;
+
+create or replace function public.studbud_set_public_profile(p_bio text, p_favorite_subject text, p_grade_level text, p_study_goal text, p_show_stats boolean)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    if auth.uid() is null then raise exception 'Sign in first.'; end if;
+    insert into public.studbud_public_profiles (user_id, bio, favorite_subject, grade_level, study_goal, show_stats, updated_at)
+    values (auth.uid(), left(trim(coalesce(p_bio, '')), 160), left(trim(coalesce(p_favorite_subject, '')), 40),
+        left(trim(coalesce(p_grade_level, '')), 20), left(trim(coalesce(p_study_goal, '')), 80), coalesce(p_show_stats, true), now())
+    on conflict (user_id) do update set bio = excluded.bio, favorite_subject = excluded.favorite_subject,
+        grade_level = excluded.grade_level, study_goal = excluded.study_goal, show_stats = excluded.show_stats, updated_at = now();
+    return public.studbud_get_public_profile();
+end;
+$$;
+
+revoke all on function public.studbud_get_public_profile() from public, anon;
+grant execute on function public.studbud_get_public_profile() to authenticated;
+revoke all on function public.studbud_set_public_profile(text, text, text, text, boolean) from public, anon;
+grant execute on function public.studbud_set_public_profile(text, text, text, text, boolean) to authenticated;
+
+revoke all on function public.studbud_is_hidden_user(uuid) from public, anon, authenticated;
+revoke all on function public.studbud_friend_overview() from public, anon;
+grant execute on function public.studbud_friend_overview() to authenticated;
+revoke all on function public.studbud_friend_request(text) from public, anon;
+grant execute on function public.studbud_friend_request(text) to authenticated;
+revoke all on function public.studbud_friend_respond(uuid, boolean) from public, anon;
+grant execute on function public.studbud_friend_respond(uuid, boolean) to authenticated;
+revoke all on function public.studbud_friend_remove(uuid) from public, anon;
+grant execute on function public.studbud_friend_remove(uuid) to authenticated;
+revoke all on function public.studbud_friend_profile(uuid) from public, anon;
+grant execute on function public.studbud_friend_profile(uuid) to authenticated;
