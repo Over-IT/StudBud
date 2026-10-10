@@ -58,6 +58,7 @@
 .study-leaderboard-row.podium-3 { border-color: #cd8a4b; background: linear-gradient(90deg, rgba(205,138,75,.14), var(--bg-glass)); }
 .study-leaderboard-rank { color: var(--accent-primary); font-size: 1.15rem; font-weight: 800; text-align: center; }
 .study-leaderboard-avatar { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; color: #fff; font-weight: 800; background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary)); }
+.study-leaderboard-row .study-leaderboard-avatar, .podium-spot .study-leaderboard-avatar { width: 36px; height: 36px; }
 .study-leaderboard-main { display: grid; gap: 6px; min-width: 0; }
 .study-leaderboard-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .you-badge { padding: 1px 7px; border-radius: 999px; color: #fff; font-size: .68rem; font-style: normal; font-weight: 700; background: var(--accent-primary); vertical-align: middle; }
@@ -438,6 +439,13 @@ input, select, textarea {
     padding: 10px 12px;
     width: 100%;
     transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+input[type="checkbox"], input[type="radio"] {
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    flex: 0 0 auto;
 }
 
 .light-theme input, .light-theme select, .light-theme textarea {
@@ -2590,12 +2598,13 @@ body.compact-ui .nav-item { padding-top: 8px; padding-bottom: 8px; }
 /* Admin page */
 .admin-panel { display: grid; gap: 12px; }
 .admin-tabs, .admin-search { display: flex; gap: 8px; flex-wrap: wrap; }
-.admin-search input { flex: 1; min-width: 200px; }
+.admin-search input { flex: 1 1 140px; min-width: 0; }
 .admin-tabs .selected { background: var(--accent, #6366f1); color: #fff; }
 .admin-list { display: grid; gap: 8px; }
 .admin-row { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; padding: 10px 12px; border-radius: 12px; background: rgba(148, 163, 184, .12); }
 .admin-row small { display: block; opacity: .75; }
-.admin-preview { max-width: 60ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-preview { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-row > div:first-child { min-width: 0; overflow-wrap: anywhere; }
 
 /* UI touch-ups */
 html { scroll-behavior: smooth; }
@@ -2706,6 +2715,25 @@ textarea { resize: vertical; }
 .friend-bio { margin: 0; overflow-wrap: anywhere; }
 .friend-chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .friend-chip { padding: 4px 10px; border-radius: 999px; background: var(--bg-glass-hover); border: 1px solid var(--border-glass); font-size: .85rem; }
-.settings-check { display: flex; gap: 8px; align-items: center; }
+.settings-check { display: flex; gap: 8px; align-items: center; min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 520px) {
+    .study-leaderboard-row { grid-template-columns: 28px 36px minmax(0, 1fr); gap: 8px; padding: 10px; }
+    .study-leaderboard-time { grid-column: 2 / -1; font-size: .85rem; }
+    .study-leaderboard-tabs { flex-wrap: wrap; }
+    .friend-profile-head { flex-wrap: wrap; }
+    .friend-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .admin-actions { width: 100%; }
+}
+.settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: var(--spacing-md); align-items: start; }
+.settings-grid > .glass-card { display: flex; flex-direction: column; gap: var(--spacing-sm); }
+.settings-grid > .glass-card > h2 { margin: 0 0 var(--spacing-xs, 4px); font-size: 1.15rem; }
+.settings-grid > .glass-card p { margin: 0; }
+.settings-grid .form-group { margin: 0; }
+.settings-grid .primary-btn, .settings-grid .secondary-btn { align-self: flex-start; }
+.settings-actions { display: flex; flex-wrap: wrap; gap: var(--spacing-sm); }
+.settings-grid .danger-zone { margin-top: var(--spacing-sm); }
+.settings-grid .danger-zone h4 { margin: 0 0 var(--spacing-sm); }
+.settings-grid .danger-btn { max-width: 100%; white-space: normal; }
+#public-profile-card, .settings-grid > .glass-card { min-width: 0; }
+#public-profile-card input, #public-profile-card select, #public-profile-card textarea { max-width: 100%; }
 #public-bio { width: 100%; resize: vertical; }
-

@@ -2049,11 +2049,15 @@
         }
 
         profileCosmetics(profile) {
-            return { skin: profile?.equipped_skin || '', hat: profile?.equipped_hat || '', acc: profile?.equipped_accessory || '' };
+            return {
+                skin: profile?.equipped_skin || profile?.skin || '',
+                hat: profile?.equipped_hat || profile?.hat || '',
+                acc: profile?.equipped_accessory || profile?.accessory || ''
+            };
         }
 
         // Draws the same animated-game character to a cached image so lobby avatars match in-game characters.
-        multiplayerAvatarMarkup(cos = {}, large = false) {
+        multiplayerAvatarMarkup(cos = {}, large = false, extraClass = '') {
             const util = window.StudBudArcade?.util;
             const key = [cos.skin, cos.hat, cos.acc, cos.color].join('|');
             this.characterCache = this.characterCache || new Map();
@@ -2069,7 +2073,7 @@
                 url = canvas.toDataURL('image/png');
                 this.characterCache.set(key, url);
             }
-            return `<span class="player-avatar char-avatar${large ? ' player-avatar-large' : ''}">${url ? `<img src="${url}" alt="" draggable="false">` : '<i class="fas fa-user" aria-hidden="true"></i>'}</span>`;
+            return `<span class="player-avatar char-avatar${large ? ' player-avatar-large' : ''}${extraClass ? ` ${this.escapeHTML(extraClass)}` : ''}">${url ? `<img src="${url}" alt="" draggable="false">` : '<i class="fas fa-user" aria-hidden="true"></i>'}</span>`;
         }
 
         renderMultiplayerShop(profile) {
@@ -2251,9 +2255,9 @@
 
         // Admin tools. The server re-checks the account on every call; this only controls what is shown.
         async refreshAdminAccess() {
-            // Show the tab to the "overit" account even if the server isn't set up yet, so the page can explain what is missing.
+            // Show the tab to the admin accounts even if the server isn't set up yet, so the page can explain what is missing.
             const name = String(window.StudBudCloud?.user?.user_metadata?.username || '').toLowerCase();
-            this.isAdmin = name === 'overit';
+            this.isAdmin = ['overit', 'andy'].includes(name);
             try { if (await window.StudBudCommunityGames.isAdmin()) this.isAdmin = true; } catch (error) { /* keep the name check */ }
             window.NexusApp.isAdmin = this.isAdmin;
             document.getElementById('admin-nav-item')?.classList.toggle('hidden', !this.isAdmin);
@@ -4450,13 +4454,13 @@
                 const pct = Math.max(3, Math.round((Number(player.seconds) || 0) / top * 100));
                 return `<li class="study-leaderboard-row${player.is_me ? ' is-self' : ''}${rank >= 1 && rank <= 3 ? ` podium-${rank}` : ''}">
                     <span class="study-leaderboard-rank">${rank >= 1 && rank <= 3 ? medal[rank - 1] : (rank || '—')}</span>
-                    <span class="study-leaderboard-avatar" aria-hidden="true">${name.charAt(0).toUpperCase()}</span>
+                    ${this.multiplayerAvatarMarkup(this.profileCosmetics(player), false, 'study-leaderboard-avatar')}
                     <div class="study-leaderboard-main"><strong>${name}${player.is_me ? ' <em class="you-badge">you</em>' : ''}</strong><span class="study-leaderboard-bar"><i style="width:${pct}%"></i></span></div>
                     <span class="study-leaderboard-time">${this.formatStudyDuration(player.seconds)}</span></li>`;
             };
             const podium = board.length >= 3 ? `<li class="study-podium" aria-hidden="true">${[1, 0, 2].map(i => {
                 const p = board[i];
-                return `<div class="podium-spot podium-spot-${i + 1}"><span class="podium-medal">${medal[i]}</span><span class="study-leaderboard-avatar">${this.escapeHTML((p.username || 'S').charAt(0).toUpperCase())}</span><b>${this.escapeHTML(p.username || 'Student')}</b><small>${this.formatStudyDuration(p.seconds)}</small><div class="podium-block"></div></div>`;
+                return `<div class="podium-spot podium-spot-${i + 1}"><span class="podium-medal">${medal[i]}</span>${this.multiplayerAvatarMarkup(this.profileCosmetics(p), false, 'study-leaderboard-avatar')}<b>${this.escapeHTML(p.username || 'Student')}</b><small>${this.formatStudyDuration(p.seconds)}</small><div class="podium-block"></div></div>`;
             }).join('')}</li>` : '';
             list.innerHTML = board.length ? podium + board.map(row).join('') : '<li class="empty-state">No study time logged for this period yet. Start a session to be first on the board.</li>';
             const label = document.getElementById('study-leaderboard-period-label');

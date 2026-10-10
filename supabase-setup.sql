@@ -188,6 +188,9 @@ begin
             'username', ranked.username,
             'seconds', ranked.seconds,
             'minutes', floor(ranked.seconds / 60.0)::integer,
+            'skin', ranked.equipped_skin,
+            'hat', ranked.equipped_hat,
+            'accessory', ranked.equipped_accessory,
             'is_me', ranked.user_id = v_user_id
         ) order by ranked.seconds desc, ranked.username
     ), '[]'::jsonb)
@@ -196,12 +199,17 @@ begin
         select row_number() over (order by sum(entry.seconds) desc, coalesce(nullif(account.raw_user_meta_data ->> 'username', ''), 'Student'))::integer as rank,
             entry.user_id,
             coalesce(nullif(account.raw_user_meta_data ->> 'username', ''), 'Student') as username,
-            sum(entry.seconds)::integer as seconds
+            sum(entry.seconds)::integer as seconds,
+            coalesce(cosmetics.equipped_skin, '') as equipped_skin,
+            coalesce(cosmetics.equipped_hat, '') as equipped_hat,
+            coalesce(cosmetics.equipped_accessory, '') as equipped_accessory
         from public.studbud_study_time_entries entry
         join auth.users account on account.id = entry.user_id
+        left join public.studbud_multiplayer_profiles cosmetics on cosmetics.user_id = entry.user_id
         where entry.study_date between v_start and v_today
           and not public.studbud_is_hidden_user(entry.user_id)
-        group by entry.user_id, account.raw_user_meta_data
+        group by entry.user_id, account.raw_user_meta_data,
+            cosmetics.equipped_skin, cosmetics.equipped_hat, cosmetics.equipped_accessory
         order by sum(entry.seconds) desc, username
         limit 50
     ) ranked;
@@ -1460,7 +1468,7 @@ grant execute on function public.studbud_leave_game_room(text) to authenticated;
 
 
 -- ============================================================================
--- Admin tools: only the "overit" account (email overit@accounts.studbud.invalid)
+-- Admin tools: only the "overit" and "andy" accounts (emails overit@/andy@accounts.studbud.invalid)
 -- Every function re-checks the caller on the server, so the client can't bypass it.
 -- ============================================================================
 create table if not exists public.studbud_banned_users (
@@ -1480,7 +1488,7 @@ set search_path = public, pg_temp
 as $$
     select exists (
         select 1 from auth.users
-        where id = auth.uid() and lower(email) = 'overit@accounts.studbud.invalid'
+        where id = auth.uid() and         lower(email) in ('overit@accounts.studbud.invalid', 'andy@accounts.studbud.invalid')
     );
 $$;
 
