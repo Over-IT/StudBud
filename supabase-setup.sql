@@ -468,7 +468,13 @@ as $$
         ('skin_bee', 150), ('skin_ocean', 200), ('skin_forest', 210), ('skin_ice', 350), ('skin_chrome', 380), ('skin_cosmic', 520),
         ('hat_beret', 90), ('hat_sombrero', 140), ('hat_frog', 150), ('hat_mushroom', 160), ('hat_unicorn', 230), ('hat_tiara', 300),
         ('acc_lei', 90), ('acc_leaves', 190), ('acc_guitar', 210), ('acc_notes', 220), ('acc_bubbles', 230), ('acc_lightning', 320),
-        ('palette_sunrise', 150), ('palette_arctic', 170), ('palette_toxic', 200), ('palette_royal', 320)
+        ('palette_sunrise', 150), ('palette_arctic', 170), ('palette_toxic', 200), ('palette_royal', 320),
+        ('palette_sand', 70), ('palette_sky', 75), ('palette_moss', 80), ('palette_plum', 85), ('palette_steel', 90),
+        ('palette_eclipse', 700), ('palette_opal', 740),
+        ('skin_sprout', 70), ('skin_sunny', 75), ('skin_berry', 80), ('skin_storm', 85), ('skin_minty', 90),
+        ('skin_celestial', 750), ('skin_inferno', 800),
+        ('hat_visor', 65), ('hat_bucket', 75), ('hat_astronaut', 210), ('hat_cosmic', 720),
+        ('acc_comet', 450), ('acc_aura', 760)
     ), pets(id, rarity) as (values
         ('pet_puppy', 'common'), ('pet_kitten', 'common'), ('pet_hamster', 'common'), ('pet_bunny', 'common'),
         ('pet_chick', 'common'), ('pet_frog', 'common'), ('pet_turtle', 'common'), ('pet_goldfish', 'common'),
@@ -483,7 +489,7 @@ as $$
     )
     select priced.id, (round(priced.price * 2.5 / 5) * 5)::integer,
         case when priced.price < 100 then 'common' when priced.price < 160 then 'uncommon'
-             when priced.price < 260 then 'rare' when priced.price < 400 then 'epic' else 'legendary' end
+             when priced.price < 260 then 'rare' when priced.price < 400 then 'epic' when priced.price < 700 then 'legendary' else 'mythic' end
     from priced
     union all
     select pets.id, null::integer, pets.rarity from pets;
@@ -612,7 +618,7 @@ begin
         v_rarity := case when v_roll < 0.20 then 'common' when v_roll < 0.60 then 'uncommon' when v_roll < 0.88 then 'rare' when v_roll < 0.98 then 'epic' else 'legendary' end;
     elsif p_box = 'legendary' then
         v_cost := 500;
-        v_rarity := case when v_roll < 0.20 then 'uncommon' when v_roll < 0.60 then 'rare' when v_roll < 0.90 then 'epic' else 'legendary' end;
+        v_rarity := case when v_roll < 0.20 then 'uncommon' when v_roll < 0.60 then 'rare' when v_roll < 0.88 then 'epic' when v_roll < 0.98 then 'legendary' else 'mythic' end;
     elsif p_box = 'hat' then
         v_cost := 130; v_prefix := 'hat\_%';
         v_rarity := case when v_roll < 0.40 then 'common' when v_roll < 0.72 then 'uncommon' when v_roll < 0.92 then 'rare' when v_roll < 0.99 then 'epic' else 'legendary' end;
@@ -627,7 +633,7 @@ begin
         v_rarity := case when v_roll < 0.40 then 'uncommon' when v_roll < 0.75 then 'rare' when v_roll < 0.95 then 'epic' else 'legendary' end;
     elsif p_box = 'mythic' then
         v_cost := 1000;
-        v_rarity := case when v_roll < 0.55 then 'epic' else 'legendary' end;
+        v_rarity := case when v_roll < 0.40 then 'epic' when v_roll < 0.85 then 'legendary' else 'mythic' end;
     else
         raise exception 'Unknown mystery box.';
     end if;
@@ -641,8 +647,8 @@ begin
     where s.id not like 'accessory\_%' and s.id not like 'pet\_%' and s.id like v_prefix
       and not (s.id = any(v_profile.owned_items))
     order by case s.rarity when v_rarity then 0 else 1 end,
-             abs(array_position(array['common','uncommon','rare','epic','legendary'], s.rarity)
-               - array_position(array['common','uncommon','rare','epic','legendary'], v_rarity)),
+             abs(array_position(array['common','uncommon','rare','epic','legendary','mythic'], s.rarity)
+               - array_position(array['common','uncommon','rare','epic','legendary','mythic'], v_rarity)),
              random()
     limit 1;
     if v_item_id is null then raise exception 'You already own every item that box can contain!'; end if;

@@ -59,8 +59,23 @@
                     ['jungle', 'Jungle', 130, 100, 160], ['crimson', 'Crimson Night', 355, 10, 170], ['glacier', 'Glacier', 195, 210, 180],
                     ['sakura', 'Sakura', 330, 340, 190], ['ember', 'Ember', 15, 40, 210], ['cyber', 'Cyber Pink', 320, 180, 240],
                     ['galaxy', 'Galaxy', 275, 320, 280], ['prism', 'Prism', 300, 60, 420],
-                    ['sunrise', 'Sunrise', 30, 350, 150], ['arctic', 'Arctic', 190, 230, 170], ['toxic', 'Toxic', 100, 140, 200], ['royal', 'Royal', 250, 45, 320]
+                    ['sunrise', 'Sunrise', 30, 350, 150], ['arctic', 'Arctic', 190, 230, 170], ['toxic', 'Toxic', 100, 140, 200], ['royal', 'Royal', 250, 45, 320],
+                    ['sand', 'Sandy Shore', 35, 45, 70], ['sky', 'Clear Sky', 205, 195, 75], ['moss', 'Mossy', 110, 95, 80], ['plum', 'Plum', 290, 310, 85], ['steel', 'Steel', 210, 220, 90],
+                    ['eclipse', 'Eclipse', 280, 20, 700], ['opal', 'Opal Dream', 180, 320, 740]
                 ].map(([color, name, hue, hue2, price]) => ({ id: `palette_${color}`, name, color, hue, hue2, price, type: 'palette' })),
+                { id: 'skin_sprout', name: 'Sprout', icon: 'fa-seedling', price: 70, type: 'skin' },
+                { id: 'skin_sunny', name: 'Sunny', icon: 'fa-sun', price: 75, type: 'skin' },
+                { id: 'skin_berry', name: 'Berry', icon: 'fa-user', price: 80, type: 'skin' },
+                { id: 'skin_storm', name: 'Stormy', icon: 'fa-cloud', price: 85, type: 'skin' },
+                { id: 'skin_minty', name: 'Minty', icon: 'fa-leaf', price: 90, type: 'skin' },
+                { id: 'skin_celestial', name: 'Celestial Titan', icon: 'fa-sun', price: 750, type: 'skin' },
+                { id: 'skin_inferno', name: 'Inferno Phoenix', icon: 'fa-fire', price: 800, type: 'skin' },
+                { id: 'hat_visor', name: 'Sun Visor', icon: 'fa-sun', price: 65, type: 'hat' },
+                { id: 'hat_bucket', name: 'Bucket Hat', icon: 'fa-hat-cowboy-side', price: 75, type: 'hat' },
+                { id: 'hat_astronaut', name: 'Space Helmet', icon: 'fa-user-astronaut', price: 210, type: 'hat' },
+                { id: 'hat_cosmic', name: 'Cosmic Crown', icon: 'fa-crown', price: 720, type: 'hat' },
+                { id: 'acc_comet', name: 'Comet Trail', icon: 'fa-meteor', price: 450, type: 'accessory' },
+                { id: 'acc_aura', name: 'Mythic Aura', icon: 'fa-infinity', price: 760, type: 'accessory' },
                 { id: 'acc_glasses', name: 'Round Glasses', icon: 'fa-glasses', price: 70, type: 'accessory' },
                 { id: 'acc_headband', name: 'Sport Headband', icon: 'fa-ribbon', price: 70, type: 'accessory' },
                 { id: 'acc_bandana', name: 'Bandana', icon: 'fa-ribbon', price: 80, type: 'accessory' },
@@ -131,19 +146,19 @@
                         }
 
                         static rarityForPrice(price) {
-                            return price < 100 ? 'common' : price < 160 ? 'uncommon' : price < 260 ? 'rare' : price < 400 ? 'epic' : 'legendary';
+                            return price < 100 ? 'common' : price < 160 ? 'uncommon' : price < 260 ? 'rare' : price < 400 ? 'epic' : price < 700 ? 'legendary' : 'mythic';
                         }
 
                         static get boxes() {
                             return [
                                 { id: 'basic', name: 'Study Box', price: 80, icon: 'fa-box', odds: 'Mostly common, small chance of rare · always something new' },
                                 { id: 'rare', name: 'Honors Box', price: 200, icon: 'fa-box-open', odds: 'Uncommon and rare finds, epics possible' },
-                                { id: 'legendary', name: 'Valedictorian Box', price: 500, icon: 'fa-gem', odds: 'Rare or better, 10% legendary' },
+                                { id: 'legendary', name: 'Valedictorian Box', price: 500, icon: 'fa-gem', odds: 'Rare or better, 10% legendary, 2% mythic' },
                                 { id: 'hat', name: 'Hat Box', price: 130, icon: 'fa-hat-wizard', odds: 'Hats only · mostly common/uncommon' },
                                 { id: 'accessory', name: 'Style Box', price: 140, icon: 'fa-glasses', odds: 'Accessories only · mostly common/uncommon' },
                                 { id: 'palette', name: 'Color Box', price: 160, icon: 'fa-palette', odds: 'Color palettes only · uncommon or better' },
                                 { id: 'skin', name: 'Character Box', price: 260, icon: 'fa-user-astronaut', odds: 'Characters only · uncommon or better' },
-                                { id: 'mythic', name: 'Mythic Box', price: 1000, icon: 'fa-dragon', odds: 'Anything · epic or legendary (45%)' }
+                                { id: 'mythic', name: 'Mythic Box', price: 1000, icon: 'fa-dragon', odds: 'Anything · epic or better, 45% legendary, 15% mythic' }
                             ];
                         }
 

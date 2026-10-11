@@ -2355,7 +2355,7 @@
                     <p class="settings-hint">Boxes can contain characters, hats, accessories and colors you don't own yet. Boxes are the cheapest way to collect.</p>`;
                                 } else if (tab === 'inventory') {
                                     const typeNames = { skin: 'Characters', hat: 'Hats', accessory: 'Accessories', palette: 'Colors' };
-                                    const order = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
+                                    const order = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
                                     const mine = games.catalog.filter(item => item.type !== 'pet' && owned.includes(item.id));
                                     const total = catalog.length;
                                     const sections = Object.keys(typeNames).map(type => {
@@ -2366,7 +2366,7 @@
                                     }).join('');
                                     body = `<h4 class="shop-category-title">${mine.filter(item => !item.legacy).length} / ${total} items collected</h4>${sections || '<p class="settings-hint">Nothing here yet — open a mystery box or buy something!</p>'}`;
                                 } else {
-                                    const order = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
+                                    const order = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
                                     const rank = item => { const i = order.indexOf(item.rarity); return i < 0 ? order.length : i; };
                                     const items = catalog.filter(item => item.type === tab)
                                         .sort((a, b) => rank(a) - rank(b) || (a.price ?? Infinity) - (b.price ?? Infinity) || String(a.name).localeCompare(String(b.name)));
@@ -2656,7 +2656,7 @@
             if (action === 'multiplayer-mystery') {
                 const item = window.StudBudCommunityGames.catalog.find(entry => entry.id === unlockedItem);
                 document.getElementById('multiplayer-shop-status').textContent = `New ${item?.rarity || profile.rarity} drop: ${item?.name || 'cosmetic'}!`;
-                window.StudBudSfx?.play(['epic', 'legendary'].includes(item?.rarity || profile.rarity) ? 'win' : 'success', 'ui', 0);
+                window.StudBudSfx?.play(['epic', 'legendary', 'mythic'].includes(item?.rarity || profile.rarity) ? 'win' : 'success', 'ui', 0);
             }
             if (action === 'multiplayer-equip' && itemId.startsWith('palette_')) {
                 const colorScheme = itemId.slice('palette_'.length);
@@ -2753,6 +2753,7 @@
                 runner.cameraRow = runner.started ? runner.cameraRow : -3.5;
                 runner.restarting = true; runner.clock = 0; runner.hop = null; runner.dead = false;
                 runner.deathAge = 0; runner.bump = 0; runner.lanes = new Map();
+                runner.coins = 0; runner.queued = null; runner.fx = [];
                 runner.seed = Math.floor(Math.random() * 0x7fffffff) || 127;
                 this.waitingLane(runner, 0);
                 document.getElementById('waiting-runner-score').textContent = '0';
@@ -2778,12 +2779,19 @@
             let type = roll < 0.32 ? 'grass' : roll < 0.65 ? 'road' : roll < 0.89 ? 'river' : 'rail';
             if (type === 'rail' && previous === 'rail') type = 'grass';
             const direction = this.waitingRandom(runner, row, 7) < 0.5 ? -1 : 1;
-            const lane = { row, type, blockers: [], speed: (0.55 + this.waitingRandom(runner, row, 5) * 0.85) * direction, phase: this.waitingRandom(runner, row, 11) * 9 };
+            // Traffic and currents speed up gradually the further you get.
+            const ramp = 1 + Math.min(row, 220) / 240;
+            const lane = { row, type, blockers: [], speed: (0.55 + this.waitingRandom(runner, row, 5) * 0.85) * direction * (1 + (ramp - 1) * 0.5), phase: this.waitingRandom(runner, row, 11) * 9 };
             if (type === 'grass') {
                 for (let col = 0; col < 9; col++) if (col !== 4 && this.waitingRandom(runner, row, col + 19) < 0.22) lane.blockers.push({ col, kind: this.waitingRandom(runner, row, col + 41) < 0.66 ? 'tree' : 'rock' });
             } else if (type === 'road') {
-                lane.vehicles = [0, 1, 2].map(i => ({ x: i * 5 + this.waitingRandom(runner, row, i + 53) * 1.7, w: this.waitingRandom(runner, row, i + 71) < 0.35 ? 2.1 : 1.1, speed: direction * (1.2 + this.waitingRandom(runner, row, i + 81) * 2.8), color: ['#38bdf8', '#fbbf24', '#f472b6', '#a78bfa', '#ef4444', '#f8fafc'][Math.floor(this.waitingRandom(runner, row, i + 91) * 6)] }));
-            } else if (type === 'river') {
+                lane.vehicles = [0, 1, 2].map(i => ({ x: i * 5 + this.waitingRandom(runner, row, i + 53) * 1.7, w: this.waitingRandom(runner, row, i + 71) < 0.35 ? 2.1 : 1.1, speed: direction * (1.2 + this.waitingRandom(runner, row, i + 81) * 2.8) * ramp, color: ['#38bdf8', '#fbbf24', '#f472b6', '#a78bfa', '#ef4444', '#f8fafc'][Math.floor(this.waitingRandom(runner, row, i + 91) * 6)] }));
+            }
+            if ((type === 'grass' || type === 'road') && this.waitingRandom(runner, row, 151) < (type === 'grass' ? 0.2 : 0.12)) {
+                const col = Math.floor(this.waitingRandom(runner, row, 157) * 9);
+                if (!lane.blockers.some(blocker => blocker.col === col)) lane.coin = { col, taken: false };
+            }
+            if (type === 'river') {
                 lane.platforms = [0, 1, 2].map(i => ({ x: i * 4.5 + this.waitingRandom(runner, row, i + 101), w: 2.2 + this.waitingRandom(runner, row, i + 121) * 0.7, speed: lane.speed, kind: 'log' }));
                 if (this.waitingRandom(runner, row, 137) < 0.6) lane.platforms.push({ x: 1 + Math.floor(this.waitingRandom(runner, row, 139) * 7), w: 0.82, speed: 0, kind: 'pad' });
             }
@@ -2804,7 +2812,9 @@
             const runner = this.waitingRunner;
             if (runner.dead && runner.deathAge < 0.55) return;
             if (runner.dead || !runner.running) this.startWaitingRunner();
-            if (runner.hop || !runner.running || runner.restarting) return;
+            // Buffer one input pressed mid-hop so quick taps never feel dropped.
+            if (runner.hop) { runner.queued = [dx, dy]; return; }
+            if (!runner.running || runner.restarting) return;
             const row = Math.max(0, runner.row + dy), destination = this.waitingLane(runner, row);
             const onLand = destination.type === 'grass' || destination.type === 'road' || destination.type === 'rail';
             const col = Math.max(0, Math.min(8, onLand ? Math.round(runner.x + dx) : runner.x + dx));
@@ -2881,6 +2891,7 @@
                 return;
             }
             if (!runner.running) return;
+            if (runner.fx?.length) runner.fx = runner.fx.filter(effect => (effect.age += dt) < 0.7);
             const target = runner.restarting ? -3.5 : Math.max(runner.autoRow, (runner.rowFloat ?? runner.row) - 3.5);
             runner.cameraRow += (target - runner.cameraRow) * (1 - Math.exp(-5 * dt));
             runner.cameraX += (4 + (runner.viewCols < 9 ? (runner.x - 4) * 0.38 : 0) - runner.cameraX) * (1 - Math.exp(-4 * dt));
@@ -2903,6 +2914,13 @@
                         runner.x = hop.blocked ? hop.x : hop.targetX;
                         runner.row = hop.blocked ? hop.from : hop.to; runner.rowFloat = runner.row;
                         runner.hop = null; landed = true;
+                        if (!hop.blocked) (runner.fx ||= []).push({ x: runner.x, row: runner.row, age: 0, kind: 'dust' });
+                        const landLane = this.waitingLane(runner, runner.row);
+                        if (landLane.coin && !landLane.coin.taken && Math.round(runner.x) === landLane.coin.col) {
+                            landLane.coin.taken = true; runner.coins = (runner.coins || 0) + 1;
+                            runner.fx.push({ x: runner.x, row: runner.row, age: 0, kind: 'coin' });
+                            window.StudBudSfx?.play('coin', 'game');
+                        }
                         if (runner.row > runner.score) {
                             runner.score = runner.row; document.getElementById('waiting-runner-score').textContent = String(runner.score);
                             if (runner.score > runner.best) {
@@ -2933,6 +2951,7 @@
                     }
                 }
                 if (runner.dead) break;
+                if (landed && runner.queued) { const [qx, qy] = runner.queued; runner.queued = null; this.waitingHop(qx, qy); }
                 if (landed && this.waitingLane(runner, runner.row).type === 'river' && !this.waitingPlatformCovers(this.waitingLane(runner, runner.row), runner.x, runner.clock)) this.waitingDeath('Splash! Missed the log');
                 if (runner.x < -0.28 || runner.x > 8.28 || (!runner.hop && this.waitingLane(runner, runner.row).type === 'river' && Math.abs(runner.x - runner.cameraX) > (runner.viewCols || 9) / 2 + 0.23)) this.waitingDeath('Carried beyond the bank');
                 if (after.row < runner.cameraRow - 0.5) this.waitingDeath('The trail moved on');
@@ -4074,6 +4093,26 @@
                     }
                 }
             }
+            for (let row = start; row < start + rows; row++) {
+                const coin = runner.lanes.get(row)?.coin;
+                if (!coin || coin.taken) continue;
+                const cx = left + (coin.col + .5) * tile, cy = screenY(row) + laneHeight * .48 - Math.sin(clock * 4 + row) * tile * .05;
+                const spin = Math.abs(Math.cos(clock * 3 + row));
+                ctx.fillStyle = 'rgba(34,49,38,.22)'; ctx.beginPath(); ctx.ellipse(cx, screenY(row) + laneHeight * .66, tile * .13, tile * .05, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = '#b7791f'; ctx.beginPath(); ctx.ellipse(cx + 2, cy, tile * .15 * spin + 2, tile * .15, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.ellipse(cx, cy, tile * .15 * spin + 1, tile * .15, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = '#fff7c2'; ctx.fillRect(cx - 1, cy - tile * .08, 2, tile * .16);
+            }
+            for (const effect of runner.fx || []) {
+                const fx = left + (effect.x + .5) * tile, fy = screenY(effect.row) + laneHeight * .65, k = effect.age / .7;
+                if (effect.kind === 'dust') {
+                    ctx.fillStyle = `rgba(245,240,220,${.55 * (1 - k)})`;
+                    for (let i = -1; i <= 1; i += 2) { ctx.beginPath(); ctx.arc(fx + i * tile * (.18 + k * .25), fy - k * 4, tile * (.06 + k * .05), 0, Math.PI * 2); ctx.fill(); }
+                } else {
+                    ctx.globalAlpha = 1 - k; ctx.fillStyle = '#fde047'; ctx.font = '900 14px system-ui'; ctx.textAlign = 'center';
+                    ctx.fillText('+1', fx, fy - tile * (.8 + k * .5)); ctx.globalAlpha = 1;
+                }
+            }
             const hop = runner.hop, progress = hop?.t || 0, arc = hop ? Math.sin(progress * Math.PI) : 0;
             const px = left + (runner.x + .5) * tile, groundY = screenY(runner.rowFloat ?? runner.row) + laneHeight * .65;
             const death = runner.dead ? Math.min(1, (runner.deathAge || 0) / .55) : 0, splash = runner.dead && /Splash|Carried/.test(runner.deathReason || '');
@@ -4092,6 +4131,7 @@
             }
             ctx.fillStyle = 'rgba(29,48,40,.74)'; ctx.fillRect(0, 0, width, 31);
             ctx.fillStyle = '#f5ffe7'; ctx.font = '800 12px system-ui'; ctx.textAlign = 'right'; ctx.fillText('ROWS ' + runner.score + ' / BEST ' + runner.best, width - 14, 21);
+            ctx.textAlign = 'left'; ctx.fillStyle = '#fde047'; ctx.fillText('● ' + (runner.coins || 0), 14, 21);
             const touch = window.matchMedia?.('(pointer: coarse)').matches || (navigator.maxTouchPoints || 0) > 0;
             const prompt = runner.dead ? (death < 1 ? (splash ? 'Splash!' : 'Ouch!') : runner.deathReason + (touch ? ' - tap to restart' : ' - press a key to restart')) : (touch ? 'TAP TO HOP / SWIPE TO MOVE' : 'WASD / ARROWS OR SPACE TO HOP');
             ctx.font = '700 11px system-ui'; ctx.textAlign = 'center'; const pw = Math.min(width - 16, ctx.measureText(prompt).width + 20);
@@ -4371,12 +4411,13 @@
             startButton.disabled = players.length < 2;
             startButton.textContent = room.mode === 'duel' ? 'Start the hill brawl' : 'Start the game';
             finishButton.classList.toggle('hidden', !isHost || room.status === 'finished');
-            this.syncArcadeSession(room, isHost);
             const waitingCard = document.getElementById('waiting-arcade-card');
             const guestWaiting = room.status === 'waiting';
             waitingCard.classList.toggle('hidden', !guestWaiting);
             if (guestWaiting && !this.waitingRunner.started) this.startWaitingRunner();
             if (!guestWaiting) this.stopWaitingRunner();
+            try { this.syncArcadeSession(room, isHost); }
+            catch (error) { console.error('[NexusApp] Arcade session could not sync:', error); }
             document.getElementById('multiplayer-host-flow').classList.add('hidden');
             document.getElementById('multiplayer-join-flow').classList.add('hidden');
             document.querySelector('.multiplayer-tabs').classList.add('hidden');
@@ -4447,11 +4488,18 @@
             if (!this.arcadeSession) document.body.classList.remove('mpg-active');
         }
 
-        startPractice() {
-            const room = this.hostedGameRoom;
+        startPractice(modeOverride) {
             const arcade = window.StudBudArcade;
-            if (!room || !arcade || this.practiceSession) return;
-            const user = window.StudBudCloud.user;
+            if (this.practiceSession && (this.practiceSession.destroyed || !this.practiceSession.overlay?.isConnected)) {
+                try { this.practiceSession.destroy(); } catch (_) { /* already gone */ }
+                this.practiceSession = null;
+            }
+            const deckId = document.getElementById('host-game-deck')?.value;
+            const room = modeOverride
+                ? { mode: modeOverride, deck_id: deckId, state: { players: [] } }
+                : this.hostedGameRoom || { mode: this.selectedMultiplayerMode || 'skyline', deck_id: deckId, state: { players: [] } };
+            if (!arcade || this.practiceSession) return;
+            const user = window.StudBudCloud?.user || { id: 'local-practice' };
             const me = (room.state?.players || []).find(player => player.id === user.id) || { id: user.id, nickname: 'You' };
             const deck = (AppState.get('flashcards') || []).find(item => item.id === room.deck_id || item.title === room.deck_title);
             const botDefs = [['b1', 'Nova', '#f472b6'], ['b2', 'Kite', '#facc15'], ['b3', 'Rook', '#4ade80']];
@@ -4748,7 +4796,8 @@
                     ${p.bio ? `<p class="friend-bio">${this.escapeHTML(p.bio)}</p>` : ''}${facts ? `<div class="friend-chips">${facts}</div>` : ''}
                     <div class="friend-stats">${p.show_stats === false ? stat('Match wins', Number(p.wins) || 0) : `${stat('Studied today', this.formatStudyDuration(p.today_seconds))}${stat('This week', this.formatStudyDuration(p.week_seconds))}${stat('All time', this.formatStudyDuration(p.total_seconds))}${stat('Day streak', `${Number(p.streak_days) || 0} 🔥`)}${stat('Match wins', Number(p.wins) || 0)}`}</div>
                     <h4>Shared flashcard sets</h4>
-                    <ul class="friend-list">${decks || '<li class="empty-state">No shared sets yet.</li>'}</ul>`;
+                    <ul class="friend-list">${decks || '<li class="empty-state">No shared sets yet.</li>'}</ul>
+                    ${p.is_me ? `<div class="own-profile-actions"><button type="button" class="primary-btn" data-action="edit-public-profile"><i class="fas fa-pen" aria-hidden="true"></i> Edit public profile</button><button type="button" class="secondary-btn" data-action="open-my-shop"><i class="fas fa-store" aria-hidden="true"></i> Shop &amp; character</button></div>` : ''}`;
             } catch (error) {
                 modal.innerHTML = `<p class="community-status error">${this.escapeHTML(error.message || 'Could not open that profile.')}</p><button type="button" class="ghost-btn" data-action="close-user-profile">Close</button>`;
             }
@@ -4794,7 +4843,7 @@
                 { route: 'exam-arcade', sel: nav('exam-arcade'), title: 'Practice & Arcade', text: 'Practice exams and quick arcade games that use your own flashcards.' },
                 { route: 'multiplayer', sel: nav('multiplayer'), title: 'Multiplayer', text: 'Host or join a room and play City Escape, Soccer, King of the Hill and more. Every game has its own touch controls on phones, and a live leaderboard that ranks by what wins that game.' },
                 { route: 'shop', sel: nav('shop'), title: 'Shop & your character', text: 'Earn coins from games and open mystery boxes for characters, hats, accessories and colors. Equip items to wear them, and press Unequip on a worn item to take it off again.' },
-                { route: 'shop', sel: '#multiplayer-profile-button', title: 'Your profile button', text: 'This button in the top bar shows your character and name. Tap it any time to jump to your shop and character.' },
+                { route: 'shop', sel: '#multiplayer-profile-button', title: 'Your profile button', text: 'This button in the top bar shows your character and name. Tap it any time to see your public profile, then edit it or jump to the shop.' },
                 { route: 'about', sel: nav('about'), title: 'About', text: 'What StudBud is for, how to use it, and who to email with questions or suggestions.' },
                 { route: 'settings', sel: '#public-profile-card', title: 'Public profile', text: 'Write a short bio, favorite subject, grade and study goal for your friends to see, and choose whether to share your study stats.' },
                 { route: 'settings', sel: nav('settings'), title: 'Settings', text: 'Set your graduation year and target GPA, change your username (once a week), back up or restore your data, and replay this tutorial any time.' },
@@ -5589,6 +5638,8 @@
                     this.setMultiplayerScreen(target.dataset.multiplayerTab);
                 } else if (id === 'waiting-practice-btn') {
                     this.startPractice();
+                } else if (id === 'preview-practice-btn') {
+                    this.startPractice(this.selectedMultiplayerMode || 'skyline');
                 } else if (target.matches('[data-study-leaderboard-period]')) {
                     this.studyLeaderboardPeriod = target.dataset.studyLeaderboardPeriod;
                     await this.refreshStudyLeaderboard(this.studyLeaderboardPeriod);
@@ -5701,6 +5752,20 @@
                     await this.friendAction(action, target.dataset.id, target.dataset.name);
                 } else if (action === 'view-profile') {
                     await this.openUserProfile(target.dataset.id);
+                } else if (action === 'view-my-profile') {
+                    const myId = window.StudBudCloud?.user?.id;
+                    if (myId) await this.openUserProfile(myId);
+                    else Router.navigate('settings');
+                } else if (action === 'edit-public-profile' || action === 'open-my-shop') {
+                    document.getElementById('user-profile-overlay')?.classList.add('hidden');
+                    Router.navigate(action === 'open-my-shop' ? 'shop' : 'settings');
+                    if (action === 'edit-public-profile') {
+                        setTimeout(() => {
+                            const card = document.getElementById('public-profile-card');
+                            card?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            card?.querySelector('input, textarea, select')?.focus({ preventScroll: true });
+                        }, 300);
+                    }
                 } else if (action === 'friend-view') {
                     await this.showFriendProfile(target.dataset.id);
                 } else if (action === 'friend-profile-close') {

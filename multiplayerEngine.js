@@ -150,7 +150,7 @@
     }
 
     function roundRect(ctx, x, y, w, h, r) {
-        r = Math.min(r, w / 2, h / 2);
+        r = Math.max(0, Math.min(r, Math.abs(w) / 2, Math.abs(h) / 2));
         ctx.beginPath();
         ctx.moveTo(x + r, y);
         ctx.arcTo(x + w, y, x + w, y + h, r);
@@ -1082,8 +1082,32 @@
         skin_neon: { body: '#22d3ee', head: '#e879f9', eye: '#0f172a', trim: '#a3e635' },
         skin_pixel: { body: '#4ade80', head: '#bbf7d0', eye: '#052e16', trim: '#166534' },
         skin_steampunk: { body: '#a16207', head: '#fcd9a8', eye: '#422006', trim: '#78350f' },
-        skin_rainbow: { body: '#a855f7', head: '#fde047', eye: '#0f172a', trim: '#22c55e' }
+        skin_rainbow: { body: '#a855f7', head: '#fde047', eye: '#0f172a', trim: '#22c55e' },
+        skin_sprout: { body: '#65a30d', head: '#d9f99d', eye: '#1a2e05', trim: '#3f6212' },
+        skin_sunny: { body: '#fbbf24', head: '#fef3c7', eye: '#78350f', trim: '#d97706' },
+        skin_berry: { body: '#7c3aed', head: '#ddd6fe', eye: '#2e1065', trim: '#a21caf' },
+        skin_storm: { body: '#475569', head: '#cbd5e1', eye: '#0f172a', trim: '#38bdf8' },
+        skin_minty: { body: '#34d399', head: '#d1fae5', eye: '#064e3b', trim: '#059669' },
+        skin_celestial: { body: '#fef3c7', head: '#fffbeb', eye: '#7c3aed', trim: '#facc15', mythic: ['#fde047', '#a78bfa'] },
+        skin_inferno: { body: '#991b1b', head: '#fb923c', eye: '#fef08a', trim: '#fbbf24', mythic: ['#f97316', '#ef4444'] }
     };
+
+    // Shimmering aura shared by mythic skins and the Mythic Aura accessory.
+    function drawMythicAura(ctx, cx, cy, radius, colors, time) {
+        ctx.save();
+        const pulse = 1 + Math.sin(time * 3) * 0.08;
+        const glow = ctx.createRadialGradient(cx, cy, radius * 0.2, cx, cy, radius * pulse);
+        glow.addColorStop(0, colors[0] + '55'); glow.addColorStop(0.6, colors[1] + '33'); glow.addColorStop(1, colors[1] + '00');
+        ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(cx, cy, radius * pulse, 0, TAU); ctx.fill();
+        const baseAlpha = ctx.globalAlpha;
+        for (let i = 0; i < 5; i++) {
+            const a = time * 1.8 + i * TAU / 5, rr = radius * (0.75 + Math.sin(time * 4 + i) * 0.1);
+            ctx.fillStyle = i % 2 ? colors[0] : colors[1];
+            ctx.globalAlpha = baseAlpha * (0.6 + Math.sin(time * 7 + i) * 0.35);
+            ctx.beginPath(); ctx.arc(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr * 0.8, Math.max(1.2, radius * 0.06), 0, TAU); ctx.fill();
+        }
+        ctx.restore();
+    }
 
     const LEGACY_HATS = { accessory_cap: 'hat_cap', accessory_halo: 'hat_halo', accessory_headphones: 'hat_headphones' };
     let petMap = null;
@@ -1221,6 +1245,29 @@
             fill('#e5e7eb', () => { ctx.moveTo(-r * 0.9, r * 0.3); ctx.lineTo(-r * 0.6, -r * 0.2); ctx.lineTo(-r * 0.3, r * 0.05); ctx.lineTo(0, -r * 0.65); ctx.lineTo(r * 0.3, r * 0.05); ctx.lineTo(r * 0.6, -r * 0.2); ctx.lineTo(r * 0.9, r * 0.3); });
             fill('#ec4899', () => ctx.arc(0, -r * 0.25, r * 0.16, 0, TAU));
             fill('#38bdf8', () => { ctx.arc(-r * 0.6, r * 0.05, r * 0.1, 0, TAU); ctx.arc(r * 0.6, r * 0.05, r * 0.1, 0, TAU); });
+        } else if (hat === 'hat_visor') {
+            fill('#f8fafc', () => ctx.ellipse(r * 0.35, r * 0.35, r * 1.25, r * 0.22, 0, 0, TAU));
+            ctx.fillStyle = '#0ea5e9'; ctx.fillRect(-r * 1.0, r * 0.05, r * 2.0, r * 0.3);
+        } else if (hat === 'hat_bucket') {
+            fill('#a3a380', () => ctx.ellipse(0, r * 0.38, r * 1.45, r * 0.3, 0, 0, TAU));
+            fill('#bdbd94', () => { ctx.moveTo(-r * 0.95, r * 0.35); ctx.lineTo(-r * 0.75, -r * 0.55); ctx.quadraticCurveTo(0, -r * 0.8, r * 0.75, -r * 0.55); ctx.lineTo(r * 0.95, r * 0.35); });
+            ctx.fillStyle = '#6b6b4e'; ctx.fillRect(-r * 0.88, r * 0.08, r * 1.76, r * 0.16);
+        } else if (hat === 'hat_astronaut') {
+            ctx.fillStyle = 'rgba(186,230,253,.35)'; ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = r * 0.18;
+            ctx.beginPath(); ctx.arc(0, r * 0.95, r * 1.45, 0, TAU); ctx.fill(); ctx.stroke();
+            fill('rgba(255,255,255,.6)', () => ctx.ellipse(-r * 0.55, r * 0.2, r * 0.22, r * 0.4, 0.5, 0, TAU));
+            fill('#ef4444', () => ctx.arc(0, -r * 0.5, r * 0.16, 0, TAU));
+        } else if (hat === 'hat_cosmic') {
+            const t = performance.now() / 1000;
+            const glow = ctx.createLinearGradient(-r, -r, r, r);
+            glow.addColorStop(0, '#f43f5e'); glow.addColorStop(0.5, '#a855f7'); glow.addColorStop(1, '#22d3ee');
+            fill(glow, () => {
+                ctx.moveTo(-r * 1.0, r * 0.35); ctx.lineTo(-r * 1.1, -r * 1.05); ctx.lineTo(-r * 0.5, -r * 0.35);
+                ctx.lineTo(0, -r * 1.45); ctx.lineTo(r * 0.5, -r * 0.35); ctx.lineTo(r * 1.1, -r * 1.05); ctx.lineTo(r * 1.0, r * 0.35);
+            });
+            fill('#fef9c3', () => { ctx.arc(-r * 1.1, -r * 1.05, r * 0.14, 0, TAU); ctx.arc(0, -r * 1.45, r * 0.18, 0, TAU); ctx.arc(r * 1.1, -r * 1.05, r * 0.14, 0, TAU); });
+            ctx.fillStyle = `rgba(254,249,195,${0.5 + Math.sin(t * 6) * 0.4})`;
+            for (let i = 0; i < 3; i++) { const a = t * 2 + i * 2.1; ctx.fillRect(Math.cos(a) * r * 1.5 - 1, -r * 0.6 + Math.sin(a) * r * 0.5 - 1, 2.5, 2.5); }
         }
         ctx.restore();
     }
@@ -1237,6 +1284,14 @@
         ctx.globalAlpha = alpha * (c.skin?.alpha || 1);
         ctx.fillStyle = 'rgba(0,0,0,.25)';
         ctx.fillRect(x + 2, y + h - 2, w - 4, 3);
+        if (c.skin?.mythic) drawMythicAura(ctx, cx, y + h * 0.45, Math.max(w, h) * 0.75, c.skin.mythic, time);
+        if (c.acc === 'acc_aura') drawMythicAura(ctx, cx, y + h * 0.45, Math.max(w, h) * 0.85, ['#22d3ee', '#f43f5e'], time + 1.3);
+        if (c.acc === 'acc_comet') {
+            for (let i = 5; i > 0; i--) {
+                ctx.fillStyle = `rgba(${i % 2 ? '125,211,252' : '196,181,253'},${0.12 * (6 - i)})`;
+                ctx.beginPath(); ctx.arc(cx - face * (w * 0.4 + i * 6), y + h * 0.5 + Math.sin(time * 8 + i) * 2, 3 + (6 - i) * 0.9, 0, TAU); ctx.fill();
+            }
+        }
         if (c.acc === 'acc_wings') {
             ctx.fillStyle = 'rgba(226,232,240,.9)';
             const flap = Math.sin(time * 10) * 4;
@@ -1343,8 +1398,11 @@
         ctx.translate(x, y);
         ctx.fillStyle = 'rgba(0,0,0,.3)';
         ctx.beginPath(); ctx.ellipse(2, 4, r, r * 0.8, 0, 0, TAU); ctx.fill();
+        if (c.skin?.mythic) drawMythicAura(ctx, 0, 0, r * 1.7, c.skin.mythic, time);
+        if (c.acc === 'acc_aura') drawMythicAura(ctx, 0, 0, r * 1.9, ['#22d3ee', '#f43f5e'], time + 1.3);
         ctx.save();
         ctx.rotate(aim);
+        if (c.acc === 'acc_comet') { for (let i = 4; i > 0; i--) { ctx.fillStyle = `rgba(125,211,252,${0.14 * (5 - i)})`; ctx.beginPath(); ctx.arc(-r * (0.9 + i * 0.45), Math.sin(time * 8 + i) * r * 0.15, r * (0.2 + (5 - i) * 0.07), 0, TAU); ctx.fill(); } }
         if (c.acc === 'acc_cape') { ctx.fillStyle = '#dc2626'; ctx.beginPath(); ctx.moveTo(-r * 0.2, -r * 0.9); ctx.lineTo(-r * 1.7, 0); ctx.lineTo(-r * 0.2, r * 0.9); ctx.fill(); }
         if (c.acc === 'acc_wings') { ctx.fillStyle = 'rgba(226,232,240,.9)'; const f = Math.sin(time * 10) * 0.12; ctx.beginPath(); ctx.ellipse(-r * 0.3, -r * 1.15, r * 0.35, r * (1 + f), 0.4, 0, TAU); ctx.ellipse(-r * 0.3, r * 1.15, r * 0.35, r * (1 + f), -0.4, 0, TAU); ctx.fill(); }
         if (c.acc === 'acc_backpack') { ctx.fillStyle = '#b45309'; roundRect(ctx, -r * 1.25, -r * 0.5, r * 0.7, r, 3); ctx.fill(); }
