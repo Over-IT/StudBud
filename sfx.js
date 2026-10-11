@@ -187,6 +187,7 @@
         }
 
         startMusic(mode, forceRestart = false) {
+            if (window.StudBudArcade?.previewDepth > 0) return;
             if (!MUSIC[mode]) this.activeMode = mode;
             if (!this.settings.music || !this.settings.musicVolume || !this.unlock()) return;
             const style = MUSIC[mode] ? mode : this.styleFor(mode);
@@ -320,6 +321,7 @@
 
         // category is 'ui' or 'game'; sounds in a muted category are skipped.
         play(name, category = 'ui', minGapMs = 45) {
+            if (window.StudBudArcade?.previewDepth > 0) return;
             const s = this.settings;
             if (!s.volume || !s[category] || !RECIPES[name] || !this.unlock()) return;
             const now = performance.now();

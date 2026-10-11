@@ -2366,10 +2366,17 @@
                                     }).join('');
                                     body = `<h4 class="shop-category-title">${mine.filter(item => !item.legacy).length} / ${total} items collected</h4>${sections || '<p class="settings-hint">Nothing here yet — open a mystery box or buy something!</p>'}`;
                                 } else {
-                                    const items = catalog.filter(item => item.type === tab);
+                                    const order = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
+                                    const rank = item => { const i = order.indexOf(item.rarity); return i < 0 ? order.length : i; };
+                                    const items = catalog.filter(item => item.type === tab)
+                                        .sort((a, b) => rank(a) - rank(b) || (a.price ?? Infinity) - (b.price ?? Infinity) || String(a.name).localeCompare(String(b.name)));
                                     const count = items.filter(item => owned.includes(item.id)).length;
                                     const remove = slotKey[tab] ? `<button type="button" class="ghost-btn shop-unequip" data-action="multiplayer-unequip" data-slot="${tab === 'accessory' ? 'accessory' : tab}">Remove</button>` : '';
-                                    body = `<h4 class="shop-category-title">${count} / ${items.length} collected ${remove}</h4>${items.map(itemCard).join('')}`;
+                                    const groups = [...new Set(items.map(item => item.rarity))].sort((a, b) => rank({ rarity: a }) - rank({ rarity: b }));
+                                    body = `<h4 class="shop-category-title">${count} / ${items.length} collected ${remove}</h4>${groups.map(rarity => {
+                                        const list = items.filter(item => item.rarity === rarity);
+                                        return `<h4 class="shop-category-title shop-rarity-title rarity-${this.escapeHTML(rarity)}">${this.escapeHTML(rarity.charAt(0).toUpperCase() + rarity.slice(1))} · ${list.filter(item => owned.includes(item.id)).length}/${list.length}</h4>${list.map(itemCard).join('')}`;
+                                    }).join('')}`;
                                 }
             document.getElementById('multiplayer-shop-items').innerHTML = `
                 <div class="shop-tabs" role="tablist">${tabs.map(([id, label]) => `<button type="button" class="shop-tab${tab === id ? ' selected' : ''}" role="tab" aria-selected="${tab === id}" data-shop-tab="${id}">${label}</button>`).join('')}</div>
@@ -2737,17 +2744,21 @@
 
         startWaitingRunner(reset = true) {
             const runner = this.waitingRunner;
+            if (reset && runner.dead && runner.deathAge < 0.55) return;
             runner.best = Math.max(Number(runner.best) || 0, this.readWaitingBest());
             document.getElementById('waiting-runner-best').textContent = String(runner.best);
             if (reset) {
-                runner.x = 4; runner.row = 0; runner.cameraRow = -4; runner.score = 0;
-                runner.clock = 0; runner.hop = null; runner.dead = false; runner.lanes = new Map();
+                runner.x = 4; runner.row = 0; runner.rowFloat = 0; runner.score = 0;
+                runner.autoRow = -3.5; runner.cameraX = Number.isFinite(runner.cameraX) ? runner.cameraX : 4;
+                runner.cameraRow = runner.started ? runner.cameraRow : -3.5;
+                runner.restarting = true; runner.clock = 0; runner.hop = null; runner.dead = false;
+                runner.deathAge = 0; runner.bump = 0; runner.lanes = new Map();
                 runner.seed = Math.floor(Math.random() * 0x7fffffff) || 127;
                 this.waitingLane(runner, 0);
                 document.getElementById('waiting-runner-score').textContent = '0';
             }
             runner.running = true; runner.started = true;
-            document.getElementById('waiting-runner-start').textContent = 'Restart crossing';
+            document.getElementById('waiting-runner-start').textContent = 'Restart warm-up';
         }
 
         waitingRandom(runner, row, salt = 0) {
@@ -2764,23 +2775,25 @@
             }
             if (runner.lanes.has(row)) return runner.lanes.get(row);
             const roll = this.waitingRandom(runner, row, 3), previous = runner.lanes.get(row - 1)?.type;
-            let type = roll < 0.28 ? 'grass' : roll < 0.57 ? 'road' : roll < 0.79 ? 'data' : roll < 0.91 ? 'rail' : 'hall';
+            let type = roll < 0.32 ? 'grass' : roll < 0.65 ? 'road' : roll < 0.89 ? 'river' : 'rail';
             if (type === 'rail' && previous === 'rail') type = 'grass';
-            const lane = { row, type, blockers: [], speed: (0.58 + this.waitingRandom(runner, row, 5) * 0.72) * (this.waitingRandom(runner, row, 7) < 0.5 ? -1 : 1), phase: this.waitingRandom(runner, row, 11) * 8 };
-            if (type === 'grass' || type === 'hall') {
-                for (let col = 0; col < 9; col++) if (col !== 4 && this.waitingRandom(runner, row, col + 19) < (type === 'grass' ? 0.13 : 0.09)) lane.blockers.push({ col, kind: this.waitingRandom(runner, row, col + 41) < 0.5 ? 'tree' : 'crate' });
+            const direction = this.waitingRandom(runner, row, 7) < 0.5 ? -1 : 1;
+            const lane = { row, type, blockers: [], speed: (0.55 + this.waitingRandom(runner, row, 5) * 0.85) * direction, phase: this.waitingRandom(runner, row, 11) * 9 };
+            if (type === 'grass') {
+                for (let col = 0; col < 9; col++) if (col !== 4 && this.waitingRandom(runner, row, col + 19) < 0.22) lane.blockers.push({ col, kind: this.waitingRandom(runner, row, col + 41) < 0.66 ? 'tree' : 'rock' });
             } else if (type === 'road') {
-                lane.vehicles = [0, 1].map(i => ({ x: this.waitingRandom(runner, row, i + 53) * 12 - 2 + i * 4.5, w: this.waitingRandom(runner, row, i + 71) < 0.38 ? 1.7 : 1.12, color: ['#38bdf8', '#f59e0b', '#f472b6', '#a78bfa'][Math.floor(this.waitingRandom(runner, row, i + 91) * 4)] }));
-            } else if (type === 'data') {
-                lane.platforms = [0, 1].map(i => ({ x: this.waitingRandom(runner, row, i + 101) * 10 - 1, w: 1.7 + this.waitingRandom(runner, row, i + 121) * 1.3, color: i ? '#8b5cf6' : '#22d3ee' }));
+                lane.vehicles = [0, 1, 2].map(i => ({ x: i * 5 + this.waitingRandom(runner, row, i + 53) * 1.7, w: this.waitingRandom(runner, row, i + 71) < 0.35 ? 2.1 : 1.1, speed: direction * (1.2 + this.waitingRandom(runner, row, i + 81) * 2.8), color: ['#38bdf8', '#fbbf24', '#f472b6', '#a78bfa', '#ef4444', '#f8fafc'][Math.floor(this.waitingRandom(runner, row, i + 91) * 6)] }));
+            } else if (type === 'river') {
+                lane.platforms = [0, 1, 2].map(i => ({ x: i * 4.5 + this.waitingRandom(runner, row, i + 101), w: 2.2 + this.waitingRandom(runner, row, i + 121) * 0.7, speed: lane.speed, kind: 'log' }));
+                if (this.waitingRandom(runner, row, 137) < 0.6) lane.platforms.push({ x: 1 + Math.floor(this.waitingRandom(runner, row, 139) * 7), w: 0.82, speed: 0, kind: 'pad' });
             }
             runner.lanes.set(row, lane);
             return lane;
         }
 
         waitingWrap(value, length) { return ((value % length) + length) % length; }
-        waitingVehicleX(lane, vehicle, time) { return this.waitingWrap(vehicle.x + lane.speed * time, 13) - 2; }
-        waitingPlatformX(lane, platform, time) { return this.waitingWrap(platform.x + lane.speed * time, 11) - 1; }
+        waitingVehicleX(lane, vehicle, time) { return this.waitingWrap(vehicle.x + (vehicle.speed ?? lane.speed) * time + 3, 17) - 3; }
+        waitingPlatformX(lane, platform, time) { return platform.kind === 'pad' ? platform.x : this.waitingWrap(platform.x + (platform.speed ?? lane.speed) * time + 3, 14) - 3; }
 
         pointOnCanvas(canvas, event) {
             const bounds = canvas.getBoundingClientRect();
@@ -2789,21 +2802,21 @@
 
         waitingHop(dx, dy) {
             const runner = this.waitingRunner;
-            if (runner.dead || !runner.running) {
-                this.startWaitingRunner();
-                if (!dy && !dx) return;
-            }
-            if (runner.hop || !runner.running) return;
-            const col = Math.max(0, Math.min(8, Math.round(runner.x) + dx));
-            const row = Math.max(0, runner.row + dy);
-            if (col === Math.round(runner.x) && row === runner.row) return;
-            const destination = this.waitingLane(runner, row);
-            if ((destination.type === 'grass' || destination.type === 'hall') && destination.blockers.some(blocker => blocker.col === col)) { runner.bump = 0.18; return; }
-            runner.hop = { x: runner.x, from: runner.row, to: row, targetX: col, dx, dy, t: 0 };
+            if (runner.dead && runner.deathAge < 0.55) return;
+            if (runner.dead || !runner.running) this.startWaitingRunner();
+            if (runner.hop || !runner.running || runner.restarting) return;
+            const row = Math.max(0, runner.row + dy), destination = this.waitingLane(runner, row);
+            const onLand = destination.type === 'grass' || destination.type === 'road' || destination.type === 'rail';
+            const col = Math.max(0, Math.min(8, onLand ? Math.round(runner.x + dx) : runner.x + dx));
+            if (Math.abs(col - runner.x) < 0.01 && row === runner.row) return;
+            const blocked = destination.blockers.some(blocker => blocker.col === Math.round(col));
+            runner.hop = { x: runner.x, from: runner.row, to: row, targetX: col, dx, dy, elapsed: 0, duration: blocked ? 0.22 : 0.2, t: 0, blocked };
+            if (blocked) runner.bump = 0.22;
         }
 
         beginWaitingHop(event) {
             event.preventDefault();
+            if (this.waitingRunner.dead && this.waitingRunner.deathAge < 0.55) return;
             if (!this.waitingRunner.running || this.waitingRunner.dead) this.startWaitingRunner();
             this.waitingRunner.pointer = this.pointOnCanvas(event.currentTarget, event);
             event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -2825,67 +2838,106 @@
             const runner = this.waitingRunner;
             if (runner.dead) return;
             runner.dead = true; runner.running = false; runner.hop = null; runner.deathReason = reason;
-            document.getElementById('waiting-runner-start').textContent = 'Run again';
+            runner.deathAge = 0;
+            document.getElementById('waiting-runner-start').textContent = 'Oops...';
             this.saveWaitingRunnerBest();
         }
 
-        waitingPlatformCovers(lane, x, time) {
-            return lane.platforms?.some(platform => {
-                const center = this.waitingPlatformX(lane, platform, time);
-                return x >= center - platform.w / 2 && x <= center + platform.w / 2;
-            }) || false;
+        waitingPlatformAt(lane, x, time) {
+            return lane.platforms?.find(platform => Math.abs(x - this.waitingPlatformX(lane, platform, time)) <= platform.w / 2 - 0.04);
         }
+
+        waitingPlatformCovers(lane, x, time) { return Boolean(this.waitingPlatformAt(lane, x, time)); }
 
         waitingTrain(lane, time) {
-            const phase = this.waitingWrap(time + lane.phase, 8);
-            if (phase < 5.6) return null;
-            const progress = Math.min(1, (phase - 5.6) / 1.65);
-            return { x: (lane.speed > 0 ? -2 : 11) + progress * 13 * (lane.speed > 0 ? 1 : -1), active: true };
+            const phase = this.waitingWrap(time + lane.phase, 9);
+            if (phase < 6 || phase > 7.65) return null;
+            return { x: lane.speed > 0 ? -6 + (phase - 6) * 16 : 14 - (phase - 6) * 16, w: 5.4, active: true };
         }
 
-        stepWaitingRunner(delta) {
-            const runner = this.waitingRunner;
-            if (!runner.running) return;
-            const dt = Math.min(0.05, delta * 16.67 / 1000);
-            runner.clock += dt;
-            const ahead = Math.max(runner.row, Math.ceil(runner.cameraRow + 12));
-            for (let row = Math.max(0, Math.floor(runner.cameraRow) - 2); row <= ahead; row++) this.waitingLane(runner, row);
-            runner.cameraRow = Math.max(runner.cameraRow + dt * 0.32, runner.row - 4);
-            if (!runner.hop && runner.row < runner.cameraRow - 0.1) { this.waitingDeath('The campus shuttle caught up'); return; }
-            if (runner.hop) {
-                const hop = runner.hop; hop.t = Math.min(1, hop.t + dt / 0.14);
-                runner.x = hop.x + (hop.targetX - hop.x) * hop.t;
-                if (hop.t >= 1) {
-                    runner.x = hop.targetX; runner.row = hop.to; runner.hop = null;
-                    if (runner.row > runner.score) {
-                        runner.score = runner.row; document.getElementById('waiting-runner-score').textContent = String(runner.score);
-                        if (runner.score > runner.best) {
-                            runner.best = this.saveWaitingBestLocal(runner.score);
-                            document.getElementById('waiting-runner-best').textContent = String(runner.best);
-                        }
-                    }
-                }
-            } else {
-                const lane = this.waitingLane(runner, runner.row);
-                if (lane.type === 'data') {
-                    const platform = lane.platforms?.find(item => {
-                        const center = this.waitingPlatformX(lane, item, runner.clock);
-                        return runner.x >= center - item.w / 2 && runner.x <= center + item.w / 2;
-                    });
-                    if (!platform) { this.waitingDeath('Lost in the data stream'); return; }
-                    runner.x += lane.speed * dt;
-                    if (runner.x < 0 || runner.x > 8) { this.waitingDeath('Swept off the study raft'); return; }
-                } else if (lane.type === 'road') {
-                    if (lane.vehicles.some(vehicle => {
-                        const center = this.waitingVehicleX(lane, vehicle, runner.clock);
-                        return Math.abs(center - runner.x) < (vehicle.w + 0.52) / 2;
-                    })) { this.waitingDeath('Hit by a rolling library cart'); return; }
-                } else if (lane.type === 'rail') {
-                    const train = this.waitingTrain(lane, runner.clock);
-                    if (train?.active && Math.abs(train.x - runner.x) < 1.35) { this.waitingDeath('The study express passed'); return; }
+        // Sweep relative motion against an expanded AABB, including the ground footprint mid-hop.
+        waitingSweptHit(from, to, x0, x1, row, halfWidth, halfHeight = 0.28) {
+            const px = from.x - x0, py = from.row - row;
+            const vx = to.x - x1 - px, vy = to.row - row - py;
+            const limits = [halfWidth + 0.23, halfHeight + 0.21];
+            let enter = 0, exit = 1;
+            for (const [p, v, bound] of [[px, vx, limits[0]], [py, vy, limits[1]]]) {
+                if (Math.abs(v) < 1e-9) { if (Math.abs(p) > bound) return false; }
+                else {
+                    const a = (-bound - p) / v, b = (bound - p) / v;
+                    enter = Math.max(enter, Math.min(a, b)); exit = Math.min(exit, Math.max(a, b));
+                    if (enter > exit) return false;
                 }
             }
-            runner.bump = Math.max(0, (runner.bump || 0) - dt);
+            return true;
+        }
+
+        stepWaitingRunner(elapsed) {
+            const runner = this.waitingRunner, dt = Math.min(0.1, Math.max(0, elapsed));
+            if (!runner.started) return;
+            if (runner.dead) {
+                runner.deathAge += dt;
+                if (runner.deathAge >= 0.55) document.getElementById('waiting-runner-start').textContent = 'Run again';
+                return;
+            }
+            if (!runner.running) return;
+            const target = runner.restarting ? -3.5 : Math.max(runner.autoRow, (runner.rowFloat ?? runner.row) - 3.5);
+            runner.cameraRow += (target - runner.cameraRow) * (1 - Math.exp(-5 * dt));
+            runner.cameraX += (4 + (runner.viewCols < 9 ? (runner.x - 4) * 0.38 : 0) - runner.cameraX) * (1 - Math.exp(-4 * dt));
+            if (runner.restarting) { if (Math.abs(runner.cameraRow + 3.5) < 0.08) runner.restarting = false; else return; }
+            const steps = Math.max(1, Math.ceil(dt * 240)), tick = dt / steps;
+            for (let step = 0; step < steps && !runner.dead; step++) {
+                const before = { x: runner.x, row: runner.rowFloat ?? runner.row }, oldTime = runner.clock;
+                runner.clock += tick; runner.autoRow += tick * 0.28;
+                const ahead = Math.max(runner.row + 9, Math.ceil(runner.cameraRow + 13));
+                for (let row = Math.max(0, Math.floor(runner.cameraRow) - 2); row <= ahead; row++) this.waitingLane(runner, row);
+                let landed = false;
+                if (runner.hop) {
+                    const hop = runner.hop;
+                    hop.elapsed += tick; hop.t = Math.min(1, hop.elapsed / hop.duration);
+                    const ease = hop.t * hop.t * (3 - 2 * hop.t);
+                    const travel = hop.blocked ? Math.sin(hop.t * Math.PI) * 0.18 : ease;
+                    runner.x = hop.x + (hop.targetX - hop.x) * travel;
+                    runner.rowFloat = hop.from + (hop.to - hop.from) * travel;
+                    if (hop.t >= 1) {
+                        runner.x = hop.blocked ? hop.x : hop.targetX;
+                        runner.row = hop.blocked ? hop.from : hop.to; runner.rowFloat = runner.row;
+                        runner.hop = null; landed = true;
+                        if (runner.row > runner.score) {
+                            runner.score = runner.row; document.getElementById('waiting-runner-score').textContent = String(runner.score);
+                            if (runner.score > runner.best) {
+                                runner.best = this.saveWaitingBestLocal(runner.score);
+                                document.getElementById('waiting-runner-best').textContent = String(runner.best);
+                            }
+                        }
+                    }
+                } else {
+                    const lane = this.waitingLane(runner, runner.row);
+                    if (lane.type === 'river') {
+                        const platform = this.waitingPlatformAt(lane, runner.x, oldTime);
+                        if (!platform) { this.waitingDeath('Splash! Missed the log'); break; }
+                        runner.x += (platform.speed ?? lane.speed) * tick;
+                    }
+                }
+                const after = { x: runner.x, row: runner.rowFloat ?? runner.row };
+                for (let row = Math.max(1, Math.floor(Math.min(before.row, after.row) - 0.5)); row <= Math.ceil(Math.max(before.row, after.row) + 0.5); row++) {
+                    const lane = this.waitingLane(runner, row);
+                    if (lane.type === 'road') for (const vehicle of lane.vehicles) {
+                        const x0 = this.waitingVehicleX(lane, vehicle, oldTime);
+                        const x1 = x0 + (vehicle.speed ?? lane.speed) * tick;
+                        if (this.waitingSweptHit(before, after, x0, x1, row, vehicle.w / 2 - 0.07)) { this.waitingDeath('Bumped by traffic'); break; }
+                    }
+                    if (lane.type === 'rail') {
+                        const train = this.waitingTrain(lane, runner.clock), previous = this.waitingTrain(lane, oldTime);
+                        if (train && this.waitingSweptHit(before, after, previous?.x ?? train.x, train.x, row, train.w / 2 - 0.08, 0.34)) this.waitingDeath('The express caught you');
+                    }
+                }
+                if (runner.dead) break;
+                if (landed && this.waitingLane(runner, runner.row).type === 'river' && !this.waitingPlatformCovers(this.waitingLane(runner, runner.row), runner.x, runner.clock)) this.waitingDeath('Splash! Missed the log');
+                if (runner.x < -0.28 || runner.x > 8.28 || (!runner.hop && this.waitingLane(runner, runner.row).type === 'river' && Math.abs(runner.x - runner.cameraX) > (runner.viewCols || 9) / 2 + 0.23)) this.waitingDeath('Carried beyond the bank');
+                if (after.row < runner.cameraRow - 0.5) this.waitingDeath('The trail moved on');
+                runner.bump = Math.max(0, (runner.bump || 0) - tick);
+            }
         }
 
         async saveWaitingRunnerBest() {
@@ -2922,7 +2974,7 @@
                     this.stopMultiplayerAnimation();
                     return;
                 }
-                const delta = Math.min(2.5, Math.max(0.25, (now - this.multiplayerFrameTime) / 16.67));
+                const delta = Math.min(0.1, Math.max(0, (now - this.multiplayerFrameTime) / 1000));
                 this.multiplayerFrameTime = now;
                 const modePreviews = document.querySelectorAll('.mode-preview-canvas');
                 for (const canvas of modePreviews) {
@@ -2938,7 +2990,7 @@
                 const waiting = document.getElementById('waiting-arcade-card');
                 if (waiting && !waiting.classList.contains('hidden') && this.canvasIsVisible(document.getElementById('waiting-runner-canvas'))) {
                     this.stepWaitingRunner(delta);
-                    this.drawScholarCrossing(document.getElementById('waiting-runner-canvas'), now / 1000);
+                    this.drawWaitingWarmup(document.getElementById('waiting-runner-canvas'), now / 1000);
                 }
                 this.multiplayerFrame = requestAnimationFrame(animate);
             };
@@ -3046,8 +3098,8 @@
                 return bot;
             });
             if (mode === 'duel') {
-                const sp = [[390, 440], [1190, 440], [790, 200]];
-                bots.forEach((b, i) => Object.assign(b, { w: 34, h: 56, sp: sp[i], x: sp[i][0], y: sp[i][1] - 60, dmg: 0, airJumps: 1, swingT: 0, swingCd: 0.5 + i * 0.4, f: i === 1 ? -1 : 1, ai: { ...b.ai, role: ['west-route', 'east-route', 'upper-route'][i], routeX: [770, 830, 800][i] } }));
+                const sp = game.botSpawns;
+                bots.forEach((b, i) => Object.assign(b, { w: 34, h: 56, sp: sp[i], x: sp[i][0], y: sp[i][1] - 60, dmg: 0, airJumps: 1, swingT: 0, swingCd: 0.5 + i * 0.4, f: i === 1 ? -1 : 1, ai: { ...b.ai, role: ['west-route', 'east-route', 'upper-route'][i], routeX: game.W / 2 + [-30, 30, 0][i] } }));
                 demo.onEmit = ev => { if (ev.k === 'sw') this.duelSwing(demo, ev); };
             } else if (mode === 'shooter') {
                 bots.forEach((b, i) => { b.r = 16; b.strafe = i % 2 ? -1 : 1; this.placeShooterBot(game, b, i); });
@@ -3124,9 +3176,9 @@
                 for (const o of contenders) { const d = Math.hypot(o.x - b.x, o.y - b.y); if (d < bd) { bd = d; tgt = o; } }
                 const routeOffset = (b.i - 1) * 58;
                 const objectiveX = U.clamp(hillCenter + routeOffset, zone.x + 35, zone.x + zone.w - 35);
-                const off = b.y + 56 > 525 && (b.x + 17 < 300 || b.x + 17 > 1300);
+                const off = b.y + 56 > game.stage.y + 5 && (b.x + 17 < game.stage.x || b.x + 17 > game.stage.x + game.stage.w);
                 let want = 0;
-                if (off) want = Math.sign(800 - b.x);
+                if (off) want = Math.sign(game.W / 2 - b.x);
                 else if (tgt && Math.abs(tgt.x - b.x) > 60) want = Math.sign(tgt.x - b.x);
                 else if (!tgt && Math.abs(objectiveX - (b.x + 17)) > 28) want = Math.sign(objectiveX - (b.x + 17));
                 if (b.stun <= 0) {
@@ -3139,7 +3191,7 @@
                 if (b.stun <= 0) {
                     if (off) { if (!b.onGround && b.vy > 0 && b.airJumps > 0) { b.vy = -820; b.airJumps--; } }
                     else if (b.onGround && ((!tgt && zone.y < b.y + 20 && Math.abs(objectiveX - (b.x + 17)) < 260) || (tgt && tgt.y < b.y - 50 && Math.abs(tgt.x - b.x) < 320) || (b.wall && want))) b.vy = -900;
-                    else if (tgt && !b.onGround && b.vy > 0 && b.airJumps > 0 && tgt.y < b.y - 40) { b.vy = -820; b.airJumps--; }
+                    else if (!b.onGround && b.vy > 0 && b.airJumps > 0 && (tgt ? tgt.y < b.y - 40 : zone.y < b.y + 36 && Math.abs(objectiveX - (b.x + 17)) < 340)) { b.vy = -820; b.airJumps--; }
                 }
                 U.moveBody(b, game.solids, dt);
                 if (tgt && b.swingCd <= 0 && b.stun <= 0 && bd < 115) {
@@ -3148,7 +3200,7 @@
                     const ev = { k: 'sw', x: b.x + 17, y: b.y + 28, d: b.f, a: ang, p: 1, by: b.id, c: b.dmg };
                     game.onEvent(ev, b); this.duelSwing(demo, ev);
                 }
-                if (b.x < -150 || b.x > 1750 || b.y > 950 || b.y < -500) {
+                if (b.x < -180 || b.x > game.W + 180 || b.y > game.H || b.y < -650) {
                     b.respawn = 1.4; game.particles.burst(b.x, Math.min(b.y, 880), b.color, 30, 500, 0.8, 6);
                     if (b.lastHit === demo.meId) game.onEvent({ k: 'ko', by: demo.meId }, b);
                     b.lastHit = null;
@@ -3165,8 +3217,8 @@
             let tgt = null, bd = 1e9;
             for (const b of foes) { const d = Math.hypot(b.x - me.x, b.y - me.y); if (d < bd) { bd = d; tgt = b; } }
             const cx = me.x + 17;
-            if (me.y + 56 > 525 && (cx < 300 || cx > 1300)) {
-                hold.add(cx < 800 ? 'KeyD' : 'KeyA');
+            if (me.y + 56 > game.stage.y + 5 && (cx < game.stage.x || cx > game.stage.x + game.stage.w)) {
+                hold.add(cx < game.W / 2 ? 'KeyD' : 'KeyA');
                 if (!me.onGround && me.vy > 0 && game.airJumps > 0) tap.add('Space');
                 return;
             }
@@ -3861,12 +3913,14 @@
         drawLivePreview(canvas, mode, now) {
             const A = window.StudBudArcade;
             if (!canvas || !A?.games?.[mode] || !this.canvasIsVisible(canvas)) return false;
+            A.previewDepth = (A.previewDepth || 0) + 1;
             try {
                 const rect = canvas.getBoundingClientRect();
                 const dpr = Math.min(1.5, Math.max(1, window.devicePixelRatio || 1));
                 const width = Math.max(1, Math.round(rect.width * dpr)), height = Math.max(1, Math.round(rect.height * dpr));
                 if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
                 if (!this.livePreviews) this.livePreviews = new Map();
+                const viewWidth = 900, viewHeight = Math.round(viewWidth * height / width);
                 let demo = this.livePreviews.get(canvas);
                 if (!demo || demo.mode !== mode) {
                     const hold = new Set(), tap = new Set(), noop = () => {};
@@ -3886,8 +3940,8 @@
                         }
                     };
                     const base = {
-                        seed: 4242, local: { id: 'demo', color: '#38bdf8', nickname: 'You', cos: {} }, user: { id: 'demo' }, t: 0, startedAt: Date.now(), done: false, finishMs: 0, over: false, paused: false, question: null, score: 0,
-                        vw: width, vh: height, canvas: mockCanvas, overlay: mockOverlay, roster: new Map(), cards: [], keys: hold, hudBounds() { return { x: 12, y: 12, w: Math.max(1, this.vw - 24), h: Math.max(1, this.vh - 24) }; }, mouse: { x: width / 2, y: height / 2, down: false, pressed: false, touchAt: 0 },
+                        preview: true, seed: 4242, local: { id: 'demo', color: '#38bdf8', nickname: 'You', cos: {} }, user: { id: 'demo' }, t: 0, startedAt: Date.now(), done: false, finishMs: 0, over: false, paused: false, question: null, score: 0,
+                        vw: viewWidth, vh: viewHeight, canvas: mockCanvas, overlay: mockOverlay, roster: new Map(), cards: [], keys: hold, hudBounds() { return { x: 12, y: 12, w: Math.max(1, this.vw - 24), h: Math.max(1, this.vh - 24) }; }, mouse: { x: width / 2, y: height / 2, down: false, pressed: false, touchAt: 0 },
                         down: (...keys) => keys.some(key => hold.has(key)), pressed: (...keys) => keys.some(key => tap.has(key)),
                         axis: () => ({ x: (hold.has('KeyD') || hold.has('ArrowRight') ? 1 : 0) - (hold.has('KeyA') || hold.has('ArrowLeft') ? 1 : 0), y: (hold.has('KeyS') || hold.has('ArrowDown') ? 1 : 0) - (hold.has('KeyW') || hold.has('ArrowUp') ? 1 : 0) }),
                         spend: () => true, refill: noop, sfx: noop, toast: noop, ask: () => false, remoteList: () => [], standings() { return [this.local, ...this.remoteList()].map(player => ({ id: player.id, n: player.nickname || player.name || player.id, color: player.color || '#94a3b8', s: Number(player.score) || 0 })); }, emit: event => demo?.onEmit?.(event), send: noop, setGoal: noop, addScore: noop,
@@ -3913,7 +3967,7 @@
                 const dt = Math.min(0.05, Math.max(0.001, (now - demo.last) / 1000));
                 demo.last = now; demo.clock += dt; session.t += dt; session.startedAt = Date.now() - demo.clock * 1000;
                 hold.clear(); tap.clear(); session.mouse.down = false; session.mouse.pressed = false;
-                session.vw = canvas.width; session.vh = canvas.height;
+                session.vw = viewWidth; session.vh = viewHeight;
                 this.previewControls(demo, dt);
                 if (game.res && game.res.value < 35) game.res.value = game.res.max;
                 if (mode === 'skyline' && game.finished && !demo.endAt) demo.endAt = demo.clock;
@@ -3921,105 +3975,128 @@
                 game.update(dt);
                 const context = canvas.getContext('2d');
                 context.setTransform(1, 0, 0, 1, 0, 0);
-                game.draw(context, canvas.width, canvas.height);
+                context.save();
+                context.scale(canvas.width / viewWidth, canvas.height / viewHeight);
+                game.draw(context, viewWidth, viewHeight);
+                context.restore();
                 return true;
             } catch (error) {
                 console.warn(`[NexusApp] ${mode} live preview unavailable:`, error);
                 if (this.livePreviews) this.livePreviews.delete(canvas);
                 return false;
+            } finally {
+                A.previewDepth--;
             }
         }
 
-        drawScholarCrossing(canvas, time) {
+        drawWaitingWarmup(canvas, time) {
             if (!canvas) return;
             const ctx = canvas.getContext('2d');
             if (!ctx) return;
             const runner = this.waitingRunner, width = canvas.width, height = canvas.height;
-            const tile = Math.min(width / 9, height / 8.8), left = (width - tile * 9) / 2, clock = runner.clock || time;
-            const sky = ctx.createLinearGradient(0, 0, 0, height);
-            sky.addColorStop(0, '#111b36'); sky.addColorStop(0.52, '#142b45'); sky.addColorStop(1, '#0a1528');
-            ctx.fillStyle = sky; ctx.fillRect(0, 0, width, height);
-            for (let i = 0; i < 18; i++) {
-                const x = (i * 67 + Math.sin(time * 0.4 + i) * 9) % width, y = (i * 41 + Math.sin(time * 0.24 + i * 2) * 13) % height;
-                ctx.fillStyle = i % 3 ? 'rgba(103,232,249,.24)' : 'rgba(196,181,253,.32)'; ctx.beginPath(); ctx.arc(x, y, 1 + i % 2, 0, Math.PI * 2); ctx.fill();
-            }
-            const rows = Math.ceil(height / tile) + 3, start = Math.max(0, Math.floor(runner.cameraRow) - 2);
-            const screenY = row => height - (row - runner.cameraRow + 1.8) * tile;
+            const tile = Math.min(width / 7.8, height / 7.3), laneHeight = tile * 0.82;
+            runner.viewCols = width / tile;
+            const left = width / 2 - ((runner.cameraX ?? 4) + 0.5) * tile, clock = runner.clock || 0;
+            const screenY = row => height - (row - runner.cameraRow + 1.8) * laneHeight;
+            ctx.fillStyle = '#80bd5b'; ctx.fillRect(0, 0, width, height);
+            const block = (x, y, w, h, rise, top, front, side) => {
+                ctx.fillStyle = 'rgba(20,37,27,.22)'; ctx.fillRect(x + 5, y + 5, w, h);
+                ctx.fillStyle = front; ctx.fillRect(x, y + h - rise, w, rise);
+                ctx.fillStyle = side; ctx.beginPath(); ctx.moveTo(x + w, y - rise); ctx.lineTo(x + w + 4, y - rise + 4); ctx.lineTo(x + w + 4, y + h); ctx.lineTo(x + w, y + h - rise); ctx.fill();
+                ctx.fillStyle = top; ctx.fillRect(x, y - rise, w, h);
+            };
+            const start = Math.max(-5, Math.floor(runner.cameraRow) - 2), rows = Math.ceil(height / laneHeight) + 7;
             for (let row = start; row < start + rows; row++) {
                 const lane = this.waitingLane(runner, row), y = screenY(row);
-                if (y < -tile || y > height) continue;
-                ctx.fillStyle = lane.type === 'grass' ? '#244b46' : lane.type === 'road' ? '#283446' : lane.type === 'data' ? '#104c69' : lane.type === 'rail' ? '#373248' : '#39445c';
-                ctx.fillRect(left, y, tile * 9, tile);
-                ctx.fillStyle = lane.type === 'grass' ? 'rgba(134,239,172,.12)' : lane.type === 'data' ? 'rgba(34,211,238,.12)' : 'rgba(255,255,255,.045)';
-                for (let col = 0; col < 9; col++) ctx.fillRect(left + col * tile + 1, y + 1, tile - 2, tile - 2);
-                if (lane.type === 'road') {
-                    ctx.strokeStyle = 'rgba(226,232,240,.45)'; ctx.lineWidth = 2; ctx.setLineDash([tile * 0.38, tile * 0.34]); ctx.beginPath(); ctx.moveTo(left, y + tile / 2); ctx.lineTo(left + tile * 9, y + tile / 2); ctx.stroke(); ctx.setLineDash([]);
+                if (y < -laneHeight * 2 || y > height + laneHeight) continue;
+                ctx.fillStyle = lane.type === 'grass' ? (row % 2 ? '#8cc967' : '#9bd573') : lane.type === 'road' ? '#646b73' : lane.type === 'river' ? '#3c9bd4' : '#bba582';
+                ctx.fillRect(left, y, tile * 9, laneHeight);
+                ctx.fillStyle = 'rgba(0,0,0,.08)'; ctx.fillRect(left, y + laneHeight - 3, tile * 9, 3);
+                if (lane.type === 'grass') {
+                    for (let col = 0; col < 9; col++) {
+                        ctx.fillStyle = 'rgba(67,117,46,.22)';
+                        const gx = left + (col + this.waitingRandom(runner, Math.max(0, row), col + 171) * .7) * tile;
+                        ctx.fillRect(gx, y + laneHeight * .25, tile * .07, 3); ctx.fillRect(gx + 7, y + laneHeight * .68, tile * .08, 3);
+                    }
+                    for (const blocker of lane.blockers) {
+                        const x = left + (blocker.col + .5) * tile;
+                        if (blocker.kind === 'tree') {
+                            block(x - tile * .075, y + laneHeight * .5, tile * .15, tile * .25, tile * .13, '#a67840', '#75502d', '#634326');
+                            block(x - tile * .3, y + laneHeight * .23, tile * .6, tile * .42, tile * .33, '#5eaa43', '#3c8134', '#326b2c');
+                            block(x - tile * .2, y + laneHeight * .15, tile * .4, tile * .28, tile * .37, '#78bc51', '#509840', '#408033');
+                        } else block(x - tile * .27, y + laneHeight * .4, tile * .54, tile * .36, tile * .15, '#b6bcc0', '#858e93', '#727a80');
+                    }
+                } else if (lane.type === 'road') {
+                    ctx.fillStyle = '#d0d3d2';
+                    for (let col = 0; col < 9; col++) ctx.fillRect(left + col * tile + tile * .15, y + laneHeight * .48, tile * .4, 3);
                     for (const vehicle of lane.vehicles) {
-                        const vx = left + (this.waitingVehicleX(lane, vehicle, clock) + 2) * tile, vw = vehicle.w * tile;
-                        ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(vx + vw / 2, y + tile * .79, vw * .48, tile * .08, 0, 0, Math.PI * 2); ctx.fill();
-                        ctx.fillStyle = vehicle.color; ctx.beginPath(); ctx.roundRect(vx - vw / 2, y + tile * .2, vw, tile * .58, 8); ctx.fill();
-                        ctx.fillStyle = '#dff8ff'; ctx.fillRect(vx - vw * .25, y + tile * .25, vw * .5, tile * .18);
-                        ctx.fillStyle = '#172033'; ctx.fillRect(vx - vw * .34, y + tile * .68, vw * .2, tile * .12); ctx.fillRect(vx + vw * .14, y + tile * .68, vw * .2, tile * .12);
+                        const x = left + (this.waitingVehicleX(lane, vehicle, clock) + .5) * tile, vw = vehicle.w * tile, truck = vehicle.w > 1.5;
+                        ctx.fillStyle = '#2d343a'; ctx.fillRect(x - vw * .34, y + laneHeight * .69, vw * .17, tile * .12); ctx.fillRect(x + vw * .17, y + laneHeight * .69, vw * .17, tile * .12);
+                        block(x - vw / 2, y + laneHeight * .27, vw, laneHeight * .5, tile * .12, vehicle.color, '#404851', '#333b44');
+                        if (truck) block(x - vw * .43, y + laneHeight * .28, vw * .6, laneHeight * .44, tile * .24, '#ecded0', '#b5a596', '#948777');
+                        else block(x - vw * .26, y + laneHeight * .32, vw * .52, laneHeight * .34, tile * .23, vehicle.color, '#394b5e', '#2a3746');
+                        ctx.fillStyle = '#bfe8ed'; ctx.fillRect(x + (lane.speed > 0 ? vw * .18 : -vw * .36), y + laneHeight * .24 - tile * .13, vw * .18, laneHeight * .28);
+                        ctx.fillStyle = '#fff0ac'; ctx.fillRect(x + (lane.speed > 0 ? vw / 2 - 4 : -vw / 2), y + laneHeight * .31, 4, laneHeight * .1);
                     }
-                } else if (lane.type === 'data') {
-                    ctx.strokeStyle = 'rgba(103,232,249,.44)'; ctx.lineWidth = 2;
-                    for (let i = 0; i < 5; i++) { const px = left + this.waitingWrap(i * tile * 2.3 + clock * 26, tile * 9); ctx.beginPath(); ctx.moveTo(px, y + 4); ctx.lineTo(px - tile * 0.4, y + tile - 4); ctx.stroke(); }
-                    for (const platform of lane.platforms || []) {
-                        const px = left + (this.waitingPlatformX(lane, platform, clock) + 1) * tile, pw = platform.w * tile;
-                        ctx.save(); ctx.shadowColor = platform.color; ctx.shadowBlur = 9; ctx.fillStyle = '#17243a'; ctx.beginPath(); ctx.roundRect(px - pw / 2, y + tile * .22, pw, tile * .56, 7); ctx.fill(); ctx.restore();
-                        ctx.fillStyle = platform.color; ctx.fillRect(px - pw / 2 + 4, y + tile * .25, pw - 8, 4);
-                        ctx.fillStyle = '#e0f2fe'; ctx.font = `700 ${Math.max(8, tile * .17)}px system-ui`; ctx.textAlign = 'center'; ctx.fillText('DATA BOOK', px, y + tile * .59);
-                    }
-                } else if (lane.type === 'rail') {
-                    ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 4;
-                    for (const xx of [left + tile * 2.7, left + tile * 6.3]) { ctx.beginPath(); ctx.moveTo(xx, y); ctx.lineTo(xx, y + tile); ctx.stroke(); }
-                    ctx.fillStyle = 'rgba(226,232,240,.22)'; for (let x = left + tile * 2.5; x < left + tile * 6.5; x += tile * .42) ctx.fillRect(x, y + 2, tile * .13, tile - 4);
-                    const phase = this.waitingWrap(clock + lane.phase, 8), train = this.waitingTrain(lane, clock);
-                    if (phase >= 4.6 && phase < 5.6) {
-                        const blink = Math.sin(clock * 15) > 0 ? '#fb7185' : '#fecaca';
-                        ctx.fillStyle = blink; ctx.beginPath(); ctx.arc(left + tile * 1.3, y + tile / 2, tile * .13, 0, Math.PI * 2); ctx.fill();
-                        ctx.fillStyle = '#fff1f2'; ctx.font = `900 ${Math.max(8, tile * .15)}px system-ui`; ctx.textAlign = 'center'; ctx.fillText('TRAIN - CLEAR TRACK', left + tile * 4.5, y + tile * .24);
-                    }
-                    if (train) {
-                        const tx = left + (train.x + 2) * tile;
-                        ctx.fillStyle = '#f97316'; ctx.beginPath(); ctx.roundRect(tx - tile * 1.3, y + tile * .13, tile * 2.6, tile * .72, 8); ctx.fill();
-                        ctx.fillStyle = '#fed7aa'; ctx.fillRect(tx - tile * .86, y + tile * .2, tile * 1.72, tile * .25);
-                        ctx.fillStyle = '#7c2d12'; ctx.fillRect(tx - tile * .7, y + tile * .56, tile * 1.4, tile * .13);
+                } else if (lane.type === 'river') {
+                    ctx.fillStyle = 'rgba(191,238,255,.45)';
+                    for (let col = 0; col < 9; col++) ctx.fillRect(left + this.waitingWrap(col * tile + clock * lane.speed * 12, tile * 9), y + laneHeight * (.23 + col % 3 * .21), tile * .28, 2);
+                    for (const platform of lane.platforms) {
+                        const x = left + (this.waitingPlatformX(lane, platform, clock) + .5) * tile, pw = platform.w * tile;
+                        if (platform.kind === 'pad') {
+                            block(x - pw / 2, y + laneHeight * .21, pw, laneHeight * .61, 3, '#82c954', '#579944', '#407835');
+                            ctx.fillStyle = '#3c9bd4'; ctx.beginPath(); ctx.moveTo(x, y + laneHeight * .5); ctx.lineTo(x + pw / 2, y + laneHeight * .5); ctx.lineTo(x + pw / 2, y + laneHeight * .25); ctx.fill();
+                            ctx.fillStyle = '#f6b9d1'; ctx.fillRect(x - 5, y + laneHeight * .34, 10, 6);
+                        } else {
+                            block(x - pw / 2, y + laneHeight * .25, pw, laneHeight * .5, tile * .06, '#ae7b45', '#7a502e', '#634028');
+                            ctx.fillStyle = '#815630';
+                            for (let xx = x - pw / 2 + 10; xx < x + pw / 2; xx += tile * .7) ctx.fillRect(xx, y + laneHeight * .29 - tile * .06, 2, laneHeight * .34);
+                            ctx.fillStyle = '#d6a46c'; ctx.fillRect(x - pw / 2 + 4, y + laneHeight * .3 - tile * .06, pw - 8, 3);
+                        }
                     }
                 } else {
-                    for (const blocker of lane.blockers) {
-                        const x = left + (blocker.col + 0.5) * tile, baseY = y + tile * .84;
-                        if (blocker.kind === 'tree') {
-                            ctx.fillStyle = '#713f12'; ctx.fillRect(x - tile * .07, y + tile * .45, tile * .14, tile * .43);
-                            ctx.fillStyle = '#34d399'; ctx.beginPath(); ctx.arc(x, y + tile * .42, tile * .27, 0, Math.PI * 2); ctx.fill();
-                            ctx.fillStyle = '#86efac'; ctx.beginPath(); ctx.arc(x - tile * .09, y + tile * .35, tile * .09, 0, Math.PI * 2); ctx.fill();
-                        } else {
-                            ctx.fillStyle = '#b45309'; ctx.beginPath(); ctx.roundRect(x - tile * .28, y + tile * .48, tile * .56, tile * .37, 4); ctx.fill();
-                            ctx.fillStyle = '#fde68a'; ctx.fillRect(x - tile * .2, y + tile * .53, tile * .4, 3);
+                    ctx.fillStyle = '#786047'; for (let xx = left; xx < left + tile * 9; xx += tile * .32) ctx.fillRect(xx, y + laneHeight * .18, tile * .14, laneHeight * .64);
+                    ctx.fillStyle = '#454b53'; ctx.fillRect(left, y + laneHeight * .23, tile * 9, 5); ctx.fillRect(left, y + laneHeight * .7, tile * 9, 5);
+                    ctx.fillStyle = '#e3e6e6'; ctx.fillRect(left, y + laneHeight * .23, tile * 9, 2); ctx.fillRect(left, y + laneHeight * .7, tile * 9, 2);
+                    const phase = this.waitingWrap(clock + lane.phase, 9), warning = phase >= 4.6 && phase < 7.65;
+                    const signalX = left + tile * .65;
+                    block(signalX - 3, y + laneHeight * .3, 6, laneHeight * .45, tile * .25, '#58616a', '#343e48', '#26323b');
+                    block(signalX - 12, y + laneHeight * .3 - tile * .28, 24, 14, 4, '#303b42', '#25313a', '#1d272f');
+                    ctx.fillStyle = warning && Math.floor(clock * 7) % 2 ? '#ff554d' : warning ? '#7e2927' : '#8fe07c'; ctx.fillRect(signalX - 7, y + laneHeight * .3 - tile * .28 - 1, 8, 8);
+                    const train = this.waitingTrain(lane, clock);
+                    if (train) {
+                        const x = left + (train.x + .5) * tile;
+                        for (let car = 0; car < 3; car++) {
+                            const tx = x - train.w * tile / 2 + car * train.w * tile / 3;
+                            block(tx + 2, y + laneHeight * .18, train.w * tile / 3 - 4, laneHeight * .66, tile * .22, car ? '#e5c45a' : '#ed7852', '#a14834', '#76392e');
+                            ctx.fillStyle = '#c8eaf1'; for (let j = 0; j < 3; j++) ctx.fillRect(tx + tile * (.2 + j * .45), y + laneHeight * .29 - tile * .22, tile * .3, laneHeight * .3);
                         }
-                        ctx.fillStyle = 'rgba(0,0,0,.15)'; ctx.beginPath(); ctx.ellipse(x, baseY, tile * .25, 3, 0, 0, Math.PI * 2); ctx.fill();
-                    }
-                    if (lane.type === 'hall') {
-                        ctx.fillStyle = 'rgba(226,232,240,.35)'; ctx.fillRect(left + tile * .5, y + tile * .18, tile * 8, 2);
-                        ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.arc(left + tile * 7.9, y + tile * .25, tile * .07, 0, Math.PI * 2); ctx.fill();
                     }
                 }
-                ctx.strokeStyle = 'rgba(226,232,240,.08)'; ctx.lineWidth = 1; ctx.strokeRect(left + .5, y + .5, tile * 9 - 1, tile - 1);
             }
-            const hop = runner.hop, progress = hop?.t ?? 0, xTile = hop ? hop.x + (hop.targetX - hop.x) * progress : runner.x;
-            const rowFloat = hop ? hop.from + (hop.to - hop.from) * progress : runner.row;
-            const px = left + (xTile + .5) * tile, py = screenY(rowFloat) + tile * .52 - (hop ? Math.sin(progress * Math.PI) * tile * .18 : 0);
+            const hop = runner.hop, progress = hop?.t || 0, arc = hop ? Math.sin(progress * Math.PI) : 0;
+            const px = left + (runner.x + .5) * tile, groundY = screenY(runner.rowFloat ?? runner.row) + laneHeight * .65;
+            const death = runner.dead ? Math.min(1, (runner.deathAge || 0) / .55) : 0, splash = runner.dead && /Splash|Carried/.test(runner.deathReason || '');
+            ctx.fillStyle = 'rgba(34,49,38,.25)'; ctx.fillRect(px - tile * .21, groundY + 2, tile * .5, tile * .1);
+            ctx.save(); ctx.translate(px, groundY - arc * tile * .28);
+            const stretch = hop ? 1 + arc * .12 - Math.sin(Math.min(1, progress * 4) * Math.PI) * .12 : 1;
+            ctx.scale((2 - stretch) * (1 + death * .35), stretch * (1 - death * .72));
+            ctx.globalAlpha = splash ? 1 - death : 1;
             const profile = this.multiplayerProfile || {}, cos = this.profileCosmetics(profile), util = window.StudBudArcade?.util;
-            if (util?.drawFigureSide) util.drawFigureSide(ctx, { color: profile.color || '#38bdf8', cos }, px - tile * .26, py - tile * .67, tile * .52, tile * .78, 1, time, Boolean(hop), 1);
-            else this.drawCharacter(ctx, px, py - 16, '#38bdf8', 0.8, time, Boolean(hop));
-            const palette = profile.equipped_palette || '';
-            ctx.fillStyle = '#e2e8f0'; ctx.font = '800 12px system-ui'; ctx.textAlign = 'left'; ctx.fillText("SCHOLAR'S CROSSING", 14, 21);
-            ctx.textAlign = 'right'; ctx.fillStyle = palette.includes('sunset') ? '#fdba74' : '#a5f3fc'; ctx.fillText(`ROWS ${runner.score}  /  BEST ${runner.best}`, width - 14, 21);
-            ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(7,15,29,.7)'; ctx.beginPath(); ctx.roundRect(width / 2 - 116, height - 27, 232, 20, 9); ctx.fill();
+            if (util?.drawFigureSide) util.drawFigureSide(ctx, { color: profile.color || '#38bdf8', cos }, -tile * .23, -tile * .72, tile * .46, tile * .72, hop?.dx < 0 ? -1 : 1, clock, Boolean(hop), 1);
+            else this.drawCharacter(ctx, 0, -tile * .4, '#38bdf8', .8, clock, Boolean(hop));
+            ctx.restore();
+            if (splash) {
+                ctx.strokeStyle = 'rgba(222,248,255,' + (1 - death) + ')'; ctx.lineWidth = 3; ctx.beginPath(); ctx.ellipse(px, groundY, tile * (.2 + death * .6), tile * (.08 + death * .2), 0, 0, Math.PI * 2); ctx.stroke();
+                ctx.fillStyle = '#d5f3ff'; for (let i = 0; i < 6; i++) ctx.fillRect(px + Math.cos(i) * death * tile * .6, groundY - Math.sin(death * Math.PI) * tile * .5 + Math.sin(i) * death * tile * .2, 4, 4);
+            }
+            ctx.fillStyle = 'rgba(29,48,40,.74)'; ctx.fillRect(0, 0, width, 31);
+            ctx.fillStyle = '#f5ffe7'; ctx.font = '800 12px system-ui'; ctx.textAlign = 'right'; ctx.fillText('ROWS ' + runner.score + ' / BEST ' + runner.best, width - 14, 21);
             const touch = window.matchMedia?.('(pointer: coarse)').matches || (navigator.maxTouchPoints || 0) > 0;
-            ctx.fillStyle = '#cbd5e1'; ctx.font = '700 10px system-ui'; ctx.fillText(runner.dead ? (runner.deathReason || 'Run over') + (touch ? ' - tap to restart' : ' - press a key to restart') : (touch ? 'TAP TO HOP · SWIPE TO MOVE' : 'WASD / ARROWS OR SPACE TO HOP'), width / 2, height - 13);
-            if (runner.bump > 0) { ctx.fillStyle = `rgba(251,191,36,${runner.bump * 2})`; ctx.fillRect(0, 0, width, height); }
-            if (runner.dead) { ctx.fillStyle = 'rgba(4,10,22,.28)'; ctx.fillRect(0, 0, width, height); }
+            const prompt = runner.dead ? (death < 1 ? (splash ? 'Splash!' : 'Ouch!') : runner.deathReason + (touch ? ' - tap to restart' : ' - press a key to restart')) : (touch ? 'TAP TO HOP / SWIPE TO MOVE' : 'WASD / ARROWS OR SPACE TO HOP');
+            ctx.font = '700 11px system-ui'; ctx.textAlign = 'center'; const pw = Math.min(width - 16, ctx.measureText(prompt).width + 20);
+            ctx.fillStyle = 'rgba(29,48,40,.78)'; ctx.fillRect(width / 2 - pw / 2, height - 28, pw, 22);
+            ctx.fillStyle = '#f4ffe8'; ctx.fillText(prompt, width / 2, height - 13, width - 30);
         }
 
         async searchCommunityDecks(query) {

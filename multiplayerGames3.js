@@ -200,6 +200,15 @@
             ctx.strokeStyle = 'rgba(56,189,248,.05)'; ctx.lineWidth = 1;
             for (let x = 0; x < w; x += 50) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
 
+            if (s.preview) {
+                ASSETS.forEach((asset, i) => {
+                    const x = 20 + (i % 3) * (w - 40) / 3, y = 20 + Math.floor(i / 3) * (h - 100) / 2;
+                    this.chart(ctx, i, x, y, (w - 70) / 3, (h - 125) / 2, t, false);
+                    ctx.fillStyle = asset.color; ctx.fillRect(x, y, 8, 8);
+                });
+                [...s.roster.values()].forEach((player, i) => drawFigureSide(ctx, player, w * (i + 1) / (s.roster.size + 1) - 13, h - 60, 26, 44, 1, this.anim, false, 1));
+                return;
+            }
             if (s.vw < 900 || s.overlay.classList.contains('has-touch')) { this.drawCompact(ctx); return; }
             ui.transform = s.placeHud(ctx, 0, 60, 1200, 660, 'center');
             w = 1200; h = 720;
@@ -428,15 +437,15 @@
                 const x = this.slotOf(info.id, w);
                 drawFigureSide(ctx, info, x - 13, dockY - 44, 26, 44, 1, t, false, 1);
                 ctx.strokeStyle = '#a16207'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x + 6, dockY - 24); ctx.lineTo(x + 52, dockY - 62); ctx.stroke();
-                nameTag(ctx, isMe ? 'You' : info.nickname, x, dockY - 70, isMe ? '#fff' : info.color);
+                if (!this.s.preview) nameTag(ctx, isMe ? 'You' : info.nickname, x, dockY - 70, isMe ? '#fff' : info.color);
                 if (st >= 2) {
                     const bx = x + 52 + Math.sin(t * 2 + x) * 2;
                     const by = wy + 30 + depth * (h - wy - 120) + (st === 3 ? Math.sin(t * 40) * 5 : Math.sin(t * 3) * 2);
                     ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x + 52, dockY - 62); ctx.lineTo(bx, wy); ctx.lineTo(bx, by); ctx.stroke();
                     ctx.fillStyle = st === 3 ? '#fde047' : '#ef4444'; ctx.beginPath(); ctx.arc(bx, by, 6, 0, TAU); ctx.fill();
-                    if (st === 3) { ctx.fillStyle = '#fde047'; ctx.font = '900 30px system-ui'; ctx.textAlign = 'center'; ctx.fillText('!', bx, by - 14); }
+                    if (st === 3 && !s.preview) { ctx.fillStyle = '#fde047'; ctx.font = '900 30px system-ui'; ctx.textAlign = 'center'; ctx.fillText('!', bx, by - 14); }
                     if (st === 4) { ctx.fillStyle = 'rgba(253,224,71,.4)'; ctx.beginPath(); ctx.arc(bx, by, 18 + Math.sin(t * 12) * 4, 0, TAU); ctx.fill(); }
-                } else if (st === 1) {
+                } else if (st === 1 && !s.preview) {
                     ctx.fillStyle = 'rgba(8,12,24,.7)'; ctx.fillRect(x - 30, dockY + 24, 60, 10);
                     ctx.fillStyle = '#f97316'; ctx.fillRect(x - 30, dockY + 24, 60 * power, 10);
                 }
@@ -451,6 +460,7 @@
                 const x = this.slotOf(s.user.id, w) + 52;
                 ctx.strokeStyle = `rgba(255,255,255,${1 - sp.t / 0.8})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.ellipse(x, wy + 2, 10 + sp.t * 50, 4 + sp.t * 14, 0, 0, TAU); ctx.stroke();
             }
+            if (s.preview) return;
             if (this.st === 1) {
                 s.placeHud(ctx, w / 2 - 160, h - 116, 320, 52, 'bottom-center');
                 const mx = w / 2 - 160, my = h - 90;
@@ -623,10 +633,10 @@
                 if (on) this.ring(ctx, term.x, term.y, 44 + Math.sin(t * 5 + term.id) * 3, color + 'aa', 3);
             }
             this.drawPlayers(ctx, (c, x, y, r) => { if (r ? r.ex?.sh : this.shield > 0) this.ring(c, x, y, 28, 'rgba(56,189,248,.8)', 3); });
-            for (const c of this.pops) { ctx.globalAlpha = 1 - c.t / 1.2; ctx.fillStyle = c.color; ctx.font = '900 18px system-ui'; ctx.textAlign = 'center'; ctx.fillText(c.text, c.x, c.y - c.t * 50); ctx.globalAlpha = 1; }
+            for (const c of this.s.preview ? [] : this.pops) { ctx.globalAlpha = 1 - c.t / 1.2; ctx.fillStyle = c.color; ctx.font = '900 18px system-ui'; ctx.textAlign = 'center'; ctx.fillText(c.text, c.x, c.y - c.t * 50); ctx.globalAlpha = 1; }
             this.particles.draw(ctx);
             this.end(ctx);
-            if (this.hk) this.drawHack(ctx, w, h);
+            if (!this.s.preview && this.hk) this.drawHack(ctx, w, h);
         }
 
         drawHack(ctx, w, h) {

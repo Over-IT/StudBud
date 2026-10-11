@@ -75,12 +75,12 @@
                 if (!this.seen(r.x, r.y)) continue;
                 drawFigureTop(ctx, r, r.x, r.y, 15, r.f || 0, this.anim + r.x * 0.01, 0.95);
                 if (extra) extra(ctx, r.x, r.y, r);
-                nameTag(ctx, r.name || '', r.x, r.y - 30, r.color);
+                if (!this.s.preview) nameTag(ctx, r.name || '', r.x, r.y - 30, r.color);
             }
             const alpha = this.stun > 0 ? 0.5 + Math.sin(this.anim * 30) * 0.3 : 1;
             drawFigureTop(ctx, s.local, me.x, me.y, 15, me.aim, this.anim, alpha);
             if (extra) extra(ctx, me.x, me.y, null);
-            nameTag(ctx, 'You', me.x, me.y - 30, '#fff');
+            if (!this.s.preview) nameTag(ctx, 'You', me.x, me.y - 30, '#fff');
         }
 
         net() {
@@ -93,6 +93,7 @@
         }
 
         qMark(ctx, x, y, color, pulse) {
+            if (this.s.preview) return;
             const r = 20 + Math.sin(pulse * 4) * 2;
             ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(x + 3, y + 6, r, r * 0.8, 0, 0, TAU); ctx.fill();
             ctx.fillStyle = color; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
@@ -479,33 +480,36 @@
             }
             ctx.fillStyle = '#0f172a'; A.util.roundRect(ctx, cartX + cartW / 2 - 85, cartY + 31, 170, 24, 5); ctx.fill();
             ctx.fillStyle = '#fef3c7'; ctx.font = '900 13px system-ui'; ctx.textAlign = 'center'; ctx.fillText('CRYSTAL DEPOT', cartX + cartW / 2, cartY + 48);
-            ctx.fillStyle = '#cbd5e1'; ctx.font = '700 10px system-ui'; ctx.fillText('BANK HAUL  /  REFUEL', cartX + cartW / 2, groundY + 20);
+            ctx.fillStyle = '#cbd5e1'; ctx.font = '700 10px system-ui'; if (!s.preview) ctx.fillText('BANK HAUL  /  REFUEL', cartX + cartW / 2, groundY + 20);
 
-            const sign = { x: depot.x + depot.w / 2 - 112, y: depot.y - 126, w: 224, h: 112 };
-            ctx.strokeStyle = '#713f12'; ctx.lineWidth = 8; ctx.beginPath(); ctx.moveTo(sign.x + 19, sign.y + sign.h); ctx.lineTo(sign.x + 19, groundY - 8); ctx.moveTo(sign.x + sign.w - 19, sign.y + sign.h); ctx.lineTo(sign.x + sign.w - 19, groundY - 8); ctx.stroke();
-            ctx.fillStyle = '#422f24'; A.util.roundRect(ctx, sign.x, sign.y, sign.w, sign.h, 8); ctx.fill();
-            ctx.fillStyle = '#f5d99e'; A.util.roundRect(ctx, sign.x + 5, sign.y + 5, sign.w - 10, sign.h - 10, 5); ctx.fill();
-            ctx.fillStyle = '#422f24'; ctx.font = '900 12px system-ui'; ctx.textAlign = 'center'; ctx.fillText('CRYSTAL VALUES / COINS', sign.x + sign.w / 2, sign.y + 19);
-            displayCrystals.forEach((crystal, i) => {
-                const col = i % 2, row = Math.floor(i / 2), x = sign.x + 12 + col * 107, y = sign.y + 30 + row * 23;
-                ctx.fillStyle = crystal.color; ctx.beginPath(); ctx.arc(x + 5, y + 4, 4, 0, TAU); ctx.fill();
-                ctx.fillStyle = '#2d2118'; ctx.textAlign = 'left'; ctx.font = '800 9px system-ui'; ctx.fillText(crystal.name, x + 13, y + 7);
-                ctx.textAlign = 'right'; ctx.font = '900 10px system-ui'; ctx.fillText(`${crystal.value}c`, x + 101, y + 7);
-            });
+            if (!s.preview) {
+                const sign = { x: depot.x + depot.w / 2 - 112, y: depot.y - 126, w: 224, h: 112 };
+                ctx.strokeStyle = '#713f12'; ctx.lineWidth = 8; ctx.beginPath(); ctx.moveTo(sign.x + 19, sign.y + sign.h); ctx.lineTo(sign.x + 19, groundY - 8); ctx.moveTo(sign.x + sign.w - 19, sign.y + sign.h); ctx.lineTo(sign.x + sign.w - 19, groundY - 8); ctx.stroke();
+                ctx.fillStyle = '#422f24'; A.util.roundRect(ctx, sign.x, sign.y, sign.w, sign.h, 8); ctx.fill();
+                ctx.fillStyle = '#f5d99e'; A.util.roundRect(ctx, sign.x + 5, sign.y + 5, sign.w - 10, sign.h - 10, 5); ctx.fill();
+                ctx.fillStyle = '#422f24'; ctx.font = '900 12px system-ui'; ctx.textAlign = 'center'; ctx.fillText('CRYSTAL VALUES / COINS', sign.x + sign.w / 2, sign.y + 19);
+                displayCrystals.forEach((crystal, i) => {
+                    const col = i % 2, row = Math.floor(i / 2), x = sign.x + 12 + col * 107, y = sign.y + 30 + row * 23;
+                    ctx.fillStyle = crystal.color; ctx.beginPath(); ctx.arc(x + 5, y + 4, 4, 0, TAU); ctx.fill();
+                    ctx.fillStyle = '#2d2118'; ctx.textAlign = 'left'; ctx.font = '800 9px system-ui'; ctx.fillText(crystal.name, x + 13, y + 7);
+                    ctx.textAlign = 'right'; ctx.font = '900 10px system-ui'; ctx.fillText(`${crystal.value}c`, x + 101, y + 7);
+                });
+
+            }
 
             for (const r of s.remoteList()) {
                 if (!Number.isFinite(r.x) || !Number.isFinite(r.y) || !this.seen(r.x, r.y)) continue;
                 A.util.drawFigureSide(ctx, r, r.x, r.y, 26, 40, Number.isFinite(r.f) ? r.f : 1, this.anim + r.x * 0.01, r.a === 1, 0.82);
                 const carried = r.ex && Number.isFinite(r.ex.c) ? r.ex.c : 0;
-                if (carried) { ctx.fillStyle = '#fbbf24'; ctx.font = '800 11px system-ui'; ctx.textAlign = 'center'; ctx.fillText(`◆ ${carried}`, r.x + 13, r.y + 53); }
-                A.util.nameTag(ctx, r.name || '', r.x + 13, r.y - 12, r.color);
+                if (carried && !s.preview) { ctx.fillStyle = '#fbbf24'; ctx.font = '800 11px system-ui'; ctx.textAlign = 'center'; ctx.fillText(`◆ ${carried}`, r.x + 13, r.y + 53); }
+                if (!this.s.preview) A.util.nameTag(ctx, r.name || '', r.x + 13, r.y - 12, r.color);
             }
             A.util.drawFigureSide(ctx, s.local, me.x, me.y, me.w, me.h, me.face, this.anim, me.onGround, this.stun > 0 ? 0.72 : 1);
             if (this.jetting) {
                 ctx.fillStyle = '#fde047'; ctx.beginPath(); ctx.moveTo(me.x + 6, me.y + me.h - 4); ctx.lineTo(me.x + 11, me.y + me.h + 17 + Math.sin(this.anim * 28) * 3); ctx.lineTo(me.x + 17, me.y + me.h - 4); ctx.fill();
                 ctx.fillStyle = '#fb923c'; ctx.beginPath(); ctx.moveTo(me.x + 8, me.y + me.h - 1); ctx.lineTo(me.x + 12, me.y + me.h + 10); ctx.lineTo(me.x + 15, me.y + me.h - 1); ctx.fill();
             }
-            A.util.nameTag(ctx, 'You', me.x + me.w / 2, me.y - 12, '#fff');
+            if (!this.s.preview) A.util.nameTag(ctx, 'You', me.x + me.w / 2, me.y - 12, '#fff');
             this.particles.draw(ctx);
             this.end(ctx);
 
@@ -517,6 +521,7 @@
             const light = ctx.createRadialGradient(px, py, 36, px, py, Math.min(w, h) * 0.56);
             light.addColorStop(0, 'rgba(255,239,190,.08)'); light.addColorStop(0.62, 'rgba(255,205,120,.035)'); light.addColorStop(1, 'rgba(0,0,0,.2)');
             ctx.fillStyle = light; ctx.fillRect(0, 0, w, h);
+            if (s.preview) return;
             s.placeHud(ctx, 0, 0, 230, 34, 'top-center');
             ctx.fillStyle = this.lowFuel ? 'rgba(127,29,29,.9)' : 'rgba(8,12,24,.76)'; A.util.roundRect(ctx, 0, 0, 230, 34, 10); ctx.fill();
             ctx.strokeStyle = this.lowFuel ? 'rgba(248,113,113,.75)' : 'rgba(148,163,184,.35)'; ctx.lineWidth = 1; A.util.roundRect(ctx, .5, .5, 229, 33, 10); ctx.stroke();
@@ -827,13 +832,13 @@
             boat(me.x, me.y, me.aim);
             this.drawPlayers(ctx);
             const mw = this.mouseWorld();
-            if (!s.question) {
+            if (!s.preview && !s.question) {
                 const ang = Math.atan2(mw.y - me.y, mw.x - me.x), d = Math.min(320, dist(mw.x, mw.y, me.x, me.y));
                 this.ring(ctx, me.x + Math.cos(ang) * d, me.y + Math.sin(ang) * d, 78, this.castCd > 0 ? 'rgba(255,255,255,.18)' : 'rgba(254,243,199,.65)', 2);
             }
             this.particles.draw(ctx);
             this.end(ctx);
-            if (this.hurt > 0) { ctx.fillStyle = `rgba(248,113,113,${this.hurt * 0.25})`; ctx.fillRect(0, 0, w, h); }
+            if (!s.preview && this.hurt > 0) { ctx.fillStyle = `rgba(248,113,113,${this.hurt * 0.25})`; ctx.fillRect(0, 0, w, h); }
         }
     }
 
@@ -1055,12 +1060,12 @@
             for (const shop of this.shops) {
                 if (this.pkg) continue;
                 this.ring(ctx, shop.door.x, shop.door.y, 42 + Math.sin(t * 5) * 4, '#fde047', 4);
-                ctx.fillStyle = '#fde047'; ctx.font = '800 15px system-ui'; ctx.textAlign = 'center'; ctx.fillText('PICK UP', shop.door.x, shop.door.y + 5);
+                ctx.fillStyle = '#fde047'; ctx.font = '800 15px system-ui'; ctx.textAlign = 'center'; if (!s.preview) ctx.fillText('PICK UP', shop.door.x, shop.door.y + 5);
             }
             if (this.pkg) {
                 const d = this.pkg.to.door;
                 this.ring(ctx, d.x, d.y, 44 + Math.sin(t * 6) * 5, '#4ade80', 5);
-                ctx.fillStyle = '#4ade80'; ctx.font = '800 15px system-ui'; ctx.textAlign = 'center'; ctx.fillText('DELIVER', d.x, d.y + 5);
+                ctx.fillStyle = '#4ade80'; ctx.font = '800 15px system-ui'; ctx.textAlign = 'center'; if (!s.preview) ctx.fillText('DELIVER', d.x, d.y + 5);
             }
             for (const v of this.vending) {
                 if (!this.seen(v.x, v.y)) continue;
@@ -1431,7 +1436,7 @@
             if (!this.teamsOn) {
                 const keeper = this.keeper;
                 drawFigureTop(ctx, { color: '#fbbf24' }, keeper.x, keeper.y, keeper.r, Math.PI, t, 1);
-                nameTag(ctx, 'Keeper', keeper.x, keeper.y - 34, '#fbbf24');
+                if (!this.s.preview) nameTag(ctx, 'Keeper', keeper.x, keeper.y - 34, '#fbbf24');
             }
             this.drawPlayers(ctx, (c, x, y, r) => {
                 const owner = r ? r.id : this.s.user.id;
@@ -1455,6 +1460,7 @@
                 ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(12, 0); ctx.lineTo(-7, -8); ctx.lineTo(-7, 8); ctx.fill(); ctx.restore();
             }
             this.end(ctx);
+            if (this.s.preview) return;
             if (this.kickHeld && !this.freeze) {
                 this.s.placeHud(ctx, 0, 0, 172, 31, 'top-center');
                 ctx.fillStyle = 'rgba(15,23,42,.8)'; roundRect(ctx, 0, 0, 172, 31, 9); ctx.fill();

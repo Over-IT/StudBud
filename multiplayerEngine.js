@@ -2,7 +2,7 @@
     'use strict';
 
     const TAU = Math.PI * 2;
-    const sfx = (name, gap) => { try { window.StudBudSfx?.play(name, 'game', gap); } catch (error) { /* audio is optional */ } };
+    const sfx = (name, gap) => { if (window.StudBudArcade?.previewDepth > 0) return; try { window.StudBudSfx?.play(name, 'game', gap); } catch (error) { /* audio is optional */ } };
     const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
     const lerp = (a, b, t) => a + (b - a) * t;
     const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
@@ -172,10 +172,12 @@
     }
 
     class Particles {
-        constructor() { this.items = []; }
+        constructor(session) { this.items = []; this.session = session; }
         burst(x, y, color, count = 10, speed = 160, life = 0.5, size = 4) {
-            if (count >= 24) sfx('boom', 160);
-            else if (count >= 8) sfx('pop', 70);
+            if (!this.session?.preview) {
+                if (count >= 24) sfx('boom', 160);
+                else if (count >= 8) sfx('pop', 70);
+            }
             for (let i = 0; i < count; i++) {
                 const a = Math.random() * TAU;
                 const v = speed * (0.3 + Math.random() * 0.7);
@@ -208,7 +210,19 @@
     }
 
     class BaseGame {
-        constructor(session) { this.s = session; this.particles = new Particles(); }
+        constructor(session) {
+            this.s = session; this.particles = new Particles(session);
+            // Scope direct audio calls too, including preview instances outside the mode cards.
+            if (session.preview) for (const name of ['update', 'draw', 'onEvent']) {
+                const method = this[name];
+                this[name] = (...args) => {
+                    const arcade = window.StudBudArcade;
+                    arcade.previewDepth = (arcade.previewDepth || 0) + 1;
+                    try { return method.apply(this, args); }
+                    finally { arcade.previewDepth--; }
+                };
+            }
+        }
         update() { }
         draw() { }
         net() { return {}; }
@@ -226,6 +240,7 @@
             this.onLeave = options.onLeave;
             this.finishRoom = options.finishRoom;
             this.practice = Boolean(options.practice);
+            this.preview = Boolean(options.preview);
             this.correct = 0;
             this.reward = Math.min(100, Math.max(5, Number(this.room.state?.question_reward) || 20));
             this.mode = this.room.mode;
@@ -264,15 +279,17 @@
             const Game = (window.StudBudArcade.games[this.mode]) || window.StudBudArcade.games.skyline;
             this.buildDom();
             this.game = new Game(this);
-            window.StudBudSfx?.startMusic(this.mode);
+            if (!this.preview) window.StudBudSfx?.startMusic(this.mode);
+            else this.overlay.querySelectorAll('.mpg-hud, .mpg-hint, .mpg-touch, .mpg-countdown').forEach(element => element.classList.add('hidden'));
             this.bind();
-            if (!this.practice) this.connect();
-            this.loadCards(options.fallbackCards);
+            if (!this.practice && !this.preview) this.connect();
+            if (!this.preview) this.loadCards(options.fallbackCards);
             this.resize();
             if (this.practice) this.countdown = 1.2;
+            if (this.preview) this.countdown = 0;
             this.lastFrame = performance.now();
             this.raf = requestAnimationFrame(now => this.frame(now));
-            if (!this.practice) {
+            if (!this.practice && !this.preview) {
                 this.sendTimer = setInterval(() => this.sendState(), 100);
                 this.reportTimer = setInterval(() => this.reportScore(false), 5000);
                 this.overlay.requestFullscreen?.().catch(() => { });
@@ -360,13 +377,13 @@
         remoteList() { return [...this.remotes.values()]; }
 
         // ---------- scoring / end of match ----------
-        sfx(name, gap) { sfx(name, gap); }
+        sfx(name, gap) { if (!this.preview) sfx(name, gap); }
 
         addScore(n) {
             this.score = Math.max(0, this.score + n);
-            if (n >= 40) sfx('coin', 120);
-            else if (n > 0) sfx('pop', 90);
-            else if (n < 0) sfx('hit');
+            if (n >= 40) this.sfx('coin', 120);
+            else if (n > 0) this.sfx('pop', 90);
+            else if (n < 0) this.sfx('hit');
         }
         setGoal(n) { this.goal = n; }
 
@@ -441,7 +458,7 @@
             this.renderResults();
             const me = this.standingsCache.findIndex(row => row.id === this.user.id);
             window.StudBudSfx?.stopMusic();
-            sfx(me === 0 ? 'win' : 'lose');
+            this.sfx(me === 0 ? 'win' : 'lose');
         }
 
         // ---------- questions ----------
@@ -453,7 +470,7 @@
             const now = performance.now();
             if (now - (this.lastNeed || 0) > 1800) {
                 this.lastNeed = now;
-                sfx('wrong');
+                this.sfx('wrong');
                 const prompt = this.overlay?.classList.contains('has-touch') ? 'tap recharge to answer a question' : 'press Q to answer a question';
                 this.toast(`Out of ${res.label.toLowerCase()} — ${prompt}`, '#f87171');
             }
@@ -469,7 +486,7 @@
             const n = this.rewardAmount();
             if (this.practice) res.value = res.max;
             else res.add(n);
-            sfx('refill');
+            this.sfx('refill');
             this.toast(`+${n} ${res.label}`, res.color);
             return n;
         }
@@ -486,6 +503,7 @@
 
         // Automatic triggers (mystery boxes, chests, pads) are blocked briefly after any question closes.
         ask(callback, note, manual, opts) {
+            if (this.preview) return false;
             if (opts?.force && this.question) this.closeQuestion(true);
             if (this.practice && !manual) return false;
             if (this.paused || this.question || this.over || this.countdown > 0) return false;
@@ -523,7 +541,7 @@
             const res = this.game.res;
             box.querySelector('small').textContent = note || (res ? `Correct answer: +${this.rewardAmount()} ${res.label}` : 'Question');
             box.classList.remove('hidden');
-            sfx('question');
+            this.sfx('question');
         }
 
         answerQuestion(index) {
@@ -534,7 +552,7 @@
             this.answered++;
             if (correct) this.correct++;
             try { q.onAnswer?.(correct); } catch (error) { console.error(error); }
-            sfx(correct ? 'correct' : 'wrong');
+            this.sfx(correct ? 'correct' : 'wrong');
             const box = this.overlay.querySelector('.mpg-question');
             box.querySelectorAll('[data-q]').forEach((button, i) => {
                 button.classList.toggle('right', normalizeChoiceText(q.options[i]) === normalizeChoiceText(q.card.back));
@@ -563,6 +581,7 @@
         }
 
         toast(text, color = '#e2e8f0') {
+            if (this.preview) return;
             const holder = this.overlay.querySelector('.mpg-toasts');
             if ([...holder.children].some(el => el.textContent === text)) return;
             const item = document.createElement('div');
@@ -909,6 +928,7 @@
         }
 
         updateHud() {
+            if (this.preview) return;
             if (this.over) return;
             const o = this.overlay;
             o.querySelector('.mpg-name').textContent = this.game.title || '';
@@ -936,6 +956,7 @@
         }
 
         updateMeter() {
+            if (this.preview) return;
             const res = this.game.res;
             const box = this.overlay.querySelector('.mpg-meter');
             if (!res) { box.classList.add('hidden'); return; }
@@ -950,6 +971,7 @@
         }
 
         renderResults() {
+            if (this.preview) return;
             const panel = this.overlay.querySelector('.mpg-results');
             const rows = this.standingsCache || this.standings();
             const winner = rows[0];
@@ -974,7 +996,7 @@
                     const step = this.countdown > 0.4 ? Math.ceil(this.countdown - 0.4) : 0;
                     if (step !== this.lastCountStep) {
                         this.lastCountStep = step;
-                        sfx(step ? 'countdown' : 'go');
+                        this.sfx(step ? 'countdown' : 'go');
                     }
                     const text = this.countdown > 0.4 ? String(Math.ceil(this.countdown - 0.4)) : 'GO!';
                     const el = this.overlay.querySelector('.mpg-countdown');
@@ -1012,7 +1034,7 @@
 
         destroy() {
             this.destroyed = true;
-            window.StudBudSfx?.endMusic();
+            if (!this.preview) window.StudBudSfx?.endMusic();
             cancelAnimationFrame(this.raf);
             this.hudObserver?.disconnect();
             clearInterval(this.sendTimer);

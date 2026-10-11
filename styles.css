@@ -3045,3 +3045,4 @@ body.compact-ui .streak-flame b { bottom: 4px; font-size: .85rem; }
 @media (max-width: 520px) {
     .deck-recommendation { flex-direction: column; align-items: stretch; }
 }
+.multiplayer-shop .shop-grid > .shop-rarity-title { justify-content: flex-start; margin-top: 10px; padding-bottom: 4px; color: var(--rarity, var(--text-secondary)); border-bottom: 1px solid color-mix(in srgb, var(--rarity, #94a3b8) 40%, transparent); }

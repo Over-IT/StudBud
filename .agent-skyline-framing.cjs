@@ -1,0 +1,13 @@
+const fs=require('fs');let s=fs.readFileSync('multiplayerGames.js','utf8');const old=`            const k = 1 - Math.exp(-6 * (this.dtLast || 0.016));
+            const targetX = w >= W + 120 ? (W - w) / 2 : clamp(me.x + 13 - w / 2, -60, W + 60 - w);
+            const targetY = me.y - h * 0.62;`;
+const replacement=`            const k = 1 - Math.exp(-6 * (this.dtLast || 0.016));
+            const cssScale = s.scale || 1, cssW = w * cssScale, cssH = h * cssScale;
+            const small = !s.preview && (cssW < 700 || cssH < 550);
+            const zoom = this.zoom = small ? clamp(Math.min(1, w / 460, h / 850), 0.76, 1) : 1;
+            const viewW = w / zoom, viewH = h / zoom;
+            const lookX = small ? clamp((me.vx || 0) * 0.12, -80, 80) : 0;
+            const lookY = small ? clamp(-(me.vy || 0) * 0.09, 0, 70) : 0;
+            const targetX = viewW >= W + 120 ? (W - viewW) / 2 : clamp(me.x + 13 + lookX - viewW / 2, -60, W + 60 - viewW);
+            const targetY = me.y - viewH * 0.62 - lookY;`;
+if(!s.includes(old))throw Error('Skyline camera baseline');s=s.replace(old,replacement).replace('this.cam.y + h * 0.62','this.cam.y + viewH * 0.62');s=s.replace('            ctx.translate(-Math.round(this.cam.x), -Math.round(this.cam.y));','            ctx.scale(zoom, zoom);\n            ctx.translate(-this.cam.x, -this.cam.y);');s=s.replace('right = this.cam.x + w + 50, top = this.cam.y - 60, bottom = this.cam.y + h + 60','right = this.cam.x + viewW + 50, top = this.cam.y - 60, bottom = this.cam.y + viewH + 60');fs.writeFileSync('multiplayerGames.js',s,'utf8');
