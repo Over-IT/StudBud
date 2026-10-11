@@ -106,8 +106,15 @@
     /* ------------------------------------------------------------------ */
     const TS = 48, COLS = 70, ROWS = 46;
     const DIG_TIME = [0, 0.28, 0.62, 0.4, 0.55, 0.7, 0, 0.5, 9999];
-    const ORE_VALUE = { 3: 5, 4: 15, 5: 40 };
-    const LAVA_REACH = 5;
+    const CRYSTALS = {
+        3: { name: 'Quartz', value: 5, color: '#dbeafe' },
+        4: { name: 'Amethyst', value: 12, color: '#c084fc' },
+        5: { name: 'Emerald', value: 25, color: '#34d399' },
+        7: { name: 'Sapphire', value: 50, color: '#38bdf8' },
+        8: { name: 'Ruby', value: 90, color: '#fb7185' },
+        9: { name: 'Diamond', value: 160, color: '#fef08a' }
+    };
+    const LAVA_DOWN_INTERVAL = 0.3, LAVA_SIDE_INTERVAL = 1.2, LAVA_SIDE_REACH = 9;
 
     class Miner extends Arena {
         constructor(s) {
@@ -157,7 +164,7 @@
             this.baseSpeed = 280; this.stun = 0; this.lavaCd = 0; this.jetting = false;
             this.res = new A.Resource('Fuel', '#facc15', 100, 78, 2);
             this.F = new Uint8Array(COLS * ROWS);
-            this.flowing = new Set(); this.flowClock = 0;
+            this.flowing = new Set(); this.flowClock = 0; this.flowSideClock = 0;
         }
 
         tile(tx, ty) { return tx < 0 || ty < 0 || tx >= COLS || ty >= ROWS ? 10 : this.T[ty * COLS + tx]; }
@@ -178,29 +185,45 @@
 
         flowLava(dt) {
             this.flowClock += dt;
-            if (this.flowClock < 0.34 || !this.flowing.size) return;
-            this.flowClock = 0;
-            const active = [...this.flowing]; this.flowing.clear();
+            this.flowSideClock += dt;
             const changed = [];
-            for (const idx of active) {
-                if (this.T[idx] !== 6) continue;
-                const x = idx % COLS, y = Math.floor(idx / COLS), spread = this.F[idx];
-                const down = (y + 1) * COLS + x;
-                let targets = [];
-                if (y + 1 < ROWS - 1 && this.T[down] === 0) targets = [down];
-                else if (spread < 3) {
-                    const left = y * COLS + x - 1, right = y * COLS + x + 1;
-                    if (x > 1 && this.T[left] === 0) targets.push(left);
-                    if (x < COLS - 2 && this.T[right] === 0) targets.push(right);
+            const spread = sideways => {
+                const active = [...this.flowing].sort((a, b) => a - b);
+                for (const idx of active) {
+                    if (this.T[idx] !== 6) { this.flowing.delete(idx); continue; }
+                    const x = idx % COLS, y = Math.floor(idx / COLS), reach = this.F[idx];
+                    const below = (y + 1) * COLS + x;
+                    if (!sideways) {
+                        if (y + 1 < ROWS - 1 && this.T[below] === 0) this.addLavaFlow(below, reach, changed);
+                        continue;
+                    }
+                    if (y + 1 < ROWS - 1 && this.T[below] === 0) continue;
+                    if (reach >= LAVA_SIDE_REACH) continue;
+                    for (const nx of [x - 1, x + 1]) {
+                        if (nx <= 0 || nx >= COLS - 1) continue;
+                        const next = y * COLS + nx;
+                        if (this.T[next] === 0) this.addLavaFlow(next, reach + 1, changed);
+                    }
                 }
-                for (const n of targets) {
-                    this.T[n] = 6; this.F[n] = spread + (n === down ? 0 : 1); this.flowing.add(n);
-                    const nx = n % COLS, ny = Math.floor(n / COLS);
-                    changed.push({ x: nx, y: ny, d: this.F[n] });
-                    this.particles.burst(nx * TS + TS / 2, ny * TS + TS / 2, '#fb642f', 3, 75, 0.35, 3);
-                }
+            };
+            while (this.flowClock >= LAVA_DOWN_INTERVAL) {
+                this.flowClock -= LAVA_DOWN_INTERVAL;
+                spread(false);
+            }
+            while (this.flowSideClock >= LAVA_SIDE_INTERVAL) {
+                this.flowSideClock -= LAVA_SIDE_INTERVAL;
+                spread(true);
             }
             if (changed.length) this.s.emit({ k: 'lv', cells: changed });
+        }
+
+        addLavaFlow(index, distance, changed) {
+            this.T[index] = 6;
+            this.F[index] = distance;
+            this.flowing.add(index);
+            const x = index % COLS, y = Math.floor(index / COLS);
+            changed.push({ x, y, d: distance });
+            this.particles.burst(x * TS + TS / 2, y * TS + TS / 2, '#fb642f', 3, 75, 0.35, 3);
         }
 
         collisionSolids() {
@@ -312,15 +335,16 @@
             this.T[ty * COLS + tx] = 0;
             this.wakeLava(tx, ty);
             const cx = tx * TS + TS / 2, cy = ty * TS + TS / 2;
-            const colors = { 1: '#a16207', 2: '#94a3b8', 3: '#dbeafe', 4: '#c084fc', 5: '#34d399', 7: '#38bdf8', 8: '#fb7185', 9: '#fef08a' };
+            const colors = { 1: '#a16207', 2: '#94a3b8', ...Object.fromEntries(Object.entries(CRYSTALS).map(([type, crystal]) => [type, crystal.color])) };
             this.particles.burst(cx, cy, colors[type] || '#a16207', type >= 3 ? 12 : 7, 150, 0.48, 4);
             if (!mined) return;
             this.s.emit({ k: 'dg', x: tx, y: ty, t: type });
             this.dig = { tx: -1, ty: -1, p: 0 };
-            const values = { 3: 5, 4: 12, 5: 25, 7: 50, 8: 90, 9: 160 };
-            if (values[type]) {
-                if (this.items >= this.cap) this.s.toast('Satchel full — return to the surface depot!', '#fbbf24');
-                else { this.carry += values[type]; this.items++; this.s.toast(`+${values[type]} carried · ${['', '', '', 'Quartz', 'Amethyst', 'Emerald', '', 'Sapphire', 'Ruby', 'Diamond'][type]}`, colors[type]); }
+            const crystal = CRYSTALS[type];
+            if (crystal) {
+                if (this.items >= this.cap) this.s.toast('Satchel full - return to the surface depot!', '#fbbf24');
+                else { this.carry += crystal.value; this.items++; this.s.toast(`+${crystal.value} carried - ${crystal.name}`, crystal.color); }
+
             }
         }
 
@@ -357,8 +381,8 @@
             const c0 = Math.max(0, Math.floor(this.x0 / TS)), c1 = Math.min(COLS - 1, Math.ceil(this.x1 / TS));
             const r0 = Math.max(0, Math.floor(this.y0 / TS)), r1 = Math.min(ROWS - 1, Math.ceil(this.y1 / TS));
             const strata = ['#30221c', '#33231a', '#35231b', '#38241d', '#38231d', '#39231d'];
-            const oreColor = { 3: '#dbeafe', 4: '#c084fc', 5: '#34d399', 7: '#38bdf8', 8: '#fb7185', 9: '#fef08a' };
-            const oreName = { 3: 'QUARTZ', 4: 'AMETHYST', 5: 'EMERALD', 7: 'SAPPHIRE', 8: 'RUBY', 9: 'DIAMOND' };
+            const oreColor = Object.fromEntries(Object.entries(CRYSTALS).map(([type, crystal]) => [type, crystal.color]));
+            const oreName = Object.fromEntries(Object.entries(CRYSTALS).map(([type, crystal]) => [type, crystal.name.toUpperCase()]));
             for (let ty = Math.max(4, r0); ty <= r1; ty++) for (let tx = c0; tx <= c1; tx++) {
                 const idx = ty * COLS + tx, type = this.T[idx], x = tx * TS, y = ty * TS;
                 const color = strata[Math.min(strata.length - 1, Math.floor((ty - 4) / 8))];
@@ -433,13 +457,41 @@
             }
             const groundY = 4 * TS;
             ctx.fillStyle = '#4ade80'; ctx.fillRect(this.x0, groundY - 5, this.x1 - this.x0, 6);
-            const depot = this.base;
-            ctx.fillStyle = 'rgba(15,23,42,.36)'; ctx.fillRect(depot.x + 18, depot.y + 10, depot.w - 36, depot.h - 10);
-            ctx.fillStyle = '#475569'; A.util.roundRect(ctx, depot.x + 20, depot.y + 12, depot.w - 40, depot.h - 12, 12); ctx.fill();
-            ctx.fillStyle = '#64748b'; ctx.fillRect(depot.x + 28, depot.y + 6, depot.w - 56, 22);
-            ctx.fillStyle = '#fbbf24'; ctx.fillRect(depot.x + 34, depot.y + 38, depot.w - 68, 12);
-            ctx.fillStyle = '#0f172a'; ctx.font = '900 19px system-ui'; ctx.textAlign = 'center'; ctx.fillText('CRYSTAL DEPOT', depot.x + depot.w / 2, depot.y + 83);
-            ctx.fillStyle = '#f8fafc'; ctx.font = '700 12px system-ui'; ctx.fillText('SELL HAUL  •  REFUEL', depot.x + depot.w / 2, depot.y + 105);
+            const depot = this.base, bob = Math.sin(this.anim * 2.2) * 1.5;
+            const cartX = depot.x + 62, cartY = depot.y + 25 + bob, cartW = depot.w - 124, cartH = 48;
+            ctx.fillStyle = 'rgba(15,23,42,.3)'; ctx.beginPath(); ctx.ellipse(depot.x + depot.w / 2, groundY - 3, depot.w * 0.43, 9, 0, 0, TAU); ctx.fill();
+            ctx.strokeStyle = '#64748b'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(cartX + 15, groundY - 5); ctx.lineTo(cartX + cartW - 15, groundY - 5); ctx.stroke();
+            ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cartX + 12, groundY - 11); ctx.lineTo(cartX + cartW - 12, groundY - 11); ctx.stroke();
+            ctx.fillStyle = '#334155'; A.util.roundRect(ctx, cartX, cartY, cartW, cartH, 9); ctx.fill();
+            ctx.fillStyle = '#64748b'; A.util.roundRect(ctx, cartX + 5, cartY + 5, cartW - 10, cartH - 10, 6); ctx.fill();
+            ctx.fillStyle = '#1e293b'; A.util.roundRect(ctx, cartX + 12, cartY + 9, cartW - 24, cartH - 13, 4); ctx.fill();
+            ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(cartX + 4, cartY + 8); ctx.lineTo(cartX + 4, cartY + cartH + 4); ctx.lineTo(cartX + cartW - 4, cartY + cartH + 4); ctx.lineTo(cartX + cartW - 4, cartY + 8); ctx.stroke();
+            const displayCrystals = Object.values(CRYSTALS);
+            for (let i = 0; i < 5; i++) {
+                const crystal = displayCrystals[i % displayCrystals.length], cx = cartX + 38 + i * ((cartW - 76) / 4), cy = cartY + 23 + Math.sin(this.anim * 2.5 + i) * 2;
+                ctx.save(); ctx.shadowColor = crystal.color; ctx.shadowBlur = 12; ctx.fillStyle = crystal.color;
+                ctx.beginPath(); ctx.moveTo(cx, cy - 12); ctx.lineTo(cx + 9, cy); ctx.lineTo(cx, cy + 11); ctx.lineTo(cx - 8, cy); ctx.closePath(); ctx.fill(); ctx.restore();
+            }
+            for (const wx of [cartX + 34, cartX + cartW - 34]) {
+                ctx.fillStyle = '#0f172a'; ctx.beginPath(); ctx.arc(wx, groundY - 8, 11, 0, TAU); ctx.fill();
+                ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(wx, groundY - 8, 7, 0, TAU); ctx.stroke();
+                ctx.fillStyle = '#94a3b8'; ctx.beginPath(); ctx.arc(wx, groundY - 8, 2, 0, TAU); ctx.fill();
+            }
+            ctx.fillStyle = '#0f172a'; A.util.roundRect(ctx, cartX + cartW / 2 - 85, cartY + 31, 170, 24, 5); ctx.fill();
+            ctx.fillStyle = '#fef3c7'; ctx.font = '900 13px system-ui'; ctx.textAlign = 'center'; ctx.fillText('CRYSTAL DEPOT', cartX + cartW / 2, cartY + 48);
+            ctx.fillStyle = '#cbd5e1'; ctx.font = '700 10px system-ui'; ctx.fillText('BANK HAUL  /  REFUEL', cartX + cartW / 2, groundY + 20);
+
+            const sign = { x: depot.x + depot.w / 2 - 112, y: depot.y - 126, w: 224, h: 112 };
+            ctx.strokeStyle = '#713f12'; ctx.lineWidth = 8; ctx.beginPath(); ctx.moveTo(sign.x + 19, sign.y + sign.h); ctx.lineTo(sign.x + 19, groundY - 8); ctx.moveTo(sign.x + sign.w - 19, sign.y + sign.h); ctx.lineTo(sign.x + sign.w - 19, groundY - 8); ctx.stroke();
+            ctx.fillStyle = '#422f24'; A.util.roundRect(ctx, sign.x, sign.y, sign.w, sign.h, 8); ctx.fill();
+            ctx.fillStyle = '#f5d99e'; A.util.roundRect(ctx, sign.x + 5, sign.y + 5, sign.w - 10, sign.h - 10, 5); ctx.fill();
+            ctx.fillStyle = '#422f24'; ctx.font = '900 12px system-ui'; ctx.textAlign = 'center'; ctx.fillText('CRYSTAL VALUES / COINS', sign.x + sign.w / 2, sign.y + 19);
+            displayCrystals.forEach((crystal, i) => {
+                const col = i % 2, row = Math.floor(i / 2), x = sign.x + 12 + col * 107, y = sign.y + 30 + row * 23;
+                ctx.fillStyle = crystal.color; ctx.beginPath(); ctx.arc(x + 5, y + 4, 4, 0, TAU); ctx.fill();
+                ctx.fillStyle = '#2d2118'; ctx.textAlign = 'left'; ctx.font = '800 9px system-ui'; ctx.fillText(crystal.name, x + 13, y + 7);
+                ctx.textAlign = 'right'; ctx.font = '900 10px system-ui'; ctx.fillText(`${crystal.value}c`, x + 101, y + 7);
+            });
 
             for (const r of s.remoteList()) {
                 if (!Number.isFinite(r.x) || !Number.isFinite(r.y) || !this.seen(r.x, r.y)) continue;
@@ -465,13 +517,11 @@
             const light = ctx.createRadialGradient(px, py, 36, px, py, Math.min(w, h) * 0.56);
             light.addColorStop(0, 'rgba(255,239,190,.08)'); light.addColorStop(0.62, 'rgba(255,205,120,.035)'); light.addColorStop(1, 'rgba(0,0,0,.2)');
             ctx.fillStyle = light; ctx.fillRect(0, 0, w, h);
-            s.placeHud(ctx, 0, 0, 212, this.lowFuel ? 70 : 30, 'top-center');
-            ctx.fillStyle = 'rgba(8,12,24,.72)'; A.util.roundRect(ctx, 0, 0, 212, 30, 10); ctx.fill();
-            ctx.fillStyle = '#cbd5e1'; ctx.font = '700 12px system-ui'; ctx.textAlign = 'center'; ctx.fillText(`DEPTH  ${depth * 5}m`, 106, 20);
-            if (this.lowFuel) {
-                ctx.fillStyle = 'rgba(127,29,29,.88)'; A.util.roundRect(ctx, 0, 36, 212, 34, 10); ctx.fill();
-                ctx.fillStyle = '#fecaca'; ctx.font = '900 14px system-ui'; ctx.fillText('LOW FUEL — HEAD UP!', 106, 58);
-            }
+            s.placeHud(ctx, 0, 0, 230, 34, 'top-center');
+            ctx.fillStyle = this.lowFuel ? 'rgba(127,29,29,.9)' : 'rgba(8,12,24,.76)'; A.util.roundRect(ctx, 0, 0, 230, 34, 10); ctx.fill();
+            ctx.strokeStyle = this.lowFuel ? 'rgba(248,113,113,.75)' : 'rgba(148,163,184,.35)'; ctx.lineWidth = 1; A.util.roundRect(ctx, .5, .5, 229, 33, 10); ctx.stroke();
+            ctx.fillStyle = this.lowFuel ? '#fecaca' : '#cbd5e1'; ctx.font = '800 12px system-ui'; ctx.textAlign = 'center';
+            ctx.fillText(`DEPTH ${depth * 5}m${this.lowFuel ? ' · LOW FUEL · HEAD UP' : ''}`, 115, 22, 220);
             ctx.restore();
             if (depth === 0 && this.carry > 0 && me.y < 4 * TS) {
                 s.placeHud(ctx, 0, 0, 270, 24, 'bottom-center');

@@ -974,7 +974,7 @@
             this.hostedGamePollError = '';
             this.multiplayerProfile = null;
             this.multiplayerProfilePromise = null;
-            this.waitingRunner = { running: false, started: false, x: 90, y: 245, vx: 0, vy: 0, camera: 0, score: 0, best: 0, aiming: false, aimPoint: null, platforms: [], timer: null, saving: false };
+            this.waitingRunner = { running: false, started: false, x: 4, row: 0, cameraRow: 0, score: 0, best: 0, hop: null, lanes: new Map(), clock: 0, dead: false, saving: false };
             this.multiplayerFrame = null;
             this.multiplayerFrameTime = 0;
             this.multiplayerScreen = 'host';
@@ -1101,10 +1101,10 @@
                 });
             });
             const waitingCanvas = document.getElementById('waiting-runner-canvas');
-            waitingCanvas.addEventListener('pointerdown', event => this.beginWaitingAim(event));
-            waitingCanvas.addEventListener('pointermove', event => this.updateWaitingAim(event));
-            waitingCanvas.addEventListener('pointerup', event => this.releaseWaitingAim(event));
-            waitingCanvas.addEventListener('pointercancel', event => this.releaseWaitingAim(event));
+            waitingCanvas.addEventListener('pointerdown', event => this.beginWaitingHop(event));
+            waitingCanvas.addEventListener('pointerup', event => this.finishWaitingHop(event));
+            waitingCanvas.addEventListener('pointercancel', event => this.finishWaitingHop(event));
+            waitingCanvas.addEventListener('contextmenu', event => event.preventDefault());
             document.addEventListener('input', event => {
                 if (event.target.matches('#assignment-search')) this.renderAssignments();
                 if (event.target.matches('#course-search')) {
@@ -2119,7 +2119,8 @@
                     <div class="actions">
                         <button class="primary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}">Study</button>
                         <button class="secondary-btn" data-action="add-card" data-id="${this.escapeHTML(deck.id)}">Add Card</button>
-                        ${share}
+                        ${share}
+
                         <button class="danger-btn" data-action="delete-deck" data-id="${this.escapeHTML(deck.id)}">Delete</button>
                     </div>
                 </article>`;
@@ -2420,7 +2421,7 @@
                 this.renderDailyReward(profile);
                 const best = document.getElementById('waiting-runner-best');
                 if (best) {
-                    this.waitingRunner.best = Number(profile.best_wait_score || 0);
+                    this.waitingRunner.best = Math.max(Number(profile.best_wait_score || 0), this.readWaitingBest());
                     best.textContent = String(this.waitingRunner.best);
                 }
                 this.renderAppearanceShopSchemes();
@@ -2716,139 +2717,185 @@
         stopWaitingRunner() {
             this.waitingRunner.running = false;
             this.waitingRunner.started = false;
-            this.waitingRunner.aiming = false;
+            this.waitingRunner.hop = null;
+        }
+
+        waitingBestKey() {
+            return `studbud.scholar-crossing.best.${window.StudBudCloud?.user?.id || 'local'}`;
+        }
+
+        readWaitingBest() {
+            try { return Math.max(0, Number(localStorage.getItem(this.waitingBestKey())) || 0); }
+            catch (_) { return 0; }
+        }
+
+        saveWaitingBestLocal(score) {
+            const best = Math.max(this.readWaitingBest(), Math.floor(Number(score) || 0));
+            try { localStorage.setItem(this.waitingBestKey(), String(best)); } catch (_) { /* Keep this best for the current run. */ }
+            return best;
         }
 
         startWaitingRunner(reset = true) {
             const runner = this.waitingRunner;
+            runner.best = Math.max(Number(runner.best) || 0, this.readWaitingBest());
+            document.getElementById('waiting-runner-best').textContent = String(runner.best);
             if (reset) {
-                runner.score = 0;
-                runner.x = 90;
-                runner.y = 251;
-                runner.vx = 0;
-                runner.vy = 0;
-                runner.grounded = true;
-                runner.camera = 0;
-                runner.aiming = false;
-                runner.aimStart = null;
-                runner.aimPoint = null;
-                runner.platforms = [{ x: 28, y: 278, width: 175 }];
-                let center = 115;
-                for (let index = 1; index < 60; index++) {
-                    const width = 92 - Math.min(30, index) * 0.8;
-                    center = Math.max(width / 2 + 12, Math.min(508 - width / 2, center + (Math.random() * 2 - 1) * 150));
-                    runner.platforms.push({ x: center - width / 2, y: 278 - index * 58, width });
-                }
+                runner.x = 4; runner.row = 0; runner.cameraRow = -4; runner.score = 0;
+                runner.clock = 0; runner.hop = null; runner.dead = false; runner.lanes = new Map();
+                runner.seed = Math.floor(Math.random() * 0x7fffffff) || 127;
+                this.waitingLane(runner, 0);
                 document.getElementById('waiting-runner-score').textContent = '0';
             }
-            runner.running = true;
-            runner.started = true;
-            document.getElementById('waiting-runner-start').textContent = 'Restart climb';
+            runner.running = true; runner.started = true;
+            document.getElementById('waiting-runner-start').textContent = 'Restart crossing';
         }
+
+        waitingRandom(runner, row, salt = 0) {
+            let value = Math.imul((row + runner.seed + salt) | 0, 0x45d9f3b);
+            value = Math.imul(value ^ (value >>> 16), 0x45d9f3b);
+            value = Math.imul(value ^ (value >>> 16), 0x45d9f3b);
+            return ((value ^ (value >>> 16)) >>> 0) / 4294967296;
+        }
+
+        waitingLane(runner, row) {
+            if (row <= 0) {
+                if (!runner.lanes.has(0)) runner.lanes.set(0, { row: 0, type: 'grass', blockers: [] });
+                return runner.lanes.get(0);
+            }
+            if (runner.lanes.has(row)) return runner.lanes.get(row);
+            const roll = this.waitingRandom(runner, row, 3), previous = runner.lanes.get(row - 1)?.type;
+            let type = roll < 0.28 ? 'grass' : roll < 0.57 ? 'road' : roll < 0.79 ? 'data' : roll < 0.91 ? 'rail' : 'hall';
+            if (type === 'rail' && previous === 'rail') type = 'grass';
+            const lane = { row, type, blockers: [], speed: (0.58 + this.waitingRandom(runner, row, 5) * 0.72) * (this.waitingRandom(runner, row, 7) < 0.5 ? -1 : 1), phase: this.waitingRandom(runner, row, 11) * 8 };
+            if (type === 'grass' || type === 'hall') {
+                for (let col = 0; col < 9; col++) if (col !== 4 && this.waitingRandom(runner, row, col + 19) < (type === 'grass' ? 0.13 : 0.09)) lane.blockers.push({ col, kind: this.waitingRandom(runner, row, col + 41) < 0.5 ? 'tree' : 'crate' });
+            } else if (type === 'road') {
+                lane.vehicles = [0, 1].map(i => ({ x: this.waitingRandom(runner, row, i + 53) * 12 - 2 + i * 4.5, w: this.waitingRandom(runner, row, i + 71) < 0.38 ? 1.7 : 1.12, color: ['#38bdf8', '#f59e0b', '#f472b6', '#a78bfa'][Math.floor(this.waitingRandom(runner, row, i + 91) * 4)] }));
+            } else if (type === 'data') {
+                lane.platforms = [0, 1].map(i => ({ x: this.waitingRandom(runner, row, i + 101) * 10 - 1, w: 1.7 + this.waitingRandom(runner, row, i + 121) * 1.3, color: i ? '#8b5cf6' : '#22d3ee' }));
+            }
+            runner.lanes.set(row, lane);
+            return lane;
+        }
+
+        waitingWrap(value, length) { return ((value % length) + length) % length; }
+        waitingVehicleX(lane, vehicle, time) { return this.waitingWrap(vehicle.x + lane.speed * time, 13) - 2; }
+        waitingPlatformX(lane, platform, time) { return this.waitingWrap(platform.x + lane.speed * time, 11) - 1; }
 
         pointOnCanvas(canvas, event) {
             const bounds = canvas.getBoundingClientRect();
-            return {
-                x: (event.clientX - bounds.left) * canvas.width / bounds.width,
-                y: (event.clientY - bounds.top) * canvas.height / bounds.height
-            };
+            return { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
         }
 
-        // Pull-back launch: the drag vector (start point minus current point) sets the launch velocity.
-        waitingLaunchVelocity(runner, point) {
-            const dx = Math.max(-100, Math.min(100, runner.aimStart.x - point.x));
-            const dy = Math.max(0, Math.min(110, point.y - runner.aimStart.y));
-            if (Math.hypot(dx, dy) < 14) return null;
-            return { vx: dx * 0.065, vy: -(5.6 + dy * 0.05) };
-        }
-
-        // Advances one 1/60s tick of the warm-up physics; returns the platform landed on, if any.
-        waitingPhysics(state, platforms) {
-            const previousFoot = state.y + 27;
-            state.x += state.vx;
-            state.y += state.vy;
-            state.vy += 0.27;
-            if (state.x < 15) { state.x = 15; state.vx = Math.abs(state.vx) * 0.6; }
-            if (state.x > 505) { state.x = 505; state.vx = -Math.abs(state.vx) * 0.6; }
-            if (state.vy <= 0) return null;
-            return platforms.find(item =>
-                previousFoot <= item.y && state.y + 27 >= item.y
-                && state.x + 13 >= item.x && state.x - 13 <= item.x + item.width
-            ) || null;
-        }
-
-        beginWaitingAim(event) {
-            if (!this.waitingRunner.running) { this.startWaitingRunner(); event.preventDefault(); return; }
+        waitingHop(dx, dy) {
             const runner = this.waitingRunner;
-            if (!runner.grounded) return;
-            const point = this.pointOnCanvas(event.currentTarget, event);
-            runner.aiming = true;
-            runner.aimStart = point;
-            runner.aimPoint = point;
+            if (runner.dead || !runner.running) {
+                this.startWaitingRunner();
+                if (!dy && !dx) return;
+            }
+            if (runner.hop || !runner.running) return;
+            const col = Math.max(0, Math.min(8, Math.round(runner.x) + dx));
+            const row = Math.max(0, runner.row + dy);
+            if (col === Math.round(runner.x) && row === runner.row) return;
+            const destination = this.waitingLane(runner, row);
+            if ((destination.type === 'grass' || destination.type === 'hall') && destination.blockers.some(blocker => blocker.col === col)) { runner.bump = 0.18; return; }
+            runner.hop = { x: runner.x, from: runner.row, to: row, targetX: col, dx, dy, t: 0 };
+        }
+
+        beginWaitingHop(event) {
+            event.preventDefault();
+            if (!this.waitingRunner.running || this.waitingRunner.dead) this.startWaitingRunner();
+            this.waitingRunner.pointer = this.pointOnCanvas(event.currentTarget, event);
             event.currentTarget.setPointerCapture?.(event.pointerId);
+        }
+
+        finishWaitingHop(event) {
+            const runner = this.waitingRunner, start = runner.pointer;
+            runner.pointer = null;
+            if (!start || event.type === 'pointercancel') return;
+            const end = this.pointOnCanvas(event.currentTarget, event), dx = end.x - start.x, dy = end.y - start.y;
+            const threshold = Math.max(22, event.currentTarget.getBoundingClientRect().width / 18);
+            if (Math.max(Math.abs(dx), Math.abs(dy)) < threshold) this.waitingHop(0, 1);
+            else if (Math.abs(dx) > Math.abs(dy)) this.waitingHop(dx > 0 ? 1 : -1, 0);
+            else this.waitingHop(0, dy < 0 ? 1 : -1);
             event.preventDefault();
         }
 
-        updateWaitingAim(event) {
-            if (!this.waitingRunner.aiming) return;
-            this.waitingRunner.aimPoint = this.pointOnCanvas(event.currentTarget, event);
-            event.preventDefault();
-        }
-
-        releaseWaitingAim(event) {
+        waitingDeath(reason) {
             const runner = this.waitingRunner;
-            if (!runner.aiming || !runner.aimPoint) return;
-            const launch = event.type === 'pointercancel' ? null : this.waitingLaunchVelocity(runner, this.pointOnCanvas(event.currentTarget, event));
-            runner.aiming = false;
-            runner.aimPoint = null;
-            if (!launch) return;
-            runner.vx = launch.vx;
-            runner.vy = launch.vy;
-            runner.grounded = false;
-            window.StudBudSfx?.play?.('jump');
-            event.preventDefault();
+            if (runner.dead) return;
+            runner.dead = true; runner.running = false; runner.hop = null; runner.deathReason = reason;
+            document.getElementById('waiting-runner-start').textContent = 'Run again';
+            this.saveWaitingRunnerBest();
+        }
+
+        waitingPlatformCovers(lane, x, time) {
+            return lane.platforms?.some(platform => {
+                const center = this.waitingPlatformX(lane, platform, time);
+                return x >= center - platform.w / 2 && x <= center + platform.w / 2;
+            }) || false;
+        }
+
+        waitingTrain(lane, time) {
+            const phase = this.waitingWrap(time + lane.phase, 8);
+            if (phase < 5.6) return null;
+            const progress = Math.min(1, (phase - 5.6) / 1.65);
+            return { x: (lane.speed > 0 ? -2 : 11) + progress * 13 * (lane.speed > 0 ? 1 : -1), active: true };
         }
 
         stepWaitingRunner(delta) {
             const runner = this.waitingRunner;
-            if (!runner.running || runner.grounded) return;
-            runner.tickBank = (runner.tickBank || 0) + delta;
-            while (runner.tickBank >= 1) {
-                runner.tickBank -= 1;
-                const platform = this.waitingPhysics(runner, runner.platforms);
-                if (!platform) continue;
-                runner.y = platform.y - 27;
-                runner.vy = 0;
-                runner.vx = 0;
-                runner.grounded = true;
-                const altitude = Math.max(0, Math.floor((251 - runner.y) / 8));
-                if (altitude > runner.score) {
-                    runner.score = altitude;
-                    document.getElementById('waiting-runner-score').textContent = String(altitude);
-                    if (altitude > runner.best) {
-                        runner.best = altitude;
-                        document.getElementById('waiting-runner-best').textContent = String(altitude);
+            if (!runner.running) return;
+            const dt = Math.min(0.05, delta * 16.67 / 1000);
+            runner.clock += dt;
+            const ahead = Math.max(runner.row, Math.ceil(runner.cameraRow + 12));
+            for (let row = Math.max(0, Math.floor(runner.cameraRow) - 2); row <= ahead; row++) this.waitingLane(runner, row);
+            runner.cameraRow = Math.max(runner.cameraRow + dt * 0.32, runner.row - 4);
+            if (!runner.hop && runner.row < runner.cameraRow - 0.1) { this.waitingDeath('The campus shuttle caught up'); return; }
+            if (runner.hop) {
+                const hop = runner.hop; hop.t = Math.min(1, hop.t + dt / 0.14);
+                runner.x = hop.x + (hop.targetX - hop.x) * hop.t;
+                if (hop.t >= 1) {
+                    runner.x = hop.targetX; runner.row = hop.to; runner.hop = null;
+                    if (runner.row > runner.score) {
+                        runner.score = runner.row; document.getElementById('waiting-runner-score').textContent = String(runner.score);
+                        if (runner.score > runner.best) {
+                            runner.best = this.saveWaitingBestLocal(runner.score);
+                            document.getElementById('waiting-runner-best').textContent = String(runner.best);
+                        }
                     }
                 }
-                break;
+            } else {
+                const lane = this.waitingLane(runner, runner.row);
+                if (lane.type === 'data') {
+                    const platform = lane.platforms?.find(item => {
+                        const center = this.waitingPlatformX(lane, item, runner.clock);
+                        return runner.x >= center - item.w / 2 && runner.x <= center + item.w / 2;
+                    });
+                    if (!platform) { this.waitingDeath('Lost in the data stream'); return; }
+                    runner.x += lane.speed * dt;
+                    if (runner.x < 0 || runner.x > 8) { this.waitingDeath('Swept off the study raft'); return; }
+                } else if (lane.type === 'road') {
+                    if (lane.vehicles.some(vehicle => {
+                        const center = this.waitingVehicleX(lane, vehicle, runner.clock);
+                        return Math.abs(center - runner.x) < (vehicle.w + 0.52) / 2;
+                    })) { this.waitingDeath('Hit by a rolling library cart'); return; }
+                } else if (lane.type === 'rail') {
+                    const train = this.waitingTrain(lane, runner.clock);
+                    if (train?.active && Math.abs(train.x - runner.x) < 1.35) { this.waitingDeath('The study express passed'); return; }
+                }
             }
-            if (runner.y - runner.camera > 390) {
-                runner.running = false;
-                runner.aiming = false;
-                document.getElementById('waiting-runner-start').textContent = 'Climb again';
-                this.saveWaitingRunnerBest();
-                return;
-            }
-            if (runner.y - runner.camera < 205) runner.camera = runner.y - 205;
+            runner.bump = Math.max(0, (runner.bump || 0) - dt);
         }
 
         async saveWaitingRunnerBest() {
             const runner = this.waitingRunner;
+            if (runner.score > 0) runner.best = Math.max(runner.best, this.saveWaitingBestLocal(runner.score));
             if (runner.saving || runner.score <= 0 || runner.score <= Number(this.multiplayerProfile?.best_wait_score || 0)) return;
             runner.saving = true;
             try {
                 this.multiplayerProfile = await window.StudBudCommunityGames.recordWaitingGameBest(runner.score);
-                runner.best = Number(this.multiplayerProfile.best_wait_score || runner.score);
+                runner.best = Math.max(Number(this.multiplayerProfile.best_wait_score || runner.score), this.readWaitingBest());
                 document.getElementById('waiting-runner-best').textContent = String(runner.best);
             } catch (error) {
                 console.error('[NexusApp] Warm-up personal best could not sync:', error);
@@ -2859,42 +2906,55 @@
         }
 
         startMultiplayerAnimation() {
+            if (!this.multiplayerVisibilityHandler) {
+                this.multiplayerVisibilityHandler = () => {
+                    if (document.visibilityState === 'hidden') this.stopMultiplayerAnimation();
+                    else if (Router.activeRoute === 'multiplayer') this.startMultiplayerAnimation();
+                };
+                document.addEventListener('visibilitychange', this.multiplayerVisibilityHandler);
+            }
             if (this.multiplayerFrame) return;
+            if (!this.livePreviews) this.livePreviews = new Map();
             this.multiplayerFrameTime = performance.now();
             const animate = now => {
+                this.multiplayerFrame = null;
+                if (Router.activeRoute !== 'multiplayer' || document.visibilityState === 'hidden') {
+                    this.stopMultiplayerAnimation();
+                    return;
+                }
                 const delta = Math.min(2.5, Math.max(0.25, (now - this.multiplayerFrameTime) / 16.67));
                 this.multiplayerFrameTime = now;
-                if (Router.activeRoute === 'multiplayer') {
-                    const roomActive = this.hostedGameRoom && this.hostedGameRoom.status !== 'waiting' && !document.getElementById('hosted-game-room').classList.contains('hidden');
-                    const previewActive = !document.getElementById('multiplayer-host-flow').classList.contains('hidden');
-                    if (previewActive && !this.drawLivePreview(document.getElementById('multiplayer-game-canvas'), this.selectedMultiplayerMode, now)) this.drawMultiplayerScene(
-                        document.getElementById('multiplayer-game-canvas'),
-                        this.selectedMultiplayerMode,
-                        [{ nickname: this.multiplayerDisplayName(), score: 280, skin: this.multiplayerProfile?.equipped_skin, hat: this.multiplayerProfile?.equipped_hat, accessory: this.multiplayerProfile?.equipped_accessory, streak: 2 }, { nickname: 'Rival', score: 140, skin: 'skin_robot', streak: 1 }],
-                        now / 1000,
-                        true
-                    );
-                    if (roomActive) this.drawMultiplayerScene(
-                        document.getElementById('multiplayer-room-canvas'),
-                        this.hostedGameRoom.mode,
-                        this.hostedGameRoom.state?.players || [],
-                        now / 1000,
-                        false
-                    );
-                    const waiting = document.getElementById('waiting-arcade-card');
-                    if (waiting && !waiting.classList.contains('hidden')) {
-                        this.stepWaitingRunner(delta);
-                        this.drawPotClimb(document.getElementById('waiting-runner-canvas'), now / 1000);
-                    }
+                const modePreviews = document.querySelectorAll('.mode-preview-canvas');
+                for (const canvas of modePreviews) {
+                    if (this.canvasIsVisible(canvas)) this.drawLivePreview(canvas, canvas.dataset.previewMode, now);
+                    else if (this.livePreviews.has(canvas)) this.livePreviews.delete(canvas);
+                }
+                const preview = document.getElementById('multiplayer-game-canvas');
+                const previewActive = !document.getElementById('multiplayer-host-flow').classList.contains('hidden');
+                if (previewActive && this.canvasIsVisible(preview)) this.drawLivePreview(preview, this.selectedMultiplayerMode, now);
+                const roomActive = this.hostedGameRoom && this.hostedGameRoom.status !== 'waiting' && !document.getElementById('hosted-game-room').classList.contains('hidden');
+                const roomCanvas = document.getElementById('multiplayer-room-canvas');
+                if (roomActive && this.canvasIsVisible(roomCanvas)) this.drawLivePreview(roomCanvas, this.hostedGameRoom.mode, now);
+                const waiting = document.getElementById('waiting-arcade-card');
+                if (waiting && !waiting.classList.contains('hidden') && this.canvasIsVisible(document.getElementById('waiting-runner-canvas'))) {
+                    this.stepWaitingRunner(delta);
+                    this.drawScholarCrossing(document.getElementById('waiting-runner-canvas'), now / 1000);
                 }
                 this.multiplayerFrame = requestAnimationFrame(animate);
             };
             this.multiplayerFrame = requestAnimationFrame(animate);
         }
 
+        canvasIsVisible(canvas) {
+            if (!canvas || !canvas.isConnected || canvas.getClientRects().length === 0) return false;
+            const rect = canvas.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth;
+        }
+
         stopMultiplayerAnimation() {
             if (this.multiplayerFrame) cancelAnimationFrame(this.multiplayerFrame);
             this.multiplayerFrame = null;
+            if (this.livePreviews) this.livePreviews.clear();
         }
 
         drawCharacter(context, x, y, color, scale, time, swinging = false, accessoryId = '', tool = '') {
@@ -2971,23 +3031,63 @@
         // ---- Simulated lobby players for the live previews: they fight each other and the demo player like a real match ----
         initPreviewBots(demo, mode, game) {
             const U = window.StudBudArcade.util;
-            const bots = [['b1', 'Nova', '#f472b6'], ['b2', 'Kite', '#facc15'], ['b3', 'Rook', '#4ade80']].map(([id, name, color], i) => ({
-                id, name, color, cos: {}, i, x: 0, y: 0, vx: 0, vy: 0, f: 0, a: 0, hp: 100, ex: {}, score: 0, tx: 0, ty: 0, respawn: 0, invuln: 0, stun: 0, cd: Math.random(), seen: performance.now()
-            }));
+            const names = [['b1', 'Nova', '#f472b6'], ['b2', 'Kite', '#facc15'], ['b3', 'Rook', '#4ade80']];
+            const bots = names.map(([id, name, color], i) => {
+                const rng = U.mulberry32(U.hashStr(`${mode}:${id}:studbud-bot`));
+                const bot = {
+                    id, name, color, cos: {}, i, x: 0, y: 0, vx: 0, vy: 0, f: 0, a: 0, hp: 100, ex: {}, score: 0,
+                    tx: 0, ty: 0, respawn: 0, invuln: 0, stun: 0, cd: rng(), seen: performance.now(),
+                    ai: { rng, speed: 0.82 + rng() * 0.42, aggression: 0.25 + rng() * 0.65, reaction: 0.16 + rng() * 0.48,
+                        area: (i + rng() * 0.55) / names.length, lane: i, side: i % 2 ? 1 : -1, phase: rng() * Math.PI * 2,
+                        nextThink: 0, target: null, targetUntil: 0, lastX: 0, lastY: 0, stuck: 0, route: i }
+                };
+                const W = game.W || game.WIDTH || 1600, H = game.H || 800;
+                bot.x = W * (0.16 + i * 0.32); bot.y = H * (0.28 + (i % 2) * 0.42);
+                return bot;
+            });
             if (mode === 'duel') {
-                const sp = [[480, 440], [1080, 440], [790, 200]];
-                bots.forEach((b, i) => Object.assign(b, { w: 34, h: 56, sp: sp[i], x: sp[i][0], y: sp[i][1] - 60, dmg: 0, airJumps: 1, swingT: 0, swingCd: 0.5 + i * 0.4, f: 1 }));
+                const sp = [[390, 440], [1190, 440], [790, 200]];
+                bots.forEach((b, i) => Object.assign(b, { w: 34, h: 56, sp: sp[i], x: sp[i][0], y: sp[i][1] - 60, dmg: 0, airJumps: 1, swingT: 0, swingCd: 0.5 + i * 0.4, f: i === 1 ? -1 : 1, ai: { ...b.ai, role: ['west-route', 'east-route', 'upper-route'][i], routeX: [770, 830, 800][i] } }));
                 demo.onEmit = ev => { if (ev.k === 'sw') this.duelSwing(demo, ev); };
             } else if (mode === 'shooter') {
-                bots.forEach(b => { b.r = 16; b.strafe = 1; this.placeShooterBot(game, b); });
+                bots.forEach((b, i) => { b.r = 16; b.strafe = i % 2 ? -1 : 1; this.placeShooterBot(game, b, i); });
             } else if (mode === 'sports') {
-                bots.forEach(b => {
+                bots.forEach((b, i) => {
                     b.team = game.teamOf(b.id); b.dir = b.team === 0 ? 1 : -1; b.r = 15; b.kickCd = 0; b.turbo = 0; b.stun = 0;
                     const mates = game.teamIds.filter(id => game.teamOf(id) === b.team);
-                    b.lane = game.H * (Math.max(0, mates.indexOf(b.id)) + 1) / (mates.length + 1);
+                    const slot = Math.max(0, mates.indexOf(b.id));
+                    b.lane = game.H * (slot + 1) / (mates.length + 1);
+                    b.role = slot === 0 ? 'attacker' : slot === mates.length - 1 ? 'defender' : 'midfielder';
                     b.home = [game.W * (b.dir > 0 ? 0.3 : 0.7), b.lane];
-                    b.x = b.home[0] + (Math.random() - 0.5) * 200; b.y = b.lane;
+                    b.x = b.home[0] + (slot - (mates.length - 1) / 2) * 46; b.y = b.lane;
                 });
+            } else if (mode === 'miner') {
+                bots.forEach((b, i) => { b.x = 35 * 48 + (i - 1) * 76; b.y = 3.6 * 48; b.fuel = 100; b.carry = 0; b.items = 0; b.ai.sector = [[2, 24], [24, 47], [47, 68]][i]; });
+            } else if (mode === 'market') {
+                const shops = game.shops || [], houses = game.houses || [];
+                bots.forEach((b, i) => {
+                    const shopIndex = shops.length ? i % shops.length : 0;
+                    const houseIndex = houses.length > 1 ? Math.round(i * (houses.length - 1) / (bots.length - 1)) : 0;
+                    const shop = shops[shopIndex], home = houses[houseIndex];
+                    b.x = home?.door?.x ?? b.x; b.y = home?.door?.y ?? b.y;
+                    b.ai.carrying = false; b.ai.shopIndex = shopIndex; b.ai.houseIndex = houseIndex;
+                    b.ai.target = shop?.door || home?.door || null;
+                });
+            } else if (mode === 'river') {
+                bots.forEach((b, i) => { b.x = 620 + i * 720; b.y = game.H * (0.25 + i * 0.24); b.ai.fishIndex = (i * 13 + 4) % Math.max(1, game.fish.length); b.ai.castTimer = 0.3 + i * 0.9; });
+            } else if (mode === 'hack') {
+                bots.forEach((b, i) => { const term = game.terms?.[i % Math.max(1, game.terms?.length || 1)]; b.x = term?.x || b.x; b.y = term?.y || b.y; b.ai.termIndex = i; });
+            } else if (mode === 'skyline') {
+                const route = this.skyRoute(game);
+                bots.forEach((b, i) => {
+                    const cp = (i + 1) % Math.max(1, game.checkpoints.length), nodeIndex = route.cpNode[cp] || 0, node = route.list[nodeIndex];
+                    b.w = 26; b.h = 44; b.st = { i: nodeIndex, flagDone: true, hop: null, wait: i * 0.16, air: false, moving: false };
+                    b.x = node.x + node.w / 2 - b.w / 2; b.y = node.y - b.h; b.f = i % 2 ? -1 : 1;
+                });
+            } else if (mode === 'frenzy' || mode === 'fishing') {
+                bots.forEach((b, i) => { b.ai.fishingState = i % 2 ? 1 : 0; b.ai.fishingTimer = 0.7 + i * 0.8; b.ai.power = 0; b.ai.powerDir = 1; b.ai.fishY = 100 + i * 45; });
+            } else if (mode === 'crypto') {
+                bots.forEach((b, i) => { b.ai.asset = (i * 2 + 1) % 6; b.ai.cash = 200; b.ai.units = Array(6).fill(0); b.ai.tradeAt = i * 0.7; });
             }
             return bots;
         }
@@ -3009,7 +3109,8 @@
 
         stepDuelBots(demo, dt) {
             const U = window.StudBudArcade.util, game = demo.game, me = game.me, now = performance.now();
-            const meAlive = game.respawn <= 0;
+            const zone = game.hill().zone;
+            const hillCenter = zone.x + zone.w / 2;
             for (const b of demo.bots) {
                 if (b.respawn > 0) {
                     b.respawn -= dt; b.a = 5;
@@ -3018,13 +3119,16 @@
                 }
                 b.stun = Math.max(0, b.stun - dt); b.invuln = Math.max(0, b.invuln - dt); b.swingT = Math.max(0, b.swingT - dt); b.swingCd -= dt;
                 let tgt = null, bd = 1e9;
-                const foes = demo.bots.filter(o => o !== b && o.respawn <= 0);
-                if (meAlive) foes.push({ x: me.x, y: me.y, id: demo.meId });
-                for (const o of foes) { const d = Math.hypot(o.x - b.x, o.y - b.y); if (d < bd) { bd = d; tgt = o; } }
+                const contenders = demo.bots.filter(o => o !== b && o.respawn <= 0 && game.inHill({ x: o.x, y: o.y }, zone));
+                if (game.respawn <= 0 && game.inHill(me, zone)) contenders.push({ x: me.x, y: me.y, id: demo.meId });
+                for (const o of contenders) { const d = Math.hypot(o.x - b.x, o.y - b.y); if (d < bd) { bd = d; tgt = o; } }
+                const routeOffset = (b.i - 1) * 58;
+                const objectiveX = U.clamp(hillCenter + routeOffset, zone.x + 35, zone.x + zone.w - 35);
                 const off = b.y + 56 > 525 && (b.x + 17 < 300 || b.x + 17 > 1300);
                 let want = 0;
                 if (off) want = Math.sign(800 - b.x);
                 else if (tgt && Math.abs(tgt.x - b.x) > 60) want = Math.sign(tgt.x - b.x);
+                else if (!tgt && Math.abs(objectiveX - (b.x + 17)) > 28) want = Math.sign(objectiveX - (b.x + 17));
                 if (b.stun <= 0) {
                     const acc = (b.onGround ? 3000 : 1500) * dt;
                     b.vx += U.clamp(want * 300 - b.vx, -acc, acc);
@@ -3034,13 +3138,13 @@
                 if (b.onGround) b.airJumps = 1;
                 if (b.stun <= 0) {
                     if (off) { if (!b.onGround && b.vy > 0 && b.airJumps > 0) { b.vy = -820; b.airJumps--; } }
-                    else if (tgt && b.onGround && ((tgt.y < b.y - 50 && Math.abs(tgt.x - b.x) < 320) || (b.wall && want))) b.vy = -900;
+                    else if (b.onGround && ((!tgt && zone.y < b.y + 20 && Math.abs(objectiveX - (b.x + 17)) < 260) || (tgt && tgt.y < b.y - 50 && Math.abs(tgt.x - b.x) < 320) || (b.wall && want))) b.vy = -900;
                     else if (tgt && !b.onGround && b.vy > 0 && b.airJumps > 0 && tgt.y < b.y - 40) { b.vy = -820; b.airJumps--; }
                 }
                 U.moveBody(b, game.solids, dt);
                 if (tgt && b.swingCd <= 0 && b.stun <= 0 && bd < 115) {
                     const ang = Math.atan2(tgt.y - b.y, tgt.x - b.x);
-                    b.swingT = 0.22; b.swingCd = 0.6 + Math.random() * 0.5; b.swing = now; b.swingAim = ang;
+                    b.swingT = 0.22; b.swingCd = 0.6 + (b.ai?.rng?.() || 0.5) * 0.5; b.swing = now; b.swingAim = ang;
                     const ev = { k: 'sw', x: b.x + 17, y: b.y + 28, d: b.f, a: ang, p: 1, by: b.id, c: b.dmg };
                     game.onEvent(ev, b); this.duelSwing(demo, ev);
                 }
@@ -3076,15 +3180,17 @@
             session.mouse.pressed = bd < 120;
         }
 
-        placeShooterBot(game, b) {
-            const U = window.StudBudArcade.util, me = game.me;
-            for (let i = 0; i < 20; i++) {
-                const a = Math.random() * U.TAU, d = 380 + Math.random() * 350;
-                const x = U.clamp(me.x + Math.cos(a) * d, 120, game.W - 120), y = U.clamp(me.y + Math.sin(a) * d, 120, game.H - 120);
+        placeShooterBot(game, b, index = b.i || 0) {
+            const U = window.StudBudArcade.util, rng = b.ai?.rng || Math.random;
+            const sectors = [[0.18, 0.2], [0.82, 0.23], [0.5, 0.78], [0.18, 0.75], [0.82, 0.72]];
+            const [sx, sy] = sectors[index % sectors.length];
+            for (let attempt = 0; attempt < 28; attempt++) {
+                const x = U.clamp(game.W * sx + (rng() - 0.5) * 420, 120, game.W - 120);
+                const y = U.clamp(game.H * sy + (rng() - 0.5) * 360, 120, game.H - 120);
                 if (game.walls.some(w => U.overlap({ x: x - 22, y: y - 22, w: 44, h: 44 }, w))) continue;
                 b.x = x; b.y = y; return;
             }
-            b.x = game.W / 2; b.y = game.H / 2;
+            b.x = game.W * sx; b.y = game.H * sy;
         }
 
         stepShooterBots(demo, dt) {
@@ -3093,11 +3199,11 @@
                 b.seen = now;
                 if (b.respawn > 0) {
                     b.respawn -= dt; b.a = 1;
-                    if (b.respawn <= 0) { this.placeShooterBot(game, b); b.hp = 100; b.a = 0; b.invuln = 1.5; }
+                    if (b.respawn <= 0) { this.placeShooterBot(game, b, b.i); b.hp = 100; b.a = 0; b.invuln = 1.5; }
                     continue;
                 }
                 b.cd -= dt; b.invuln = Math.max(0, b.invuln - dt); b.sfT = (b.sfT || 0) - dt;
-                if (b.sfT <= 0) { b.strafe = -b.strafe; b.sfT = 1.2 + Math.random() * 1.8; }
+                if (b.sfT <= 0) { b.strafe = -b.strafe; b.sfT = 1.2 + (b.ai?.rng?.() || 0.5) * 1.8; }
                 let tgt = null, bd = 1e9;
                 const foes = demo.bots.filter(o => o !== b && o.respawn <= 0);
                 if (game.dead <= 0) foes.push(me);
@@ -3107,9 +3213,9 @@
                     const ang = Math.atan2(tgt.y - b.y, tgt.x - b.x), dir = bd > 420 ? 1 : bd < 260 ? -1 : 0;
                     mx = Math.cos(ang) * dir + Math.cos(ang + Math.PI / 2) * b.strafe * 0.8;
                     my = Math.sin(ang) * dir + Math.sin(ang + Math.PI / 2) * b.strafe * 0.8;
-                    b.aim = ang + (Math.random() - 0.5) * 0.12;
+                    b.aim = ang + ((b.ai?.rng?.() || 0.5) - 0.5) * (0.08 + (1 - (b.ai?.aggression || 0.5)) * 0.1);
                     if (b.cd <= 0 && bd < 780) {
-                        b.cd = 0.3 + Math.random() * 0.3;
+                        b.cd = (b.ai?.reaction || 0.3) + (b.ai?.rng?.() || 0.5) * 0.25;
                         game.onEvent({ k: 'sh', x: b.x + Math.cos(b.aim) * 24, y: b.y + Math.sin(b.aim) * 24, a: b.aim, by: b.id }, b);
                     }
                 }
@@ -3161,27 +3267,31 @@
 
         // Soccer preview: bots chase the ball with their team's closest player, dribble it toward the rival goal and shoot when close.
         stepSportsBots(demo, dt) {
-            const U = window.StudBudArcade.util, game = demo.game, me = game.me, ball = game.ball, now = performance.now();
-            const mates = demo.bots.map(b => ({ x: b.x, y: b.y, team: b.team, id: b.id }));
-            mates.push({ x: me.x, y: me.y, team: game.myTeam, id: demo.meId });
+            const U = window.StudBudArcade.util, game = demo.game, ball = game.ball, now = performance.now();
+            const all = demo.bots.map(b => ({ x: b.x, y: b.y, team: b.team, id: b.id }));
+            all.push({ x: game.me.x, y: game.me.y, team: game.myTeam, id: demo.meId });
             for (const b of demo.bots) {
-                b.seen = now; b.ex = { t: 0 };
-                b.kickCd -= dt;
-                const own = mates.filter(o => o.team === b.team);
+                b.seen = now; b.ex = { t: 0 }; b.kickCd -= dt;
+                const own = all.filter(o => o.team === b.team);
                 const closest = own.reduce((best, o) => Math.hypot(o.x - ball.x, o.y - ball.y) < Math.hypot(best.x - ball.x, best.y - ball.y) ? o : best, own[0]);
-                const chaser = closest.id === b.id || Math.hypot(b.x - ball.x, b.y - ball.y) < 260;
-                const goalX = b.dir > 0 ? game.W : 0, goalY = game.H / 2;
-                let tx, ty, speed = 255 * 1.1;
+                const chaser = closest.id === b.id;
+                const goalX = b.dir > 0 ? game.W : 0, homeGoal = b.dir > 0 ? 0 : game.W, goalY = game.H / 2;
+                const attacking = b.team !== (ball.vx > 35 ? 0 : ball.vx < -35 ? 1 : b.team);
+                let tx, ty, speed = 255 * 1.08;
                 if (game.freeze > 0) { tx = b.home[0]; ty = b.lane; }
                 else if (chaser) {
                     const ax = goalX - ball.x, ay = goalY - ball.y, al = Math.hypot(ax, ay) || 1;
-                    tx = ball.x - (ax / al) * 34; ty = ball.y - (ay / al) * 34; speed = 255 * 1.3;
+                    tx = ball.x - ax / al * (30 + b.i * 5); ty = ball.y - ay / al * (30 + b.i * 5); speed = 255 * (1.12 + b.ai.aggression * 0.18);
+                } else if (b.role === 'defender' || (attacking && b.i % 2 === 0)) {
+                    tx = homeGoal + (goalX - homeGoal) * 0.16; ty = U.clamp(goalY + (b.lane - game.H / 2) * 0.38, 130, game.H - 130);
                 } else {
-                    tx = U.clamp(ball.x - b.dir * 380, 200, game.W - 200); ty = U.clamp(b.lane + (ball.y - game.H / 2) * 0.3, 120, game.H - 120);
+                    const support = b.role === 'attacker' ? 0.42 : 0.27;
+                    tx = U.clamp(ball.x - b.dir * (185 + 75 * support) + (b.lane - game.H / 2) * 0.14, 170, game.W - 170);
+                    ty = U.clamp(b.lane + (ball.y - game.H / 2) * 0.2, 120, game.H - 120);
                 }
-                const dx = tx - b.x, dy = ty - b.y, dl = Math.hypot(dx, dy) || 1, k = dl > 14 ? 1 : dl / 14;
-                const acc = 3000 * dt;
-                b.vx += U.clamp(dx / dl * speed * k - b.vx, -acc, acc); b.vy += U.clamp(dy / dl * speed * k - b.vy, -acc, acc);
+                const dx = tx - b.x, dy = ty - b.y, dl = Math.hypot(dx, dy) || 1;
+                const desired = Math.min(speed, dl * 2.1), accel = 3000 * dt;
+                b.vx += U.clamp(dx / dl * desired - b.vx, -accel, accel); b.vy += U.clamp(dy / dl * desired - b.vy, -accel, accel);
                 b.x = U.clamp(b.x + b.vx * dt, b.r, game.W - b.r); b.y = U.clamp(b.y + b.vy * dt, b.r, game.H - b.r);
                 b.f = Math.atan2(b.vy, b.vx); b.a = 1; b.tx = b.x; b.ty = b.y;
                 if (game.freeze > 0) continue;
@@ -3189,18 +3299,12 @@
                 if (bd < min) {
                     const nx = bx / (bd || 1), ny = by / (bd || 1);
                     ball.x = b.x + nx * min; ball.y = b.y + ny * min;
-                    const ga = Math.atan2(goalY + (Math.random() - 0.5) * 180 - ball.y, goalX - ball.x);
-                    const shoot = b.kickCd <= 0 && Math.abs(goalX - ball.x) < 700;
-                    const sp = shoot ? 900 : 330;
-                    ball.vx = Math.cos(ga) * sp; ball.vy = Math.sin(ga) * sp;
-                    if (shoot) b.kickCd = 1.2;
-                    game.lastTouch = b.id;
+                    const goalAngle = Math.atan2(goalY + (b.ai.rng() - 0.5) * 105 - ball.y, goalX - ball.x);
+                    const shoot = b.kickCd <= 0 && Math.abs(goalX - ball.x) < 690 && (chaser || b.role === 'attacker');
+                    const shotSpeed = shoot ? 850 + b.ai.aggression * 90 : 300;
+                    ball.vx = Math.cos(goalAngle) * shotSpeed; ball.vy = Math.sin(goalAngle) * shotSpeed;
+                    if (shoot) b.kickCd = 1.2 + b.ai.reaction;
                 }
-            }
-            // a goal the demo player didn't score is credited to the bot that touched the ball last
-            if (game.unclaimed !== null && game.unclaimed !== undefined) {
-                const scorer = demo.bots.find(b => b.id === game.lastTouch) || demo.bots[0];
-                game.onEvent({ k: 'gl', team: game.unclaimed }, scorer);
             }
         }
 
@@ -3473,440 +3577,449 @@
         }
 
         // Runs the real game class with scripted bot input, so the lobby preview always matches the actual game.
+        previewControls(demo, dt) {
+            const { mode, game, hold, tap, session } = demo;
+            const me = game.me;
+            const bots = demo.bots;
+            const clock = demo.clock;
+            const press = (...keys) => keys.forEach(key => hold.add(key));
+            const tapKey = (...keys) => keys.forEach(key => tap.add(key));
+            if (mode === 'skyline') {
+                this.skylineBot(demo, game, clock, dt, hold, tap);
+                bots.forEach((bot, i) => this.stepSkylineBot(demo, bot, i, dt));
+                return;
+            }
+            if (mode === 'duel') {
+                this.stepDuelBots(demo, dt); this.driveDuel(demo, hold, tap, session); return;
+            }
+            if (mode === 'shooter') {
+                this.stepShooterBots(demo, dt); this.driveShooter(demo, hold, tap, session, clock); return;
+            }
+            if (mode === 'sports') {
+                this.stepSportsBots(demo, dt); this.driveSports(demo, hold, tap); return;
+            }
+            if (mode === 'miner') {
+                const carry = Number(game.items || 0), lowFuel = Number(game.res?.value || 0) < 35;
+                if ((carry >= game.cap * 0.55 || lowFuel) && me.y > game.base.y + game.base.h) {
+                    const dx = game.base.x + game.base.w / 2 - (me.x + me.w / 2);
+                    if (Math.abs(dx) > 22) press(dx > 0 ? 'KeyD' : 'KeyA');
+                    press('KeyW');
+                } else {
+                    let target = null, best = Infinity;
+                    const x0 = Math.max(1, Math.floor(me.x / 48) - 10), x1 = Math.min(68, x0 + 20);
+                    const y0 = Math.max(4, Math.floor(me.y / 48) - 2), y1 = Math.min(44, y0 + 12);
+                    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+                        const type = game.tile(x, y);
+                        if (![3, 4, 5, 7, 8, 9].includes(type)) continue;
+                        const score = Math.abs(x * 48 + 24 - me.x - me.w / 2) + Math.abs(y * 48 + 24 - me.y - me.h / 2) * 1.5;
+                        if (score < best) { best = score; target = { x, y }; }
+                    }
+                    if (target) {
+                        const tx = target.x * 48 + 24, ty = target.y * 48 + 24, dx = tx - me.x - me.w / 2, dy = ty - me.y - me.h / 2;
+                        if (Math.abs(dx) > 30) press(dx > 0 ? 'KeyD' : 'KeyA');
+                        if (dy > 34 && Math.abs(dx) < 115) press('KeyS');
+                        if (dy < -70) press('KeyW');
+                        if (game.res.value < 82 && me.y > 260) press('KeyW');
+                    } else { press(clock % 4 < 2 ? 'KeyD' : 'KeyA'); press('KeyS'); }
+                }
+                bots.forEach((b, i) => this.stepAmbientBot(demo, b, i, dt));
+                return;
+            }
+            if (mode === 'market') {
+                const shops = game.shops || [];
+                const target = game.pkg ? game.pkg.to.door : shops.length ? shops[(demo.shopIndex || 0) % shops.length].door : null;
+                if (!target) { bots.forEach((b, i) => this.stepAmbientBot(demo, b, i, dt)); return; }
+                const dx = target.x - game.me.x, dy = target.y - game.me.y;
+                const avoidance = game.cars.find(car => {
+                    const rect = game.carRect(car, clock);
+                    return Math.abs(rect.x + rect.w / 2 - me.x) < 95 && Math.abs(rect.y + rect.h / 2 - me.y) < 65;
+                });
+                if (avoidance) {
+                    if (avoidance.horiz) press(me.y < avoidance.c ? 'KeyW' : 'KeyS');
+                    else press(me.x < avoidance.c ? 'KeyA' : 'KeyD');
+                } else {
+                    if (Math.abs(dx) > 25) press(dx > 0 ? 'KeyD' : 'KeyA');
+                    if (Math.abs(dy) > 25) press(dy > 0 ? 'KeyS' : 'KeyW');
+                    if (Math.hypot(dx, dy) > 210) press('ShiftLeft');
+                }
+                bots.forEach((b, i) => this.stepAmbientBot(demo, b, i, dt));
+                return;
+            }
+            if (mode === 'river') {
+                const seconds = clock;
+                let target = null, best = Infinity;
+                for (const fish of game.fish) {
+                    const p = game.fishPos(fish, seconds), d = Math.hypot(p.x - me.x, p.y - me.y);
+                    if (d < best) { best = d; target = p; }
+                }
+                if (target) {
+                    const dx = target.x - me.x, dy = target.y - me.y;
+                    if (Math.hypot(dx, dy) > 145) {
+                        if (Math.abs(dx) > Math.abs(dy)) press(dx > 0 ? 'KeyD' : 'KeyA');
+                        else press(dy > 0 ? 'KeyS' : 'KeyW');
+                    }
+                    const hazards = [...game.rocks.map(r => ({ x: r.x, y: r.y, r: r.r })), ...game.pools.map(pool => ({ ...game.poolPos(pool, seconds), r: pool.r * 0.75 }))];
+                    const hazard = hazards.find(item => Math.hypot(item.x - me.x, item.y - me.y) < item.r + 80);
+                    if (hazard) {
+                        const side = me.x < hazard.x ? -1 : 1; press(side < 0 ? 'KeyA' : 'KeyD');
+                    }
+                    if (!game.cast && game.castCd <= 0 && best < 270 && clock - (demo.lastCast || -2) > 1.2) {
+                        session.mouse.x = (target.x - game.camX) * game.zoom + session.vw / 2;
+                        session.mouse.y = (target.y - game.camY) * game.zoom + session.vh / 2;
+                        session.mouse.pressed = true; demo.lastCast = clock;
+                    }
+                }
+                bots.forEach((b, i) => this.stepAmbientBot(demo, b, i, dt));
+                return;
+            }
+            if (mode === 'crypto') {
+                if (Math.floor(clock / 2) !== demo.lastTrade) {
+                    demo.lastTrade = Math.floor(clock / 2); tapKey(`Digit${(demo.lastTrade % 6) + 1}`);
+                    tapKey(game.price(game.sel, clock) >= game.price(game.sel, Math.max(0, clock - 3)) ? 'KeyB' : 'KeyS');
+                }
+                bots.forEach((b, i) => this.stepAmbientBot(demo, b, i, dt));
+                return;
+            }
+            if (mode === 'frenzy') {
+                if (game.st === 0 && clock - (demo.lastAction || -2) > 1.2) { tapKey('Space'); demo.lastAction = clock; }
+                else if (game.st === 1) {
+                    if (game.power < 0.9) press('Space');
+                    else { demo.lastAction = clock; }
+                } else if (game.st === 3) tapKey('Space');
+                else if (game.st === 4) { if (game.fishY > game.zone.y + 42) press('Space'); }
+                bots.forEach((b, i) => this.stepAmbientBot(demo, b, i, dt));
+                return;
+            }
+            const axis = game.me && game.me.x < (game.W || 900) * 0.55 ? 'KeyD' : 'KeyA';
+            press(axis); if (Math.floor(clock * 1.6) !== demo.lastJump) { demo.lastJump = Math.floor(clock * 1.6); tapKey('Space'); }
+            bots.forEach((b, i) => this.stepAmbientBot(demo, b, i, dt));
+        }
+
+        stepSkylineBot(demo, bot, index, dt) {
+            const game = demo.game, now = performance.now(), route = this.skyRoute(game);
+            if (!bot.st) {
+                const cp = (index + 1) % Math.max(1, game.checkpoints.length), nodeIndex = route.cpNode[cp] || 0, node = route.list[nodeIndex];
+                bot.w = 26; bot.h = 44; bot.st = { i: nodeIndex, flagDone: true, hop: null, wait: 0, air: false, moving: false };
+                bot.x = node.x + node.w / 2 - bot.w / 2; bot.y = node.y - bot.h;
+            }
+            bot.w = 26; bot.h = 44;
+            if (!route.list[bot.st.i + 1]) {
+                const cp = (index + 1) % Math.max(1, game.checkpoints.length), nodeIndex = route.cpNode[cp] || 0, node = route.list[nodeIndex];
+                bot.st.i = nodeIndex; bot.st.hop = null; bot.st.flagDone = true; bot.st.wait = 0.45 + bot.ai.reaction;
+                bot.x = node.x + node.w / 2 - bot.w / 2; bot.y = node.y - bot.h;
+            }
+            const speed = bot.ai.speed * (0.78 + bot.ai.aggression * 0.24);
+            this.skyStep(game, bot, bot.st, dt, speed);
+            bot.f = bot.face || 1; bot.a = bot.st.air ? 2 : bot.st.moving ? 1 : 0;
+            bot.tx = bot.x; bot.ty = bot.y; bot.ex = {}; bot.seen = now;
+        }
+
+        stepAmbientBot(demo, bot, index, dt) {
+            const { mode, game, clock } = demo, now = performance.now();
+            const U = window.StudBudArcade.util;
+            const ai = bot.ai || (bot.ai = { rng: U.mulberry32(U.hashStr(`${mode}:${bot.id}`)), speed: 1, aggression: 0.5, reaction: 0.3, area: (index + 0.5) / 3, phase: index, stuck: 0, lastX: bot.x, lastY: bot.y });
+            const rand = ai.rng || Math.random, W = game.W || game.WIDTH || 1600, H = game.H || 800;
+            const speed = (mode === 'miner' ? 74 : mode === 'market' ? 136 : mode === 'river' ? 115 : mode === 'hack' ? 112 : 84) * (ai.speed || 1);
+            const setTarget = (target, duration = 2.2) => { ai.target = target; ai.targetUntil = clock + duration; };
+            let target = ai.target;
+            if (mode === 'market' && game.shops?.length && game.houses?.length) {
+                if (!target || clock >= ai.targetUntil || Math.hypot(bot.x - target.x, bot.y - target.y) < 44) {
+                    if (ai.carrying) bot.score = (bot.score || 0) + 1;
+                    ai.carrying = !ai.carrying;
+                    const shops = game.shops, houses = game.houses;
+                    const list = ai.carrying ? houses : shops;
+                    const cycle = ai.carrying ? (ai.houseIndex + Math.floor(clock / 3)) : (ai.shopIndex + Math.floor(clock / 3));
+                    const item = list[((cycle + index) % list.length + list.length) % list.length];
+                    setTarget(item.door, 6); target = ai.target;
+                }
+                let dx = target.x - bot.x, dy = target.y - bot.y;
+                const car = game.cars?.find(item => { const rect = game.carRect(item, clock); return Math.abs(rect.x + rect.w / 2 - bot.x) < 72 && Math.abs(rect.y + rect.h / 2 - bot.y) < 54; });
+                if (car) { if (car.horiz) dy = bot.y < car.c ? -100 : 100; else dx = bot.x < car.c ? -100 : 100; }
+                this.moveBotToward(bot, dx, dy, speed, dt);
+                bot.ex = { p: ai.carrying ? 1 : 0 };
+            } else if (mode === 'river' && game.fish?.length) {
+                const fishIndex = (ai.fishIndex + Math.floor(clock / 9) * (index + 1)) % game.fish.length;
+                const fish = game.fish[fishIndex], p = game.fishPos(fish, clock);
+                if (!target || clock >= ai.targetUntil || Math.hypot(bot.x - p.x, bot.y - p.y) < 90) { setTarget({ x: p.x + (index - 1) * 95, y: p.y + (index - 1) * 58 }, 5); target = ai.target; }
+                let dx = target.x - bot.x, dy = target.y - bot.y;
+                const hazards = [...game.rocks.map(r => ({ x: r.x, y: r.y, r: r.r })), ...(game.pools || []).map(pool => ({ ...game.poolPos(pool, clock), r: pool.r * 0.9 }))];
+                const hazard = hazards.find(item => Math.hypot(item.x - bot.x, item.y - bot.y) < item.r + 65);
+                if (hazard) { dx = bot.x - hazard.x + ai.side * 55; dy = bot.y - hazard.y; }
+                this.moveBotToward(bot, dx, dy, speed, dt);
+                ai.castTimer -= dt;
+                if (ai.castTimer <= 0 && Math.hypot(p.x - bot.x, p.y - bot.y) < 220) {
+                    const catchDistance = Math.hypot(p.x - bot.x, p.y - bot.y);
+                    if (catchDistance < 140) {
+                        const values = [5, 15, 40, 100];
+                        bot.score = (bot.score || 0) + values[fish.type];
+                        ai.catches = (ai.catches || 0) + 1;
+                        ai.fishIndex = (fishIndex + 1 + Math.floor(rand() * 5)) % game.fish.length;
+                    }
+                    ai.castTimer = 2.5 + rand() * 1.7 + ai.reaction;
+                }
+                bot.ex = { n: ai.castTimer > 2.2 ? 1 : 0, catches: ai.catches || 0 };
+            } else if (mode === 'miner' && game.T) {
+                bot.fuel = bot.fuel ?? 100; bot.carry = bot.carry || 0; bot.items = bot.items || 0;
+                const sector = ai.sector || [[2, 24], [24, 47], [47, 68]][index];
+                const returning = bot.carry >= 40 || bot.fuel < 24;
+                if (returning) {
+                    target = { x: game.base.x + game.base.w / 2, y: game.base.y + game.base.h + 28 };
+                    if (Math.abs(bot.x - target.x) < 75 && bot.y < game.base.y + game.base.h + 80) { bot.carry = 0; bot.items = 0; bot.fuel = 100; ai.ore = null; }
+                } else {
+                    const targetTile = ai.ore;
+                    if (!targetTile || game.tile(targetTile.x, targetTile.y) < 3 || game.tile(targetTile.x, targetTile.y) === 6 || clock > (ai.oreUntil || 0)) {
+                        let best = -Infinity, pick = null;
+                        for (let y = 6; y < 34; y++) for (let x = sector[0]; x < sector[1]; x++) {
+                            const type = game.tile(x, y);
+                            if (![3, 4, 5, 7, 8, 9].includes(type)) continue;
+                            let lava = false;
+                            for (let ly = Math.max(4, y - 2); ly <= Math.min(44, y + 2) && !lava; ly++) for (let lx = Math.max(1, x - 2); lx <= Math.min(68, x + 2); lx++) if (game.tile(lx, ly) === 6) { lava = true; break; }
+                            if (lava) continue;
+                            const distance = Math.abs(x * 48 + 24 - bot.x) + Math.abs(y * 48 + 24 - bot.y) * 1.25;
+                            const value = ({ 3: 5, 4: 12, 5: 25, 7: 50, 8: 90, 9: 160 })[type] || 0;
+                            const score = value * (0.75 + rand() * 0.5) - distance * 0.12;
+                            if (score > best) { best = score; pick = { x, y }; }
+                        }
+                        ai.ore = pick; ai.oreUntil = clock + 12; target = null;
+                    }
+                    if (ai.ore) target = { x: ai.ore.x * 48 + 24, y: ai.ore.y * 48 + 24 };
+                }
+                if (!target) target = ai.target || { x: sector[0] * 48 + 24, y: 12 * 48 };
+                const dx = target.x - bot.x, dy = target.y - bot.y, d = Math.hypot(dx, dy) || 1;
+                const nx = bot.x + dx / d * speed * dt, ny = bot.y + dy / d * speed * dt;
+                const tileX = Math.max(1, Math.min(68, Math.floor(nx / 48))), tileY = Math.max(4, Math.min(44, Math.floor(ny / 48)));
+                if (game.tile(tileX, tileY) === 6) { bot.x += ai.side * speed * dt; }
+                else { bot.x = nx; bot.y = ny; }
+                if (ai.ore && Math.hypot(bot.x - target.x, bot.y - target.y) < 48) {
+                    const type = game.tile(ai.ore.x, ai.ore.y), crystalValues = { 3: 5, 4: 12, 5: 25, 7: 50, 8: 90, 9: 160 };
+                    if (crystalValues[type]) { bot.carry += crystalValues[type]; bot.items++; game.breakTile(ai.ore.x, ai.ore.y, type, false); ai.ore = null; }
+                }
+                bot.fuel = Math.max(0, bot.fuel - dt * (returning ? 0.2 : 2.4));
+                bot.ex = { c: bot.carry, n: bot.items }; bot.a = 1;
+            } else if (mode === 'crypto') {
+                ai.tradeAt -= dt;
+                if (ai.tradeAt <= 0) {
+                    const trend = game.price(ai.asset, clock) - game.price(ai.asset, Math.max(0, clock - 4));
+                    const price = game.price(ai.asset, clock);
+                    if (trend >= 0 && ai.cash >= price) { ai.cash -= price; ai.units[ai.asset]++; }
+                    else if (ai.units[ai.asset] > 0) { ai.cash += price * ai.units[ai.asset]; ai.units[ai.asset] = 0; ai.asset = (ai.asset + 1 + Math.floor(rand() * 3)) % 6; }
+                    else ai.asset = (ai.asset + 1 + Math.floor(rand() * 3)) % 6;
+                    ai.tradeAt = 2.4 + rand() * 2.6;
+                }
+                ai.cash += dt * (index === 0 ? 2 : 1);
+                bot.score = Math.round(ai.cash + ai.units.reduce((sum, units, asset) => sum + units * game.price(asset, clock), 0));
+                bot.ex = { asset: ai.asset, balance: bot.score };
+                this.wanderBot(bot, ai, W, H, speed * 0.35, dt, clock);
+            } else if ((mode === 'frenzy' || mode === 'fishing') && game.st !== undefined) {
+                ai.fishingTimer -= dt;
+                if (ai.fishingTimer <= 0) { ai.fishingState = (ai.fishingState + 1) % 5; ai.fishingTimer = [1.2, 1.8, 1.4, 0.8, 2.2][ai.fishingState] + ai.reaction; }
+                if (ai.fishingState === 1) ai.power = Math.max(0, Math.min(1, (ai.power || 0) + dt * ai.powerDir * 0.7));
+                if (ai.power >= 1 || ai.power <= 0) ai.powerDir *= -1;
+                ai.fishY = Math.max(20, Math.min(220, ai.fishY + Math.sin(clock * (0.8 + index * 0.2) + ai.phase) * dt * 25));
+                bot.ex = { st: ai.fishingState, d: ai.depth || 0.4 + ai.area * 0.5, p: ai.power || 0 };
+            } else if (mode === 'hack' && game.terms?.length) {
+                if (!target || clock >= ai.targetUntil || Math.hypot(bot.x - target.x, bot.y - target.y) < 58) {
+                    const terminals = game.terms.filter(term => term.kind === 'mine');
+                    const term = terminals[(ai.termIndex + Math.floor(clock / 8)) % Math.max(1, terminals.length)] || game.terms[ai.termIndex % game.terms.length];
+                    setTarget({ x: term.x + ai.side * 70, y: term.y }, 6); target = ai.target;
+                    ai.term = term;
+                }
+                this.moveBotToward(bot, target.x - bot.x, target.y - bot.y, speed, dt);
+                if (ai.term && Math.hypot(bot.x - ai.term.x, bot.y - ai.term.y) < 66 && ai.term.cd <= 0) { ai.term.cd = 3; bot.score = (bot.score || 0) + 1; }
+                bot.ex = { sh: Math.sin(clock + ai.phase) > 0.65 ? 1 : 0 };
+            } else {
+                this.wanderBot(bot, ai, W, H, speed * 0.55, dt, clock);
+                bot.ex = {};
+            }
+            const moved = Math.hypot(bot.x - ai.lastX, bot.y - ai.lastY);
+            ai.stuck = moved < 1.4 ? ai.stuck + dt : 0; ai.lastX = bot.x; ai.lastY = bot.y;
+            if (ai.stuck > 1.1) { ai.target = null; ai.targetUntil = 0; ai.side *= -1; ai.stuck = 0; }
+            bot.x = Math.max(20, Math.min(W - 20, bot.x)); bot.y = Math.max(20, Math.min(H - 20, bot.y));
+            bot.f = Math.atan2((target?.y ?? bot.ty ?? bot.y) - bot.y, (target?.x ?? bot.tx ?? bot.x) - bot.x);
+            bot.a = 1; bot.hp = 100; bot.tx = bot.x; bot.ty = bot.y; bot.seen = now; bot.ex = bot.ex || {};
+        }
+
+        moveBotToward(bot, dx, dy, speed, dt) {
+            const d = Math.hypot(dx, dy) || 1;
+            const k = Math.min(1, dt * (3.2 + (bot.ai?.speed || 1) * 2.4));
+            bot.vx = (bot.vx || 0) + ((dx / d) * speed - (bot.vx || 0)) * k;
+            bot.vy = (bot.vy || 0) + ((dy / d) * speed - (bot.vy || 0)) * k;
+            bot.x += bot.vx * dt; bot.y += bot.vy * dt;
+            if (Math.abs(dx) + Math.abs(dy) > 0) bot.f = Math.atan2(dy, dx);
+        }
+
+        wanderBot(bot, ai, W, H, speed, dt, clock) {
+            if (!ai.target || clock >= ai.targetUntil || Math.hypot(bot.x - ai.target.x, bot.y - ai.target.y) < 42) {
+                const region = ai.area || 0.5, x = W * (0.12 + region * 0.76), y = H * (0.2 + ((ai.lane + 1) % 3) * 0.28);
+                ai.target = { x: Math.max(35, Math.min(W - 35, x + (ai.rng() - 0.5) * W * 0.22)), y: Math.max(35, Math.min(H - 35, y + (ai.rng() - 0.5) * H * 0.18)) };
+                ai.targetUntil = clock + 2.5 + ai.rng() * 3;
+            }
+            const dx = ai.target.x - bot.x, dy = ai.target.y - bot.y;
+            this.moveBotToward(bot, dx, dy, speed, dt);
+        }
+
         drawLivePreview(canvas, mode, now) {
             const A = window.StudBudArcade;
-            if (!canvas || !A?.games?.[mode]) return false;
+            if (!canvas || !A?.games?.[mode] || !this.canvasIsVisible(canvas)) return false;
             try {
-                let demo = this.livePreview;
-                if (!demo || demo.mode !== mode || demo.failed) {
-                    const hold = new Set(), tap = new Set();
+                const rect = canvas.getBoundingClientRect();
+                const dpr = Math.min(1.5, Math.max(1, window.devicePixelRatio || 1));
+                const width = Math.max(1, Math.round(rect.width * dpr)), height = Math.max(1, Math.round(rect.height * dpr));
+                if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
+                if (!this.livePreviews) this.livePreviews = new Map();
+                let demo = this.livePreviews.get(canvas);
+                if (!demo || demo.mode !== mode) {
+                    const hold = new Set(), tap = new Set(), noop = () => {};
+                    const mockClassList = { contains: () => false, add: noop, remove: noop, toggle: noop };
+                    const mockCanvas = { style: {}, classList: mockClassList };
+                    const mockElements = new Map();
+                    const mockOverlay = {
+                        classList: mockClassList,
+                        querySelector: selector => {
+                            if (selector === '.mpg-canvas') return mockCanvas;
+                            if (!mockElements.has(selector)) {
+                                const element = { style: {}, classList: mockClassList, textContent: '', innerHTML: '', value: '',
+                                    querySelector: () => element, appendChild: noop, getBoundingClientRect: () => ({ width, height, left: 0, top: 0, right: width, bottom: height }) };
+                                mockElements.set(selector, element);
+                            }
+                            return mockElements.get(selector);
+                        }
+                    };
                     const base = {
                         seed: 4242, local: { id: 'demo', color: '#38bdf8', nickname: 'You', cos: {} }, user: { id: 'demo' }, t: 0, startedAt: Date.now(), done: false, finishMs: 0, over: false, paused: false, question: null, score: 0,
-                        vw: canvas.width, vh: canvas.height, canvas: { style: {} }, overlay: null, roster: new Map(), keys: hold, mouse: { x: 0, y: 0, down: false, pressed: false, touchAt: 0 },
-                        down: (...c) => c.some(k => hold.has(k)), pressed: (...c) => c.some(k => tap.has(k)),
-                        axis: () => ({ x: (hold.has('KeyD') ? 1 : 0) - (hold.has('KeyA') ? 1 : 0), y: (hold.has('KeyS') ? 1 : 0) - (hold.has('KeyW') ? 1 : 0) }),
-                        spend: () => true, refill() { }, sfx() { }, toast() { }, ask() { return false; }, remoteList: () => [], emit: ev => this.livePreview?.onEmit?.(ev), send() { }, setGoal() { }, addScore() { }
+                        vw: width, vh: height, canvas: mockCanvas, overlay: mockOverlay, roster: new Map(), cards: [], keys: hold, hudBounds() { return { x: 12, y: 12, w: Math.max(1, this.vw - 24), h: Math.max(1, this.vh - 24) }; }, mouse: { x: width / 2, y: height / 2, down: false, pressed: false, touchAt: 0 },
+                        down: (...keys) => keys.some(key => hold.has(key)), pressed: (...keys) => keys.some(key => tap.has(key)),
+                        axis: () => ({ x: (hold.has('KeyD') || hold.has('ArrowRight') ? 1 : 0) - (hold.has('KeyA') || hold.has('ArrowLeft') ? 1 : 0), y: (hold.has('KeyS') || hold.has('ArrowDown') ? 1 : 0) - (hold.has('KeyW') || hold.has('ArrowUp') ? 1 : 0) }),
+                        spend: () => true, refill: noop, sfx: noop, toast: noop, ask: () => false, remoteList: () => [], standings() { return [this.local, ...this.remoteList()].map(player => ({ id: player.id, n: player.nickname || player.name || player.id, color: player.color || '#94a3b8', s: Number(player.score) || 0 })); }, emit: event => demo?.onEmit?.(event), send: noop, setGoal: noop, addScore: noop,
+                        placeHud(ctx, x, y, w, h, anchor = 'top-left') {
+                            const scale = Math.max(0.35, Math.min(1, (session.vw - 24) / w, (session.vh - 24) / h));
+                            const left = anchor.endsWith('right') ? session.vw - w * scale - 12 : anchor.endsWith('center') || anchor === 'center' ? (session.vw - w * scale) / 2 : 12;
+                            const top = anchor.startsWith('bottom') ? session.vh - h * scale - 12 : anchor === 'center' ? (session.vh - h * scale) / 2 : 12;
+                            ctx.save(); ctx.translate(left - x * scale, top - y * scale); ctx.scale(scale, scale);
+                            return { x: left - x * scale, y: top - y * scale, scale };
+                        }
                     };
                     const session = new Proxy(base, { get: (target, key) => key in target ? target[key] : (() => undefined) });
                     base.roster.set('demo', base.local);
                     [['b1', 'Nova', '#f472b6'], ['b2', 'Kite', '#facc15'], ['b3', 'Rook', '#4ade80']].forEach(([id, nickname, color]) => base.roster.set(id, { id, nickname, color, cos: {} }));
-                    const game = new A.games[mode](session);
-                    session.game = game;
-                    demo = this.livePreview = { mode, session, game, hold, tap, last: now, clock: 0, meId: 'demo' };
+                    const game = new A.games[mode](session); session.game = game;
+                    demo = { mode, session, game, hold, tap, last: now, clock: 0, meId: 'demo' };
                     demo.bots = this.initPreviewBots(demo, mode, game);
+                    this.livePreviews.set(canvas, demo);
                 }
                 const { session, game, hold, tap } = demo;
+                session.remoteList = () => demo.bots;
+                session.remotes = new Map(demo.bots.map(bot => [bot.id, bot]));
                 const dt = Math.min(0.05, Math.max(0.001, (now - demo.last) / 1000));
-                demo.last = now; demo.clock += dt; session.t += dt;
-                const c = demo.clock;
-                hold.clear(); tap.clear();
-                const me = game.me;
-                const bots = demo.bots;
-                session.remoteList = () => bots;
+                demo.last = now; demo.clock += dt; session.t += dt; session.startedAt = Date.now() - demo.clock * 1000;
+                hold.clear(); tap.clear(); session.mouse.down = false; session.mouse.pressed = false;
                 session.vw = canvas.width; session.vh = canvas.height;
-                const dir = Math.sin(c * 0.7) > 0 ? 'KeyD' : 'KeyA';
-                session.mouse.x = canvas.width / 2 + Math.cos(c * 1.3) * 260; session.mouse.y = canvas.height / 2 + Math.sin(c * 1.7) * 120;
-                session.mouse.down = Math.sin(c * 2) > 0.2;
-                session.mouse.pressed = false;
-                if (mode === 'skyline') {
-                    demo.trail = demo.trail || [];
-                    demo.trail.push({ t: c, x: me.x, y: me.y, f: me.face || 1 });
-                    while (demo.trail.length > 400) demo.trail.shift();
-                    bots.forEach((b, i) => {
-                        const pt = demo.trail.find(p => p.t >= c - 1.4 * (i + 1)) || demo.trail[0];
-                        b.x = pt.x + (i - 1) * 34; b.y = pt.y; b.f = pt.f; b.a = 1; b.tx = b.x; b.ty = b.y; b.ex = {}; b.seen = performance.now();
-                    });
-                    this.skylineBot(demo, game, c, dt, hold, tap);
-                } else if (mode === 'duel') {
-                    this.stepDuelBots(demo, dt);
-                    this.driveDuel(demo, hold, tap, session);
-                } else if (mode === 'shooter') {
-                    this.stepShooterBots(demo, dt);
-                    this.driveShooter(demo, hold, tap, session, c);
-                } else if (mode === 'sports') {
-                    this.stepSportsBots(demo, dt);
-                    this.driveSports(demo, hold, tap);
-                } else {
-                    bots.forEach((b, i) => {
-                        const ph = c * (0.6 + i * 0.17) + i * 2.1;
-                        b.x = me.x + Math.cos(ph) * (180 + i * 90); b.y = me.y + Math.sin(ph * 1.3) * (130 + i * 50);
-                        b.f = Math.atan2(me.y - b.y, me.x - b.x); b.a = 1; b.hp = 100; b.tx = b.x; b.ty = b.y; b.ex = {}; b.seen = performance.now();
-                    });
-                    hold.add(dir);
-                    if (Math.floor(c * 1.6) !== demo.lastJump) { demo.lastJump = Math.floor(c * 1.6); tap.add('Space'); }
-                    if (Math.sin(c * 0.5) > 0.3) hold.add('Space');
-                }
-                if (game.res && game.res.value < 40) game.res.value = 100;
-                if (mode === 'skyline' && game.finished && !demo.endAt) demo.endAt = c;
-                if (mode === 'skyline' && demo.endAt && c - demo.endAt > 1.5) this.livePreview = null;
+                this.previewControls(demo, dt);
+                if (game.res && game.res.value < 35) game.res.value = game.res.max;
+                if (mode === 'skyline' && game.finished && !demo.endAt) demo.endAt = demo.clock;
+                if (mode === 'skyline' && demo.endAt && demo.clock - demo.endAt > 1.5) this.livePreviews.delete(canvas);
                 game.update(dt);
                 const context = canvas.getContext('2d');
                 context.setTransform(1, 0, 0, 1, 0, 0);
                 game.draw(context, canvas.width, canvas.height);
-                context.fillStyle = 'rgba(8,12,28,.7)'; context.fillRect(10, 10, 150, 26);
-                context.fillStyle = '#fff'; context.font = 'bold 13px system-ui'; context.textAlign = 'left';
-                context.fillText('LIVE GAME PREVIEW', 20, 28);
                 return true;
             } catch (error) {
-                if (this.livePreview) this.livePreview.failed = true;
-                console.warn('[NexusApp] Live preview unavailable, using the static scene:', error);
+                console.warn(`[NexusApp] ${mode} live preview unavailable:`, error);
+                if (this.livePreviews) this.livePreviews.delete(canvas);
                 return false;
             }
         }
 
-        drawMultiplayerScene(canvas, mode, players, time, preview) {
+        drawScholarCrossing(canvas, time) {
             if (!canvas) return;
-            const context = canvas.getContext('2d');
-            if (!context) return;
-            const width = canvas.width, height = canvas.height;
-            const phase = time * 0.8;
-            const ranked = players.length ? players : [{ score: 300 }, { score: 150 }];
-            const palette = this.multiplayerProfile?.equipped_palette || 'palette_default';
-                const accent = palette.includes('ocean') ? '#39d2f2'
-                : palette.includes('sunset') || palette.includes('coral') ? '#ff835f'
-                    : palette.includes('violet') || palette.includes('aurora') ? '#bd8cff'
-                        : palette.includes('midnight') ? '#91a5ff' : '#68e0ac';
-            const sky = context.createLinearGradient(0, 0, 0, height);
-            sky.addColorStop(0, mode === 'miner' ? '#2e2542' : mode === 'river' ? '#4baad0' : mode === 'market' ? '#ffb66e' : mode === 'duel' ? '#34294e' : '#5094cf');
-            sky.addColorStop(1, mode === 'miner' ? '#100f1c' : mode === 'river' ? '#164c75' : mode === 'market' ? '#9c4869' : mode === 'duel' ? '#121629' : '#1a355e');
-            context.fillStyle = sky; context.fillRect(0, 0, width, height);
-            for (let index = 0; index < 11; index++) {
-                const x = (index * 112 + Math.sin(phase + index) * 28 - phase * (8 + index % 3) + width * 3) % (width + 90) - 40;
-                if (mode === 'miner') {
-                    context.fillStyle = index % 2 ? '#54446f' : '#382d50';
-                    context.beginPath(); context.moveTo(x - 38, 225); context.lineTo(x, 45 + (index * 27 % 110)); context.lineTo(x + 44, 225); context.fill();
-                    context.fillStyle = index % 2 ? '#7fe6ee' : '#f7c75f';
-                    context.globalAlpha = 0.75;
-                    context.beginPath(); context.moveTo(x, 110 + index % 50); context.lineTo(x - 10, 132 + index % 35); context.lineTo(x + 9, 131 + index % 35); context.fill();
-                    context.globalAlpha = 1;
-                } else if (mode === 'river') {
-                    context.fillStyle = '#b6e9ff'; context.globalAlpha = 0.22;
-                    context.beginPath(); context.ellipse(x, 225 + index % 75, 38, 4, 0, 0, Math.PI * 2); context.fill(); context.globalAlpha = 1;
-                    if (index % 3 === 0) {
-                        context.fillStyle = '#fff0a2'; context.beginPath(); context.arc(x, 245 + index % 60, 6, 0, Math.PI * 2); context.fill();
-                        context.fillStyle = '#ff9b61'; context.beginPath(); context.moveTo(x - 6, 245 + index % 60); context.lineTo(x - 14, 240 + index % 60); context.lineTo(x - 14, 250 + index % 60); context.fill();
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            const runner = this.waitingRunner, width = canvas.width, height = canvas.height;
+            const tile = Math.min(width / 9, height / 8.8), left = (width - tile * 9) / 2, clock = runner.clock || time;
+            const sky = ctx.createLinearGradient(0, 0, 0, height);
+            sky.addColorStop(0, '#111b36'); sky.addColorStop(0.52, '#142b45'); sky.addColorStop(1, '#0a1528');
+            ctx.fillStyle = sky; ctx.fillRect(0, 0, width, height);
+            for (let i = 0; i < 18; i++) {
+                const x = (i * 67 + Math.sin(time * 0.4 + i) * 9) % width, y = (i * 41 + Math.sin(time * 0.24 + i * 2) * 13) % height;
+                ctx.fillStyle = i % 3 ? 'rgba(103,232,249,.24)' : 'rgba(196,181,253,.32)'; ctx.beginPath(); ctx.arc(x, y, 1 + i % 2, 0, Math.PI * 2); ctx.fill();
+            }
+            const rows = Math.ceil(height / tile) + 3, start = Math.max(0, Math.floor(runner.cameraRow) - 2);
+            const screenY = row => height - (row - runner.cameraRow + 1.8) * tile;
+            for (let row = start; row < start + rows; row++) {
+                const lane = this.waitingLane(runner, row), y = screenY(row);
+                if (y < -tile || y > height) continue;
+                ctx.fillStyle = lane.type === 'grass' ? '#244b46' : lane.type === 'road' ? '#283446' : lane.type === 'data' ? '#104c69' : lane.type === 'rail' ? '#373248' : '#39445c';
+                ctx.fillRect(left, y, tile * 9, tile);
+                ctx.fillStyle = lane.type === 'grass' ? 'rgba(134,239,172,.12)' : lane.type === 'data' ? 'rgba(34,211,238,.12)' : 'rgba(255,255,255,.045)';
+                for (let col = 0; col < 9; col++) ctx.fillRect(left + col * tile + 1, y + 1, tile - 2, tile - 2);
+                if (lane.type === 'road') {
+                    ctx.strokeStyle = 'rgba(226,232,240,.45)'; ctx.lineWidth = 2; ctx.setLineDash([tile * 0.38, tile * 0.34]); ctx.beginPath(); ctx.moveTo(left, y + tile / 2); ctx.lineTo(left + tile * 9, y + tile / 2); ctx.stroke(); ctx.setLineDash([]);
+                    for (const vehicle of lane.vehicles) {
+                        const vx = left + (this.waitingVehicleX(lane, vehicle, clock) + 2) * tile, vw = vehicle.w * tile;
+                        ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(vx + vw / 2, y + tile * .79, vw * .48, tile * .08, 0, 0, Math.PI * 2); ctx.fill();
+                        ctx.fillStyle = vehicle.color; ctx.beginPath(); ctx.roundRect(vx - vw / 2, y + tile * .2, vw, tile * .58, 8); ctx.fill();
+                        ctx.fillStyle = '#dff8ff'; ctx.fillRect(vx - vw * .25, y + tile * .25, vw * .5, tile * .18);
+                        ctx.fillStyle = '#172033'; ctx.fillRect(vx - vw * .34, y + tile * .68, vw * .2, tile * .12); ctx.fillRect(vx + vw * .14, y + tile * .68, vw * .2, tile * .12);
+                    }
+                } else if (lane.type === 'data') {
+                    ctx.strokeStyle = 'rgba(103,232,249,.44)'; ctx.lineWidth = 2;
+                    for (let i = 0; i < 5; i++) { const px = left + this.waitingWrap(i * tile * 2.3 + clock * 26, tile * 9); ctx.beginPath(); ctx.moveTo(px, y + 4); ctx.lineTo(px - tile * 0.4, y + tile - 4); ctx.stroke(); }
+                    for (const platform of lane.platforms || []) {
+                        const px = left + (this.waitingPlatformX(lane, platform, clock) + 1) * tile, pw = platform.w * tile;
+                        ctx.save(); ctx.shadowColor = platform.color; ctx.shadowBlur = 9; ctx.fillStyle = '#17243a'; ctx.beginPath(); ctx.roundRect(px - pw / 2, y + tile * .22, pw, tile * .56, 7); ctx.fill(); ctx.restore();
+                        ctx.fillStyle = platform.color; ctx.fillRect(px - pw / 2 + 4, y + tile * .25, pw - 8, 4);
+                        ctx.fillStyle = '#e0f2fe'; ctx.font = `700 ${Math.max(8, tile * .17)}px system-ui`; ctx.textAlign = 'center'; ctx.fillText('DATA BOOK', px, y + tile * .59);
+                    }
+                } else if (lane.type === 'rail') {
+                    ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 4;
+                    for (const xx of [left + tile * 2.7, left + tile * 6.3]) { ctx.beginPath(); ctx.moveTo(xx, y); ctx.lineTo(xx, y + tile); ctx.stroke(); }
+                    ctx.fillStyle = 'rgba(226,232,240,.22)'; for (let x = left + tile * 2.5; x < left + tile * 6.5; x += tile * .42) ctx.fillRect(x, y + 2, tile * .13, tile - 4);
+                    const phase = this.waitingWrap(clock + lane.phase, 8), train = this.waitingTrain(lane, clock);
+                    if (phase >= 4.6 && phase < 5.6) {
+                        const blink = Math.sin(clock * 15) > 0 ? '#fb7185' : '#fecaca';
+                        ctx.fillStyle = blink; ctx.beginPath(); ctx.arc(left + tile * 1.3, y + tile / 2, tile * .13, 0, Math.PI * 2); ctx.fill();
+                        ctx.fillStyle = '#fff1f2'; ctx.font = `900 ${Math.max(8, tile * .15)}px system-ui`; ctx.textAlign = 'center'; ctx.fillText('TRAIN - CLEAR TRACK', left + tile * 4.5, y + tile * .24);
+                    }
+                    if (train) {
+                        const tx = left + (train.x + 2) * tile;
+                        ctx.fillStyle = '#f97316'; ctx.beginPath(); ctx.roundRect(tx - tile * 1.3, y + tile * .13, tile * 2.6, tile * .72, 8); ctx.fill();
+                        ctx.fillStyle = '#fed7aa'; ctx.fillRect(tx - tile * .86, y + tile * .2, tile * 1.72, tile * .25);
+                        ctx.fillStyle = '#7c2d12'; ctx.fillRect(tx - tile * .7, y + tile * .56, tile * 1.4, tile * .13);
                     }
                 } else {
-                    const buildingHeight = 90 + (index * 41 % 150);
-                    context.fillStyle = mode === 'market' ? (index % 2 ? '#9f5368' : '#ba685d') : '#294668';
-                    context.fillRect(x, 218 - buildingHeight, 72, buildingHeight);
-                    context.fillStyle = '#ffd785';
-                    for (let window = 0; window < 6; window++) {
-                        context.globalAlpha = 0.4 + ((index + window) % 3) * 0.2;
-                        context.fillRect(x + 10 + (window % 2) * 30, 235 - buildingHeight + Math.floor(window / 2) * 31, 9, 12);
+                    for (const blocker of lane.blockers) {
+                        const x = left + (blocker.col + 0.5) * tile, baseY = y + tile * .84;
+                        if (blocker.kind === 'tree') {
+                            ctx.fillStyle = '#713f12'; ctx.fillRect(x - tile * .07, y + tile * .45, tile * .14, tile * .43);
+                            ctx.fillStyle = '#34d399'; ctx.beginPath(); ctx.arc(x, y + tile * .42, tile * .27, 0, Math.PI * 2); ctx.fill();
+                            ctx.fillStyle = '#86efac'; ctx.beginPath(); ctx.arc(x - tile * .09, y + tile * .35, tile * .09, 0, Math.PI * 2); ctx.fill();
+                        } else {
+                            ctx.fillStyle = '#b45309'; ctx.beginPath(); ctx.roundRect(x - tile * .28, y + tile * .48, tile * .56, tile * .37, 4); ctx.fill();
+                            ctx.fillStyle = '#fde68a'; ctx.fillRect(x - tile * .2, y + tile * .53, tile * .4, 3);
+                        }
+                        ctx.fillStyle = 'rgba(0,0,0,.15)'; ctx.beginPath(); ctx.ellipse(x, baseY, tile * .25, 3, 0, 0, Math.PI * 2); ctx.fill();
                     }
-                    context.globalAlpha = 1;
+                    if (lane.type === 'hall') {
+                        ctx.fillStyle = 'rgba(226,232,240,.35)'; ctx.fillRect(left + tile * .5, y + tile * .18, tile * 8, 2);
+                        ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.arc(left + tile * 7.9, y + tile * .25, tile * .07, 0, Math.PI * 2); ctx.fill();
+                    }
                 }
+                ctx.strokeStyle = 'rgba(226,232,240,.08)'; ctx.lineWidth = 1; ctx.strokeRect(left + .5, y + .5, tile * 9 - 1, tile - 1);
             }
-            context.globalAlpha = 0.18;
-            context.fillStyle = '#fff';
-            for (let spark = 0; spark < 34; spark++) {
-                const x = (spark * 83 + Math.sin(phase * (spark % 3 + 1) + spark) * 17) % width;
-                const y = (spark * 47 + phase * (9 + spark % 5)) % 220;
-                context.beginPath(); context.arc(x, y, 1 + spark % 3, 0, Math.PI * 2); context.fill();
-            }
-            context.globalAlpha = 1;
-
-            if (mode === 'river') {
-                for (let layer = 0; layer < 3; layer++) {
-                    const y = 240 + layer * 43;
-                    context.fillStyle = ['#267ca2', '#1d698e', '#175478'][layer];
-                    context.beginPath(); context.moveTo(0, y);
-                    for (let x = 0; x <= width; x += 22) context.lineTo(x, y + Math.sin(x * 0.025 + phase * (1 + layer * 0.15)) * 8);
-                    context.lineTo(width, height); context.lineTo(0, height); context.fill();
-                    context.strokeStyle = '#9de7f6'; context.globalAlpha = 0.35;
-                    context.lineWidth = 2; context.beginPath();
-                    for (let x = 0; x <= width; x += 20) context.lineTo(x, y + Math.sin(x * 0.025 + phase * (1 + layer * 0.15)) * 8);
-                    context.stroke(); context.globalAlpha = 1;
-                }
-                for (let index = 0; index < 3; index++) {
-                    const x = ((index * 300 + phase * 50) % (width + 160)) - 80;
-                    context.fillStyle = '#e59c61'; context.beginPath(); context.moveTo(x - 49, 272); context.lineTo(x + 50, 272); context.lineTo(x + 35, 291); context.lineTo(x - 31, 291); context.fill();
-                    context.fillStyle = '#f5d8a7'; context.fillRect(x - 24, 243, 47, 28);
-                    const player = players[index % Math.max(players.length, 1)] || {};
-                    this.drawCharacter(context, x + ((index % Math.max(players.length, 1)) * 16), 237, index === 0 ? accent : '#f69074', 0.75, time, true, player.accessory, 'rod');
-                }
-            } else if (mode === 'market') {
-                for (let stall = 0; stall < 5; stall++) {
-                    const x = stall * 190 - 15;
-                    context.fillStyle = '#75465a'; context.fillRect(x, 224, 154, 106);
-                    context.fillStyle = stall % 2 ? '#ffd166' : '#ff7e67';
-                    context.beginPath(); context.moveTo(x - 6, 224); context.lineTo(x + 14, 182); context.lineTo(x + 141, 182); context.lineTo(x + 160, 224); context.fill();
-                    for (let stripe = 0; stripe < 5; stripe++) {
-                        context.fillStyle = stripe % 2 ? '#fff0cb' : 'rgba(255,255,255,.18)';
-                        context.fillRect(x + 13 + stripe * 27, 190, 12, 34);
-                    }
-                    context.fillStyle = '#f6c76a';
-                    for (let item = 0; item < 4; item++) { context.beginPath(); context.arc(x + 24 + item * 34, 252, 8 + item % 2 * 3, 0, Math.PI * 2); context.fill(); }
-                }
-                for (let index = 0; index < 3; index++) this.drawCharacter(context, 100 + index * 285 + Math.sin(phase + index) * 26, 296, index ? '#ff9c69' : accent, 0.78, time + index, false, players[index]?.accessory);
-            } else if (mode === 'miner') {
-                context.fillStyle = '#372b4c'; context.beginPath(); context.moveTo(0, 290);
-                for (let x = 0; x <= width; x += 35) context.lineTo(x, 260 + Math.sin(x * 0.016 + phase) * 28);
-                context.lineTo(width, height); context.lineTo(0, height); context.fill();
-                for (let index = 0; index < 24; index++) {
-                    const x = index * 43 + 8;
-                    const y = 273 + Math.sin(index * 7) * 35;
-                    context.fillStyle = index % 2 ? '#58dbe4' : '#eabe61';
-                    context.beginPath(); context.moveTo(x, y - 12); context.lineTo(x + 8, y); context.lineTo(x, y + 17); context.lineTo(x - 8, y); context.fill();
-                    context.globalAlpha = 0.14 + (Math.sin(time * 3 + index) + 1) * 0.13;
-                    context.beginPath(); context.arc(x, y, 19, 0, Math.PI * 2); context.fill(); context.globalAlpha = 1;
-                }
-                context.fillStyle = '#4b4d58'; context.fillRect(0, 316, width, 44);
-                context.strokeStyle = '#d5a876'; context.lineWidth = 5;
-                for (let rail = 0; rail < 2; rail++) { context.beginPath(); context.moveTo(0, 321 + rail * 23); context.lineTo(width, 321 + rail * 23); context.stroke(); }
-                context.fillStyle = '#485262'; context.fillRect(60, 280, 85, 37);
-                for (let wheel = 0; wheel < 2; wheel++) { context.fillStyle = '#18202e'; context.beginPath(); context.arc(78 + wheel * 54, 319, 11, 0, Math.PI * 2); context.fill(); }
-                this.drawCharacter(context, 100, 272, accent, 0.8, time, true, players[0]?.accessory, 'pickaxe');
-            } else if (mode === 'duel') {
-                context.fillStyle = 'rgba(31,25,55,.68)';
-                context.fillRect(0, 0, width / 2 - 3, height);
-                context.fillStyle = 'rgba(24,35,63,.75)';
-                context.fillRect(width / 2 + 3, 0, width / 2 - 3, height);
-                context.fillStyle = '#755077';
-                for (let index = 0; index < 5; index++) {
-                    const base = 280 - index * 50;
-                    context.fillRect(index % 2 ? 0 : 105, base, 125 + (index % 2) * 80, 17);
-                    context.fillStyle = '#b7849f'; context.fillRect(index % 2 ? 0 : 105, base, 125 + (index % 2) * 80, 4);
-                    context.fillStyle = '#755077';
-                }
-                context.fillStyle = '#7183a2';
-                for (let index = 0; index < 5; index++) {
-                    const base = 280 - index * 50;
-                    context.fillRect(index % 2 ? width - 205 : width - 125, base, 125 + (index % 2) * 80, 17);
-                    context.fillStyle = '#b7c6df'; context.fillRect(index % 2 ? width - 205 : width - 125, base, 125 + (index % 2) * 80, 4);
-                    context.fillStyle = '#7183a2';
-                }
-                const clash = Math.sin(time * 3) * 18;
-                const challenger = players[0] || { distance: 0 };
-                const rival = players[1] || { distance: 0 };
-                const challengerY = Math.max(72, 285 - Number(challenger.distance || 0) * 13);
-                const rivalY = Math.max(72, 285 - Number(rival.distance || 0) * 13);
-                this.drawCharacter(context, 320 + clash, challengerY, accent, 1.12, time, true, challenger.accessory, 'hammer');
-                this.drawCharacter(context, 575 - clash, rivalY, '#ff8178', 1.12, time + 0.8, true, rival.accessory, 'hammer');
-                context.strokeStyle = '#f9dc89'; context.lineWidth = 4;
-                context.globalAlpha = 0.35 + (Math.sin(time * 8) + 1) * 0.25;
-                context.beginPath(); context.arc(width / 2, 236, 30 + Math.sin(time * 7) * 8, -0.9, 1.3); context.stroke();
-                context.globalAlpha = 1;
-                context.fillStyle = '#f4e2b5'; context.font = 'bold 17px system-ui'; context.textAlign = 'center';
-                context.fillText('HAMMERHEART ARENA', width / 2, 38); context.textAlign = 'left';
-            } else if (mode === 'crypto') {
-                context.fillStyle = '#101a2c';
-                for (let row = 0; row < 7; row++) {
-                    context.strokeStyle = 'rgba(99,220,187,.12)'; context.lineWidth = 1;
-                    context.beginPath(); context.moveTo(0, 72 + row * 38); context.lineTo(width, 72 + row * 38); context.stroke();
-                }
-                context.beginPath();
-                for (let point = 0; point < 35; point++) {
-                    const x = point * (width / 34);
-                    const y = 188 + Math.sin(point * 1.9 + phase) * 62 + Math.sin(point * 0.41 + phase * 0.45) * 32;
-                    if (point === 0) context.moveTo(x, y); else context.lineTo(x, y);
-                }
-                context.strokeStyle = '#71f0b5'; context.lineWidth = 5; context.shadowColor = '#63edb4'; context.shadowBlur = 12; context.stroke(); context.shadowBlur = 0;
-                for (let index = 0; index < 7; index++) {
-                    const x = 72 + index * 122;
-                    context.fillStyle = index % 2 ? '#ff7085' : '#67e8b3';
-                    const height = 24 + (index * 19 % 54);
-                    context.fillRect(x, 272 - height, 14, height);
-                    context.fillRect(x - 4, 257 - height, 22, 4);
-                }
-                context.fillStyle = '#def8ef'; context.font = 'bold 19px system-ui'; context.fillText('MARKET VOLATILITY', 24, 58);
-                const position = players[0]?.last_action || 'choose a position';
-                context.fillStyle = '#9db6c8'; context.font = '14px system-ui'; context.fillText(`Latest move: ${position.toUpperCase()}`, 24, 83);
-                this.drawCharacter(context, 120 + Math.sin(phase * 2) * 18, 302, accent, 0.86, time, false, players[0]?.accessory);
-            } else if (mode === 'shooter') {
-                context.fillStyle = '#0b1528';
-                for (let star = 0; star < 60; star++) {
-                    const x = (star * 79 - phase * (14 + star % 4) + width * 4) % width;
-                    const y = (star * 47) % 278;
-                    context.fillStyle = star % 5 === 0 ? '#fbd77a' : '#a9d9ff';
-                    context.globalAlpha = 0.35 + (star % 4) * 0.15;
-                    context.fillRect(x, y, star % 7 === 0 ? 3 : 1.5, star % 7 === 0 ? 3 : 1.5);
-                }
-                context.globalAlpha = 1;
-                for (let wave = 0; wave < 3; wave++) {
-                    for (let drone = 0; drone < 5; drone++) {
-                        const x = 170 + drone * 125 + Math.sin(phase * 2 + drone + wave) * 22;
-                        const y = 95 + wave * 52 + Math.cos(phase * 2.7 + drone) * 13;
-                        context.fillStyle = wave === 2 ? '#ff7e8f' : '#62dff0';
-                        context.beginPath(); context.moveTo(x, y - 13); context.lineTo(x + 15, y); context.lineTo(x, y + 12); context.lineTo(x - 15, y); context.closePath(); context.fill();
-                        context.fillStyle = '#e7fbff'; context.beginPath(); context.arc(x, y, 3, 0, Math.PI * 2); context.fill();
-                    }
-                }
-                context.fillStyle = '#263d5b'; context.beginPath(); context.moveTo(370, 302); context.lineTo(430, 242); context.lineTo(490, 302); context.closePath(); context.fill();
-                context.fillStyle = '#63d8ff'; context.fillRect(421, 278, 18, 27);
-                context.fillStyle = '#b9eaff'; context.font = 'bold 17px system-ui'; context.fillText(`WAVE ${Number(players[0]?.wave || 1)}`, 28, 58);
-                context.strokeStyle = '#75e7ff'; context.lineWidth = 4; context.beginPath(); context.moveTo(450, 274); context.lineTo(490 + Math.sin(phase * 4) * 45, 138 + Math.cos(phase * 3) * 24); context.stroke();
-                this.drawCharacter(context, 450, 297, accent, 0.82, time, true, players[0]?.accessory, 'blaster');
-            } else if (mode === 'sports') {
-                context.fillStyle = '#246b4d'; context.fillRect(0, 0, width, height);
-                for (let stripe = 0; stripe < 9; stripe++) {
-                    context.fillStyle = stripe % 2 ? 'rgba(255,255,255,.025)' : 'rgba(5,28,22,.09)';
-                    context.fillRect(stripe * 112, 66, 112, 294);
-                }
-                context.strokeStyle = 'rgba(246,255,241,.65)'; context.lineWidth = 3;
-                context.beginPath(); context.moveTo(width / 2, 70); context.lineTo(width / 2, 352); context.stroke();
-                context.beginPath(); context.arc(width / 2, 211, 44, 0, Math.PI * 2); context.stroke();
-                context.strokeRect(12, 120, 70, 182); context.strokeRect(width - 82, 120, 70, 182);
-                context.fillStyle = '#f4f8e8'; context.fillRect(8, 150, 6, 122); context.fillRect(width - 14, 150, 6, 122);
-                context.fillStyle = '#fff3c1'; context.font = 'bold 19px system-ui'; context.textAlign = 'center'; context.fillText('SOCCER', width / 2, 43); context.textAlign = 'left';
-                const goals = Number(players[0]?.touchdowns || 0);
-                const ballX = width / 2 + Math.sin(phase * 1.6) * 150;
-                this.drawCharacter(context, ballX - 40, 222, accent, 0.93, time, true, players[0]?.accessory);
-                this.drawCharacter(context, ballX + 70, 225, '#f78278', 0.88, time + 1, true, players[1]?.accessory);
-                context.fillStyle = '#fff'; context.beginPath(); context.arc(ballX, 238, 9, 0, Math.PI * 2); context.fill();
-                context.fillStyle = '#1e293b'; context.beginPath(); context.arc(ballX, 238, 3.5, 0, Math.PI * 2); context.fill();
-                context.fillStyle = '#f4f8e8'; context.font = 'bold 15px system-ui'; context.fillText(`${goals} GOAL${goals === 1 ? '' : 'S'}`, 25, height - 18);
-            } else {
-                const runner = players[0] || { score: 280, distance: 5 };
-                const mapLength = 36;
-                const routeNodes = Math.max(Number(runner.distance || 0), Math.floor(Number(runner.score || 0) / 50));
-                const segment = Math.min(mapLength - 1, Math.floor(routeNodes));
-                const camera = Math.max(0, segment * 176 - 285);
-                const biome = Math.floor(segment / 6) % 4;
-                const skies = ['#528fc0', '#e59370', '#483e80', '#9aafc3'];
-                const deep = ['#233b5c', '#65435e', '#252545', '#465266'];
-                const bg = context.createLinearGradient(0, 0, 0, height);
-                bg.addColorStop(0, skies[biome]); bg.addColorStop(1, deep[biome]);
-                context.fillStyle = bg; context.fillRect(0, 0, width, height);
-                for (let far = 0; far < 12; far++) {
-                    const x = (far * 126 - camera * 0.28 + width * 4) % (width + 140) - 70;
-                    context.fillStyle = biome === 2 ? 'rgba(25,21,54,.72)' : 'rgba(28,45,69,.5)';
-                    context.beginPath(); context.moveTo(x, 250); context.lineTo(x + 18, 95 + far % 5 * 18); context.lineTo(x + 94, 225); context.lineTo(x + 108, 250); context.fill();
-                }
-                const heights = [278, 250, 226, 260, 211, 232, 190, 246, 216, 184, 229, 198];
-                const routeEnd = mapLength;
-                for (let index = Math.max(0, segment - 2); index < routeEnd; index++) {
-                    const x = index * 176 - camera + 285;
-                    const y = heights[index % heights.length];
-                    const widthHere = index % 4 === 2 ? 92 : 135;
-                    const color = index % 6 === 5 ? '#d2bc86' : biome === 2 ? '#9682ce' : '#a47b60';
-                    context.fillStyle = '#26354a'; context.fillRect(x, y + 9, widthHere, 18);
-                    context.fillStyle = color; context.fillRect(x, y, widthHere, 12);
-                    context.fillStyle = '#f3d18b'; context.fillRect(x + 4, y + 2, widthHere - 8, 3);
-                    if (index % 3 === 1) {
-                        context.fillStyle = '#ff8a76';
-                        context.beginPath(); context.moveTo(x + 46, y); context.lineTo(x + 53, y - 19); context.lineTo(x + 60, y); context.lineTo(x + 68, y - 23); context.lineTo(x + 77, y); context.fill();
-                    } else if (index % 3 === 2) {
-                        const beamX = x + 20 + ((Math.sin(time * 2 + index) + 1) * 0.5) * 44;
-                        context.strokeStyle = '#71e8ec'; context.lineWidth = 5; context.shadowColor = '#65f4ed'; context.shadowBlur = 8;
-                        context.beginPath(); context.moveTo(beamX, y - 22); context.lineTo(beamX + 47, y - 22); context.stroke(); context.shadowBlur = 0;
-                    }
-                    if (index % 5 === 0 && index > 0) {
-                        context.fillStyle = '#ffe07a'; context.fillRect(x + widthHere / 2 - 3, y - 60, 6, 59);
-                        context.fillStyle = '#fff0ad'; context.font = 'bold 12px system-ui'; context.fillText(`CHECKPOINT ${Math.floor(index / 5)}`, x - 3, y - 66);
-                    }
-                    if (index % 4 === 0) {
-                        context.fillStyle = '#8be8ca'; context.beginPath(); context.arc(x + widthHere * 0.75, y - 28 - Math.sin(time * 3 + index) * 5, 7, 0, Math.PI * 2); context.fill();
-                        context.fillStyle = 'rgba(119,244,196,.23)'; context.beginPath(); context.arc(x + widthHere * 0.75, y - 28, 15, 0, Math.PI * 2); context.fill();
-                    }
-                }
-                const finishX = (mapLength - 1) * 176 - camera + 285;
-                if (finishX > -50 && finishX < width + 50) {
-                    context.fillStyle = '#f8e6ae'; context.fillRect(finishX, 92, 8, 190);
-                    context.fillRect(finishX + 78, 92, 8, 190);
-                    context.fillRect(finishX, 92, 86, 10);
-                    for (let tile = 0; tile < 6; tile++) {
-                        context.fillStyle = tile % 2 ? '#1a2436' : '#fff';
-                        context.fillRect(finishX + (tile % 2) * 14, 103 + Math.floor(tile / 2) * 14, 14, 14);
-                    }
-                    context.fillStyle = '#fff3c4'; context.font = 'bold 13px system-ui'; context.fillText('FINISH', finishX - 5, 80);
-                }
-                const currentIndex = Math.min(segment, routeEnd - 1);
-                const currentY = heights[currentIndex % heights.length];
-                const playerX = currentIndex * 176 - camera + 340 + Math.sin(phase * 2) * 4;
-                this.drawCharacter(context, playerX, currentY - 29, accent, 1, time, true, players[0]?.accessory);
-                ranked.forEach((player, index) => {
-                    if (index === 0) return;
-                    const distance = Math.max(Number(player.distance || 0), Math.floor(Number(player.score || 0) / 50));
-                    const rivalSegment = Math.floor(distance);
-                    const rivalX = rivalSegment * 176 - camera + 340;
-                    const rivalY = heights[Math.max(0, rivalSegment) % heights.length];
-                    this.drawCharacter(context, rivalX, rivalY - 27, ['#ff9d69', '#a8a0ff', '#f185aa'][index % 3], 0.78, time + index, true, player.accessory);
-                });
-                context.fillStyle = '#fff4cc'; context.font = 'bold 17px system-ui'; context.fillText(`ROOFTOP DISTRICT ${Math.floor(segment / 6) + 1} · CHECKPOINT ${Math.min(7, Math.floor(segment / 5))}/7`, 22, 42);
-                context.fillStyle = 'rgba(9,19,37,.65)'; context.fillRect(width - 226, 14, 205, 15);
-                context.fillStyle = '#ffe07a'; context.fillRect(width - 226, 14, 205 * Math.min(1, segment / (mapLength - 1)), 15);
-                context.fillStyle = '#fff'; context.font = '11px system-ui'; context.fillText('36-SECTION ROUTE', width - 221, 42);
-            }
-            if (['classic', 'rush', 'survival'].includes(mode)) {
-                ranked.slice(1).forEach((player, index) => {
-                    const x = 660 + index * 90 + Math.sin(time * 2 + index) * 8;
-                    this.drawCharacter(context, x, 293 - index * 28, index % 2 ? '#f6a75f' : '#a99be9', 0.8, time + index, false);
-                });
-            }
-            context.fillStyle = '#fff';
-            context.font = '600 15px system-ui';
-            context.shadowColor = 'rgba(8,15,30,.65)'; context.shadowBlur = 5;
-            const sceneLabel = {
-                skyline: 'ROOFTOP DISTRICT', river: 'RIVER HAUL', market: 'BAZAAR RUN',
-                miner: 'CRYSTAL CAVERN', duel: 'RIVAL CLIMB', crypto: 'LIVE MARKET',
-                shooter: 'DRONE ASSAULT', sports: 'SOCCER'
-            };
-            context.fillText(preview ? 'LIVE GAME PREVIEW' : (sceneLabel[mode] || 'LIVE MATCH'), 18, 28);
-            context.shadowBlur = 0;
-        }
-
-        drawPotClimb(canvas, time) {
-            if (!canvas) return;
-            const context = canvas.getContext('2d');
-            if (!context) return;
-            const runner = this.waitingRunner;
-            const width = canvas.width, height = canvas.height;
-            const sky = context.createLinearGradient(0, 0, 0, height);
-            sky.addColorStop(0, '#437ec4'); sky.addColorStop(0.58, '#c87c93'); sky.addColorStop(1, '#352948');
-            context.fillStyle = sky; context.fillRect(0, 0, width, height);
-            for (let index = 0; index < 8; index++) {
-                const x = (index * 89 + Math.sin(time * 0.35 + index) * 13) % width;
-                const y = 56 + (index * 59 % 190);
-                context.fillStyle = 'rgba(255,231,185,.56)';
-                context.beginPath(); context.arc(x, y, 1 + index % 2, 0, Math.PI * 2); context.fill();
-            }
-            const camera = runner.camera;
-            runner.platforms.forEach((platform, index) => {
-                const y = platform.y - camera;
-                if (y < -30 || y > height + 20) return;
-                context.fillStyle = index % 3 === 0 ? '#d9b27a' : '#b88c67';
-                context.beginPath(); context.roundRect(platform.x, y, platform.width, 12, 5); context.fill();
-                context.fillStyle = '#f1d49a';
-                context.beginPath(); context.roundRect(platform.x + 5, y + 1, platform.width - 10, 3, 2); context.fill();
-                context.fillStyle = index % 2 ? '#76d9d3' : '#ffd46e';
-                context.beginPath(); context.arc(platform.x + platform.width * 0.7, y - 5, 4, 0, Math.PI * 2); context.fill();
-            });
-            const screenY = runner.y - camera;
-            const x = runner.x;
-            if (runner.aiming && runner.aimPoint) {
-                const launch = this.waitingLaunchVelocity(runner, runner.aimPoint);
-                if (launch) {
-                    const sim = { x: runner.x, y: runner.y, vx: launch.vx, vy: launch.vy };
-                    context.fillStyle = '#ffed9d';
-                    for (let step = 0; step < 90; step++) {
-                        const landed = this.waitingPhysics(sim, runner.platforms);
-                        if (step % 4 === 3) { context.globalAlpha = 1 - step / 100; context.beginPath(); context.arc(sim.x, sim.y - camera - 18, 3, 0, Math.PI * 2); context.fill(); }
-                        if (landed) break;
-                    }
-                    context.globalAlpha = 1;
-                }
-                context.fillStyle = '#fff1a8';
-                context.font = '600 13px system-ui';
-                context.fillText(launch ? 'RELEASE TO LAUNCH' : 'PULL BACK FURTHER', 15, 24);
-            } else if (!runner.running) {
-                context.fillStyle = '#fff4df'; context.font = '600 13px system-ui';
-                context.fillText(runner.score ? 'MISSED THE LEDGE · CLIMB AGAIN' : 'CLICK TO START, THEN DRAG BACK AND RELEASE', 15, 24);
-            } else if (runner.grounded && runner.score === 0) {
-                context.fillStyle = '#fff4df'; context.font = '600 13px system-ui';
-                context.fillText('DRAG DOWN AND BACK, THEN RELEASE TO JUMP', 15, 24);
-            }
-            this.drawCharacter(context, x, screenY - 18, '#e9a86d', 0.94, time, runner.aiming || Math.abs(runner.vy) > 0.2);
-            context.fillStyle = '#33415a';
-            context.beginPath(); context.moveTo(x - 24, screenY + 8); context.lineTo(x + 22, screenY + 8);
-            context.lineTo(x + 17, screenY + 37); context.quadraticCurveTo(x, screenY + 48, x - 19, screenY + 36); context.fill();
-            context.fillStyle = '#c27960';
-            context.beginPath(); context.moveTo(x - 23, screenY + 8); context.lineTo(x + 21, screenY + 8);
-            context.lineTo(x + 15, screenY + 20); context.lineTo(x - 17, screenY + 20); context.fill();
-            context.fillStyle = 'rgba(255,255,255,.9)';
-            context.font = 'bold 15px system-ui';
-            context.fillText(`${runner.score} m`, width - 84, 25);
+            const hop = runner.hop, progress = hop?.t ?? 0, xTile = hop ? hop.x + (hop.targetX - hop.x) * progress : runner.x;
+            const rowFloat = hop ? hop.from + (hop.to - hop.from) * progress : runner.row;
+            const px = left + (xTile + .5) * tile, py = screenY(rowFloat) + tile * .52 - (hop ? Math.sin(progress * Math.PI) * tile * .18 : 0);
+            const profile = this.multiplayerProfile || {}, cos = this.profileCosmetics(profile), util = window.StudBudArcade?.util;
+            if (util?.drawFigureSide) util.drawFigureSide(ctx, { color: profile.color || '#38bdf8', cos }, px - tile * .26, py - tile * .67, tile * .52, tile * .78, 1, time, Boolean(hop), 1);
+            else this.drawCharacter(ctx, px, py - 16, '#38bdf8', 0.8, time, Boolean(hop));
+            const palette = profile.equipped_palette || '';
+            ctx.fillStyle = '#e2e8f0'; ctx.font = '800 12px system-ui'; ctx.textAlign = 'left'; ctx.fillText("SCHOLAR'S CROSSING", 14, 21);
+            ctx.textAlign = 'right'; ctx.fillStyle = palette.includes('sunset') ? '#fdba74' : '#a5f3fc'; ctx.fillText(`ROWS ${runner.score}  /  BEST ${runner.best}`, width - 14, 21);
+            ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(7,15,29,.7)'; ctx.beginPath(); ctx.roundRect(width / 2 - 116, height - 27, 232, 20, 9); ctx.fill();
+            const touch = window.matchMedia?.('(pointer: coarse)').matches || (navigator.maxTouchPoints || 0) > 0;
+            ctx.fillStyle = '#cbd5e1'; ctx.font = '700 10px system-ui'; ctx.fillText(runner.dead ? (runner.deathReason || 'Run over') + (touch ? ' - tap to restart' : ' - press a key to restart') : (touch ? 'TAP TO HOP · SWIPE TO MOVE' : 'WASD / ARROWS OR SPACE TO HOP'), width / 2, height - 13);
+            if (runner.bump > 0) { ctx.fillStyle = `rgba(251,191,36,${runner.bump * 2})`; ctx.fillRect(0, 0, width, height); }
+            if (runner.dead) { ctx.fillStyle = 'rgba(4,10,22,.28)'; ctx.fillRect(0, 0, width, height); }
         }
 
         async searchCommunityDecks(query) {
@@ -4283,7 +4396,7 @@
                     const info = s.roster.get(b.id);
                     if (info) { b.name = info.nickname; b.color = info.color; b.cos = info.cos; }
                     s.remotes.set(b.id, b);
-                    b.st = { i: 0, flagDone: true, hop: null, wait: 1 + b.i * 0.8, air: false, moving: false };
+                    b.st = b.st || { i: 0, flagDone: true, hop: null, wait: 1 + b.i * 0.8, air: false, moving: false };
                 });
                 const baseEmit = s.emit.bind(s);
                 s.emit = ev => { baseEmit(ev); demo.onEmit?.(ev); };
@@ -4303,22 +4416,8 @@
             if (mode === 'duel') this.stepDuelBots(demo, dt);
             else if (mode === 'shooter') this.stepShooterBots(demo, dt);
             else if (mode === 'sports') this.stepSportsBots(demo, dt);
-            else if (mode === 'skyline') {
-                const R = this.skyRoute(game);
-                bots.forEach((b, i) => {
-                    if (game.cp && b.st.i === 0 && !b.placed) { b.placed = true; b.x = R.list[0].x + 60 + i * 20; b.y = R.list[0].y - 44; }
-                    b.w = 26; b.h = 44;
-                    if (!R.list[b.st.i + 1]) { b.st.i = 0; b.st.hop = null; b.st.flagDone = true; b.x = R.list[0].x + 60; b.y = R.list[0].y - 44; }
-                    this.skyStep(game, b, b.st, dt, 0.8 + i * 0.07);
-                    b.f = b.face || 1; b.a = b.st.air ? 2 : b.st.moving ? 1 : 0; b.tx = b.x; b.ty = b.y; b.ex = {}; b.seen = now;
-                });
-            } else if (me) {
-                bots.forEach((b, i) => {
-                    const ph = c * (0.5 + i * 0.13) + i * 2.1;
-                    b.x = me.x + Math.cos(ph) * (200 + i * 90); b.y = me.y + Math.sin(ph * 1.3) * (140 + i * 50);
-                    b.f = Math.atan2(me.y - b.y, me.x - b.x); b.a = 1; b.hp = 100; b.tx = b.x; b.ty = b.y; b.ex = {}; b.seen = now;
-                });
-            }
+            else if (mode === 'skyline') bots.forEach((bot, i) => this.stepSkylineBot(demo, bot, i, dt));
+            else bots.forEach((bot, i) => this.stepAmbientBot(demo, bot, i, dt));
         }
 
         async leaveHostedGame() {
@@ -4921,7 +5020,6 @@
             });
             const data = this.homeWidgetData(st, prefs);
             this.updateAppBadge(prefs.badge && st.loaded ? st.streak : 0);
-            this.pushHomeWidgetData(data.card);
             const body = document.getElementById('home-widget-body');
             if (!body) return;
             const esc = value => this.escapeHTML(String(value ?? ''));
@@ -4958,40 +5056,6 @@
             if (!('setAppBadge' in navigator)) return;
             const request = count > 0 ? navigator.setAppBadge(count) : navigator.clearAppBadge();
             Promise.resolve(request).catch(() => { });
-        }
-
-        pushHomeWidgetData(card) {
-            const worker = navigator.serviceWorker?.controller;
-            if (!worker) return;
-            const { updated, ...stable } = card;
-            const key = JSON.stringify(stable);
-            if (key === this.lastHomeWidgetPayload) return;
-            this.lastHomeWidgetPayload = key;
-            worker.postMessage({ type: 'studbud-widget-data', data: card });
-        }
-
-        installHomeWidget() {
-            const note = document.getElementById('home-widget-install-note');
-            const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
-            const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
-            const installBtn = document.getElementById('install-app-button');
-            let text;
-            if (standalone) {
-                text = /windows/i.test(navigator.userAgent)
-                    ? 'StudBud is installed. Open the Widgets board (Windows key + W), choose Add widgets and pick StudBud to pin this widget. Your streak also shows on the app icon.'
-                    : ios
-                        ? 'StudBud is on your home screen. Your streak shows as a badge on the icon once notifications are allowed for StudBud.'
-                        : 'StudBud is installed. Your streak shows on the app icon, and long-pressing the icon gives quick shortcuts to your streak, planner and flashcards.';
-                if (ios && window.Notification?.permission === 'default') window.Notification.requestPermission().then(() => this.renderHomeWidget()).catch(() => { });
-            } else if (installBtn && !installBtn.classList.contains('hidden') && !ios) {
-                installBtn.click();
-                text = 'Follow your browser\'s prompt to install StudBud. Once installed, your streak appears on the app icon.';
-            } else {
-                text = ios
-                    ? 'In Safari, tap the Share button, then "Add to Home Screen". Open StudBud from the new icon to see your streak badge.'
-                    : 'Open your browser menu and choose "Install app" or "Add to Home screen". Once installed, your streak appears on the app icon.';
-            }
-            if (note) note.textContent = text;
         }
 
         renderDailyStudyHabit() {
@@ -5458,8 +5522,6 @@
                     const panel = document.getElementById('home-widget-settings');
                     const open = panel?.classList.toggle('hidden') === false;
                     target.setAttribute('aria-expanded', String(open));
-                } else if (action === 'install-home-widget') {
-                    this.installHomeWidget();
                 } else if (action === 'copy-hosted-room-code') {
                     await this.copyHostedRoomCode();
                 } else if (action === 'study-leaderboard-retry') {
@@ -5699,12 +5761,11 @@
         }
 
         handleKeydown(event) {
-            if (Router.activeRoute === 'multiplayer' && event.code === 'Space'
+            if (Router.activeRoute === 'multiplayer'
                 && !['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(event.target.tagName)
                 && !document.getElementById('waiting-arcade-card').classList.contains('hidden')) {
-                event.preventDefault();
-                if (!this.waitingRunner.running) this.startWaitingRunner();
-                return;
+                const moves = { ArrowUp: [0, 1], KeyW: [0, 1], ArrowDown: [0, -1], KeyS: [0, -1], ArrowLeft: [-1, 0], KeyA: [-1, 0], ArrowRight: [1, 0], KeyD: [1, 0], Space: [0, 1] };
+                if (moves[event.code]) { event.preventDefault(); this.waitingHop(...moves[event.code]); return; }
             }
             if (event.target.id === 'course-search') {
                 const list = document.getElementById('course-suggestions');

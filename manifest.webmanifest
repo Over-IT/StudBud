@@ -17,21 +17,6 @@
   "shortcuts": [
     { "name": "Study streak", "short_name": "Streak", "description": "See your streak and the study leaderboard", "url": "./#/leaderboard", "icons": [{ "src": "./icons/icon-192.png", "sizes": "192x192" }] },
     { "name": "Assignments", "short_name": "Planner", "description": "Open your assignment planner", "url": "./#/planner", "icons": [{ "src": "./icons/icon-192.png", "sizes": "192x192" }] },
-    { "name": "Flashcards", "short_name": "Cards", "description": "Review flashcards that are due", "url": "./#/flashcard", "icons": [{ "src": "./icons/icon-192.png", "sizes": "192x192" }] }
-  ],
-  "widgets": [
-    {
-      "name": "StudBud streak",
-      "short_name": "Streak",
-      "description": "Your study streak, today's goal, assignments to work on, grades and flashcards due.",
-      "tag": "studbud-streak",
-      "ms_ac_template": "./widgets/streak-template.json",
-      "data": "./widgets/streak-data.json",
-      "type": "application/json",
-      "auth": false,
-      "update": 900,
-      "icons": [{ "src": "./icons/icon-192.png", "sizes": "192x192" }],
-      "screenshots": [{ "src": "./icons/icon-512.png", "sizes": "512x512", "label": "StudBud streak widget" }]
-    }
+    { "name": "Flashcards", "short_name": "Cards", "description": "Study your flashcards", "url": "./#/flashcard", "icons": [{ "src": "./icons/icon-192.png", "sizes": "192x192" }] }
   ]
 }

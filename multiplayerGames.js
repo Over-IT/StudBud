@@ -1316,10 +1316,18 @@
             this.formatValue = v => `${v}s`;
             this.solids = [
                 { x: 300, y: 520, w: 1000, h: 260, main: true },
-                { x: 400, y: 390, w: 220, h: 14, oneway: true },
-                { x: 980, y: 390, w: 220, h: 14, oneway: true },
-                { x: 690, y: 270, w: 220, h: 14, oneway: true }
+                { x: 330, y: 448, w: 145, h: 14, oneway: true, ledge: 0 },
+                { x: 400, y: 390, w: 220, h: 14, oneway: true, ledge: 1 },
+                { x: 480, y: 334, w: 140, h: 14, oneway: true, ledge: 2 },
+                { x: 590, y: 458, w: 104, h: 14, oneway: true, ledge: 0 },
+                { x: 690, y: 270, w: 220, h: 14, oneway: true, ledge: 2 },
+                { x: 906, y: 458, w: 104, h: 14, oneway: true, ledge: 0 },
+                { x: 980, y: 390, w: 220, h: 14, oneway: true, ledge: 1 },
+                { x: 1125, y: 334, w: 145, h: 14, oneway: true, ledge: 2 },
+                { x: 1225, y: 448, w: 75, h: 14, oneway: true, ledge: 0 }
             ];
+            this.jumpPads = [{ x: 520, y: 508, w: 66, cooldown: 0 }, { x: 1014, y: 508, w: 66, cooldown: 0 }];
+            this.padFlash = 0;
             this.me = { x: 790, y: 200, w: 34, h: 56, vx: 0, vy: 0, face: 1 };
             const spawns = [[480, 440], [1080, 440], [790, 200], [790, 460]];
             this.spawn = spawns[hashStr(s.user.id) % spawns.length];
@@ -1358,7 +1366,8 @@
             this.hammer = Math.max(0, this.hammer - dt);
             this.swingCd = Math.max(0, this.swingCd - dt); this.swingT = Math.max(0, this.swingT - dt); this.stun = Math.max(0, this.stun - dt);
             this.dodgeCd = Math.max(0, this.dodgeCd - dt); this.dodge = Math.max(0, this.dodge - dt);
-            this.shieldBreak = Math.max(0, this.shieldBreak - dt);
+            this.shieldBreak = Math.max(0, this.shieldBreak - dt); this.padFlash = Math.max(0, this.padFlash - dt);
+            for (const pad of this.jumpPads) pad.cooldown = Math.max(0, pad.cooldown - dt);
             if (this.dropTimer > 0) {
                 this.dropTimer = Math.max(0, this.dropTimer - dt);
                 if (this.dropTimer === 0) for (const p of this.solids) if (p.oneway) p.off = false;
@@ -1579,6 +1588,12 @@
                 ctx.fillStyle = `rgba(255,255,255,${0.2 + (i % 5) * 0.12})`;
                 ctx.fillRect((hashStr(`st${i}`) % 1000) / 1000 * w, (hashStr(`sy${i}`) % 600) / 600 * h * 0.8, 2, 2);
             }
+            for (let layer = 0; layer < 3; layer++) {
+                ctx.fillStyle = ['rgba(15,23,42,.26)', 'rgba(20,24,49,.42)', 'rgba(10,15,32,.52)'][layer];
+                ctx.beginPath(); ctx.moveTo(0, h * 0.69 + layer * 16);
+                for (let x = 0; x <= w + 80; x += 80) ctx.lineTo(x, h * (0.55 + layer * 0.055) + Math.sin(x * 0.012 + layer * 3) * (18 + layer * 7));
+                ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.fill();
+            }
             ctx.save();
             const sh = this.shake > 0 ? 8 : 0;
             ctx.translate(this.offX + (Math.random() - 0.5) * sh, this.offY + (Math.random() - 0.5) * sh);
@@ -1589,8 +1604,25 @@
                     ctx.fillStyle = '#6366f1'; ctx.fillRect(p.x, p.y, p.w, 12);
                     ctx.fillStyle = '#4338ca'; ctx.fillRect(p.x, p.y + 12, p.w, 6);
                 } else {
-                    ctx.fillStyle = '#818cf8'; roundRect(ctx, p.x, p.y, p.w, p.h, 6); ctx.fill();
+                    const tops = ['#5eead4', '#a5b4fc', '#fbbf24'];
+                    const faces = ['#0f766e', '#4338ca', '#92400e'];
+                    ctx.fillStyle = faces[p.ledge || 0]; roundRect(ctx, p.x, p.y, p.w, p.h + 7, 6); ctx.fill();
+                    ctx.fillStyle = tops[p.ledge || 0]; roundRect(ctx, p.x, p.y, p.w, p.h, 6); ctx.fill();
+                    ctx.fillStyle = 'rgba(255,255,255,.45)'; ctx.fillRect(p.x + 8, p.y + 2, Math.max(10, p.w - 16), 2);
                 }
+            }
+            for (const pad of this.jumpPads) {
+                const glow = pad.cooldown <= 0 ? 0.65 + Math.sin(this.anim * 9) * 0.18 : 0.2;
+                ctx.save(); ctx.shadowColor = '#67e8f9'; ctx.shadowBlur = 18 * glow;
+                ctx.fillStyle = `rgba(34,211,238,${glow})`; roundRect(ctx, pad.x, pad.y, pad.w, 12, 6); ctx.fill();
+                ctx.strokeStyle = '#cffafe'; ctx.lineWidth = 2; ctx.beginPath();
+                for (let x = pad.x + 12; x < pad.x + pad.w - 4; x += 16) { ctx.moveTo(x, pad.y + 8); ctx.lineTo(x + 7, pad.y + 3); }
+                ctx.stroke(); ctx.restore();
+            }
+            for (const x of [350, 1260]) {
+                ctx.fillStyle = 'rgba(8,12,24,.45)'; ctx.beginPath(); ctx.ellipse(x + 18, 510, 29, 7, 0, 0, TAU); ctx.fill();
+                ctx.fillStyle = '#22c55e'; ctx.beginPath(); ctx.arc(x, 490, 17, 0, TAU); ctx.arc(x + 20, 484, 22, 0, TAU); ctx.arc(x + 38, 492, 15, 0, TAU); ctx.fill();
+                ctx.fillStyle = '#713f12'; ctx.fillRect(x + 15, 495, 8, 25);
             }
             const hill = this.hill();
             const hz = hill.zone;

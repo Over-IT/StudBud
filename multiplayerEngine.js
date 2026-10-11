@@ -241,6 +241,7 @@
             this.answered = 0;
             this.paused = false;
             this.over = false;
+            this.touchHintUntil = Date.now() + 5500;
             this.ending = false;
             this.countdown = 3.4;
             this.t = 0;
@@ -447,12 +448,14 @@
         // Spend from the game's resource; nags the player to answer a question when empty.
         spend(n) {
             const res = this.game.res;
+            if (this.practice) { if (res) res.value = res.max; return true; }
             if (res.spend(n)) return true;
             const now = performance.now();
             if (now - (this.lastNeed || 0) > 1800) {
                 this.lastNeed = now;
                 sfx('wrong');
-                this.toast(`Out of ${res.label.toLowerCase()} — press Q to answer a question`, '#f87171');
+                const prompt = this.overlay?.classList.contains('has-touch') ? 'tap recharge to answer a question' : 'press Q to answer a question';
+                this.toast(`Out of ${res.label.toLowerCase()} — ${prompt}`, '#f87171');
             }
             return false;
         }
@@ -464,7 +467,8 @@
             const res = this.game.res;
             if (!res) return 0;
             const n = this.rewardAmount();
-            res.add(n);
+            if (this.practice) res.value = res.max;
+            else res.add(n);
             sfx('refill');
             this.toast(`+${n} ${res.label}`, res.color);
             return n;
@@ -483,6 +487,7 @@
         // Automatic triggers (mystery boxes, chests, pads) are blocked briefly after any question closes.
         ask(callback, note, manual, opts) {
             if (opts?.force && this.question) this.closeQuestion(true);
+            if (this.practice && !manual) return false;
             if (this.paused || this.question || this.over || this.countdown > 0) return false;
             if (!manual && performance.now() < (this.askCooldownUntil || 0)) return false;
             if (!this.cards.length) { this.toast('Questions are still loading…', '#fbbf24'); return false; }
@@ -645,7 +650,7 @@
             overlay.innerHTML = `
                 <canvas class="mpg-canvas"></canvas>
                 <div class="mpg-top">
-                    <div class="mpg-chip"><strong class="mpg-name"></strong><span class="mpg-goal"></span></div>
+                    <div class="mpg-chip"><strong class="mpg-name"></strong><span class="mpg-goal"></span>${this.practice ? '<small class="mpg-practice-indicator">Practice · unlimited energy</small>' : ''}</div>
                     <div class="mpg-timer"></div>
                     <div class="mpg-actions">
                         <button type="button" class="mpg-end ${this.isHost && !this.practice ? '' : 'hidden'}">End match</button>
@@ -919,8 +924,10 @@
                 ? `${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, '0')}`
                 : `${Math.floor(this.t / 60)}:${String(Math.floor(this.t) % 60).padStart(2, '0')}`;
             const touch = o.classList.contains('has-touch');
-            const hint = touch ? this.game.touchHint?.() : this.game.hint();
-            const controlsHint = touch ? 'Touch controls: joystick and action buttons below' : 'Keyboard/mouse controls';
+            const hint = touch
+                ? (Date.now() < this.touchHintUntil ? this.game.touchHint?.() : '')
+                : this.game.hint();
+            const controlsHint = touch ? '' : 'Keyboard/mouse controls';
             o.querySelector('.mpg-hint').textContent = this.question ? '' : [controlsHint, hint].filter(Boolean).join(' · ');
             this.applyTouchLayout?.();
             this.layoutHud();
@@ -976,7 +983,12 @@
                 } else {
                     this.overlay.querySelector('.mpg-countdown').classList.add('hidden');
                     this.t += dt;
-                    if (!this.paused) { this.onTick?.(dt); this.game.update(dt); }
+                    if (!this.paused) {
+                        this.onTick?.(dt);
+                        if (this.practice && this.game.res) this.game.res.value = this.game.res.max;
+                        this.game.update(dt);
+                        if (this.practice && this.game.res) this.game.res.value = this.game.res.max;
+                    }
                     this.checkEnd();
                     if (!this.practice && !this.isHost && !this.over && Date.now() > this.deadline + 9000) this.finish(this.standings());
                 }

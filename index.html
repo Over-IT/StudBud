@@ -165,12 +165,11 @@
                             <div class="home-widget-head">
                                 <h3 id="daily-study-heading"><i class="fas fa-fire-flame-curved" aria-hidden="true"></i> Today at a glance</h3>
                                 <div class="home-widget-head-actions">
-                                    <button class="secondary-btn" type="button" data-target="leaderboard-view"><i class="fas fa-ranking-star" aria-hidden="true"></i> <span>Leaderboards</span></button>
                                     <button class="secondary-btn" type="button" data-action="toggle-home-widget-settings" aria-expanded="false" aria-controls="home-widget-settings"><i class="fas fa-sliders" aria-hidden="true"></i> <span>Customize</span></button>
                                 </div>
                             </div>
                             <div id="home-widget-settings" class="home-widget-settings hidden">
-                                <p class="study-guidance-intro">Choose what this widget shows. The same items appear on your device's home-screen widget where supported.</p>
+                                <p class="study-guidance-intro">Choose what this card shows.</p>
                                 <div class="home-widget-options">
                                     <label class="settings-check"><input type="checkbox" data-home-widget-pref="streak"> Streak</label>
                                     <label class="settings-check"><input type="checkbox" data-home-widget-pref="week"> This week</label>
@@ -181,10 +180,6 @@
                                     <label class="settings-check">Assignments to show
                                         <select data-home-widget-pref="assignmentCount" aria-label="Number of assignments to show"><option value="2">2</option><option value="3">3</option><option value="5">5</option><option value="8">8</option></select>
                                     </label>
-                                </div>
-                                <div class="home-widget-install">
-                                    <button class="primary-btn" type="button" data-action="install-home-widget"><i class="fas fa-mobile-screen-button" aria-hidden="true"></i> Add StudBud to home screen</button>
-                                    <p id="home-widget-install-note" class="settings-hint">Installing StudBud puts your streak on the app icon and adds shortcuts. On Windows 11 you can also pin the StudBud widget from the Widgets board.</p>
                                 </div>
                             </div>
                             <div id="home-widget-body" class="home-widget-body"><p class="study-guidance-intro">Loading today's progress…</p></div>
@@ -627,13 +622,13 @@
                                         <span id="multiplayer-identity-badge" class="community-badge">Player</span>
                                     </div>
                                     <div class="multiplayer-mode-picker" role="group" aria-label="Choose a game mode">
-                                        <button type="button" class="multiplayer-mode selected" data-mode="skyline"><span class="mode-art mode-rooftop" aria-hidden="true"></span><strong>City Escape</strong><small>Climb a rooftop obstacle course</small></button>
-                                        <button type="button" class="multiplayer-mode" data-mode="river"><span class="mode-art mode-river" aria-hidden="true"></span><strong>River Fishing</strong><small>Steer a boat and catch fish</small></button>
-                                        <button type="button" class="multiplayer-mode" data-mode="market"><span class="mode-art mode-market" aria-hidden="true"></span><strong>Package Delivery</strong><small>Deliver packages, dodge cars</small></button>
-                                        <button type="button" class="multiplayer-mode" data-mode="miner"><span class="mode-art mode-miner" aria-hidden="true"></span><strong>Crystal Mining</strong><small>Dig crystals, avoid lava</small></button>
-                                        <button type="button" class="multiplayer-mode" data-mode="duel"><span class="mode-art mode-duel" aria-hidden="true"></span><strong>King of the Hill</strong><small>King of the Hill: hold the zone, knock rivals off</small></button>
-                                        <button type="button" class="multiplayer-mode" data-mode="shooter"><span class="mode-art mode-shooter" aria-hidden="true"></span><strong>Arena Shooter</strong><small>Aim, dash and blast drones and rivals</small></button>
-                                        <button type="button" class="multiplayer-mode" data-mode="sports"><span class="mode-art mode-sports" aria-hidden="true"></span><strong>Soccer</strong><small>Blue vs red teams, dribble and score goals</small></button>
+                                        <button type="button" class="multiplayer-mode selected" data-mode="skyline"><canvas class="mode-preview-canvas" data-preview-mode="skyline" aria-hidden="true"></canvas><strong>City Escape</strong><small>Climb a rooftop obstacle course</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="river"><canvas class="mode-preview-canvas" data-preview-mode="river" aria-hidden="true"></canvas><strong>River Fishing</strong><small>Steer a boat and catch fish</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="market"><canvas class="mode-preview-canvas" data-preview-mode="market" aria-hidden="true"></canvas><strong>Package Delivery</strong><small>Deliver packages, dodge cars</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="miner"><canvas class="mode-preview-canvas" data-preview-mode="miner" aria-hidden="true"></canvas><strong>Crystal Mining</strong><small>Dig crystals, avoid lava</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="duel"><canvas class="mode-preview-canvas" data-preview-mode="duel" aria-hidden="true"></canvas><strong>King of the Hill</strong><small>King of the Hill: hold the zone, knock rivals off</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="shooter"><canvas class="mode-preview-canvas" data-preview-mode="shooter" aria-hidden="true"></canvas><strong>Arena Shooter</strong><small>Aim, dash and blast drones and rivals</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="sports"><canvas class="mode-preview-canvas" data-preview-mode="sports" aria-hidden="true"></canvas><strong>Soccer</strong><small>Blue vs red teams, dribble and score goals</small></button>
                                     </div>
                                     <div class="hosted-game-setup">
                                     <form id="host-game-form" class="hosted-game-form">
@@ -654,7 +649,7 @@
                                     </form>
                                     </div>
                                     <div id="multiplayer-preview" class="multiplayer-preview">
-                                        <div class="preview-heading"><div><strong id="multiplayer-preview-title">City Escape</strong><span id="multiplayer-preview-description">Scale a lively rooftop course with every correct answer.</span></div><span class="preview-live"><i></i> Game preview</span></div>
+                                        <div class="preview-heading"><div><strong id="multiplayer-preview-title">City Escape</strong><span id="multiplayer-preview-description">Scale a lively rooftop course with every correct answer.</span></div></div>
                                         <canvas id="multiplayer-game-canvas" width="900" height="360" aria-label="Animated preview of the selected multiplayer game"></canvas>
                                     </div>
                                 </section>
@@ -693,9 +688,9 @@
                                 </section>
                             </section>
                             <section id="waiting-arcade-card" class="glass-card waiting-arcade-card hidden">
-                                <div><h3>Warm-up: Potshot Peak</h3><p>Optional while you wait: pull back to aim the hammer, release to launch, and chain clean landings.</p></div>
-                                <canvas id="waiting-runner-canvas" width="520" height="360" aria-label="A pot-climbing game. Drag to aim the hammer and release to launch onto a ledge."></canvas>
-                                <div class="waiting-runner-meta"><span>Altitude <strong id="waiting-runner-score">0</strong> m · Best <strong id="waiting-runner-best">0</strong> m</span><button id="waiting-runner-start" class="secondary-btn" type="button">Start climbing</button></div>
+                                <div><h3>Warm-up: Scholar’s Crossing</h3><p>Hop across the campus lanes: dodge rolling carts, ride the data stream, and watch for the study express.</p></div>
+                                <canvas id="waiting-runner-canvas" width="520" height="360" aria-label="Scholar’s Crossing endless hopper. Tap to hop forward or swipe to move in any direction."></canvas>
+                                <div class="waiting-runner-meta"><span>Rows <strong id="waiting-runner-score">0</strong> · Best <strong id="waiting-runner-best">0</strong></span><button id="waiting-runner-start" class="secondary-btn" type="button">Start hopping</button></div>
                                 <div class="waiting-practice"><span>Want a full-screen warm-up?</span><button id="waiting-practice-btn" class="primary-btn" type="button"><i class="fas fa-gamepad"></i> Practice this game</button></div>
                             </section>
                         </main>
