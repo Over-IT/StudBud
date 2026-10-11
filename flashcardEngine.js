@@ -490,6 +490,9 @@
             this.options = options;
             this.deck = options.deck || null;
             this.learnAheadAll = options.learnAheadAll !== false;
+            // includeAll: every card is studyable at any time (no daily limits); reviews not scheduled yet come after
+            // ready reviews and new cards, weakest memory first, and are graded with Anki's early-review intervals.
+            this.includeAll = Boolean(options.includeAll);
             const now = Number.isFinite(options.now) ? options.now : Date.now();
             const counts = this.deck ? SM2Engine.getDailyCounts(this.deck, now)
                 : { day: SM2Engine.dayNumber(now, this.cfg), newDone: options.newDoneToday || 0, reviewsDone: options.reviewsDoneToday || 0 };
@@ -499,6 +502,7 @@
             this.learning = [];
             this.reviews = [];
             this.newCards = [];
+            this.ahead = [];
             const endOfToday = SM2Engine.dayStart(this.today + 1, this.cfg);
 
             (cards || []).forEach((card, position) => {
@@ -509,13 +513,25 @@
                 if (c.state === 'new') this.newCards.push({ card, dueAt: now, position });
                 else if (c.state === 'review') {
                     if (SM2Engine.dayNumber(dueAt, this.cfg) <= this.today) this.reviews.push({ card, dueAt, position, tiebreak: Math.random() });
-                } else if (dueAt < endOfToday) this.learning.push({ card, dueAt, position });
+                    else if (this.includeAll) this.ahead.push({ card, dueAt, position, weight: AnkiStudySession.aheadWeight(c, now) + Math.random() * 0.01 });
+                } else if (dueAt < endOfToday || this.includeAll) this.learning.push({ card, dueAt, position });
             });
 
             this.reviews.sort((a, b) => SM2Engine.dayNumber(a.dueAt, this.cfg) - SM2Engine.dayNumber(b.dueAt, this.cfg) || a.tiebreak - b.tiebreak);
-            this.reviews = this.reviews.slice(0, Math.max(0, this.cfg.reviewsPerDay - this.reviewsDone));
-            this.newCards = this.newCards.slice(0, Math.max(0, this.cfg.newCardsPerDay - this.newDone));
+            this.ahead.sort((a, b) => a.weight - b.weight);
+            if (!this.includeAll) {
+                this.reviews = this.reviews.slice(0, Math.max(0, this.cfg.reviewsPerDay - this.reviewsDone));
+                this.newCards = this.newCards.slice(0, Math.max(0, this.cfg.newCardsPerDay - this.newDone));
+            }
             this.sortLearning();
+        }
+
+        /** Fraction of the scheduled interval still remaining (0 = about to be due, 1 = just reviewed). Lower is studied first. */
+        static aheadWeight(c, now) {
+            const last = Date.parse(c.lastReviewed);
+            const due = Date.parse(c.nextReviewDate);
+            if (!Number.isFinite(last) || !Number.isFinite(due) || due <= last) return 0;
+            return Math.max(0, Math.min(1, (due - now) / (due - last)));
         }
 
         sortLearning() {
@@ -528,6 +544,7 @@
             if (learn && learn.dueAt <= now) return learn.card;
             if (this.reviews.length) return this.reviews[0].card;
             if (this.newCards.length) return this.newCards[0].card;
+            if (this.ahead.length) return this.ahead[0].card;
             if (learn && (this.learnAheadAll || learn.dueAt <= now + this.cfg.learnAheadMinutes * MINUTE)) return learn.card;
             return null;
         }
@@ -547,7 +564,8 @@
             if (result.previousState === 'new') this.newDone += 1;
             else if (result.previousState === 'review') this.reviewsDone += 1;
             if (this.deck) this.deck.ankiToday = { day: this.today, newDone: this.newDone, reviewsDone: this.reviewsDone };
-            const requeued = (card.state === 'learning' || card.state === 'relearning') && result.dueAt < SM2Engine.dayStart(this.today + 1, this.cfg);
+            const requeued = (card.state === 'learning' || card.state === 'relearning')
+                && (this.includeAll || result.dueAt < SM2Engine.dayStart(this.today + 1, this.cfg));
             if (requeued) {
                 this.learning.push({ card, dueAt: result.dueAt, position: Number.MAX_SAFE_INTEGER });
                 this.sortLearning();
@@ -556,18 +574,18 @@
         }
 
         remove(card) {
-            ['learning', 'reviews', 'newCards'].forEach(queue => {
+            ['learning', 'reviews', 'newCards', 'ahead'].forEach(queue => {
                 this[queue] = this[queue].filter(entry => entry.card !== card);
             });
         }
 
-        /** Anki's three counters: new (blue), learning (red), review (green). */
+        /** Anki's three counters: new (blue), learning (red), review (green; includes early reviews in includeAll mode). */
         counts() {
-            return { new: this.newCards.length, learning: this.learning.length, review: this.reviews.length };
+            return { new: this.newCards.length, learning: this.learning.length, review: this.reviews.length + this.ahead.length };
         }
 
         get remaining() {
-            return this.newCards.length + this.learning.length + this.reviews.length;
+            return this.newCards.length + this.learning.length + this.reviews.length + this.ahead.length;
         }
 
         isFinished() {
@@ -577,7 +595,7 @@
         snapshot(now = Date.now()) {
             const dueLearning = this.learning.filter(e => e.dueAt <= now);
             const laterLearning = this.learning.filter(e => e.dueAt > now);
-            return [...dueLearning, ...this.reviews, ...this.newCards, ...laterLearning].map(e => e.card);
+            return [...dueLearning, ...this.reviews, ...this.newCards, ...this.ahead, ...laterLearning].map(e => e.card);
         }
     }
 

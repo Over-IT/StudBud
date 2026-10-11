@@ -10,6 +10,8 @@
     const esc = value => String(value ?? '').replace(/[&<>"']/g, ch =>
         ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 
+    const normalizeChoiceText = value => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+
     function mulberry32(seed) {
         let a = seed >>> 0;
         return function () {
@@ -489,7 +491,14 @@
             this.lastCard = index;
             this.lastCardIndex = index;
             const card = this.cards[index];
-            const wrong = [...new Set(this.cards.filter(c => c.back !== card.back).map(c => c.back))];
+            const correctKey = normalizeChoiceText(card.back);
+            const seen = new Set([correctKey]);
+            const wrong = [];
+            for (const candidate of this.cards) {
+                const answer = candidate.back;
+                const key = normalizeChoiceText(answer);
+                if (key && !seen.has(key)) { seen.add(key); wrong.push(answer); }
+            }
             for (let i = wrong.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [wrong[i], wrong[j]] = [wrong[j], wrong[i]]; }
             const options = wrong.slice(0, 3).concat(card.back);
             for (let i = options.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [options[i], options[j]] = [options[j], options[i]]; }
@@ -516,14 +525,14 @@
             const q = this.question;
             if (!q || q.locked) return;
             q.locked = true;
-            const correct = q.options[index] === q.card.back;
+            const correct = index >= 0 && index < q.options.length && normalizeChoiceText(q.options[index]) === normalizeChoiceText(q.card.back);
             this.answered++;
             if (correct) this.correct++;
             try { q.onAnswer?.(correct); } catch (error) { console.error(error); }
             sfx(correct ? 'correct' : 'wrong');
             const box = this.overlay.querySelector('.mpg-question');
             box.querySelectorAll('[data-q]').forEach((button, i) => {
-                button.classList.toggle('right', q.options[i] === q.card.back);
+                button.classList.toggle('right', normalizeChoiceText(q.options[i]) === normalizeChoiceText(q.card.back));
                 button.classList.toggle('wrong', i === index && !correct);
             });
             box.querySelector('.mpg-q-result').textContent = correct ? 'Correct!' : `Not quite — ${q.card.back}`;
@@ -691,7 +700,9 @@
         bindTouch(overlay) {
             const pad = overlay.querySelector('.mpg-touch');
             if (!pad) return;
-            if (window.matchMedia?.('(pointer: coarse)').matches || navigator.maxTouchPoints > 0) overlay.classList.add('has-touch');
+            const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches;
+            const touchCapable = (navigator.maxTouchPoints || 0) > 0 || window.matchMedia?.('(hover: none)').matches;
+            if (coarsePointer && touchCapable) overlay.classList.add('has-touch');
             const release = btn => {
                 const code = btn.dataset.k;
                 if (code) this.keys.delete(code);
@@ -858,14 +869,22 @@
             if (!this.overlay || !this.scale) return;
             const root = this.overlay.getBoundingClientRect();
             const header = this.overlay.querySelector('.mpg-hud').getBoundingClientRect();
+            let top = header.bottom - root.top + 8;
             let bottom = 8;
             const touch = this.overlay.classList.contains('has-touch');
-            for (const selector of touch ? ['.mpg-stick', '.mpg-btns', '.mpg-stick-zone'] : ['.mpg-hint']) {
+            const hint = this.overlay.querySelector('.mpg-hint');
+            if (touch && hint.offsetWidth && hint.offsetHeight) {
+                hint.style.top = `${top}px`;
+                hint.style.bottom = 'auto';
+                top = Math.max(top, hint.getBoundingClientRect().bottom - root.top + 8);
+            }
+            const selectors = touch ? ['.mpg-stick', '.mpg-btns'] : ['.mpg-hint'];
+            for (const selector of selectors) {
                 const el = this.overlay.querySelector(selector);
                 const rect = el.getBoundingClientRect();
                 if (el.offsetWidth && el.offsetHeight) bottom = Math.max(bottom, root.bottom - rect.top + 8);
             }
-            this.hudInsets = { top: (header.bottom - root.top + 8) / this.scale, left: 8 / this.scale, right: 8 / this.scale, bottom: bottom / this.scale };
+            this.hudInsets = { top: top / this.scale, left: 8 / this.scale, right: 8 / this.scale, bottom: bottom / this.scale };
         }
 
         hudBounds() {
@@ -899,7 +918,10 @@
             o.querySelector('.mpg-timer').textContent = this.room.goal_type === 'time' && Number.isFinite(left)
                 ? `${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, '0')}`
                 : `${Math.floor(this.t / 60)}:${String(Math.floor(this.t) % 60).padStart(2, '0')}`;
-            o.querySelector('.mpg-hint').textContent = this.question ? '' : this.game.hint();
+            const touch = o.classList.contains('has-touch');
+            const hint = touch ? this.game.touchHint?.() : this.game.hint();
+            const controlsHint = touch ? 'Touch controls: joystick and action buttons below' : 'Keyboard/mouse controls';
+            o.querySelector('.mpg-hint').textContent = this.question ? '' : [controlsHint, hint].filter(Boolean).join(' · ');
             this.applyTouchLayout?.();
             this.layoutHud();
             o.querySelector('.mpg-board').innerHTML = this.standings().slice(0, 6).map((row, i) =>

@@ -98,13 +98,19 @@ window.PracticeExamEngine = (() => {
     },
 
     getDistractors: function (correctAnswer, deck, count) {
-      let distractors = deck
-        .filter(c => c.definition !== correctAnswer)
-        .map(c => c.definition)
-        .sort(() => 0.5 - Math.random())
-        .slice(0, count);
-      let options = [correctAnswer, ...distractors].sort(() => 0.5 - Math.random());
-      return options;
+      const normalize = value => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+      const seen = new Set([normalize(correctAnswer)]);
+      const distractors = [];
+      for (const card of deck) {
+        const answer = card.definition;
+        const key = normalize(answer);
+        if (key && !seen.has(key)) {
+          seen.add(key);
+          distractors.push(answer);
+        }
+      }
+      distractors.sort(() => 0.5 - Math.random());
+      return [correctAnswer, ...distractors.slice(0, count)].sort(() => 0.5 - Math.random());
     },
 
     evaluateExam: function (userAnswers, timeTakenSeconds, originalDeck) {

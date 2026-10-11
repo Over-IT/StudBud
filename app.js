@@ -1586,8 +1586,14 @@
                     <section class="glass-card">
                         <h3>Grade targets</h3>
                         <label for="class-target-percent">Target grade (%)</label>
-                        <div class="inline-form"><input id="class-target-percent" type="number" min="0" max="100" step="0.1" value="${target}"><button class="primary-btn" data-action="save-class-target">Save target</button></div>
-                        <p>${grade >= target ? 'You are currently meeting this class target.' : `You are ${(target - grade).toFixed(2)} points below your target.`}</p>
+                        <div class="inline-form"><input id="class-target-percent" type="number" min="0" max="100" step="0.1" value="${Number.isFinite(target) ? target : ''}" placeholder="${Number.isFinite(this.effectiveCourseTarget(course)) ? `${this.effectiveCourseTarget(course)} (from GPA goal)` : 'e.g. 90'}"><button class="primary-btn" data-action="save-class-target">Save target</button></div>
+                        <p>${(() => {
+                            const goal = this.effectiveCourseTarget(course);
+                            if (!Number.isFinite(goal)) return 'Set a target here or a target GPA in your profile.';
+                            const source = Number.isFinite(target) ? 'class target' : `${goal.toFixed(2)}% needed for your target GPA`;
+                            if (grade === null) return `No graded work yet. Aim for at least ${goal.toFixed(2)}% (${source}).`;
+                            return grade >= goal ? `You are currently meeting your ${source}.` : `You are ${(goal - grade).toFixed(2)} points below your ${source}.`;
+                        })()}</p>
                     </section>
                     <section class="glass-card">
                         <h3>Optional grade categories</h3>
@@ -1769,16 +1775,19 @@
             const assignments = AppState.get('assignments') || [];
             const profile = AppState.get('profile') || {};
             const targetGpa = Number(profile.targetGpa || 0);
-            const currentWeightedGpa = Number(this.calculateTrackedGPA(courses).weighted);
-            const gpaGap = Math.max(0, targetGpa - currentWeightedGpa);
+            const trackedGpa = this.calculateTrackedGPA(courses);
+            const currentWeightedGpa = Number(trackedGpa.weighted);
+            const gpaGap = Number(trackedGpa.totalCredits) > 0 && Number.isFinite(currentWeightedGpa) && targetGpa > 0
+                ? Math.max(0, targetGpa - currentWeightedGpa) : 0;
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             const history = AppState.get('studyHistory') || [];
             // Only quizzes and tests need studying; homework is just done and turned in
             const recommended = assignments.filter(item => item.status !== 'completed' && ['quiz', 'test'].includes(String(item.kind || 'assignment').toLowerCase())).map(item => {
                 const course = courses.find(entry => entry.code === item.courseCode);
-                const grade = course ? this.calculateCourseGrade(course) : 0;
-                const target = course ? Number(course.targetPct) : NaN;
+                const grade = course ? this.calculateCourseGrade(course) : null;
+                const target = course ? this.effectiveCourseTarget(course, targetGpa) : NaN;
+                const targetFromGpa = course && !this.hasCourseTarget(course) && Number.isFinite(target);
                 const gradeGap = Number.isFinite(grade) && Number.isFinite(target) ? Math.max(0, target - grade) : 0;
                 const due = item.dueDate ? new Date(`${item.dueDate}T00:00:00`) : null;
                 const daysUntilDue = due && Number.isFinite(due.getTime()) ? Math.ceil((due - today) / 86400000) : 7;
@@ -1817,8 +1826,11 @@
                     daysUntilDue <= 1 ? 'Due very soon; give it priority today.' :
                     `${daysUntilDue} days until due; split the work into ${sessionCount} focused session${sessionCount === 1 ? '' : 's'}.`;
                 if (minutesStudied) reason += ` You have logged ${minutesStudied} min; about ${remainingStudyMinutes} min remain in the estimate.`;
-                if (gradeGap > 0) reason += ` ${gradeGap.toFixed(2)} points below your ${target.toFixed(2)}% class target.`;
+                if (gradeGap > 0) reason += ` ${gradeGap.toFixed(2)} points below the ${target.toFixed(2)}% ${targetFromGpa ? `needed in this class for your ${targetGpa.toFixed(2)} GPA goal` : 'class target'}.`;
                 if (gpaGap > 0) reason += ` Your current weighted GPA (${currentWeightedGpa.toFixed(2)}) is below your ${targetGpa.toFixed(2)} target.`;
+                const deckLinks = this.decksForAssessment(item);
+                const flashcardMinutes = taskSessions.filter(session => session.source === 'flashcards')
+                    .reduce((sum, session) => sum + Math.max(0, Math.round(Number(session.durationSec || 0) / 60)), 0);
                 const studyMethodKey = this.getStudyMethodKey(item, taskSessions);
                 const studyMethod = this.studyMethodLabel(studyMethodKey);
                 return {
@@ -1834,10 +1846,75 @@
                     sessionCount,
                     studyMethod,
                     studyMethodKey,
-                    averageEffectiveness
+                    averageEffectiveness,
+                    deckLinks,
+                    flashcardMinutes,
+                    grade,
+                    target
                 };
             }).sort((a, b) => b.score - a.score);
             return recommended;
+        }
+
+        hasCourseTarget(course) {
+            return course && course.targetPct !== null && course.targetPct !== undefined && course.targetPct !== '' && Number.isFinite(Number(course.targetPct));
+        }
+
+        /** The class's own target %, or the % this class needs in the cheapest plan that reaches the target GPA. */
+        effectiveCourseTarget(course, targetGpa = Number((AppState.get('profile') || {}).targetGpa || 0)) {
+            if (this.hasCourseTarget(course)) return Number(course.targetPct);
+            if (!(targetGpa > 0)) return NaN;
+            const courses = AppState.get('courses') || [];
+            const plan = this.gpaTargetPlan(targetGpa, 'weighted', courses.some(item => item.code === course.code) ? courses : [course]);
+            const entry = plan.byCode.get(course.code);
+            return entry ? Number(entry.minPct) : NaN;
+        }
+
+        /**
+         * Lowest grade in each class that gets the credit-weighted GPA to the target: start every class at the lowest
+         * grade worth the target (or its best grade), then raise whichever class needs the fewest extra percentage
+         * points per GPA gained until the target is met.
+         */
+        gpaTargetPlan(targetGpa, mode = 'weighted', courses = AppState.get('courses') || []) {
+            const scale = (window.PCHS_GRADE_SCALE || []).slice().sort((a, b) => a.minPct - b.minPct);
+            const points = (item, course) => Number(mode === 'weighted' && course.isWeighted ? item.weighted : item.unweighted);
+            const rows = courses.map(course => {
+                const ladder = [];
+                scale.forEach(item => {
+                    if (!ladder.length || points(item, course) > points(ladder[ladder.length - 1], course)) ladder.push(item);
+                });
+                const best = Math.max(...scale.map(item => points(item, course)));
+                const goal = Math.min(targetGpa, best);
+                let level = ladder.findIndex(item => points(item, course) >= goal);
+                if (level < 0) level = ladder.length - 1;
+                return { course, ladder, level, credits: Math.max(0, Number(course.credits) || 0) };
+            });
+            const totalCredits = rows.reduce((sum, row) => sum + row.credits, 0);
+            const gpa = () => totalCredits > 0 ? rows.reduce((sum, row) => sum + points(row.ladder[row.level], row.course) * row.credits, 0) / totalCredits : 0;
+            let guard = 0;
+            while (totalCredits > 0 && gpa() < targetGpa - 1e-9 && guard++ < 200) {
+                let bestRow = null;
+                let bestCost = Infinity;
+                rows.forEach(row => {
+                    const next = row.ladder[row.level + 1];
+                    if (!next || !row.credits) return;
+                    const gain = (points(next, row.course) - points(row.ladder[row.level], row.course)) * row.credits;
+                    const cost = (next.minPct - row.ladder[row.level].minPct) / Math.max(gain, 1e-6);
+                    if (gain > 0 && cost < bestCost) { bestCost = cost; bestRow = row; }
+                });
+                if (!bestRow) break;
+                bestRow.level += 1;
+            }
+            const byCode = new Map(rows.map(row => [row.course.code, row.ladder[row.level]]));
+            return { byCode, gpa: gpa(), reachable: totalCredits > 0 && gpa() >= targetGpa - 1e-9 };
+        }
+
+        /** Decks linked to a quiz/test first, then decks tagged with the same class. */
+        decksForAssessment(item) {
+            const decks = (AppState.get('flashcards') || []).filter(deck => (deck.cards || []).length);
+            const exact = decks.filter(deck => deck.assessmentId && String(deck.assessmentId) === String(item.id));
+            const sameClass = decks.filter(deck => !exact.includes(deck) && !deck.assessmentId && item.courseCode && this.deckLinkInfo(deck).courseCode === item.courseCode);
+            return [...exact.map(deck => ({ deck, exact: true })), ...sameClass.map(deck => ({ deck, exact: false }))];
         }
 
         getStudyMethodKey(item, history = []) {
@@ -2059,6 +2136,35 @@
                     .catch(error => console.warn('[NexusApp] Deck authors could not load:', error));
             }
             this.syncDeckLinkSelects(document.getElementById('import-deck-course'), document.getElementById('import-deck-assessment'), false);
+            this.renderDeckRecommendations();
+        }
+
+        renderDeckRecommendations() {
+            const section = document.getElementById('deck-recommendations');
+            const list = document.getElementById('deck-recommendation-list');
+            if (!section || !list) return;
+            const seen = new Set();
+            const rows = [];
+            this.getStudyRecommendations().forEach(item => {
+                (item.deckLinks || []).forEach(({ deck, exact }) => {
+                    if (seen.has(deck.id) || rows.length >= 4) return;
+                    seen.add(deck.id);
+                    rows.push({ deck, exact, item });
+                });
+            });
+            section.classList.toggle('hidden', !rows.length);
+            list.innerHTML = rows.map(({ deck, exact, item }) => {
+                const due = item.dueDate ? new Date(`${String(item.dueDate).slice(0, 10)}T00:00:00`) : null;
+                const days = due && Number.isFinite(due.getTime()) ? Math.ceil((due - new Date(new Date().toDateString())) / 86400000) : null;
+                const when = days === null ? '' : days <= 0 ? 'today' : days === 1 ? 'tomorrow' : `in ${days} days`;
+                const studied = item.flashcardMinutes ? `${item.flashcardMinutes} min on flashcards so far` : 'No flashcard time yet';
+                return `<article class="deck-recommendation">
+                    <div><strong>${this.escapeHTML(deck.title)}</strong>
+                        <span>${exact ? 'For' : 'Same class as'} ${this.escapeHTML(this.deckAssessmentLabel(item))}${when ? ` · ${when}` : ''}</span>
+                        <small>${this.escapeHTML(studied)} · suggested ${item.sessionMinutes} min today</small></div>
+                    <button class="primary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}"><i class="fas fa-play"></i> Study</button>
+                </article>`;
+            }).join('');
         }
 
         deckAssessments() {
@@ -4240,7 +4346,7 @@
             const year = document.getElementById('settings-grad-year');
             if (year && profile.graduationYear) year.value = String(profile.graduationYear);
             const targetGpa = document.getElementById('settings-target-gpa');
-            if (targetGpa) targetGpa.value = String(profile.targetGpa || 3.8);
+            if (targetGpa) targetGpa.value = String(Number.isFinite(Number(profile.targetGpa)) && profile.targetGpa !== '' && profile.targetGpa !== null ? Number(profile.targetGpa) : 3.8);
             const currentTermSetting = document.getElementById('settings-current-term');
             if (currentTermSetting) currentTermSetting.value = profile.currentTerm || 'auto';
 
@@ -4644,9 +4750,12 @@
             this.renderFocusSprint();
             if (priorityList) {
                 const recommendations = this.getStudyRecommendations().slice(0, 5);
-                priorityList.innerHTML = recommendations.length ? recommendations.map((item, index) =>
-                    `<article class="study-priority-item"><span class="priority-rank">${index + 1}</span><div><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(item.courseTitle)} · ${this.escapeHTML(item.kind || 'assignment')} · ${item.sessionMinutes} min today (about ${item.remainingStudyMinutes} min remaining)</span><small>${this.escapeHTML(item.reason)}</small><p><strong>Study method:</strong> ${this.escapeHTML(item.studyMethod)}</p><button class="secondary-btn" data-action="log-study" data-id="${this.escapeHTML(item.id)}"><i class="fas fa-stopwatch"></i> Log study session</button></div></article>`
-                ).join('') : '<div class="empty-state empty-state-cta"><p>Add an upcoming quiz or test to get study suggestions.</p><button class="primary-btn" type="button" data-action="add-quiz"><i class="fas fa-plus"></i> Add a quiz or test</button></div>';
+                priorityList.innerHTML = recommendations.length ? recommendations.map((item, index) => {
+                    const decks = (item.deckLinks || []).slice(0, 2).map(({ deck }) =>
+                        `<button class="secondary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}"><i class="fas fa-layer-group"></i> ${this.escapeHTML(deck.title)}</button>`).join('');
+                    const studied = item.minutesStudied ? `<small class="study-time-logged"><i class="fas fa-clock"></i> ${item.minutesStudied} min studied${item.flashcardMinutes ? ` (${item.flashcardMinutes} with flashcards)` : ''}</small>` : '';
+                    return `<article class="study-priority-item"><span class="priority-rank">${index + 1}</span><div><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(item.courseTitle)} · ${this.escapeHTML(item.kind || 'assignment')} · ${item.sessionMinutes} min today (about ${item.remainingStudyMinutes} min remaining)</span>${studied}<small>${this.escapeHTML(item.reason)}</small><p><strong>Study method:</strong> ${this.escapeHTML(item.studyMethod)}</p><div class="study-priority-actions"><button class="secondary-btn" data-action="log-study" data-id="${this.escapeHTML(item.id)}"><i class="fas fa-stopwatch"></i> Log study session</button>${decks}</div></div></article>`;
+                }).join('') : '<div class="empty-state empty-state-cta"><p>Add an upcoming quiz or test to get study suggestions.</p><button class="primary-btn" type="button" data-action="add-quiz"><i class="fas fa-plus"></i> Add a quiz or test</button></div>';
             }
             this.renderStudyProgress();
             this.renderDailyStudyHabit();
@@ -5493,6 +5602,9 @@
                     if (title && title.trim()) await AppState.saveFlashcardDeck({ id: `deck_${Date.now()}`, title: title.trim(), cards: [] });
                 } else if (id === 'open-target-gpa-btn') {
                     this.openModal('target-gpa-modal');
+                    const desired = document.getElementById('desired-gpa');
+                    const goal = Number((AppState.get('profile') || {}).targetGpa);
+                    if (desired && !desired.value && Number.isFinite(goal) && goal > 0) desired.value = String(goal);
                 } else if (id === 'run-gpa-solver-btn') {
                     this.solveTargetGPA();
                 } else if (id === 'drawer-toggle-btn' || id === 'mobile-mixer-toggle-btn' || id === 'close-drawer-btn') {
@@ -6158,6 +6270,11 @@
             if (action === 'save-class-target') {
                 const course = courses.find(item => item.code === Router.selectedClassCode);
                 const input = document.getElementById('class-target-percent');
+                if (course && String(input.value).trim() === '') {
+                    AppState.updateCourse(course.code, { targetPct: null, targetGrade: null });
+                    this.renderClassDetail();
+                    return;
+                }
                 const targetPct = Number(input.value);
                 if (!course || !Number.isFinite(targetPct) || targetPct < 0 || targetPct > 100) {
                     window.alert('Enter a target between 0 and 100%.');
@@ -6180,10 +6297,10 @@
             if (action === 'study-deck') this.startStudy(id, false);
         }
 
-        startStudy(deckId, dueOnly) {
+        startStudy(deckId) {
             const deck = (AppState.get('flashcards') || []).find(item => item.id === deckId);
             if (!deck) throw new Error('The selected deck no longer exists.');
-            const cards = deck.cards || [];
+            const cards = (deck.cards || []).filter(card => card && !card.suspended);
             if (!cards.length) {
                 window.alert('This deck has no cards yet.');
                 return;
@@ -6192,23 +6309,20 @@
             this.activeDeckId = deckId;
             this.cramMode = false;
             this.studySession = null;
-            // Anki queue: due learning cards, then reviews (daily limit), then new cards (daily limit)
-            const session = window.SM2Engine?.createSession ? window.SM2Engine.createSession(cards, { deck }) : null;
+            // Flashcards are never "due": every card can be studied any time. Ready cards come first, then new cards,
+            // then the rest (weakest memory first); learning steps and early-review intervals keep spacing accurate.
+            const session = window.SM2Engine?.createSession ? window.SM2Engine.createSession(cards, { deck, includeAll: true }) : null;
             if (session && session.remaining) {
                 this.studySession = session;
                 this.studyCards = [];
             } else {
-                const limitHit = cards.some(card => this.isCardDue(card, Date.now()));
-                const prompt = limitHit
-                    ? 'You have reached today\'s new/review limit for this deck. Cram all cards anyway? (This will not change your review schedule.)'
-                    : 'Nothing is due in this deck. Cram all cards anyway? (This will not change your review schedule.)';
-                if (dueOnly || !window.confirm(prompt)) { this.activeDeckId = null; return; }
                 this.cramMode = true;
                 this.studyCards = cards.slice().sort(() => Math.random() - 0.5);
             }
             this.activeCardIndex = 0;
             this.currentStudyCard = null;
             this.activeStudyStartedAt = Date.now();
+            this.activeStudyCardsSeen = 0;
             document.getElementById('active-study-area').classList.remove('hidden');
             this.renderStudyCard();
         }
@@ -6222,9 +6336,9 @@
             const progress = document.getElementById('study-progress');
             if (this.studySession) {
                 const n = this.studySession.counts();
-                progress.innerHTML = `<span class="anki-count anki-new" title="New">${n.new}</span> <span class="anki-count anki-learn" title="Learning">${n.learning}</span> <span class="anki-count anki-review" title="To review">${n.review}</span>`;
+                progress.innerHTML = `<span class="anki-count anki-new" title="New cards">${n.new} new</span> <span class="anki-count anki-learn" title="Cards in learning steps">${n.learning} learning</span> <span class="anki-count anki-review" title="Cards to review">${n.review} review</span>`;
             } else {
-                progress.textContent = `${this.studyCards.length - this.activeCardIndex} left · cram mode`;
+                progress.textContent = `${this.studyCards.length - this.activeCardIndex} left`;
             }
             const cardEl = document.getElementById('current-flashcard');
             const backEl = document.getElementById('card-back-content');
@@ -6302,9 +6416,14 @@
             if (startedAt) {
                 const durationSec = Math.min(21600, Math.floor((Date.now() - startedAt) / 1000));
                 if (durationSec > 0) {
+                    const studiedDeck = (AppState.get('flashcards') || []).find(item => item.id === this.activeDeckId);
+                    const link = studiedDeck ? this.deckLinkInfo(studiedDeck) : {};
+                    const target = link.assessment && link.assessment.status !== 'completed' ? link.assessment : null;
                     AppState.recordStudySession({
                         id: `flashcards_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-                        title: 'Flashcard study',
+                        title: target ? `Flashcards: ${studiedDeck.title} → ${target.title}` : `Flashcards: ${studiedDeck?.title || 'study'}`,
+                        assignmentId: target ? target.id : undefined,
+                        courseCode: target?.courseCode || link.courseCode || undefined,
                         durationSec,
                         method: 'flashcards',
                         methodLabel: 'Flashcards / spaced review',
@@ -6329,19 +6448,40 @@
                 window.alert('Enter a target GPA between 0 and 5.');
                 return;
             }
-            const gpa = window.GPACalculator.calculateCurrentGPA(AppState.get('courses') || []);
-            const credits = Number(gpa.totalCredits);
-            if (credits <= 0) {
-                document.getElementById('solver-output-percentage').textContent = 'Add courses first';
-                document.getElementById('solver-results').classList.remove('hidden');
+            const courses = AppState.get('courses') || [];
+            const output = document.getElementById('solver-output-percentage');
+            const results = document.getElementById('solver-results');
+            let detail = document.getElementById('solver-course-breakdown');
+            if (!detail) {
+                detail = document.createElement('ul');
+                detail.id = 'solver-course-breakdown';
+                detail.className = 'solver-course-breakdown';
+                results.append(detail);
+            }
+            results.classList.remove('hidden');
+            if (!courses.length) {
+                output.textContent = 'Add classes first';
+                detail.innerHTML = '';
                 return;
             }
-            const currentGpa = Number(mode === 'weighted' ? gpa.weighted : gpa.unweighted);
-            const required = window.GPACalculator.solveTargetGPA(target, currentGpa, 14, credits);
-            const requiredGpa = required ? Number(required.requiredGpa) : target;
-            document.getElementById('solver-output-percentage').textContent =
-                requiredGpa > 5 ? `${requiredGpa.toFixed(2)} GPA needed (not possible)` : `${requiredGpa.toFixed(2)} GPA needed`;
-            document.getElementById('solver-results').classList.remove('hidden');
+            const tracked = this.calculateTrackedGPA(courses);
+            const current = Number(mode === 'weighted' ? tracked.weighted : tracked.unweighted);
+            const plan = this.gpaTargetPlan(target, mode, courses);
+            const reachable = plan.reachable;
+            const rows = courses.map(course => {
+                const needed = plan.byCode.get(course.code);
+                const grade = this.calculateCourseGrade(course);
+                const gradeText = grade === null ? 'no grades yet' : `now ${grade.toFixed(2)}%`;
+                const status = !needed ? 'no target' : grade === null ? `aim for ${needed.minPct}%+ (${needed.letter})`
+                    : grade >= needed.minPct ? `on track (${needed.letter} needs ${needed.minPct}%+)` : `need ${needed.minPct}%+ (${needed.letter}), ${(needed.minPct - grade).toFixed(2)} pts to go`;
+                return `<li><strong>${this.escapeHTML(course.title || course.code)}</strong><span>${this.escapeHTML(gradeText)} · ${this.escapeHTML(status)}</span></li>`;
+            });
+            const currentText = Number(tracked.totalCredits) > 0 ? `Current ${mode} GPA ${current.toFixed(2)}` : 'No graded classes yet';
+            output.textContent = reachable ? `${currentText} → target ${target.toFixed(2)}` : `${target.toFixed(2)} is above the best possible ${mode} GPA (${plan.gpa.toFixed(2)}) for these classes`;
+            detail.innerHTML = rows.join('');
+            // Keep the profile target in sync so study priorities use it
+            const profile = AppState.get('profile') || {};
+            if (Number(profile.targetGpa) !== target) AppState.set('profile', { ...profile, targetGpa: target });
         }
 
         saveProfile() {
@@ -6361,6 +6501,7 @@
             };
             AppState.set('profile', profile);
             this.renderProfile();
+            this.renderDashboard();
             window.alert('Profile saved.');
         }
 
@@ -6569,7 +6710,7 @@
             this.arcadeCardDeck = new Map();
             (AppState.get('flashcards') || []).forEach(deck => (deck.cards || []).forEach(card => this.arcadeCardDeck.set(card, deck)));
             const now = Date.now();
-            // Spaced-repetition ordering: due and struggling cards come first, mastered cards last
+            // Spaced-repetition ordering: cards ready for review and struggling cards first, well-known cards last
             const priority = card => (this.isCardDue(card, now) ? 0 : 10) + Math.min(5, Number(card.lapses || 0)) - (card.lastReviewed ? 0 : 1);
             this.arcadeCards = Array.from(this.arcadeCardDeck.keys())
                 .filter(card => card.front && card.back)
@@ -6682,11 +6823,19 @@
             for (let i = 0; i < counts['multiple-choice']; i++) items.push({ type: 'multiple-choice', cards: [draw()] });
             for (let i = 0; i < counts.written; i++) items.push({ type: 'written', cards: [draw()] });
             for (let i = 0; i < counts.matching; i++) {
-                const group = shuffle(availableCards).slice(0, Math.min(4, availableCards.length));
-                items.push({ type: 'matching', cards: group });
+                const backs = new Set();
+                const group = shuffle(availableCards).filter(card => {
+                    const key = this.answerKey(card.back);
+                    if (backs.has(key)) return false;
+                    backs.add(key);
+                    return true;
+                }).slice(0, Math.min(4, availableCards.length));
+                if (group.length >= 2) items.push({ type: 'matching', cards: group });
             }
             const ordered = shuffle(items);
+            if (!ordered.length) throw new Error('This deck needs cards with different answers for matching questions.');
             this.practiceTestCards = ordered.map(item => item.cards[0]);
+            this.practiceTestDeckCards = availableCards;
             this.practiceTestGroups = ordered.map(item => item.cards);
             this.practiceTestQuestionTypes = ordered.map(item => item.type);
             this.practiceTestAnswers = [];
@@ -6719,8 +6868,7 @@
             form.id = 'practice-test-answer-form';
             form.dataset.questionType = questionType;
             if (questionType === 'multiple-choice') {
-                const choices = [card, ...this.practiceTestCards.filter(item => item !== card)
-                    .sort(() => Math.random() - 0.5).slice(0, 3)].sort(() => Math.random() - 0.5);
+                const choices = [card, ...this.pickDistractorCards(card, this.practiceTestDeckCards || this.practiceTestCards, 3)].sort(() => Math.random() - 0.5);
                 const options = document.createElement('div');
                 options.className = 'arcade-answer-options';
                 choices.forEach((option, choiceIndex) => {
@@ -6851,7 +6999,15 @@
 
         prepareMemoryGame() {
             if (this.memoryMismatchTimeout) clearTimeout(this.memoryMismatchTimeout);
-            const selectedCards = this.arcadeCards.slice(0, 8);
+            const labels = new Set();
+            const selectedCards = this.arcadeCards.filter(card => {
+                const front = this.answerKey(card.front);
+                const back = this.answerKey(card.back);
+                if (front === back || labels.has(front) || labels.has(back)) return false;
+                labels.add(front);
+                labels.add(back);
+                return true;
+            }).slice(0, 8);
             this.memoryCards = selectedCards.flatMap((card, index) => [
                 { pair: index, label: card.front },
                 { pair: index, label: card.back }
@@ -6963,12 +7119,14 @@
             choicesContainer.className = 'arcade-answer-options';
             if (this.arcadeMode === 'truefalse') {
                 const isTrue = Math.random() < 0.5;
-                const distractor = this.arcadeCards.find(item => item !== card);
-                this.arcadeCurrentIsTrue = isTrue;
+                const distractor = this.pickDistractorCards(card, this.arcadeCards, 1)[0];
+                // Without a different answer to show, the statement can only be the real one
+                const showTrue = isTrue || !distractor;
+                this.arcadeCurrentIsTrue = showTrue;
                 this.arcadeOptions = [true, false];
                 const statement = document.createElement('p');
                 statement.className = 'true-false-statement';
-                statement.textContent = isTrue ? card.back : distractor.back;
+                statement.textContent = showTrue ? card.back : distractor.back;
                 this.arcadeOptions.forEach((value, index) => {
                     const button = document.createElement('button');
                     button.className = 'secondary-btn';
@@ -6983,9 +7141,7 @@
                 return;
             }
             const choices = [card];
-            const distractors = this.arcadeCards.filter(item => item !== card)
-                .sort(() => Math.random() - 0.5)
-                .slice(0, 3);
+            const distractors = this.pickDistractorCards(card, this.arcadeCards, 3);
             this.arcadeOptions = [...choices, ...distractors].sort(() => Math.random() - 0.5);
             this.arcadeOptions.forEach((option, index) => {
                 const button = document.createElement('button');
@@ -7000,11 +7156,32 @@
             content.append(progress, question, choicesContainer, feedback);
         }
 
+        answerKey(text) {
+            return String(text ?? '').normalize('NFKC').trim().replace(/\s+/g, ' ').replace(/[.!?;:,]+$/, '').toLowerCase();
+        }
+
+        /** Random cards whose answers differ from the correct answer and from each other. */
+        pickDistractorCards(card, pool, count) {
+            const used = new Set([this.answerKey(card.back)]);
+            const picks = [];
+            for (const item of [...(pool || [])].sort(() => Math.random() - 0.5)) {
+                if (picks.length >= count) break;
+                if (!item || item === card) continue;
+                const key = this.answerKey(item.back);
+                if (!key || used.has(key)) continue;
+                used.add(key);
+                picks.push(item);
+            }
+            return picks;
+        }
+
         updateCardSchedule(card, correct) {
             const deck = this.arcadeCardDeck && this.arcadeCardDeck.get(card);
             if (!deck || !window.SM2Engine || !card) return;
-            // Multiple choice is easier than free recall: only due cards earn credit, a miss always counts
-            if (correct && !this.isCardDue(card)) return;
+            // Multiple choice is easier than free recall: a correct pick only counts once the card is ready for review
+            // (or is brand new), so games can't inflate intervals; a miss always counts.
+            const state = window.SM2Engine.normalize(card).state;
+            if (correct && state !== 'new' && !window.SM2Engine.isDue(card)) return;
             Object.assign(card, window.SM2Engine.evaluate(card, correct ? 4 : 1));
             AppState.saveFlashcardDeck(deck).catch(error => console.error('[NexusApp] Card progress could not be saved:', error));
         }

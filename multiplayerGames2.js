@@ -338,7 +338,8 @@
 
         goalText() { return `Banked ${this.banked} · Carried ${this.items}/${this.cap} (${this.carry} pts)`; }
         touchLayout() { return { stick: true, stickZone: 'local', platform: true, buttons: [{ k: 'Space', label: 'Jetpack', cls: 'main' }] }; }
-        hint() { return 'A/D or joystick move · W/Space jetpack · S/↓ digs down · hold anywhere outside controls to mine that direction · depot banks crystals · Q recharges fuel'; }
+        hint() { return 'A/D move · W/Space jetpack · S/↓ dig down · hold mouse button to mine in that direction · depot banks crystals · Q recharges fuel'; }
+        touchHint() { return 'Hold outside the controls to mine in that direction · deposit crystals at the surface depot'; }
 
         draw(ctx, w, h) {
             const s = this.s, me = this.me;
@@ -361,7 +362,32 @@
             for (let ty = Math.max(4, r0); ty <= r1; ty++) for (let tx = c0; tx <= c1; tx++) {
                 const idx = ty * COLS + tx, type = this.T[idx], x = tx * TS, y = ty * TS;
                 const color = strata[Math.min(strata.length - 1, Math.floor((ty - 4) / 8))];
-                if (type === 0) { ctx.fillStyle = color; ctx.fillRect(x, y, TS, TS); continue; }
+                if (type === 0) {
+                    const caveHash = A.util.hashStr(`${this.seed}:${idx}:cave`);
+                    ctx.fillStyle = '#100e11'; ctx.fillRect(x, y, TS, TS);
+                    const recess = ctx.createLinearGradient(x, y, x + TS, y + TS);
+                    recess.addColorStop(0, '#211a1b'); recess.addColorStop(0.5, '#100e12'); recess.addColorStop(1, '#07090d');
+                    ctx.fillStyle = recess; ctx.fillRect(x + 2, y + 2, TS - 4, TS - 4);
+                    ctx.fillStyle = 'rgba(173,145,126,.12)';
+                    for (let k = 0; k < 3; k++) {
+                        const px = x + 7 + ((caveHash >>> (k * 7)) & 31), py = y + 7 + ((caveHash >>> (k * 5 + 11)) & 29);
+                        ctx.fillRect(px, py, 2 + (k & 1), 1);
+                    }
+                    const seam = [];
+                    if (this.solid(this.tile(tx - 1, ty))) seam.push([x + 1, y + 1, x + 1, y + TS - 1]);
+                    if (this.solid(this.tile(tx + 1, ty))) seam.push([x + TS - 1, y + 1, x + TS - 1, y + TS - 1]);
+                    if (this.solid(this.tile(tx, ty - 1))) seam.push([x + 1, y + 1, x + TS - 1, y + 1]);
+                    if (this.solid(this.tile(tx, ty + 1))) seam.push([x + 1, y + TS - 1, x + TS - 1, y + TS - 1]);
+                    if (seam.length) {
+                        ctx.save();
+                        ctx.lineCap = 'square'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(5,5,7,.82)';
+                        ctx.beginPath(); for (const [x1, y1, x2, y2] of seam) { ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); } ctx.stroke();
+                        ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(197,145,93,.7)';
+                        ctx.beginPath(); for (const [x1, y1, x2, y2] of seam) { ctx.moveTo(x1 + (x1 === x + 1 ? 2 : -2), y1 + (y1 === y + 1 ? 2 : -2)); ctx.lineTo(x2 + (x2 === x + 1 ? 2 : -2), y2 + (y2 === y + 1 ? 2 : -2)); } ctx.stroke();
+                        ctx.restore();
+                    }
+                    continue;
+                }
                 if (type === 6) {
                     ctx.fillStyle = '#21140f'; ctx.fillRect(x, y, TS, TS);
                     const pulse = 0.76 + Math.sin(this.anim * 4 + idx) * 0.12;

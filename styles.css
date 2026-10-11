@@ -2641,7 +2641,8 @@ body.compact-ui .nav-item { padding-top: 8px; padding-bottom: 8px; }
 /* --- Touch controls for multiplayer games --- */
 .mpg-touch { display: none; position: absolute; left: 0; right: 0; bottom: 0; padding: 0 14px 18px; justify-content: space-between; align-items: flex-end; pointer-events: none; z-index: 5; }
 .mpg-overlay.has-touch .mpg-touch { display: flex; }
-.mpg-overlay.has-touch .mpg-hint { display: none; }
+.mpg-overlay.has-touch .mpg-hint { display: block; top: auto; bottom: auto; left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100% - 24px); padding: 5px 10px; font-size: .68rem; z-index: 5; }
+.mpg-overlay.has-touch .mpg-hint:empty { display: none; }
 .mpg-overlay.has-touch .mpg-meter { bottom: 190px; width: 170px; }
 .mpg-touch button { pointer-events: auto; touch-action: none; user-select: none; -webkit-user-select: none; border: 2px solid rgba(255,255,255,.28); background: rgba(15,23,42,.55); color: #f8fafc; font-weight: 800; font-size: 1rem; border-radius: 50%; width: 62px; height: 62px; backdrop-filter: blur(4px); }
 .mpg-touch button.on { background: rgba(56,189,248,.65); transform: scale(.95); }
@@ -2732,7 +2733,8 @@ textarea { resize: vertical; }
 
 /* Mobile game controls (after base button rules) */
 .mpg-overlay { touch-action: none; overscroll-behavior: none; -webkit-touch-callout: none; }
-/* One answer button only: on touch the floating Recharge pill replaces the meter's button. */
+/* Desktop recharge uses Q; the separate on-screen recharge pill is touch-only. */
+.mpg-overlay .mpg-recharge { display: none; }
 .mpg-overlay.has-touch .mpg-recharge { display: none; }
 #game-canvas { touch-action: none; }
 .mpg-stick-zone { display: none; position: absolute; left: 0; bottom: 0; width: 50%; top: 25%; z-index: 4; touch-action: none; }
@@ -3055,3 +3057,23 @@ body.compact-ui .streak-flame b { bottom: 4px; font-size: .85rem; }
 }
 .deck-card .deck-tags { justify-content: center; }
 .deck-chip i, .deck-link-edit summary i, .deck-link-hint i { font-size: 0.8em !important; width: auto !important; height: auto !important; margin: 0 !important; background: none !important; padding: 0 !important; box-shadow: none !important; display: inline !important; }
+
+/* Flashcard recommendations for upcoming tests */
+.deck-recommendations { margin: 0 0 1rem; }
+.deck-recommendations h3 { margin: 0 0 .25rem; display: flex; gap: .5rem; align-items: center; }
+.deck-recommendation-list { display: grid; gap: .6rem; margin-top: .6rem; }
+.deck-recommendation { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .7rem .85rem; border-radius: 12px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08); }
+.deck-recommendation > div { display: grid; gap: .15rem; min-width: 0; }
+.deck-recommendation strong, .deck-recommendation span { overflow-wrap: anywhere; }
+.deck-recommendation span, .deck-recommendation small { opacity: .8; font-size: .85rem; }
+.deck-recommendation .primary-btn { flex-shrink: 0; }
+.study-priority-actions { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .4rem; }
+.study-time-logged { display: block; opacity: .85; }
+.anki-count { white-space: nowrap; }
+.solver-course-breakdown { list-style: none; padding: 0; margin: .75rem 0 0; display: grid; gap: .45rem; text-align: left; }
+.solver-course-breakdown li { display: grid; gap: .1rem; padding: .5rem .65rem; border-radius: 10px; background: rgba(255,255,255,.05); }
+.solver-course-breakdown span { font-size: .85rem; opacity: .85; }
+#solver-output-percentage { font-size: 1.15rem; }
+@media (max-width: 520px) {
+    .deck-recommendation { flex-direction: column; align-items: stretch; }
+}
