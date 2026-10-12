@@ -779,7 +779,7 @@
         update(dt) {
             const s = this.s, me = this.me, t = s.t;
             this.anim += dt; this.dtLast = dt;
-            const clock = (Date.now() - s.startedAt) / 1000;
+            const clock = ((typeof s.testPauseAt === 'number' ? s.testPauseAt : Date.now()) - s.startedAt) / 1000;
             this.clock = clock;
 
             for (const m of this.movers) {
@@ -1092,7 +1092,10 @@
             const k = 1 - Math.exp(-6 * (this.dtLast || 0.016));
             const cssScale = s.scale || 1, cssW = w * cssScale, cssH = h * cssScale;
             const small = !s.preview && (cssW < 700 || cssH < 550);
-            const zoom = this.zoom = small ? clamp(Math.min(1, w / 460, h / 850), 0.76, 1) : 1;
+            const landscape = w >= h;
+            const zoom = this.zoom = small
+                ? landscape ? clamp(Math.min(1, w / 760, h / 500), 0.7, 0.98) : clamp(Math.min(1, w / 460, h / 760), 0.68, 0.94)
+                : 1;
             const viewW = w / zoom, viewH = h / zoom;
             const lookX = small ? clamp((me.vx || 0) * 0.12, -80, 80) : 0;
             const lookY = small ? clamp(-(me.vy || 0) * 0.09, 0, 70) : 0;
@@ -1337,7 +1340,7 @@
             this.botSpawns = [[390, 440], [1190, 440], [790, 200]].map(([x, y]) => [(x + 17) * scaleX - 17, y]);
             this.spawn = spawns[hashStr(s.user.id) % spawns.length];
             this.me.x = this.spawn[0]; this.me.y = this.spawn[1] - 60;
-            this.dmg = 0; this.stun = 0; this.invuln = 1.5; this.swingT = 0; this.swingCd = 0;
+            this.dmg = 0; this.stun = 0; this.invuln = 1.5; this.swingT = 0; this.swingCd = 0; this.swingHeavy = false;
             this.guard = false; this.airJumps = 1; this.coyote = 0; this.hammer = 0; this.kos = 0; this.falls = 0; this.respawn = 0;
             this.lastHit = { by: null, at: 0 }; this.anim = 0; this.orb = { x: this.W / 2, y: 150, t: 0 }; this.state = 0; this.shake = 0;
             this.hitFlash = 0; this.hitlag = 0; this.dropTimer = 0; this.dodge = 0; this.dodgeCd = 0; this.shieldBreak = 0;
@@ -1426,8 +1429,9 @@
             }
             if (this.stun <= 0 && !this.guard && this.dodge <= 0 && this.swingCd <= 0 && (s.mouse.pressed || s.pressed('KeyJ', 'KeyK')) && s.spend(8)) {
                 const heavy = s.pressed('KeyK') && !s.pressed('KeyJ');
+                this.swingHeavy = heavy;
                 this.swingT = heavy ? 0.28 : 0.22; this.swingCd = heavy ? 0.78 : 0.52; s.sfx('swing'); this.swingAim = this.aim;
-                s.emit({ k: 'sw', x: Math.round(me.x + 17), y: Math.round(me.y + 28), d: me.face, a: +this.aim.toFixed(2), p: (this.hammer > 0 ? 1.6 : 1) * (heavy ? 1.2 : 1), by: s.user.id, c: (this.dmg | 0) });
+                s.emit({ k: 'sw', x: Math.round(me.x + 17), y: Math.round(me.y + 28), d: me.face, a: +this.aim.toFixed(2), p: (this.hammer > 0 ? 1.6 : 1) * (heavy ? 1.2 : 1), h: heavy ? 1 : 0, by: s.user.id, c: (this.dmg | 0) });
                 this.particles.burst(me.x + 17 + Math.cos(this.aim) * 70, me.y + 28 + Math.sin(this.aim) * 70, '#fde68a', 8, 200, 0.25, 4);
             }
             moveBody(me, this.solids, dt);
@@ -1530,6 +1534,7 @@
             if (ev.k === 'sw') {
                 from.swing = performance.now();
                 from.swingAim = typeof ev.a === 'number' ? ev.a : (ev.d > 0 ? 0 : Math.PI);
+                from.swingHeavy = ev.h === 1;
                 if (this.respawn > 0 || this.invuln > 0 || this.stun > 0.2 || !this.attackHits(ev, me)) return;
                 const angle = from.swingAim, dx = Math.cos(angle), dy = Math.sin(angle);
                 const power = ev.p || 1;
@@ -1557,33 +1562,33 @@
         net() {
             const m = this.me;
             return { x: Math.round(m.x), y: Math.round(m.y), vx: Math.round(m.vx), vy: Math.round(m.vy), f: m.face, a: this.state,
-                ex: { d: Math.round(this.dmg), h: this.hammer > 0 ? 1 : 0, i: this.invuln > 0 ? 1 : 0, t: +(this.aim || 0).toFixed(2), k: this.kos, f: this.falls } };
+                ex: { d: Math.round(this.dmg), h: this.hammer > 0 ? 1 : 0, hv: this.swingHeavy ? 1 : 0, i: this.invuln > 0 ? 1 : 0, t: +(this.aim || 0).toFixed(2), k: this.kos, f: this.falls } };
         }
 
         goalText() { return `${this.kos} KOs · ${this.falls} KOs against · ${Math.round(this.dmg)}% damage`; }
         touchLayout() { return { stick: true, platform: true, buttons: [{ k: 'Space', label: 'Jump' }, { k: 'ShiftLeft', label: 'Shield' }, { k: 'KeyK', label: 'Heavy', small: true }, { k: 'KeyL', label: 'Dodge' }] }; }
         hint() { return 'A/D move · Space jump twice · Down fast-fall / drop through ledges · Click or tap canvas to aim and swing · K heavy (last tap / facing) · Shift shield · L dodge · Q recharge'; }
 
-                    drawFighter(ctx, x, y, who, face, state, dmg, name, hammer, swingAge, alpha, you, aim, swingAim) {
+        drawFighter(ctx, x, y, who, face, state, dmg, name, hammer, swingAge, alpha, you, aim, swingAim, heavySwing = false) {
             const color = who.color;
             drawRunner(ctx, x, y, 34, 56, who, face, this.anim, state === 1 ? 1 : 0, alpha);
             const cx = x + 34 / 2, cy = y + 30;
-            const swinging = state === 3 || swingAge < 0.22;
+            const duration = heavySwing ? 0.28 : 0.22;
+            const swinging = state === 3 || swingAge < duration;
             ctx.save();
             ctx.translate(cx, cy);
-                        // The hammer points at the cursor and sweeps around the aim direction captured when the swing started
-                        const base = swinging && typeof swingAim === 'number' ? swingAim : (typeof aim === 'number' ? aim : (face > 0 ? 0 : Math.PI));
-                        const sweepProgress = Math.max(0, Math.min(1, swingAge < 0.22 ? swingAge / 0.22 : 0.5));
-                        const angle = base + (swinging ? -0.8 + sweepProgress * 1.6 : -0.35);
-                        ctx.globalAlpha = alpha;
-                        if (swinging) {
-                            ctx.fillStyle = 'rgba(253,230,138,.16)'; ctx.strokeStyle = 'rgba(253,230,138,.85)'; ctx.lineWidth = 4;
-                            ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, 136, base - 0.86, base + 0.86); ctx.closePath(); ctx.fill(); ctx.stroke();
-                        }
-                        ctx.rotate(angle);
-                        ctx.fillStyle = '#92400e'; ctx.fillRect(0, -3, 62, 6);
-                        ctx.fillStyle = hammer ? '#f472b6' : '#9ca3af'; roundRect(ctx, 52, -17, 30, 34, 6); ctx.fill();
-                        ctx.restore();
+            const base = swinging && typeof swingAim === 'number' ? swingAim : (typeof aim === 'number' ? aim : (face > 0 ? 0 : Math.PI));
+            const sweepProgress = Math.max(0, Math.min(1, swingAge / duration));
+            const angle = base + (swinging ? -0.8 + sweepProgress * 1.6 : -0.35);
+            ctx.globalAlpha = alpha;
+            if (swinging && heavySwing) {
+                ctx.fillStyle = 'rgba(253,230,138,.12)'; ctx.strokeStyle = 'rgba(253,230,138,.8)'; ctx.lineWidth = 4;
+                ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, 136, base - 0.86, base + 0.86); ctx.closePath(); ctx.fill(); ctx.stroke();
+            }
+            ctx.rotate(angle);
+            ctx.fillStyle = '#92400e'; ctx.fillRect(0, -3, 62, 6);
+            ctx.fillStyle = hammer ? '#f472b6' : '#9ca3af'; roundRect(ctx, 52, -17, 30, 34, 6); ctx.fill();
+            ctx.restore();
             if (state === 6) { ctx.strokeStyle = 'rgba(56,189,248,.9)'; ctx.lineWidth = 3; ctx.strokeRect(x - 3, y - 3, 40, 62); }
             if (state === 4) { ctx.strokeStyle = 'rgba(125,211,252,.85)'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(cx, cy, 44, 0, TAU); ctx.stroke(); }
             if (!this.s.preview) nameTag(ctx, `${you ? 'You' : name} · ${Math.round(dmg)}%`, cx, y - 14, you ? '#fff' : color);
@@ -1631,11 +1636,11 @@
             for (const r of s.remoteList()) {
                 if (r.a === 5) continue;
                 const swingAge = r.swing ? (performance.now() - r.swing) / 1000 : 9;
-                this.drawFighter(ctx, r.x, r.y, r, r.f || 1, r.a, r.ex?.d || 0, r.name, r.ex?.h, swingAge, r.ex?.i ? 0.5 : 0.95, false, r.ex?.t, r.swingAim);
+                this.drawFighter(ctx, r.x, r.y, r, r.f || 1, r.a, r.ex?.d || 0, r.name, r.ex?.h, swingAge, r.ex?.i ? 0.5 : 0.95, false, r.ex?.t, r.swingAim, r.swingHeavy ?? Boolean(r.ex?.hv));
             }
             if (this.respawn <= 0) {
                 const alpha = this.invuln > 0 ? 0.55 + Math.sin(this.anim * 22) * 0.25 : 1;
-                this.drawFighter(ctx, me.x, me.y, s.local, me.face, this.state, this.dmg, 'You', this.hammer > 0, this.swingT > 0 ? 0.22 - this.swingT : 9, alpha, true, this.aim, this.swingAim);
+                this.drawFighter(ctx, me.x, me.y, s.local, me.face, this.state, this.dmg, 'You', this.hammer > 0, this.swingT > 0 ? (this.swingHeavy ? 0.28 : 0.22) - this.swingT : 9, alpha, true, this.aim, this.swingAim, this.swingHeavy);
                 if (this.hitFlash > 0) { ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.fillRect(me.x, me.y, me.w, me.h); }
             }
             this.particles.draw(ctx);
@@ -1662,12 +1667,17 @@
                 { x: -60, y: 0, w: 60, h: this.H }, { x: this.W, y: 0, w: 60, h: this.H }
             ];
             this.cover = [];
-            for (let i = 0; i < 20; i++) {
-                const horizontal = r() < 0.5;
-                const wall = { x: 200 + r() * (this.W - 500), y: 200 + r() * (this.H - 450), w: horizontal ? 160 + r() * 200 : 50, h: horizontal ? 50 : 160 + r() * 200 };
-                if (dist(wall.x + wall.w / 2, wall.y + wall.h / 2, this.W / 2, this.H / 2) < 260) continue;
-                this.cover.push(wall);
+            for (const [x, y] of [[440, 350], [880, 620]]) {
+                for (const sx of [1, -1]) for (const sy of [1, -1]) {
+                    const mirror = wall => ({
+                        x: sx > 0 ? wall.x : this.W - wall.x - wall.w,
+                        y: sy > 0 ? wall.y : this.H - wall.y - wall.h,
+                        w: wall.w, h: wall.h
+                    });
+                    this.cover.push(mirror({ x, y, w: 210, h: 46 }), mirror({ x, y: y + 46, w: 46, h: 140 }));
+                }
             }
+            this.multiplayer = !s.practice && s.roster.size > 1;
             this.walls.push(...this.cover);
             this.orbs = [];
             for (let i = 0; i < 8; i++) this.orbs.push({ x: 250 + r() * (this.W - 500), y: 250 + r() * (this.H - 500), t: 0 });
@@ -1719,7 +1729,10 @@
         }
 
         cameraZoom(w = this.s.vw || 1280, h = this.s.vh || 720) {
-            return this.s.overlay.classList.contains('has-touch') && w < 760 ? 1.05 : clamp(h / 900, 0.7, 1.2);
+            if (this.s.overlay.classList.contains('has-touch') && w < 760) {
+                return w >= h ? clamp(h / 760, 0.62, 0.98) : clamp(w / 520, 0.68, 1.02);
+            }
+            return clamp(h / 900, 0.7, 1.2);
         }
 
         weaponInfo(type = this.weapon) {
@@ -1758,7 +1771,7 @@
             for (const p of this.packs) p.t = (p.t ?? 18) - dt;
             this.packs = this.packs.filter(p => p.t > 0);
             const wave = 1 + Math.floor(s.t / 35);
-            if (wave !== this.wave) { this.wave = wave; s.toast(`WAVE ${wave} · reinforcements incoming`, '#a78bfa'); }
+            if (wave !== this.wave) { this.wave = wave; if (!this.multiplayer) s.toast(`WAVE ${wave} · reinforcements incoming`, '#a78bfa'); }
             this.invuln = Math.max(0, this.invuln - dt); this.fireCd -= dt; this.dashCd -= dt; this.novaCd -= dt; this.nova = Math.max(0, this.nova - dt);
             const zoom = this.zoom || 1;
             const mx = this.cam.x + (s.mouse.x - s.vw / 2) / zoom, my = this.cam.y + (s.mouse.y - s.vh / 2) / zoom;
@@ -1821,12 +1834,12 @@
             this.muzzle = Math.max(0, (this.muzzle || 0) - dt);
 
             // drones
-            if (this.dead <= 0) {
+            if (this.dead <= 0 && !this.multiplayer) {
                 this.spawnT -= dt;
-                const cap = Math.min(22, 5 + Math.floor(s.t / 12));
-                if (this.spawnT <= 0 && this.drones.length < cap) { this.spawnDrone(); this.spawnT = Math.max(0.5, 1.9 - s.t / 100); }
+                const cap = 4;
+                if (this.spawnT <= 0 && this.drones.length < cap) { this.spawnDrone(); this.spawnT = Math.max(1.8, 3.6 - s.t / 300); }
             }
-            const targets = this.dead > 0 || s.question ? null : me;
+            const targets = this.dead > 0 ? null : me;
             for (const d of this.drones) {
                 d.hit = Math.max(0, d.hit - dt);
                 if (!targets) { d.vx *= 0.95; d.vy *= 0.95; }
@@ -1847,7 +1860,7 @@
                         if (od > 0 && od < 40) { wantX += ox / od * 0.8; wantY += oy / od * 0.8; }
                     }
                     d.vx = lerp(d.vx, wantX * sp, 0.08); d.vy = lerp(d.vy, wantY * sp, 0.08);
-                    if (dd < d.r + me.r && this.invuln <= 0 && !s.question) this.damage(15, null, d);
+                    if (dd < d.r + me.r && this.invuln <= 0) this.damage(15, null, d);
                 }
                 d.x += d.vx * dt; d.y += d.vy * dt;
                 for (const w of this.cover) pushCircleOutOfRect(d, w);
@@ -1860,6 +1873,7 @@
                 for (let i = 0; i < steps && b.life > 0; i++) {
                     b.x += b.vx * dt / steps; b.y += b.vy * dt / steps;
                     if (this.walls.some(w => b.x > w.x && b.x < w.x + w.w && b.y > w.y && b.y < w.y + w.h)) { b.life = 0; this.particles.burst(b.x, b.y, '#94a3b8', 4, 80, 0.2, 3); break; }
+                    if (this.hitBot?.(b)) break;
                     if (b.own) {
                         for (const d of this.drones) {
                             if (d.hp > 0 && dist(b.x, b.y, d.x, d.y) < d.r + 4) {
@@ -1869,7 +1883,7 @@
                                 break;
                             }
                         }
-                    } else if (this.dead <= 0 && this.invuln <= 0 && !s.question && dist(b.x, b.y, me.x, me.y) < me.r + 4) {
+                    } else if (this.dead <= 0 && this.invuln <= 0 && dist(b.x, b.y, me.x, me.y) < me.r + 4) {
                         b.life = 0;
                         this.damage(b.dmg, b.by, null);
                     }
@@ -1929,7 +1943,7 @@
             return { x: Math.round(m.x), y: Math.round(m.y), vx: Math.round(m.vx), vy: Math.round(m.vy), f: +m.aim.toFixed(2), a: this.dead > 0 ? 1 : 0, hp: Math.round(this.hp), ex: { o: this.overdrive > 0 ? 1 : 0, w: this.weapon } };
         }
 
-        goalText() { return `${this.kills} drones · ${this.pk} players · HP ${Math.max(0, Math.round(this.hp))}`; }
+        goalText() { return `${this.multiplayer ? `${this.pk} player KOs` : `${this.kills} drones · ${this.pk} players`} · HP ${Math.max(0, Math.round(this.hp))}`; }
         touchLayout() { return { stick: true, buttons: [{ k: 'Space', label: 'Dash' }, { k: 'KeyE', label: 'Blast', cls: 'e' }] }; }
         hint() { return 'WASD move · hold click / canvas touch to aim and fire · Space dash · E shockwave · colored pickups = timed weapons / repairs · Q reload'; }
 
@@ -1982,6 +1996,13 @@
                 ctx.strokeStyle = '#6366f1'; ctx.lineWidth = 2; ctx.strokeRect(wl.x + 1.5, wl.y + 1.5, wl.w - 3, wl.h - 3);
                 ctx.fillStyle = '#fbbf24';
                 for (let i = 12; i < wl.w - 8; i += 36) ctx.fillRect(wl.x + i, wl.y + wl.h - 7, 12, 3);
+                if (wl.h > 60 && wl.w > 30) {
+                    ctx.strokeStyle = 'rgba(148,163,184,.25)'; ctx.lineWidth = 1;
+                    for (let y = 20; y < wl.h - 15; y += 30) {
+                        ctx.beginPath(); ctx.moveTo(wl.x + 6, wl.y + y); ctx.lineTo(wl.x + wl.w - 6, wl.y + y); ctx.stroke();
+                    }
+                    ctx.fillStyle = '#38bdf8'; ctx.fillRect(wl.x + 8, wl.y + 14, 4, 8);
+                }
             }
             for (const o of this.orbs) {
                 if (o.t > 0) continue;

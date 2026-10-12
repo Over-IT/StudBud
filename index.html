@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>StudBud | Plan, Study, Play</title>
+    <title>StudBud</title>
     <meta name="theme-color" content="#111827">
     <meta name="description" content="StudBud is a student hub: plan classes, assignments and grades, study with flashcards and focus tools, then play live multiplayer games powered by your own flashcards.">
     <link rel="manifest" href="./manifest.webmanifest">
@@ -19,7 +19,7 @@
         <div class="glass-card auth-card">
             <div class="logo-container">
                 <img class="logo-mark" src="./icons/studbud.svg" alt="" width="44" height="44">
-                <span class="logo-text">StudBud<br><small>Plan · Study · Play</small></span>
+                <span class="logo-text">StudBud</span>
             </div>
             <h1 id="auth-title">Sign in to StudBud</h1>
             <p id="auth-description">Your classes, assignments, study history, and preferences sync to your account.</p>
@@ -46,7 +46,7 @@
             <div class="sidebar-header">
                 <div class="logo-container">
                     <img class="logo-mark" src="./icons/studbud.svg" alt="" width="40" height="40">
-                    <span class="logo-text">StudBud<br><small>Plan · Study · Play</small></span>
+                    <span class="logo-text">StudBud</span>
                 </div>
                 <button id="sidebar-collapse-btn" class="icon-btn sidebar-collapse-btn" aria-label="Collapse sidebar" aria-expanded="true" title="Collapse sidebar">
                     <i class="fas fa-chevron-left"></i>
@@ -149,6 +149,10 @@
                     </button>
                 </div>
             </header>
+            <aside id="site-notice" class="site-notice hidden" aria-label="Site announcement">
+                <div><strong>Announcement</strong><p id="site-notice-message"></p></div>
+                <button type="button" class="icon-btn" data-action="dismiss-site-notice" aria-label="Dismiss announcement"><i class="fas fa-times" aria-hidden="true"></i></button>
+            </aside>
 
             <!-- VIEW CONTAINERS -->
             <div id="view-container">
@@ -188,7 +192,7 @@
                         <div class="glass-card widget schedule-widget">
                             <div class="view-header">
                                 <div><h3 id="daily-schedule-title">Today's PCHS Schedule</h3><p id="daily-schedule-type" class="schedule-day-type"></p></div>
-                                <button class="secondary-btn" data-target="schedule-view">Set Schedule</button>
+                                <button id="daily-schedule-edit" class="secondary-btn" data-target="schedule-view">Set Schedule</button>
                             </div>
                             <ul id="daily-schedule-list" class="empty-list"></ul>
                         </div>
@@ -639,7 +643,7 @@
                                         <div class="multiplayer-goals">
                                             <label class="time-slider">Time limit: <strong id="host-game-time-value">5 min</strong><input id="host-game-time" name="timeLimit" type="range" min="1" max="60" step="1" value="5"></label>
                                                                                     </div>
-                                                                                    <label>Refill per correct answer<select id="host-game-reward" name="questionReward">
+                                                                                    <label><span id="host-game-resource-label">Energy per correct answer</span><select id="host-game-reward" name="questionReward">
                                                                                         <option value="10">10 (hard)</option>
                                                                                         <option value="20" selected>20 (normal)</option>
                                                                                         <option value="30">30 (easy)</option>
@@ -649,7 +653,31 @@
                                     </form>
                                     </div>
                                     <div id="multiplayer-preview" class="multiplayer-preview">
-                                        <div class="preview-heading"><div><strong id="multiplayer-preview-title">City Escape</strong><span id="multiplayer-preview-description">Scale a lively rooftop course with every correct answer.</span></div><button id="preview-practice-btn" class="secondary-btn" type="button"><i class="fas fa-gamepad"></i> Practice this game</button></div>
+                                        <div class="preview-heading"><div><strong id="multiplayer-preview-title">City Escape</strong><span id="multiplayer-preview-description">Scale a lively rooftop course with every correct answer.</span></div><button id="preview-practice-btn" class="secondary-btn" type="button" data-action="toggle-solo-settings" aria-expanded="false"><i class="fas fa-gamepad" aria-hidden="true"></i> Set up solo game</button></div>
+                                        <form id="solo-game-settings" class="solo-game-settings hidden">
+                                            <label>Game time
+                                                <select name="timeLimit">
+                                                    <option value="0">No time limit</option>
+                                                    <option value="300">5 minutes</option>
+                                                    <option value="600" selected>10 minutes</option>
+                                                    <option value="1200">20 minutes</option>
+                                                    <option value="1800">30 minutes</option>
+                                                    <option value="3600">60 minutes</option>
+                                                </select>
+                                            </label>
+                                            <label><span id="solo-game-resource-label">Energy per correct answer</span>
+                                                <select name="questionReward">
+                                                    <option value="10">10 · challenging</option>
+                                                    <option value="20" selected>20 · balanced</option>
+                                                    <option value="30">30 · relaxed</option>
+                                                    <option value="50">50 · generous</option>
+                                                    <option value="75">75 · very generous</option>
+                                                    <option value="100">100 · full refill</option>
+                                                </select>
+                                            </label>
+                                            <button class="primary-btn" type="button" data-action="start-solo-game"><i class="fas fa-play" aria-hidden="true"></i> Start solo game</button>
+                                            <small>Correct answers refill energy. Solo games award no multiplayer coins.</small>
+                                        </form>
                                         <canvas id="multiplayer-game-canvas" width="900" height="360" aria-label="Animated preview of the selected multiplayer game"></canvas>
                                     </div>
                                 </section>
@@ -689,9 +717,9 @@
                             </section>
                             <section id="waiting-arcade-card" class="glass-card waiting-arcade-card hidden">
                                 <div><h3>Warm-up</h3><p>Hop through grassy trails, dodge traffic, ride floating logs, and watch for the express train.</p></div>
-                                <canvas id="waiting-runner-canvas" width="520" height="360" aria-label="Pregame warm-up: hop across roads, rivers and tracks. Tap to hop forward or swipe to move in any direction."></canvas>
-                                <div class="waiting-runner-meta"><span>Rows <strong id="waiting-runner-score">0</strong> · Best <strong id="waiting-runner-best">0</strong></span><button id="waiting-runner-start" class="secondary-btn" type="button">Start hopping</button></div>
-                                <div class="waiting-practice"><span>Want a full-screen warm-up?</span><button id="waiting-practice-btn" class="primary-btn" type="button"><i class="fas fa-gamepad"></i> Practice this game</button></div>
+                                <canvas id="waiting-runner-canvas" width="520" height="360" aria-label="Pregame warm-up: tap to hop forward, swipe to change lanes, and keep moving as the screen scrolls."></canvas>
+                                <div class="waiting-runner-meta"><span>Rows <strong id="waiting-runner-score">0</strong> · Best <strong id="waiting-runner-best">0</strong></span><button id="waiting-runner-start" class="secondary-btn" type="button">Start warm-up</button></div>
+                                <div class="waiting-practice"><span>Want to play solo with bots? Practice awards no coins.</span><button id="waiting-practice-btn" class="primary-btn" type="button"><i class="fas fa-gamepad" aria-hidden="true"></i> Solo practice · no coins</button></div>
                             </section>
                         </main>
                     </div>
@@ -703,6 +731,8 @@
                         <div class="admin-tabs">
                             <button type="button" class="secondary-btn selected" data-admin-tab="decks">Public flashcards</button>
                             <button type="button" class="secondary-btn" data-admin-tab="users">Users</button>
+                            <button type="button" class="secondary-btn" data-admin-tab="games">Game testing</button>
+                            <button type="button" class="secondary-btn" data-admin-tab="notices">Announcements</button>
                         </div>
                         <form id="admin-search-form" class="admin-search">
                             <input id="admin-search" type="search" placeholder="Search by title or username" autocomplete="off">

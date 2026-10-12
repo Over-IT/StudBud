@@ -474,7 +474,9 @@ as $$
         ('skin_sprout', 70), ('skin_sunny', 75), ('skin_berry', 80), ('skin_storm', 85), ('skin_minty', 90),
         ('skin_celestial', 750), ('skin_inferno', 800),
         ('hat_visor', 65), ('hat_bucket', 75), ('hat_astronaut', 210), ('hat_cosmic', 720),
-        ('acc_comet', 450), ('acc_aura', 760)
+        ('acc_comet', 450), ('acc_aura', 760),
+        ('acc_rainbow_trail', 360), ('acc_firefly_trail', 280), ('acc_stardust_trail', 520), ('acc_leaf_trail', 240),
+        ('acc_prism_effect', 680), ('acc_frost_effect', 420), ('acc_ember_effect', 500), ('acc_heart_effect', 320)
     ), pets(id, rarity) as (values
         ('pet_puppy', 'common'), ('pet_kitten', 'common'), ('pet_hamster', 'common'), ('pet_bunny', 'common'),
         ('pet_chick', 'common'), ('pet_frog', 'common'), ('pet_turtle', 'common'), ('pet_goldfish', 'common'),
@@ -878,6 +880,20 @@ as $$
 declare
     v_state jsonb := p_room.state;
 begin
+    v_state := jsonb_set(v_state, '{players}', coalesce((
+        select jsonb_agg(
+            player || jsonb_build_object(
+                'skin', coalesce(profile.equipped_skin, player ->> 'skin', ''),
+                'hat', coalesce(profile.equipped_hat, player ->> 'hat', ''),
+                'accessory', coalesce(profile.equipped_accessory, player ->> 'accessory', '')
+            ) order by position
+        )
+        from jsonb_array_elements(coalesce(v_state -> 'players', '[]'::jsonb))
+            with ordinality as members(player, position)
+        left join public.studbud_multiplayer_profiles profile
+            on profile.user_id::text = player ->> 'id'
+    ), '[]'::jsonb), true);
+
     if auth.uid() is distinct from p_room.host_id
         and jsonb_typeof(v_state -> 'question') = 'object' then
         v_state := jsonb_set(
@@ -1666,6 +1682,7 @@ begin
                 coalesce(p.wins, 0) as wins,
                 (select count(*) from public.studbud_community_decks d where d.owner_id = a.id) as decks,
                 exists (select 1 from public.studbud_banned_users b where b.user_id = a.id) as banned,
+                (select b.reason from public.studbud_banned_users b where b.user_id = a.id) as ban_reason,
                 coalesce((select s.force_change from public.studbud_username_state s where s.user_id = a.id), false) as force_change
             from auth.users a
             left join public.studbud_multiplayer_profiles p on p.user_id = a.id
@@ -2247,3 +2264,76 @@ end;
 $$;
 revoke all on function public.studbud_view_profile(uuid) from public, anon;
 grant execute on function public.studbud_view_profile(uuid) to authenticated;
+
+-- Admin-only full-card review; public discovery still uses its existing preview.
+create or replace function public.studbud_admin_get_deck(p_deck_id uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_deck jsonb;
+begin
+    perform public.studbud_require_admin();
+    select jsonb_build_object('id', d.id, 'title', d.title, 'card_count', d.card_count, 'cards', d.cards)
+        into v_deck from public.studbud_community_decks d where d.id = p_deck_id;
+    if v_deck is null then raise exception 'That shared set no longer exists.'; end if;
+    return v_deck;
+end;
+$$;
+revoke all on function public.studbud_admin_get_deck(uuid) from public, anon;
+grant execute on function public.studbud_admin_get_deck(uuid) to authenticated;
+
+create table if not exists public.studbud_site_notice (
+    id integer primary key check (id = 1),
+    message text not null check (char_length(message) <= 1000),
+    active boolean not null default false,
+    updated_at timestamptz not null default now(),
+    updated_by uuid references auth.users(id) on delete set null,
+    constraint studbud_site_notice_message_check check (not active or char_length(btrim(message)) > 0)
+);
+alter table public.studbud_site_notice enable row level security;
+revoke all on public.studbud_site_notice from public, anon, authenticated;
+
+create or replace function public.studbud_get_site_notice()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    if auth.uid() is null then raise exception 'Sign in to see announcements.'; end if;
+    return (
+        select jsonb_build_object('message', n.message, 'active', n.active, 'updated_at', n.updated_at)
+        from public.studbud_site_notice n
+        where n.active or public.studbud_is_admin()
+    );
+end;
+$$;
+revoke all on function public.studbud_get_site_notice() from public, anon;
+grant execute on function public.studbud_get_site_notice() to authenticated;
+
+create or replace function public.studbud_admin_set_site_notice(p_message text, p_active boolean default true)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    perform public.studbud_require_admin();
+    if p_message is null or char_length(p_message) > 1000 or p_active is null
+        or (p_active and char_length(btrim(p_message)) = 0) then
+        raise exception 'Enter an announcement of 1-1000 characters before publishing.';
+    end if;
+    insert into public.studbud_site_notice(id, message, active, updated_at, updated_by)
+        values (1, btrim(p_message), p_active, now(), auth.uid())
+    on conflict(id) do update
+        set message = excluded.message, active = excluded.active,
+            updated_at = excluded.updated_at, updated_by = excluded.updated_by;
+end;
+$$;
+revoke all on function public.studbud_admin_set_site_notice(text, boolean) from public, anon;
+grant execute on function public.studbud_admin_set_site_notice(text, boolean) to authenticated;

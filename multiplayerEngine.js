@@ -198,7 +198,7 @@
         }
     }
 
-    // A meter (ammo, energy, bait…) that is spent by playing and refilled by answering questions.
+    // Resources are spent by playing and accumulate without a cap from correct answers.
     class Resource {
         constructor(label, color, max, start, mult = 1) {
             this.label = label; this.color = color; this.max = max; this.value = start; this.mult = mult;
@@ -229,6 +229,18 @@
         onEvent() { }
         goalText() { return ''; }
         hint() { return ''; }
+        touchHint() {
+            return {
+                skyline: 'Joystick to move · Jump again in the air · Dash across gaps · Recharge on a wide ledge',
+                duel: 'Joystick to move · Jump twice · Tap the arena to swing · Heavy uses your last aim · Shield or Dodge to escape',
+                shooter: 'Joystick to move · Hold the arena to aim and fire · Dash between cover · Recharge behind cover',
+                market: 'Joystick to move · Hold Sprint for speed · Pick up and deliver packages · Building recesses are away from traffic',
+                river: 'Joystick to steer · Tap the water to cast · Shallow banks are calm places to recharge',
+                sports: 'Joystick to dribble · Tap toward the goal to kick · Hold Sprint to run faster',
+                crypto: 'Tap an asset to select it · Buy low and sell high · Recharge to keep trading',
+                hack: 'Joystick to move · Use nearby terminals · Recharge between hacks'
+            }[this.s.mode] || 'Use the on-screen controls · Recharge opens a flashcard';
+        }
     }
 
     class Session {
@@ -238,14 +250,16 @@
             this.api = options.api;
             this.isHost = Boolean(options.isHost);
             this.onLeave = options.onLeave;
+            this.onRestart = options.onRestart;
             this.finishRoom = options.finishRoom;
             this.practice = Boolean(options.practice);
+            this.testing = Boolean(options.testing);
             this.preview = Boolean(options.preview);
             this.correct = 0;
-            this.reward = Math.min(100, Math.max(5, Number(this.room.state?.question_reward) || 20));
+            this.reward = Math.min(100, Math.max(1, Number(options.questionReward ?? this.room.state?.question_reward) || 20));
             this.mode = this.room.mode;
             this.code = this.room.room_code;
-            this.seed = hashStr(`${this.code}:${this.mode}`);
+            this.seed = Number.isInteger(options.seed) ? options.seed >>> 0 : hashStr(`${this.code}:${this.mode}`);
             this.roster = new Map();
             this.remotes = new Map();
             this.keys = new Set();
@@ -270,9 +284,11 @@
             this.done = false;
             this.lastReport = { score: -1, answered: -1, at: 0 };
             this.startedAt = Date.parse(this.room.started_at) || Date.now();
-            this.deadline = this.practice ? Infinity : this.room.goal_type === 'time'
-                ? this.startedAt + Number(this.room.time_limit_seconds) * 1000
-                : this.startedAt + 12 * 60000;
+            this.deadline = this.practice
+                ? Number(options.timeLimitSeconds) > 0 ? this.startedAt + Number(options.timeLimitSeconds) * 1000 : Infinity
+                : this.room.goal_type === 'time'
+                    ? this.startedAt + Number(this.room.time_limit_seconds) * 1000
+                    : this.startedAt + 12 * 60000;
             this.updateRoster(this.room);
             this.local = this.roster.get(this.user.id) || { id: this.user.id, nickname: 'Player', color: PALETTE[0] };
 
@@ -303,12 +319,17 @@
             const ids = new Set();
             players.forEach(player => {
                 ids.add(player.id);
-                this.roster.set(player.id, {
+                const info = this.roster.get(player.id) || {};
+                Object.assign(info, {
                     id: player.id, nickname: player.nickname, score: Number(player.score || 0), color: playerColor(player), avatar: player.avatar,
-                    cos: { skin: player.skin || '', hat: player.hat || '', acc: player.accessory || '' }
+                    cos: playerCosmetics(player)
                 });
+                this.roster.set(player.id, info);
+                const remote = this.remotes.get(player.id);
+                if (remote) { remote.cos = info.cos; remote.color = info.color; remote.name = info.nickname; }
             });
             for (const id of [...this.roster.keys()]) if (!ids.has(id)) { this.roster.delete(id); this.remotes.delete(id); }
+            if (this.roster.has(this.user.id)) this.local = this.roster.get(this.user.id);
         }
 
         updateRoom(room) {
@@ -332,6 +353,10 @@
         }
 
         async loadCards(fallback) {
+            if (this.practice) {
+                this.cards = fallback || [];
+                return;
+            }
             try {
                 this.cards = await this.api.getCards(this.code);
             } catch (error) {
@@ -393,7 +418,7 @@
                 const r = this.remotes.get(info.id);
                 const isMe = info.id === this.user.id;
                 rows.push({
-                    id: info.id, n: info.nickname, color: info.color,
+                    id: info.id, n: info.nickname, color: info.color, cos: info.cos,
                     s: Math.round(Number(isMe ? this.score : r ? r.score : info.score) || 0),
                     g: Math.round(Number(isMe ? this.goal : r ? r.goal : (this.game?.scoreGoal === false ? info.score || 0 : 0)) || 0),
                     d: isMe ? this.done : Boolean(r?.done)
@@ -411,7 +436,11 @@
         }
 
         checkEnd() {
-            if (this.practice || this.over || this.ending || !this.isHost || this.countdown > 0) return;
+            if (this.practice) {
+                if (!this.testing && !this.over && Date.now() >= this.deadline) this.finish(this.standings());
+                return;
+            }
+            if (this.over || this.ending || !this.isHost || this.countdown > 0) return;
             const now = Date.now();
             const rows = this.standings();
             const limit = Number(this.room.point_limit);
@@ -465,7 +494,7 @@
         // Spend from the game's resource; nags the player to answer a question when empty.
         spend(n) {
             const res = this.game.res;
-            if (this.practice) { if (res) res.value = res.max; return true; }
+            if (this.preview || this.testing) return true;
             if (res.spend(n)) return true;
             const now = performance.now();
             if (now - (this.lastNeed || 0) > 1800) {
@@ -478,14 +507,13 @@
         }
 
         // Amount of the game's resource a correct answer is worth (host-configured).
-        rewardAmount() { return Math.max(1, Math.round(this.reward * (this.game.res?.mult || 1))); }
+        rewardAmount() { return Math.max(1, Math.round(this.reward)); }
 
         refill() {
             const res = this.game.res;
             if (!res) return 0;
             const n = this.rewardAmount();
-            if (this.practice) res.value = res.max;
-            else res.add(n);
+            res.add(n);
             this.sfx('refill');
             this.toast(`+${n} ${res.label}`, res.color);
             return n;
@@ -496,16 +524,16 @@
             const res = this.game.res;
             if (!res || this.paused || this.question || this.over || this.countdown > 0) return;
             this.ask(correct => {
+                if (this.testing) return;
                 if (correct) this.refill();
                 else if (correct === false) this.toast(`Wrong answer — no ${res.label.toLowerCase()}`, '#f87171');
-            }, `Correct answer: +${this.rewardAmount()} ${res.label}`, true);
+            }, this.testing ? 'Admin test question · resources are unlimited' : `Correct answer: +${this.rewardAmount()} ${res.label}`, true);
         }
 
         // Automatic triggers (mystery boxes, chests, pads) are blocked briefly after any question closes.
         ask(callback, note, manual, opts) {
             if (this.preview) return false;
             if (opts?.force && this.question) this.closeQuestion(true);
-            if (this.practice && !manual) return false;
             if (this.paused || this.question || this.over || this.countdown > 0) return false;
             if (!manual && performance.now() < (this.askCooldownUntil || 0)) return false;
             if (!this.cards.length) { this.toast('Questions are still loading…', '#fbbf24'); return false; }
@@ -532,7 +560,8 @@
         showQuestion(card, options, note) {
             this.resetTouchStick?.();
             this.overlay?.querySelectorAll('.mpg-touch button.on').forEach(b => b.classList.remove('on'));
-            this.keys.clear(); this.mouse.down = false; this.mouse.rdown = false;
+            this.keys.clear(); this.justPressed.clear();
+            this.mouse.down = false; this.mouse.rdown = false; this.mouse.pressed = false; this.mouse.rpressed = false;
             const box = this.overlay.querySelector('.mpg-question');
             box.querySelector('.mpg-q-prompt').textContent = card.front;
             box.querySelector('.mpg-q-options').innerHTML = options.map((option, i) =>
@@ -541,7 +570,9 @@
             const res = this.game.res;
             box.querySelector('small').textContent = note || (res ? `Correct answer: +${this.rewardAmount()} ${res.label}` : 'Question');
             box.classList.remove('hidden');
+            box.querySelector('[data-q]')?.focus({ preventScroll: true });
             this.sfx('question');
+            return true;
         }
 
         answerQuestion(index) {
@@ -576,7 +607,10 @@
         closeQuestion(resume) {
             this.question = null;
             this.askCooldownUntil = performance.now() + 6000;
-            this.overlay.querySelector('.mpg-question').classList.add('hidden');
+            const box = this.overlay.querySelector('.mpg-question');
+            const restoreFocus = box.contains(document.activeElement);
+            box.classList.add('hidden');
+            if (restoreFocus) this.canvas.focus({ preventScroll: true });
             if (resume) this.paused = false;
         }
 
@@ -609,12 +643,27 @@
                 keydown: e => {
                     if (typing(e)) return;
                     if (this.question) {
+                        if (e.code === 'Escape') { this.skipQuestion(); e.preventDefault(); return; }
+                        if (e.code === 'Tab') {
+                            const buttons = [...this.overlay.querySelector('.mpg-question').querySelectorAll('button')];
+                            const index = buttons.indexOf(document.activeElement);
+                            buttons[(index + (e.shiftKey ? -1 : 1) + buttons.length) % buttons.length]?.focus();
+                            e.preventDefault(); return;
+                        }
+                        if (e.code === 'Enter' || e.code === 'Space') return;
                         const n = Number(e.key);
                         if (n >= 1 && n <= 4) this.answerQuestion(n - 1);
                         e.preventDefault();
                         return;
                     }
-                    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) e.preventDefault();
+                    if (e.code === 'Tab') {
+                        const targets = [this.canvas, ...this.overlay.querySelectorAll('.mpg-hud button, .mpg-hud summary, .mpg-touch button')].filter(el => el.offsetWidth && el.offsetHeight);
+                        const index = targets.indexOf(document.activeElement);
+                        targets[(index + (e.shiftKey ? -1 : 1) + targets.length) % targets.length]?.focus();
+                        e.preventDefault(); return;
+                    }
+                    if ((e.code === 'Enter' || e.code === 'Space') && this.overlay.contains(e.target) && e.target.closest('button, summary')) return;
+                    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
                     if (e.code === 'KeyQ' && !e.repeat && this.game?.res) { this.recharge(); return; }
                     if (!e.repeat) this.justPressed.add(e.code);
                     this.keys.add(e.code);
@@ -628,6 +677,8 @@
             window.addEventListener('blur', this.handlers.blur);
             window.addEventListener('resize', this.handlers.resize);
             const canvas = this.canvas;
+            canvas.tabIndex = 0;
+            canvas.setAttribute('aria-label', 'Game area. Use the game controls, Q to refill, or Tab to reach game buttons.');
             canvas.addEventListener('pointermove', e => {
                 if (this.aimPointer != null && e.pointerId !== this.aimPointer) return;
                 const b = canvas.getBoundingClientRect();
@@ -656,7 +707,25 @@
                 if (!target) return;
                 if (target.dataset.q !== undefined && !target.classList.contains('mpg-qbtn')) this.answerQuestion(Number(target.dataset.q));
                 else if (target.classList.contains('mpg-q-skip')) this.skipQuestion();
-                else if (target.classList.contains('mpg-recharge')) this.recharge();
+                else if (target.classList.contains('mpg-recharge') || target.classList.contains('mpg-qbtn')) this.recharge();
+                else if (target.classList.contains('mpg-board-toggle')) {
+                    const open = this.overlay.classList.toggle('board-open');
+                    target.setAttribute('aria-expanded', String(open));
+                    this.layoutHud();
+                }
+                else if (target.classList.contains('mpg-test-pause') && this.testing) {
+                    if (this.paused) {
+                        const elapsed = Date.now() - this.testPauseAt;
+                        this.startedAt += elapsed;
+                        if (Number.isFinite(this.deadline)) this.deadline += elapsed;
+                        this.testPauseAt = null; this.paused = false; target.textContent = 'Pause';
+                    } else {
+                        this.testPauseAt = Date.now(); this.paused = true; target.textContent = 'Resume';
+                        this.keys.clear(); this.justPressed.clear(); this.resetTouchStick?.();
+                        this.mouse.down = false; this.mouse.rdown = false;
+                    }
+                }
+                else if (target.classList.contains('mpg-test-restart') && this.testing) this.onRestart?.();
                 else if (target.classList.contains('mpg-leave') || target.classList.contains('mpg-exit')) this.onLeave?.();
                 else if (target.classList.contains('mpg-end')) this.hostEnd();
             });
@@ -669,9 +738,11 @@
             overlay.innerHTML = `
                 <canvas class="mpg-canvas"></canvas>
                 <div class="mpg-top">
-                    <div class="mpg-chip"><strong class="mpg-name"></strong><span class="mpg-goal"></span>${this.practice ? '<small class="mpg-practice-indicator">Practice · unlimited energy</small>' : ''}</div>
+                    <div class="mpg-chip"><strong class="mpg-name"></strong><span class="mpg-goal"></span>${this.testing ? '<small class="mpg-practice-indicator">Admin testing · infinite energy</small>' : this.practice ? '<small class="mpg-practice-indicator">Solo game · no coins</small>' : ''}</div>
                     <div class="mpg-timer"></div>
                     <div class="mpg-actions">
+                        ${this.testing ? `<details class="mpg-test-tools"><summary>Tools</summary><div class="mpg-test-panel"><div><button type="button" class="mpg-test-pause">Pause</button>${this.onRestart ? '<button type="button" class="mpg-test-restart">Restart</button>' : ''}</div><pre class="mpg-test-stats"></pre></div></details>` : ''}
+                        <button type="button" class="mpg-board-toggle" aria-expanded="false" aria-label="Show match standings">Ranks</button>
                         <button type="button" class="mpg-end ${this.isHost && !this.practice ? '' : 'hidden'}">End match</button>
                         <button type="button" class="mpg-leave">${this.practice ? 'Close' : 'Leave'}</button>
                     </div>
@@ -680,7 +751,6 @@
                 <div class="mpg-score"><span>Score</span><strong>0</strong></div>
                 <div class="mpg-meter hidden">
                     <div class="mpg-meter-head"><span class="mpg-meter-label"></span><b class="mpg-meter-value"></b></div>
-                    <div class="mpg-meter-bar"><i></i></div>
                     <button type="button" class="mpg-recharge">Answer a question <kbd>Q</kbd></button>
                 </div>
                 <div class="mpg-hint"></div>
@@ -727,6 +797,11 @@
             const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches;
             const touchCapable = (navigator.maxTouchPoints || 0) > 0 || window.matchMedia?.('(hover: none)').matches;
             if (coarsePointer && touchCapable) overlay.classList.add('has-touch');
+            overlay.addEventListener('pointerdown', event => {
+                if (event.pointerType !== 'touch' || overlay.classList.contains('has-touch')) return;
+                overlay.classList.add('has-touch');
+                this.resize();
+            });
             const release = btn => {
                 const code = btn.dataset.k;
                 if (code) this.keys.delete(code);
@@ -861,8 +936,9 @@
                     q.type = 'button';
                     q.className = 'mpg-qbtn b-q';
                     q.dataset.q = '1';
-                    q.setAttribute('aria-label', 'Answer a question to recharge');
-                    q.innerHTML = '<span aria-hidden="true">?</span> Recharge';
+                    const resourceName = this.game.res.label;
+                    q.setAttribute('aria-label', this.testing ? 'Test a flashcard question' : `Answer a question to refill ${resourceName.toLowerCase()}`);
+                    q.innerHTML = `<span aria-hidden="true">?</span> ${this.testing ? 'Test question' : `Refill ${esc(resourceName)}`}`;
                     bindBtn(q);
                     overlay.querySelector('.mpg-status').appendChild(q);
                 }
@@ -940,34 +1016,36 @@
                 ? (this.game.formatValue ? this.game.formatValue(Math.round(this.goal)) : Math.round(this.goal).toLocaleString())
                 : Math.round(this.score).toLocaleString();
             const left = Math.max(0, this.deadline - Date.now());
-            o.querySelector('.mpg-timer').textContent = this.room.goal_type === 'time' && Number.isFinite(left)
+            const countdownTimer = this.practice ? Number.isFinite(this.deadline) : this.room.goal_type === 'time';
+            o.querySelector('.mpg-timer').textContent = countdownTimer && Number.isFinite(left)
                 ? `${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, '0')}`
                 : `${Math.floor(this.t / 60)}:${String(Math.floor(this.t) % 60).padStart(2, '0')}`;
             const touch = o.classList.contains('has-touch');
-            const hint = touch
-                ? (Date.now() < this.touchHintUntil ? this.game.touchHint?.() : '')
-                : this.game.hint();
+            const hint = touch ? (this.game.touchHint?.() || this.game.hint()) : this.game.hint();
             const controlsHint = touch ? '' : 'Keyboard/mouse controls';
             o.querySelector('.mpg-hint').textContent = this.question ? '' : [controlsHint, hint].filter(Boolean).join(' · ');
             this.applyTouchLayout?.();
             this.layoutHud();
+            const diagnostics = o.querySelector('.mpg-test-stats');
+            if (diagnostics) {
+                const me = this.game.me;
+                const position = me ? `${Math.round(me.x)}, ${Math.round(me.y)}` : 'Not applicable';
+                diagnostics.textContent = `Mode: ${this.mode}\nSeed: ${this.seed}\nTime: ${this.t.toFixed(1)}s\nPlayers: ${this.roster.size}\nPosition: ${position}\nResources: infinite\nScore: ${Math.round(this.score)}\nObjective: ${Math.round(this.goal)}`;
+            }
             o.querySelector('.mpg-board').innerHTML = this.standings().slice(0, 6).map((row, i) =>
-                `<li class="${row.id === this.user.id ? 'me' : ''}"><i style="background:${row.color}"></i><span>${i + 1}. ${esc(row.n)}</span><b>${this.valueText(row)}</b></li>`).join('');
+                `<li class="${row.id === this.user.id ? 'me' : ''}"><img class="mpg-player-avatar" src="${avatarUrl(row)}" alt="" draggable="false"><span>${i + 1}. ${esc(row.n)}</span><b>${this.valueText(row)}</b></li>`).join('');
         }
 
         updateMeter() {
             if (this.preview) return;
             const res = this.game.res;
             const box = this.overlay.querySelector('.mpg-meter');
-            if (!res) { box.classList.add('hidden'); return; }
+            if (!res || this.testing) { box.classList.add('hidden'); return; }
             box.classList.remove('hidden');
             const value = Math.round(res.value);
             box.querySelector('.mpg-meter-label').textContent = res.label;
             box.querySelector('.mpg-meter-value').textContent = `${value}`;
-            const fill = box.querySelector('.mpg-meter-bar i');
-            fill.style.width = `${Math.max(0, Math.min(100, res.value / res.max * 100))}%`;
-            fill.style.background = res.color;
-            box.classList.toggle('low', res.value < res.max * 0.2);
+            box.classList.toggle('low', res.value < 1);
         }
 
         renderResults() {
@@ -979,8 +1057,8 @@
             panel.innerHTML = `<div class="mpg-results-card">
                 <small>Match over</small>
                 <h2>${winner ? `${esc(winner.n)} wins!` : 'Game over'}</h2>
-                <ol>${rows.map((row, i) => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${i + 1}</span><i style="background:${row.color}"></i><strong>${esc(row.n)}</strong><b>${this.valueText(row)}</b><em>${this.rewards ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
-                <p>${this.rewards ? 'Coins have been added to your multiplayer wallet.' : 'Tallying coin rewards…'}</p>
+                <ol>${rows.map((row, i) => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${i + 1}</span><img class="mpg-player-avatar" src="${avatarUrl(row)}" alt="" draggable="false"><strong>${esc(row.n)}</strong><b>${this.valueText(row)}</b><em>${this.rewards ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
+                <p>${this.practice ? 'Local results only. Solo games and admin tests do not award coins.' : this.rewards ? 'Coins have been added to your multiplayer wallet.' : 'Tallying coin rewards…'}</p>
                 <button type="button" class="mpg-exit">Back to lobby</button>
             </div>`;
         }
@@ -1004,23 +1082,25 @@
                     el.classList.toggle('hidden', this.countdown <= -0.2);
                 } else {
                     this.overlay.querySelector('.mpg-countdown').classList.add('hidden');
-                    this.t += dt;
                     if (!this.paused) {
+                        this.t += dt;
                         this.onTick?.(dt);
-                        if (this.practice && this.game.res) this.game.res.value = this.game.res.max;
+                        if (this.testing && this.game.res) this.game.res.value = this.game.res.max;
                         this.game.update(dt);
-                        if (this.practice && this.game.res) this.game.res.value = this.game.res.max;
+                        if (this.testing && this.game.res) this.game.res.value = this.game.res.max;
                     }
                     this.checkEnd();
                     if (!this.practice && !this.isHost && !this.over && Date.now() > this.deadline + 9000) this.finish(this.standings());
                 }
             }
-            for (const r of this.remotes.values()) {
-                if (now - r.seen > 5000) { this.remotes.delete(r.id); continue; }
-                const gap = dist(r.x, r.y, r.tx, r.ty);
-                const k = gap > 500 ? 1 : Math.min(1, dt * 14);
-                r.x += (r.tx - r.x) * k;
-                r.y += (r.ty - r.y) * k;
+            if (!this.paused) {
+                for (const r of this.remotes.values()) {
+                    if (now - r.seen > 5000) { this.remotes.delete(r.id); continue; }
+                    const gap = dist(r.x, r.y, r.tx, r.ty);
+                    const k = gap > 500 ? 1 : Math.min(1, dt * 14);
+                    r.x += (r.tx - r.x) * k;
+                    r.y += (r.ty - r.y) * k;
+                }
             }
             this.updateMeter();
             this.justPressed.clear();
@@ -1050,6 +1130,31 @@
             lockViewportZoom(false);
             if (document.fullscreenElement) document.exitFullscreen?.().catch(() => { });
         }
+    }
+
+    function playerCosmetics(player) {
+        return {
+            skin: player?.equipped_skin ?? player?.skin ?? player?.cos?.skin ?? '',
+            hat: player?.equipped_hat ?? player?.hat ?? player?.cos?.hat ?? '',
+            acc: player?.equipped_accessory ?? player?.accessory ?? player?.acc ?? player?.cos?.acc ?? '',
+            color: player?.color || '#34d399'
+        };
+    }
+
+    const avatarCache = new Map();
+    function avatarUrl(player) {
+        const cos = playerCosmetics(player);
+        const key = [cos.skin, cos.hat, cos.acc, cos.color].join('|');
+        if (!avatarCache.has(key)) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 240; canvas.height = 240;
+            const ctx = canvas.getContext('2d');
+            ctx.scale(3, 3);
+            drawFigureSide(ctx, { color: cos.color, cos }, 27, 25, 26, 42, 1, 0, false);
+            if (avatarCache.size >= 300) avatarCache.delete(avatarCache.keys().next().value);
+            avatarCache.set(key, canvas.toDataURL('image/png'));
+        }
+        return avatarCache.get(key);
     }
 
     // ---------- cosmetics ----------
@@ -1133,7 +1238,7 @@
     // Accepts either a colour string or a player-like object ({ color, cos }).
     function who(p) {
         if (typeof p === 'string') return { color: p, skin: null, hat: '', acc: '' };
-        const cos = p?.cos || {};
+        const cos = playerCosmetics(p);
         return { color: p?.color || '#94a3b8', skin: SKINS[cos.skin] || null, hat: LEGACY_HATS[cos.hat] || cos.hat || '', acc: cos.acc || '' };
     }
 
@@ -1158,9 +1263,9 @@
             ctx.beginPath(); ctx.arc(0, r * 0.8, r * 1.1, Math.PI, TAU); ctx.stroke();
             fill('#ef4444', () => { ctx.arc(-r * 1.1, r * 0.9, r * 0.38, 0, TAU); ctx.arc(r * 1.1, r * 0.9, r * 0.38, 0, TAU); });
         } else if (hat === 'hat_tophat') {
-            ctx.fillStyle = '#111827'; ctx.fillRect(-r * 0.75, -r * 1.5, r * 1.5, r * 1.8);
-            ctx.fillRect(-r * 1.3, r * 0.2, r * 2.6, r * 0.28);
-            ctx.fillStyle = '#dc2626'; ctx.fillRect(-r * 0.75, -r * 0.1, r * 1.5, r * 0.3);
+            ctx.fillStyle = '#111827'; ctx.fillRect(-r * 0.8, -r * 1.5, r * 1.6, r * 1.85);
+            fill('#111827', () => ctx.ellipse(0, r * 0.3, r * 1.3, r * 0.28, 0, 0, TAU));
+            ctx.fillStyle = '#dc2626'; ctx.fillRect(-r * 0.8, -r * 0.1, r * 1.6, r * 0.3);
         } else if (hat === 'hat_wizard') {
             fill('#4f46e5', () => { ctx.moveTo(-r * 1.1, r * 0.4); ctx.lineTo(r * 0.2, -r * 2.1); ctx.lineTo(r * 1.1, r * 0.4); });
             fill('#4338ca', () => ctx.ellipse(0, r * 0.4, r * 1.5, r * 0.3, 0, 0, TAU));
@@ -1292,6 +1397,38 @@
                 ctx.beginPath(); ctx.arc(cx - face * (w * 0.4 + i * 6), y + h * 0.5 + Math.sin(time * 8 + i) * 2, 3 + (6 - i) * 0.9, 0, TAU); ctx.fill();
             }
         }
+        if (c.acc === 'acc_rainbow_trail' || c.acc === 'acc_firefly_trail' || c.acc === 'acc_stardust_trail' || c.acc === 'acc_leaf_trail') {
+            const colors = c.acc === 'acc_rainbow_trail' ? ['#fb7185', '#fbbf24', '#4ade80', '#38bdf8', '#c084fc']
+                : c.acc === 'acc_firefly_trail' ? ['#fde047', '#bef264', '#86efac']
+                    : c.acc === 'acc_leaf_trail' ? ['#f97316', '#eab308', '#dc2626'] : ['#e0e7ff', '#c4b5fd', '#7dd3fc'];
+            for (let i = 0; i < 5; i++) {
+                const t = (time * 0.8 + i / 5) % 1;
+                const px = cx - face * (w * 0.45 + t * 30);
+                const py = y + h * 0.58 + Math.sin(time * 5 + i * 1.7) * 7;
+                ctx.globalAlpha = alpha * (c.skin?.alpha || 1) * (1 - t) * 0.8;
+                ctx.fillStyle = colors[i % colors.length];
+                if (c.acc === 'acc_leaf_trail') {
+                    ctx.save(); ctx.translate(px, py); ctx.rotate(Math.sin(time * 3 + i) * 0.7);
+                    ctx.beginPath(); ctx.ellipse(0, 0, 3.5, 2, 0, 0, TAU); ctx.fill(); ctx.restore();
+                } else {
+                    ctx.beginPath(); ctx.arc(px, py, c.acc === 'acc_firefly_trail' ? 2.3 : 2.8, 0, TAU); ctx.fill();
+                }
+            }
+            ctx.globalAlpha = alpha * (c.skin?.alpha || 1);
+        }
+        if (c.acc === 'acc_prism_effect' || c.acc === 'acc_frost_effect' || c.acc === 'acc_ember_effect' || c.acc === 'acc_heart_effect') {
+            const effectColors = {
+                acc_prism_effect: ['#22d3ee', '#c084fc'],
+                acc_frost_effect: ['#bae6fd', '#60a5fa'],
+                acc_ember_effect: ['#fb923c', '#ef4444'],
+                acc_heart_effect: ['#fb7185', '#f472b6']
+            }[c.acc];
+            ctx.strokeStyle = effectColors[0];
+            ctx.globalAlpha = alpha * (c.skin?.alpha || 1) * (0.35 + Math.sin(time * 4) * 0.16);
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.ellipse(cx, y + h * 0.48, w * (0.72 + Math.sin(time * 3) * 0.08), h * 0.44, time * 0.35, 0, TAU); ctx.stroke();
+            ctx.globalAlpha = alpha * (c.skin?.alpha || 1);
+        }
         if (c.acc === 'acc_wings') {
             ctx.fillStyle = 'rgba(226,232,240,.9)';
             const flap = Math.sin(time * 10) * 4;
@@ -1385,7 +1522,8 @@
         if (c.acc === 'acc_chain') { ctx.strokeStyle = '#facc15'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(cx, y + 15 + bob, 7, 0.2, Math.PI - 0.2); ctx.stroke(); ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(cx, y + 24 + bob, 2.5, 0, TAU); ctx.fill(); }
         if (c.acc === 'acc_tie') { ctx.fillStyle = '#2563eb'; ctx.beginPath(); ctx.moveTo(cx - 3, y + 18 + bob); ctx.lineTo(cx + 3, y + 18 + bob); ctx.lineTo(cx + 2.5, y + 30 + bob); ctx.lineTo(cx, y + 33 + bob); ctx.lineTo(cx - 2.5, y + 30 + bob); ctx.fill(); }
         if (c.acc === 'acc_medal') { ctx.strokeStyle = '#dc2626'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx - 6, y + 15 + bob); ctx.lineTo(cx, y + 26 + bob); ctx.lineTo(cx + 6, y + 15 + bob); ctx.stroke(); ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(cx, y + 28 + bob, 4, 0, TAU); ctx.fill(); }
-        drawHat(ctx, c.hat, cx, y + 3 + bob, 10, face * 0.08);
+        ctx.globalAlpha = alpha;
+        drawHat(ctx, c.hat, cx, y + bob, 11, face * 0.03);
         ctx.restore();
     }
 
@@ -1400,12 +1538,48 @@
         ctx.beginPath(); ctx.ellipse(2, 4, r, r * 0.8, 0, 0, TAU); ctx.fill();
         if (c.skin?.mythic) drawMythicAura(ctx, 0, 0, r * 1.7, c.skin.mythic, time);
         if (c.acc === 'acc_aura') drawMythicAura(ctx, 0, 0, r * 1.9, ['#22d3ee', '#f43f5e'], time + 1.3);
+        if (c.acc === 'acc_sparkles') {
+            for (let i = 0; i < 5; i++) {
+                const angle = time * 1.8 + i * TAU / 5;
+                ctx.globalAlpha = alpha * (c.skin?.alpha || 1) * (0.55 + Math.sin(time * 6 + i) * 0.35);
+                ctx.fillStyle = '#fde68a';
+                ctx.beginPath();
+                ctx.arc(Math.cos(angle) * r * 1.45, Math.sin(angle) * r * 1.45, r * 0.12, 0, TAU);
+                ctx.fill();
+            }
+            ctx.globalAlpha = alpha * (c.skin?.alpha || 1);
+        }
         ctx.save();
         ctx.rotate(aim);
         if (c.acc === 'acc_comet') { for (let i = 4; i > 0; i--) { ctx.fillStyle = `rgba(125,211,252,${0.14 * (5 - i)})`; ctx.beginPath(); ctx.arc(-r * (0.9 + i * 0.45), Math.sin(time * 8 + i) * r * 0.15, r * (0.2 + (5 - i) * 0.07), 0, TAU); ctx.fill(); } }
+        if (c.acc === 'acc_rainbow_trail' || c.acc === 'acc_firefly_trail' || c.acc === 'acc_stardust_trail' || c.acc === 'acc_leaf_trail') {
+            const colors = c.acc === 'acc_rainbow_trail' ? ['#fb7185', '#fbbf24', '#4ade80', '#38bdf8', '#c084fc']
+                : c.acc === 'acc_firefly_trail' ? ['#fde047', '#bef264', '#86efac']
+                    : c.acc === 'acc_leaf_trail' ? ['#f97316', '#eab308', '#dc2626'] : ['#e0e7ff', '#c4b5fd', '#7dd3fc'];
+            for (let i = 0; i < 5; i++) {
+                const t = (time * 0.8 + i / 5) % 1;
+                ctx.globalAlpha = alpha * (c.skin?.alpha || 1) * (1 - t) * 0.8;
+                ctx.fillStyle = colors[i % colors.length];
+                ctx.beginPath(); ctx.arc(-r * (1 + t * 1.6), Math.sin(time * 5 + i * 1.7) * r * 0.6, r * (c.acc === 'acc_firefly_trail' ? 0.12 : 0.16), 0, TAU); ctx.fill();
+            }
+            ctx.globalAlpha = alpha * (c.skin?.alpha || 1);
+        }
+        if (c.acc === 'acc_prism_effect' || c.acc === 'acc_frost_effect' || c.acc === 'acc_ember_effect' || c.acc === 'acc_heart_effect') {
+            const effectColors = {
+                acc_prism_effect: ['#22d3ee', '#c084fc'],
+                acc_frost_effect: ['#bae6fd', '#60a5fa'],
+                acc_ember_effect: ['#fb923c', '#ef4444'],
+                acc_heart_effect: ['#fb7185', '#f472b6']
+            }[c.acc];
+            ctx.strokeStyle = effectColors[0]; ctx.lineWidth = Math.max(1.5, r * 0.1);
+            ctx.globalAlpha = alpha * (c.skin?.alpha || 1) * (0.4 + Math.sin(time * 4) * 0.18);
+            ctx.beginPath(); ctx.arc(0, 0, r * (1.45 + Math.sin(time * 3) * 0.1), time * 0.8, time * 0.8 + Math.PI * 1.6); ctx.stroke();
+            ctx.globalAlpha = alpha * (c.skin?.alpha || 1);
+        }
         if (c.acc === 'acc_cape') { ctx.fillStyle = '#dc2626'; ctx.beginPath(); ctx.moveTo(-r * 0.2, -r * 0.9); ctx.lineTo(-r * 1.7, 0); ctx.lineTo(-r * 0.2, r * 0.9); ctx.fill(); }
         if (c.acc === 'acc_wings') { ctx.fillStyle = 'rgba(226,232,240,.9)'; const f = Math.sin(time * 10) * 0.12; ctx.beginPath(); ctx.ellipse(-r * 0.3, -r * 1.15, r * 0.35, r * (1 + f), 0.4, 0, TAU); ctx.ellipse(-r * 0.3, r * 1.15, r * 0.35, r * (1 + f), -0.4, 0, TAU); ctx.fill(); }
         if (c.acc === 'acc_backpack') { ctx.fillStyle = '#b45309'; roundRect(ctx, -r * 1.25, -r * 0.5, r * 0.7, r, 3); ctx.fill(); }
+        if (c.acc === 'acc_sword') { ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = Math.max(2, r * 0.16); ctx.beginPath(); ctx.moveTo(-r * 0.6, r * 0.7); ctx.lineTo(-r * 1.1, -r * 1.1); ctx.stroke(); ctx.strokeStyle = '#92400e'; ctx.beginPath(); ctx.moveTo(-r * 0.9, r * 0.5); ctx.lineTo(-r * 0.4, r * 0.35); ctx.stroke(); }
         if (c.acc === 'acc_jetpack') { ctx.fillStyle = '#64748b'; roundRect(ctx, -r * 1.3, -r * 0.5, r * 0.7, r, 3); ctx.fill(); ctx.fillStyle = '#f97316'; ctx.fillRect(-r * 1.6 - Math.sin(time * 30) * 2, -r * 0.25, r * 0.4, r * 0.5); }
         if (c.acc === 'acc_tail') { ctx.fillStyle = '#f97316'; ctx.beginPath(); ctx.ellipse(-r * 1.3, Math.sin(time * 6) * r * 0.3, r * 0.6, r * 0.28, 0, 0, TAU); ctx.fill(); }
         if (c.acc === 'acc_fairy' || c.acc === 'acc_phoenix') { ctx.fillStyle = c.acc === 'acc_fairy' ? 'rgba(244,114,182,.7)' : 'rgba(249,115,22,.85)'; const f = Math.sin(time * 10) * 0.12; ctx.beginPath(); ctx.ellipse(-r * 0.3, -r * 1.15, r * 0.35, r * (1 + f), 0.4, 0, TAU); ctx.ellipse(-r * 0.3, r * 1.15, r * 0.35, r * (1 + f), -0.4, 0, TAU); ctx.fill(); }
@@ -1421,6 +1595,10 @@
         ctx.beginPath(); ctx.arc(r * 0.5, -r * 0.2, r * 0.1, 0, TAU); ctx.arc(r * 0.5, r * 0.2, r * 0.1, 0, TAU); ctx.fill();
         if (c.acc === 'acc_shades') { ctx.fillStyle = '#0f172a'; ctx.fillRect(r * 0.4, -r * 0.34, r * 0.26, r * 0.68); }
         if (c.acc === 'acc_monocle') { ctx.strokeStyle = '#facc15'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(r * 0.55, r * 0.2, r * 0.18, 0, TAU); ctx.stroke(); }
+        if (c.acc === 'acc_eyepatch') { ctx.strokeStyle = '#0f172a'; ctx.lineWidth = Math.max(1, r * 0.08); ctx.beginPath(); ctx.moveTo(-r * 0.3, -r * 0.45); ctx.lineTo(r * 0.5, r * 0.25); ctx.stroke(); ctx.fillStyle = '#0f172a'; ctx.beginPath(); ctx.arc(r * 0.5, r * 0.2, r * 0.18, 0, TAU); ctx.fill(); }
+        if (c.acc === 'acc_mustache' || c.acc === 'acc_beard') { ctx.fillStyle = c.acc === 'acc_beard' ? '#92400e' : '#451a03'; ctx.beginPath(); ctx.ellipse(r * 0.65, 0, r * (c.acc === 'acc_beard' ? 0.17 : 0.08), r * (c.acc === 'acc_beard' ? 0.4 : 0.2), 0, 0, TAU); ctx.fill(); }
+        if (c.acc === 'acc_bowtie') { ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.moveTo(-r * 0.25, 0); ctx.lineTo(-r * 0.48, -r * 0.25); ctx.lineTo(-r * 0.48, r * 0.25); ctx.moveTo(-r * 0.25, 0); ctx.lineTo(-r * 0.02, -r * 0.25); ctx.lineTo(-r * 0.02, r * 0.25); ctx.fill(); }
+        if (c.acc === 'acc_tie') { ctx.fillStyle = '#2563eb'; ctx.beginPath(); ctx.moveTo(-r * 0.15, -r * 0.12); ctx.lineTo(-r * 0.15, r * 0.12); ctx.lineTo(-r * 0.75, r * 0.1); ctx.lineTo(-r * 0.85, 0); ctx.lineTo(-r * 0.75, -r * 0.1); ctx.fill(); }
         if (c.acc === 'acc_headband' || c.acc === 'acc_bandana') { ctx.strokeStyle = c.acc === 'acc_headband' ? '#ef4444' : '#2563eb'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(r * 0.1, 0, r * 0.62, -1.2, 1.2); ctx.stroke(); }
         if (c.acc === 'acc_glasses' || c.acc === 'acc_goggles' || c.acc === 'acc_mask') { ctx.fillStyle = c.acc === 'acc_mask' ? '#7c3aed' : '#0f172a'; ctx.fillRect(r * 0.4, -r * 0.34, r * 0.26, r * 0.68); }
         if (c.acc === 'acc_medal' || c.acc === 'acc_chain') { ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(r * 0.3, 0, r * 0.14, 0, TAU); ctx.fill(); }
@@ -1430,12 +1608,13 @@
         const orbitTop = { acc_hearts: '❤️', acc_stars: '⭐', acc_snow: '❄️', acc_notes: '🎵', acc_leaves: '🍃', acc_bubbles: '🫧' }[c.acc];
         ctx.restore();
         if (orbitTop) { ctx.font = `${Math.round(r * 0.7)}px serif`; ctx.textAlign = 'center'; for (let i = 0; i < 3; i++) { const a = time * 1.6 + i * 2.1; ctx.fillText(orbitTop, Math.cos(a) * r * 1.5, Math.sin(a) * r * 1.5); } }
-        if (c.hat) drawHat(ctx, c.hat, 0, -r * 0.55, r * 0.55);
+        ctx.globalAlpha = alpha;
+        if (c.hat) drawHat(ctx, c.hat, Math.cos(aim) * r * 0.1, Math.sin(aim) * r * 0.1 - r * 0.62, r * 0.62);
         ctx.restore();
     }
 
     window.StudBudArcade = {
         Session, BaseGame, Particles, Resource, games: {},
-        util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, who, drawHat, drawFigureSide, drawFigureTop }
+        util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, who, playerCosmetics, avatarUrl, drawHat, drawFigureSide, drawFigureTop }
     };
 })(window);

@@ -4,7 +4,7 @@
     const A = window.StudBudArcade;
     const { TAU, clamp, lerp, dist, overlap, mulberry32, pushCircleOutOfRect, roundRect, nameTag, drawFigureTop } = A.util;
 
-    const clock = s => (Date.now() - s.startedAt) / 1000;
+    const clock = s => ((typeof s.testPauseAt === 'number' ? s.testPauseAt : Date.now()) - s.startedAt) / 1000;
     const mod = (n, m) => ((n % m) + m) % m;
     const rampDistance = (time, capTime, gain) => {
         const t = Math.max(0, time), ramped = Math.min(t, capTime);
@@ -54,7 +54,11 @@
         }
 
         begin(ctx, w, h, zoomBase = 820) {
-            this.zoom = clamp(h / zoomBase, 0.6, 1.25);
+            const touch = this.s.overlay.classList.contains('has-touch');
+            const landscape = w >= h;
+            this.zoom = touch
+                ? landscape ? clamp(h / zoomBase, 0.55, 1.15) : clamp(w / (zoomBase * 1.08), 0.46, 0.88)
+                : clamp(h / zoomBase, 0.6, 1.25);
             const hw = w / this.zoom / 2, hh = h / this.zoom / 2;
             this.camX = this.W <= hw * 2 ? this.W / 2 : clamp(this.cam.x, hw, this.W - hw);
             this.camY = this.H <= hh * 2 ? this.H / 2 : clamp(this.cam.y, hh, this.H - hh);
@@ -115,7 +119,7 @@
         8: { name: 'Ruby', value: 90, color: '#fb7185' },
         9: { name: 'Diamond', value: 160, color: '#fef08a' }
     };
-    const LAVA_DOWN_INTERVAL = 0.3, LAVA_SIDE_INTERVAL = 1.2, LAVA_SIDE_REACH = 9;
+    const LAVA_DOWN_INTERVAL = 0.3, LAVA_SIDE_INTERVAL = 1.2, LAVA_SIDE_REACH = 7;
 
     class Miner extends Arena {
         constructor(s) {
@@ -165,7 +169,9 @@
             this.baseSpeed = 280; this.stun = 0; this.lavaCd = 0; this.jetting = false;
             this.res = new A.Resource('Fuel', '#facc15', 100, 78, 2);
             this.F = new Uint8Array(COLS * ROWS);
+            this.D = new Uint8Array(COLS * ROWS);
             this.flowing = new Set(); this.flowClock = 0; this.flowSideClock = 0;
+            for (let i = 0; i < tiles.length; i++) if (tiles[i] === 6) this.flowing.add(i);
         }
 
         tile(tx, ty) { return tx < 0 || ty < 0 || tx >= COLS || ty >= ROWS ? 10 : this.T[ty * COLS + tx]; }
@@ -195,15 +201,15 @@
                     const x = idx % COLS, y = Math.floor(idx / COLS), reach = this.F[idx];
                     const below = (y + 1) * COLS + x;
                     if (!sideways) {
-                        if (y + 1 < ROWS - 1 && this.T[below] === 0) this.addLavaFlow(below, reach, changed);
+                        if (y + 1 < ROWS - 1 && (this.T[below] === 0 || (this.T[below] === 6 && this.F[below] > 0))) this.addLavaFlow(below, 0, true, changed);
                         continue;
                     }
-                    if (y + 1 < ROWS - 1 && this.T[below] === 0) continue;
+                    if (!this.solid(this.tile(x, y + 1))) continue;
                     if (reach >= LAVA_SIDE_REACH) continue;
                     for (const nx of [x - 1, x + 1]) {
                         if (nx <= 0 || nx >= COLS - 1) continue;
                         const next = y * COLS + nx;
-                        if (this.T[next] === 0) this.addLavaFlow(next, reach + 1, changed);
+                        if (this.T[next] === 0 || (this.T[next] === 6 && this.F[next] > reach + 1)) this.addLavaFlow(next, reach + 1, false, changed);
                     }
                 }
             };
@@ -218,21 +224,41 @@
             if (changed.length) this.s.emit({ k: 'lv', cells: changed });
         }
 
-        addLavaFlow(index, distance, changed) {
+        addLavaFlow(index, distance, falling, changed) {
             this.T[index] = 6;
             this.F[index] = distance;
+            this.D[index] = falling ? 1 : 0;
             this.flowing.add(index);
             const x = index % COLS, y = Math.floor(index / COLS);
-            changed.push({ x, y, d: distance });
+            changed.push({ x, y, d: distance, f: falling ? 1 : 0 });
             this.particles.burst(x * TS + TS / 2, y * TS + TS / 2, '#fb642f', 3, 75, 0.35, 3);
         }
 
-        collisionSolids() {
-            const me = this.me, solids = [];
-            const x0 = Math.max(0, Math.floor(me.x / TS) - 1), x1 = Math.min(COLS - 1, Math.floor((me.x + me.w) / TS) + 1);
-            const y0 = Math.max(0, Math.floor(me.y / TS) - 1), y1 = Math.min(ROWS - 1, Math.floor((me.y + me.h) / TS) + 1);
+        collisionSolids(body = this.me) {
+            const solids = [];
+            const x0 = Math.max(0, Math.floor(body.x / TS) - 1), x1 = Math.min(COLS - 1, Math.floor((body.x + body.w) / TS) + 1);
+            const y0 = Math.max(0, Math.floor(body.y / TS) - 1), y1 = Math.min(ROWS - 1, Math.floor((body.y + body.h) / TS) + 1);
             for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (this.solid(this.tile(x, y))) solids.push({ x: x * TS, y: y * TS, w: TS, h: TS });
             return solids;
+        }
+
+        drawMineProgress(ctx, x, y, progress) {
+            const amount = clamp(progress, 0, 1);
+            if (amount <= 0) return;
+            ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(x + 5, y + TS - 8, TS - 10, 5);
+            ctx.fillStyle = '#fde047'; ctx.fillRect(x + 5, y + TS - 8, (TS - 10) * amount, 5);
+            const cracks = Math.min(5, 1 + Math.floor(amount * 6));
+            const paths = [
+                [[18, 7], [21, 15], [16, 21], [19, 28]],
+                [[21, 15], [29, 12], [34, 16]], [[16, 21], [10, 18], [7, 23]],
+                [[19, 28], [25, 32], [23, 38]], [[29, 12], [27, 7], [32, 4]]
+            ];
+            ctx.strokeStyle = `rgba(15,10,8,${0.45 + amount * 0.4})`; ctx.lineWidth = 2;
+            for (const path of paths.slice(0, cracks)) {
+                ctx.beginPath(); ctx.moveTo(x + path[0][0], y + path[0][1]);
+                for (const [px, py] of path.slice(1)) ctx.lineTo(x + px, y + py);
+                ctx.stroke();
+            }
         }
 
         hitLava() {
@@ -352,7 +378,12 @@
         onEvent(ev) {
             if (ev.k === 'dg' && this.tile(ev.x, ev.y) !== 0) this.breakTile(ev.x, ev.y, ev.t, false);
             if (ev.k === 'lv' && Array.isArray(ev.cells)) for (const cell of ev.cells) {
-                if (cell && this.tile(cell.x, cell.y) === 0) { const idx = cell.y * COLS + cell.x; this.T[idx] = 6; this.F[idx] = cell.d || 0; this.flowing.add(idx); }
+                if (cell && Number.isInteger(cell.x) && Number.isInteger(cell.y) && cell.x > 0 && cell.x < COLS - 1 && cell.y >= 4 && cell.y < ROWS - 1
+                    && Number.isInteger(cell.d) && cell.d >= 0 && cell.d <= LAVA_SIDE_REACH
+                    && (this.tile(cell.x, cell.y) === 0 || (this.tile(cell.x, cell.y) === 6 && this.F[cell.y * COLS + cell.x] > cell.d))) {
+                    const idx = cell.y * COLS + cell.x;
+                    this.T[idx] = 6; this.F[idx] = cell.d || 0; this.D[idx] = cell.f ? 1 : 0; this.flowing.add(idx);
+                }
             }
         }
 
@@ -419,7 +450,17 @@
                     const glow = ctx.createRadialGradient(x + 24, y + 24, 3, x + 24, y + 24, 38);
                     glow.addColorStop(0, `rgba(255,196,55,${pulse})`); glow.addColorStop(0.55, 'rgba(249,115,22,.86)'); glow.addColorStop(1, 'rgba(220,38,38,0)');
                     ctx.fillStyle = glow; ctx.fillRect(x - 8, y - 8, TS + 16, TS + 16);
-                    ctx.fillStyle = '#ff7a18'; ctx.beginPath(); ctx.moveTo(x + 3, y + 34); ctx.lineTo(x + 12, y + 13 + Math.sin(this.anim * 4 + tx) * 4); ctx.lineTo(x + 21, y + 34); ctx.lineTo(x + 32, y + 9); ctx.lineTo(x + 44, y + 34); ctx.closePath(); ctx.fill();
+                    const level = Math.min(LAVA_SIDE_REACH, this.F[idx]);
+                    const surfaceHeight = this.D[idx] || level === 0 ? TS : TS * (1 - level / (LAVA_SIDE_REACH + 1));
+                    const surfaceY = y + TS - surfaceHeight;
+                    ctx.fillStyle = '#d9481b'; ctx.fillRect(x + 2, surfaceY, TS - 4, surfaceHeight - 2);
+                    ctx.fillStyle = '#ff7a18'; ctx.beginPath();
+                    ctx.moveTo(x + 3, y + TS - 3);
+                    ctx.lineTo(x + 12, surfaceY + 9 + Math.sin(this.anim * 4 + tx) * 2);
+                    ctx.lineTo(x + 21, y + TS - 3); ctx.lineTo(x + 32, surfaceY + 5);
+                    ctx.lineTo(x + 44, y + TS - 3); ctx.closePath(); ctx.fill();
+                    ctx.fillStyle = 'rgba(255,218,95,.56)';
+                    ctx.fillRect(x + 4, surfaceY + 3, TS - 8, 2);
                     continue;
                 }
                 const rockColor = type === 10 ? '#111827' : type === 2 ? '#475569' : color;
@@ -441,11 +482,6 @@
                     ctx.fillStyle = 'rgba(255,255,255,.72)'; ctx.beginPath(); ctx.moveTo(cx, y + 8); ctx.lineTo(x + 22, cy); ctx.lineTo(x + 11, cy); ctx.closePath(); ctx.fill();
                     if ((hash & 3) === 0) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx + Math.sin(this.anim * 4 + idx) * 7, y + 4); ctx.lineTo(cx, y + 11); ctx.lineTo(cx + 4, y + 7); ctx.stroke(); }
                     if ((hash & 15) === 2) { ctx.fillStyle = 'rgba(255,255,255,.78)'; ctx.font = '700 8px system-ui'; ctx.textAlign = 'center'; ctx.fillText(oreName[type], cx, y + 46); }
-                }
-                if (this.dig.tx === tx && this.dig.ty === ty) {
-                    ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(x, y + TS - 6, TS, 6);
-                    ctx.fillStyle = '#fde047'; ctx.fillRect(x, y + TS - 6, TS * clamp(this.dig.p / this.digDuration(type, ty), 0, 1), 6);
-                    ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.beginPath(); ctx.moveTo(x + 8, y + 10); ctx.lineTo(x + 18, y + 16); ctx.lineTo(x + 14, y + 25); ctx.stroke();
                 }
             }
 
@@ -500,11 +536,21 @@
             for (const r of s.remoteList()) {
                 if (!Number.isFinite(r.x) || !Number.isFinite(r.y) || !this.seen(r.x, r.y)) continue;
                 A.util.drawFigureSide(ctx, r, r.x, r.y, 26, 40, Number.isFinite(r.f) ? r.f : 1, this.anim + r.x * 0.01, r.a === 1, 0.82);
+                const dig = r.ai?.dig;
+                if (dig && dig.progress > 0) {
+                    const tx = dig.x * TS, ty = dig.y * TS, type = this.tile(dig.x, dig.y);
+                    if (this.solid(type) && type !== 10) this.drawMineProgress(ctx, tx, ty, dig.progress / this.digDuration(type, dig.y));
+                }
                 const carried = r.ex && Number.isFinite(r.ex.c) ? r.ex.c : 0;
                 if (carried && !s.preview) { ctx.fillStyle = '#fbbf24'; ctx.font = '800 11px system-ui'; ctx.textAlign = 'center'; ctx.fillText(`◆ ${carried}`, r.x + 13, r.y + 53); }
                 if (!this.s.preview) A.util.nameTag(ctx, r.name || '', r.x + 13, r.y - 12, r.color);
             }
+            if (this.dig.tx >= 0 && this.dig.ty >= 0) this.drawMineProgress(ctx, this.dig.tx * TS, this.dig.ty * TS, this.dig.p / this.digDuration(this.tile(this.dig.tx, this.dig.ty), this.dig.ty));
             A.util.drawFigureSide(ctx, s.local, me.x, me.y, me.w, me.h, me.face, this.anim, me.onGround, this.stun > 0 ? 0.72 : 1);
+            if (this.carry > 0) {
+                ctx.fillStyle = '#fef3c7'; ctx.font = '900 11px system-ui'; ctx.textAlign = 'center';
+                ctx.fillText(`◆ ${this.carry}`, me.x + me.w / 2, me.y - 4);
+            }
             if (this.jetting) {
                 ctx.fillStyle = '#fde047'; ctx.beginPath(); ctx.moveTo(me.x + 6, me.y + me.h - 4); ctx.lineTo(me.x + 11, me.y + me.h + 17 + Math.sin(this.anim * 28) * 3); ctx.lineTo(me.x + 17, me.y + me.h - 4); ctx.fill();
                 ctx.fillStyle = '#fb923c'; ctx.beginPath(); ctx.moveTo(me.x + 8, me.y + me.h - 1); ctx.lineTo(me.x + 12, me.y + me.h + 10); ctx.lineTo(me.x + 15, me.y + me.h - 1); ctx.fill();
@@ -527,6 +573,11 @@
             ctx.strokeStyle = this.lowFuel ? 'rgba(248,113,113,.75)' : 'rgba(148,163,184,.35)'; ctx.lineWidth = 1; A.util.roundRect(ctx, .5, .5, 229, 33, 10); ctx.stroke();
             ctx.fillStyle = this.lowFuel ? '#fecaca' : '#cbd5e1'; ctx.font = '800 12px system-ui'; ctx.textAlign = 'center';
             ctx.fillText(`DEPTH ${depth * 5}m${this.lowFuel ? ' · LOW FUEL · HEAD UP' : ''}`, 115, 22, 220);
+            ctx.restore();
+            s.placeHud(ctx, 0, 0, 175, 32, 'top-right');
+            ctx.fillStyle = 'rgba(8,12,24,.78)'; A.util.roundRect(ctx, 0, 0, 175, 32, 9); ctx.fill();
+            ctx.fillStyle = '#fef3c7'; ctx.font = '800 12px system-ui'; ctx.textAlign = 'center';
+            ctx.fillText(`HAUL ${this.carry}c  ·  ${this.items}/${this.cap}`, 87, 21, 166);
             ctx.restore();
             if (depth === 0 && this.carry > 0 && me.y < 4 * TS) {
                 s.placeHud(ctx, 0, 0, 270, 24, 'bottom-center');
@@ -559,9 +610,9 @@
                 this.fish.push({ i, type, y0: 300 + r() * (this.H - 600), amp: 20 + r() * 80, fq: 0.4 + r() * 0.8, ph: r() * TAU, x0: r() * this.W, spd: (type === 3 ? 140 : 40 + r() * 80) * (r() < 0.5 ? 1 : -1) });
             }
             this.logs = [];
-            for (let i = 0; i < 15; i++) this.logs.push({ y: 300 + r() * (this.H - 600), x0: r() * this.W, spd: 90 + r() * 100, phase: r() * TAU, fq: 0.35 + r() * 0.55 });
+            for (let i = 0; i < 19; i++) this.logs.push({ y: 360 + r() * (this.H - 720), x0: r() * this.W, spd: 105 + r() * 115, phase: r() * TAU, fq: 0.35 + r() * 0.55 });
             this.rocks = [];
-            for (let i = 0; i < 30; i++) this.rocks.push({ x: 600 + r() * (this.W - 900), y: 330 + r() * (this.H - 660), r: 30 + r() * 24 });
+            for (let i = 0; i < 38; i++) this.rocks.push({ x: 600 + r() * (this.W - 900), y: 380 + r() * (this.H - 760), r: 32 + r() * 25 });
             this.pools = [];
             for (let i = 0; i < 3; i++) this.pools.push({ x: 900 + i * 1050 + r() * 300, y: 450 + r() * (this.H - 900), r: 130, phase: r() * TAU, ampX: 60 + r() * 45, ampY: 40 + r() * 35 });
             this.poolHitCd = 0;
@@ -591,13 +642,14 @@
             this.step(dt, 1800);
             this.castCd -= dt; this.hurt = Math.max(0, this.hurt - dt); this.comboT -= dt; this.poolHitCd = Math.max(0, this.poolHitCd - dt);
             if (this.comboT <= 0) this.combo = 0;
-            me.vx += 42 * dt;
+            const nearBank = me.y < this.bank + 80 || me.y > this.H - this.bank - 80;
+            if (!nearBank) me.vx += 42 * dt;
             // banks
             if (me.y < this.bank + me.r) { me.y = this.bank + me.r; me.vy = Math.max(0, me.vy); }
             if (me.y > this.H - this.bank - me.r) { me.y = this.H - this.bank - me.r; me.vy = Math.min(0, me.vy); }
             if (me.x > this.W - 60) me.x = 120;
             for (const rock of this.rocks) {
-                const d = dist(me.x, me.y, rock.x, rock.y);
+                const d = dist(me.x, me.y, rock.x, rock.y) || 1;
                 if (d < rock.r + me.r) {
                     me.x = rock.x + (me.x - rock.x) / d * (rock.r + me.r); me.y = rock.y + (me.y - rock.y) / d * (rock.r + me.r); me.vx *= 0.5; me.vy *= 0.5;
                     if (this.hurt <= 0) { this.hurt = 1; this.loseFish(); this.particles.burst(me.x, me.y, '#94a3b8', 10, 160, 0.4, 3); }
@@ -610,6 +662,7 @@
             }
             this.duelCheck(now);
             for (const pool of this.pools) {
+                if (nearBank) continue;
                 const pos = this.poolPos(pool, now), dx = pos.x - me.x, dy = pos.y - me.y;
                 const d = Math.hypot(dx, dy) || 1, pullRadius = pool.r * 1.7;
                 if (d < pullRadius) {
@@ -763,6 +816,16 @@
             const g = ctx.createLinearGradient(0, this.bank, 0, this.H - this.bank);
             g.addColorStop(0, '#0e7490'); g.addColorStop(0.5, '#0891b2'); g.addColorStop(1, '#0e7490');
             ctx.fillStyle = g; ctx.fillRect(this.x0, this.bank, this.x1 - this.x0, this.H - this.bank * 2);
+            ctx.fillStyle = '#49b4b9';
+            ctx.fillRect(this.x0, this.bank, this.x1 - this.x0, 80);
+            ctx.fillRect(this.x0, this.H - this.bank - 80, this.x1 - this.x0, 80);
+            for (let x = Math.floor(this.x0 / 520) * 520; x < this.x1; x += 520) {
+                for (const y of [this.bank + 18, this.H - this.bank - 56]) {
+                    ctx.fillStyle = '#946947'; ctx.fillRect(x + 40, y, 90, 38);
+                    ctx.fillStyle = '#c59a70';
+                    for (let i = 0; i < 5; i++) ctx.fillRect(x + 42 + i * 18, y + 2, 14, 34);
+                }
+            }
             ctx.strokeStyle = 'rgba(224,242,254,.22)'; ctx.lineWidth = 2;
             for (let y = Math.ceil((this.y0 - 0) / 70) * 70; y < this.y1; y += 70) {
                 if (y < this.bank || y > this.H - this.bank) continue;
@@ -859,27 +922,16 @@
                 const b = { x, y, w: BW, h: BH, shop, color: shop ? '#f59e0b' : ['#64748b', '#7c6f64', '#6b7280', '#78716c'][Math.floor(r() * 4)], roof: shop ? '#dc2626' : ['#475569', '#9a3412', '#1d4ed8', '#166534'][Math.floor(r() * 4)] };
                 b.door = { x: x + BW / 2, y: y + BH + 24 };
                 this.blocks.push(b);
-                this.walls.push({ x, y, w: BW, h: BH });
+                this.walls.push({ x: x + 80, y, w: BW - 80, h: BH }, { x, y: y + 80, w: 80, h: BH - 80 });
             }
             this.shops = this.blocks.filter(b => b.shop);
             this.houses = this.blocks.filter(b => !b.shop);
             this.cars = [];
-            for (let k = 0; k < BR + 1; k++) for (let j = 0; j < 4; j++) this.cars.push({ horiz: true, c: ROAD / 2 + k * (BH + ROAD), p0: r() * this.W, spd: (155 + r() * 100) * (j % 2 ? -1 : 1), lane: (j % 2 ? -1 : 1) * (j < 2 ? 30 : 55), phase: r() * TAU, color: ['#ef4444', '#3b82f6', '#22c55e', '#a855f7', '#f97316'][Math.floor(r() * 5)] });
-            for (let k = 0; k < BC + 1; k++) for (let j = 0; j < 4; j++) this.cars.push({ horiz: false, c: ROAD / 2 + k * (BW + ROAD), p0: r() * this.H, spd: (155 + r() * 100) * (j % 2 ? -1 : 1), lane: (j % 2 ? -1 : 1) * (j < 2 ? 30 : 55), phase: r() * TAU, color: ['#ef4444', '#3b82f6', '#22c55e', '#a855f7', '#f97316'][Math.floor(r() * 5)] });
-            this.vending = [];
-            for (let i = 0; i < 24; i++) {
-                const side = i % 2 ? 56 : -56;
-                if (i < 8) {
-                    const col = 1 + Math.floor(r() * BC - 0.01), row = 1 + Math.floor(r() * BR - 0.01);
-                    this.vending.push({ i, x: col * (BW + ROAD) - ROAD / 2 + (i % 2 ? 62 : -62), y: row * (BH + ROAD) - ROAD / 2 + (i % 3 ? 62 : -62), until: 0 });
-                } else if (i % 3 === 0) {
-                    const k = Math.floor(r() * (BR + 1));
-                    this.vending.push({ i, x: 120 + r() * (this.W - 240), y: ROAD / 2 + k * (BH + ROAD) + side, until: 0 });
-                } else {
-                    const k = Math.floor(r() * (BC + 1));
-                    this.vending.push({ i, x: ROAD / 2 + k * (BW + ROAD) + side, y: 120 + r() * (this.H - 240), until: 0 });
-                }
-            }
+            for (let k = 0; k < BR + 1; k++) for (let j = 0; j < 5; j++) this.cars.push({ horiz: true, c: ROAD / 2 + k * (BH + ROAD), p0: r() * this.W, spd: (165 + r() * 95) * (j % 2 ? -1 : 1), lane: (j % 2 ? -1 : 1) * (20 + Math.floor(j / 2) * 22), phase: r() * TAU, color: ['#ef4444', '#3b82f6', '#22c55e', '#a855f7', '#f97316'][Math.floor(r() * 5)] });
+            for (let k = 0; k < BC + 1; k++) for (let j = 0; j < 5; j++) this.cars.push({ horiz: false, c: ROAD / 2 + k * (BW + ROAD), p0: r() * this.H, spd: (165 + r() * 95) * (j % 2 ? -1 : 1), lane: (j % 2 ? -1 : 1) * (20 + Math.floor(j / 2) * 22), phase: r() * TAU, color: ['#ef4444', '#3b82f6', '#22c55e', '#a855f7', '#f97316'][Math.floor(r() * 5)] });
+            this.vending = this.blocks.map((b, i) => ({ i, x: b.x + 40, y: b.y + 40, until: 0 }));
+            this.roadsX = Array.from({ length: BC + 1 }, (_, i) => ROAD / 2 + i * (BW + ROAD));
+            this.roadsY = Array.from({ length: BR + 1 }, (_, i) => ROAD / 2 + i * (BH + ROAD));
             this.trees = [];
             for (const b of this.blocks) for (let k = 0; k < 4; k++) this.trees.push({ x: b.x + (k % 2 ? b.w + 30 : -30), y: b.y + (k < 2 ? 20 : b.h - 20) + r() * 40, r: 12 + r() * 6 });
             this.scoreGoal = false; this.goalUnit = 'deliveries'; this.goalLabel = 'Deliveries';
@@ -965,6 +1017,18 @@
                 c.fillStyle = '#36634b'; c.fillRect(b.x + b.w - 15, b.y + b.h + 4, 28, 12);
                 c.fillStyle = '#e596a6'; for (let j = 0; j < 4; j++) { c.beginPath(); c.arc(b.x + b.w - 12 + j * 7, b.y + b.h + 8, 3, 0, TAU); c.fill(); }
             });
+            for (const b of this.blocks) {
+                c.fillStyle = '#aeb9b3'; c.fillRect(b.x, b.y, 80, 80);
+                c.strokeStyle = '#87958e'; c.lineWidth = 1;
+                for (let i = 20; i < 80; i += 20) {
+                    c.beginPath(); c.moveTo(b.x + i, b.y); c.lineTo(b.x + i, b.y + 80); c.stroke();
+                    c.beginPath(); c.moveTo(b.x, b.y + i); c.lineTo(b.x + 80, b.y + i); c.stroke();
+                }
+                c.fillStyle = '#20382e'; c.fillRect(b.x + 60, b.y + 8, 12, 62);
+                c.fillStyle = '#4b9566'; c.fillRect(b.x + 62, b.y + 10, 8, 58);
+                c.fillStyle = '#79593f'; c.fillRect(b.x + 8, b.y + 63, 44, 8);
+                c.fillStyle = '#d7b187'; c.fillRect(b.x + 8, b.y + 61, 44, 3);
+            }
             for (const tree of this.trees) {
                 c.fillStyle = '#757e79'; c.fillRect(tree.x - 12, tree.y - 10, 24, 24);
                 c.fillStyle = 'rgba(0,0,0,.25)'; c.beginPath(); c.ellipse(tree.x + 6, tree.y + 7, tree.r + 4, tree.r, 0, 0, TAU); c.fill();
@@ -1049,7 +1113,7 @@
         ex() { return { p: this.pkg ? 1 : 0 }; }
         goalText() { return `${this.deliveries} deliveries · $${this.cash} cash · streak ${this.streak}`; }
         touchLayout() { return { stick: true, buttons: [{ k: 'ShiftLeft', label: 'Sprint', cls: 'main' }] }; }
-        hint() { return 'WASD move (uses a little energy) · Shift sprint (more energy) · deliver to marked houses · dodge cars · Q = recharge'; }
+        hint() { return 'WASD move · Shift sprint · deliver to marked houses · building recesses shelter you from traffic · Q recharge anywhere'; }
 
         draw(ctx, w, h) {
             const s = this.s, me = this.me, now = clock(s), t = this.anim;
@@ -1089,6 +1153,11 @@
                 ctx.restore();                ctx.fillStyle = 'rgba(15,23,42,.75)';
                 if (c.horiz) { const sg = Math.sign(c.spd); ctx.fillRect(rect.x + rect.w / 2 + (sg > 0 ? 6 : -22), rect.y + 5, 16, rect.h - 10); ctx.fillStyle = '#fef08a'; ctx.fillRect(sg > 0 ? rect.x + rect.w - 6 : rect.x, rect.y + 4, 6, 8); ctx.fillRect(sg > 0 ? rect.x + rect.w - 6 : rect.x, rect.y + rect.h - 12, 6, 8); }
                 else { const sg = Math.sign(c.spd); ctx.fillRect(rect.x + 5, rect.y + rect.h / 2 + (sg > 0 ? 6 : -22), rect.w - 10, 16); ctx.fillStyle = '#fef08a'; ctx.fillRect(rect.x + 4, sg > 0 ? rect.y + rect.h - 6 : rect.y, 8, 6); ctx.fillRect(rect.x + rect.w - 12, sg > 0 ? rect.y + rect.h - 6 : rect.y, 8, 6); }
+                if (!s.preview && dist(me.x, me.y, rect.x + rect.w / 2, rect.y + rect.h / 2) < 155) {
+                    const pulse = 0.62 + Math.sin(t * 10) * 0.28;
+                    ctx.fillStyle = `rgba(127,29,29,${pulse})`; ctx.beginPath(); ctx.arc(rect.x + rect.w / 2, rect.y - 11, 10, 0, TAU); ctx.fill();
+                    ctx.fillStyle = '#fff7ed'; ctx.font = '900 13px system-ui'; ctx.textAlign = 'center'; ctx.fillText('!', rect.x + rect.w / 2, rect.y - 6);
+                }
             }
             this.drawPlayers(ctx, (c, x, y, r) => {
                 const has = r ? r.ex?.p : this.pkg;
@@ -1222,6 +1291,9 @@
                     s.emit({ k: 'gl', team });
                     if (team === this.myTeam) { this.td++; s.addScore(100); s.toast(`GOAL! (${this.td})`, '#fde047'); s.sfx('score'); }
                     else s.toast(`Own goal! It counts for ${team === 0 ? 'Blue' : 'Red'}`, '#f87171');
+                } else if (s.practice || s.preview) {
+                    this.teamTd[team]++;
+                    s.toast(`${team === 0 ? 'Blue' : 'Red'} scored!`, team === 0 ? '#60a5fa' : '#f87171');
                 } else this.unclaimed = team;
             } else if (mine) {
                 this.td++; s.addScore(100); s.toast(`GOAL! (${this.td})`, '#fde047'); s.sfx('score');

@@ -47,11 +47,11 @@
                 { id: 'hat_unicorn', name: 'Unicorn Horn', icon: 'fa-horse-head', price: 230, type: 'hat' },
                 { id: 'hat_tiara', name: 'Jeweled Tiara', icon: 'fa-gem', price: 300, type: 'hat' },
                 { id: 'acc_lei', name: 'Flower Lei', icon: 'fa-spa', price: 90, type: 'accessory' },
-                { id: 'acc_leaves', name: 'Leaf Swirl', icon: 'fa-leaf', price: 190, type: 'accessory' },
+                { id: 'acc_leaves', name: 'Leaf Swirl Trail', icon: 'fa-leaf', price: 190, type: 'trail' },
                 { id: 'acc_guitar', name: 'Back Guitar', icon: 'fa-guitar', price: 210, type: 'accessory' },
-                { id: 'acc_notes', name: 'Music Notes', icon: 'fa-music', price: 220, type: 'accessory' },
-                { id: 'acc_bubbles', name: 'Bubble Trail', icon: 'fa-circle', price: 230, type: 'accessory' },
-                { id: 'acc_lightning', name: 'Storm Aura', icon: 'fa-bolt', price: 320, type: 'accessory' },
+                { id: 'acc_notes', name: 'Music Notes Trail', icon: 'fa-music', price: 220, type: 'trail' },
+                { id: 'acc_bubbles', name: 'Bubble Trail', icon: 'fa-circle', price: 230, type: 'trail' },
+                { id: 'acc_lightning', name: 'Storm Aura', icon: 'fa-bolt', price: 320, type: 'effect' },
                 ...[
                     ['rose', 'Rose Garden', 340, 350, 110], ['lime', 'Lime Fizz', 90, 80, 110], ['mint', 'Fresh Mint', 150, 160, 120],
                     ['mocha', 'Mocha', 25, 35, 120], ['teal', 'Deep Teal', 175, 165, 130], ['peach', 'Peach Fuzz', 20, 30, 130],
@@ -74,8 +74,16 @@
                 { id: 'hat_bucket', name: 'Bucket Hat', icon: 'fa-hat-cowboy-side', price: 75, type: 'hat' },
                 { id: 'hat_astronaut', name: 'Space Helmet', icon: 'fa-user-astronaut', price: 210, type: 'hat' },
                 { id: 'hat_cosmic', name: 'Cosmic Crown', icon: 'fa-crown', price: 720, type: 'hat' },
-                { id: 'acc_comet', name: 'Comet Trail', icon: 'fa-meteor', price: 450, type: 'accessory' },
-                { id: 'acc_aura', name: 'Mythic Aura', icon: 'fa-infinity', price: 760, type: 'accessory' },
+                { id: 'acc_comet', name: 'Comet Trail', icon: 'fa-meteor', price: 450, type: 'trail' },
+                { id: 'acc_aura', name: 'Mythic Aura', icon: 'fa-infinity', price: 760, type: 'effect' },
+                { id: 'acc_rainbow_trail', name: 'Rainbow Ribbon', icon: 'fa-rainbow', price: 360, type: 'trail' },
+                { id: 'acc_firefly_trail', name: 'Firefly Drift', icon: 'fa-bug', price: 280, type: 'trail' },
+                { id: 'acc_stardust_trail', name: 'Stardust Trail', icon: 'fa-star', price: 520, type: 'trail' },
+                { id: 'acc_leaf_trail', name: 'Autumn Leaves', icon: 'fa-leaf', price: 240, type: 'trail' },
+                { id: 'acc_prism_effect', name: 'Prism Pulse', icon: 'fa-circle-nodes', price: 680, type: 'effect' },
+                { id: 'acc_frost_effect', name: 'Frost Nova', icon: 'fa-snowflake', price: 420, type: 'effect' },
+                { id: 'acc_ember_effect', name: 'Ember Halo', icon: 'fa-fire-flame-curved', price: 500, type: 'effect' },
+                { id: 'acc_heart_effect', name: 'Heartbeats', icon: 'fa-heart', price: 320, type: 'effect' },
                 { id: 'acc_glasses', name: 'Round Glasses', icon: 'fa-glasses', price: 70, type: 'accessory' },
                 { id: 'acc_headband', name: 'Sport Headband', icon: 'fa-ribbon', price: 70, type: 'accessory' },
                 { id: 'acc_bandana', name: 'Bandana', icon: 'fa-ribbon', price: 80, type: 'accessory' },
@@ -93,7 +101,7 @@
                 { id: 'acc_jetpack', name: 'Jetpack', icon: 'fa-rocket', price: 240, type: 'accessory' },
                 { id: 'acc_fairy', name: 'Fairy Wings', icon: 'fa-wand-magic', price: 260, type: 'accessory' },
                 { id: 'acc_stars', name: 'Orbit Stars', icon: 'fa-star', price: 280, type: 'accessory' },
-                { id: 'acc_flame', name: 'Flame Aura', icon: 'fa-fire-flame-curved', price: 300, type: 'accessory' },
+                { id: 'acc_flame', name: 'Flame Aura', icon: 'fa-fire-flame-curved', price: 300, type: 'effect' },
                 { id: 'acc_phoenix', name: 'Phoenix Wings', icon: 'fa-dove', price: 420, type: 'accessory' },
                 { id: 'hat_cap', name: 'Sporty Cap', icon: 'fa-hat-cowboy-side', price: 60, type: 'hat' },
                 { id: 'hat_party', name: 'Party Hat', icon: 'fa-cake-candles', price: 70, type: 'hat' },
@@ -119,7 +127,7 @@
                 { id: 'acc_backpack', name: 'Backpack', icon: 'fa-bag-shopping', price: 100, type: 'accessory' },
                 { id: 'acc_monocle', name: 'Monocle', icon: 'fa-eye', price: 140, type: 'accessory' },
                 { id: 'acc_cape', name: 'Hero Cape', icon: 'fa-mask', price: 180, type: 'accessory' },
-                { id: 'acc_sparkles', name: 'Sparkle Aura', icon: 'fa-wand-magic-sparkles', price: 220, type: 'accessory' },
+                { id: 'acc_sparkles', name: 'Sparkle Aura', icon: 'fa-wand-magic-sparkles', price: 220, type: 'effect' },
                 { id: 'acc_wings', name: 'Jet Wings', icon: 'fa-dove',                 price: 350, type: 'accessory' },
                 { id: 'palette_aurora', name: 'Aurora Drift', color: 'aurora', hue: 165, hue2: 260, price: 160, type: 'palette' },
                 { id: 'palette_coral', name: 'Coral Reef', color: 'coral', hue: 10, hue2: 40, price: 160, type: 'palette' },
@@ -151,14 +159,14 @@
 
                         static get boxes() {
                             return [
-                                { id: 'basic', name: 'Study Box', price: 80, icon: 'fa-box', odds: 'Mostly common, small chance of rare · always something new' },
-                                { id: 'rare', name: 'Honors Box', price: 200, icon: 'fa-box-open', odds: 'Uncommon and rare finds, epics possible' },
-                                { id: 'legendary', name: 'Valedictorian Box', price: 500, icon: 'fa-gem', odds: 'Rare or better, 10% legendary, 2% mythic' },
-                                { id: 'hat', name: 'Hat Box', price: 130, icon: 'fa-hat-wizard', odds: 'Hats only · mostly common/uncommon' },
-                                { id: 'accessory', name: 'Style Box', price: 140, icon: 'fa-glasses', odds: 'Accessories only · mostly common/uncommon' },
-                                { id: 'palette', name: 'Color Box', price: 160, icon: 'fa-palette', odds: 'Color palettes only · uncommon or better' },
-                                { id: 'skin', name: 'Character Box', price: 260, icon: 'fa-user-astronaut', odds: 'Characters only · uncommon or better' },
-                                { id: 'mythic', name: 'Mythic Box', price: 1000, icon: 'fa-dragon', odds: 'Anything · epic or better, 45% legendary, 15% mythic' }
+                                { id: 'basic', name: 'Study Box', price: 80, icon: 'fa-book-open', odds: 'A little bit of everything', chances: { common: 70, uncommon: 22, rare: 7, epic: 1 } },
+                                { id: 'rare', name: 'Honors Box', price: 200, icon: 'fa-graduation-cap', odds: 'Better odds for rare finds', chances: { common: 20, uncommon: 40, rare: 28, epic: 10, legendary: 2 } },
+                                { id: 'legendary', name: 'Valedictorian Box', price: 500, icon: 'fa-award', odds: '20% uncommon; no common drops', chances: { uncommon: 20, rare: 40, epic: 28, legendary: 10, mythic: 2 } },
+                                { id: 'hat', name: 'Hat Box', price: 130, icon: 'fa-hat-wizard', odds: 'Hats only', chances: { common: 40, uncommon: 32, rare: 20, epic: 7, legendary: 1 } },
+                                { id: 'accessory', name: 'Style Box', price: 140, icon: 'fa-wand-magic-sparkles', odds: 'Accessories, effects and trails', chances: { common: 40, uncommon: 32, rare: 20, epic: 7, legendary: 1 } },
+                                { id: 'palette', name: 'Color Box', price: 160, icon: 'fa-palette', odds: 'Color palettes only', chances: { uncommon: 50, rare: 35, epic: 13, legendary: 2 } },
+                                { id: 'skin', name: 'Character Box', price: 260, icon: 'fa-user-astronaut', odds: 'Characters only', chances: { uncommon: 40, rare: 35, epic: 20, legendary: 5 } },
+                                { id: 'mythic', name: 'Mythic Box', price: 1000, icon: 'fa-dragon', odds: 'High-tier finds', chances: { epic: 40, legendary: 45, mythic: 15 } }
                             ];
                         }
 
@@ -373,6 +381,14 @@
             const { data, error } = await this.getClient().rpc(fn, args);
             if (error) throw new Error(error.message.includes('Could not find the function')
                 ? 'Admin tools are not set up yet. Re-run supabase-setup.sql in Supabase.'
+                : error.message);
+            return data;
+        }
+
+        async getSiteNotice() {
+            const { data, error } = await this.getClient().rpc('studbud_get_site_notice');
+            if (error) throw new Error(error.message.includes('Could not find the function')
+                ? 'Site announcements are not set up yet. Re-run supabase-setup.sql in Supabase.'
                 : error.message);
             return data;
         }

@@ -16,7 +16,6 @@
         constructor() {
             this.listeners = new Map();
         }
-
         /**
          * Subscribe a callback to an event.
          * @param {string} event 
@@ -1107,6 +1106,30 @@
             waitingCanvas.addEventListener('contextmenu', event => event.preventDefault());
             document.addEventListener('input', event => {
                 if (event.target.matches('#assignment-search')) this.renderAssignments();
+                if (event.target.matches('#multiplayer-shop-search')) {
+                    this.shopSearch = event.target.value.trim();
+                    const query = event.target.value.trim().toLocaleLowerCase();
+                    const grid = event.target.closest('#multiplayer-shop-items')?.querySelector('.shop-grid');
+                    if (grid) {
+                        const cards = [...grid.querySelectorAll('.multiplayer-shop-item')];
+                        let visible = 0;
+                        for (const card of cards) {
+                            const matches = !query || card.dataset.search?.includes(query);
+                            card.hidden = !matches;
+                            if (matches) visible++;
+                        }
+                        for (const heading of grid.querySelectorAll('.shop-category-title')) {
+                            let sibling = heading.nextElementSibling, hasItems = false;
+                            while (sibling && !sibling.matches('.shop-category-title')) {
+                                if (sibling.matches('.multiplayer-shop-item') && !sibling.hidden) hasItems = true;
+                                sibling = sibling.nextElementSibling;
+                            }
+                            heading.hidden = !hasItems;
+                        }
+                        const empty = grid.querySelector('.shop-search-empty');
+                        if (empty) empty.hidden = !query || visible > 0;
+                    }
+                }
                 if (event.target.matches('#course-search')) {
                     document.getElementById('course-name').value = '';
                     document.getElementById('course-selection-hint').textContent = 'Choose a PCHS course from the matches.';
@@ -1696,20 +1719,39 @@
             const type = document.getElementById('daily-schedule-type');
             if (!list || !type) return;
             const { pchsSchedule, pattern, entries } = this.getScheduleEntries(date);
+            const courses = AppState.get('courses') || [];
+            const hasSchedule = Object.values(this.getPeriodMap()).some(code => courses.some(course => course.code === code));
+            const edit = document.getElementById('daily-schedule-edit');
+            if (edit) edit.textContent = hasSchedule ? 'Edit schedule' : 'Set schedule';
             type.textContent = pchsSchedule ? `${pchsSchedule.title} · ${date.toLocaleDateString(undefined, { weekday: 'long' })}` : 'PCHS schedule unavailable';
+            const todayKey = localDateKey(date);
+            const work = (AppState.get('assignments') || []).filter(item => String(item.dueDate || '').slice(0, 10) === todayKey && item.status !== 'completed' && !this.isGradedItem(item));
+            const workMarkup = items => items.length ? `<ul class="schedule-due-work">${items.map(item => `<li><span class="schedule-work-kind">${this.escapeHTML(item.kind || 'assignment')}</span><button type="button" class="schedule-work-link" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">${this.escapeHTML(item.title)}</button></li>`).join('')}</ul>` : '';
+            const todayCourses = new Set(entries.filter(entry => entry.course).map(entry => entry.course.code));
+            const otherWork = work.filter(item => !todayCourses.has(item.courseCode));
+            const otherMarkup = otherWork.length ? `<li class="schedule-extra-work"><strong>Also due today</strong>${workMarkup(otherWork)}</li>` : '';
+            const nextDayMarkup = () => {
+                if (!hasSchedule) return '';
+                for (let offset = 1; offset <= 7; offset++) {
+                    const next = new Date(date.getFullYear(), date.getMonth(), date.getDate() + offset);
+                    const upcoming = this.getScheduleEntries(next).entries.filter(entry => entry.course);
+                    if (upcoming.length) return `<li><details class="schedule-next-day"><summary>Next classes · ${this.escapeHTML(next.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }))}</summary><ul>${upcoming.map(entry => `<li class="daily-period-row"><span>${this.escapeHTML(entry.period)}<small>${this.escapeHTML(entry.time || '')}</small></span><strong>${this.escapeHTML(entry.course.title)}</strong></li>`).join('')}</ul></details></li>`;
+                }
+                return '';
+            };
             if (!pattern) {
-                list.innerHTML = '<li class="empty-state">No classes are scheduled on this day.</li>';
+                list.innerHTML = `<li class="empty-state">${hasSchedule ? 'Your schedule is saved. No classes today.' : 'No classes today. Set your class periods to prepare for school days.'}</li>${otherMarkup}${nextDayMarkup()}`;
                 return;
             }
             const configured = entries.filter(entry => entry.periodNumber && entry.course);
             if (!configured.length) {
-                list.innerHTML = '<li class="empty-state">Set your class periods to see today’s classes here.</li>';
+                list.innerHTML = `<li class="empty-state">${hasSchedule ? 'Your schedule is saved, but none of your classes use today’s periods.' : 'Set your class periods to see today’s classes here.'}</li>${otherMarkup}${nextDayMarkup()}`;
                 return;
             }
             list.innerHTML = entries.map(entry => entry.periodNumber
-                ? `<li class="daily-period-row"><span>${this.escapeHTML(entry.period)}<small>${this.escapeHTML(entry.time || '')}</small></span><strong>${this.escapeHTML(entry.course?.title || 'No class assigned')}</strong></li>`
+                ? `<li class="daily-period-row"><span>${this.escapeHTML(entry.period)}<small>${this.escapeHTML(entry.time || '')}</small></span><div class="daily-period-class"><strong>${this.escapeHTML(entry.course?.title || 'No class assigned')}</strong>${workMarkup(work.filter(item => entry.course && item.courseCode === entry.course.code))}</div></li>`
                 : `<li class="daily-period-row"><span>PCHS block</span><strong>${this.escapeHTML(entry.period)}</strong></li>`
-            ).join('');
+            ).join('') + otherMarkup;
         }
 
         changeCalendarMonth(offset) {
@@ -2086,6 +2128,7 @@
             const grid = document.getElementById('deck-grid');
             if (!grid) return;
             const decks = AppState.get('flashcards') || [];
+            this.refreshCommunityDeckActions();
             const myId = window.StudBudCloud?.user?.id;
             grid.innerHTML = decks.length ? decks.map(deck => {
                 // Sets added from the community belong to their author: credit them and don't allow reposting.
@@ -2294,30 +2337,13 @@
         }
 
         profileCosmetics(profile) {
-            return {
-                skin: profile?.equipped_skin || profile?.skin || '',
-                hat: profile?.equipped_hat || profile?.hat || '',
-                acc: profile?.equipped_accessory || profile?.accessory || ''
-            };
+            return window.StudBudArcade.util.playerCosmetics(profile);
         }
 
         // Draws the same animated-game character to a cached image so lobby avatars match in-game characters.
         multiplayerAvatarMarkup(cos = {}, large = false, extraClass = '') {
             const util = window.StudBudArcade?.util;
-            const key = [cos.skin, cos.hat, cos.acc, cos.color].join('|');
-            this.characterCache = this.characterCache || new Map();
-            let url = this.characterCache.get(key);
-            if (!url && util) {
-                const canvas = document.createElement('canvas');
-                canvas.width = 240;
-                canvas.height = 240;
-                const ctx = canvas.getContext('2d');
-                ctx.scale(3, 3);
-                ctx.imageSmoothingQuality = 'high';
-                util.drawFigureSide(ctx, { color: cos.color || '#34d399', cos }, 27, 25, 26, 42, 1, 0, false);
-                url = canvas.toDataURL('image/png');
-                this.characterCache.set(key, url);
-            }
+            const url = util?.avatarUrl({ color: cos.color, cos });
             return `<span class="player-avatar char-avatar${large ? ' player-avatar-large' : ''}${extraClass ? ` ${this.escapeHTML(extraClass)}` : ''}">${url ? `<img src="${url}" alt="" draggable="false">` : '<i class="fas fa-user" aria-hidden="true"></i>'}</span>`;
         }
 
@@ -2326,9 +2352,9 @@
             const owned = profile.owned_items || [];
             const tab = this.shopTab || 'boxes';
             const catalog = games.catalog.filter(item => !item.legacy && item.type !== 'pet');
-            const equippedBy = { skin: profile.equipped_skin, hat: profile.equipped_hat, accessory: profile.equipped_accessory, palette: profile.equipped_palette };
-            const tabs = [['boxes', 'Mystery boxes'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['palette', 'Colors'], ['inventory', 'Inventory']];
-            const slotKey = { skin: 'skin', hat: 'hat', accessory: 'acc' };
+            const equippedBy = { skin: profile.equipped_skin, hat: profile.equipped_hat, accessory: profile.equipped_accessory, effect: profile.equipped_accessory, trail: profile.equipped_accessory, palette: profile.equipped_palette };
+            const tabs = [['boxes', 'Mystery boxes'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['effect', 'Effects'], ['trail', 'Trails'], ['palette', 'Colors'], ['inventory', 'Inventory']];
+            const slotKey = { skin: 'skin', hat: 'hat', accessory: 'acc', effect: 'acc', trail: 'acc' };
             const itemCard = item => {
                 const has = owned.includes(item.id);
                 const equipped = equippedBy[item.type] === item.id;
@@ -2339,22 +2365,23 @@
                 else preview = this.multiplayerAvatarMarkup({ skin: '', hat: '', acc: '', [slotKey[item.type]]: item.id });
                 const price = item.price == null ? '' : ` · ${item.price} <i class="fas fa-coins"></i>`;
                 let button;
-                if (has && equipped && equippedBy[item.type] !== undefined) button = `<button type="button" class="ghost-btn" data-action="multiplayer-unequip" data-slot="${item.type}">Unequip</button>`;
+                if (has && equipped && equippedBy[item.type] !== undefined) button = `<button type="button" class="ghost-btn" data-action="multiplayer-unequip" data-slot="${item.type === 'effect' || item.type === 'trail' ? 'accessory' : item.type}">Unequip</button>`;
                 else if (has) button = `<button type="button" class="secondary-btn" data-action="multiplayer-equip" data-id="${this.escapeHTML(item.id)}">Equip</button>`;
                 else if (item.price == null) button = '<button type="button" class="secondary-btn" disabled>Box only</button>';
                 else button = `<button type="button" class="secondary-btn" data-action="multiplayer-buy" data-id="${this.escapeHTML(item.id)}" ${profile.coins < item.price ? 'disabled' : ''}>Buy${price}</button>`;
                 const name = item.name;
-                return `<article class="multiplayer-shop-item rarity-${item.rarity}${equipped ? ' equipped' : ''}">${preview}<div><strong>${this.escapeHTML(name)}</strong><small class="rarity-label">${item.rarity}</small></div>${button}</article>`;
+                const search = this.escapeHTML(`${name} ${item.rarity}`.toLocaleLowerCase());
+                return `<article class="multiplayer-shop-item rarity-${item.rarity}${equipped ? ' equipped' : ''}" data-search="${search}">${preview}<div><strong>${this.escapeHTML(name)}</strong><small class="rarity-label">${item.rarity}</small></div>${button}</article>`;
             };
             let body;
             if (tab === 'boxes') {
                 const drop = this.lastDrop;
                 const dropItem = drop && games.catalog.find(entry => entry.id === drop.unlocked_item && entry.type !== 'pet');
                 body = `${dropItem ? `<div class="box-reveal rarity-${this.escapeHTML(dropItem.rarity)}">${dropItem.type === 'palette' ? `<span class="shop-palette" style="background: linear-gradient(135deg, hsl(${dropItem.hue} 75% 55%), hsl(${dropItem.hue2} 80% 40%))"></span>` : this.multiplayerAvatarMarkup({ skin: '', hat: '', acc: '', [slotKey[dropItem.type]]: dropItem.id }, true)}<div><small>${this.escapeHTML(dropItem.rarity)}</small><strong>${this.escapeHTML(dropItem.name)}</strong><span>New item added to your inventory!</span></div></div>` : ''}
-                    ${games.constructor.boxes.map(box => `<article class="multiplayer-shop-item box-card box-${box.id}"><span class="mystery-capsule"><i class="fas ${box.icon}"></i></span><div><strong>${box.name}</strong><small>${box.odds}</small></div><button type="button" class="secondary-btn" data-action="multiplayer-mystery" data-id="${box.id}" ${profile.coins < box.price ? 'disabled' : ''}>Open · ${box.price} <i class="fas fa-coins"></i></button></article>`).join('')}
-                    <p class="settings-hint">Boxes can contain characters, hats, accessories and colors you don't own yet. Boxes are the cheapest way to collect.</p>`;
+                    ${games.constructor.boxes.map(box => `<article class="multiplayer-shop-item box-card box-${box.id}" data-search="${this.escapeHTML(`${box.name} ${box.id}`.toLocaleLowerCase())}"><span class="mystery-capsule" aria-hidden="true"><i class="fas ${box.icon}"></i><small>STUDBUD</small></span><div class="box-details"><strong>${this.escapeHTML(box.name)}</strong><small>${this.escapeHTML(box.odds)}</small><span class="box-chances" aria-label="Rarity drop chances">${Object.entries(box.chances).map(([rarity, chance]) => `<span class="rarity-${rarity}">${rarity} <b>${chance}%</b></span>`).join('')}</span></div><button type="button" class="secondary-btn" data-action="multiplayer-mystery" data-id="${box.id}" ${profile.coins < box.price ? 'disabled' : ''}>Open · ${box.price} <i class="fas fa-coins"></i></button></article>`).join('')}
+                    <p class="settings-hint">Drop chances show the rarity roll for each box. Open boxes to collect characters, hats, accessories, effects, trails and colors.</p>`;
                                 } else if (tab === 'inventory') {
-                                    const typeNames = { skin: 'Characters', hat: 'Hats', accessory: 'Accessories', palette: 'Colors' };
+                                    const typeNames = { skin: 'Characters', hat: 'Hats', accessory: 'Accessories', effect: 'Effects', trail: 'Trails', palette: 'Colors' };
                                     const order = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
                                     const mine = games.catalog.filter(item => item.type !== 'pet' && owned.includes(item.id));
                                     const total = catalog.length;
@@ -2371,7 +2398,7 @@
                                     const items = catalog.filter(item => item.type === tab)
                                         .sort((a, b) => rank(a) - rank(b) || (a.price ?? Infinity) - (b.price ?? Infinity) || String(a.name).localeCompare(String(b.name)));
                                     const count = items.filter(item => owned.includes(item.id)).length;
-                                    const remove = slotKey[tab] ? `<button type="button" class="ghost-btn shop-unequip" data-action="multiplayer-unequip" data-slot="${tab === 'accessory' ? 'accessory' : tab}">Remove</button>` : '';
+                                    const remove = slotKey[tab] ? `<button type="button" class="ghost-btn shop-unequip" data-action="multiplayer-unequip" data-slot="${tab === 'effect' || tab === 'trail' ? 'accessory' : tab}">Remove</button>` : '';
                                     const groups = [...new Set(items.map(item => item.rarity))].sort((a, b) => rank({ rarity: a }) - rank({ rarity: b }));
                                     body = `<h4 class="shop-category-title">${count} / ${items.length} collected ${remove}</h4>${groups.map(rarity => {
                                         const list = items.filter(item => item.rarity === rarity);
@@ -2380,7 +2407,24 @@
                                 }
             document.getElementById('multiplayer-shop-items').innerHTML = `
                 <div class="shop-tabs" role="tablist">${tabs.map(([id, label]) => `<button type="button" class="shop-tab${tab === id ? ' selected' : ''}" role="tab" aria-selected="${tab === id}" data-shop-tab="${id}">${label}</button>`).join('')}</div>
-                <div class="shop-grid">${body}</div>`;
+                <label class="shop-search"><i class="fas fa-magnifying-glass" aria-hidden="true"></i><span class="sr-only">Filter shop items</span><input id="multiplayer-shop-search" type="search" value="${this.escapeHTML(this.shopSearch || '')}" placeholder="Filter by name or rarity"></label>
+                <div class="shop-grid">${body}<p class="shop-search-empty" role="status" hidden>No matching shop items. Try another name or rarity.</p></div>`;
+            const search = document.getElementById('multiplayer-shop-search');
+            if (search && this.shopSearch) {
+                const query = this.shopSearch.toLocaleLowerCase();
+                for (const card of search.closest('#multiplayer-shop-items').querySelectorAll('.multiplayer-shop-item')) card.hidden = !card.dataset.search?.includes(query);
+                const grid = search.closest('#multiplayer-shop-items').querySelector('.shop-grid');
+                for (const heading of grid.querySelectorAll('.shop-category-title')) {
+                    let sibling = heading.nextElementSibling, hasItems = false;
+                    while (sibling && !sibling.matches('.shop-category-title')) {
+                        if (sibling.matches('.multiplayer-shop-item') && !sibling.hidden) hasItems = true;
+                        sibling = sibling.nextElementSibling;
+                    }
+                    heading.hidden = !hasItems;
+                }
+                const empty = grid.querySelector('.shop-search-empty');
+                if (empty) empty.hidden = !query || [...grid.querySelectorAll('.multiplayer-shop-item')].some(card => !card.hidden);
+            }
         }
 
         async renderMultiplayerProfile(force = false) {
@@ -2527,6 +2571,7 @@
             try { if (await window.StudBudCommunityGames.isAdmin()) this.isAdmin = true; } catch (error) { /* keep the name check */ }
             window.NexusApp.isAdmin = this.isAdmin;
             document.getElementById('admin-nav-item')?.classList.toggle('hidden', !this.isAdmin);
+            if (this.isAdmin && /^#\/?admin$/i.test(window.location.hash) && Router.activeRoute !== 'admin') Router.handleHashChange();
             this.refreshUsernameCard();
             this.loadPublicProfileCard();
         }
@@ -2563,11 +2608,63 @@
             }
         }
 
+        async loadSiteNotice(force = false) {
+            if (!window.StudBudCloud?.user || !window.StudBudCommunityGames?.getSiteNotice) return;
+            if (!force && Date.now() - (this.siteNoticeCheckedAt || 0) < 60000) return;
+            this.siteNoticeCheckedAt = Date.now();
+            try {
+                this.siteNotice = await window.StudBudCommunityGames.getSiteNotice();
+                const notice = this.siteNotice;
+                const panel = document.getElementById('site-notice');
+                document.getElementById('site-notice-message').textContent = notice?.message || '';
+                panel.classList.toggle('hidden', !notice?.active || notice.updated_at === this.dismissedSiteNotice);
+            } catch (error) {
+                console.warn('[Announcements] Could not load site notice:', error.message);
+            }
+        }
+
         async loadAdminList() {
             const list = document.getElementById('admin-list');
             const status = document.getElementById('admin-status');
             if (!list || !this.isAdmin) return;
             const tab = this.adminTab || 'decks';
+            document.getElementById('admin-search-form')?.classList.toggle('hidden', tab === 'games' || tab === 'notices');
+            if (tab === 'games') {
+                status.textContent = 'Testing tools are available only to administrators. Test games have infinite energy and no rewards.';
+                list.innerHTML = `<article class="admin-row">
+                    <div><strong>Multiplayer game test bench</strong><small>Launch any arena with simulated players. Test sessions do not award coins or affect leaderboards.</small></div>
+                    <div class="admin-test-settings">
+                        <label>Game to test<select id="admin-game-test-mode">
+                            <option value="skyline">City Escape</option><option value="river">River Fishing</option>
+                            <option value="market">Package Delivery</option><option value="miner">Crystal Mining</option>
+                            <option value="duel">King of the Hill</option><option value="shooter">Arena Shooter</option>
+                            <option value="sports">Soccer</option>
+                        </select></label>
+                        <label>Simulated players<select id="admin-game-test-bots"><option value="0">No bots</option><option value="1">1 bot</option><option value="2">2 bots</option><option value="3" selected>3 bots</option></select></label>
+                        <label>Map seed (optional)<input id="admin-game-test-seed" type="number" min="0" max="4294967295" step="1" placeholder="Default map"></label>
+                    </div>
+                    <div class="admin-actions">
+                        <button type="button" class="primary-btn" data-admin-action="test-game"><i class="fas fa-flask" aria-hidden="true"></i> Launch test</button>
+                    </div>
+                </article>`;
+                return;
+            }
+            if (tab === 'notices') {
+                status.textContent = 'Loading announcement…';
+                try {
+                    const notice = await window.StudBudCommunityGames.getSiteNotice();
+                    status.textContent = notice?.active ? 'This announcement is currently visible to signed-in students.' : 'No announcement is currently published.';
+                    list.innerHTML = `<form id="admin-notice-form" class="admin-notice-form">
+                        <label>Announcement message<textarea id="admin-notice-message" rows="5" maxlength="1000" required>${this.escapeHTML(notice?.message || '')}</textarea></label>
+                        <small>Publish one site-wide message at a time. Students can dismiss it; updating the message makes it visible again.</small>
+                        <div class="admin-actions"><button type="submit" class="primary-btn">Publish announcement</button>${notice?.active ? '<button type="button" class="secondary-btn" data-admin-action="hide-notice">Unpublish</button>' : ''}</div>
+                    </form>`;
+                } catch (error) {
+                    status.textContent = this.friendlyErrorMessage(error, 'Could not load announcements.');
+                    list.innerHTML = '';
+                }
+                return;
+            }
             const query = document.getElementById('admin-search')?.value.trim() || '';
             status.textContent = 'Loading…';
             try {
@@ -2579,17 +2676,22 @@
                     ? rows.map(user => `<article class="admin-row">
                         <div><strong>${esc(user.username)}</strong>${user.banned ? ' <span class="admin-badge">banned</span>' : ''}${user.force_change ? ' <span class="admin-badge">rename required</span>' : ''}
                         <small>${Number(user.coins)} coins · ${Number(user.wins)} wins · ${Number(user.decks)} public decks · joined ${esc(new Date(user.created_at).toLocaleDateString())}</small></div>
-                        <div class="admin-actions">
+                        <details class="admin-tools"><summary>Manage user</summary><div class="admin-actions">
+                            <button type="button" class="secondary-btn" data-admin-action="profile" data-id="${esc(user.id)}">Public profile</button>
                             <button type="button" class="secondary-btn" data-admin-action="coins" data-id="${esc(user.id)}" data-name="${esc(user.username)}">Coins</button>
                             <button type="button" class="secondary-btn" data-admin-action="remove-decks" data-id="${esc(user.id)}" data-name="${esc(user.username)}">Remove decks</button>
                             <button type="button" class="secondary-btn" data-admin-action="${user.force_change ? 'cancel-rename' : 'force-rename'}" data-id="${esc(user.id)}" data-name="${esc(user.username)}">${user.force_change ? 'Cancel rename' : 'Force rename'}</button>
                             <button type="button" class="${user.banned ? 'secondary-btn' : 'danger-btn'}" data-admin-action="${user.banned ? 'unban' : 'ban'}" data-id="${esc(user.id)}" data-name="${esc(user.username)}">${user.banned ? 'Unban' : 'Ban'}</button>
-                        </div></article>`).join('')
+                        </div><small>Last sign-in: ${esc(user.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleString() : 'Never')}${user.ban_reason ? ` · Ban reason: ${esc(user.ban_reason)}` : ''}</small></details></article>`).join('')
                     : rows.map(deck => `<article class="admin-row">
                         <div><strong>${esc(deck.title)}</strong> <small>by ${esc(deck.owner)} · ${Number(deck.card_count)} cards · ${Number(deck.study_count)} studies</small>
                         ${deck.description ? `<small>${esc(deck.description)}</small>` : ''}
                         <small class="admin-preview">${(deck.preview || []).map(card => `${esc(card.front)} → ${esc(card.back)}`).join(' · ')}</small></div>
-                        <div class="admin-actions"><button type="button" class="danger-btn" data-admin-action="delete-deck" data-id="${esc(deck.id)}" data-name="${esc(deck.title)}">Delete</button></div></article>`).join('');
+                        <details class="admin-tools"><summary>Review & moderate</summary><div class="admin-actions">
+                            <button type="button" class="secondary-btn" data-admin-action="inspect-deck" data-id="${esc(deck.id)}">Inspect all cards</button>
+                            <button type="button" class="secondary-btn" data-admin-action="profile" data-id="${esc(deck.owner_id)}">Author profile</button>
+                            <button type="button" class="danger-btn" data-admin-action="delete-deck" data-id="${esc(deck.id)}" data-name="${esc(deck.title)}">Delete</button>
+                        </div></details><div id="admin-deck-${esc(deck.id)}" class="admin-deck-details hidden"></div></article>`).join('');
             } catch (error) {
                 status.textContent = this.friendlyErrorMessage(error, 'Could not load admin data.');
                 list.innerHTML = '';
@@ -2600,7 +2702,32 @@
             const games = window.StudBudCommunityGames;
             const status = document.getElementById('admin-status');
             try {
-                if (action === 'delete-deck') {
+                if (action === 'test-game') {
+                    if (!this.isAdmin) throw new Error('Game testing is available only to administrators.');
+                    const mode = document.getElementById('admin-game-test-mode')?.value;
+                    if (!window.StudBudArcade?.games?.[mode]) throw new Error('Choose a valid game to test.');
+                    const botCount = Number(document.getElementById('admin-game-test-bots').value);
+                    const seedText = document.getElementById('admin-game-test-seed').value.trim();
+                    const seed = seedText ? Number(seedText) : undefined;
+                    if (seed !== undefined && (!Number.isInteger(seed) || seed < 0 || seed > 4294967295)) throw new Error('Map seed must be a whole number from 0 to 4294967295.');
+                    this.startPractice(mode, { testing: true, timeLimitSeconds: 0, questionReward: 100, botCount, seed });
+                    return;
+                } else if (action === 'inspect-deck') {
+                    const deck = await games.adminCall('studbud_admin_get_deck', { p_deck_id: data.id });
+                    const panel = document.getElementById(`admin-deck-${data.id}`);
+                    panel.innerHTML = `<details open><summary>${Number(deck.card_count)} cards · ${this.escapeHTML(deck.title)}</summary><ol class="admin-deck-cards">${deck.cards.map(card => `<li><strong>${this.escapeHTML(card.front)}</strong><p>${this.escapeHTML(card.back)}</p></li>`).join('')}</ol></details>`;
+                    panel.classList.remove('hidden');
+                    return;
+                } else if (action === 'profile') {
+                    await this.openUserProfile(data.id);
+                    return;
+                } else if (action === 'publish-notice' || action === 'hide-notice') {
+                    const message = document.getElementById('admin-notice-message').value.trim();
+                    if (action === 'publish-notice' && !message) throw new Error('Enter an announcement message.');
+                    await games.adminCall('studbud_admin_set_site_notice', { p_message: message, p_active: action === 'publish-notice' });
+                    this.dismissedSiteNotice = null;
+                    await this.loadSiteNotice(true);
+                } else if (action === 'delete-deck') {
                     if (!confirm(`Delete the public deck "${data.name}"?`)) return;
                     await games.adminCall('studbud_admin_delete_deck', { p_deck_id: data.id });
                 } else if (action === 'remove-decks') {
@@ -2618,8 +2745,10 @@
                 } else if (action === 'unban') {
                     await games.adminCall('studbud_admin_set_ban', { p_user_id: data.id, p_banned: false });
                 } else if (action === 'coins') {
-                    const amount = Number(prompt(`Add or remove coins for ${data.name} (use a negative number to remove):`, '100'));
-                    if (!Number.isInteger(amount) || amount === 0) return;
+                    const input = prompt(`Add or remove coins for ${data.name} (use a negative number to remove):`, '100');
+                    if (input === null) return;
+                    const amount = Number(input);
+                    if (!Number.isInteger(amount) || amount === 0 || Math.abs(amount) > 2147483647) throw new Error('Enter a non-zero whole-number coin adjustment within the supported range.');
                     await games.adminCall('studbud_admin_adjust_coins', { p_user_id: data.id, p_delta: amount });
                 }
                 await this.loadAdminList();
@@ -2702,12 +2831,18 @@
                 miner: ['Crystal Mining', 'Dig crystals, bank them at base, avoid lava.'],
                 duel: ['King of the Hill', 'King of the Hill: hold the glowing zone to score and knock rivals off.'],
                 crypto: ['Crypto Trading', 'Trade six assets and answer questions for cash.'],
-                shooter: ['Arena Shooter', 'Twin-stick arena: aim with the mouse, dash, blast drone waves and rival pilots.'],
+                shooter: ['Arena Shooter', 'Twin-stick combat: dash, upgrade your blaster and battle rival pilots, with drones as a secondary threat.'],
                 sports: ['Soccer', 'Blue vs red: players are split into two teams. Dribble the ball, spend energy on power kicks and score in the rival goal.']
             };
             const [title, description] = labels[mode] || labels.skyline;
             document.getElementById('multiplayer-preview-title').textContent = title;
             document.getElementById('multiplayer-preview-description').textContent = description;
+            const resource = ({ miner: 'Fuel', river: 'Bait', shooter: 'Ammo' })[mode] || 'Energy';
+            const resourceLabel = `${resource} per correct answer`;
+            for (const id of ['host-game-resource-label', 'solo-game-resource-label']) {
+                const label = document.getElementById(id);
+                if (label) label.textContent = resourceLabel;
+            }
         }
 
         setMultiplayerScreen(screen) {
@@ -2749,9 +2884,9 @@
             document.getElementById('waiting-runner-best').textContent = String(runner.best);
             if (reset) {
                 runner.x = 4; runner.row = 0; runner.rowFloat = 0; runner.score = 0;
-                runner.autoRow = -3.5; runner.cameraX = Number.isFinite(runner.cameraX) ? runner.cameraX : 4;
+                runner.cameraX = Number.isFinite(runner.cameraX) ? runner.cameraX : 4;
                 runner.cameraRow = runner.started ? runner.cameraRow : -3.5;
-                runner.restarting = true; runner.clock = 0; runner.hop = null; runner.dead = false;
+                runner.restarting = true; runner.clock = 0; runner.hop = null; runner.dead = false; runner.pressure = 0;
                 runner.deathAge = 0; runner.bump = 0; runner.lanes = new Map();
                 runner.coins = 0; runner.queued = null; runner.fx = [];
                 runner.seed = Math.floor(Math.random() * 0x7fffffff) || 127;
@@ -2854,7 +2989,10 @@
         }
 
         waitingPlatformAt(lane, x, time) {
-            return lane.platforms?.find(platform => Math.abs(x - this.waitingPlatformX(lane, platform, time)) <= platform.w / 2 - 0.04);
+            const platforms = lane.platforms || [];
+            const covers = platform => Math.abs(x - this.waitingPlatformX(lane, platform, time)) <= platform.w / 2 + (platform.kind === 'log' ? 0.1 : 0.04);
+            return platforms.find(platform => platform.kind === 'pad' && covers(platform))
+                || platforms.find(platform => platform.kind === 'log' && covers(platform));
         }
 
         waitingPlatformCovers(lane, x, time) { return Boolean(this.waitingPlatformAt(lane, x, time)); }
@@ -2892,14 +3030,19 @@
             }
             if (!runner.running) return;
             if (runner.fx?.length) runner.fx = runner.fx.filter(effect => (effect.age += dt) < 0.7);
-            const target = runner.restarting ? -3.5 : Math.max(runner.autoRow, (runner.rowFloat ?? runner.row) - 3.5);
-            runner.cameraRow += (target - runner.cameraRow) * (1 - Math.exp(-5 * dt));
             runner.cameraX += (4 + (runner.viewCols < 9 ? (runner.x - 4) * 0.38 : 0) - runner.cameraX) * (1 - Math.exp(-4 * dt));
-            if (runner.restarting) { if (Math.abs(runner.cameraRow + 3.5) < 0.08) runner.restarting = false; else return; }
+            if (runner.restarting) {
+                runner.cameraRow += (-3.5 - runner.cameraRow) * (1 - Math.exp(-7 * dt));
+                if (Math.abs(runner.cameraRow + 3.5) < 0.08) runner.restarting = false;
+                else return;
+            }
             const steps = Math.max(1, Math.ceil(dt * 240)), tick = dt / steps;
             for (let step = 0; step < steps && !runner.dead; step++) {
                 const before = { x: runner.x, row: runner.rowFloat ?? runner.row }, oldTime = runner.clock;
-                runner.clock += tick; runner.autoRow += tick * 0.28;
+                runner.clock += tick;
+                runner.cameraRow += tick * (0.85 + Math.min(0.65, Math.max(0, runner.score - 12) * 0.0025));
+                const followAhead = (runner.rowFloat ?? runner.row) - 3.5 - runner.cameraRow;
+                if (followAhead > 0) runner.cameraRow += followAhead * (1 - Math.exp(-7 * tick));
                 const ahead = Math.max(runner.row + 9, Math.ceil(runner.cameraRow + 13));
                 for (let row = Math.max(0, Math.floor(runner.cameraRow) - 2); row <= ahead; row++) this.waitingLane(runner, row);
                 let landed = false;
@@ -2928,13 +3071,23 @@
                                 document.getElementById('waiting-runner-best').textContent = String(runner.best);
                             }
                         }
+                        const landedLane = this.waitingLane(runner, runner.row);
+                        if (landedLane.type === 'river') {
+                            const platform = this.waitingPlatformAt(landedLane, runner.x, runner.clock);
+                            if (!platform) { this.waitingDeath('Splash! Missed a log or lily pad'); break; }
+                            runner.ridingPlatform = platform.kind;
+                            if (platform.kind === 'log') runner.fx.push({ x: runner.x, row: runner.row, age: 0, kind: 'log-land' });
+                        } else runner.ridingPlatform = null;
                     }
                 } else {
                     const lane = this.waitingLane(runner, runner.row);
                     if (lane.type === 'river') {
                         const platform = this.waitingPlatformAt(lane, runner.x, oldTime);
-                        if (!platform) { this.waitingDeath('Splash! Missed the log'); break; }
-                        runner.x += (platform.speed ?? lane.speed) * tick;
+                        if (!platform) { this.waitingDeath('Splash! Missed a log or lily pad'); break; }
+                        runner.ridingPlatform = platform.kind;
+                        if (platform.kind !== 'pad') runner.x += (platform.speed ?? lane.speed) * tick;
+                    } else {
+                        runner.ridingPlatform = null;
                     }
                 }
                 const after = { x: runner.x, row: runner.rowFloat ?? runner.row };
@@ -2952,9 +3105,10 @@
                 }
                 if (runner.dead) break;
                 if (landed && runner.queued) { const [qx, qy] = runner.queued; runner.queued = null; this.waitingHop(qx, qy); }
-                if (landed && this.waitingLane(runner, runner.row).type === 'river' && !this.waitingPlatformCovers(this.waitingLane(runner, runner.row), runner.x, runner.clock)) this.waitingDeath('Splash! Missed the log');
+                if (landed && this.waitingLane(runner, runner.row).type === 'river' && !this.waitingPlatformCovers(this.waitingLane(runner, runner.row), runner.x, runner.clock)) this.waitingDeath('Splash! Missed a log or lily pad');
                 if (runner.x < -0.28 || runner.x > 8.28 || (!runner.hop && this.waitingLane(runner, runner.row).type === 'river' && Math.abs(runner.x - runner.cameraX) > (runner.viewCols || 9) / 2 + 0.23)) this.waitingDeath('Carried beyond the bank');
-                if (after.row < runner.cameraRow - 0.5) this.waitingDeath('The trail moved on');
+                if (after.row < runner.cameraRow - 1.15) this.waitingDeath('The trail caught up');
+                runner.pressure = Math.max(0, runner.cameraRow - after.row + 2.25);
                 runner.bump = Math.max(0, (runner.bump || 0) - tick);
             }
         }
@@ -3026,6 +3180,7 @@
             if (this.multiplayerFrame) cancelAnimationFrame(this.multiplayerFrame);
             this.multiplayerFrame = null;
             if (this.livePreviews) this.livePreviews.clear();
+            this.recordedCityPreview?.video?.pause();
         }
 
         drawCharacter(context, x, y, color, scale, time, swinging = false, accessoryId = '', tool = '') {
@@ -3106,7 +3261,7 @@
             const bots = names.map(([id, name, color], i) => {
                 const rng = U.mulberry32(U.hashStr(`${mode}:${id}:studbud-bot`));
                 const bot = {
-                    id, name, color, cos: {}, i, x: 0, y: 0, vx: 0, vy: 0, f: 0, a: 0, hp: 100, ex: {}, score: 0,
+                    id, name, color, cos: { skin: ['skin_robot', 'skin_ninja', 'skin_alien'][i] }, i, x: 0, y: 0, vx: 0, vy: 0, f: 0, a: 0, hp: 100, ex: {}, score: 0,
                     tx: 0, ty: 0, respawn: 0, invuln: 0, stun: 0, cd: rng(), seen: performance.now(),
                     ai: { rng, speed: 0.82 + rng() * 0.42, aggression: 0.25 + rng() * 0.65, reaction: 0.16 + rng() * 0.48,
                         area: (i + rng() * 0.55) / names.length, lane: i, side: i % 2 ? 1 : -1, phase: rng() * Math.PI * 2,
@@ -3114,6 +3269,15 @@
                 };
                 const W = game.W || game.WIDTH || 1600, H = game.H || 800;
                 bot.x = W * (0.16 + i * 0.32); bot.y = H * (0.28 + (i % 2) * 0.42);
+                if (mode === 'miner') {
+                    const sector = [[2, 24], [24, 47], [47, 68]][i];
+                    bot.w = 26; bot.h = 40; bot.x = ((sector[0] + sector[1]) / 2) * 48 - bot.w / 2;
+                    bot.y = 4 * 48 - bot.h; bot.vx = 0; bot.vy = 0;
+                    bot.ai.sector = sector; bot.ai.dig = null; bot.ai.fuel = 100;
+                } else if (mode === 'market') {
+                    bot.r = 15;
+                    bot.x = game.roadsX[i + 1]; bot.y = game.roadsY[1];
+                }
                 return bot;
             });
             if (mode === 'duel') {
@@ -3122,6 +3286,7 @@
                 demo.onEmit = ev => { if (ev.k === 'sw') this.duelSwing(demo, ev); };
             } else if (mode === 'shooter') {
                 bots.forEach((b, i) => { b.r = 16; b.strafe = i % 2 ? -1 : 1; this.placeShooterBot(game, b, i); });
+                game.hitBot = bullet => this.hitShooterBot(demo, bullet);
             } else if (mode === 'sports') {
                 bots.forEach((b, i) => {
                     b.team = game.teamOf(b.id); b.dir = b.team === 0 ? 1 : -1; b.r = 15; b.kickCd = 0; b.turbo = 0; b.stun = 0;
@@ -3139,10 +3304,10 @@
                 bots.forEach((b, i) => {
                     const shopIndex = shops.length ? i % shops.length : 0;
                     const houseIndex = houses.length > 1 ? Math.round(i * (houses.length - 1) / (bots.length - 1)) : 0;
-                    const shop = shops[shopIndex], home = houses[houseIndex];
+                    const home = houses[houseIndex];
                     b.x = home?.door?.x ?? b.x; b.y = home?.door?.y ?? b.y;
                     b.ai.carrying = false; b.ai.shopIndex = shopIndex; b.ai.houseIndex = houseIndex;
-                    b.ai.target = shop?.door || home?.door || null;
+                    b.ai.target = null;
                 });
             } else if (mode === 'river') {
                 bots.forEach((b, i) => { b.x = 620 + i * 720; b.y = game.H * (0.25 + i * 0.24); b.ai.fishIndex = (i * 13 + 4) % Math.max(1, game.fish.length); b.ai.castTimer = 0.3 + i * 0.9; });
@@ -3150,10 +3315,11 @@
                 bots.forEach((b, i) => { const term = game.terms?.[i % Math.max(1, game.terms?.length || 1)]; b.x = term?.x || b.x; b.y = term?.y || b.y; b.ai.termIndex = i; });
             } else if (mode === 'skyline') {
                 const route = this.skyRoute(game);
+                const start = route.list[0], ground = game.solids.find(p => p.ground);
                 bots.forEach((b, i) => {
-                    const cp = (i + 1) % Math.max(1, game.checkpoints.length), nodeIndex = route.cpNode[cp] || 0, node = route.list[nodeIndex];
-                    b.w = 26; b.h = 44; b.st = { i: nodeIndex, flagDone: true, hop: null, wait: i * 0.16, air: false, moving: false };
-                    b.x = node.x + node.w / 2 - b.w / 2; b.y = node.y - b.h; b.f = i % 2 ? -1 : 1;
+                    b.w = 26; b.h = 44; b.st = { i: 0, flagDone: true, jump: null, wait: i * 0.16, air: false, moving: false };
+                    b.x = start.x + 45 + i * 42; b.y = ground.y - b.h; b.f = i % 2 ? -1 : 1;
+                    b.onGround = true; b.ground = ground; b.airJumps = 1; b.dashCd = 0;
                 });
             } else if (mode === 'frenzy' || mode === 'fishing') {
                 bots.forEach((b, i) => { b.ai.fishingState = i % 2 ? 1 : 0; b.ai.fishingTimer = 0.7 + i * 0.8; b.ai.power = 0; b.ai.powerDir = 1; b.ai.fishY = 100 + i * 45; });
@@ -3183,6 +3349,7 @@
             const zone = game.hill().zone;
             const hillCenter = zone.x + zone.w / 2;
             for (const b of demo.bots) {
+                const ready = this.botResourceReady(demo, b, dt);
                 if (b.respawn > 0) {
                     b.respawn -= dt; b.a = 5;
                     if (b.respawn <= 0) { b.x = b.sp[0]; b.y = b.sp[1] - 60; b.vx = b.vy = 0; b.dmg = 0; b.invuln = 2; b.a = 0; }
@@ -3201,19 +3368,21 @@
                 else if (tgt && Math.abs(tgt.x - b.x) > 60) want = Math.sign(tgt.x - b.x);
                 else if (!tgt && Math.abs(objectiveX - (b.x + 17)) > 28) want = Math.sign(objectiveX - (b.x + 17));
                 if (b.stun <= 0) {
+                    if (!ready) want = 0;
                     const acc = (b.onGround ? 3000 : 1500) * dt;
                     b.vx += U.clamp(want * 300 - b.vx, -acc, acc);
                     if (tgt) b.f = tgt.x >= b.x ? 1 : -1;
                 }
                 b.vy = Math.min(1200, b.vy + 2400 * dt);
                 if (b.onGround) b.airJumps = 1;
-                if (b.stun <= 0) {
+                if (b.stun <= 0 && ready) {
                     if (off) { if (!b.onGround && b.vy > 0 && b.airJumps > 0) { b.vy = -820; b.airJumps--; } }
                     else if (b.onGround && ((!tgt && zone.y < b.y + 20 && Math.abs(objectiveX - (b.x + 17)) < 260) || (tgt && tgt.y < b.y - 50 && Math.abs(tgt.x - b.x) < 320) || (b.wall && want))) b.vy = -900;
                     else if (!b.onGround && b.vy > 0 && b.airJumps > 0 && (tgt ? tgt.y < b.y - 40 : zone.y < b.y + 36 && Math.abs(objectiveX - (b.x + 17)) < 340)) { b.vy = -820; b.airJumps--; }
                 }
                 U.moveBody(b, game.solids, dt);
-                if (tgt && b.swingCd <= 0 && b.stun <= 0 && bd < 115) {
+                if (ready && tgt && b.swingCd <= 0 && b.stun <= 0 && bd < 115) {
+                    b.ai.energy = Math.max(0, (b.ai.energy ?? 100) - 8);
                     const ang = Math.atan2(tgt.y - b.y, tgt.x - b.x);
                     b.swingT = 0.22; b.swingCd = 0.6 + (b.ai?.rng?.() || 0.5) * 0.5; b.swing = now; b.swingAim = ang;
                     const ev = { k: 'sw', x: b.x + 17, y: b.y + 28, d: b.f, a: ang, p: 1, by: b.id, c: b.dmg };
@@ -3224,6 +3393,11 @@
                     if (b.lastHit === demo.meId) game.onEvent({ k: 'ko', by: demo.meId }, b);
                     b.lastHit = null;
                 }
+                const contested = game.inHill(me, zone) || demo.bots.some(other => other !== b && other.respawn <= 0 && game.inHill(other, zone));
+                if (b.respawn <= 0 && !contested && game.inHill(b, zone)) {
+                    b.hillTick = (b.hillTick || 0) + dt;
+                    if (b.hillTick >= 1) { b.hillSecs = (b.hillSecs || 0) + Math.floor(b.hillTick); b.hillTick %= 1; }
+                } else b.hillTick = 0;
                 b.a = b.swingT > 0 ? 3 : !b.onGround ? 2 : Math.abs(b.vx) > 40 ? 1 : 0;
                 b.ex = { d: Math.round(b.dmg), h: 0, i: b.invuln > 0 ? 1 : 0, t: b.swingAim || 0 };
                 b.tx = b.x; b.ty = b.y; b.seen = now;
@@ -3267,6 +3441,7 @@
         stepShooterBots(demo, dt) {
             const U = window.StudBudArcade.util, game = demo.game, me = game.me, now = performance.now();
             for (const b of demo.bots) {
+                const ready = this.botResourceReady(demo, b, dt);
                 b.seen = now;
                 if (b.respawn > 0) {
                     b.respawn -= dt; b.a = 1;
@@ -3280,12 +3455,13 @@
                 if (game.dead <= 0) foes.push(me);
                 for (const o of foes) { const d = Math.hypot(o.x - b.x, o.y - b.y); if (d < bd) { bd = d; tgt = o; } }
                 let mx = 0, my = 0;
-                if (tgt) {
+                if (tgt && ready) {
                     const ang = Math.atan2(tgt.y - b.y, tgt.x - b.x), dir = bd > 420 ? 1 : bd < 260 ? -1 : 0;
                     mx = Math.cos(ang) * dir + Math.cos(ang + Math.PI / 2) * b.strafe * 0.8;
                     my = Math.sin(ang) * dir + Math.sin(ang + Math.PI / 2) * b.strafe * 0.8;
                     b.aim = ang + ((b.ai?.rng?.() || 0.5) - 0.5) * (0.08 + (1 - (b.ai?.aggression || 0.5)) * 0.1);
                     if (b.cd <= 0 && bd < 780) {
+                        b.ai.energy = Math.max(0, (b.ai.energy ?? 100) - 1);
                         b.cd = (b.ai?.reaction || 0.3) + (b.ai?.rng?.() || 0.5) * 0.25;
                         game.onEvent({ k: 'sh', x: b.x + Math.cos(b.aim) * 24, y: b.y + Math.sin(b.aim) * 24, a: b.aim, by: b.id }, b);
                     }
@@ -3297,22 +3473,26 @@
                 b.x = U.clamp(b.x, 30, game.W - 30); b.y = U.clamp(b.y, 30, game.H - 30);
                 b.f = b.aim || 0; b.a = 0; b.ex = { o: 0 }; b.tx = b.x; b.ty = b.y;
             }
-            for (const bl of game.bullets) {
-                if (bl.life <= 0) continue;
-                const atk = bl.own ? demo.meId : bl.by;
-                if (!atk) continue;
-                for (const b of demo.bots) {
-                    if (b.respawn > 0 || b.id === atk || b.invuln > 0 || Math.hypot(bl.x - b.x, bl.y - b.y) > b.r + 4) continue;
-                    bl.life = 0; b.hp -= bl.dmg;
-                    game.particles.burst(bl.x, bl.y, '#fde68a', 5, 120, 0.25, 3);
-                    if (atk === demo.meId) game.onEvent({ k: 'hit', by: demo.meId }, b);
-                    if (b.hp <= 0) {
-                        b.respawn = 2; game.particles.burst(b.x, b.y, b.color, 30, 380, 0.8, 6);
-                        if (atk === demo.meId) game.onEvent({ k: 'ko', by: demo.meId }, b);
-                    }
-                    break;
-                }
+        }
+
+        hitShooterBot(demo, bullet) {
+            const attacker = bullet.own ? demo.meId : bullet.by;
+            if (!attacker || bullet.life <= 0) return false;
+            const bot = demo.bots.find(b => b.respawn <= 0 && b.id !== attacker && b.invuln <= 0 && Math.hypot(bullet.x - b.x, bullet.y - b.y) <= b.r + 4);
+            if (!bot) return false;
+            const game = demo.game;
+            bullet.life = 0; bot.hp -= bullet.dmg;
+            game.particles.burst(bullet.x, bullet.y, '#fde68a', 5, 120, 0.25, 3);
+            const shooter = demo.bots.find(b => b.id === attacker);
+            if (attacker === demo.meId) game.onEvent({ k: 'hit', by: demo.meId, dmg: bullet.dmg }, bot);
+            else if (shooter) shooter.score = (shooter.score || 0) + 4;
+            if (bot.hp <= 0) {
+                bot.respawn = 2;
+                game.particles.burst(bot.x, bot.y, bot.color, 30, 380, 0.8, 6);
+                if (attacker === demo.meId) game.onEvent({ k: 'ko', by: demo.meId }, bot);
+                else if (shooter) shooter.score = (shooter.score || 0) + 100;
             }
+            return true;
         }
 
         driveShooter(demo, hold, tap, session, c) {
@@ -3342,17 +3522,19 @@
             const all = demo.bots.map(b => ({ x: b.x, y: b.y, team: b.team, id: b.id }));
             all.push({ x: game.me.x, y: game.me.y, team: game.myTeam, id: demo.meId });
             for (const b of demo.bots) {
+                const ready = this.botResourceReady(demo, b, dt, Math.hypot(b.vx, b.vy) > 20 ? 3 : 0);
                 b.seen = now; b.ex = { t: 0 }; b.kickCd -= dt;
                 const own = all.filter(o => o.team === b.team);
                 const closest = own.reduce((best, o) => Math.hypot(o.x - ball.x, o.y - ball.y) < Math.hypot(best.x - ball.x, best.y - ball.y) ? o : best, own[0]);
                 const chaser = closest.id === b.id;
                 const goalX = b.dir > 0 ? game.W : 0, homeGoal = b.dir > 0 ? 0 : game.W, goalY = game.H / 2;
                 const attacking = b.team !== (ball.vx > 35 ? 0 : ball.vx < -35 ? 1 : b.team);
-                let tx, ty, speed = 255 * 1.08;
+                let tx, ty, speed = game.baseSpeed * Math.min(1, b.ai.speed);
                 if (game.freeze > 0) { tx = b.home[0]; ty = b.lane; }
                 else if (chaser) {
                     const ax = goalX - ball.x, ay = goalY - ball.y, al = Math.hypot(ax, ay) || 1;
-                    tx = ball.x - ax / al * (30 + b.i * 5); ty = ball.y - ay / al * (30 + b.i * 5); speed = 255 * (1.12 + b.ai.aggression * 0.18);
+                    const contact = b.r + ball.r - 5;
+                    tx = ball.x - ax / al * contact; ty = ball.y - ay / al * contact;
                 } else if (b.role === 'defender' || (attacking && b.i % 2 === 0)) {
                     tx = homeGoal + (goalX - homeGoal) * 0.16; ty = U.clamp(goalY + (b.lane - game.H / 2) * 0.38, 130, game.H - 130);
                 } else {
@@ -3361,20 +3543,21 @@
                     ty = U.clamp(b.lane + (ball.y - game.H / 2) * 0.2, 120, game.H - 120);
                 }
                 const dx = tx - b.x, dy = ty - b.y, dl = Math.hypot(dx, dy) || 1;
-                const desired = Math.min(speed, dl * 2.1), accel = 3000 * dt;
+                const desired = ready ? Math.min(speed, dl * 2.1) : 0, accel = 3000 * dt;
                 b.vx += U.clamp(dx / dl * desired - b.vx, -accel, accel); b.vy += U.clamp(dy / dl * desired - b.vy, -accel, accel);
                 b.x = U.clamp(b.x + b.vx * dt, b.r, game.W - b.r); b.y = U.clamp(b.y + b.vy * dt, b.r, game.H - b.r);
                 b.f = Math.atan2(b.vy, b.vx); b.a = 1; b.tx = b.x; b.ty = b.y;
-                if (game.freeze > 0) continue;
+                if (game.freeze > 0 || !ready) continue;
                 const bx = ball.x - b.x, by = ball.y - b.y, bd = Math.hypot(bx, by), min = b.r + ball.r;
                 if (bd < min) {
                     const nx = bx / (bd || 1), ny = by / (bd || 1);
                     ball.x = b.x + nx * min; ball.y = b.y + ny * min;
                     const goalAngle = Math.atan2(goalY + (b.ai.rng() - 0.5) * 105 - ball.y, goalX - ball.x);
-                    const shoot = b.kickCd <= 0 && Math.abs(goalX - ball.x) < 690 && (chaser || b.role === 'attacker');
+                    const shoot = b.kickCd <= 0 && b.ai.energy >= 10 && Math.abs(goalX - ball.x) < 690 && (chaser || b.role === 'attacker');
                     const shotSpeed = shoot ? 850 + b.ai.aggression * 90 : 300;
                     ball.vx = Math.cos(goalAngle) * shotSpeed; ball.vy = Math.sin(goalAngle) * shotSpeed;
-                    if (shoot) b.kickCd = 1.2 + b.ai.reaction;
+                    game.lastTouch = b.id;
+                    if (shoot) { b.kickCd = 1.2 + b.ai.reaction; b.ai.energy = Math.max(0, (b.ai.energy ?? 100) - 10); }
                 }
             }
         }
@@ -3396,8 +3579,7 @@
         }
 
         // ---- City Escape autoplay ----
-        // The course is generated from a fixed seed, so it never changes. The bot follows one fixed route through it: walk to the platform's edge, hop to the next platform on a set arc, repeat.
-        // Movement is scripted rather than physics-driven, so it clears every checkpoint every time.
+        // The route provides navigation targets; movement still uses the game's physical jump and collision rules.
         skyRoute(game) {
             if (game.botRoute) return game.botRoute;
             const cps = game.checkpoints;
@@ -3422,48 +3604,93 @@
             return game.botRoute = { list, flags, cpNode, props: game.solids.filter(p => p.prop) };
         }
 
-        // Advances a scripted runner (body = {x, y, w, h}) one frame along the route.
-        skyStep(game, b, st, dt, speed) {
+        // Advances a bot using the same jump, gravity, double-jump, dash and collision limits as the player.
+        skyStep(demo, game, b, st, dt, speed) {
             const U = window.StudBudArcade.util, R = this.skyRoute(game), n = R.list[st.i], nx = R.list[st.i + 1];
             const bw = b.w || 26, bh = b.h || 44;
             st.air = false; st.moving = false;
-            if (st.wait > 0) { st.wait -= dt; b.y = n.y - bh; return; }
-            if (st.hop) {
-                const h = st.hop;
-                h.t += dt / h.dur;
-                const s = Math.min(1, h.t);
-                b.x = U.lerp(h.x0, nx.x + h.rel - bw / 2, s);
-                b.y = U.lerp(h.y0, nx.y - bh, s) - 4 * h.lift * s * (1 - s);
-                st.air = true;
-                if (s >= 1) { st.hop = null; st.i++; st.flagDone = false; st.wait = 0.05; }
-                return;
+            const ai = b.ai;
+            ai.energy = ai.energy ?? 100;
+            if (demo.session.testing || demo.session.preview) ai.energy = 100;
+            if (ai.energy < 22) {
+                ai.rechargeAt = ai.rechargeAt || demo.clock + 3 + ai.reaction;
+                if (demo.clock >= ai.rechargeAt) { ai.energy += demo.session.rewardAmount(); ai.rechargeAt = 0; }
+                b.vx *= Math.max(0, 1 - 8 * dt);
+            } else {
+                ai.energy = Math.max(0, ai.energy - (b.onGround ? 2 : 1.2) * dt);
+                const groundIndex = b.onGround ? R.list.indexOf(b.ground) : -1;
+                if (groundIndex >= 0 && groundIndex !== st.i) { st.i = groundIndex; st.flagDone = !R.flags.has(groundIndex); st.jump = null; }
+                if (st.wait > 0) st.wait -= dt;
+
+                if (b.onGround && st.wait <= 0 && nx) {
+                    b.airJumps = 1;
+                    const fx = R.flags.get(st.i), cx = b.x + bw / 2;
+                    const dir = nx.x + nx.w / 2 >= n.x + n.w / 2 ? 1 : -1;
+                    const launchX = dir > 0 ? n.x + n.w - 20 : n.x + 20;
+                    const targetX = fx !== undefined && !st.flagDone ? fx : launchX;
+                    const dx = targetX - cx;
+                    if (fx !== undefined && !st.flagDone && Math.abs(dx) < 9) {
+                        st.flagDone = true;
+                        st.wait = 0.2;
+                    } else if (Math.abs(dx) > 16) {
+                        b.vx += U.clamp(Math.sign(dx) * 300 * speed - b.vx, -3400 * dt, 3400 * dt);
+                        b.face = Math.sign(dx); st.moving = true;
+                    } else {
+                        const choices = [{ dbl: 0.08, dash: null }, { dbl: 0.22, dash: null }, { dbl: 0.16, dash: 0.35 }, { dbl: 0.3, dash: 0.18 }];
+                        const plan = choices.find(choice => {
+                            if (choice.dbl > 0.1 && ai.energy < 18) return false;
+                            if (choice.dash !== null && ai.energy < 34) return false;
+                            return this.skyPredict(game, R, { cur: st.i }, b, b.vx, dir, choice) > st.i;
+                        });
+                        if (plan && ai.energy >= 6) {
+                            b.vy = -850; ai.energy -= 6; b.airJumps = 1;
+                            st.jump = { t: demo.clock, v: plan, dbl: false, dash: false };
+                            b.face = dir; st.moving = true;
+                        } else {
+                            b.vx = 0;
+                            st.retry = (st.retry || 0) + dt;
+                            if (st.retry > 1.2) {
+                                const back = dir > 0 ? n.x + 20 : n.x + n.w - 20;
+                                b.vx = Math.sign(back - cx) * Math.min(180, Math.abs(back - cx) * 2);
+                                st.retry = 0;
+                            }
+                        }
+                    }
+                }
             }
-            const cx = b.x + bw / 2, fx = R.flags.get(st.i);
-            let tx;
-            if (fx !== undefined && !st.flagDone) tx = fx;
-            else if (!nx) tx = n.x + n.w / 2;
-            else tx = U.clamp(nx.x + nx.w / 2, n.x + 14, n.x + n.w - 14);
-            const dx = tx - cx;
-            if (Math.abs(dx) > 3) {
-                const step = Math.min(Math.abs(dx), 320 * speed * dt);
-                b.x += Math.sign(dx) * step; b.face = Math.sign(dx); st.moving = true;
-            } else if (fx !== undefined && !st.flagDone) { st.flagDone = true; st.wait = 0.25; }
-            else if (nx) {
-                const rel = U.clamp(cx - nx.x, 16, nx.w - 16), rise = n.y - nx.y, run = Math.abs(nx.x + rel - cx);
-                st.hop = { t: 0, x0: b.x, y0: b.y, rel, dur: U.clamp(0.4 + run / 1100 + Math.max(0, rise) / 1600, 0.4, 1) / speed, lift: 60 + Math.max(0, rise) * 0.25 + run * 0.06 };
-                b.face = nx.x + rel >= cx ? 1 : -1;
+
+            b.dashCd = Math.max(0, (b.dashCd || 0) - dt);
+            const nxTarget = nx || n;
+            if (!b.onGround && st.jump && ai.energy >= 0) {
+                const elapsed = demo.clock - st.jump.t;
+                const keys = this.skyAirKeys(b, nxTarget, st.jump, elapsed, b.airJumps || 0, b.dashCd || 0);
+                if (keys.dir) b.vx += U.clamp(keys.dir * 340 * speed - b.vx, -2300 * dt, 2300 * dt);
+                b.vy = Math.min(1150, b.vy + 2300 * dt);
+                if (!keys.hold && b.vy < -250) b.vy += 2600 * dt;
+                if (keys.dbl && !st.jump.dbl && (b.airJumps || 0) > 0 && ai.energy >= 12) {
+                    b.vy = -780; b.airJumps--; ai.energy -= 12; st.jump.dbl = true;
+                }
+                if (keys.dash && !st.jump.dash && b.dashCd <= 0 && ai.energy >= 25) {
+                    b.dash = 0.16; b.dashCd = 0.9; ai.energy -= 25; st.jump.dash = true;
+                }
+            } else if (!b.onGround) {
+                b.vy = Math.min(1150, b.vy + 2300 * dt);
             }
-            b.x = U.clamp(b.x, n.x + 12 - bw / 2, n.x + n.w - 12 - bw / 2);
-            // Hop over rooftop props instead of walking through them
-            const c2 = b.x + bw / 2;
-            let lift = 0;
-            for (const p of R.props) {
-                if (Math.abs(p.y + p.h - n.y) > 2) continue;
-                const out = Math.max(p.x - c2, c2 - (p.x + p.w), 0);
-                lift = Math.max(lift, (n.y - p.y) * U.clamp((46 - out) / 46, 0, 1));
+            if (b.dash > 0) {
+                b.dash = Math.max(0, b.dash - dt);
+                b.vx = (b.face || 1) * 760; b.vy = 0;
             }
-            b.y = n.y - bh - lift;
-            if (lift > 2) st.air = true;
+            const previousGround = b.ground;
+            if (previousGround?.dx || previousGround?.dy) {
+                b.x += previousGround.dx || 0; b.y += previousGround.dy || 0;
+            }
+            U.moveBody(b, game.solids, dt);
+            if (b.onGround) {
+                const spring = game.springs.find(item => U.overlap({ x: b.x + 3, y: b.y + 3, w: bw - 6, h: bh - 6 }, item));
+                if (spring && b.vy >= 0) { b.vy = -1280; b.airJumps = 1; st.jump = st.jump || { t: demo.clock, v: { dbl: 9, dash: null }, dbl: false, dash: false }; }
+            }
+            st.air = !b.onGround;
+            st.moving ||= Math.abs(b.vx) > 35;
         }
 
         skylineBot(demo, game, c, dt, hold, tap) {
@@ -3769,18 +3996,23 @@
         stepSkylineBot(demo, bot, index, dt) {
             const game = demo.game, now = performance.now(), route = this.skyRoute(game);
             if (!bot.st) {
-                const cp = (index + 1) % Math.max(1, game.checkpoints.length), nodeIndex = route.cpNode[cp] || 0, node = route.list[nodeIndex];
-                bot.w = 26; bot.h = 44; bot.st = { i: nodeIndex, flagDone: true, hop: null, wait: 0, air: false, moving: false };
-                bot.x = node.x + node.w / 2 - bot.w / 2; bot.y = node.y - bot.h;
+                const ground = game.solids.find(p => p.ground), start = route.list[0];
+                bot.w = 26; bot.h = 44; bot.st = { i: 0, flagDone: true, jump: null, wait: 0, air: false, moving: false };
+                bot.x = start.x + 45 + index * 42; bot.y = ground.y - bot.h;
+                bot.vx = 0; bot.vy = 0; bot.onGround = true; bot.ground = ground; bot.airJumps = 1; bot.dashCd = 0;
             }
             bot.w = 26; bot.h = 44;
-            if (!route.list[bot.st.i + 1]) {
-                const cp = (index + 1) % Math.max(1, game.checkpoints.length), nodeIndex = route.cpNode[cp] || 0, node = route.list[nodeIndex];
-                bot.st.i = nodeIndex; bot.st.hop = null; bot.st.flagDone = true; bot.st.wait = 0.45 + bot.ai.reaction;
-                bot.x = node.x + node.w / 2 - bot.w / 2; bot.y = node.y - bot.h;
+            if (bot.done) {
+                bot.vx = 0; bot.vy = 0; bot.seen = now;
+                return;
+            }
+            if (bot.onGround && bot.ground === game.summit) {
+                bot.done = true; bot.vx = 0; bot.vy = 0; bot.seen = now;
+                return;
             }
             const speed = bot.ai.speed * (0.78 + bot.ai.aggression * 0.24);
-            this.skyStep(game, bot, bot.st, dt, speed);
+            this.skyStep(demo, game, bot, bot.st, dt, speed);
+            if (bot.onGround && bot.ground === game.summit) bot.done = true;
             bot.f = bot.face || 1; bot.a = bot.st.air ? 2 : bot.st.moving ? 1 : 0;
             bot.tx = bot.x; bot.ty = bot.y; bot.ex = {}; bot.seen = now;
         }
@@ -3790,23 +4022,42 @@
             const U = window.StudBudArcade.util;
             const ai = bot.ai || (bot.ai = { rng: U.mulberry32(U.hashStr(`${mode}:${bot.id}`)), speed: 1, aggression: 0.5, reaction: 0.3, area: (index + 0.5) / 3, phase: index, stuck: 0, lastX: bot.x, lastY: bot.y });
             const rand = ai.rng || Math.random, W = game.W || game.WIDTH || 1600, H = game.H || 800;
-            const speed = (mode === 'miner' ? 74 : mode === 'market' ? 136 : mode === 'river' ? 115 : mode === 'hack' ? 112 : 84) * (ai.speed || 1);
+            const ready = mode === 'miner' || this.botResourceReady(demo, bot, dt, Math.hypot(bot.vx, bot.vy) > 20 ? 3 : 0);
+            const speed = ready ? (mode === 'miner' ? 74 : mode === 'market' ? game.baseSpeed : mode === 'river' ? 115 : mode === 'hack' ? 112 : 84) * (ai.speed || 1) : 0;
             const setTarget = (target, duration = 2.2) => { ai.target = target; ai.targetUntil = clock + duration; };
             let target = ai.target;
             if (mode === 'market' && game.shops?.length && game.houses?.length) {
-                if (!target || clock >= ai.targetUntil || Math.hypot(bot.x - target.x, bot.y - target.y) < 44) {
-                    if (ai.carrying) bot.score = (bot.score || 0) + 1;
-                    ai.carrying = !ai.carrying;
+                const arrived = target && Math.hypot(bot.x - target.x, bot.y - target.y) < 44;
+                if (!target || arrived) {
+                    if (arrived && ai.carrying) {
+                        bot.deliveries = (bot.deliveries || 0) + 1;
+                        bot.cash = (bot.cash || 0) + 60;
+                    }
+                    ai.carrying = arrived ? !ai.carrying : false;
                     const shops = game.shops, houses = game.houses;
-                    const list = ai.carrying ? houses : shops;
+                    const list = ai.carrying ? [...houses].sort((a, b) => Math.hypot(a.door.x - bot.x, a.door.y - bot.y) - Math.hypot(b.door.x - bot.x, b.door.y - bot.y)).slice(0, 3) : shops;
                     const cycle = ai.carrying ? (ai.houseIndex + Math.floor(clock / 3)) : (ai.shopIndex + Math.floor(clock / 3));
                     const item = list[((cycle + index) % list.length + list.length) % list.length];
-                    setTarget(item.door, 6); target = ai.target;
+                    setTarget(item.door, Infinity); target = ai.target;
+                    const nearest = (values, value) => values.reduce((best, current) => Math.abs(current - value) < Math.abs(best - value) ? current : best);
+                    const fromX = nearest(game.roadsX, bot.x), fromY = nearest(game.roadsY, bot.y);
+                    const toX = nearest(game.roadsX, target.x), toY = nearest(game.roadsY, target.y);
+                    ai.path = [{ x: fromX, y: fromY }, { x: toX, y: fromY }, { x: toX, y: toY }, { x: target.x, y: toY }, target];
                 }
-                let dx = target.x - bot.x, dy = target.y - bot.y;
+                while (ai.path?.length > 1 && Math.hypot(bot.x - ai.path[0].x, bot.y - ai.path[0].y) < 30) ai.path.shift();
+                const waypoint = ai.path?.[0] || target;
+                let dx = waypoint.x - bot.x, dy = waypoint.y - bot.y;
                 const car = game.cars?.find(item => { const rect = game.carRect(item, clock); return Math.abs(rect.x + rect.w / 2 - bot.x) < 72 && Math.abs(rect.y + rect.h / 2 - bot.y) < 54; });
                 if (car) { if (car.horiz) dy = bot.y < car.c ? -100 : 100; else dx = bot.x < car.c ? -100 : 100; }
                 this.moveBotToward(bot, dx, dy, speed, dt);
+                for (const wall of game.walls) U.pushCircleOutOfRect(bot, wall);
+                ai.hitCd = Math.max(0, (ai.hitCd || 0) - dt);
+                if (ai.hitCd <= 0 && game.cars.some(car => U.overlap({ x: bot.x - 12, y: bot.y - 12, w: 24, h: 24 }, game.carRect(car, clock)))) {
+                    ai.hitCd = 1.35; bot.cash = Math.max(0, (bot.cash || 0) - Math.max(12, Math.round((bot.cash || 0) * 0.12)));
+                    if (ai.carrying) { ai.target = null; ai.path = null; }
+                    ai.carrying = false;
+                }
+                bot.score = bot.deliveries || 0;
                 bot.ex = { p: ai.carrying ? 1 : 0 };
             } else if (mode === 'river' && game.fish?.length) {
                 const fishIndex = (ai.fishIndex + Math.floor(clock / 9) * (index + 1)) % game.fish.length;
@@ -3818,7 +4069,8 @@
                 if (hazard) { dx = bot.x - hazard.x + ai.side * 55; dy = bot.y - hazard.y; }
                 this.moveBotToward(bot, dx, dy, speed, dt);
                 ai.castTimer -= dt;
-                if (ai.castTimer <= 0 && Math.hypot(p.x - bot.x, p.y - bot.y) < 220) {
+                if (ready && ai.castTimer <= 0 && Math.hypot(p.x - bot.x, p.y - bot.y) < 220) {
+                    ai.energy = Math.max(0, (ai.energy ?? 100) - 10);
                     const catchDistance = Math.hypot(p.x - bot.x, p.y - bot.y);
                     if (catchDistance < 140) {
                         const values = [5, 15, 40, 100];
@@ -3830,42 +4082,100 @@
                 }
                 bot.ex = { n: ai.castTimer > 2.2 ? 1 : 0, catches: ai.catches || 0 };
             } else if (mode === 'miner' && game.T) {
-                bot.fuel = bot.fuel ?? 100; bot.carry = bot.carry || 0; bot.items = bot.items || 0;
+                const TS = 48, crystalValues = { 3: 5, 4: 12, 5: 25, 7: 50, 8: 90, 9: 160 };
+                bot.w = 26; bot.h = 40; bot.fuel = demo.session.testing || demo.session.preview ? 100 : ai.fuel ?? 100; bot.carry = bot.carry || 0; bot.items = bot.items || 0;
                 const sector = ai.sector || [[2, 24], [24, 47], [47, 68]][index];
-                const returning = bot.carry >= 40 || bot.fuel < 24;
+                const depth = game.depthAt(bot.y + bot.h);
+                if (bot.carry && !ai.tripStarted) ai.tripStarted = clock;
+                const returning = bot.carry >= 40 || bot.items >= game.cap || (bot.carry > 0 && clock - ai.tripStarted > 22) || bot.fuel < Math.min(78, 28 + depth * 1.6);
                 if (returning) {
-                    target = { x: game.base.x + game.base.w / 2, y: game.base.y + game.base.h + 28 };
-                    if (Math.abs(bot.x - target.x) < 75 && bot.y < game.base.y + game.base.h + 80) { bot.carry = 0; bot.items = 0; bot.fuel = 100; ai.ore = null; }
+                    target = { x: game.base.x + game.base.w / 2, y: game.base.y + game.base.h / 2 };
+                    ai.ore = null;
                 } else {
-                    const targetTile = ai.ore;
-                    if (!targetTile || game.tile(targetTile.x, targetTile.y) < 3 || game.tile(targetTile.x, targetTile.y) === 6 || clock > (ai.oreUntil || 0)) {
+                    const targetTile = ai.ore, targetType = targetTile && game.tile(targetTile.x, targetTile.y);
+                    if (!targetTile || !crystalValues[targetType] || clock > (ai.oreUntil || 0)) {
                         let best = -Infinity, pick = null;
-                        for (let y = 6; y < 34; y++) for (let x = sector[0]; x < sector[1]; x++) {
+                        for (let y = 6; y < 44; y++) for (let x = sector[0]; x < sector[1]; x++) {
                             const type = game.tile(x, y);
-                            if (![3, 4, 5, 7, 8, 9].includes(type)) continue;
-                            let lava = false;
-                            for (let ly = Math.max(4, y - 2); ly <= Math.min(44, y + 2) && !lava; ly++) for (let lx = Math.max(1, x - 2); lx <= Math.min(68, x + 2); lx++) if (game.tile(lx, ly) === 6) { lava = true; break; }
-                            if (lava) continue;
-                            const distance = Math.abs(x * 48 + 24 - bot.x) + Math.abs(y * 48 + 24 - bot.y) * 1.25;
-                            const value = ({ 3: 5, 4: 12, 5: 25, 7: 50, 8: 90, 9: 160 })[type] || 0;
-                            const score = value * (0.75 + rand() * 0.5) - distance * 0.12;
+                            if (!crystalValues[type]) continue;
+                            let lavaNear = false;
+                            for (let ly = Math.max(4, y - 2); ly <= Math.min(44, y + 2) && !lavaNear; ly++) {
+                                for (let lx = Math.max(1, x - 2); lx <= Math.min(68, x + 2); lx++) {
+                                    if (game.tile(lx, ly) === 6) { lavaNear = true; break; }
+                                }
+                            }
+                            if (lavaNear) continue;
+                            const distance = Math.abs(x * TS + TS / 2 - (bot.x + bot.w / 2)) + Math.abs(y * TS + TS / 2 - (bot.y + bot.h / 2)) * 1.15;
+                            const score = crystalValues[type] * (0.85 + rand() * 0.3) - distance * 0.16;
                             if (score > best) { best = score; pick = { x, y }; }
                         }
-                        ai.ore = pick; ai.oreUntil = clock + 12; target = null;
+                        ai.ore = pick; ai.oreUntil = clock + 18; ai.dig = null;
                     }
-                    if (ai.ore) target = { x: ai.ore.x * 48 + 24, y: ai.ore.y * 48 + 24 };
+                    if (ai.ore) target = { x: ai.ore.x * TS + TS / 2, y: ai.ore.y * TS + TS / 2 };
+                    else target = { x: sector[0] * TS + TS / 2, y: 12 * TS };
                 }
-                if (!target) target = ai.target || { x: sector[0] * 48 + 24, y: 12 * 48 };
-                const dx = target.x - bot.x, dy = target.y - bot.y, d = Math.hypot(dx, dy) || 1;
-                const nx = bot.x + dx / d * speed * dt, ny = bot.y + dy / d * speed * dt;
-                const tileX = Math.max(1, Math.min(68, Math.floor(nx / 48))), tileY = Math.max(4, Math.min(44, Math.floor(ny / 48)));
-                if (game.tile(tileX, tileY) === 6) { bot.x += ai.side * speed * dt; }
-                else { bot.x = nx; bot.y = ny; }
-                if (ai.ore && Math.hypot(bot.x - target.x, bot.y - target.y) < 48) {
-                    const type = game.tile(ai.ore.x, ai.ore.y), crystalValues = { 3: 5, 4: 12, 5: 25, 7: 50, 8: 90, 9: 160 };
-                    if (crystalValues[type]) { bot.carry += crystalValues[type]; bot.items++; game.breakTile(ai.ore.x, ai.ore.y, type, false); ai.ore = null; }
+
+                const cx = bot.x + bot.w / 2, cy = bot.y + bot.h / 2;
+                const dx = target.x - cx, dy = target.y - cy;
+                const recharging = Boolean(ai.rechargeAt);
+                const digX = Math.abs(dx) > TS * 0.65 ? Math.sign(dx) : 0, digY = digX ? 0 : Math.sign(dy);
+                const tx = Math.floor(cx / TS) + digX, ty = Math.floor(cy / TS) + digY;
+                const type = game.tile(tx, ty);
+                const diggable = type > 0 && type !== 6 && type !== 10
+                    && Math.hypot(tx * TS + TS / 2 - cx, ty * TS + TS / 2 - cy) < TS * 2.25;
+                if (diggable && !recharging && bot.fuel >= 2.8 * dt) {
+                    bot.fuel = Math.max(0, bot.fuel - 2.8 * dt);
+                    if (!ai.dig || ai.dig.x !== tx || ai.dig.y !== ty) ai.dig = { x: tx, y: ty, progress: 0 };
+                    ai.dig.progress += dt;
+                    bot.vx *= Math.max(0, 1 - 10 * dt);
+                    if (ai.dig.progress >= game.digDuration(type, ty)) {
+                        game.breakTile(tx, ty, type, false);
+                        game.s.emit({ k: 'dg', x: tx, y: ty, t: type });
+                        if (crystalValues[type]) {
+                            bot.carry += crystalValues[type]; bot.items++;
+                            if (ai.ore?.x === tx && ai.ore?.y === ty) ai.ore = null;
+                        }
+                        ai.dig = null;
+                    }
+                } else {
+                    ai.dig = null;
+                    const desiredX = !recharging && Math.abs(dx) > 18 ? Math.sign(dx) * game.baseSpeed : 0;
+                    bot.vx += U.clamp(desiredX - bot.vx, -850 * dt, 850 * dt);
                 }
-                bot.fuel = Math.max(0, bot.fuel - dt * (returning ? 0.2 : 2.4));
+
+                bot.vy = Math.min(860, (bot.vy || 0) + 1750 * dt);
+                const shouldJet = !recharging && dy < -42 && bot.fuel >= 11 * dt;
+                if (shouldJet) {
+                    bot.vy = Math.max(-590, bot.vy - 3000 * dt);
+                    bot.fuel = Math.max(0, bot.fuel - 11 * dt);
+                }
+                U.moveBody(bot, game.collisionSolids(bot), dt);
+                bot.x = U.clamp(bot.x, TS + 1, game.W - TS - bot.w - 1);
+                bot.y = U.clamp(bot.y, 0, game.H - TS - bot.h);
+
+                let touchingLava = false;
+                const x0 = Math.floor((bot.x + 3) / TS), x1 = Math.floor((bot.x + bot.w - 3) / TS);
+                const y0 = Math.floor((bot.y + 3) / TS), y1 = Math.floor((bot.y + bot.h - 3) / TS);
+                for (let ly = y0; ly <= y1 && !touchingLava; ly++) for (let lx = x0; lx <= x1; lx++) {
+                    if (game.tile(lx, ly) === 6) { touchingLava = true; break; }
+                }
+                if (touchingLava && (ai.lavaCd || 0) <= 0) {
+                    ai.lavaCd = 1.1; bot.carry = Math.max(0, bot.carry - Math.ceil(bot.carry * 0.2));
+                    bot.vy = -360; ai.ore = null; ai.dig = null;
+                }
+                ai.lavaCd = Math.max(0, (ai.lavaCd || 0) - dt);
+                if (U.overlap(bot, game.base)) {
+                    if (bot.carry > 0) bot.score = (bot.score || 0) + bot.carry;
+                    bot.carry = 0; bot.items = 0; ai.ore = null; ai.dig = null; ai.tripStarted = 0;
+                }
+                if (!demo.session.testing && !demo.session.preview && (bot.fuel < 35 || ai.rechargeAt)) {
+                    ai.rechargeAt = ai.rechargeAt || clock + 3 + ai.reaction;
+                    if (clock >= ai.rechargeAt) {
+                        bot.fuel += demo.session.rewardAmount();
+                        ai.rechargeAt = bot.fuel < 85 ? clock + 3 + ai.reaction : 0;
+                    }
+                }
+                ai.fuel = bot.fuel;
                 bot.ex = { c: bot.carry, n: bot.items }; bot.a = 1;
             } else if (mode === 'crypto') {
                 ai.tradeAt -= dt;
@@ -3904,7 +4214,10 @@
             }
             const moved = Math.hypot(bot.x - ai.lastX, bot.y - ai.lastY);
             ai.stuck = moved < 1.4 ? ai.stuck + dt : 0; ai.lastX = bot.x; ai.lastY = bot.y;
-            if (ai.stuck > 1.1) { ai.target = null; ai.targetUntil = 0; ai.side *= -1; ai.stuck = 0; }
+            if (ai.stuck > 1.1) {
+                if (mode !== 'market') { ai.target = null; ai.targetUntil = 0; }
+                ai.side *= -1; ai.stuck = 0;
+            }
             bot.x = Math.max(20, Math.min(W - 20, bot.x)); bot.y = Math.max(20, Math.min(H - 20, bot.y));
             bot.f = Math.atan2((target?.y ?? bot.ty ?? bot.y) - bot.y, (target?.x ?? bot.tx ?? bot.x) - bot.x);
             bot.a = 1; bot.hp = 100; bot.tx = bot.x; bot.ty = bot.y; bot.seen = now; bot.ex = bot.ex || {};
@@ -3919,6 +4232,21 @@
             if (Math.abs(dx) + Math.abs(dy) > 0) bot.f = Math.atan2(dy, dx);
         }
 
+        botResourceReady(demo, bot, dt, drain = 0) {
+            const ai = bot.ai;
+            const max = demo.game.res?.max || 100;
+            if (demo.session.testing || demo.session.preview) { ai.energy = max; ai.rechargeAt = 0; return true; }
+            ai.energy = ai.energy ?? demo.game.res?.value ?? max;
+            if (ai.rechargeAt) {
+                if (demo.clock < ai.rechargeAt) return false;
+                ai.energy += demo.session.rewardAmount();
+                ai.rechargeAt = 0;
+            }
+            if (ai.energy < 8) { ai.rechargeAt = demo.clock + 3 + ai.reaction; return false; }
+            ai.energy = Math.max(0, ai.energy - drain * dt);
+            return true;
+        }
+
         wanderBot(bot, ai, W, H, speed, dt, clock) {
             if (!ai.target || clock >= ai.targetUntil || Math.hypot(bot.x - ai.target.x, bot.y - ai.target.y) < 42) {
                 const region = ai.area || 0.5, x = W * (0.12 + region * 0.76), y = H * (0.2 + ((ai.lane + 1) % 3) * 0.28);
@@ -3929,19 +4257,74 @@
             this.moveBotToward(bot, dx, dy, speed, dt);
         }
 
+        drawRecordedCityPreview(canvas) {
+            let preview = this.recordedCityPreview;
+            if (!preview) {
+                const video = document.createElement('video');
+                if (!video.canPlayType?.('video/mp4')) {
+                    this.recordedCityPreview = { failed: true };
+                    console.info('[City preview] Recorded video is unsupported; using live gameplay.');
+                    return false;
+                }
+                const clips = ['start', 'checkpoint-1', 'checkpoint-2', 'checkpoint-3'];
+                preview = this.recordedCityPreview = { video, clips, index: 0, failed: false, starting: false };
+                video.muted = true;
+                video.playsInline = true;
+                video.preload = 'auto';
+                video.addEventListener('error', () => {
+                    preview.failed = true;
+                    video.pause();
+                    console.warn('[City preview] Recorded clip could not load; using live gameplay.', video.error);
+                });
+                video.addEventListener('ended', () => {
+                    preview.index = (preview.index + 1) % clips.length;
+                    video.src = `./assets/previews/city-escape/${clips[preview.index]}.mp4`;
+                });
+                video.src = `./assets/previews/city-escape/${clips[0]}.mp4`;
+            }
+            if (preview.failed) return false;
+            const video = preview.video;
+            if (video.paused && !preview.starting) {
+                preview.starting = true;
+                video.play().then(() => { preview.starting = false; }).catch(error => {
+                    preview.starting = false;
+                    if (error.name === 'AbortError') return;
+                    preview.failed = true;
+                    console.warn('[City preview] Recorded playback unavailable; using live gameplay.', error);
+                });
+            }
+            if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) return false;
+            const rect = canvas.getBoundingClientRect();
+            const dpr = Math.min(1.5, Math.max(1, window.devicePixelRatio || 1));
+            const width = Math.max(1, Math.round(rect.width * dpr)), height = Math.max(1, Math.round(rect.height * dpr));
+            if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
+            const context = canvas.getContext('2d');
+            context.setTransform(1, 0, 0, 1, 0, 0);
+            context.fillStyle = '#111827';
+            context.fillRect(0, 0, width, height);
+            const scale = Math.min(width / video.videoWidth, height / video.videoHeight);
+            const w = video.videoWidth * scale, h = video.videoHeight * scale;
+            context.drawImage(video, (width - w) / 2, (height - h) / 2, w, h);
+            return true;
+        }
+
         drawLivePreview(canvas, mode, now) {
             const A = window.StudBudArcade;
             if (!canvas || !A?.games?.[mode] || !this.canvasIsVisible(canvas)) return false;
             A.previewDepth = (A.previewDepth || 0) + 1;
             try {
+                if (mode === 'skyline' && this.drawRecordedCityPreview(canvas)) return true;
                 const rect = canvas.getBoundingClientRect();
                 const dpr = Math.min(1.5, Math.max(1, window.devicePixelRatio || 1));
                 const width = Math.max(1, Math.round(rect.width * dpr)), height = Math.max(1, Math.round(rect.height * dpr));
                 if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
+                const context = canvas.getContext('2d');
                 if (!this.livePreviews) this.livePreviews = new Map();
                 const viewWidth = 900, viewHeight = Math.round(viewWidth * height / width);
                 let demo = this.livePreviews.get(canvas);
                 if (!demo || demo.mode !== mode) {
+                    context.setTransform(1, 0, 0, 1, 0, 0);
+                    context.clearRect(0, 0, width, height);
                     const hold = new Set(), tap = new Set(), noop = () => {};
                     const mockClassList = { contains: () => false, add: noop, remove: noop, toggle: noop };
                     const mockCanvas = { style: {}, classList: mockClassList };
@@ -3955,15 +4338,17 @@
                                     querySelector: () => element, appendChild: noop, getBoundingClientRect: () => ({ width, height, left: 0, top: 0, right: width, bottom: height }) };
                                 mockElements.set(selector, element);
                             }
+
                             return mockElements.get(selector);
                         }
                     };
+                    const cosmetics = this.profileCosmetics(this.multiplayerProfile || {});
                     const base = {
-                        preview: true, seed: 4242, local: { id: 'demo', color: '#38bdf8', nickname: 'You', cos: {} }, user: { id: 'demo' }, t: 0, startedAt: Date.now(), done: false, finishMs: 0, over: false, paused: false, question: null, score: 0,
+                        preview: true, seed: 4242, local: { id: 'demo', color: '#38bdf8', nickname: 'You', cos: { skin: cosmetics.skin, hat: cosmetics.hat, acc: cosmetics.acc } }, user: { id: 'demo' }, t: 0, startedAt: Date.now(), done: false, finishMs: 0, over: false, paused: false, question: null, score: 0,
                         vw: viewWidth, vh: viewHeight, canvas: mockCanvas, overlay: mockOverlay, roster: new Map(), cards: [], keys: hold, hudBounds() { return { x: 12, y: 12, w: Math.max(1, this.vw - 24), h: Math.max(1, this.vh - 24) }; }, mouse: { x: width / 2, y: height / 2, down: false, pressed: false, touchAt: 0 },
                         down: (...keys) => keys.some(key => hold.has(key)), pressed: (...keys) => keys.some(key => tap.has(key)),
                         axis: () => ({ x: (hold.has('KeyD') || hold.has('ArrowRight') ? 1 : 0) - (hold.has('KeyA') || hold.has('ArrowLeft') ? 1 : 0), y: (hold.has('KeyS') || hold.has('ArrowDown') ? 1 : 0) - (hold.has('KeyW') || hold.has('ArrowUp') ? 1 : 0) }),
-                        spend: () => true, refill: noop, sfx: noop, toast: noop, ask: () => false, remoteList: () => [], standings() { return [this.local, ...this.remoteList()].map(player => ({ id: player.id, n: player.nickname || player.name || player.id, color: player.color || '#94a3b8', s: Number(player.score) || 0 })); }, emit: event => demo?.onEmit?.(event), send: noop, setGoal: noop, addScore: noop,
+                        spend: () => true, rewardAmount: () => 20, refill: noop, sfx: noop, toast: noop, ask: () => false, remoteList: () => [], standings() { return [this.local, ...this.remoteList()].map(player => ({ id: player.id, n: player.nickname || player.name || player.id, color: player.color || '#94a3b8', s: Number(player.score) || 0 })); }, emit: event => demo?.onEmit?.(event), send: noop, setGoal: noop, addScore: noop,
                         placeHud(ctx, x, y, w, h, anchor = 'top-left') {
                             const scale = Math.max(0.35, Math.min(1, (session.vw - 24) / w, (session.vh - 24) / h));
                             const left = anchor.endsWith('right') ? session.vw - w * scale - 12 : anchor.endsWith('center') || anchor === 'center' ? (session.vw - w * scale) / 2 : 12;
@@ -3981,6 +4366,8 @@
                     this.livePreviews.set(canvas, demo);
                 }
                 const { session, game, hold, tap } = demo;
+                const cosmetics = this.profileCosmetics(this.multiplayerProfile || {});
+                session.local.cos = { skin: cosmetics.skin, hat: cosmetics.hat, acc: cosmetics.acc };
                 session.remoteList = () => demo.bots;
                 session.remotes = new Map(demo.bots.map(bot => [bot.id, bot]));
                 const dt = Math.min(0.05, Math.max(0.001, (now - demo.last) / 1000));
@@ -3992,16 +4379,23 @@
                 if (mode === 'skyline' && game.finished && !demo.endAt) demo.endAt = demo.clock;
                 if (mode === 'skyline' && demo.endAt && demo.clock - demo.endAt > 1.5) this.livePreviews.delete(canvas);
                 game.update(dt);
-                const context = canvas.getContext('2d');
                 context.setTransform(1, 0, 0, 1, 0, 0);
                 context.save();
-                context.scale(canvas.width / viewWidth, canvas.height / viewHeight);
-                game.draw(context, viewWidth, viewHeight);
-                context.restore();
+                try {
+                    context.scale(canvas.width / viewWidth, canvas.height / viewHeight);
+                    game.draw(context, viewWidth, viewHeight);
+                } finally {
+                    context.restore();
+                }
                 return true;
             } catch (error) {
                 console.warn(`[NexusApp] ${mode} live preview unavailable:`, error);
                 if (this.livePreviews) this.livePreviews.delete(canvas);
+                const context = canvas.getContext('2d');
+                context.setTransform(1, 0, 0, 1, 0, 0);
+                context.clearRect(0, 0, canvas.width, canvas.height);
+                context.fillStyle = '#fca5a5'; context.font = '600 14px system-ui'; context.textAlign = 'center';
+                context.fillText('Game preview unavailable', canvas.width / 2, canvas.height / 2, canvas.width - 16);
                 return false;
             } finally {
                 A.previewDepth--;
@@ -4108,6 +4502,12 @@
                 if (effect.kind === 'dust') {
                     ctx.fillStyle = `rgba(245,240,220,${.55 * (1 - k)})`;
                     for (let i = -1; i <= 1; i += 2) { ctx.beginPath(); ctx.arc(fx + i * tile * (.18 + k * .25), fy - k * 4, tile * (.06 + k * .05), 0, Math.PI * 2); ctx.fill(); }
+                } else if (effect.kind === 'log-land') {
+                    ctx.globalAlpha = 1 - k;
+                    ctx.strokeStyle = '#fef3c7'; ctx.lineWidth = Math.max(2, tile * .045);
+                    ctx.beginPath(); ctx.ellipse(fx, fy, tile * (.22 + k * .45), tile * (.1 + k * .2), 0, 0, Math.PI * 2); ctx.stroke();
+                    ctx.fillStyle = '#fff7ed'; ctx.font = '900 12px system-ui'; ctx.textAlign = 'center';
+                    ctx.fillText('LOG RIDE', fx, fy - tile * (.42 + k * .25)); ctx.globalAlpha = 1;
                 } else {
                     ctx.globalAlpha = 1 - k; ctx.fillStyle = '#fde047'; ctx.font = '900 14px system-ui'; ctx.textAlign = 'center';
                     ctx.fillText('+1', fx, fy - tile * (.8 + k * .5)); ctx.globalAlpha = 1;
@@ -4132,11 +4532,35 @@
             ctx.fillStyle = 'rgba(29,48,40,.74)'; ctx.fillRect(0, 0, width, 31);
             ctx.fillStyle = '#f5ffe7'; ctx.font = '800 12px system-ui'; ctx.textAlign = 'right'; ctx.fillText('ROWS ' + runner.score + ' / BEST ' + runner.best, width - 14, 21);
             ctx.textAlign = 'left'; ctx.fillStyle = '#fde047'; ctx.fillText('● ' + (runner.coins || 0), 14, 21);
+            if (!runner.dead && runner.pressure > 1.1) {
+                ctx.textAlign = 'center'; ctx.fillStyle = '#fb923c'; ctx.font = '900 11px system-ui';
+                ctx.fillText('KEEP MOVING - THE TRAIL IS CATCHING UP', width / 2, 40);
+            }
             const touch = window.matchMedia?.('(pointer: coarse)').matches || (navigator.maxTouchPoints || 0) > 0;
-            const prompt = runner.dead ? (death < 1 ? (splash ? 'Splash!' : 'Ouch!') : runner.deathReason + (touch ? ' - tap to restart' : ' - press a key to restart')) : (touch ? 'TAP TO HOP / SWIPE TO MOVE' : 'WASD / ARROWS OR SPACE TO HOP');
+            const prompt = runner.dead ? (death < 1 ? (splash ? 'Splash!' : 'Ouch!') : runner.deathReason + (touch ? ' - tap to restart' : ' - press a key to restart')) : (touch ? 'TAP FORWARD · SWIPE TO CHANGE LANES' : 'WASD / ARROWS TO MOVE · SPACE TO HOP');
             ctx.font = '700 11px system-ui'; ctx.textAlign = 'center'; const pw = Math.min(width - 16, ctx.measureText(prompt).width + 20);
             ctx.fillStyle = 'rgba(29,48,40,.78)'; ctx.fillRect(width / 2 - pw / 2, height - 28, pw, 22);
             ctx.fillStyle = '#f4ffe8'; ctx.fillText(prompt, width / 2, height - 13, width - 30);
+        }
+
+        findCommunityDeck(deckId) {
+            return (AppState.get('flashcards') || []).find(deck =>
+                deck.communitySourceId === deckId || deck.communityDeckId === deckId
+            );
+        }
+
+        communityDeckActionMarkup(deckId) {
+            const id = this.escapeHTML(deckId);
+            return this.findCommunityDeck(deckId)
+                ? `<span class="community-deck-added" data-community-deck-id="${id}"><i class="fas fa-check-circle" aria-hidden="true"></i> Already in your decks</span>`
+                : `<button class="secondary-btn" type="button" data-action="import-community-deck" data-id="${id}" data-community-deck-id="${id}"><i class="fas fa-download" aria-hidden="true"></i> Add to my decks</button>`;
+        }
+
+        refreshCommunityDeckActions() {
+            document.querySelectorAll('[data-community-deck-id]').forEach(element => {
+                const markup = this.communityDeckActionMarkup(element.dataset.communityDeckId);
+                if (element.outerHTML !== markup) element.outerHTML = markup;
+            });
         }
 
         async searchCommunityDecks(query) {
@@ -4152,7 +4576,7 @@
                         <div><strong>${this.escapeHTML(deck.title)}</strong>${deck.course ? ` <span class="deck-chip"><i class="fas fa-book"></i> ${this.escapeHTML(deck.course)}</span>` : ''}<p>${this.escapeHTML(deck.description || 'A student-shared study set.')}</p>
                             <small>${Number(deck.card_count)} cards · studied by ${Number(deck.study_count)} ${Number(deck.study_count) === 1 ? 'student' : 'students'}</small>
                             <small class="deck-author">by <button type="button" class="link-btn" data-action="view-profile" data-id="${this.escapeHTML(deck.owner_id)}">${this.escapeHTML(deck.author_name || 'Student')}</button></small></div>
-                        <button class="secondary-btn" type="button" data-action="import-community-deck" data-id="${this.escapeHTML(deck.id)}"><i class="fas fa-download"></i> Add to my decks</button>
+                        ${this.communityDeckActionMarkup(deck.id)}
                     </article>`).join('') : '<p class="empty-state">No shared decks found. Try another search, or share one of your own after studying it.</p>';
                 status.textContent = `${decks.length} community deck${decks.length === 1 ? '' : 's'} found.`;
             } catch (error) {
@@ -4185,12 +4609,17 @@
         }
 
         async importCommunityDeck(deckId) {
+            const local = this.findCommunityDeck(deckId);
+            if (local) {
+                document.getElementById('community-deck-status').textContent = `“${local.title}” is already in your decks.`;
+                this.refreshCommunityDeckActions();
+                return;
+            }
             const shared = await window.StudBudCommunityGames.importDeck(deckId);
-            const existingDeck = (AppState.get('flashcards') || []).find(deck =>
-                deck.communitySourceId === shared.id
-            );
+            const existingDeck = this.findCommunityDeck(shared.id);
             if (existingDeck) {
                 document.getElementById('community-deck-status').textContent = `“${shared.title}” is already in your decks.`;
+                this.refreshCommunityDeckActions();
                 return;
             }
             const localDeck = {
@@ -4215,6 +4644,7 @@
                 studiedCount: 0
             };
             await AppState.saveFlashcardDeck(localDeck);
+            this.refreshCommunityDeckActions();
             document.getElementById('community-deck-status').textContent = `Added “${shared.title}” to your private decks.`;
         }
 
@@ -4344,7 +4774,7 @@
             document.getElementById('hosted-room-meta').textContent = `${goalLabel} · ${players.length} / ${playerLimit} players`;
             document.getElementById('hosted-room-code').textContent = room.room_code;
             const rankedPlayers = players.slice().sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
-            const avatarFor = player => this.multiplayerAvatarMarkup({ skin: player.skin, hat: player.hat, acc: player.accessory });
+            const avatarFor = player => this.multiplayerAvatarMarkup(this.profileCosmetics(player));
             document.getElementById('hosted-leaderboard-count').textContent = `${players.length} player${players.length === 1 ? '' : 's'}`;
             document.getElementById('hosted-leaderboard-title').textContent = room.status === 'waiting' ? 'Lobby' : 'Leaderboard';
             document.getElementById('hosted-room-players').innerHTML = rankedPlayers
@@ -4488,49 +4918,71 @@
             if (!this.arcadeSession) document.body.classList.remove('mpg-active');
         }
 
-        startPractice(modeOverride) {
+        startPractice(modeOverride, config = {}) {
             const arcade = window.StudBudArcade;
             if (this.practiceSession && (this.practiceSession.destroyed || !this.practiceSession.overlay?.isConnected)) {
                 try { this.practiceSession.destroy(); } catch (_) { /* already gone */ }
                 this.practiceSession = null;
             }
             const deckId = document.getElementById('host-game-deck')?.value;
+            if (config.testing && !this.isAdmin) throw new Error('Game testing is available only to administrators.');
+            const botCount = config.botCount ?? 3;
+            if (!Number.isInteger(botCount) || botCount < 0 || botCount > 3) throw new Error('Choose between zero and three simulated players.');
+            const selectedDeck = (AppState.get('flashcards') || []).find(item => item.id === deckId);
+            if (!config.testing && !(selectedDeck?.cards || []).some(card => card.front && card.back)) {
+                throw new Error('Select a flashcard set with complete cards before starting a solo game.');
+            }
             const room = modeOverride
                 ? { mode: modeOverride, deck_id: deckId, state: { players: [] } }
                 : this.hostedGameRoom || { mode: this.selectedMultiplayerMode || 'skyline', deck_id: deckId, state: { players: [] } };
             if (!arcade || this.practiceSession) return;
             const user = window.StudBudCloud?.user || { id: 'local-practice' };
-            const me = (room.state?.players || []).find(player => player.id === user.id) || { id: user.id, nickname: 'You' };
-            const deck = (AppState.get('flashcards') || []).find(item => item.id === room.deck_id || item.title === room.deck_title);
-            const botDefs = [['b1', 'Nova', '#f472b6'], ['b2', 'Kite', '#facc15'], ['b3', 'Rook', '#4ade80']];
+            const roomPlayer = (room.state?.players || []).find(player => player.id === user.id) || { id: user.id, nickname: 'You' };
+            const cosmetics = this.profileCosmetics(this.multiplayerProfile || roomPlayer);
+            const hasProfile = !!this.multiplayerProfile;
+            const me = {
+                ...roomPlayer,
+                skin: hasProfile ? cosmetics.skin : roomPlayer.skin || '',
+                hat: hasProfile ? cosmetics.hat : roomPlayer.hat || '',
+                accessory: hasProfile ? cosmetics.acc : roomPlayer.accessory || ''
+            };
+            const roomDeck = (AppState.get('flashcards') || []).find(item => item.id === room.deck_id || item.title === room.deck_title);
+            const botDefs = [['b1', 'Nova', '#f472b6'], ['b2', 'Kite', '#facc15'], ['b3', 'Rook', '#4ade80']].slice(0, botCount);
             const fake = {
                 mode: room.mode, room_code: 'PRACTICE', goal_type: 'points', point_limit: 99999, host_id: user.id,
                 started_at: new Date().toISOString(),
-                state: { players: [me, ...botDefs.map(([id, nickname, color]) => ({ id, nickname, color }))] }
+                state: { question_reward: config.questionReward || 20, players: [me, ...botDefs.map(([id, nickname, color], i) => ({ id, nickname, color, skin: ['skin_robot', 'skin_ninja', 'skin_alien'][i] }))] }
             };
             const s = this.practiceSession = new arcade.Session({
-                room: fake, user, api: window.StudBudCommunityGames, isHost: false, practice: true,
-                fallbackCards: (deck?.cards || []).filter(card => card.front && card.back),
-                onLeave: () => this.closePractice()
+                room: fake, user, api: window.StudBudCommunityGames, isHost: false, practice: true, testing: Boolean(config.testing),
+                timeLimitSeconds: config.timeLimitSeconds || 0, questionReward: config.questionReward || 20,
+                seed: config.seed,
+                fallbackCards: (roomDeck?.cards || []).filter(card => card.front && card.back),
+                onLeave: () => this.closePractice(),
+                onRestart: config.testing ? () => { this.closePractice(); this.startPractice(room.mode, config); } : undefined
             });
             document.body.classList.add('mpg-active');
             try {
                 const demo = { mode: room.mode, session: s, game: s.game, meId: user.id, clock: 0 };
-                demo.bots = this.initPreviewBots(demo, room.mode, s.game);
+                demo.bots = this.initPreviewBots(demo, room.mode, s.game).slice(0, botCount);
                 demo.bots.forEach(b => {
                     const info = s.roster.get(b.id);
                     if (info) { b.name = info.nickname; b.color = info.color; b.cos = info.cos; }
                     s.remotes.set(b.id, b);
-                    b.st = b.st || { i: 0, flagDone: true, hop: null, wait: 1 + b.i * 0.8, air: false, moving: false };
                 });
                 const baseEmit = s.emit.bind(s);
                 s.emit = ev => { baseEmit(ev); demo.onEmit?.(ev); };
                 s.onTick = dt => {
                     if (s.over || s.paused || s.countdown > 0) return;
-                    try { this.tickPracticeBots(demo, dt); } catch (error) { s.onTick = null; console.warn('[Practice] bots disabled:', error); }
+                    try { this.tickPracticeBots(demo, dt); } catch (error) {
+                        s.onTick = null;
+                        console.error('[Practice] bots stopped:', error);
+                        s.toast('Bot simulation stopped unexpectedly. Restart the game to try again.', '#f87171');
+                    }
                 };
             } catch (error) {
-                console.warn('[Practice] Could not add bots:', error);
+                console.error('[Practice] Could not add bots:', error);
+                s.toast('Bots could not start. Restart the game to try again.', '#f87171');
             }
         }
 
@@ -4543,6 +4995,28 @@
             else if (mode === 'sports') this.stepSportsBots(demo, dt);
             else if (mode === 'skyline') bots.forEach((bot, i) => this.stepSkylineBot(demo, bot, i, dt));
             else bots.forEach((bot, i) => this.stepAmbientBot(demo, bot, i, dt));
+            for (const bot of bots) {
+                if (mode === 'skyline') {
+                    bot.goal = Math.max(bot.goal || 0, Math.round(Math.max(0, -(bot.y + bot.h)) / 40));
+                    bot.score = bot.goal;
+                } else if (mode === 'duel') {
+                    bot.goal = Math.floor(bot.hillSecs || 0);
+                    bot.score = bot.goal * 12;
+                } else if (mode === 'sports') {
+                    bot.goal = Number(game.teamTd?.[bot.team]) || 0;
+                    bot.score = bot.goal * 100;
+                } else if (mode === 'market') {
+                    bot.goal = bot.deliveries || 0;
+                    bot.score = bot.goal;
+                } else if (mode === 'miner' || mode === 'river' || mode === 'crypto' || mode === 'shooter' || mode === 'hack') {
+                    bot.goal = Math.round(Number(bot.score) || 0);
+                }
+                const rosterPlayer = demo.session.roster.get(bot.id);
+                if (rosterPlayer) {
+                    rosterPlayer.score = Math.round(Number(bot.score) || 0);
+                    rosterPlayer.goal = Math.round(Number(bot.goal) || 0);
+                }
+            }
         }
 
         async leaveHostedGame() {
@@ -4726,7 +5200,7 @@
             try {
                 const data = await games.friendCall('studbud_friend_overview');
                 this.friendOverview = data;
-                const person = (row, buttons) => `<li class="friend-row">${this.multiplayerAvatarMarkup({ skin: row.skin || '', hat: row.hat || '', acc: row.accessory || '' }, false, 'friend-avatar')}<strong>${this.escapeHTML(row.username)}</strong><span class="friend-actions">${buttons}</span></li>`;
+                const person = (row, buttons) => `<li class="friend-row">${this.multiplayerAvatarMarkup(this.profileCosmetics(row), false, 'friend-avatar')}<strong>${this.escapeHTML(row.username)}</strong><span class="friend-actions">${buttons}</span></li>`;
                 const attrs = row => `data-id="${this.escapeHTML(row.friendship_id)}" data-name="${this.escapeHTML(row.username)}"`;
                 lists.friends.innerHTML = data.friends.length
                     ? data.friends.map(row => person(row, `<button type="button" class="secondary-btn" data-action="friend-view" data-id="${this.escapeHTML(row.user_id)}">Profile</button><button type="button" class="ghost-btn" data-action="friend-remove" ${attrs(row)}>Remove</button>`)).join('')
@@ -4785,21 +5259,21 @@
             }
             const modal = overlay.firstElementChild;
             overlay.classList.remove('hidden');
-            modal.innerHTML = '<p class="community-status">Loading profile…</p><button type="button" class="ghost-btn" data-action="close-user-profile">Close</button>';
+            modal.innerHTML = '<p class="community-status">Loading profile…</p><button type="button" class="secondary-btn" data-action="close-user-profile">Close</button>';
             try {
                 const p = await window.StudBudCommunityGames.getUserProfile(userId);
-                const avatar = this.multiplayerAvatarMarkup({ skin: p.skin, hat: p.hat, acc: p.accessory }, true);
+                const avatar = this.multiplayerAvatarMarkup(this.profileCosmetics(p), true);
                 const stat = (label, value) => `<div class="friend-stat"><strong>${value}</strong><small>${label}</small></div>`;
                 const facts = [p.grade_level && `🎓 ${p.grade_level}`, p.favorite_subject && `⭐ ${p.favorite_subject}`, p.study_goal && `🎯 ${p.study_goal}`].filter(Boolean).map(f => `<span class="friend-chip">${this.escapeHTML(f)}</span>`).join('');
-                const decks = (p.decks || []).map(d => `<li class="friend-row"><div><strong>${this.escapeHTML(d.title)}</strong>${d.course ? ` <span class="deck-chip"><i class="fas fa-book"></i> ${this.escapeHTML(d.course)}</span>` : ''}<br><small>${Number(d.card_count)} cards · studied by ${Number(d.study_count)}</small></div>${p.is_me ? '' : `<button type="button" class="secondary-btn" data-action="import-community-deck" data-id="${this.escapeHTML(d.id)}">Add</button>`}</li>`).join('');
-                modal.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.username)}${p.is_me ? ' <em class="you-badge">you</em>' : ''}</h3></div><button type="button" class="ghost-btn" data-action="close-user-profile" aria-label="Close profile"><i class="fas fa-xmark"></i></button></div>
+                const decks = (p.decks || []).map(d => `<li class="friend-row"><div><strong>${this.escapeHTML(d.title)}</strong>${d.course ? ` <span class="deck-chip"><i class="fas fa-book"></i> ${this.escapeHTML(d.course)}</span>` : ''}<br><small>${Number(d.card_count)} cards · studied by ${Number(d.study_count)}</small></div>${p.is_me && !this.findCommunityDeck(d.id) ? '' : this.communityDeckActionMarkup(d.id)}</li>`).join('');
+                modal.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.username)}${p.is_me ? ' <em class="you-badge">you</em>' : ''}</h3></div><button type="button" class="icon-btn profile-close" data-action="close-user-profile" aria-label="Close profile"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
                     ${p.bio ? `<p class="friend-bio">${this.escapeHTML(p.bio)}</p>` : ''}${facts ? `<div class="friend-chips">${facts}</div>` : ''}
                     <div class="friend-stats">${p.show_stats === false ? stat('Match wins', Number(p.wins) || 0) : `${stat('Studied today', this.formatStudyDuration(p.today_seconds))}${stat('This week', this.formatStudyDuration(p.week_seconds))}${stat('All time', this.formatStudyDuration(p.total_seconds))}${stat('Day streak', `${Number(p.streak_days) || 0} 🔥`)}${stat('Match wins', Number(p.wins) || 0)}`}</div>
                     <h4>Shared flashcard sets</h4>
                     <ul class="friend-list">${decks || '<li class="empty-state">No shared sets yet.</li>'}</ul>
                     ${p.is_me ? `<div class="own-profile-actions"><button type="button" class="primary-btn" data-action="edit-public-profile"><i class="fas fa-pen" aria-hidden="true"></i> Edit public profile</button><button type="button" class="secondary-btn" data-action="open-my-shop"><i class="fas fa-store" aria-hidden="true"></i> Shop &amp; character</button></div>` : ''}`;
             } catch (error) {
-                modal.innerHTML = `<p class="community-status error">${this.escapeHTML(error.message || 'Could not open that profile.')}</p><button type="button" class="ghost-btn" data-action="close-user-profile">Close</button>`;
+                modal.innerHTML = `<p class="community-status error">${this.escapeHTML(error.message || 'Could not open that profile.')}</p><button type="button" class="secondary-btn" data-action="close-user-profile">Close</button>`;
             }
         }
 
@@ -4811,7 +5285,7 @@
                 const avatar = this.multiplayerAvatarMarkup({ skin: p.skin, hat: p.hat, acc: p.accessory }, true);
                 const stat = (label, value) => `<div class="friend-stat"><strong>${value}</strong><small>${label}</small></div>`;
                 const facts = [p.grade_level && `🎓 ${p.grade_level}`, p.favorite_subject && `⭐ ${p.favorite_subject}`, p.study_goal && `🎯 ${p.study_goal}`].filter(Boolean).map(f => `<span class="friend-chip">${this.escapeHTML(f)}</span>`).join('');
-                panel.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.username)}</h3><small>Friend</small></div><button type="button" class="ghost-btn" data-action="friend-profile-close" aria-label="Close profile"><i class="fas fa-xmark"></i></button></div>
+                panel.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.username)}</h3><small>Friend</small></div><button type="button" class="icon-btn profile-close" data-action="friend-profile-close" aria-label="Close profile"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
                     ${p.bio ? `<p class="friend-bio">${this.escapeHTML(p.bio)}</p>` : ''}${facts ? `<div class="friend-chips">${facts}</div>` : ''}
                     <div class="friend-stats">${p.show_stats === false ? stat('Match wins', Number(p.wins) || 0) : `${stat('Studied today', this.formatStudyDuration(p.today_seconds))}${stat('This week', this.formatStudyDuration(p.week_seconds))}${stat('All time', this.formatStudyDuration(p.total_seconds))}${stat('Day streak', `${Number(p.streak_days) || 0} 🔥`)}${stat('Match wins', Number(p.wins) || 0)}`}</div>`;
                 panel.classList.remove('hidden');
@@ -4959,6 +5433,7 @@
         }
 
         renderDashboard() {
+            this.loadSiteNotice();
             this.renderHomeWidget();
             const courses = AppState.get('courses') || [];
             const calculator = window.GPACalculator;
@@ -5630,6 +6105,7 @@
                 if (target.matches('.multiplayer-mode[data-mode]')) {
                     this.selectedMultiplayerMode = target.dataset.mode;
                     document.getElementById('host-game-mode').value = this.selectedMultiplayerMode;
+                    this.livePreviews?.delete(document.getElementById('multiplayer-game-canvas'));
                     this.updateMultiplayerModeSetup(this.selectedMultiplayerMode);
                     document.querySelectorAll('.multiplayer-mode').forEach(button =>
                         button.classList.toggle('selected', button === target)
@@ -5638,8 +6114,17 @@
                     this.setMultiplayerScreen(target.dataset.multiplayerTab);
                 } else if (id === 'waiting-practice-btn') {
                     this.startPractice();
-                } else if (id === 'preview-practice-btn') {
-                    this.startPractice(this.selectedMultiplayerMode || 'skyline');
+                } else if (action === 'toggle-solo-settings') {
+                    const form = document.getElementById('solo-game-settings');
+                    const open = form?.classList.toggle('hidden') === false;
+                    target.setAttribute('aria-expanded', String(open));
+                    target.innerHTML = `<i class="fas fa-gamepad" aria-hidden="true"></i> ${open ? 'Solo game settings' : 'Set up solo game'}`;
+                } else if (action === 'start-solo-game') {
+                    const form = document.getElementById('solo-game-settings');
+                    this.startPractice(this.selectedMultiplayerMode || 'skyline', {
+                        timeLimitSeconds: Number(form?.elements.timeLimit.value) || 0,
+                        questionReward: Number(form?.elements.questionReward.value) || 20
+                    });
                 } else if (target.matches('[data-study-leaderboard-period]')) {
                     this.studyLeaderboardPeriod = target.dataset.studyLeaderboardPeriod;
                     await this.refreshStudyLeaderboard(this.studyLeaderboardPeriod);
@@ -5650,6 +6135,9 @@
                     const panel = document.getElementById('home-widget-settings');
                     const open = panel?.classList.toggle('hidden') === false;
                     target.setAttribute('aria-expanded', String(open));
+                } else if (action === 'dismiss-site-notice') {
+                    this.dismissedSiteNotice = this.siteNotice?.updated_at;
+                    document.getElementById('site-notice').classList.add('hidden');
                 } else if (action === 'copy-hosted-room-code') {
                     await this.copyHostedRoomCode();
                 } else if (action === 'study-leaderboard-retry') {
@@ -5966,6 +6454,11 @@
 
         async handleSubmit(event) {
             const form = event.target;
+            if (form.id === 'admin-notice-form') {
+                event.preventDefault();
+                await this.runAdminAction('publish-notice', {});
+                return;
+            }
             if (form.id === 'friend-add-form') {
                 event.preventDefault();
                 await this.sendFriendRequest(document.getElementById('friend-username'));
