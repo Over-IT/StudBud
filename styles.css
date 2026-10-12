@@ -70,6 +70,7 @@
 .announcement-history { display: grid; gap: 12px; list-style: none; padding: 0; margin: 12px 0 0; }
 .announcement-history li { min-width: 0; padding: 12px; border: 1px solid var(--border-glass); border-radius: var(--border-radius-sm); }
 .announcement-history time { color: var(--text-secondary); font-size: .8rem; }
+.announcement-history li > small, .site-notice small { display: block; margin-top: 4px; color: var(--text-secondary); }
 .announcement-history p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0 0; }
 #site-notice-status:empty { display: none; }
 .study-leaderboard-bar { display: block; height: 6px; overflow: hidden; border-radius: 999px; background: var(--bg-glass-hover); }

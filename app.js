@@ -2640,18 +2640,44 @@
 
         async loadSiteNotice(force = false) {
             if (!window.StudBudCloud?.user || !window.StudBudCommunityGames?.getSiteNotice) return;
-            if (!force && Date.now() - (this.siteNoticeCheckedAt || 0) < 60000) return;
+            const userId = window.StudBudCloud.user.id;
+            if (!force && this.siteNoticeUserId === userId && Date.now() - (this.siteNoticeCheckedAt || 0) < 60000) return;
+            this.siteNoticeUserId = userId;
             this.siteNoticeCheckedAt = Date.now();
             try {
-                this.siteNotice = await window.StudBudCommunityGames.getSiteNotice();
-                const notice = this.siteNotice;
+                const notice = await window.StudBudCommunityGames.getSiteNotice();
+                if (window.StudBudCloud?.user?.id !== userId) return;
+                this.siteNotice = notice;
                 const panel = document.getElementById('site-notice');
                 document.getElementById('site-notice-message').textContent = notice?.message || '';
-                const dismissalKey = `${window.StudBudCloud.user.id}:${notice?.publication_id}`;
-                panel.classList.toggle('hidden', !notice?.active || notice.dismissed || dismissalKey === this.dismissedSiteNotice);
+                const metadata = document.getElementById('site-notice-metadata');
+                if (metadata) metadata.textContent = notice?.published_at
+                    ? `${this.formatAnnouncementTime(notice.published_at)} · By ${notice.author_name || 'Site administrator'}`
+                    : '';
+                const dismissalKey = `${userId}:${notice?.publication_id}`;
+                let savedDismissal = false;
+                if (notice?.publication_id) {
+                    try {
+                        savedDismissal = localStorage.getItem(this.siteNoticeDismissalKey(userId, notice.publication_id)) === '1';
+                    } catch (error) {
+                        console.warn('[Announcements] Could not read device dismissal:', error);
+                    }
+                }
+                panel.classList.toggle('hidden', !notice?.active || notice.dismissed || savedDismissal || dismissalKey === this.dismissedSiteNotice);
             } catch (error) {
                 console.warn('[Announcements] Could not load site notice:', error.message);
             }
+        }
+
+        siteNoticeDismissalKey(userId, publicationId) {
+            return `STUDBUD_NOTICE_DISMISSED:${userId}:${publicationId}`;
+        }
+
+        formatAnnouncementTime(timestamp) {
+            return new Date(timestamp).toLocaleString(undefined, {
+                year: 'numeric', month: 'short', day: 'numeric',
+                hour: 'numeric', minute: '2-digit', second: '2-digit'
+            });
         }
 
         async dismissSiteNotice() {
@@ -2669,6 +2695,11 @@
                 }
                 await window.StudBudCommunityGames.dismissSiteNotice(notice.publication_id);
                 this.dismissedSiteNotice = `${userId}:${notice.publication_id}`;
+                try {
+                    localStorage.setItem(this.siteNoticeDismissalKey(userId, notice.publication_id), '1');
+                } catch (error) {
+                    console.warn('[Announcements] Device dismissal could not be cached; account dismissal is saved:', error);
+                }
                 if (window.StudBudCloud?.user?.id === userId && this.siteNotice?.publication_id === notice.publication_id) {
                     this.siteNotice.dismissed = true;
                     document.getElementById('site-notice').classList.add('hidden');
@@ -2690,9 +2721,13 @@
             status.textContent = 'Loading announcements…';
             try {
                 const history = await window.StudBudCommunityGames.getSiteNoticeHistory();
-                list.innerHTML = history.map(notice => {
-                    const date = new Date(notice.published_at);
-                    return `<li><time datetime="${this.escapeHTML(notice.published_at)}">${this.escapeHTML(date.toLocaleString())}</time><p>${this.escapeHTML(notice.message)}</p></li>`;
+                const chronological = [...history].sort((a, b) => {
+                    const byDate = Date.parse(b.published_at) - Date.parse(a.published_at);
+                    return byDate || String(b.publication_id).length - String(a.publication_id).length
+                        || String(b.publication_id).localeCompare(String(a.publication_id));
+                });
+                list.innerHTML = chronological.map((notice, index) => {
+                    return `<li>${index === 0 ? '<strong>Latest announcement</strong> ' : ''}<time datetime="${this.escapeHTML(notice.published_at)}">${this.escapeHTML(this.formatAnnouncementTime(notice.published_at))}</time><small>By ${this.escapeHTML(notice.author_name || 'Site administrator')} ${this.accountTagMarkup(notice.author_name)}</small><p>${this.escapeHTML(notice.message)}</p></li>`;
                 }).join('');
                 status.textContent = history.length ? '' : 'No announcements have been published yet.';
             } catch (error) {

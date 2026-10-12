@@ -10,12 +10,17 @@ assert.equal(manifest.short_name, 'StudBud');
 assert.match(html, /<title>StudBud<\/title>/);
 assert.equal([...html.matchAll(/<span class="logo-text">StudBud<\/span>/g)].length, 2);
 const errors = [];
+const localValues = new Map();
 const sandbox = {
     console: { ...console, warn: (...args) => { errors.push(args); console.warn(...args); } },
     performance, Date, Math, Map, Set, Uint8Array,
     document: { addEventListener() {}, getElementById() { return { textContent: '' }; } },
     window: { devicePixelRatio: 1, addEventListener() {} },
-    navigator: { maxTouchPoints: 0 }
+    navigator: { maxTouchPoints: 0 },
+    localStorage: {
+        getItem: key => localValues.get(key) ?? null,
+        setItem: (key, value) => localValues.set(key, String(value))
+    }
 };
 vm.createContext(sandbox);
 for (const file of ['communityGames.js', 'multiplayerEngine.js', 'multiplayerGames.js', 'multiplayerGames2.js', 'multiplayerGames3.js', 'plannerEngine.js']) {
@@ -574,11 +579,19 @@ async function checkCommunityAndAdminUi() {
     assert.equal(nodes.get('site-notice-status').textContent, '');
     assert.equal(nodes.get('dismiss-notice').disabled, false);
     assert.ok(dismissals.has('qa-user:1'), 'dismissal is stored for the signed-in account');
+    assert.equal(localValues.get(app.siteNoticeDismissalKey('qa-user', '1')), '1', 'successful dismissal is mirrored on the device');
     await app.loadSiteNotice(true);
     assert.equal(nodes.get('site-notice').classList.contains('hidden'), true);
     const reloadedApp = Object.create(sandbox.window.TestApp.prototype);
     await reloadedApp.loadSiteNotice(true);
     assert.equal(nodes.get('site-notice').classList.contains('hidden'), true, 'a fresh app instance retains server-backed dismissal');
+    dismissals.delete('qa-user:1');
+    await reloadedApp.loadSiteNotice(true);
+    assert.equal(nodes.get('site-notice').classList.contains('hidden'), true, 'device dismissal prevents a stale server response from showing the banner after reload');
+    dismissals.add('qa-user:1');
+    localValues.delete(app.siteNoticeDismissalKey('qa-user', '1'));
+    await reloadedApp.loadSiteNotice(true);
+    assert.equal(nodes.get('site-notice').classList.contains('hidden'), true, 'server dismissal works on another device without a local mirror');
     notice = { ...notice, updated_at: 'newer' };
     await reloadedApp.loadSiteNotice(true);
     assert.equal(nodes.get('site-notice').classList.contains('hidden'), true, 'changing metadata must not reshow the same publication');
@@ -593,6 +606,24 @@ async function checkCommunityAndAdminUi() {
     await app.loadAnnouncementHistory();
     assert.match(nodes.get('announcement-history').innerHTML, /&lt;\/textarea&gt;&lt;script&gt;/);
     assert.ok(!nodes.get('announcement-history').innerHTML.includes('<script>'), 'history escapes announcement content');
+    const chronologicalApi = sandbox.window.StudBudCommunityGames.getSiteNoticeHistory;
+    sandbox.window.StudBudCommunityGames.getSiteNoticeHistory = async () => [
+        { publication_id: '10', published_at: '2026-10-10T01:00:00Z', message: 'Oldest', author_name: 'andy' },
+        { publication_id: '2', published_at: '2026-10-12T01:00:00Z', message: 'Newest', author_name: 'overit', dismissed: false },
+        { publication_id: '1', published_at: '2026-10-11T01:00:00Z', message: 'Middle', author_name: '<script>author</script>', dismissed: true },
+        { publication_id: '3', published_at: '2026-10-10T02:00:00Z', message: 'Future admin publication', author_name: 'future_admin' }
+    ];
+    await app.loadAnnouncementHistory();
+    const sortedHistory = nodes.get('announcement-history').innerHTML;
+    assert.ok(sortedHistory.indexOf('Newest') < sortedHistory.indexOf('Middle'));
+    assert.ok(sortedHistory.indexOf('Middle') < sortedHistory.indexOf('Oldest'), 'history sorts by publication date, not insertion ID or dismissal');
+    assert.equal((sortedHistory.match(/Latest announcement/g) || []).length, 1);
+    assert.match(sortedHistory, /By overit/);
+    assert.match(sortedHistory, /By future_admin/, 'author names work for newly authorized admins without a hardcoded username list');
+    assert.match(sortedHistory, /By &lt;script&gt;author&lt;\/script&gt;/);
+    assert.match(sortedHistory, /datetime="2026-10-12T01:00:00Z"/);
+    assert.match(app.formatAnnouncementTime('2026-10-12T01:00:00Z'), /\d{1,2}:\d{2}:\d{2}/, 'publication timestamp includes time down to seconds');
+    sandbox.window.StudBudCommunityGames.getSiteNoticeHistory = chronologicalApi;
     const dismissApi = sandbox.window.StudBudCommunityGames.dismissSiteNotice;
     const logError = sandbox.console.error;
     const failures = [];
@@ -600,6 +631,7 @@ async function checkCommunityAndAdminUi() {
     sandbox.window.StudBudCommunityGames.dismissSiteNotice = async () => { throw new Error('Network unavailable'); };
     await app.dismissSiteNotice();
     assert.equal(nodes.get('site-notice').classList.contains('hidden'), false, 'failed dismissal must not pretend to be saved');
+    assert.equal(localValues.has(app.siteNoticeDismissalKey('qa-user', '2')), false, 'failed server save must not create a success-shaped device record');
     assert.match(nodes.get('site-notice-status').textContent, /Network unavailable/);
     assert.equal(nodes.get('dismiss-notice').disabled, false, 'failed dismissal can be retried');
     assert.equal(failures.length, 1, 'dismissal failure is logged');

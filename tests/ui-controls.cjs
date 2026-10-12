@@ -66,12 +66,25 @@ assert.match(sql, /where publication_id is null and char_length\(btrim\(message\
 assert.match(sql, /values \(auth.uid\(\), p_publication_id\) on conflict do nothing/,
     'repeat dismissal is idempotent and cannot impersonate another account');
 assert.match(sql, /where d.user_id = auth.uid\(\) and d.publication_id = n.publication_id/);
-assert.match(sql, /order by h.id desc/, 'archive is newest first');
+assert.match(sql, /order by h.published_at desc, h.id desc/, 'archive is chronologically newest first with a stable tie-breaker');
+assert.match(sql, /n.message, n.updated_at, n.updated_by, nullif\(account.raw_user_meta_data ->> 'username', ''\)/,
+    'upgrade preserves the original announcement timestamp and publisher');
+assert.match(sql, /'author_name', coalesce\(h.published_username, 'Site administrator'\)/);
 const publishNoticeFunction = sql.match(/create or replace function public\.studbud_admin_set_site_notice[\s\S]*?\$\$;/)[0];
 assert.match(publishNoticeFunction, /perform public.studbud_require_admin\(\)/);
-assert.match(publishNoticeFunction, /if p_active then\s+insert into public.studbud_site_notice_history/);
+assert.match(publishNoticeFunction, /if p_active then\s+select[\s\S]*?insert into public.studbud_site_notice_history[\s\S]*?returning id into v_publication_id;\s+end if;/);
 assert.match(publishNoticeFunction, /else studbud_site_notice.publication_id end/,
     'unpublishing preserves the publication identity and dismissal records');
+assert.match(publishNoticeFunction, /insert into public.studbud_site_notice_history\(message, published_by, published_username\)/,
+    'future publications snapshot the publisher username');
+assert.match(publishNoticeFunction, /if v_author_username is null then raise exception/,
+    'new announcements cannot publish without a recorded author username');
+assert.match(publishNoticeFunction, /values \(btrim\(p_message\), auth.uid\(\), v_author_username\)/,
+    'author is taken from the authenticated administrator, not browser input');
+const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+const about = html.match(/<section id="about-view"[\s\S]*?<\/section>/)[0];
+assert.ok(about.indexOf('id="announcement-history-card"') > about.indexOf('Questions or suggestions?'),
+    'announcement history belongs at the bottom of About');
 for (const signature of ['studbud_get_site_notice_history\\(\\)', 'studbud_dismiss_site_notice\\(bigint\\)']) {
     assert.match(sql, new RegExp(`revoke all on function public\\.${signature} from public, anon;`));
     assert.match(sql, new RegExp(`grant execute on function public\\.${signature} to authenticated;`));

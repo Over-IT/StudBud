@@ -2321,13 +2321,21 @@ create table if not exists public.studbud_site_notice_history (
 alter table public.studbud_site_notice_history enable row level security;
 revoke all on public.studbud_site_notice_history from public, anon, authenticated;
 
+alter table public.studbud_site_notice_history add column if not exists published_username text;
+update public.studbud_site_notice_history h
+set published_username = nullif(account.raw_user_meta_data ->> 'username', '')
+from auth.users account
+where h.published_username is null and account.id = h.published_by;
+
 alter table public.studbud_site_notice add column if not exists publication_id bigint
     references public.studbud_site_notice_history(id);
 
 -- Preserve the existing announcement once when upgrading from the single-notice schema.
 with archived as (
-    insert into public.studbud_site_notice_history(message, published_at, published_by)
-    select message, updated_at, updated_by from public.studbud_site_notice
+    insert into public.studbud_site_notice_history(message, published_at, published_by, published_username)
+    select n.message, n.updated_at, n.updated_by, nullif(account.raw_user_meta_data ->> 'username', '')
+    from public.studbud_site_notice n
+    left join auth.users account on account.id = n.updated_by
     where publication_id is null and char_length(btrim(message)) > 0
     returning id
 )
@@ -2354,11 +2362,13 @@ begin
     if auth.uid() is null then raise exception 'Sign in to see announcements.'; end if;
     return (
         select jsonb_build_object('message', n.message, 'active', n.active, 'updated_at', n.updated_at,
+            'published_at', h.published_at, 'author_name', coalesce(h.published_username, 'Site administrator'),
             'publication_id', n.publication_id::text, 'dismissed', exists (
                 select 1 from public.studbud_site_notice_dismissals d
                 where d.user_id = auth.uid() and d.publication_id = n.publication_id
             ))
         from public.studbud_site_notice n
+        left join public.studbud_site_notice_history h on h.id = n.publication_id
         where n.active or public.studbud_is_admin()
     );
 end;
@@ -2377,7 +2387,8 @@ begin
     if auth.uid() is null then raise exception 'Sign in to see announcements.'; end if;
     return coalesce((
         select jsonb_agg(jsonb_build_object('publication_id', h.id::text,
-            'message', h.message, 'published_at', h.published_at) order by h.id desc)
+            'message', h.message, 'published_at', h.published_at,
+            'author_name', coalesce(h.published_username, 'Site administrator')) order by h.published_at desc, h.id desc)
         from public.studbud_site_notice_history h
     ), '[]'::jsonb);
 end;
@@ -2411,6 +2422,7 @@ set search_path = public, pg_temp
 as $$
 declare
     v_publication_id bigint;
+    v_author_username text;
 begin
     perform public.studbud_require_admin();
     if p_message is null or char_length(p_message) > 1000 or p_active is null
@@ -2418,8 +2430,11 @@ begin
         raise exception 'Enter an announcement of 1-1000 characters before publishing.';
     end if;
     if p_active then
-        insert into public.studbud_site_notice_history(message, published_by)
-        values (btrim(p_message), auth.uid()) returning id into v_publication_id;
+        select nullif(raw_user_meta_data ->> 'username', '') into v_author_username
+        from auth.users where id = auth.uid();
+        if v_author_username is null then raise exception 'The announcement author must have a username.'; end if;
+        insert into public.studbud_site_notice_history(message, published_by, published_username)
+        values (btrim(p_message), auth.uid(), v_author_username) returning id into v_publication_id;
     end if;
     insert into public.studbud_site_notice(id, message, active, updated_at, updated_by, publication_id)
         values (1, btrim(p_message), p_active, now(), auth.uid(), v_publication_id)
