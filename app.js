@@ -552,7 +552,14 @@
             }
 
             const studyRoute = viewId === 'flashcard-view' || viewId === 'exam-arcade-view';
-            document.getElementById('study-ambience')?.classList.toggle('hidden', !studyRoute);
+            const ambience = document.getElementById('study-ambience');
+            ambience?.classList.toggle('hidden', !studyRoute);
+            document.getElementById('ambience-panel')?.classList.add('hidden');
+            document.getElementById('ambience-toggle')?.setAttribute('aria-expanded', 'false');
+            if (studyRoute && ambience) {
+                const toolbar = document.querySelector(`#${viewId} > .view-header`);
+                toolbar?.appendChild(ambience);
+            }
             if (!studyRoute) {
                 document.getElementById('ambience-panel')?.classList.add('hidden');
                 Soundscape.stopAll();
@@ -1034,6 +1041,10 @@
                 '"': '&quot;',
                 "'": '&#39;'
             })[character]);
+        }
+
+        accountTagMarkup(username) {
+            return window.StudBudArcade.util.accountTagMarkup(username);
         }
 
         friendlyErrorMessage(error, fallback = 'Something went wrong. Please try again in a moment.') {
@@ -2134,7 +2145,7 @@
                 // Sets added from the community belong to their author: credit them and don't allow reposting.
                 const borrowed = Boolean(deck.communitySourceId && deck.communitySourceOwnerId && deck.communitySourceOwnerId !== myId);
                 const author = borrowed
-                    ? `<small class="deck-author">by <button type="button" class="link-btn" data-action="view-profile" data-id="${this.escapeHTML(deck.communitySourceOwnerId)}">${this.escapeHTML(deck.communitySourceAuthor || 'another student')}</button></small>`
+                    ? `<small class="deck-author">by <button type="button" class="link-btn" data-action="view-profile" data-id="${this.escapeHTML(deck.communitySourceOwnerId)}">${this.escapeHTML(deck.communitySourceAuthor || 'another student')}</button> ${this.accountTagMarkup(deck.communitySourceAuthor)}</small>`
                     : deck.communityPublished ? '<small class="deck-author">by you · shared</small>' : '';
                 const share = borrowed
                     ? '<button class="secondary-btn" type="button" disabled title="Sets added from other students can\'t be reposted"><i class="fas fa-lock"></i> Not yours to share</button>'
@@ -2371,7 +2382,7 @@
                 else button = `<button type="button" class="secondary-btn" data-action="multiplayer-buy" data-id="${this.escapeHTML(item.id)}" ${profile.coins < item.price ? 'disabled' : ''}>Buy${price}</button>`;
                 const name = item.name;
                 const search = this.escapeHTML(`${name} ${item.rarity}`.toLocaleLowerCase());
-                return `<article class="multiplayer-shop-item rarity-${item.rarity}${equipped ? ' equipped' : ''}" data-search="${search}"><span class="shop-preview" aria-hidden="true">${preview}</span><div><strong>${this.escapeHTML(name)}</strong><small class="rarity-label">${item.rarity}</small></div>${button}</article>`;
+                return `<article class="multiplayer-shop-item rarity-${item.rarity}${equipped ? ' equipped' : ''}" data-search="${search}"><span class="shop-preview" aria-hidden="true">${preview}</span><div><strong>${this.escapeHTML(name)}</strong><small class="rarity-label">${item.rarity}</small>${item.description ? `<small>${this.escapeHTML(item.description)}</small>` : ''}</div>${button}</article>`;
             };
             let body;
             if (tab === 'boxes') {
@@ -2459,7 +2470,7 @@
             const nameNodes = ['multiplayer-header-name', 'multiplayer-player-name', 'multiplayer-identity-badge'];
             nameNodes.forEach(id => {
                 const element = document.getElementById(id);
-                if (element) element.textContent = name;
+                if (element) element.innerHTML = `${this.escapeHTML(name)} ${this.accountTagMarkup(window.StudBudCloud?.user?.user_metadata?.username)}`;
             });
             const defaultAvatar = document.getElementById('multiplayer-header-avatar');
             if (defaultAvatar) defaultAvatar.innerHTML = this.multiplayerAvatarMarkup({});
@@ -2545,7 +2556,7 @@
                 const { data } = await cloud.client.auth.refreshSession();
                 if (data?.user) cloud.user = data.user;
                 const accountName = document.getElementById('account-name');
-                if (accountName) accountName.textContent = username;
+                if (accountName) accountName.innerHTML = `${this.escapeHTML(username)} ${this.accountTagMarkup(username)}`;
                 statusEl.textContent = `Username changed to ${username}. Use it the next time you sign in.`;
                 document.getElementById('forced-username-modal')?.remove();
                 await this.refreshUsernameCard();
@@ -2583,6 +2594,8 @@
         async refreshAdminAccess() {
             // Show the tab to the admin accounts even if the server isn't set up yet, so the page can explain what is missing.
             const name = String(window.StudBudCloud?.user?.user_metadata?.username || '').toLowerCase();
+            const accountName = document.getElementById('account-name');
+            if (accountName) accountName.innerHTML = `${this.escapeHTML(name)} ${this.accountTagMarkup(name)}`;
             this.isAdmin = ['overit', 'andy'].includes(name);
             try { if (await window.StudBudCommunityGames.isAdmin()) this.isAdmin = true; } catch (error) { /* keep the name check */ }
             window.NexusApp.isAdmin = this.isAdmin;
@@ -2690,7 +2703,7 @@
                 const esc = value => this.escapeHTML(String(value ?? ''));
                 list.innerHTML = tab === 'users'
                     ? rows.map(user => `<article class="admin-row">
-                        <div><strong>${esc(user.username)}</strong>${user.banned ? ' <span class="admin-badge">banned</span>' : ''}${user.force_change ? ' <span class="admin-badge">rename required</span>' : ''}
+                        <div><strong>${esc(user.username)} ${this.accountTagMarkup(user.username)}</strong>${user.banned ? ' <span class="admin-badge">banned</span>' : ''}${user.force_change ? ' <span class="admin-badge">rename required</span>' : ''}
                         <small>${Number(user.coins)} coins · ${Number(user.wins)} wins · ${Number(user.decks)} public decks · joined ${esc(new Date(user.created_at).toLocaleDateString())}</small></div>
                         <details class="admin-tools"><summary>Manage user</summary><div class="admin-actions">
                             <button type="button" class="secondary-btn" data-admin-action="profile" data-id="${esc(user.id)}">Public profile</button>
@@ -2700,7 +2713,7 @@
                             <button type="button" class="${user.banned ? 'secondary-btn' : 'danger-btn'}" data-admin-action="${user.banned ? 'unban' : 'ban'}" data-id="${esc(user.id)}" data-name="${esc(user.username)}">${user.banned ? 'Unban' : 'Ban'}</button>
                         </div><small>Last sign-in: ${esc(user.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleString() : 'Never')}${user.ban_reason ? ` · Ban reason: ${esc(user.ban_reason)}` : ''}</small></details></article>`).join('')
                     : rows.map(deck => `<article class="admin-row">
-                        <div><strong>${esc(deck.title)}</strong> <small>by ${esc(deck.owner)} · ${Number(deck.card_count)} cards · ${Number(deck.study_count)} studies</small>
+                        <div><strong>${esc(deck.title)}</strong> <small>by ${esc(deck.owner)} ${this.accountTagMarkup(deck.owner)} · ${Number(deck.card_count)} cards · ${Number(deck.study_count)} studies</small>
                         ${deck.description ? `<small>${esc(deck.description)}</small>` : ''}
                         <small class="admin-preview">${(deck.preview || []).map(card => `${esc(card.front)} → ${esc(card.back)}`).join(' · ')}</small></div>
                         <details class="admin-tools"><summary>Review & moderate</summary><div class="admin-actions">
@@ -4591,7 +4604,7 @@
                     <article class="community-deck-card">
                         <div><strong>${this.escapeHTML(deck.title)}</strong>${deck.course ? ` <span class="deck-chip"><i class="fas fa-book"></i> ${this.escapeHTML(deck.course)}</span>` : ''}<p>${this.escapeHTML(deck.description || 'A student-shared study set.')}</p>
                             <small>${Number(deck.card_count)} cards · studied by ${Number(deck.study_count)} ${Number(deck.study_count) === 1 ? 'student' : 'students'}</small>
-                            <small class="deck-author">by <button type="button" class="link-btn" data-action="view-profile" data-id="${this.escapeHTML(deck.owner_id)}">${this.escapeHTML(deck.author_name || 'Student')}</button></small></div>
+                            <small class="deck-author">by <button type="button" class="link-btn" data-action="view-profile" data-id="${this.escapeHTML(deck.owner_id)}">${this.escapeHTML(deck.author_name || 'Student')}</button> ${this.accountTagMarkup(deck.author_name)}</small></div>
                         ${this.communityDeckActionMarkup(deck.id)}
                     </article>`).join('') : '<p class="empty-state">No shared decks found. Try another search, or share one of your own after studying it.</p>';
                 status.textContent = `${decks.length} community deck${decks.length === 1 ? '' : 's'} found.`;
@@ -4798,7 +4811,7 @@
                     const isSelf = player.id === window.StudBudCloud.user.id;
                     const kick = isHost && player.id !== room.host_id && room.status !== 'finished' ? `<button class="host-kick-btn" type="button" data-action="hosted-kick-player" data-id="${this.escapeHTML(player.id)}" aria-label="Remove ${this.escapeHTML(player.nickname)}">Remove</button>` : '';
                     if (room.status === 'waiting') {
-                        return `<li class="leaderboard-player lobby-player${isSelf ? ' is-self' : ''}">${avatarFor(player)}<span class="leaderboard-name">${this.escapeHTML(player.nickname)}${isSelf ? ' · you' : ''}</span><span class="lobby-tag${player.id === room.host_id ? ' is-host' : ''}">${player.id === room.host_id ? '<i class="fas fa-crown"></i> Host' : 'Ready'}</span>${kick}</li>`;
+                        return `<li class="leaderboard-player lobby-player${isSelf ? ' is-self' : ''}">${avatarFor(player)}<span class="leaderboard-name">${this.escapeHTML(player.nickname)} ${this.accountTagMarkup(player.username)}${isSelf ? ' · you' : ''}</span><span class="lobby-tag${player.id === room.host_id ? ' is-host' : ''}">${player.id === room.host_id ? '<i class="fas fa-crown"></i> Host' : 'Ready'}</span>${kick}</li>`;
                     }
                     const progress = room.mode === 'sports' ? `${Number(player.touchdowns || 0)} goals`
                         : room.mode === 'shooter' ? `${Number(player.targets || 0)} targets · wave ${Number(player.wave || 1)}`
@@ -4812,7 +4825,7 @@
                     const unit = { sports: 'goals', shooter: 'kill pts', skyline: 'm', river: 'fish pts', market: 'deliveries', miner: 'crystals', duel: 'sec on hill' }[room.mode];
                     const valueLabel = room.mode === 'crypto' ? `$${Number(player.score || 0).toLocaleString()}` : `${Number(player.score || 0).toLocaleString()} ${unit || 'score'}`;
                     const profileBtn = `<button class="host-kick-btn" type="button" data-action="view-profile" data-id="${this.escapeHTML(player.id)}">Profile</button>`;
-                    return `<li class="leaderboard-player${isSelf ? ' is-self' : ''}">${avatarFor(player)}<span class="leaderboard-name">${index + 1}. ${this.escapeHTML(player.nickname)}${isSelf ? ' · you' : ''}</span><span class="leaderboard-stat"><strong>${this.escapeHTML(valueLabel)}</strong><small>${this.escapeHTML(progress)}</small></span>${profileBtn}${kick}</li>`;
+                    return `<li class="leaderboard-player${isSelf ? ' is-self' : ''}">${avatarFor(player)}<span class="leaderboard-name">${index + 1}. ${this.escapeHTML(player.nickname)} ${this.accountTagMarkup(player.username)}${isSelf ? ' · you' : ''}</span><span class="leaderboard-stat"><strong>${this.escapeHTML(valueLabel)}</strong><small>${this.escapeHTML(progress)}</small></span>${profileBtn}${kick}</li>`;
                 }).join('');
             const sceneNames = {
                 skyline: 'City Escape', river: 'River Fishing', market: 'Package Delivery',
@@ -4834,10 +4847,10 @@
                     river: ['Steer a boat, dodge obstacles and catch fish.', 'WASD steer · click cast · Q recharge'],
                     market: ['Deliver packages across town and dodge cars.', 'WASD move · Shift sprint · Q recharge'],
                     miner: ['Dig through the cavern, haul ore back to base and avoid lava.', 'WASD move · hold click dig · Q recharge'],
-                    duel: ['Hold the glowing hill alone to score. Knock rivals off the stage.', 'A/D move · Space jump · click swing · Shift guard'],
+                    duel: ['Hold the glowing hill alone to score. Knock rivals off the stage.', 'A/D move · Space jump · S guard · E/click swing · Shift heavy · F dodge · Q recharge'],
                     crypto: ['Trade six assets, react to market news and build mining rigs.', '1-6 pick · B buy · S sell'],
-                    shooter: ['Blast drones and other players in an arena.', 'WASD move · mouse aim · click fire · Q reload'],
-                    sports: ['Dribble the ball into the rival goal. Players are split into blue and red teams; sprinting and power kicks use energy.', 'WASD run · walk into the ball to dribble · Shift sprint · Space power kick · Q recharge']
+                    shooter: ['Blast drones and other players in an arena.', 'WASD move · mouse aim · F/click fire · E blast · Space dash · Q reload'],
+                    sports: ['Dribble the ball into the rival goal. Players are split into blue and red teams; sprinting and power kicks use energy.', 'WASD dribble · Space sprint · E/click pass · hold Shift, release for power kick · Q recharge']
                 }[room.mode] || ['Answer flashcard questions faster than everyone else.', 'Answer correctly to score points.'];
                 lobbyInfo.innerHTML = `<div class="lobby-mode"><strong>${this.escapeHTML(modeNames[room.mode] || 'Live game')}</strong><span>${this.escapeHTML(goalLabel)} · ${Number(room.state?.question_reward) || 20} coins per correct answer</span></div>
                     <p>${this.escapeHTML(info[0])}</p>
@@ -4880,7 +4893,7 @@
                 document.getElementById('hosted-podium').classList.remove('hidden');
                 const podiumUnit = { sports: 'goals', shooter: 'kill pts', skyline: 'm', river: 'fish pts', market: 'deliveries', miner: 'crystals', duel: 'sec on hill', crypto: '' }[room.mode] ?? 'points';
                 document.getElementById('hosted-podium').innerHTML = rankedPlayers.slice(0, 3).map((player, index) =>
-                    `<div class="podium-place place-${index + 1}"><span class="podium-rank">0${index + 1}</span><strong>${avatarFor(player)} ${this.escapeHTML(player.nickname)}</strong><small>${room.mode === 'crypto' ? '$' : ''}${Number(player.score || 0).toLocaleString()} ${podiumUnit} · +${Number(rewards[player.id] || 0)} coins <button class="host-kick-btn" type="button" data-action="view-profile" data-id="${this.escapeHTML(player.id)}">Profile</button></small></div>`
+                    `<div class="podium-place place-${index + 1}"><span class="podium-rank">0${index + 1}</span><strong>${avatarFor(player)} ${this.escapeHTML(player.nickname)} ${this.accountTagMarkup(player.username)}</strong><small>${room.mode === 'crypto' ? '$' : ''}${Number(player.score || 0).toLocaleString()} ${podiumUnit} · +${Number(rewards[player.id] || 0)} coins <button class="host-kick-btn" type="button" data-action="view-profile" data-id="${this.escapeHTML(player.id)}">Profile</button></small></div>`
                 ).join('');
             } else {
                 document.getElementById('hosted-podium').classList.add('hidden');
@@ -4958,6 +4971,7 @@
             const hasProfile = !!this.multiplayerProfile;
             const me = {
                 ...roomPlayer,
+                username: user.user_metadata?.username || roomPlayer.username || '',
                 skin: hasProfile ? cosmetics.skin : roomPlayer.skin || '',
                 hat: hasProfile ? cosmetics.hat : roomPlayer.hat || '',
                 accessory: hasProfile ? cosmetics.acc : roomPlayer.accessory || ''
@@ -5216,7 +5230,7 @@
             try {
                 const data = await games.friendCall('studbud_friend_overview');
                 this.friendOverview = data;
-                const person = (row, buttons) => `<li class="friend-row">${this.multiplayerAvatarMarkup(this.profileCosmetics(row), false, 'friend-avatar')}<strong>${this.escapeHTML(row.username)}</strong><span class="friend-actions">${buttons}</span></li>`;
+                const person = (row, buttons) => `<li class="friend-row">${this.multiplayerAvatarMarkup(this.profileCosmetics(row), false, 'friend-avatar')}<strong>${this.escapeHTML(row.username)} ${this.accountTagMarkup(row.username)}</strong><span class="friend-actions">${buttons}</span></li>`;
                 const attrs = row => `data-id="${this.escapeHTML(row.friendship_id)}" data-name="${this.escapeHTML(row.username)}"`;
                 lists.friends.innerHTML = data.friends.length
                     ? data.friends.map(row => person(row, `<button type="button" class="secondary-btn" data-action="friend-view" data-id="${this.escapeHTML(row.user_id)}">Profile</button><button type="button" class="ghost-btn" data-action="friend-remove" ${attrs(row)}>Remove</button>`)).join('')
@@ -5282,7 +5296,7 @@
                 const stat = (label, value) => `<div class="friend-stat"><strong>${value}</strong><small>${label}</small></div>`;
                 const facts = [p.grade_level && `🎓 ${p.grade_level}`, p.favorite_subject && `⭐ ${p.favorite_subject}`, p.study_goal && `🎯 ${p.study_goal}`].filter(Boolean).map(f => `<span class="friend-chip">${this.escapeHTML(f)}</span>`).join('');
                 const decks = (p.decks || []).map(d => `<li class="friend-row"><div><strong>${this.escapeHTML(d.title)}</strong>${d.course ? ` <span class="deck-chip"><i class="fas fa-book"></i> ${this.escapeHTML(d.course)}</span>` : ''}<br><small>${Number(d.card_count)} cards · studied by ${Number(d.study_count)}</small></div>${p.is_me && !this.findCommunityDeck(d.id) ? '' : this.communityDeckActionMarkup(d.id)}</li>`).join('');
-                modal.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.username)}${p.is_me ? ' <em class="you-badge">you</em>' : ''}</h3></div><button type="button" class="icon-btn profile-close" data-action="close-user-profile" aria-label="Close profile"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
+                modal.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.username)} ${this.accountTagMarkup(p.username)}${p.is_me ? ' <em class="you-badge">you</em>' : ''}</h3></div><button type="button" class="icon-btn profile-close" data-action="close-user-profile" aria-label="Close profile"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
                     ${p.bio ? `<p class="friend-bio">${this.escapeHTML(p.bio)}</p>` : ''}${facts ? `<div class="friend-chips">${facts}</div>` : ''}
                     <div class="friend-stats">${p.show_stats === false ? stat('Match wins', Number(p.wins) || 0) : `${stat('Studied today', this.formatStudyDuration(p.today_seconds))}${stat('This week', this.formatStudyDuration(p.week_seconds))}${stat('All time', this.formatStudyDuration(p.total_seconds))}${stat('Day streak', `${Number(p.streak_days) || 0} 🔥`)}${stat('Match wins', Number(p.wins) || 0)}`}</div>
                     <h4>Shared flashcard sets</h4>
@@ -5301,7 +5315,7 @@
                 const avatar = this.multiplayerAvatarMarkup({ skin: p.skin, hat: p.hat, acc: p.accessory }, true);
                 const stat = (label, value) => `<div class="friend-stat"><strong>${value}</strong><small>${label}</small></div>`;
                 const facts = [p.grade_level && `🎓 ${p.grade_level}`, p.favorite_subject && `⭐ ${p.favorite_subject}`, p.study_goal && `🎯 ${p.study_goal}`].filter(Boolean).map(f => `<span class="friend-chip">${this.escapeHTML(f)}</span>`).join('');
-                panel.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.username)}</h3><small>Friend</small></div><button type="button" class="icon-btn profile-close" data-action="friend-profile-close" aria-label="Close profile"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
+                panel.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.username)} ${this.accountTagMarkup(p.username)}</h3><small>Friend</small></div><button type="button" class="icon-btn profile-close" data-action="friend-profile-close" aria-label="Close profile"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
                     ${p.bio ? `<p class="friend-bio">${this.escapeHTML(p.bio)}</p>` : ''}${facts ? `<div class="friend-chips">${facts}</div>` : ''}
                     <div class="friend-stats">${p.show_stats === false ? stat('Match wins', Number(p.wins) || 0) : `${stat('Studied today', this.formatStudyDuration(p.today_seconds))}${stat('This week', this.formatStudyDuration(p.week_seconds))}${stat('All time', this.formatStudyDuration(p.total_seconds))}${stat('Day streak', `${Number(p.streak_days) || 0} 🔥`)}${stat('Match wins', Number(p.wins) || 0)}`}</div>`;
                 panel.classList.remove('hidden');
@@ -5722,7 +5736,7 @@
                 : '';
             const row = player => {
                 const rank = Number(player.rank) || 0;
-                const name = this.escapeHTML(player.username || 'Student');
+                const name = `${this.escapeHTML(player.username || 'Student')} ${this.accountTagMarkup(player.username)}`;
                 const pct = Math.max(3, Math.round((Number(player.seconds) || 0) / top * 100));
                 return `<li class="study-leaderboard-row${player.is_me ? ' is-self' : ''}${rank >= 1 && rank <= 3 ? ` podium-${rank}` : ''}">
                     <span class="study-leaderboard-rank">${rank >= 1 && rank <= 3 ? medal[rank - 1] : (rank || '—')}</span>
@@ -5732,7 +5746,7 @@
             };
             const podium = board.length >= 3 ? `<li class="study-podium">${[1, 0, 2].map(i => {
                 const p = board[i];
-                const inner = `<span class="podium-medal">${medal[i]}</span>${this.multiplayerAvatarMarkup(this.profileCosmetics(p), false, 'study-leaderboard-avatar')}<b>${this.escapeHTML(p.username || 'Student')}</b><small>${fmt(p.seconds)}</small><div class="podium-block"></div>`;
+                const inner = `<span class="podium-medal">${medal[i]}</span>${this.multiplayerAvatarMarkup(this.profileCosmetics(p), false, 'study-leaderboard-avatar')}<b>${this.escapeHTML(p.username || 'Student')}</b>${this.accountTagMarkup(p.username)}<small>${fmt(p.seconds)}</small><div class="podium-block"></div>`;
                 return p.user_id
                     ? `<button type="button" class="podium-spot podium-spot-${i + 1}" data-action="view-profile" data-id="${this.escapeHTML(p.user_id)}" aria-label="View ${this.escapeHTML(p.username || 'Student')}'s profile">${inner}</button>`
                     : `<div class="podium-spot podium-spot-${i + 1}">${inner}</div>`;

@@ -456,7 +456,7 @@
                                 <span class="focus-time-display">25:00</span>
                                 <button class="focus-play-btn" aria-label="Start study timer"><i class="fas fa-play"></i></button>
                             </div>
-                            <button id="exit-study-btn" class="icon-btn"><i class="fas fa-times"></i></button>
+                            <button id="exit-study-btn" class="icon-btn" aria-label="Close study session"><i class="fas fa-times"></i></button>
                         </div>
                         <div class="flashcard-container" id="current-flashcard">
                             <div class="flashcard-inner">
@@ -1036,7 +1036,7 @@
                 </section>
 
                 <aside id="study-ambience" class="study-ambience hidden" aria-label="Study ambience">
-                    <button type="button" class="ambience-toggle" id="ambience-toggle" aria-expanded="false" title="Study ambience"><i class="fas fa-headphones"></i></button>
+                    <button type="button" class="ambience-toggle" id="ambience-toggle" aria-expanded="false" aria-controls="ambience-panel" title="Study ambience"><i class="fas fa-headphones" aria-hidden="true"></i><span>Audio</span></button>
                     <div class="ambience-panel hidden" id="ambience-panel">
                         <strong>Study ambience</strong>
                         <div class="audio-toggles">

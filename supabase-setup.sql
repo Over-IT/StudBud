@@ -476,7 +476,11 @@ as $$
         ('hat_visor', 65), ('hat_bucket', 75), ('hat_astronaut', 210), ('hat_cosmic', 720),
         ('acc_comet', 450), ('acc_aura', 760),
         ('acc_rainbow_trail', 360), ('acc_firefly_trail', 280), ('acc_stardust_trail', 520), ('acc_leaf_trail', 240),
-        ('acc_prism_effect', 680), ('acc_frost_effect', 420), ('acc_ember_effect', 500), ('acc_heart_effect', 320)
+        ('acc_prism_effect', 680), ('acc_frost_effect', 420), ('acc_ember_effect', 500), ('acc_heart_effect', 320),
+        ('acc_dust_trail', 75), ('acc_confetti_trail', 130), ('acc_sakura_trail', 210),
+        ('acc_pixel_trail', 340), ('acc_meteor_trail', 520), ('acc_aurora_trail', 760),
+        ('acc_dew_effect', 75), ('acc_leaf_effect', 130), ('acc_snowflake_effect', 210),
+        ('acc_electric_effect', 340), ('acc_solar_effect', 520), ('acc_vortex_effect', 760)
     ), pets(id, rarity) as (values
         ('pet_puppy', 'common'), ('pet_kitten', 'common'), ('pet_hamster', 'common'), ('pet_bunny', 'common'),
         ('pet_chick', 'common'), ('pet_frog', 'common'), ('pet_turtle', 'common'), ('pet_goldfish', 'common'),
@@ -627,6 +631,10 @@ begin
     elsif p_box = 'accessory' then
         v_cost := 140; v_prefix := 'acc\_%';
         v_rarity := case when v_roll < 0.40 then 'common' when v_roll < 0.72 then 'uncommon' when v_roll < 0.92 then 'rare' when v_roll < 0.99 then 'epic' else 'legendary' end;
+    elsif p_box in ('effect', 'trail') then
+        v_cost := 200; v_prefix := 'acc\_%';
+        v_rarity := case when v_roll < 0.25 then 'common' when v_roll < 0.60 then 'uncommon'
+            when v_roll < 0.85 then 'rare' when v_roll < 0.97 then 'epic' when v_roll < 0.99 then 'legendary' else 'mythic' end;
     elsif p_box = 'palette' then
         v_cost := 160; v_prefix := 'palette\_%';
         v_rarity := case when v_roll < 0.50 then 'uncommon' when v_roll < 0.85 then 'rare' when v_roll < 0.98 then 'epic' else 'legendary' end;
@@ -647,6 +655,11 @@ begin
     select s.id into v_item_id
     from public.studbud_shop_items() s
     where s.id not like 'accessory\_%' and s.id not like 'pet\_%' and s.id like v_prefix
+      and (p_box not in ('effect', 'trail')
+        or (p_box = 'effect' and (s.id like 'acc\_%\_effect'
+            or s.id in ('acc_lightning', 'acc_flame', 'acc_sparkles', 'acc_aura')))
+        or (p_box = 'trail' and (s.id like 'acc\_%\_trail'
+            or s.id in ('acc_leaves', 'acc_notes', 'acc_bubbles', 'acc_comet'))))
       and not (s.id = any(v_profile.owned_items))
     order by case s.rarity when v_rarity then 0 else 1 end,
              abs(array_position(array['common','uncommon','rare','epic','legendary','mythic'], s.rarity)
@@ -883,6 +896,7 @@ begin
     v_state := jsonb_set(v_state, '{players}', coalesce((
         select jsonb_agg(
             player || jsonb_build_object(
+                'username', coalesce(account.raw_user_meta_data ->> 'username', ''),
                 'skin', coalesce(profile.equipped_skin, player ->> 'skin', ''),
                 'hat', coalesce(profile.equipped_hat, player ->> 'hat', ''),
                 'accessory', coalesce(profile.equipped_accessory, player ->> 'accessory', '')
@@ -892,6 +906,7 @@ begin
             with ordinality as members(player, position)
         left join public.studbud_multiplayer_profiles profile
             on profile.user_id::text = player ->> 'id'
+        left join auth.users account on account.id::text = player ->> 'id'
     ), '[]'::jsonb), true);
 
     if auth.uid() is distinct from p_room.host_id
@@ -2292,7 +2307,7 @@ create table if not exists public.studbud_site_notice (
     active boolean not null default false,
     updated_at timestamptz not null default now(),
     updated_by uuid references auth.users(id) on delete set null,
-    constraint studbud_site_notice_message_check check (not active or char_length(btrim(message)) > 0)
+    constraint studbud_site_notice_active_message_check check (not active or char_length(btrim(message)) > 0)
 );
 alter table public.studbud_site_notice enable row level security;
 revoke all on public.studbud_site_notice from public, anon, authenticated;
@@ -2337,3 +2352,5 @@ end;
 $$;
 revoke all on function public.studbud_admin_set_site_notice(text, boolean) from public, anon;
 grant execute on function public.studbud_admin_set_site_notice(text, boolean) to authenticated;
+
+notify pgrst, 'reload schema';

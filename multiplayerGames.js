@@ -881,7 +881,7 @@
                 me.vy = Math.min(1150, me.vy + 2300 * dt);
                 if (this.wallDir && me.vy > 130) me.vy = 130;
                 if (!s.down('Space', 'ArrowUp', 'KeyW') && me.vy < -250 && !this.sprung) me.vy += 2600 * dt;
-                if (!exhausted && s.pressed('ShiftLeft', 'ShiftRight', 'KeyK') && this.dashCd <= 0 && !this.finished && s.spend(25)) {
+                if (!exhausted && s.pressed('ShiftLeft', 'ShiftRight') && this.dashCd <= 0 && !this.finished && s.spend(25)) {
                     this.dash = 0.16; this.dashCd = 0.9; s.sfx('dash');
                 }
             }
@@ -1395,12 +1395,12 @@
                 return;
             }
             const ax = this.stun > 0 || this.dodge > 0 ? 0 : s.axis().x;
-            this.guard = this.stun <= 0 && this.dodge <= 0 && this.shieldBreak <= 0 && s.down('KeyS', 'ShiftLeft', 'ShiftRight');
+            this.guard = this.stun <= 0 && this.dodge <= 0 && this.shieldBreak <= 0 && s.down('KeyS');
             if (this.guard) {
                 this.res.drain(dt * 16);
                 if (this.res.value <= 0) { this.guard = false; this.shieldBreak = 0.8; s.sfx('click'); }
             }
-            if (this.stun <= 0 && this.dodgeCd <= 0 && s.pressed('KeyL')) {
+            if (this.stun <= 0 && this.dodgeCd <= 0 && s.pressed('KeyF')) {
                 this.dodge = 0.18; this.dodgeCd = 0.85; this.invuln = Math.max(this.invuln, 0.16);
                 me.vx = (ax || me.face || 1) * 760; me.vy *= 0.45; this.guard = false; s.sfx('dash');
             }
@@ -1427,8 +1427,8 @@
                 if (this.coyote > 0) { me.vy = -900; this.coyote = 0; s.sfx('jump'); }
                 else if (this.airJumps > 0) { me.vy = -820; this.airJumps--; s.sfx('jump'); this.particles.burst(me.x + 17, me.y + 56, '#bae6fd', 8, 120, 0.3, 4); }
             }
-            if (this.stun <= 0 && !this.guard && this.dodge <= 0 && this.swingCd <= 0 && (s.mouse.pressed || s.pressed('KeyJ', 'KeyK')) && s.spend(8)) {
-                const heavy = s.pressed('KeyK') && !s.pressed('KeyJ');
+            if (this.stun <= 0 && !this.guard && this.dodge <= 0 && this.swingCd <= 0 && (s.mouse.pressed || s.pressed('KeyE', 'ShiftLeft', 'ShiftRight')) && s.spend(8)) {
+                const heavy = s.pressed('ShiftLeft', 'ShiftRight');
                 this.swingHeavy = heavy;
                 this.swingT = heavy ? 0.28 : 0.22; this.swingCd = heavy ? 0.78 : 0.52; s.sfx('swing'); this.swingAim = this.aim;
                 s.emit({ k: 'sw', x: Math.round(me.x + 17), y: Math.round(me.y + 28), d: me.face, a: +this.aim.toFixed(2), p: (this.hammer > 0 ? 1.6 : 1) * (heavy ? 1.2 : 1), h: heavy ? 1 : 0, by: s.user.id, c: (this.dmg | 0) });
@@ -1566,8 +1566,8 @@
         }
 
         goalText() { return `${this.kos} KOs · ${this.falls} KOs against · ${Math.round(this.dmg)}% damage`; }
-        touchLayout() { return { stick: true, platform: true, buttons: [{ k: 'Space', label: 'Jump' }, { k: 'ShiftLeft', label: 'Shield' }, { k: 'KeyK', label: 'Heavy', small: true }, { k: 'KeyL', label: 'Dodge' }] }; }
-        hint() { return 'A/D move · Space jump twice · Down fast-fall / drop through ledges · Click or tap canvas to aim and swing · K heavy (last tap / facing) · Shift shield · L dodge · Q recharge'; }
+        touchLayout() { return { stick: true, platform: true, buttons: [{ k: 'Space', label: 'Jump' }, { k: 'KeyS', label: 'Guard' }, { k: 'ShiftLeft', label: 'Heavy', small: true }, { k: 'KeyF', label: 'Dodge' }] }; }
+        hint() { return 'A/D move · Space jump twice · S guard · E or click swing · Shift heavy · F dodge · Down fast-fall / drop through ledges · Q recharge'; }
 
         drawFighter(ctx, x, y, who, face, state, dmg, name, hammer, swingAge, alpha, you, aim, swingAim, heavySwing = false) {
             const color = who.color;
@@ -1801,7 +1801,7 @@
                 for (const w of this.walls) pushCircleOutOfRect(me, w);
                 const weapon = this.weaponInfo();
                 const cd = this.overdrive > 0 ? weapon.cd * 0.55 : weapon.cd;
-                if ((s.mouse.down || s.down('KeyJ')) && this.fireCd <= 0 && this.jam <= 0 && s.spend(weapon.cost)) {
+                if ((s.mouse.down || s.down('KeyF')) && this.fireCd <= 0 && this.jam <= 0 && s.spend(weapon.cost)) {
                     this.fireCd = cd; s.sfx('shoot', 40);
                     for (let i = 0; i < weapon.pellets; i++) {
                         const spread = weapon.pellets > 1 ? (i - 2) * 0.12 : (Math.random() - 0.5) * (this.weapon === 'rail' ? 0 : 0.04);
@@ -1945,7 +1945,7 @@
 
         goalText() { return `${this.multiplayer ? `${this.pk} player KOs` : `${this.kills} drones · ${this.pk} players`} · HP ${Math.max(0, Math.round(this.hp))}`; }
         touchLayout() { return { stick: true, buttons: [{ k: 'Space', label: 'Dash' }, { k: 'KeyE', label: 'Blast', cls: 'e' }] }; }
-        hint() { return 'WASD move · hold click / canvas touch to aim and fire · Space dash · E shockwave · colored pickups = timed weapons / repairs · Q reload'; }
+        hint() { return 'WASD move · hold F / click / canvas touch to fire · mouse aims · Space dash · E shockwave · colored pickups = timed weapons / repairs · Q reload'; }
 
         drawShip(ctx, x, y, aim, who, hp, name, you, alpha = 1, over = false) {
             const color = who.color;

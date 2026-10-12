@@ -1360,7 +1360,7 @@
             this.kickCd -= dt; this.contactCd = Math.max(0, this.contactCd - dt); this.pinchCd = Math.max(0, this.pinchCd - dt); this.turbo = Math.max(0, this.turbo - dt);
             const wasFrozen = this.freeze > 0;
             this.freeze = Math.max(0, this.freeze - dt);
-            const wantsSprint = s.down('ShiftLeft', 'ShiftRight') && this.moving;
+            const wantsSprint = s.down('Space') && this.moving;
             const free = this.turbo > 0;
             const winded = this.moving && !free && !this.res.has(1);
             const sprint = wantsSprint && (free || this.res.has(1));
@@ -1403,8 +1403,9 @@
                             if (Math.abs(b.vx - pre.vx) + Math.abs(b.vy - pre.vy) > 12) s.sfx('act', 90);
                         }
                     }
-                    const held = s.down('Space'), tapped = s.mouse.pressed;
-                    if (tapped) this.kickAim = this.mouseWorld();
+                    const held = s.down('ShiftLeft', 'ShiftRight'), mousePass = s.mouse.pressed;
+                    const tapped = mousePass || s.pressed('KeyE');
+                    if (mousePass) this.kickAim = this.mouseWorld();
                     if (held && !this.kickHeld) this.kickCharge = 0;
                     if (held) this.kickCharge = Math.min(1, this.kickCharge + dt / .8);
                     const released = this.kickHeld && !held;
@@ -1413,7 +1414,7 @@
                         const charge = tapped ? .12 : this.kickCharge;
                         const cost = Math.round(4 + charge * 11);
                         if (s.spend(cost)) {
-                            const aim = tapped || (!this.moving && this.kickAim) ? this.kickAim : null;
+                            const aim = mousePass || (!tapped && !this.moving && this.kickAim) ? this.kickAim : null;
                             const angle = aim ? Math.atan2(aim.y - me.y, aim.x - me.x) : me.aim;
                             const kickPre = { vx: b.vx, vy: b.vy }, power = 480 + charge * 650;
                             b.vx = Math.cos(angle) * power; b.vy = Math.sin(angle) * power;
@@ -1451,8 +1452,9 @@
         goalText() {
             return this.teamsOn ? `Blue ${this.teamTd[0]} – ${this.teamTd[1]} Red · You ${this.td} goal${this.td === 1 ? '' : 's'}` : `${this.td} goal${this.td === 1 ? '' : 's'}`;
         }
-        touchLayout() { return { stick: true, buttons: [{ k: 'ShiftLeft', label: 'Sprint' }] }; }
-        hint() { return `${this.teamsOn ? `${this.myTeam === 0 ? 'Blue' : 'Red'} team · ` : ''}Move to dribble · Shift sprint / steal · tap toward a pass · hold Space, release to shoot (4–15 energy) · Q recharge`; }
+        touchLayout() { return { stick: true, buttons: [{ k: 'Space', label: 'Sprint' }, { k: 'ShiftLeft', label: 'Power kick', cls: 'main' }] }; }
+        hint() { return `${this.teamsOn ? `${this.myTeam === 0 ? 'Blue' : 'Red'} team · ` : ''}WASD dribble · Space sprint / steal · E or click pass · hold Shift, release for a power kick (4–15 energy) · Q recharge`; }
+        touchHint() { return 'Joystick to dribble · Tap toward a pass · Hold Power kick, release to shoot · Sprint to steal'; }
 
         draw(ctx, w, h) {
             const me = this.me, t = this.anim, b = this.ball, W = this.W, H = this.H, gy0 = H / 2 - this.goalH / 2;

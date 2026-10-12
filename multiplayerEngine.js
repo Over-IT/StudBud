@@ -12,6 +12,13 @@
 
     const normalizeChoiceText = value => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 
+    function accountTagMarkup(username) {
+        const name = String(username ?? '').trim().toLowerCase();
+        if (name === 'overit') return '<span class="account-tag account-tag-owner">Owner</span>';
+        if (name === 'andy') return '<span class="account-tag account-tag-co-owner">Co-owner</span>';
+        return '';
+    }
+
     function mulberry32(seed) {
         let a = seed >>> 0;
         return function () {
@@ -236,7 +243,7 @@
                 shooter: 'Joystick to move · Hold the arena to aim and fire · Dash between cover · Recharge behind cover',
                 market: 'Joystick to move · Hold Sprint for speed · Pick up and deliver packages · Building recesses are away from traffic',
                 river: 'Joystick to steer · Tap the water to cast · Shallow banks are calm places to recharge',
-                sports: 'Joystick to dribble · Tap toward the goal to kick · Hold Sprint to run faster',
+                sports: 'Joystick to dribble · Tap toward the goal to pass · Hold and release Power kick · Hold Sprint to run faster',
                 crypto: 'Tap an asset to select it · Buy low and sell high · Recharge to keep trading',
                 hack: 'Joystick to move · Use nearby terminals · Recharge between hacks'
             }[this.s.mode] || 'Use the on-screen controls · Recharge opens a flashcard';
@@ -321,7 +328,7 @@
                 ids.add(player.id);
                 const info = this.roster.get(player.id) || {};
                 Object.assign(info, {
-                    id: player.id, nickname: player.nickname, score: Number(player.score || 0), color: playerColor(player), avatar: player.avatar,
+                    id: player.id, nickname: player.nickname, username: player.username, score: Number(player.score || 0), color: playerColor(player), avatar: player.avatar,
                     cos: playerCosmetics(player)
                 });
                 this.roster.set(player.id, info);
@@ -418,7 +425,7 @@
                 const r = this.remotes.get(info.id);
                 const isMe = info.id === this.user.id;
                 rows.push({
-                    id: info.id, n: info.nickname, color: info.color, cos: info.cos,
+                    id: info.id, n: info.nickname, username: info.username, color: info.color, cos: info.cos,
                     s: Math.round(Number(isMe ? this.score : r ? r.score : info.score) || 0),
                     g: Math.round(Number(isMe ? this.goal : r ? r.goal : (this.game?.scoreGoal === false ? info.score || 0 : 0)) || 0),
                     d: isMe ? this.done : Boolean(r?.done)
@@ -809,7 +816,14 @@
             hud.append(overlay.querySelector('.mpg-top'), status, overlay.querySelector('.mpg-toasts'));
             overlay.appendChild(hud);
             this.bindTouch(overlay);
-            this.setHudCollapsed(Boolean(window.matchMedia?.('(max-width: 680px), (max-height: 520px)').matches || document.body.classList.contains('compact-ui')));
+            const compactHud = this.defaultHudCollapsed();
+            this.setHudCollapsed(compactHud);
+            if (!compactHud) {
+                overlay.classList.add('board-open');
+                const ranks = overlay.querySelector('.mpg-board-toggle');
+                ranks.setAttribute('aria-expanded', 'true');
+                ranks.setAttribute('aria-label', 'Hide match standings');
+            }
             overlay.addEventListener('keydown', event => {
                 if (event.key !== 'Escape' || this.question) return;
                 const menu = overlay.querySelector('.mpg-menu-panel');
@@ -832,7 +846,11 @@
                 overlay.querySelector('.mpg-menu-toggle').setAttribute('aria-expanded', 'false');
             });
             this.hudObserver = new ResizeObserver(() => this.layoutHud());
-            for (const el of [hud, overlay.querySelector('.mpg-touch'), overlay.querySelector('.mpg-hint')]) this.hudObserver.observe(el);
+            for (const el of [hud, overlay.querySelector('.mpg-touch'), overlay.querySelector('.mpg-hint'), overlay.querySelector('.mpg-board')]) this.hudObserver.observe(el);
+        }
+
+        defaultHudCollapsed() {
+            return Boolean(window.matchMedia?.('(max-width: 680px), (pointer: coarse) and (max-height: 520px)').matches);
         }
 
         setHudCollapsed(collapsed) {
@@ -1035,6 +1053,10 @@
             let bottom = 8;
             const touch = this.overlay.classList.contains('has-touch');
             const hint = this.overlay.querySelector('.mpg-hint');
+            const board = this.overlay.querySelector('.mpg-board');
+            if (board.offsetWidth && board.offsetHeight) {
+                top = Math.max(top, board.getBoundingClientRect().bottom - root.top + 8);
+            }
             if (touch && hint.offsetWidth && hint.offsetHeight) {
                 hint.style.top = `${top}px`;
                 hint.style.bottom = 'auto';
@@ -1087,7 +1109,6 @@
             const controlsHint = touch ? '' : 'Keyboard/mouse controls';
             o.querySelector('.mpg-hint').textContent = this.question ? '' : [controlsHint, hint].filter(Boolean).join(' · ');
             this.applyTouchLayout?.();
-            this.layoutHud();
             const diagnostics = o.querySelector('.mpg-test-stats');
             if (diagnostics) {
                 const me = this.game.me;
@@ -1095,7 +1116,8 @@
                 diagnostics.textContent = `Mode: ${this.mode}\nSeed: ${this.seed}\nTime: ${this.t.toFixed(1)}s\nPlayers: ${this.roster.size}\nPosition: ${position}\nResources: infinite\nScore: ${Math.round(this.score)}\nObjective: ${Math.round(this.goal)}`;
             }
             o.querySelector('.mpg-board').innerHTML = this.standings().slice(0, 6).map((row, i) =>
-                `<li class="${row.id === this.user.id ? 'me' : ''}"><img class="mpg-player-avatar" src="${avatarUrl(row)}" alt="" draggable="false"><span>${i + 1}. ${esc(row.n)}</span><b>${this.valueText(row)}</b></li>`).join('');
+                `<li class="${row.id === this.user.id ? 'me' : ''}"><img class="mpg-player-avatar" src="${avatarUrl(row)}" alt="" draggable="false"><span>${i + 1}. ${esc(row.n)} ${accountTagMarkup(row.username)}</span><b>${this.valueText(row)}</b></li>`).join('');
+            this.layoutHud();
         }
 
         updateMeter() {
@@ -1119,7 +1141,7 @@
             panel.innerHTML = `<div class="mpg-results-card">
                 <small>Match over</small>
                 <h2>${winner ? `${esc(winner.n)} wins!` : 'Game over'}</h2>
-                <ol>${rows.map((row, i) => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${i + 1}</span><img class="mpg-player-avatar" src="${avatarUrl(row)}" alt="" draggable="false"><strong>${esc(row.n)}</strong><b>${this.valueText(row)}</b><em>${this.rewards ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
+                <ol>${rows.map((row, i) => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${i + 1}</span><img class="mpg-player-avatar" src="${avatarUrl(row)}" alt="" draggable="false"><strong>${esc(row.n)} ${accountTagMarkup(row.username)}</strong><b>${this.valueText(row)}</b><em>${this.rewards ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
                 <p>${this.practice ? 'Local results only. Solo games and admin tests do not award coins.' : this.rewards ? 'Coins have been added to your multiplayer wallet.' : 'Tallying coin rewards…'}</p>
                 <button type="button" class="mpg-exit">Back to lobby</button>
             </div>`;
@@ -1440,6 +1462,149 @@
     }
 
     // Side-on character. (x, y) is the top-left of the body box.
+    const COSMETIC_PARTICLES = {
+        acc_rainbow_trail: { trail: true, shape: 'ribbon', colors: ['#fb7185', '#fbbf24', '#4ade80', '#38bdf8', '#c084fc'] },
+        acc_firefly_trail: { trail: true, shape: 'spark', colors: ['#fde047', '#bef264', '#86efac'] },
+        acc_stardust_trail: { trail: true, shape: 'diamond', colors: ['#e0e7ff', '#c4b5fd', '#7dd3fc'] },
+        acc_leaf_trail: { trail: true, shape: 'leaf', colors: ['#f97316', '#eab308', '#dc2626'] },
+        acc_prism_effect: { shape: 'diamond', colors: ['#22d3ee', '#c084fc'] },
+        acc_frost_effect: { shape: 'snowflake', colors: ['#bae6fd', '#60a5fa'] },
+        acc_ember_effect: { shape: 'flame', colors: ['#fb923c', '#ef4444'] },
+        acc_heart_effect: { shape: 'heart', colors: ['#fb7185', '#f472b6'] },
+        acc_dust_trail: { trail: true, shape: 'dust', colors: ['#cbd5e1', '#f0f7f2'] },
+        acc_confetti_trail: { trail: true, shape: 'confetti', colors: ['#fb7185', '#fbbf24', '#55c995', '#a78bfa'] },
+        acc_sakura_trail: { trail: true, shape: 'petal', colors: ['#fbcfe8', '#f9a8d4', '#f472b6'] },
+        acc_pixel_trail: { trail: true, shape: 'pixel', colors: ['#22d3ee', '#55c995', '#b6a0ff'] },
+        acc_meteor_trail: { trail: true, shape: 'meteor', colors: ['#fde68a', '#fb923c', '#fbbf24'] },
+        acc_aurora_trail: { trail: true, shape: 'ribbon', colors: ['#70e2c0', '#a99bff', '#67e8f9'] },
+        acc_dew_effect: { shape: 'bubble', colors: ['#99f6e4', '#bae6fd'] },
+        acc_leaf_effect: { shape: 'leaf', colors: ['#86efac', '#55c995', '#bef264'] },
+        acc_snowflake_effect: { shape: 'snowflake', colors: ['#e0f2fe', '#7dd3fc'] },
+        acc_electric_effect: { shape: 'bolt', colors: ['#fde047', '#38bdf8'] },
+        acc_solar_effect: { shape: 'ray', colors: ['#fde68a', '#fbbf24', '#fb923c'] },
+        acc_vortex_effect: { shape: 'vortex', colors: ['#c084fc', '#22d3ee', '#f0abfc'] }
+    };
+
+    function drawCosmeticParticle(ctx, shape, size) {
+        ctx.lineWidth = Math.max(.8, size * .3);
+        ctx.strokeStyle = ctx.fillStyle;
+        ctx.beginPath();
+        if (shape === 'snowflake') {
+            for (let i = 0; i < 6; i++) {
+                const a = i * TAU / 6, x = Math.cos(a), y = Math.sin(a);
+                ctx.moveTo(0, 0); ctx.lineTo(x * size, y * size);
+                for (const side of [-1, 1]) {
+                    ctx.moveTo(x * size * .55, y * size * .55);
+                    ctx.lineTo(x * size * .3 - y * size * .3 * side, y * size * .3 + x * size * .3 * side);
+                }
+            }
+            ctx.stroke();
+        } else if (shape === 'heart') {
+            ctx.moveTo(0, size);
+            ctx.bezierCurveTo(-size * 2, 0, -size, -size * 1.5, 0, -size * .4);
+            ctx.bezierCurveTo(size, -size * 1.5, size * 2, 0, 0, size);
+            ctx.fill();
+        } else if (shape === 'leaf' || shape === 'petal') {
+            ctx.ellipse(0, 0, size, size * .5, 0, 0, TAU);
+            ctx.fill();
+            if (shape === 'leaf') {
+                ctx.strokeStyle = '#166534';
+                ctx.moveTo(-size * .6, 0); ctx.lineTo(size * .6, 0); ctx.stroke();
+            }
+        } else if (shape === 'confetti' || shape === 'pixel') {
+            ctx.fillRect(-size * .65, -size * .65, size * 1.3, size * (shape === 'confetti' ? .7 : 1.3));
+        } else if (shape === 'bubble') {
+            ctx.arc(0, 0, size, 0, TAU); ctx.stroke();
+            ctx.beginPath(); ctx.arc(-size * .25, -size * .25, size * .22, 0, TAU); ctx.fill();
+        } else if (shape === 'flame') {
+            ctx.moveTo(0, -size * 1.5);
+            ctx.bezierCurveTo(size * .2, -size * .2, size * 1.2, 0, size * .5, size);
+            ctx.bezierCurveTo(-size, size * 1.5, -size, 0, 0, -size * 1.5);
+            ctx.fill();
+        } else if (shape === 'bolt') {
+            ctx.moveTo(size * .3, -size * 1.5); ctx.lineTo(-size, size * .2);
+            ctx.lineTo(-size * .1, size * .2); ctx.lineTo(-size * .3, size * 1.5);
+            ctx.lineTo(size, -size * .2); ctx.lineTo(size * .1, -size * .2); ctx.closePath(); ctx.fill();
+        } else if (shape === 'ray') {
+            ctx.moveTo(-size, 0); ctx.lineTo(size, 0); ctx.stroke();
+            drawCosmeticParticle(ctx, 'spark', size * .45);
+        } else if (shape === 'dust') {
+            ctx.arc(0, 0, size, 0, TAU); ctx.fill();
+        } else {
+            const narrow = shape === 'spark' || shape === 'meteor' ? .25 : .6;
+            for (let i = 0; i < 8; i++) {
+                const a = i * TAU / 8, radius = size * (i % 2 ? narrow : 1);
+                if (i === 0) ctx.moveTo(Math.cos(a) * radius, Math.sin(a) * radius);
+                else ctx.lineTo(Math.cos(a) * radius, Math.sin(a) * radius);
+            }
+            ctx.closePath(); ctx.fill();
+            if (shape === 'meteor') {
+                ctx.beginPath(); ctx.moveTo(size, 0); ctx.lineTo(size * 3, 0); ctx.stroke();
+            }
+        }
+    }
+
+    function drawCosmeticParticles(ctx, id, cx, cy, rx, ry, time, face = 1) {
+        const def = COSMETIC_PARTICLES[id];
+        if (!def) return;
+        ctx.save();
+        const alpha = ctx.globalAlpha;
+        if (def.trail && def.shape === 'ribbon') {
+            for (let band = 0; band < def.colors.length; band++) {
+                ctx.strokeStyle = def.colors[band];
+                ctx.lineWidth = Math.max(1, rx * .09);
+                ctx.globalAlpha = alpha * .65;
+                ctx.beginPath();
+                for (let i = 0; i <= 16; i++) {
+                    const t = i / 16;
+                    const x = cx - face * rx * (.4 + t * 1.8);
+                    const y = cy + Math.sin(time * 4 - t * 5 + band * .5) * ry * .3 + band * ry * .06;
+                    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+            }
+        } else if (def.shape === 'vortex') {
+            for (let ring = 0; ring < 3; ring++) {
+                ctx.globalAlpha = alpha * .5;
+                ctx.strokeStyle = def.colors[ring];
+                ctx.lineWidth = Math.max(1, rx * .07);
+                ctx.beginPath();
+                for (let i = 0; i <= 32; i++) {
+                    const a = time * (ring % 2 ? -1 : 1) + i / 32 * Math.PI * 1.7;
+                    const radius = .65 + i / 32 * .35;
+                    const x = cx + Math.cos(a + ring * 2) * rx * radius;
+                    const y = cy + Math.sin(a + ring * 2) * ry * radius;
+                    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+                ctx.save();
+                const a = time * 1.2 + ring * TAU / 3;
+                ctx.translate(cx + Math.cos(a) * rx, cy + Math.sin(a) * ry);
+                ctx.rotate(a);
+                ctx.fillStyle = def.colors[ring];
+                ctx.globalAlpha = alpha * .8;
+                drawCosmeticParticle(ctx, 'diamond', Math.max(1.5, rx * .16));
+                ctx.restore();
+            }
+        } else {
+            for (let i = 0; i < 7; i++) {
+                const t = (time * .65 + i / 7) % 1;
+                const a = time * .8 + i * TAU / 7;
+                let x = def.trail ? cx - face * rx * (.45 + t * 1.65) : cx + Math.cos(a) * rx;
+                let y = def.trail ? cy + Math.sin(time * 4 + i * 1.7) * ry * .32 : cy + Math.sin(a) * ry;
+                if (def.shape === 'pixel') { x = Math.round(x / 3) * 3; y = Math.round(y / 3) * 3; }
+                ctx.save();
+                ctx.translate(x, y);
+                ctx.rotate(def.shape === 'pixel' ? 0 : def.shape === 'ray' ? a : time * 1.5 + i);
+                ctx.globalAlpha = alpha * (def.trail ? (1 - t) * .8 : .55 + Math.sin(time * 3 + i) * .25);
+                ctx.fillStyle = def.colors[i % def.colors.length];
+                drawCosmeticParticle(ctx, def.shape, Math.max(1.5, rx * (def.shape === 'dust' ? .14 + t * .12 : .16)));
+                ctx.restore();
+            }
+        }
+        ctx.restore();
+    }
+
     function drawFigureSide(ctx, p, x, y, w, h, face, time, running, alpha = 1) {
         const c = who(p);
         const body = c.skin?.body || c.color;
@@ -1459,38 +1624,7 @@
                 ctx.beginPath(); ctx.arc(cx - face * (w * 0.4 + i * 6), y + h * 0.5 + Math.sin(time * 8 + i) * 2, 3 + (6 - i) * 0.9, 0, TAU); ctx.fill();
             }
         }
-        if (c.acc === 'acc_rainbow_trail' || c.acc === 'acc_firefly_trail' || c.acc === 'acc_stardust_trail' || c.acc === 'acc_leaf_trail') {
-            const colors = c.acc === 'acc_rainbow_trail' ? ['#fb7185', '#fbbf24', '#4ade80', '#38bdf8', '#c084fc']
-                : c.acc === 'acc_firefly_trail' ? ['#fde047', '#bef264', '#86efac']
-                    : c.acc === 'acc_leaf_trail' ? ['#f97316', '#eab308', '#dc2626'] : ['#e0e7ff', '#c4b5fd', '#7dd3fc'];
-            for (let i = 0; i < 5; i++) {
-                const t = (time * 0.8 + i / 5) % 1;
-                const px = cx - face * (w * 0.45 + t * 30);
-                const py = y + h * 0.58 + Math.sin(time * 5 + i * 1.7) * 7;
-                ctx.globalAlpha = alpha * (c.skin?.alpha || 1) * (1 - t) * 0.8;
-                ctx.fillStyle = colors[i % colors.length];
-                if (c.acc === 'acc_leaf_trail') {
-                    ctx.save(); ctx.translate(px, py); ctx.rotate(Math.sin(time * 3 + i) * 0.7);
-                    ctx.beginPath(); ctx.ellipse(0, 0, 3.5, 2, 0, 0, TAU); ctx.fill(); ctx.restore();
-                } else {
-                    ctx.beginPath(); ctx.arc(px, py, c.acc === 'acc_firefly_trail' ? 2.3 : 2.8, 0, TAU); ctx.fill();
-                }
-            }
-            ctx.globalAlpha = alpha * (c.skin?.alpha || 1);
-        }
-        if (c.acc === 'acc_prism_effect' || c.acc === 'acc_frost_effect' || c.acc === 'acc_ember_effect' || c.acc === 'acc_heart_effect') {
-            const effectColors = {
-                acc_prism_effect: ['#22d3ee', '#c084fc'],
-                acc_frost_effect: ['#bae6fd', '#60a5fa'],
-                acc_ember_effect: ['#fb923c', '#ef4444'],
-                acc_heart_effect: ['#fb7185', '#f472b6']
-            }[c.acc];
-            ctx.strokeStyle = effectColors[0];
-            ctx.globalAlpha = alpha * (c.skin?.alpha || 1) * (0.35 + Math.sin(time * 4) * 0.16);
-            ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.ellipse(cx, y + h * 0.48, w * (0.72 + Math.sin(time * 3) * 0.08), h * 0.44, time * 0.35, 0, TAU); ctx.stroke();
-            ctx.globalAlpha = alpha * (c.skin?.alpha || 1);
-        }
+        drawCosmeticParticles(ctx, c.acc, cx, y + h * .5, w * .8, h * .55, time, face);
         if (c.acc === 'acc_wings') {
             ctx.fillStyle = 'rgba(226,232,240,.9)';
             const flap = Math.sin(time * 10) * 4;
@@ -1614,30 +1748,7 @@
         ctx.save();
         ctx.rotate(aim);
         if (c.acc === 'acc_comet') { for (let i = 4; i > 0; i--) { ctx.fillStyle = `rgba(125,211,252,${0.14 * (5 - i)})`; ctx.beginPath(); ctx.arc(-r * (0.9 + i * 0.45), Math.sin(time * 8 + i) * r * 0.15, r * (0.2 + (5 - i) * 0.07), 0, TAU); ctx.fill(); } }
-        if (c.acc === 'acc_rainbow_trail' || c.acc === 'acc_firefly_trail' || c.acc === 'acc_stardust_trail' || c.acc === 'acc_leaf_trail') {
-            const colors = c.acc === 'acc_rainbow_trail' ? ['#fb7185', '#fbbf24', '#4ade80', '#38bdf8', '#c084fc']
-                : c.acc === 'acc_firefly_trail' ? ['#fde047', '#bef264', '#86efac']
-                    : c.acc === 'acc_leaf_trail' ? ['#f97316', '#eab308', '#dc2626'] : ['#e0e7ff', '#c4b5fd', '#7dd3fc'];
-            for (let i = 0; i < 5; i++) {
-                const t = (time * 0.8 + i / 5) % 1;
-                ctx.globalAlpha = alpha * (c.skin?.alpha || 1) * (1 - t) * 0.8;
-                ctx.fillStyle = colors[i % colors.length];
-                ctx.beginPath(); ctx.arc(-r * (1 + t * 1.6), Math.sin(time * 5 + i * 1.7) * r * 0.6, r * (c.acc === 'acc_firefly_trail' ? 0.12 : 0.16), 0, TAU); ctx.fill();
-            }
-            ctx.globalAlpha = alpha * (c.skin?.alpha || 1);
-        }
-        if (c.acc === 'acc_prism_effect' || c.acc === 'acc_frost_effect' || c.acc === 'acc_ember_effect' || c.acc === 'acc_heart_effect') {
-            const effectColors = {
-                acc_prism_effect: ['#22d3ee', '#c084fc'],
-                acc_frost_effect: ['#bae6fd', '#60a5fa'],
-                acc_ember_effect: ['#fb923c', '#ef4444'],
-                acc_heart_effect: ['#fb7185', '#f472b6']
-            }[c.acc];
-            ctx.strokeStyle = effectColors[0]; ctx.lineWidth = Math.max(1.5, r * 0.1);
-            ctx.globalAlpha = alpha * (c.skin?.alpha || 1) * (0.4 + Math.sin(time * 4) * 0.18);
-            ctx.beginPath(); ctx.arc(0, 0, r * (1.45 + Math.sin(time * 3) * 0.1), time * 0.8, time * 0.8 + Math.PI * 1.6); ctx.stroke();
-            ctx.globalAlpha = alpha * (c.skin?.alpha || 1);
-        }
+        drawCosmeticParticles(ctx, c.acc, 0, 0, r * 1.45, r * 1.45, time);
         if (c.acc === 'acc_cape') { ctx.fillStyle = '#dc2626'; ctx.beginPath(); ctx.moveTo(-r * 0.2, -r * 0.9); ctx.lineTo(-r * 1.7, 0); ctx.lineTo(-r * 0.2, r * 0.9); ctx.fill(); }
         if (c.acc === 'acc_wings') { ctx.fillStyle = 'rgba(226,232,240,.9)'; const f = Math.sin(time * 10) * 0.12; ctx.beginPath(); ctx.ellipse(-r * 0.3, -r * 1.15, r * 0.35, r * (1 + f), 0.4, 0, TAU); ctx.ellipse(-r * 0.3, r * 1.15, r * 0.35, r * (1 + f), -0.4, 0, TAU); ctx.fill(); }
         if (c.acc === 'acc_backpack') { ctx.fillStyle = '#b45309'; roundRect(ctx, -r * 1.25, -r * 0.5, r * 0.7, r, 3); ctx.fill(); }
@@ -1677,6 +1788,6 @@
 
     window.StudBudArcade = {
         Session, BaseGame, Particles, Resource, games: {},
-        util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, who, playerCosmetics, avatarUrl, drawHat, drawFigureSide, drawFigureTop }
+        util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, accountTagMarkup, who, playerCosmetics, avatarUrl, drawHat, drawFigureSide, drawFigureTop }
     };
 })(window);

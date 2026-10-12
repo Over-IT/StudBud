@@ -107,6 +107,51 @@ const demoFor = mode => {
     assert.equal(app.drawLivePreview(c, mode, 1000), true);
     return app.livePreviews.get(c);
 };
+for (const [code, expected] of [['KeyS', 'guard'], ['KeyE', 'swing'], ['ShiftLeft', 'heavy'], ['KeyF', 'dodge']]) {
+    const { session, game, hold, tap } = demoFor('duel');
+    hold.clear(); tap.clear();
+    session.mouse.pressed = false;
+    game.swingCd = game.swingT = game.dodge = game.dodgeCd = game.stun = game.hitlag = game.respawn = 0;
+    game.orb.t = 100;
+    hold.add(code); tap.add(code);
+    game.update(1 / 60);
+    if (expected === 'guard') assert.equal(game.guard, true, 'S guards');
+    if (expected === 'swing') assert.ok(game.swingT > 0 && !game.swingHeavy, 'E swings');
+    if (expected === 'heavy') assert.ok(game.swingT > 0 && game.swingHeavy && !game.guard, 'Shift performs a heavy swing, not guard');
+    if (expected === 'dodge') assert.ok(game.dodge > 0, 'F dodges');
+}
+for (const action of ['pass', 'power']) {
+    const { session, game, hold, tap } = demoFor('sports');
+    hold.clear(); tap.clear();
+    session.spend = amount => game.res.spend(amount);
+    session.mouse.pressed = false;
+    game.kickCd = game.kickCharge = 0;
+    game.kickHeld = false;
+    game.freeze = 0;
+    game.pads.forEach(pad => { pad.used = true; });
+    game.ball.x = game.me.x + 45;
+    game.ball.y = game.me.y;
+    game.ball.vx = game.ball.vy = 0;
+    const before = game.res.value;
+    if (action === 'pass') tap.add('KeyE');
+    else {
+        hold.add('ShiftLeft');
+        for (let i = 0; i < 48; i++) {
+            game.ball.x = game.me.x + 45;
+            game.ball.y = game.me.y;
+            game.update(1 / 60);
+        }
+        assert.ok(game.kickCharge >= .99, 'holding Shift charges the power kick');
+        hold.delete('ShiftLeft');
+        game.ball.x = game.me.x + 45;
+        game.ball.y = game.me.y;
+    }
+    game.update(1 / 60);
+    assert.ok(game.kickCd > 0, `${action} kicks the ball`);
+    assert.ok(game.res.value < before, `${action} spends energy`);
+    assert.ok(Math.hypot(game.ball.vx, game.ball.vy) > (action === 'power' ? 900 : 400), `${action} applies the expected impulse`);
+}
+console.log('Nearby King of the Hill actions and Soccer pass/charged power-kick input passed.');
 const lava = demoFor('miner').game;
 lava.T.fill(1); lava.F.fill(0); lava.D.fill(0); lava.flowing.clear();
 for (let x = 2; x <= 40; x++) {
@@ -183,6 +228,91 @@ for (const skin of skins) {
     }
 }
 console.log('Every catalog skin/hat/accessory combination renders in side and top-down views.');
+
+const sql = fs.readFileSync(path.join(root, 'supabase-setup.sql'), 'utf8');
+const addedParticles = [
+    'acc_dust_trail', 'acc_confetti_trail', 'acc_sakura_trail', 'acc_pixel_trail', 'acc_meteor_trail', 'acc_aurora_trail',
+    'acc_dew_effect', 'acc_leaf_effect', 'acc_snowflake_effect', 'acc_electric_effect', 'acc_solar_effect', 'acc_vortex_effect'
+];
+const rarityOrder = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
+for (const id of addedParticles) {
+    const item = catalog.find(entry => entry.id === id);
+    const tuple = sql.match(new RegExp(`\\('${id}',\\s*(\\d+)\\)`));
+    assert.ok(item && tuple, `${id} exists in client and server catalogs`);
+    const basePrice = Number(tuple[1]);
+    assert.equal(item.price, Math.round(basePrice * 2.5 / 5) * 5, `${id} price matches server`);
+    assert.equal(item.rarity, sandbox.window.StudBudCommunityGames.constructor.rarityForPrice(basePrice));
+    assert.ok(item.type === 'effect' || item.type === 'trail');
+    assert.ok(item.description);
+}
+for (const type of ['effect', 'trail']) {
+    const box = sandbox.window.StudBudCommunityGames.constructor.boxes.find(entry => entry.id === type);
+    assert.equal(box.price, 200);
+    assert.equal(Object.values(box.chances).reduce((sum, value) => sum + value, 0), 100);
+    assert.deepEqual(Object.values(box.chances), [25, 35, 25, 12, 2, 1]);
+    for (const rarity of rarityOrder) {
+        assert.ok(catalog.some(item => item.type === type && item.rarity === rarity), `${type} box has ${rarity} items`);
+    }
+    const suffixPool = catalog.filter(item => item.id.endsWith(`_${type}`) && item.id.startsWith('acc_'));
+    assert.ok(suffixPool.every(item => item.type === type), `${type} suffix cannot select another category`);
+    assert.ok(sql.includes(`s.id like 'acc\\_%\\_${type}'`), `${type} server pool matches item suffix`);
+}
+assert.match(sql, /elsif p_box in \('effect', 'trail'\) then\s+v_cost := 200/);
+assert.match(sql, /v_roll < 0\.25[\s\S]*v_roll < 0\.60[\s\S]*v_roll < 0\.85[\s\S]*v_roll < 0\.97[\s\S]*v_roll < 0\.99/);
+
+const particleTrace = (id, top, time, face = 1) => {
+    const commands = [], stack = [];
+    const state = { globalAlpha: .7 };
+    const ctx = new Proxy(state, {
+        get(target, key) {
+            if (key in target) return target[key];
+            if (key === 'save') return () => stack.push({ ...state });
+            if (key === 'restore') return () => { Object.assign(state, stack.pop()); };
+            return (...args) => {
+                for (const arg of args) if (typeof arg === 'number') assert.ok(Number.isFinite(arg), `${id} ${key} geometry is finite`);
+                commands.push([key, ...args]);
+            };
+        },
+        set(target, key, value) {
+            if (typeof value === 'number') assert.ok(Number.isFinite(value), `${id} ${key} is finite`);
+            target[key] = value;
+            return true;
+        }
+    });
+    const p = { accessory: id };
+    if (top) A.util.drawFigureTop(ctx, p, 100, 100, 15, Math.PI / 2, time, .7);
+    else A.util.drawFigureSide(ctx, p, 100, 100, 26, 42, face, time, false, .7);
+    assert.equal(stack.length, 0, `${id} balances canvas save/restore`);
+    assert.equal(state.globalAlpha, .7, `${id} preserves caller alpha`);
+    assert.ok(commands.length < 800, `${id} has bounded drawing work`);
+    return JSON.stringify(commands);
+};
+for (const top of [false, true]) {
+    const baseline = particleTrace('', top, 0);
+    const shapes = new Set();
+    for (const id of addedParticles) {
+        const frame = particleTrace(id, top, 0);
+        assert.notEqual(frame, baseline, `${id} is visible in a static shop preview`);
+        assert.notEqual(frame, particleTrace(id, top, 1.7), `${id} animates in ${top ? 'top' : 'side'} view`);
+        particleTrace(id, top, 13.2, -1);
+        shapes.add(frame);
+    }
+    assert.equal(shapes.size, addedParticles.length, 'new particle items produce distinct drawings');
+}
+assert.match(A.util.accountTagMarkup('OverIT'), />Owner<\/span>/);
+assert.match(A.util.accountTagMarkup('ANDY'), />Co-owner<\/span>/);
+for (const name of ['', undefined, 'overit2', '<img src=x>', 'andy_owner']) assert.equal(A.util.accountTagMarkup(name), '');
+sessionPrototype.updateRoster.call(rosterSession, { state: { players: [{ id: 'me', nickname: 'Nickname', username: 'overit' }, { id: 'other', nickname: 'overit', username: 'student' }] } });
+rosterSession.user = { id: 'me' };
+rosterSession.game = { scoreGoal: true };
+rosterSession.score = rosterSession.goal = 0;
+rosterSession.metric = sessionPrototype.metric;
+const taggedStandings = sessionPrototype.standings.call(rosterSession);
+assert.equal(taggedStandings.find(row => row.id === 'me').username, 'overit');
+assert.equal(A.util.accountTagMarkup(taggedStandings.find(row => row.id === 'other').username), '', 'an arbitrary multiplayer nickname cannot claim an account tag');
+assert.match(sql, /'username', coalesce\(account\.raw_user_meta_data ->> 'username', ''\)/);
+assert.match(sql, /left join auth\.users account on account\.id::text = player ->> 'id'/);
+console.log('New box catalog/rarity parity, distinct animated particles, and canonical username tags passed.');
 
 const scheduleState = {
     courses: [{ code: 'math', title: 'Math & Science' }, { code: 'english', title: 'English' }],
@@ -392,6 +522,12 @@ async function checkCommunityAndAdminUi() {
     await app.openUserProfile('author');
     assert.equal((profile.innerHTML.match(/Already in your decks/g) || []).length, 2);
     assert.equal((profile.innerHTML.match(/data-action="import-community-deck"/g) || []).length, 1);
+    for (const [username, tag] of [['overit', 'Owner'], ['andy', 'Co-owner'], ['student', '']]) {
+        sandbox.window.StudBudCommunityGames.getUserProfile = async () => ({ username, show_stats: false, decks: shared });
+        await app.openUserProfile('author');
+        if (tag) assert.ok(profile.innerHTML.includes(`>${tag}</span>`), `${username} public profile shows its account tag`);
+        else assert.ok(!profile.innerHTML.includes('account-tag'), 'ordinary profiles do not gain an account tag');
+    }
     await app.importCommunityDeck('saved-set');
     await app.importCommunityDeck('owned-set');
     assert.equal(imports, 0, 'already-added and original published sets must not call the import RPC');

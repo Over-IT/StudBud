@@ -49,6 +49,29 @@ for (const file of ['multiplayerEngine.js', 'multiplayerGames.js', 'multiplayerG
 }
 
 const A = sandbox.window.StudBudArcade;
+const sql = fs.readFileSync(path.join(__dirname, '..', 'supabase-setup.sql'), 'utf8');
+const noticeDefinition = sql.match(/create table if not exists public\.studbud_site_notice \(([\s\S]*?)\n\);/)[1];
+assert.match(noticeDefinition, /message text not null check/);
+assert.doesNotMatch(noticeDefinition, /constraint studbud_site_notice_message_check\b/,
+    'explicit active-message constraint must not collide with the auto-named length check');
+assert.match(noticeDefinition, /constraint studbud_site_notice_active_message_check\b/);
+assert.match(sql, /notify pgrst, 'reload schema';\s*$/);
+
+const originalMatchMedia = sandbox.window.matchMedia;
+for (const { width, height, coarse, expected } of [
+    { width: 1440, height: 900, coarse: false, expected: false },
+    { width: 1024, height: 480, coarse: false, expected: false },
+    { width: 390, height: 844, coarse: true, expected: true },
+    { width: 844, height: 390, coarse: true, expected: true },
+    { width: 768, height: 1024, coarse: true, expected: false }
+]) {
+    sandbox.window.matchMedia = query => {
+        assert.equal(query, '(max-width: 680px), (pointer: coarse) and (max-height: 520px)');
+        return { matches: width <= 680 || (coarse && height <= 520) };
+    };
+    assert.equal(A.Session.prototype.defaultHudCollapsed(), expected, `HUD default at ${width}x${height}`);
+}
+sandbox.window.matchMedia = originalMatchMedia;
 function controlsFor(mode) {
     const session = Object.create(A.Session.prototype);
     session.keys = new Set();
@@ -135,4 +158,11 @@ for (const collapsed of [true, false, true]) {
     assert.equal(toggle.attributes['aria-label'], collapsed ? 'Show match details' : 'Hide match details');
     assert.equal(status.children[0].hidden, undefined, 'refill button remains available');
 }
-console.log('Horizontal parkour joysticks, separate Jump buttons, vertical non-parkour input, pointer release, and HUD disclosure passed.');
+const duelButtons = controlsFor('duel').buttons.children;
+assert.equal(duelButtons.find(button => button.textContent === 'Guard').dataset.k, 'KeyS');
+assert.equal(duelButtons.find(button => button.textContent === 'Heavy').dataset.k, 'ShiftLeft');
+assert.equal(duelButtons.find(button => button.textContent === 'Dodge').dataset.k, 'KeyF');
+const soccerButtons = controlsFor('sports').buttons.children;
+assert.equal(soccerButtons.find(button => button.textContent === 'Sprint').dataset.k, 'Space');
+assert.equal(soccerButtons.find(button => button.textContent === 'Power kick').dataset.k, 'ShiftLeft');
+console.log('SQL constraint naming, desktop/mobile HUD defaults, horizontal joysticks, Jump buttons, nearby action bindings, and HUD disclosure passed.');
