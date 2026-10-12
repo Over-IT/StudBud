@@ -252,6 +252,7 @@ for (const id of addedParticles) {
 }
 for (const type of ['effect', 'trail']) {
     const box = sandbox.window.StudBudCommunityGames.constructor.boxes.find(entry => entry.id === type);
+    if (type === 'effect') assert.equal(box.name, 'Auras Box', 'aura box keeps its compatible effect ID with the new visible name');
     assert.equal(box.price, 200);
     assert.equal(Object.values(box.chances).reduce((sum, value) => sum + value, 0), 100);
     assert.deepEqual(Object.values(box.chances), [25, 35, 25, 12, 2, 1]);
@@ -263,6 +264,9 @@ for (const type of ['effect', 'trail']) {
     assert.ok(sql.includes(`s.id like 'acc\\_%\\_${type}'`), `${type} server pool matches item suffix`);
 }
 assert.match(sql, /elsif p_box in \('effect', 'trail'\) then\s+v_cost := 200/);
+assert.match(source, /\['effect', 'Auras'\]/, 'cosmetic tab displays Auras');
+assert.match(source, /effect: 'Auras'/, 'inventory category displays Auras');
+assert.doesNotMatch(source, /\['effect', 'Effects'\]|effect: 'Effects'/);
 assert.match(sql, /v_roll < 0\.25[\s\S]*v_roll < 0\.60[\s\S]*v_roll < 0\.85[\s\S]*v_roll < 0\.97[\s\S]*v_roll < 0\.99/);
 
 const particleTrace = (id, top, time, face = 1) => {

@@ -2365,7 +2365,7 @@
             const tab = this.shopTab || 'boxes';
             const catalog = games.catalog.filter(item => !item.legacy && item.type !== 'pet');
             const equippedBy = { skin: profile.equipped_skin, hat: profile.equipped_hat, accessory: profile.equipped_accessory, effect: profile.equipped_accessory, trail: profile.equipped_accessory, palette: profile.equipped_palette };
-            const tabs = [['boxes', 'Mystery boxes'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['effect', 'Effects'], ['trail', 'Trails'], ['palette', 'Colors'], ['inventory', 'Inventory']];
+            const tabs = [['boxes', 'Mystery boxes'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['effect', 'Auras'], ['trail', 'Trails'], ['palette', 'Colors'], ['inventory', 'Inventory']];
             const slotKey = { skin: 'skin', hat: 'hat', accessory: 'acc', effect: 'acc', trail: 'acc' };
             const itemCard = item => {
                 const has = owned.includes(item.id);
@@ -2407,9 +2407,9 @@
                         <div class="box-details"><strong>${this.escapeHTML(box.name)}</strong><small>${this.escapeHTML(box.odds)}</small></div>
                         <details class="box-odds"><summary>Drop chances</summary><span class="box-chances" aria-label="Rarity drop chances">${Object.entries(box.chances).map(([rarity, chance]) => `<span class="rarity-${rarity}">${rarity} <b>${chance}%</b></span>`).join('')}</span></details>
                         <button type="button" class="secondary-btn" data-action="multiplayer-mystery" data-id="${box.id}" ${profile.coins < box.price ? 'disabled' : ''}>Open · ${box.price} <i class="fas fa-coins"></i></button></article>`).join('')}
-                    <p class="settings-hint">Drop chances show the rarity roll for each box. Open boxes to collect characters, hats, accessories, effects, trails and colors.</p>`;
+                    <p class="settings-hint">Drop chances show the rarity roll for each box. Open boxes to collect characters, hats, accessories, auras, trails and colors.</p>`;
                                 } else if (tab === 'inventory') {
-                                    const typeNames = { skin: 'Characters', hat: 'Hats', accessory: 'Accessories', effect: 'Effects', trail: 'Trails', palette: 'Colors' };
+                                    const typeNames = { skin: 'Characters', hat: 'Hats', accessory: 'Accessories', effect: 'Auras', trail: 'Trails', palette: 'Colors' };
                                     const order = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
                                     const mine = games.catalog.filter(item => item.type !== 'pet' && owned.includes(item.id));
                                     const total = catalog.length;
