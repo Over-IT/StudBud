@@ -624,6 +624,7 @@
         fishPos(f, now) {
             return { x: mod(f.x0 + f.spd * now, this.W), y: f.y0 + Math.sin(now * f.fq + f.ph) * f.amp };
         }
+        fishSpec(type) { return FISH[type]; }
 
         logPos(log, now) {
             return { x: mod(log.x0 + log.spd * rampDistance(now, 82.5, 0.55), this.W), y: log.y + Math.sin(now * log.fq + log.phase) * 28 };
@@ -719,7 +720,7 @@
                         if (correct) { s.refill(); s.addScore(90); this.haul += 90; s.toast('Treasure chest: +90', '#fbbf24'); this.particles.burst(c.x, c.y, '#fbbf24', 28, 300, 0.8, 5); }
                         else if (correct === false) s.toast('The chest sank!', '#f87171');
                     });
-                    if (opened) { c.until = now + 1e6; s.emit({ k: 'ch', i: c.i, u: +(now + 1e6).toFixed(1) }); }
+                    if (opened) { c.until = now + 1; s.emit({ k: 'ch', i: c.i, u: +(now + 1).toFixed(1) }); }
                 }
             }
             s.setGoal(this.haul);
@@ -1101,7 +1102,7 @@
                     if (correct) { s.addScore(40); this.cash += 40; this.earned += 40; this.boost = 8; s.refill(); s.toast('Snack break: +$40 and a speed boost!', '#38bdf8'); }
                     else if (correct === false) s.toast('Machine ate your coin.', '#f87171');
                 });
-                if (opened) v.until = now + 1e6;
+                if (opened) v.until = now + 1;
             }
             s.setGoal(this.deliveries);
         }
@@ -1462,6 +1463,7 @@
             for (const p of this.pads) {
                 if (p.used || dist(me.x, me.y, p.x, p.y) > 40) continue;
                 const opened = s.ask(correct => {
+                    p.used = false;
                     if (correct) { this.turbo = 10; s.refill(); s.addScore(40); s.toast('TURBO! Free sprint and extra speed', '#fde047'); }
                     else if (correct === false) s.toast('Missed the play call.', '#f87171');
                 });

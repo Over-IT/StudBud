@@ -562,7 +562,93 @@ assert.equal(app.botResourceReady(soloResource, resourceBot, 0.1), true);
 assert.equal(resourceBot.ai.energy, 100, 'infinite energy belongs to testing');
 console.log('Shooter collision substeps and solo/test bot resources passed.');
 
-for (const mode of ['skyline', 'river', 'market', 'miner', 'duel', 'shooter', 'sports']) {
+let questionNow = 0;
+const originalPerformance = sandbox.performance;
+const originalTimers = sandbox.setTimeout;
+const pendingAnswers = [];
+sandbox.performance = { now: () => questionNow };
+sandbox.setTimeout = callback => pendingAnswers.push(callback);
+const questionBox = {
+    contains: () => false, classList: { add: noop },
+    querySelectorAll: () => [],
+    querySelector: () => ({ textContent: '' })
+};
+const questionSession = Object.assign(Object.create(A.Session.prototype), {
+    preview: false, countdown: 0, answered: 0, correct: 0,
+    cards: [{ front: 'One plus one?', back: 'Two' }, { front: 'One plus two?', back: 'Three' }],
+    overlay: { querySelector: () => questionBox }, canvas: { focus: noop },
+    showQuestion: () => true, sfx: noop, toast: noop
+});
+for (const result of ['skip', 'correct', 'wrong']) {
+    assert.equal(questionSession.ask(noop), true);
+    if (result === 'skip') questionSession.skipQuestion();
+    else {
+        const correctIndex = questionSession.question.options.indexOf(questionSession.question.card.back);
+        questionSession.answerQuestion(result === 'correct' ? correctIndex : -1);
+        pendingAnswers.shift()();
+    }
+    questionNow += 999;
+    assert.equal(questionSession.ask(noop), false, `${result}: automatic question stays blocked before one second`);
+    questionNow++;
+    assert.equal(questionSession.ask(noop), true, `${result}: automatic question reopens at one second`);
+    questionSession.skipQuestion();
+    assert.equal(questionSession.ask(noop, '', true), true, 'manual refill remains available during the automatic cooldown');
+    questionSession.skipQuestion();
+    questionNow += 1000;
+}
+
+const repeatMarket = demoFor('market');
+Object.assign(repeatMarket.session, questionSession, {
+    ask: A.Session.prototype.ask, closeQuestion: A.Session.prototype.closeQuestion,
+    skipQuestion: A.Session.prototype.skipQuestion, question: null, askCooldownUntil: 0
+});
+repeatMarket.game.s = repeatMarket.session;
+repeatMarket.session.startedAt = Date.now();
+Object.assign(repeatMarket.game.me, { x: repeatMarket.game.vending[0].x, y: repeatMarket.game.vending[0].y });
+repeatMarket.game.update(0);
+assert.ok(repeatMarket.session.question, 'vending machine opens a real automatic question');
+assert.ok(repeatMarket.game.vending[0].until <= 1.01, 'vending machine is reusable rather than consumed for the match');
+repeatMarket.session.skipQuestion();
+repeatMarket.game.vending[0].until = 0;
+questionNow += 999;
+repeatMarket.game.update(0);
+assert.equal(repeatMarket.session.question, null, 'standing on a vending machine cannot immediately loop into another question');
+questionNow++;
+repeatMarket.game.update(0);
+assert.ok(repeatMarket.session.question, 'the same vending machine can reopen after one second');
+sandbox.performance = originalPerformance;
+sandbox.setTimeout = originalTimers;
+console.log('One-second question cooldown after skips/correct/wrong answers, manual refill and reusable market triggers passed.');
+
+for (const mode of ['duel', 'shooter', 'skyline']) {
+    const demo = demoFor(mode), bot = demo.bots[0];
+    Object.assign(bot, { respawn: .01, vx: 900, vy: 900, stun: 1 });
+    if (mode === 'duel') { bot.dmg = 150; app.stepDuelBots(demo, .02); assert.equal(bot.dmg, 0); }
+    else if (mode === 'shooter') { bot.hp = 0; app.stepShooterBots(demo, .02); assert.equal(bot.hp, 100); }
+    else {
+        bot.st.checkpoint = 1;
+        app.stepSkylineBot(demo, bot, 0, .02);
+        assert.equal(bot.y, demo.game.checkpoints[1].y - bot.h, 'parkour bot returns to its latest checkpoint');
+        bot.invuln = 0; bot.y = demo.game.checkpoints[1].y + 900;
+        app.stepSkylineBot(demo, bot, 0, .02);
+        assert.ok(bot.respawn > 0, 'falling parkour bot starts its respawn timer');
+        app.stepSkylineBot(demo, bot, 0, 2);
+    }
+    assert.ok(bot.respawn <= 0 && bot.invuln > 0, `${mode} bot respawns with protection`);
+    assert.equal(bot.vx, 0); assert.equal(bot.vy, 0);
+    assert.ok(Number.isFinite(bot.x) && Number.isFinite(bot.y));
+}
+const kickoff = demoFor('sports');
+kickoff.game.freeze = 1; kickoff.botKickoff = false;
+for (const bot of kickoff.bots) Object.assign(bot, { x: 50, y: 50, vx: 500, vy: 500 });
+app.stepSportsBots(kickoff, 0);
+for (const bot of kickoff.bots) {
+    assert.equal(bot.x, bot.home[0]); assert.equal(bot.y, bot.home[1]);
+    assert.equal(bot.vx, 0); assert.equal(bot.vy, 0);
+}
+console.log('Forced bot respawns, parkour fall recovery and soccer kickoff resets passed.');
+
+for (const mode of Object.keys(A.games)) {
     for (const testing of [false, true]) {
         const demo = demoFor(mode);
         const s = demo.session;
@@ -586,8 +672,16 @@ for (const mode of ['skyline', 'river', 'market', 'miner', 'duel', 'shooter', 's
             demo.game.update(1 / 30);
         }
         console.log(`${mode} ${testing ? 'testing' : 'solo'} three-minute bot objectives: ${demo.bots.map(bot => bot.goal).join(', ')}`);
-        if (mode === 'market') assert.ok(demo.bots.some(bot => bot.deliveries > 0), 'market bots must complete real deliveries over a full run');
-        if (mode === 'miner' || mode === 'sports') assert.ok(demo.bots.some(bot => bot.goal > 0), `${mode} bots must bank crystals or score team goals`);
+        if (mode === 'market') assert.ok(demo.bots.every(bot => bot.deliveries > 0), 'every market bot must complete real deliveries over a full run');
+        if (mode === 'miner') assert.ok(demo.bots.every(bot => bot.goal > 0), 'every mining bot must bank real crystals');
+        if (mode === 'sports') assert.ok(demo.bots.some(bot => bot.goal > 0), 'soccer bots must score team goals');
+        if (mode === 'frenzy' || mode === 'fishing' || mode === 'river' || mode === 'hack') {
+            assert.ok(demo.bots.every(bot => bot.goal > 0), `${mode} every bot must complete the objective`);
+        }
+        if (mode === 'crypto') {
+            assert.ok(demo.bots.every(bot => bot.ai.trades > 0), 'every trading bot must buy or sell assets');
+            for (const bot of demo.bots) assert.equal(bot.score, Math.round(bot.ai.cash + bot.ai.units.reduce((sum, units, asset) => sum + units * demo.game.price(asset, demo.clock), 0)), 'trading scores use actual portfolios');
+        }
         sandbox.Date = Date;
     }
 }

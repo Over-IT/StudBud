@@ -615,7 +615,7 @@
 
         closeQuestion(resume) {
             this.question = null;
-            this.askCooldownUntil = performance.now() + 6000;
+            this.askCooldownUntil = performance.now() + 1000;
             const box = this.overlay.querySelector('.mpg-question');
             const restoreFocus = box.contains(document.activeElement);
             box.classList.add('hidden');

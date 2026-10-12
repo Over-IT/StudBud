@@ -1426,7 +1426,7 @@
                     if (correct) { this.hammer = 10; this.dmg = Math.max(0, this.dmg - 25); s.refill(); s.addScore(40); s.toast('Heart Hammer! Hits hit harder', '#f472b6'); }
                     else if (correct === false) s.toast('Missed the power-up', '#f87171');
                 });
-                if (opened) this.orb.t = 1e9;
+                if (opened) this.orb.t = 1;
             }
             if (this.respawn <= 0 && (me.x < -180 || me.x > this.W + 180 || me.y > this.H || me.y < -650)) this.ko();
             if (!s.question && this.respawn <= 0) {
@@ -1803,7 +1803,7 @@
                             if (correct) { this.overdrive = 12; this.hp = Math.min(this.maxHp, this.hp + 40); s.refill(); s.addScore(30); s.toast('Overdrive! Rapid fire + repair', '#67e8f9'); }
                             else if (correct === false) { this.jam = 2; s.toast('Blaster jammed!', '#f87171'); }
                         });
-                        if (opened) o.t = 1e9;
+                        if (opened) o.t = 1;
                     }
                 }
                 for (const p of this.packs) if (dist(me.x, me.y, p.x, p.y) < 30) { this.hp = Math.min(this.maxHp, this.hp + 25); p.gone = true; this.particles.burst(p.x, p.y, '#4ade80', 10, 120, 0.4, 4); }

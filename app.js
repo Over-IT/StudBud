@@ -3435,7 +3435,7 @@
                     b.onGround = true; b.ground = ground; b.airJumps = 1; b.dashCd = 0;
                 });
             } else if (mode === 'frenzy' || mode === 'fishing') {
-                bots.forEach((b, i) => { b.ai.fishingState = i % 2 ? 1 : 0; b.ai.fishingTimer = 0.7 + i * 0.8; b.ai.power = 0; b.ai.powerDir = 1; b.ai.fishY = 100 + i * 45; });
+                bots.forEach((b, i) => { b.ai.fishingState = 0; b.ai.fishingTimer = 0.7 + i * 0.8; b.ai.power = 0; b.ai.powerDir = 1; b.ai.fishY = 100 + i * 45; });
             } else if (mode === 'crypto') {
                 bots.forEach((b, i) => { b.ai.asset = (i * 2 + 1) % 6; b.ai.cash = 200; b.ai.units = Array(6).fill(0); b.ai.tradeAt = i * 0.7; });
             }
@@ -3465,7 +3465,7 @@
                 const ready = this.botResourceReady(demo, b, dt);
                 if (b.respawn > 0) {
                     b.respawn -= dt; b.a = 5;
-                    if (b.respawn <= 0) { b.x = b.sp[0]; b.y = b.sp[1] - 60; b.vx = b.vy = 0; b.dmg = 0; b.invuln = 2; b.a = 0; }
+                    if (b.respawn <= 0) { b.x = b.sp[0]; b.y = b.sp[1] - 60; b.vx = b.vy = 0; b.dmg = 0; b.stun = b.swingT = 0; b.onGround = false; b.ground = null; b.airJumps = 1; b.invuln = 2; b.a = 0; }
                     b.seen = now; continue;
                 }
                 b.stun = Math.max(0, b.stun - dt); b.invuln = Math.max(0, b.invuln - dt); b.swingT = Math.max(0, b.swingT - dt); b.swingCd -= dt;
@@ -3558,7 +3558,7 @@
                 b.seen = now;
                 if (b.respawn > 0) {
                     b.respawn -= dt; b.a = 1;
-                    if (b.respawn <= 0) { this.placeShooterBot(game, b, b.i); b.hp = 100; b.a = 0; b.invuln = 1.5; }
+                    if (b.respawn <= 0) { this.placeShooterBot(game, b, b.i); b.hp = 100; b.vx = b.vy = 0; b.stun = 0; b.a = 0; b.invuln = 1.5; }
                     continue;
                 }
                 b.cd -= dt; b.invuln = Math.max(0, b.invuln - dt); b.sfT = (b.sfT || 0) - dt;
@@ -3632,6 +3632,10 @@
         // Soccer preview: bots chase the ball with their team's closest player, dribble it toward the rival goal and shoot when close.
         stepSportsBots(demo, dt) {
             const U = window.StudBudArcade.util, game = demo.game, ball = game.ball, now = performance.now();
+            if (game.freeze > 0 && !demo.botKickoff) {
+                for (const bot of demo.bots) Object.assign(bot, { x: bot.home[0], y: bot.home[1], vx: 0, vy: 0, kickCd: .6, stun: 0, turbo: 0 });
+            }
+            demo.botKickoff = game.freeze > 0;
             const all = demo.bots.map(b => ({ x: b.x, y: b.y, team: b.team, id: b.id }));
             all.push({ x: game.me.x, y: game.me.y, team: game.myTeam, id: demo.meId });
             for (const b of demo.bots) {
@@ -3726,7 +3730,7 @@
             ai.energy = ai.energy ?? 100;
             if (demo.session.testing || demo.session.preview) ai.energy = 100;
             if (ai.energy < 22) {
-                ai.rechargeAt = ai.rechargeAt || demo.clock + 3 + ai.reaction;
+                ai.rechargeAt = ai.rechargeAt || demo.clock + 1 + ai.reaction;
                 if (demo.clock >= ai.rechargeAt) { ai.energy += demo.session.rewardAmount(); ai.rechargeAt = 0; }
                 b.vx *= Math.max(0, 1 - 8 * dt);
             } else {
@@ -4106,6 +4110,7 @@
         }
 
         stepSkylineBot(demo, bot, index, dt) {
+            const U = window.StudBudArcade.util;
             const game = demo.game, now = performance.now(), route = this.skyRoute(game);
             if (!bot.st) {
                 const ground = game.solids.find(p => p.ground), start = route.list[0];
@@ -4114,6 +4119,18 @@
                 bot.vx = 0; bot.vy = 0; bot.onGround = true; bot.ground = ground; bot.airJumps = 1; bot.dashCd = 0;
             }
             bot.w = 26; bot.h = 44;
+            if (bot.respawn > 0) {
+                bot.respawn = Math.max(0, bot.respawn - dt);
+                if (bot.respawn === 0) {
+                    const checkpoint = game.checkpoints[bot.st.checkpoint || 0];
+                    const node = route.cpNode[checkpoint.id];
+                    Object.assign(bot, { x: checkpoint.x + 20 - bot.w / 2, y: checkpoint.y - bot.h, vx: 0, vy: 0, onGround: false, ground: null, airJumps: 1, dash: 0, dashCd: 0, invuln: 1.5 });
+                    Object.assign(bot.st, { i: node, jump: null, flagDone: true, wait: .2 });
+                }
+                bot.tx = bot.x; bot.ty = bot.y; bot.a = 5; bot.seen = now;
+                return;
+            }
+            bot.invuln = Math.max(0, bot.invuln - dt);
             if (bot.done) {
                 bot.vx = 0; bot.vy = 0; bot.seen = now;
                 return;
@@ -4124,6 +4141,18 @@
             }
             const speed = bot.ai.speed * (0.78 + bot.ai.aggression * 0.24);
             this.skyStep(demo, game, bot, bot.st, dt, speed);
+            for (const checkpoint of game.checkpoints) {
+                if (checkpoint.id > (bot.st.checkpoint || 0) && Math.abs(bot.x + bot.w / 2 - checkpoint.x - 20) < 90
+                    && Math.abs(bot.y + bot.h - checkpoint.y) < 70) bot.st.checkpoint = checkpoint.id;
+            }
+            const checkpoint = game.checkpoints[bot.st.checkpoint || 0];
+            const body = { x: bot.x + 3, y: bot.y + 3, w: bot.w - 6, h: bot.h - 6 };
+            const hit = bot.y > checkpoint.y + 800 || bot.y + bot.h > game.tideY
+                || game.spikes.some(spike => U.overlap(body, spike))
+                || game.saws.some(saw => Math.hypot(bot.x + bot.w / 2 - saw.x, bot.y + bot.h / 2 - saw.y) < saw.r + 14)
+                || game.lasers.some(laser => laser.on && U.overlap(body, laser))
+                || game.balls.some(ball => Math.hypot(bot.x + bot.w / 2 - ball.x, bot.y + bot.h / 2 - ball.y) < ball.r + 12);
+            if (hit && bot.invuln <= 0) { bot.respawn = 1.2; bot.vx = bot.vy = 0; bot.a = 5; bot.seen = now; return; }
             if (bot.onGround && bot.ground === game.summit) bot.done = true;
             bot.f = bot.face || 1; bot.a = bot.st.air ? 2 : bot.st.moving ? 1 : 0;
             bot.tx = bot.x; bot.ty = bot.y; bot.ex = {}; bot.seen = now;
@@ -4147,7 +4176,7 @@
                     }
                     ai.carrying = arrived ? !ai.carrying : false;
                     const shops = game.shops, houses = game.houses;
-                    const list = ai.carrying ? [...houses].sort((a, b) => Math.hypot(a.door.x - bot.x, a.door.y - bot.y) - Math.hypot(b.door.x - bot.x, b.door.y - bot.y)).slice(0, 3) : shops;
+                    const list = [...(ai.carrying ? houses : shops)].sort((a, b) => Math.hypot(a.door.x - bot.x, a.door.y - bot.y) - Math.hypot(b.door.x - bot.x, b.door.y - bot.y)).slice(0, ai.carrying ? 3 : 1);
                     const cycle = ai.carrying ? (ai.houseIndex + Math.floor(clock / 3)) : (ai.shopIndex + Math.floor(clock / 3));
                     const item = list[((cycle + index) % list.length + list.length) % list.length];
                     setTarget(item.door, Infinity); target = ai.target;
@@ -4158,9 +4187,7 @@
                 }
                 while (ai.path?.length > 1 && Math.hypot(bot.x - ai.path[0].x, bot.y - ai.path[0].y) < 30) ai.path.shift();
                 const waypoint = ai.path?.[0] || target;
-                let dx = waypoint.x - bot.x, dy = waypoint.y - bot.y;
-                const car = game.cars?.find(item => { const rect = game.carRect(item, clock); return Math.abs(rect.x + rect.w / 2 - bot.x) < 72 && Math.abs(rect.y + rect.h / 2 - bot.y) < 54; });
-                if (car) { if (car.horiz) dy = bot.y < car.c ? -100 : 100; else dx = bot.x < car.c ? -100 : 100; }
+                const dx = waypoint.x - bot.x, dy = waypoint.y - bot.y;
                 this.moveBotToward(bot, dx, dy, speed, dt);
                 for (const wall of game.walls) U.pushCircleOutOfRect(bot, wall);
                 ai.hitCd = Math.max(0, (ai.hitCd || 0) - dt);
@@ -4172,30 +4199,45 @@
                 bot.score = bot.deliveries || 0;
                 bot.ex = { p: ai.carrying ? 1 : 0 };
             } else if (mode === 'river' && game.fish?.length) {
-                const fishIndex = (ai.fishIndex + Math.floor(clock / 9) * (index + 1)) % game.fish.length;
-                const fish = game.fish[fishIndex], p = game.fishPos(fish, clock);
-                if (!target || clock >= ai.targetUntil || Math.hypot(bot.x - p.x, bot.y - p.y) < 90) { setTarget({ x: p.x + (index - 1) * 95, y: p.y + (index - 1) * 58 }, 5); target = ai.target; }
+                let fish = game.fish[ai.fishIndex];
+                if (!fish || (game.away.get(fish.i) || 0) > clock || clock >= ai.targetUntil) {
+                    const available = game.fish.filter(item => (game.away.get(item.i) || 0) <= clock);
+                    fish = available.sort((a, b) => {
+                        const pa = game.fishPos(a, clock), pb = game.fishPos(b, clock);
+                        return Math.hypot(pa.x - bot.x, pa.y - bot.y) - Math.hypot(pb.x - bot.x, pb.y - bot.y);
+                    })[0];
+                    ai.fishIndex = fish ? game.fish.indexOf(fish) : -1; ai.targetUntil = clock + 5;
+                }
+                const p = fish ? game.fishPos(fish, clock) : { x: bot.x, y: bot.y };
+                target = ai.target = { x: p.x, y: p.y };
                 let dx = target.x - bot.x, dy = target.y - bot.y;
                 const hazards = [...game.rocks.map(r => ({ x: r.x, y: r.y, r: r.r })), ...(game.pools || []).map(pool => ({ ...game.poolPos(pool, clock), r: pool.r * 0.9 }))];
                 const hazard = hazards.find(item => Math.hypot(item.x - bot.x, item.y - bot.y) < item.r + 65);
                 if (hazard) { dx = bot.x - hazard.x + ai.side * 55; dy = bot.y - hazard.y; }
                 this.moveBotToward(bot, dx, dy, speed, dt);
                 ai.castTimer -= dt;
-                if (ready && ai.castTimer <= 0 && Math.hypot(p.x - bot.x, p.y - bot.y) < 220) {
+                if (ready && fish && ai.castTimer <= 0 && Math.hypot(p.x - bot.x, p.y - bot.y) < 78 + game.fishSpec(fish.type).r) {
                     ai.energy = Math.max(0, (ai.energy ?? 100) - 10);
-                    const catchDistance = Math.hypot(p.x - bot.x, p.y - bot.y);
-                    if (catchDistance < 140) {
-                        const values = [5, 15, 40, 100];
-                        bot.score = (bot.score || 0) + values[fish.type];
-                        ai.catches = (ai.catches || 0) + 1;
-                        ai.fishIndex = (fishIndex + 1 + Math.floor(rand() * 5)) % game.fish.length;
-                    }
+                    bot.score = (bot.score || 0) + game.fishSpec(fish.type).v;
+                    ai.catches = (ai.catches || 0) + 1;
+                    game.away.set(fish.i, clock + 9);
+                    ai.targetUntil = 0;
                     ai.castTimer = 2.5 + rand() * 1.7 + ai.reaction;
                 }
                 bot.ex = { n: ai.castTimer > 2.2 ? 1 : 0, catches: ai.catches || 0 };
             } else if (mode === 'miner' && game.T) {
                 const TS = 48, crystalValues = { 3: 5, 4: 12, 5: 25, 7: 50, 8: 90, 9: 160 };
                 bot.w = 26; bot.h = 40; bot.fuel = demo.session.testing || demo.session.preview ? 100 : ai.fuel ?? 100; bot.carry = bot.carry || 0; bot.items = bot.items || 0;
+                if (!demo.session.testing && !demo.session.preview && (bot.fuel < 35 || ai.rechargeAt)) {
+                    ai.rechargeAt = ai.rechargeAt || clock + 1 + ai.reaction;
+                    if (clock >= ai.rechargeAt) {
+                        bot.fuel += demo.session.rewardAmount();
+                        ai.rechargeAt = bot.fuel < 85 ? clock + 1 + ai.reaction : 0;
+                    }
+                    ai.fuel = bot.fuel; bot.vx = bot.vy = 0;
+                    bot.ex = { c: bot.carry, n: bot.items }; bot.seen = now;
+                    return;
+                }
                 const sector = ai.sector || [[2, 24], [24, 47], [47, 68]][index];
                 const depth = game.depthAt(bot.y + bot.h);
                 if (bot.carry && !ai.tripStarted) ai.tripStarted = clock;
@@ -4251,7 +4293,7 @@
                     }
                 } else {
                     ai.dig = null;
-                    const desiredX = !recharging && Math.abs(dx) > 18 ? Math.sign(dx) * game.baseSpeed : 0;
+                    const desiredX = !recharging && Math.abs(dx) > 4 ? Math.sign(dx) * Math.min(game.baseSpeed, Math.abs(dx) * 6) : 0;
                     bot.vx += U.clamp(desiredX - bot.vx, -850 * dt, 850 * dt);
                 }
 
@@ -4280,13 +4322,6 @@
                     if (bot.carry > 0) bot.score = (bot.score || 0) + bot.carry;
                     bot.carry = 0; bot.items = 0; ai.ore = null; ai.dig = null; ai.tripStarted = 0;
                 }
-                if (!demo.session.testing && !demo.session.preview && (bot.fuel < 35 || ai.rechargeAt)) {
-                    ai.rechargeAt = ai.rechargeAt || clock + 3 + ai.reaction;
-                    if (clock >= ai.rechargeAt) {
-                        bot.fuel += demo.session.rewardAmount();
-                        ai.rechargeAt = bot.fuel < 85 ? clock + 3 + ai.reaction : 0;
-                    }
-                }
                 ai.fuel = bot.fuel;
                 bot.ex = { c: bot.carry, n: bot.items }; bot.a = 1;
             } else if (mode === 'crypto') {
@@ -4294,31 +4329,69 @@
                 if (ai.tradeAt <= 0) {
                     const trend = game.price(ai.asset, clock) - game.price(ai.asset, Math.max(0, clock - 4));
                     const price = game.price(ai.asset, clock);
-                    if (trend >= 0 && ai.cash >= price) { ai.cash -= price; ai.units[ai.asset]++; }
-                    else if (ai.units[ai.asset] > 0) { ai.cash += price * ai.units[ai.asset]; ai.units[ai.asset] = 0; ai.asset = (ai.asset + 1 + Math.floor(rand() * 3)) % 6; }
+                    if (trend >= 0 && ai.cash >= price) { ai.cash -= price; ai.units[ai.asset]++; ai.trades = (ai.trades || 0) + 1; }
+                    else if (ai.units[ai.asset] > 0) { ai.cash += price * ai.units[ai.asset]; ai.units[ai.asset] = 0; ai.trades = (ai.trades || 0) + 1; ai.asset = (ai.asset + 1 + Math.floor(rand() * 3)) % 6; }
                     else ai.asset = (ai.asset + 1 + Math.floor(rand() * 3)) % 6;
                     ai.tradeAt = 2.4 + rand() * 2.6;
                 }
-                ai.cash += dt * (index === 0 ? 2 : 1);
+                const rigCost = Math.round(250 * Math.pow(1.7, ai.rigs || 0));
+                if (ai.cash >= rigCost) { ai.cash -= rigCost; ai.rigs = (ai.rigs || 0) + 1; }
+                ai.cash += dt * (ai.rigs || 0) * 7;
                 bot.score = Math.round(ai.cash + ai.units.reduce((sum, units, asset) => sum + units * game.price(asset, clock), 0));
                 bot.ex = { asset: ai.asset, balance: bot.score };
                 this.wanderBot(bot, ai, W, H, speed * 0.35, dt, clock);
             } else if ((mode === 'frenzy' || mode === 'fishing') && game.st !== undefined) {
-                ai.fishingTimer -= dt;
-                if (ai.fishingTimer <= 0) { ai.fishingState = (ai.fishingState + 1) % 5; ai.fishingTimer = [1.2, 1.8, 1.4, 0.8, 2.2][ai.fishingState] + ai.reaction; }
+                if (ready) ai.fishingTimer -= dt;
+                if (ready && ai.fishingTimer <= 0 && ai.fishingState !== 4) {
+                    if (ai.fishingState === 0) {
+                        ai.energy = Math.max(0, ai.energy - 10); ai.fishingState = 1; ai.power = 0;
+                    } else if (ai.fishingState === 3) {
+                        const depth = ai.depth || .5, weights = [.62 - depth * .5, .3 + depth * .05, .07 + depth * .3, .01 + depth * .15];
+                        let roll = rand() * weights.reduce((sum, weight) => sum + weight, 0), type = 0;
+                        for (; type < 3; type++) { roll -= weights[type]; if (roll <= 0) break; }
+                        ai.catchType = type; ai.fishingState = 4; ai.progress = .3;
+                        ai.zoneY = ai.fishY = ai.fishTarget = 150; ai.zoneV = 0;
+                    } else {
+                        if (ai.fishingState === 1) ai.depth = .12 + ai.power * .88;
+                        ai.fishingState++;
+                    }
+                    ai.fishingTimer = [1.2, .8, 1.4 + (ai.depth || .5), .2, 2.2][ai.fishingState] + ai.reaction;
+                }
                 if (ai.fishingState === 1) ai.power = Math.max(0, Math.min(1, (ai.power || 0) + dt * ai.powerDir * 0.7));
                 if (ai.power >= 1 || ai.power <= 0) ai.powerDir *= -1;
-                ai.fishY = Math.max(20, Math.min(220, ai.fishY + Math.sin(clock * (0.8 + index * 0.2) + ai.phase) * dt * 25));
+                if (ai.fishingState === 4) {
+                    if (Math.abs(ai.fishY - ai.fishTarget) < 8 || rand() < dt * .9) ai.fishTarget = rand() * 230;
+                    const fishSpeed = game.catchSpeed(ai.catchType);
+                    ai.fishY += U.clamp(ai.fishTarget - ai.fishY, -1, 1) * 110 * fishSpeed * dt;
+                    const held = ai.fishY < ai.zoneY + 37 + ai.zoneV * .12;
+                    ai.zoneV = U.clamp(ai.zoneV + (held ? -1500 : 900) * dt, -420, 420);
+                    ai.zoneY = U.clamp(ai.zoneY + ai.zoneV * dt, 0, 230);
+                    const inside = ai.fishY > ai.zoneY - 4 && ai.fishY < ai.zoneY + 74;
+                    ai.progress = U.clamp(ai.progress + (inside ? .34 : -.2 - fishSpeed * .03) * dt, 0, 1);
+                    if (ai.progress >= 1) {
+                        ai.catches = (ai.catches || 0) + 1; ai.combo = (ai.combo || 0) + 1;
+                        bot.score = (bot.score || 0) + game.catchPoints(ai.catchType, ai.combo);
+                        ai.fishingState = 0; ai.fishingTimer = 1.2 + ai.reaction;
+                    } else if (ai.progress <= 0) { ai.combo = 0; ai.fishingState = 0; ai.fishingTimer = 1.2 + ai.reaction; }
+                }
                 bot.ex = { st: ai.fishingState, d: ai.depth || 0.4 + ai.area * 0.5, p: ai.power || 0 };
             } else if (mode === 'hack' && game.terms?.length) {
+                bot.r = 15;
                 if (!target || clock >= ai.targetUntil || Math.hypot(bot.x - target.x, bot.y - target.y) < 58) {
                     const terminals = game.terms.filter(term => term.kind === 'mine');
-                    const term = terminals[(ai.termIndex + Math.floor(clock / 8)) % Math.max(1, terminals.length)] || game.terms[ai.termIndex % game.terms.length];
-                    setTarget({ x: term.x + ai.side * 70, y: term.y }, 6); target = ai.target;
+                    const term = terminals.reduce((best, item) => Math.hypot(item.x - bot.x, item.y - bot.y) < Math.hypot(best.x - bot.x, best.y - bot.y) ? item : best, terminals[0]);
+                    setTarget({ x: term.x, y: term.y }, 6); target = ai.target;
                     ai.term = term;
                 }
                 this.moveBotToward(bot, target.x - bot.x, target.y - bot.y, speed, dt);
-                if (ai.term && Math.hypot(bot.x - ai.term.x, bot.y - ai.term.y) < 66 && ai.term.cd <= 0) { ai.term.cd = 3; bot.score = (bot.score || 0) + 1; }
+                for (const wall of game.walls) U.pushCircleOutOfRect(bot, wall);
+                if (ready && ai.term && Math.hypot(bot.x - ai.term.x, bot.y - ai.term.y) < 46 && ai.term.cd <= 0) {
+                    ai.miningUntil = ai.miningUntil || clock + 1 + ai.reaction;
+                    if (clock >= ai.miningUntil) {
+                        ai.term.cd = 1; bot.score = (bot.score || 0) + demo.session.rewardAmount() * 3;
+                        ai.miningUntil = 0; ai.targetUntil = 0;
+                    }
+                } else ai.miningUntil = 0;
                 bot.ex = { sh: Math.sin(clock + ai.phase) > 0.65 ? 1 : 0 };
             } else {
                 this.wanderBot(bot, ai, W, H, speed * 0.55, dt, clock);
@@ -4336,6 +4409,7 @@
         }
 
         moveBotToward(bot, dx, dy, speed, dt) {
+            if (speed === 0) { bot.vx = bot.vy = 0; return; }
             const d = Math.hypot(dx, dy) || 1;
             const k = Math.min(1, dt * (3.2 + (bot.ai?.speed || 1) * 2.4));
             bot.vx = (bot.vx || 0) + ((dx / d) * speed - (bot.vx || 0)) * k;
@@ -4347,14 +4421,14 @@
         botResourceReady(demo, bot, dt, drain = 0) {
             const ai = bot.ai;
             const max = demo.game.res?.max || 100;
-            if (demo.session.testing || demo.session.preview) { ai.energy = max; ai.rechargeAt = 0; return true; }
+            if (!demo.game.res || demo.session.testing || demo.session.preview) { ai.energy = max; ai.rechargeAt = 0; return true; }
             ai.energy = ai.energy ?? demo.game.res?.value ?? max;
             if (ai.rechargeAt) {
                 if (demo.clock < ai.rechargeAt) return false;
                 ai.energy += demo.session.rewardAmount();
                 ai.rechargeAt = 0;
             }
-            if (ai.energy < 8) { ai.rechargeAt = demo.clock + 3 + ai.reaction; return false; }
+            if (ai.energy < 8) { ai.rechargeAt = demo.clock + 1 + ai.reaction; return false; }
             ai.energy = Math.max(0, ai.energy - drain * dt);
             return true;
         }
@@ -5076,6 +5150,8 @@
                 } else if (mode === 'market') {
                     bot.goal = bot.deliveries || 0;
                     bot.score = bot.goal;
+                } else if (mode === 'frenzy' || mode === 'fishing') {
+                    bot.goal = bot.ai.catches || 0;
                 } else if (mode === 'miner' || mode === 'river' || mode === 'crypto' || mode === 'shooter' || mode === 'hack') {
                     bot.goal = Math.round(Number(bot.score) || 0);
                 }

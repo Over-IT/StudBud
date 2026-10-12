@@ -147,7 +147,7 @@
             else if (id === 'sall') this.trade(this.sel, -1e9, t);
             else if (id === 'research' && this.researchCd <= 0) {
                 s.ask(correct => {
-                    this.researchCd = 6;
+                    this.researchCd = 1;
                     if (correct) { const gain = s.reward * 8 + this.intern * 40; this.cash += gain; this.pop(`Research +${money(gain)}`, '#38bdf8'); s.toast(`Great research! +${money(gain)}`, '#38bdf8'); }
                     else if (correct === false) s.toast('Bad intel — no payout.', '#f87171');
                 }, `Correct answer: +${money(s.reward * 8 + this.intern * 40)} cash`, true);
@@ -385,7 +385,7 @@
                 this.prog = clamp(this.prog + (inside ? 0.34 : -0.2 - this.target.spd * 0.03) * dt, 0, 1);
                 if (this.prog >= 1) {
                     this.combo++; this.caught++;
-                    const pts = Math.round(this.target.v * (1 + Math.min(this.combo - 1, 5) * 0.1));
+                    const pts = this.catchPoints(this.targetType, this.combo);
                     s.addScore(pts);
                     this.say(`${this.target.name}! +${pts}${this.combo > 1 ? ` · combo x${this.combo}` : ''}`, this.target.color);
                     this.bag.unshift(this.target); this.bag.length = Math.min(this.bag.length, 6);
@@ -397,6 +397,8 @@
         }
 
         say(text, color = '#e2e8f0') { this.msg = text; this.msgT = 2.2; this.msgColor = color; }
+        catchPoints(type, combo) { return Math.round(CATCH[type].v * (1 + Math.min(combo - 1, 5) * .1)); }
+        catchSpeed(type) { return CATCH[type].spd; }
 
         net() { return { x: 0, y: 0, ex: { st: this.st, d: +this.depth.toFixed(2), p: +this.power.toFixed(2) } }; }
         goalText() { return `${this.caught} fish${this.combo > 1 ? ` · combo x${this.combo}` : ''}${this.chests ? ` · ${this.chests} chest` : ''}`; }
@@ -534,7 +536,7 @@
                         if (correct) { this.crypto += gain; this.pop(`+${gain} crypto`, '#4ade80'); s.toast(`Mined ${gain} crypto!`, '#4ade80'); }
                         else if (correct === false) s.toast('Mining failed — try again later.', '#f87171');
                     }, `Correct answer: +${gain} crypto`);
-                    if (opened) t.cd = 10;
+                    if (opened) t.cd = 1;
                 } else {
                     t.cd = 8;
                     this.hk = { code: [0, 1, 2].map(() => 1 + Math.floor(Math.random() * 5)), guess: [], rows: [], tries: 7, phase: 'code' };
