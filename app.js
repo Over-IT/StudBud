@@ -2371,14 +2371,30 @@
                 else button = `<button type="button" class="secondary-btn" data-action="multiplayer-buy" data-id="${this.escapeHTML(item.id)}" ${profile.coins < item.price ? 'disabled' : ''}>Buy${price}</button>`;
                 const name = item.name;
                 const search = this.escapeHTML(`${name} ${item.rarity}`.toLocaleLowerCase());
-                return `<article class="multiplayer-shop-item rarity-${item.rarity}${equipped ? ' equipped' : ''}" data-search="${search}">${preview}<div><strong>${this.escapeHTML(name)}</strong><small class="rarity-label">${item.rarity}</small></div>${button}</article>`;
+                return `<article class="multiplayer-shop-item rarity-${item.rarity}${equipped ? ' equipped' : ''}" data-search="${search}"><span class="shop-preview" aria-hidden="true">${preview}</span><div><strong>${this.escapeHTML(name)}</strong><small class="rarity-label">${item.rarity}</small></div>${button}</article>`;
             };
             let body;
             if (tab === 'boxes') {
                 const drop = this.lastDrop;
                 const dropItem = drop && games.catalog.find(entry => entry.id === drop.unlocked_item && entry.type !== 'pet');
                 body = `${dropItem ? `<div class="box-reveal rarity-${this.escapeHTML(dropItem.rarity)}">${dropItem.type === 'palette' ? `<span class="shop-palette" style="background: linear-gradient(135deg, hsl(${dropItem.hue} 75% 55%), hsl(${dropItem.hue2} 80% 40%))"></span>` : this.multiplayerAvatarMarkup({ skin: '', hat: '', acc: '', [slotKey[dropItem.type]]: dropItem.id }, true)}<div><small>${this.escapeHTML(dropItem.rarity)}</small><strong>${this.escapeHTML(dropItem.name)}</strong><span>New item added to your inventory!</span></div></div>` : ''}
-                    ${games.constructor.boxes.map(box => `<article class="multiplayer-shop-item box-card box-${box.id}" data-search="${this.escapeHTML(`${box.name} ${box.id}`.toLocaleLowerCase())}"><span class="mystery-capsule" aria-hidden="true"><i class="fas ${box.icon}"></i><small>STUDBUD</small></span><div class="box-details"><strong>${this.escapeHTML(box.name)}</strong><small>${this.escapeHTML(box.odds)}</small><span class="box-chances" aria-label="Rarity drop chances">${Object.entries(box.chances).map(([rarity, chance]) => `<span class="rarity-${rarity}">${rarity} <b>${chance}%</b></span>`).join('')}</span></div><button type="button" class="secondary-btn" data-action="multiplayer-mystery" data-id="${box.id}" ${profile.coins < box.price ? 'disabled' : ''}>Open · ${box.price} <i class="fas fa-coins"></i></button></article>`).join('')}
+                    ${games.constructor.boxes.map(box => `<article class="multiplayer-shop-item box-card box-${box.id}" data-search="${this.escapeHTML(`${box.name} ${box.id}`.toLocaleLowerCase())}">
+                        <span class="shop-preview mystery-capsule" aria-hidden="true">
+                            <svg viewBox="0 0 160 140" focusable="false">
+                                <ellipse cx="80" cy="126" rx="56" ry="8" fill="currentColor" opacity=".12"/>
+                                <path d="M24 54 80 31 136 54 136 106 80 130 24 106Z" fill="currentColor"/>
+                                <path d="M80 78 136 54 136 106 80 130Z" fill="#101a17" opacity=".28"/>
+                                <path d="M24 54 80 78 80 130 24 106Z" fill="#101a17" opacity=".12"/>
+                                <path d="M20 44 80 20 140 44 140 61 80 85 20 61Z" fill="currentColor"/>
+                                <path d="M20 44 80 68 140 44M80 68V85M80 85V130" fill="none" stroke="#f0f7f2" stroke-opacity=".45" stroke-width="2" stroke-linejoin="round"/>
+                                <path d="M63 27 122 51 122 67 107 73 107 57 48 33Z" fill="#f0f7f2" opacity=".35"/>
+                                <path d="m32 23 3-9 3 9 9 3-9 3-3 9-3-9-9-3Zm91 1 2-6 2 6 6 2-6 2-2 6-2-6-6-2Z" fill="currentColor" opacity=".7"/>
+                            </svg>
+                            <i class="fas ${box.icon}"></i>
+                        </span>
+                        <div class="box-details"><strong>${this.escapeHTML(box.name)}</strong><small>${this.escapeHTML(box.odds)}</small></div>
+                        <details class="box-odds"><summary>Drop chances</summary><span class="box-chances" aria-label="Rarity drop chances">${Object.entries(box.chances).map(([rarity, chance]) => `<span class="rarity-${rarity}">${rarity} <b>${chance}%</b></span>`).join('')}</span></details>
+                        <button type="button" class="secondary-btn" data-action="multiplayer-mystery" data-id="${box.id}" ${profile.coins < box.price ? 'disabled' : ''}>Open · ${box.price} <i class="fas fa-coins"></i></button></article>`).join('')}
                     <p class="settings-hint">Drop chances show the rarity roll for each box. Open boxes to collect characters, hats, accessories, effects, trails and colors.</p>`;
                                 } else if (tab === 'inventory') {
                                     const typeNames = { skin: 'Characters', hat: 'Hats', accessory: 'Accessories', effect: 'Effects', trail: 'Trails', palette: 'Colors' };
@@ -2408,7 +2424,7 @@
             document.getElementById('multiplayer-shop-items').innerHTML = `
                 <div class="shop-tabs" role="tablist">${tabs.map(([id, label]) => `<button type="button" class="shop-tab${tab === id ? ' selected' : ''}" role="tab" aria-selected="${tab === id}" data-shop-tab="${id}">${label}</button>`).join('')}</div>
                 <label class="shop-search"><i class="fas fa-magnifying-glass" aria-hidden="true"></i><span class="sr-only">Filter shop items</span><input id="multiplayer-shop-search" type="search" value="${this.escapeHTML(this.shopSearch || '')}" placeholder="Filter by name or rarity"></label>
-                <div class="shop-grid">${body}<p class="shop-search-empty" role="status" hidden>No matching shop items. Try another name or rarity.</p></div>`;
+                <div class="shop-grid${tab === 'boxes' ? ' shop-grid-boxes' : ''}">${body}<p class="shop-search-empty" role="status" hidden>No matching shop items. Try another name or rarity.</p></div>`;
             const search = document.getElementById('multiplayer-shop-search');
             if (search && this.shopSearch) {
                 const query = this.shopSearch.toLocaleLowerCase();

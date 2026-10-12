@@ -231,8 +231,8 @@
         hint() { return ''; }
         touchHint() {
             return {
-                skyline: 'Joystick to move · Jump again in the air · Dash across gaps · Recharge on a wide ledge',
-                duel: 'Joystick to move · Jump twice · Tap the arena to swing · Heavy uses your last aim · Shield or Dodge to escape',
+                skyline: 'Joystick left/right · Use Jump to jump again in the air · Dash across gaps · Recharge on a wide ledge',
+                duel: 'Joystick left/right · Use Jump to jump twice · Tap the arena to swing · Heavy uses your last aim · Shield or Dodge to escape',
                 shooter: 'Joystick to move · Hold the arena to aim and fire · Dash between cover · Recharge behind cover',
                 market: 'Joystick to move · Hold Sprint for speed · Pick up and deliver packages · Building recesses are away from traffic',
                 river: 'Joystick to steer · Tap the water to cast · Shallow banks are calm places to recharge',
@@ -708,9 +708,22 @@
                 if (target.dataset.q !== undefined && !target.classList.contains('mpg-qbtn')) this.answerQuestion(Number(target.dataset.q));
                 else if (target.classList.contains('mpg-q-skip')) this.skipQuestion();
                 else if (target.classList.contains('mpg-recharge') || target.classList.contains('mpg-qbtn')) this.recharge();
+                else if (target.classList.contains('mpg-hud-toggle')) {
+                    this.setHudCollapsed(!this.overlay.classList.contains('hud-collapsed'));
+                }
+                else if (target.classList.contains('mpg-menu-toggle')) {
+                    const menu = this.overlay.querySelector('.mpg-menu-panel');
+                    menu.hidden = !menu.hidden;
+                    target.setAttribute('aria-expanded', String(!menu.hidden));
+                }
                 else if (target.classList.contains('mpg-board-toggle')) {
                     const open = this.overlay.classList.toggle('board-open');
                     target.setAttribute('aria-expanded', String(open));
+                    target.setAttribute('aria-label', open ? 'Hide match standings' : 'Show match standings');
+                    this.overlay.querySelector('.mpg-menu-panel').hidden = true;
+                    const menuToggle = this.overlay.querySelector('.mpg-menu-toggle');
+                    menuToggle.setAttribute('aria-expanded', 'false');
+                    menuToggle.focus();
                     this.layoutHud();
                 }
                 else if (target.classList.contains('mpg-test-pause') && this.testing) {
@@ -741,19 +754,23 @@
                     <div class="mpg-chip"><strong class="mpg-name"></strong><span class="mpg-goal"></span>${this.testing ? '<small class="mpg-practice-indicator">Admin testing · infinite energy</small>' : this.practice ? '<small class="mpg-practice-indicator">Solo game · no coins</small>' : ''}</div>
                     <div class="mpg-timer"></div>
                     <div class="mpg-actions">
-                        ${this.testing ? `<details class="mpg-test-tools"><summary>Tools</summary><div class="mpg-test-panel"><div><button type="button" class="mpg-test-pause">Pause</button>${this.onRestart ? '<button type="button" class="mpg-test-restart">Restart</button>' : ''}</div><pre class="mpg-test-stats"></pre></div></details>` : ''}
-                        <button type="button" class="mpg-board-toggle" aria-expanded="false" aria-label="Show match standings">Ranks</button>
-                        <button type="button" class="mpg-end ${this.isHost && !this.practice ? '' : 'hidden'}">End match</button>
+                        <button type="button" class="mpg-hud-toggle" aria-expanded="true" aria-controls="mpg-match-details mpg-controls-hint" aria-label="Hide match details">HUD</button>
+                        <button type="button" class="mpg-menu-toggle" aria-expanded="false" aria-controls="mpg-menu-panel">Menu</button>
+                        <div class="mpg-menu-panel" id="mpg-menu-panel" hidden>
+                            <button type="button" class="mpg-board-toggle" aria-expanded="false" aria-controls="mpg-match-standings" aria-label="Show match standings">Ranks</button>
+                            ${this.testing ? `<details class="mpg-test-tools"><summary>Testing tools</summary><div class="mpg-test-panel"><div><button type="button" class="mpg-test-pause">Pause</button>${this.onRestart ? '<button type="button" class="mpg-test-restart">Restart</button>' : ''}</div><pre class="mpg-test-stats"></pre></div></details>` : ''}
+                            <button type="button" class="mpg-end ${this.isHost && !this.practice ? '' : 'hidden'}">End match</button>
+                        </div>
                         <button type="button" class="mpg-leave">${this.practice ? 'Close' : 'Leave'}</button>
                     </div>
                 </div>
-                <ol class="mpg-board"></ol>
+                <ol class="mpg-board" id="mpg-match-standings" aria-label="Match standings"></ol>
                 <div class="mpg-score"><span>Score</span><strong>0</strong></div>
                 <div class="mpg-meter hidden">
                     <div class="mpg-meter-head"><span class="mpg-meter-label"></span><b class="mpg-meter-value"></b></div>
                     <button type="button" class="mpg-recharge">Answer a question <kbd>Q</kbd></button>
                 </div>
-                <div class="mpg-hint"></div>
+                <div class="mpg-hint" id="mpg-controls-hint"></div>
                 <div class="mpg-stick-zone" aria-hidden="true"></div>
                 <div class="mpg-touch" aria-label="Touch controls">
                     <div class="mpg-stick" role="application" aria-label="Movement joystick"><i class="mpg-knob"></i></div>
@@ -778,6 +795,12 @@
             this.canvas = overlay.querySelector('.mpg-canvas');
             this.ctx = this.canvas.getContext('2d');
             overlay.querySelector('.mpg-name').textContent = this.game?.title || this.mode;
+            const chip = overlay.querySelector('.mpg-chip');
+            const details = document.createElement('div');
+            details.id = 'mpg-match-details';
+            details.className = 'mpg-match-details';
+            for (const el of chip.querySelectorAll('.mpg-goal, .mpg-practice-indicator')) details.appendChild(el);
+            chip.appendChild(details);
             const hud = document.createElement('div');
             hud.className = 'mpg-hud';
             const status = document.createElement('div');
@@ -786,8 +809,40 @@
             hud.append(overlay.querySelector('.mpg-top'), status, overlay.querySelector('.mpg-toasts'));
             overlay.appendChild(hud);
             this.bindTouch(overlay);
+            this.setHudCollapsed(Boolean(window.matchMedia?.('(max-width: 680px), (max-height: 520px)').matches || document.body.classList.contains('compact-ui')));
+            overlay.addEventListener('keydown', event => {
+                if (event.key !== 'Escape' || this.question) return;
+                const menu = overlay.querySelector('.mpg-menu-panel');
+                if (!menu.hidden) {
+                    menu.hidden = true;
+                    const toggle = overlay.querySelector('.mpg-menu-toggle');
+                    toggle.setAttribute('aria-expanded', 'false');
+                    toggle.focus();
+                }
+                if (overlay.classList.contains('board-open')) {
+                    overlay.classList.remove('board-open');
+                    const toggle = overlay.querySelector('.mpg-board-toggle');
+                    toggle.setAttribute('aria-expanded', 'false');
+                    toggle.setAttribute('aria-label', 'Show match standings');
+                }
+            });
+            overlay.addEventListener('click', event => {
+                if (event.target.closest('.mpg-menu-panel, .mpg-menu-toggle')) return;
+                overlay.querySelector('.mpg-menu-panel').hidden = true;
+                overlay.querySelector('.mpg-menu-toggle').setAttribute('aria-expanded', 'false');
+            });
             this.hudObserver = new ResizeObserver(() => this.layoutHud());
             for (const el of [hud, overlay.querySelector('.mpg-touch'), overlay.querySelector('.mpg-hint')]) this.hudObserver.observe(el);
+        }
+
+        setHudCollapsed(collapsed) {
+            this.overlay.classList.toggle('hud-collapsed', collapsed);
+            this.overlay.querySelector('.mpg-match-details').hidden = collapsed;
+            this.overlay.querySelector('.mpg-hint').hidden = collapsed;
+            const toggle = this.overlay.querySelector('.mpg-hud-toggle');
+            toggle.setAttribute('aria-expanded', String(!collapsed));
+            toggle.setAttribute('aria-label', collapsed ? 'Show match details' : 'Hide match details');
+            this.layoutHud();
         }
 
         // On-screen buttons feed the same key state as the keyboard, so every game works on phones.
@@ -826,6 +881,9 @@
                 const resolve = (dx, dy, max) => {
                     const n = Math.hypot(dx, dy) / max;
                     if (n < 0.22) return { ...NONE };
+                    if (this.stickHorizontal) {
+                        return { KeyA: dx < -max * 0.22, KeyD: dx > max * 0.22, KeyW: false, KeyS: false };
+                    }
                     if (this.stickPlatform) {
                         const steepNeed = dirs.KeyW || dirs.KeyS ? 1.0 : 1.5;
                         const pushNeed = dirs.KeyW || dirs.KeyS ? 0.5 : 0.7;
@@ -855,6 +913,7 @@
                     const max = b.width / 2;
                     const cx = origin ? origin.x : b.left + max, cy = origin ? origin.y : b.top + max;
                     let dx = e.clientX - cx, dy = e.clientY - cy;
+                    if (this.stickHorizontal) dy = 0;
                     const len = Math.hypot(dx, dy);
                     if (len > max) { dx = dx / len * max; dy = dy / len * max; }
                     knob.style.transform = `translate(${dx}px, ${dy}px)`;
@@ -915,6 +974,9 @@
                 if (key === this.touchLayoutKey) return;
                 this.touchLayoutKey = key;
                 this.stickPlatform = layout.platform ?? (layout.buttons || []).some(b => b.k === 'Space' && /jump/i.test(b.label || ''));
+                this.stickHorizontal = (layout.buttons || []).some(b => b.k === 'Space' && /jump/i.test(b.label || ''));
+                stick?.setAttribute('aria-label', this.stickHorizontal ? 'Move left or right; use the Jump button to jump' : 'Movement joystick');
+                stick?.classList.toggle('horizontal-stick', this.stickHorizontal);
                 const box = pad.querySelector('.mpg-btns');
                 box.innerHTML = '';
                 const list = layout.buttons || [];
