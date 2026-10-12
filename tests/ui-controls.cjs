@@ -56,6 +56,26 @@ assert.doesNotMatch(noticeDefinition, /constraint studbud_site_notice_message_ch
     'explicit active-message constraint must not collide with the auto-named length check');
 assert.match(noticeDefinition, /constraint studbud_site_notice_active_message_check\b/);
 assert.match(sql, /notify pgrst, 'reload schema';\s*$/);
+for (const table of ['studbud_site_notice_history', 'studbud_site_notice_dismissals']) {
+    assert.match(sql, new RegExp(`alter table public\\.${table} enable row level security;`));
+    assert.match(sql, new RegExp(`revoke all on public\\.${table} from public, anon, authenticated;`));
+}
+assert.match(sql, /primary key \(user_id, publication_id\)/, 'dismissals belong to an account and publication, not a volatile timestamp');
+assert.match(sql, /where publication_id is null and char_length\(btrim\(message\)\) > 0/,
+    'upgrade archives only an existing announcement without an archive ID');
+assert.match(sql, /values \(auth.uid\(\), p_publication_id\) on conflict do nothing/,
+    'repeat dismissal is idempotent and cannot impersonate another account');
+assert.match(sql, /where d.user_id = auth.uid\(\) and d.publication_id = n.publication_id/);
+assert.match(sql, /order by h.id desc/, 'archive is newest first');
+const publishNoticeFunction = sql.match(/create or replace function public\.studbud_admin_set_site_notice[\s\S]*?\$\$;/)[0];
+assert.match(publishNoticeFunction, /perform public.studbud_require_admin\(\)/);
+assert.match(publishNoticeFunction, /if p_active then\s+insert into public.studbud_site_notice_history/);
+assert.match(publishNoticeFunction, /else studbud_site_notice.publication_id end/,
+    'unpublishing preserves the publication identity and dismissal records');
+for (const signature of ['studbud_get_site_notice_history\\(\\)', 'studbud_dismiss_site_notice\\(bigint\\)']) {
+    assert.match(sql, new RegExp(`revoke all on function public\\.${signature} from public, anon;`));
+    assert.match(sql, new RegExp(`grant execute on function public\\.${signature} to authenticated;`));
+}
 
 const originalMatchMedia = sandbox.window.matchMedia;
 for (const { width, height, coarse, expected } of [

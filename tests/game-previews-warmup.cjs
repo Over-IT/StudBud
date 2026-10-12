@@ -478,7 +478,9 @@ async function checkCommunityAndAdminUi() {
         };
     };
     const nodes = new Map(['community-deck-status', 'community-deck-results', 'admin-list', 'admin-status', 'admin-search',
-        'admin-search-form', 'admin-notice-message', 'site-notice', 'site-notice-message', 'admin-deck-full-set'].map(id => [id, node()]));
+        'admin-search-form', 'admin-notice-message', 'site-notice', 'site-notice-message', 'site-notice-status',
+        'announcement-history', 'announcement-history-status', 'dismiss-notice', 'admin-deck-full-set'].map(id => [id, node()]));
+    sandbox.document.querySelector = selector => selector === '[data-action="dismiss-site-notice"]' ? nodes.get('dismiss-notice') : null;
     const profile = node();
     const overlay = node();
     overlay.firstElementChild = profile;
@@ -500,15 +502,26 @@ async function checkCommunityAndAdminUi() {
         { id: 'new-set', title: 'New shared set', card_count: 1, study_count: 0 }
     ];
     const calls = [];
-    let notice = { message: '</textarea><script>not executable</script>', active: true, updated_at: 'first' };
+    let notice = { publication_id: '1', message: '</textarea><script>not executable</script>', active: true, updated_at: 'first' };
+    const dismissals = new Set();
+    const history = [{ ...notice, published_at: '2026-10-12T00:00:00Z' }];
     sandbox.window.StudBudCommunityGames = {
         searchDecks: async () => shared,
         importDeck: async id => { imports++; return { id, title: 'New shared set', owner_id: 'author', cards: [{ front: 'Term', back: 'Definition' }] }; },
         getUserProfile: async () => ({ username: 'Author', show_stats: false, decks: shared }),
-        getSiteNotice: async () => notice,
+        getSiteNotice: async () => ({ ...notice, dismissed: dismissals.has(`${sandbox.window.StudBudCloud.user.id}:${notice.publication_id}`) }),
+        dismissSiteNotice: async id => { dismissals.add(`${sandbox.window.StudBudCloud.user.id}:${id}`); },
+        getSiteNoticeHistory: async () => [...history].reverse(),
         adminCall: async (name, args) => {
             calls.push({ name, args });
-            if (name === 'studbud_admin_set_site_notice') { notice = { message: args.p_message, active: args.p_active, updated_at: 'updated' }; return; }
+            if (name === 'studbud_admin_set_site_notice') {
+                notice = { ...notice, message: args.p_message, active: args.p_active, updated_at: 'updated' };
+                if (args.p_active) {
+                    notice.publication_id = String(history.length + 1);
+                    history.push({ ...notice, published_at: '2026-10-12T01:00:00Z' });
+                }
+                return;
+            }
             if (name === 'studbud_admin_get_deck') return { title: 'Full <set>', card_count: 2, cards: [{ front: '<term>', back: '<definition>' }, { front: 'Second', back: 'Card' }] };
             if (name === 'studbud_admin_list_users') return [{ id: 'user', username: 'Student', banned: true, ban_reason: '<reason>', created_at: '2026-10-01', last_sign_in_at: '2026-10-12', coins: 10, wins: 1, decks: 2 }];
             return [];
@@ -557,12 +570,64 @@ async function checkCommunityAndAdminUi() {
     await app.loadSiteNotice(true);
     assert.equal(nodes.get('site-notice-message').textContent, notice.message);
     assert.equal(nodes.get('site-notice').classList.contains('hidden'), false);
-    app.dismissedSiteNotice = notice.updated_at;
+    await app.dismissSiteNotice();
+    assert.equal(nodes.get('site-notice-status').textContent, '');
+    assert.equal(nodes.get('dismiss-notice').disabled, false);
+    assert.ok(dismissals.has('qa-user:1'), 'dismissal is stored for the signed-in account');
     await app.loadSiteNotice(true);
     assert.equal(nodes.get('site-notice').classList.contains('hidden'), true);
+    const reloadedApp = Object.create(sandbox.window.TestApp.prototype);
+    await reloadedApp.loadSiteNotice(true);
+    assert.equal(nodes.get('site-notice').classList.contains('hidden'), true, 'a fresh app instance retains server-backed dismissal');
     notice = { ...notice, updated_at: 'newer' };
+    await reloadedApp.loadSiteNotice(true);
+    assert.equal(nodes.get('site-notice').classList.contains('hidden'), true, 'changing metadata must not reshow the same publication');
+    sandbox.window.StudBudCloud.user.id = 'second-user';
+    await reloadedApp.loadSiteNotice(true);
+    assert.equal(nodes.get('site-notice').classList.contains('hidden'), false, 'another account has its own dismissal state');
+    sandbox.window.StudBudCloud.user.id = 'qa-user';
+    notice = { ...notice, publication_id: '2' };
+    history.push({ ...notice, published_at: '2026-10-12T00:30:00Z' });
     await app.loadSiteNotice(true);
-    assert.equal(nodes.get('site-notice').classList.contains('hidden'), false);
+    assert.equal(nodes.get('site-notice').classList.contains('hidden'), false, 'a new publication is shown even if its text is unchanged');
+    await app.loadAnnouncementHistory();
+    assert.match(nodes.get('announcement-history').innerHTML, /&lt;\/textarea&gt;&lt;script&gt;/);
+    assert.ok(!nodes.get('announcement-history').innerHTML.includes('<script>'), 'history escapes announcement content');
+    const dismissApi = sandbox.window.StudBudCommunityGames.dismissSiteNotice;
+    const logError = sandbox.console.error;
+    const failures = [];
+    sandbox.console.error = (...args) => failures.push(args);
+    sandbox.window.StudBudCommunityGames.dismissSiteNotice = async () => { throw new Error('Network unavailable'); };
+    await app.dismissSiteNotice();
+    assert.equal(nodes.get('site-notice').classList.contains('hidden'), false, 'failed dismissal must not pretend to be saved');
+    assert.match(nodes.get('site-notice-status').textContent, /Network unavailable/);
+    assert.equal(nodes.get('dismiss-notice').disabled, false, 'failed dismissal can be retried');
+    assert.equal(failures.length, 1, 'dismissal failure is logged');
+    sandbox.window.StudBudCommunityGames.dismissSiteNotice = dismissApi;
+    const historyApi = sandbox.window.StudBudCommunityGames.getSiteNoticeHistory;
+    sandbox.window.StudBudCommunityGames.getSiteNoticeHistory = async () => { throw new Error('History unavailable'); };
+    await app.loadAnnouncementHistory();
+    assert.match(nodes.get('announcement-history-status').textContent, /History unavailable/);
+    assert.equal(nodes.get('announcement-history').innerHTML, '');
+    sandbox.window.StudBudCommunityGames.getSiteNoticeHistory = async () => [];
+    await app.loadAnnouncementHistory();
+    assert.match(nodes.get('announcement-history-status').textContent, /No announcements/);
+    sandbox.window.StudBudCommunityGames.getSiteNoticeHistory = historyApi;
+    sandbox.console.error = logError;
+    let finishDismissal;
+    let pendingCalls = 0;
+    sandbox.window.StudBudCommunityGames.dismissSiteNotice = () => {
+        pendingCalls++;
+        return new Promise(resolve => { finishDismissal = resolve; });
+    };
+    const pendingDismissal = app.dismissSiteNotice();
+    await app.dismissSiteNotice();
+    assert.equal(pendingCalls, 1, 'repeated dismiss clicks do not send duplicate requests');
+    app.siteNotice = { ...app.siteNotice, publication_id: 'new-during-save' };
+    finishDismissal();
+    await pendingDismissal;
+    assert.equal(nodes.get('site-notice').classList.contains('hidden'), false, 'saving an old dismissal cannot hide a newer banner');
+    sandbox.window.StudBudCommunityGames.dismissSiteNotice = dismissApi;
     nodes.get('admin-notice-message').value = '   ';
     const beforePublish = calls.length;
     await app.runAdminAction('publish-notice', {});
@@ -572,9 +637,14 @@ async function checkCommunityAndAdminUi() {
     await app.runAdminAction('publish-notice', {});
     assert.equal(notice.message, 'Test announcement');
     assert.equal(notice.active, true);
+    assert.equal(history.length, 3);
+    assert.ok(nodes.get('announcement-history').innerHTML.includes('Test announcement'));
+    await app.dismissSiteNotice();
     await app.runAdminAction('hide-notice', {});
     assert.equal(notice.active, false);
     assert.equal(nodes.get('site-notice').classList.contains('hidden'), true);
-    console.log('Admin moderation/deck inspection and announcement validation/escaping/dismissal passed with local fixtures.');
+    assert.equal(history.length, 3, 'unpublishing retains history without creating a new announcement');
+    assert.ok(nodes.get('announcement-history').innerHTML.includes('Test announcement'), 'unpublished announcements stay in About');
+    console.log('Admin moderation and announcement history, escaping, account-scoped persistent dismissal, reload and failure handling passed.');
 }
 checkCommunityAndAdminUi().catch(error => { console.error(error); process.exitCode = 1; });

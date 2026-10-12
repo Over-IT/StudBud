@@ -150,7 +150,7 @@
                 </div>
             </header>
             <aside id="site-notice" class="site-notice hidden" aria-label="Site announcement">
-                <div><strong>Announcement</strong><p id="site-notice-message"></p></div>
+                <div><strong>Announcement</strong><p id="site-notice-message"></p><small>Past announcements are available in About.</small><p id="site-notice-status" role="status"></p></div>
                 <button type="button" class="icon-btn" data-action="dismiss-site-notice" aria-label="Dismiss announcement"><i class="fas fa-times" aria-hidden="true"></i></button>
             </aside>
 
@@ -839,6 +839,12 @@
 
                 <section id="about-view" class="view hidden">
                     <header class="view-header"><h2><i class="fas fa-circle-info"></i> About StudBud</h2></header>
+                    <div class="glass-card about-card">
+                        <h3>Announcements</h3>
+                        <p>All published announcements, newest first. Dismissed announcements stay here without showing the banner again.</p>
+                        <p id="announcement-history-status" role="status"></p>
+                        <ol id="announcement-history" class="announcement-history" aria-label="Announcement history"></ol>
+                    </div>
                     <div class="glass-card about-card">
                         <h3>Purpose</h3>
                         <p>StudBud is a study companion built for students. It keeps your grades, GPA, assignments, schedule and flashcards in one place, and makes studying more rewarding with leaderboards, an arcade, and multiplayer games that run on your own flashcards.</p>

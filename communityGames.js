@@ -407,6 +407,21 @@
             return data;
         }
 
+        async getSiteNoticeHistory() {
+            const { data, error } = await this.getClient().rpc('studbud_get_site_notice_history');
+            if (error) throw new Error(error.message.includes('Could not find the function')
+                ? 'Announcement history is not set up yet. Re-run supabase-setup.sql in Supabase.'
+                : error.message);
+            return data;
+        }
+
+        async dismissSiteNotice(publicationId) {
+            const { error } = await this.getClient().rpc('studbud_dismiss_site_notice', { p_publication_id: publicationId });
+            if (error) throw new Error(error.message.includes('Could not find the function')
+                ? 'Saved announcement dismissals are not set up yet. Re-run supabase-setup.sql in Supabase.'
+                : error.message);
+        }
+
         async friendCall(fn, args = {}) {
             const { data, error } = await this.getClient().rpc(fn, args);
             if (error) throw new Error(error.message.includes('Could not find the function')

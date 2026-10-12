@@ -67,6 +67,11 @@
 .account-tag { display: inline-flex; align-items: center; flex: 0 0 auto; gap: 3px; padding: 2px 7px; border: 1px solid var(--border-glass); border-radius: 999px; font-size: .65rem; font-weight: 750; line-height: 1.25; white-space: nowrap; vertical-align: middle; background: var(--bg-glass-hover); color: var(--text-primary); }
 .account-tag-owner { border-color: var(--accent-primary); color: var(--accent-primary); }
 .account-tag-co-owner { border-color: var(--text-secondary); color: var(--text-secondary); }
+.announcement-history { display: grid; gap: 12px; list-style: none; padding: 0; margin: 12px 0 0; }
+.announcement-history li { min-width: 0; padding: 12px; border: 1px solid var(--border-glass); border-radius: var(--border-radius-sm); }
+.announcement-history time { color: var(--text-secondary); font-size: .8rem; }
+.announcement-history p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0 0; }
+#site-notice-status:empty { display: none; }
 .study-leaderboard-bar { display: block; height: 6px; overflow: hidden; border-radius: 999px; background: var(--bg-glass-hover); }
 .study-leaderboard-bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary)); }
 .study-leaderboard-time { color: var(--text-secondary); font-weight: 700; font-variant-numeric: tabular-nums; }

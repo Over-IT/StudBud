@@ -85,6 +85,10 @@ User and shared-deck moderation controls are collapsed until needed. Administrat
 
 Run the updated [`supabase-setup.sql`](./supabase-setup.sql) to enable full-deck inspection and announcements. These operations are administrator-checked on the server; the browser cannot grant access.
 
+Announcements appear in the banner until you dismiss them. Dismissal is saved to your account in Supabase, so the same publication stays dismissed after reload, sign-in, or switching devices. Only publishing a new announcement creates a new banner; unpublishing does not reset dismissals or erase history. **About → Announcements** lists every archived publication newest first, including dismissed and unpublished announcements. Saving a dismissal must succeed before the banner closes; any failure is shown so you can retry.
+
+Rerun the full updated [`supabase-setup.sql`](./supabase-setup.sql) to install the announcement archive and account dismissal functions. The upgrade archives the currently stored announcement once and preserves each future publication. Announcements overwritten before this upgrade cannot be recovered because the previous schema stored only one message.
+
 Apply the latest `supabase-setup.sql` to enable account-backed multiplayer profiles, purchases, random drops, personal-best syncing, and hosted rooms.
 
 If hosting a room or opening the shop says the feature is not enabled on the server, run the latest `supabase-setup.sql` in the Supabase SQL editor and reload StudBud. Multiplayer game rooms and shop purchases are handled by protected server functions and cannot be enabled from the browser alone.

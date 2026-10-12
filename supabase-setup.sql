@@ -2312,6 +2312,37 @@ create table if not exists public.studbud_site_notice (
 alter table public.studbud_site_notice enable row level security;
 revoke all on public.studbud_site_notice from public, anon, authenticated;
 
+create table if not exists public.studbud_site_notice_history (
+    id bigint generated always as identity primary key,
+    message text not null check (char_length(btrim(message)) between 1 and 1000),
+    published_at timestamptz not null default now(),
+    published_by uuid references auth.users(id) on delete set null
+);
+alter table public.studbud_site_notice_history enable row level security;
+revoke all on public.studbud_site_notice_history from public, anon, authenticated;
+
+alter table public.studbud_site_notice add column if not exists publication_id bigint
+    references public.studbud_site_notice_history(id);
+
+-- Preserve the existing announcement once when upgrading from the single-notice schema.
+with archived as (
+    insert into public.studbud_site_notice_history(message, published_at, published_by)
+    select message, updated_at, updated_by from public.studbud_site_notice
+    where publication_id is null and char_length(btrim(message)) > 0
+    returning id
+)
+update public.studbud_site_notice set publication_id = archived.id from archived
+where publication_id is null;
+
+create table if not exists public.studbud_site_notice_dismissals (
+    user_id uuid not null references auth.users(id) on delete cascade,
+    publication_id bigint not null references public.studbud_site_notice_history(id) on delete cascade,
+    dismissed_at timestamptz not null default now(),
+    primary key (user_id, publication_id)
+);
+alter table public.studbud_site_notice_dismissals enable row level security;
+revoke all on public.studbud_site_notice_dismissals from public, anon, authenticated;
+
 create or replace function public.studbud_get_site_notice()
 returns jsonb
 language plpgsql
@@ -2322,7 +2353,11 @@ as $$
 begin
     if auth.uid() is null then raise exception 'Sign in to see announcements.'; end if;
     return (
-        select jsonb_build_object('message', n.message, 'active', n.active, 'updated_at', n.updated_at)
+        select jsonb_build_object('message', n.message, 'active', n.active, 'updated_at', n.updated_at,
+            'publication_id', n.publication_id::text, 'dismissed', exists (
+                select 1 from public.studbud_site_notice_dismissals d
+                where d.user_id = auth.uid() and d.publication_id = n.publication_id
+            ))
         from public.studbud_site_notice n
         where n.active or public.studbud_is_admin()
     );
@@ -2331,23 +2366,68 @@ $$;
 revoke all on function public.studbud_get_site_notice() from public, anon;
 grant execute on function public.studbud_get_site_notice() to authenticated;
 
-create or replace function public.studbud_admin_set_site_notice(p_message text, p_active boolean default true)
+create or replace function public.studbud_get_site_notice_history()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    if auth.uid() is null then raise exception 'Sign in to see announcements.'; end if;
+    return coalesce((
+        select jsonb_agg(jsonb_build_object('publication_id', h.id::text,
+            'message', h.message, 'published_at', h.published_at) order by h.id desc)
+        from public.studbud_site_notice_history h
+    ), '[]'::jsonb);
+end;
+$$;
+revoke all on function public.studbud_get_site_notice_history() from public, anon;
+grant execute on function public.studbud_get_site_notice_history() to authenticated;
+
+create or replace function public.studbud_dismiss_site_notice(p_publication_id bigint)
 returns void
 language plpgsql
 security definer
 set search_path = public, pg_temp
 as $$
 begin
+    if auth.uid() is null then raise exception 'Sign in to dismiss announcements.'; end if;
+    if not exists (select 1 from public.studbud_site_notice_history where id = p_publication_id) then
+        raise exception 'That announcement no longer exists.';
+    end if;
+    insert into public.studbud_site_notice_dismissals(user_id, publication_id)
+    values (auth.uid(), p_publication_id) on conflict do nothing;
+end;
+$$;
+revoke all on function public.studbud_dismiss_site_notice(bigint) from public, anon;
+grant execute on function public.studbud_dismiss_site_notice(bigint) to authenticated;
+
+create or replace function public.studbud_admin_set_site_notice(p_message text, p_active boolean default true)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_publication_id bigint;
+begin
     perform public.studbud_require_admin();
     if p_message is null or char_length(p_message) > 1000 or p_active is null
         or (p_active and char_length(btrim(p_message)) = 0) then
         raise exception 'Enter an announcement of 1-1000 characters before publishing.';
     end if;
-    insert into public.studbud_site_notice(id, message, active, updated_at, updated_by)
-        values (1, btrim(p_message), p_active, now(), auth.uid())
+    if p_active then
+        insert into public.studbud_site_notice_history(message, published_by)
+        values (btrim(p_message), auth.uid()) returning id into v_publication_id;
+    end if;
+    insert into public.studbud_site_notice(id, message, active, updated_at, updated_by, publication_id)
+        values (1, btrim(p_message), p_active, now(), auth.uid(), v_publication_id)
     on conflict(id) do update
         set message = excluded.message, active = excluded.active,
-            updated_at = excluded.updated_at, updated_by = excluded.updated_by;
+            updated_at = excluded.updated_at, updated_by = excluded.updated_by,
+            publication_id = case when p_active then excluded.publication_id
+                else studbud_site_notice.publication_id end;
 end;
 $$;
 revoke all on function public.studbud_admin_set_site_notice(text, boolean) from public, anon;

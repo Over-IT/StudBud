@@ -1187,6 +1187,7 @@
                 if (route === 'leaderboard') this.refreshStudyLeaderboard(this.studyLeaderboardPeriod || 'daily');
                 if (route === 'shop') this.renderMultiplayerProfile(true);
                 if (route === 'friends') this.loadFriends();
+                if (route === 'about') this.loadAnnouncementHistory();
                 if (route === 'admin') this.loadAdminList();
                 if (route === 'multiplayer') {
                     this.renderHostedGameDecks();
@@ -2646,9 +2647,58 @@
                 const notice = this.siteNotice;
                 const panel = document.getElementById('site-notice');
                 document.getElementById('site-notice-message').textContent = notice?.message || '';
-                panel.classList.toggle('hidden', !notice?.active || notice.updated_at === this.dismissedSiteNotice);
+                const dismissalKey = `${window.StudBudCloud.user.id}:${notice?.publication_id}`;
+                panel.classList.toggle('hidden', !notice?.active || notice.dismissed || dismissalKey === this.dismissedSiteNotice);
             } catch (error) {
                 console.warn('[Announcements] Could not load site notice:', error.message);
+            }
+        }
+
+        async dismissSiteNotice() {
+            const notice = this.siteNotice;
+            const userId = window.StudBudCloud?.user?.id;
+            const button = document.querySelector('[data-action="dismiss-site-notice"]');
+            const status = document.getElementById('site-notice-status');
+            if (this.siteNoticeDismissing) return;
+            this.siteNoticeDismissing = true;
+            button.disabled = true;
+            status.textContent = 'Saving dismissal…';
+            try {
+                if (!notice?.publication_id || !userId) {
+                    throw new Error('Saved announcement dismissals require the latest supabase-setup.sql. Rerun it in Supabase, then refresh.');
+                }
+                await window.StudBudCommunityGames.dismissSiteNotice(notice.publication_id);
+                this.dismissedSiteNotice = `${userId}:${notice.publication_id}`;
+                if (window.StudBudCloud?.user?.id === userId && this.siteNotice?.publication_id === notice.publication_id) {
+                    this.siteNotice.dismissed = true;
+                    document.getElementById('site-notice').classList.add('hidden');
+                }
+                status.textContent = '';
+            } catch (error) {
+                console.error('[Announcements] Could not save dismissal:', error);
+                status.textContent = this.friendlyErrorMessage(error, 'Could not save your dismissal. Please try again.');
+            } finally {
+                this.siteNoticeDismissing = false;
+                button.disabled = false;
+            }
+        }
+
+        async loadAnnouncementHistory() {
+            const list = document.getElementById('announcement-history');
+            const status = document.getElementById('announcement-history-status');
+            if (!list || !status) return;
+            status.textContent = 'Loading announcements…';
+            try {
+                const history = await window.StudBudCommunityGames.getSiteNoticeHistory();
+                list.innerHTML = history.map(notice => {
+                    const date = new Date(notice.published_at);
+                    return `<li><time datetime="${this.escapeHTML(notice.published_at)}">${this.escapeHTML(date.toLocaleString())}</time><p>${this.escapeHTML(notice.message)}</p></li>`;
+                }).join('');
+                status.textContent = history.length ? '' : 'No announcements have been published yet.';
+            } catch (error) {
+                console.error('[Announcements] Could not load history:', error);
+                list.innerHTML = '';
+                status.textContent = this.friendlyErrorMessage(error, 'Could not load announcement history. Please try again.');
             }
         }
 
@@ -2754,8 +2804,8 @@
                     const message = document.getElementById('admin-notice-message').value.trim();
                     if (action === 'publish-notice' && !message) throw new Error('Enter an announcement message.');
                     await games.adminCall('studbud_admin_set_site_notice', { p_message: message, p_active: action === 'publish-notice' });
-                    this.dismissedSiteNotice = null;
                     await this.loadSiteNotice(true);
+                    await this.loadAnnouncementHistory();
                 } else if (action === 'delete-deck') {
                     if (!confirm(`Delete the public deck "${data.name}"?`)) return;
                     await games.adminCall('studbud_admin_delete_deck', { p_deck_id: data.id });
@@ -6166,8 +6216,7 @@
                     const open = panel?.classList.toggle('hidden') === false;
                     target.setAttribute('aria-expanded', String(open));
                 } else if (action === 'dismiss-site-notice') {
-                    this.dismissedSiteNotice = this.siteNotice?.updated_at;
-                    document.getElementById('site-notice').classList.add('hidden');
+                    await this.dismissSiteNotice();
                 } else if (action === 'copy-hosted-room-code') {
                     await this.copyHostedRoomCode();
                 } else if (action === 'study-leaderboard-retry') {
