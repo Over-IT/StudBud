@@ -21,6 +21,9 @@ class Element {
         };
         this.style = { setProperty() {} };
         this.offsetHeight = 100;
+        this.offsetWidth = 100;
+        this.tagName = 'BUTTON';
+        this.isConnected = true;
     }
     set innerHTML(value) { this.children = []; }
     appendChild(child) { child.parent = this; this.children.push(child); }
@@ -28,6 +31,7 @@ class Element {
     setAttribute(name, value) { this.attributes[name] = value; }
     addEventListener(name, handler) { (this.handlers[name] ||= []).push(handler); }
     setPointerCapture() {}
+    focus() { sandbox.document.activeElement = this; }
     getBoundingClientRect() { return { left: 0, top: 0, right: 100, bottom: 100, width: 100, height: 100 }; }
     emit(name, x, y) {
         for (const handler of this.handlers[name] || []) {
@@ -229,4 +233,94 @@ assert.equal(duelButtons.find(button => button.textContent === 'Dodge').dataset.
 const soccerButtons = controlsFor('sports').buttons.children;
 assert.equal(soccerButtons.find(button => button.textContent === 'Sprint').dataset.k, 'ShiftLeft');
 assert.equal(soccerButtons.find(button => button.textContent === 'Power kick').dataset.k, 'Space');
+
+{
+    const session = Object.create(A.Session.prototype);
+    const canvas = new Element();
+    const overlay = new Element();
+    const summary = new Element();
+    summary.tagName = 'SUMMARY';
+    const exit = new Element();
+    overlay.querySelectorAll = () => [summary, exit];
+    session.canvas = canvas;
+    session.overlay = overlay;
+    session.keys = new Set();
+    session.justPressed = new Set();
+    session.mouse = {};
+    session.over = true;
+    let refills = 0;
+    session.recharge = () => refills++;
+    session.bind();
+    assert.equal(sandbox.document.activeElement, canvas, 'launching a game moves focus away from setup fields into the game');
+    const tab = { code: 'Tab', preventDefault() {}, target: canvas };
+    canvas.focus();
+    session.handlers.keydown(tab);
+    assert.equal(sandbox.document.activeElement, summary, 'results summary is reachable from the game with Tab');
+    session.handlers.keydown(tab);
+    assert.equal(sandbox.document.activeElement, exit);
+    session.handlers.keydown(tab);
+    assert.equal(sandbox.document.activeElement, summary, 'results focus wraps without entering hidden gameplay controls');
+    session.handlers.keydown({ code: 'KeyQ', target: canvas });
+    assert.equal(refills, 0, 'finished games never open refill questions');
+    assert.equal(session.keys.size, 0, 'finished games ignore movement input');
+}
+
+const appSource = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+vm.runInContext(appSource.slice(appSource.indexOf('    class AppOrchestrator {'), appSource.indexOf('    window.NexusApp =')) + '\nwindow.TestApp = AppOrchestrator;', sandbox);
+{
+    const app = Object.create(sandbox.window.TestApp.prototype);
+    const body = new Element();
+    const overlay = new Element();
+    const modal = new Element();
+    const background = new Element();
+    background.inert = false;
+    const alreadyInert = new Element();
+    alreadyInert.inert = true;
+    overlay.parentElement = { children: [background, alreadyInert, overlay] };
+    overlay.classList.add('hidden');
+    modal.id = 'audit-modal';
+    const heading = new Element();
+    const input = new Element();
+    input.tagName = 'INPUT';
+    const close = new Element();
+    const save = new Element();
+    const launcher = new Element();
+    modal.querySelector = selector => selector === 'h2' ? heading : input;
+    modal.querySelectorAll = () => [close, input, save];
+    overlay.querySelector = () => modal;
+    const study = new Element();
+    const elements = { 'modal-container': overlay, 'audit-modal': modal, 'active-study-area': study };
+    sandbox.document.body = body;
+    sandbox.document.getElementById = id => elements[id];
+    sandbox.document.querySelectorAll = () => [modal];
+    sandbox.Router = { activeRoute: 'flashcard' };
+    launcher.focus();
+    app.openModal('audit-modal');
+    assert.equal(sandbox.document.activeElement, input);
+    assert.equal(modal.attributes.role, 'dialog');
+    assert.equal(modal.attributes['aria-labelledby'], 'audit-modal-title');
+    assert.equal(background.inert, true, 'dialogs make background content unfocusable');
+    save.focus();
+    app.handleKeydown({ key: 'Tab', target: input, preventDefault() {} });
+    assert.equal(sandbox.document.activeElement, close);
+    app.handleKeydown({ key: 'Tab', shiftKey: true, target: input, preventDefault() {} });
+    assert.equal(sandbox.document.activeElement, save);
+    app.handleKeydown({ key: 'Escape', target: input, preventDefault() {} });
+    assert.equal(sandbox.document.activeElement, launcher, 'closing a dialog restores its launcher');
+    assert.equal(background.inert, false);
+    assert.equal(alreadyInert.inert, true, 'closing a dialog preserves earlier inert state');
+    let reveals = 0;
+    app.revealCard = () => reveals++;
+    const target = { tagName: 'CANVAS', closest: () => null };
+    body.classList.add('mpg-active');
+    app.handleKeydown({ key: ' ', code: 'Space', target, preventDefault() {} });
+    body.classList.remove('mpg-active');
+    sandbox.Router.activeRoute = 'gpa';
+    app.handleKeydown({ key: ' ', code: 'Space', target, preventDefault() {} });
+    assert.equal(reveals, 0, 'hidden study sessions cannot react to game or other-page shortcuts');
+}
+const history = A.util.questionHistoryMarkup([{ prompt: '<img>', answer: '<script>', chosen: 'wrong', correct: false }, { prompt: 'Q', answer: 'A', correct: null }]);
+assert.ok(history.includes('&lt;img&gt;') && history.includes('&lt;script&gt;') && history.includes('Skipped'));
+assert.ok(!history.includes('<script>'));
 console.log('SQL constraint naming, desktop/mobile HUD defaults, steep-angle joysticks, Jump buttons, nearby action bindings, and unified HUD disclosure passed.');
+console.log('Modal/game-result focus, background input isolation and escaped shared question summaries passed.');

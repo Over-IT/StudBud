@@ -1257,10 +1257,28 @@
 
         openModal(modalId) {
             const overlay = document.getElementById('modal-container');
+            const modal = document.getElementById(modalId);
+            if (!overlay || !modal) throw new Error('The requested dialog could not be opened.');
+            if (overlay.classList.contains('hidden')) {
+                this.modalReturnFocus = document.activeElement;
+                this.modalBackground = [...overlay.parentElement.children].filter(element => element !== overlay)
+                    .map(element => ({ element, inert: element.inert }));
+                this.modalBackground.forEach(({ element }) => { element.inert = true; });
+            }
             document.querySelectorAll('#modal-container .modal-content').forEach(modal => {
                 modal.classList.toggle('hidden', modal.id !== modalId);
             });
-            if (overlay) overlay.classList.remove('hidden');
+            modal.setAttribute('role', 'dialog');
+            modal.setAttribute('aria-modal', 'true');
+            const heading = modal.querySelector('h2');
+            if (heading) {
+                heading.id ||= `${modalId}-title`;
+                modal.setAttribute('aria-labelledby', heading.id);
+            }
+            overlay.classList.remove('hidden');
+            const target = modal.querySelector('input:not([type="hidden"]):not(:disabled), textarea:not(:disabled), select:not(:disabled)')
+                || modal.querySelector('button:not(:disabled)');
+            target?.focus({ preventScroll: true });
         }
 
         closeModal() {
@@ -1269,6 +1287,10 @@
             document.querySelectorAll('#modal-container .modal-content').forEach(modal => {
                 modal.classList.add('hidden');
             });
+            this.modalBackground?.forEach(({ element, inert }) => { element.inert = inert; });
+            this.modalBackground = null;
+            if (this.modalReturnFocus?.isConnected) this.modalReturnFocus.focus({ preventScroll: true });
+            this.modalReturnFocus = null;
         }
 
         renderGradeScenarios() {
@@ -2080,14 +2102,20 @@
             const sessions = (AppState.get('studyHistory') || []).filter(session => Number(session.durationSec) > 0)
                 .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
             const thisWeek = sessions.filter(session => new Date(session.timestamp) >= weekStart);
-            const minutes = thisWeek.reduce((sum, session) => sum + Math.round(Number(session.durationSec || 0) / 60), 0);
+            const minutes = Math.round(thisWeek.reduce((sum, session) => sum + Number(session.durationSec || 0), 0) / 60);
             const rated = thisWeek.map(session => Number(session.effectiveness)).filter(rating => Number.isFinite(rating) && rating > 0);
             const average = rated.length ? (rated.reduce((sum, rating) => sum + rating, 0) / rated.length).toFixed(1) : '—';
             const plan = this.getStudyRecommendations().slice(0, 5);
             const plannedMinutes = plan.reduce((sum, item) => sum + item.sessionMinutes, 0);
             weekSummary.textContent = `This week: ${thisWeek.length} session${thisWeek.length === 1 ? '' : 's'} · ${minutes} min logged · average effectiveness ${average}/5.`;
             summary.innerHTML = `<div><strong>${minutes}</strong><span>minutes studied this week</span></div><div><strong>${plannedMinutes}</strong><span>minutes in your next study plan</span></div><div><strong>${average}</strong><span>average effectiveness</span></div>`;
-            list.innerHTML = sessions.length ? `<h4>Recent logged sessions</h4>${sessions.slice(0, 4).map(session => `<article class="study-history-item"><div><strong>${this.escapeHTML(session.title || 'Study session')}</strong><span>${Number(session.durationSec || 0) / 60} min · ${this.escapeHTML(session.methodLabel || this.studyMethodLabel(session.method || 'retrieval'))}</span><small>${new Date(session.timestamp).toLocaleDateString()} · effectiveness ${Number(session.effectiveness || 0)}/5${session.notes ? ` · ${this.escapeHTML(session.notes)}` : ''}</small></div></article>`).join('')}` : '<p class="empty-state">Log a study session from a recommendation to help tune your future plan.</p>';
+            list.innerHTML = sessions.length ? `<h4>Recent logged sessions</h4>${sessions.slice(0, 4).map(session => {
+                const rated = Number(session.effectiveness) > 0 ? `Effectiveness ${Number(session.effectiveness)}/5` : 'Not rated';
+                const game = session.gameSummary;
+                const accuracy = game?.answered ? Math.round(game.correct / game.answered * 100) : 0;
+                const detail = game ? `<details class="saved-game-summary"><summary>Game summary · ${accuracy}% correct · ${Number(game.answered) || 0} answered</summary>${window.StudBudArcade.util.questionHistoryMarkup(game.questions || [])}</details>` : '';
+                return `<article class="study-history-item"><div><strong>${this.escapeHTML(session.title || 'Study session')}</strong><span>${this.formatStudyDuration(session.durationSec)} · ${this.escapeHTML(session.methodLabel || this.studyMethodLabel(session.method || 'retrieval'))}</span><small>${new Date(session.timestamp).toLocaleDateString()} · ${rated}${session.notes ? ` · ${this.escapeHTML(session.notes)}` : ''}</small></div>${detail}</article>`;
+            }).join('')}` : '<p class="empty-state">Log a study session from a recommendation to help tune your future plan.</p>';
         }
 
         renderAssignments() {
@@ -2168,6 +2196,11 @@
             });
         }
 
+        deckStudyCount(deck) {
+            if (!window.SM2Engine?.createSession) throw new Error('The spaced-repetition scheduler did not load. Reload before studying.');
+            return window.SM2Engine.createSession((deck.cards || []).filter(card => card && !card.suspended), { deck }).remaining;
+        }
+
         renderDecks() {
             const grid = document.getElementById('deck-grid');
             if (!grid) return;
@@ -2175,6 +2208,7 @@
             this.refreshCommunityDeckActions();
             const myId = window.StudBudCloud?.user?.id;
             grid.innerHTML = decks.length ? decks.map(deck => {
+                const studyCount = this.deckStudyCount(deck);
                 // Sets added from the community belong to their author: credit them and don't allow reposting.
                 const borrowed = Boolean(deck.communitySourceId && deck.communitySourceOwnerId && deck.communitySourceOwnerId !== myId);
                 const author = borrowed
@@ -2201,10 +2235,10 @@
                     <h3>${this.escapeHTML(deck.title)}</h3>
                     ${author}
                     ${tags}
-                    <p>${(deck.cards || []).length} cards</p>
+                    <p>${(deck.cards || []).length} cards · ${studyCount} scheduled today</p>
                     ${linkEditor}
                     <div class="actions">
-                        <button class="primary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}">Study</button>
+                        <button class="primary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}" ${studyCount ? '' : 'disabled'}>${studyCount ? 'Study' : 'Nothing scheduled'}</button>
                         <button class="secondary-btn" data-action="add-card" data-id="${this.escapeHTML(deck.id)}">Add Card</button>
                         ${share}
 
@@ -2242,6 +2276,7 @@
             });
             section.classList.toggle('hidden', !rows.length);
             list.innerHTML = rows.map(({ deck, exact, item }) => {
+                const studyCount = this.deckStudyCount(deck);
                 const due = item.dueDate ? new Date(`${String(item.dueDate).slice(0, 10)}T00:00:00`) : null;
                 const days = due && Number.isFinite(due.getTime()) ? Math.ceil((due - new Date(new Date().toDateString())) / 86400000) : null;
                 const when = days === null ? '' : days <= 0 ? 'today' : days === 1 ? 'tomorrow' : `in ${days} days`;
@@ -2250,7 +2285,7 @@
                     <div><strong>${this.escapeHTML(deck.title)}</strong>
                         <span>${exact ? 'For' : 'Same class as'} ${this.escapeHTML(this.deckAssessmentLabel(item))}${when ? ` · ${when}` : ''}</span>
                         <small>${this.escapeHTML(studied)} · suggested ${item.sessionMinutes} min today</small></div>
-                    <button class="primary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}"><i class="fas fa-play"></i> Study</button>
+                    <button class="primary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}" ${studyCount ? '' : 'disabled'}>${studyCount ? '<i class="fas fa-play"></i> Study' : 'Nothing scheduled'}</button>
                 </article>`;
             }).join('');
         }
@@ -2528,7 +2563,7 @@
                 const wins = document.getElementById('multiplayer-wins');
                 if (wins) wins.textContent = Number(profile.wins).toLocaleString();
                 this.renderMultiplayerShop(profile);
-                shopStatus.textContent = 'Earn coins from practice games, multiplayer matches and your daily reward.';
+                shopStatus.textContent = 'Earn coins from Practice & Arcade quizzes, multiplayer matches and your daily reward. Solo study games do not award coins.';
                 this.renderDailyReward(profile);
                 const best = document.getElementById('waiting-runner-best');
                 if (best) {
@@ -2551,8 +2586,8 @@
             button.disabled = claimed;
             button.textContent = claimed ? 'Claimed today' : 'Claim reward';
             text.textContent = claimed
-                ? `Come back tomorrow to keep your ${streak}-day streak going. Practice games earn coins too.`
-                : `Claim free coins once a day. Keep a streak going for bigger rewards (up to 85 coins). Practice games earn coins too.`;
+                ? `Come back tomorrow to keep your ${streak}-day coin-reward streak going. This is separate from your study streak.`
+                : `Claim free coins once a day. Keep a coin-reward streak going for bigger rewards (up to 85 coins). This is separate from your study streak.`;
         }
 
         // ---- Username changes (once a week; the admin can force a rename) ----
@@ -2969,6 +3004,12 @@
             if (label) label.textContent = minutes >= 60 ? '1 hour' : `${minutes} min`;
         }
 
+        questionRewardInfo(mode) {
+            const resource = ({ miner: 'Fuel', river: 'Bait', frenzy: 'Bait', fishing: 'Bait', shooter: 'Ammo', crypto: 'Research cash', hack: 'Crypto' })[mode] || 'Energy';
+            const multiplier = mode === 'crypto' ? 8 : mode === 'hack' ? 3 : 1;
+            return { resource, multiplier };
+        }
+
         updateMultiplayerModeSetup(mode) {
             const labels = {
                 skyline: ['City Escape', 'Climb a rooftop obstacle course before the tide.'],
@@ -2983,8 +3024,8 @@
             const [title, description] = labels[mode] || labels.skyline;
             document.getElementById('multiplayer-preview-title').textContent = title;
             document.getElementById('multiplayer-preview-description').textContent = description;
-            const resource = ({ miner: 'Fuel', river: 'Bait', shooter: 'Ammo' })[mode] || 'Energy';
-            const resourceLabel = `${resource} per correct answer`;
+            const { resource, multiplier } = this.questionRewardInfo(mode);
+            const resourceLabel = `${resource} per correct answer${multiplier > 1 ? ` (${multiplier}x setting${mode === 'crypto' ? ' + analysts' : ''})` : ''}`;
             for (const id of ['host-game-resource-label', 'solo-game-resource-label']) {
                 const label = document.getElementById(id);
                 if (label) label.textContent = resourceLabel;
@@ -4991,12 +5032,13 @@
                     river: ['Steer a boat, dodge obstacles and catch fish.', 'WASD steer · click cast · Q recharge'],
                     market: ['Deliver packages across town and dodge cars.', 'WASD move · Shift sprint · Q recharge'],
                     miner: ['Dig through the cavern, haul ore back to base and avoid lava.', 'WASD move · hold click dig · Q recharge'],
-                    duel: ['Hold the glowing hill alone to score. Knock rivals off the stage.', 'A/D move · Space jump · S guard · E/click swing · Shift heavy · F dodge · Q recharge'],
+                    duel: ['Hold the glowing hill alone to score. Knock rivals off the stage.', 'A/D move · Space jump · S guard · E/click swing · R heavy · Shift dodge · Q recharge'],
                     crypto: ['Trade six assets, react to market news and build mining rigs.', '1-6 pick · B buy · S sell'],
-                    shooter: ['Blast drones and other players in an arena.', 'WASD move · mouse aim · F/click fire · E blast · Space dash · Q reload'],
-                    sports: ['Dribble the ball into the rival goal. Players are split into blue and red teams; sprinting and power kicks use energy.', 'WASD dribble · Space sprint · E/click pass · hold Shift, release for power kick · Q recharge']
+                    shooter: ['Blast drones and other players in an arena.', 'WASD move · mouse aim · F/click fire · Space/E blast · Shift dash · Q reload'],
+                    sports: ['Dribble the ball into the rival goal. Players are split into blue and red teams; sprinting and power kicks use energy.', 'WASD dribble · Shift sprint · E/click pass · hold Space, release for power kick · Q recharge']
                 }[room.mode] || ['Answer flashcard questions faster than everyone else.', 'Answer correctly to score points.'];
-                lobbyInfo.innerHTML = `<div class="lobby-mode"><strong>${this.escapeHTML(modeNames[room.mode] || 'Live game')}</strong><span>${this.escapeHTML(goalLabel)} · ${Number(room.state?.question_reward) || 20} coins per correct answer</span></div>
+                const { resource, multiplier } = this.questionRewardInfo(room.mode);
+                lobbyInfo.innerHTML = `<div class="lobby-mode"><strong>${this.escapeHTML(modeNames[room.mode] || 'Live game')}</strong><span>${this.escapeHTML(goalLabel)} · +${(Number(room.state?.question_reward) || 20) * multiplier} ${resource.toLowerCase()} per correct answer</span></div>
                     <p>${this.escapeHTML(info[0])}</p>
                     <p class="lobby-controls"><i class="fas fa-keyboard"></i> ${this.escapeHTML(info[1])}</p>
                     <p class="lobby-controls"><i class="fas fa-circle-question"></i> Answering questions powers you up. Press Q in game to open one.</p>`;
@@ -6595,7 +6637,30 @@
         }
 
         handleKeydown(event) {
+            if (document.body.classList.contains('mpg-active')) return;
+            const modalOverlay = document.getElementById('modal-container');
+            const modalActive = modalOverlay && !modalOverlay.classList.contains('hidden');
+            if (modalActive) {
+                const modal = modalOverlay.querySelector('.modal-content:not(.hidden)');
+                if (event.key === 'Tab') {
+                    const targets = [...modal.querySelectorAll('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], summary')]
+                        .filter(element => element.offsetWidth && element.offsetHeight);
+                    const index = targets.indexOf(document.activeElement);
+                    const next = index < 0 ? event.shiftKey ? targets.length - 1 : 0
+                        : (index + (event.shiftKey ? -1 : 1) + targets.length) % targets.length;
+                    targets[next]?.focus();
+                    event.preventDefault();
+                    return;
+                }
+                if (event.key === 'Escape' && (event.target.id !== 'course-search'
+                    || document.getElementById('course-suggestions').classList.contains('hidden'))) {
+                    event.preventDefault();
+                    this.closeModal();
+                    return;
+                }
+            }
             if (Router.activeRoute === 'multiplayer'
+                && !modalActive
                 && !['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(event.target.tagName)
                 && !document.getElementById('waiting-arcade-card').classList.contains('hidden')) {
                 const moves = { ArrowUp: [0, 1], KeyW: [0, 1], ArrowDown: [0, -1], KeyS: [0, -1], ArrowLeft: [-1, 0], KeyA: [-1, 0], ArrowRight: [1, 0], KeyD: [1, 0], Space: [0, 1] };
@@ -6630,7 +6695,8 @@
             }
             const navItem = event.target.closest('.nav-item[data-target]');
             const studyArea = document.getElementById('active-study-area');
-            if (studyArea && !studyArea.classList.contains('hidden') && !event.target.closest('input, textarea, select, button') && !this.studyKeyBusy) {
+            if (Router.activeRoute === 'flashcard' && !modalActive && studyArea && !studyArea.classList.contains('hidden')
+                && !event.target.closest('input, textarea, select, button, summary') && !this.studyKeyBusy) {
                 const revealed = !document.getElementById('sm2-controls').classList.contains('hidden');
                 if (event.key === ' ' || (event.key === 'Enter' && !revealed)) {
                     event.preventDefault();

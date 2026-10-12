@@ -263,6 +263,7 @@
             this.practice = Boolean(options.practice);
             this.testing = Boolean(options.testing);
             this.preview = Boolean(options.preview);
+            this.returnFocus = document.activeElement;
             this.correct = 0;
             this.reward = Math.min(100, Math.max(1, Number(options.questionReward ?? this.room.state?.question_reward) || 20));
             this.mode = this.room.mode;
@@ -491,6 +492,8 @@
         finish(standings) {
             if (this.over) return;
             this.over = true;
+            this.keys.clear(); this.justPressed.clear(); this.resetTouchStick?.();
+            this.mouse.down = false; this.mouse.rdown = false;
             this.standingsCache = (standings || this.standings()).map(row => ({ ...row, color: row.color || this.roster.get(row.id)?.color || '#94a3b8' }));
             this.reportScore(true);
             this.closeQuestion(true);
@@ -657,6 +660,17 @@
             const typing = e => /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || '');
             this.handlers = {
                 keydown: e => {
+                    if (this.over) {
+                        if (e.code === 'Tab') {
+                            const targets = [...this.overlay.querySelectorAll('.mpg-results button, .mpg-results summary')].filter(el => el.offsetWidth && el.offsetHeight);
+                            const index = targets.indexOf(document.activeElement);
+                            const next = index < 0 ? e.shiftKey ? targets.length - 1 : 0
+                                : (index + (e.shiftKey ? -1 : 1) + targets.length) % targets.length;
+                            targets[next]?.focus();
+                            e.preventDefault();
+                        }
+                        return;
+                    }
                     if (typing(e) && e.code !== 'Tab') return;
                     if (this.question) {
                         if (e.code === 'Escape') { this.skipQuestion(); e.preventDefault(); return; }
@@ -695,6 +709,7 @@
             const canvas = this.canvas;
             canvas.tabIndex = 0;
             canvas.setAttribute('aria-label', 'Game area. Use the game controls, Q to refill, or Tab to reach game buttons.');
+            if (!this.preview) canvas.focus({ preventScroll: true });
             canvas.addEventListener('pointermove', e => {
                 if (this.aimPointer != null && e.pointerId !== this.aimPointer) return;
                 const b = canvas.getBoundingClientRect();
@@ -792,7 +807,7 @@
                         <button type="button" class="mpg-q-skip">Skip</button>
                     </div>
                 </div>
-                <div class="mpg-results hidden"></div>`;
+                <div class="mpg-results hidden" role="dialog" aria-modal="true" aria-label="Match results"></div>`;
             document.body.appendChild(overlay);
             document.body.classList.add('mpg-active');
             lockViewportZoom(true);
@@ -820,6 +835,13 @@
                 const value = event.target.type === 'checkbox' ? event.target.checked : Number(event.target.value) / 100;
                 window.NexusApp.updateGameAudio({ [key]: value });
             });
+            for (const panel of overlay.querySelectorAll('.mpg-audio-settings, .mpg-test-tools')) {
+                panel.addEventListener('toggle', () => {
+                    if (panel.open) overlay.querySelectorAll('.mpg-audio-settings, .mpg-test-tools').forEach(other => {
+                        if (other !== panel) other.open = false;
+                    });
+                });
+            }
             const compactHud = this.defaultHudCollapsed();
             this.setHudCollapsed(compactHud);
             overlay.addEventListener('keydown', event => {
@@ -1118,6 +1140,8 @@
         renderResults() {
             if (this.preview) return;
             const panel = this.overlay.querySelector('.mpg-results');
+            const focusSummary = panel.contains(document.activeElement) && document.activeElement.tagName === 'SUMMARY';
+            const summaryOpen = panel.querySelector('.mpg-summary')?.open;
             const rows = this.standingsCache || this.standings();
             const winner = rows[0];
             panel.classList.remove('hidden');
@@ -1125,14 +1149,16 @@
                 <small>Match over</small>
                 <h2>${winner ? `${esc(winner.n)} wins!` : 'Game over'}</h2>
                 <ol>${rows.map((row, i) => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${i + 1}</span><img class="mpg-player-avatar" src="${avatarUrl(row)}" alt="" draggable="false"><strong>${esc(row.n)} ${accountTagMarkup(row.username)}</strong><b>${this.valueText(row)}</b><em>${this.rewards ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
-                <p class="mpg-accuracy">${this.answered ? Math.round(this.correct / this.answered * 100) : 0}% correct · ${this.correct} / ${this.answered} answered</p>
+                <p class="mpg-accuracy">${this.answered ? Math.round(this.correct / this.answered * 100) : 0}% correct · ${this.correct} correct · ${this.answered} answered</p>
                 <details class="mpg-summary"><summary>Full game summary</summary>
                     <p>${Math.round(this.t)} seconds played · ${(this.questionHistory || []).filter(answer => answer.correct === null).length} skipped</p>
-                    <ul>${(this.questionHistory || []).map(answer => `<li class="mpg-answer-${answer.correct === null ? 'skip' : answer.correct ? 'right' : 'wrong'}"><strong>${esc(answer.prompt)}</strong><span>${answer.correct === null ? 'Skipped' : answer.correct ? 'Correct' : `Your answer: ${esc(answer.chosen || 'No selection')}`}</span><span>Answer: ${esc(answer.answer)}</span></li>`).join('') || '<li>No questions answered in this game.</li>'}</ul>
+                    ${questionHistoryMarkup(this.questionHistory)}
                 </details>
                 <p>${this.practice ? 'Local results only. Solo games and admin tests do not award coins.' : this.rewards ? 'Coins have been added to your multiplayer wallet.' : 'Tallying coin rewards…'}</p>
                 <button type="button" class="mpg-exit">Back to lobby</button>
             </div>`;
+            panel.querySelector('.mpg-summary').open = Boolean(summaryOpen);
+            panel.querySelector(focusSummary ? '.mpg-summary summary' : '.mpg-exit').focus({ preventScroll: true });
         }
 
         // ---------- main loop ----------
@@ -1202,6 +1228,7 @@
             try { if (this.channel) this.api.getClient().removeChannel(this.channel); } catch (error) { /* already closed */ }
             this.overlay.remove();
             document.body.classList.remove('mpg-active');
+            if (!this.preview && this.returnFocus?.isConnected) this.returnFocus.focus({ preventScroll: true });
             lockViewportZoom(false);
             if (document.fullscreenElement) document.exitFullscreen?.().catch(() => { });
         }
@@ -1862,6 +1889,10 @@
         ctx.restore();
     }
 
+    function questionHistoryMarkup(history = []) {
+        return `<ul class="game-answer-list">${history.map(answer => `<li class="mpg-answer-${answer.correct === null ? 'skip' : answer.correct ? 'right' : 'wrong'}"><strong>${esc(answer.prompt)}</strong><span>${answer.correct === null ? 'Skipped' : answer.correct ? 'Correct' : `Your answer: ${esc(answer.chosen || 'No selection')}`}</span><span>Answer: ${esc(answer.answer)}</span></li>`).join('') || '<li>No questions answered in this game.</li>'}</ul>`;
+    }
+
     function sceneZoom(session, w, h, base = 820) {
         if (session.preview) return clamp(h / base, .6, 1.25);
         const scale = Number.isFinite(session.scale) && session.scale > 0 ? session.scale : 1;
@@ -1872,6 +1903,6 @@
 
     window.StudBudArcade = {
         Session, BaseGame, Particles, Resource, games: {},
-        util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, accountTagMarkup, who, playerCosmetics, avatarUrl, drawHat, drawFigureSide, drawFigureTop, sceneZoom }
+        util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, accountTagMarkup, who, playerCosmetics, avatarUrl, drawHat, drawFigureSide, drawFigureTop, sceneZoom, questionHistoryMarkup }
     };
 })(window);

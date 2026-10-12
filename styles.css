@@ -96,7 +96,7 @@
     
     --text-primary: #f0f7f2;
     --text-secondary: #afc3b7;
-    --text-muted: #80968a;
+    --text-muted: #92a99c;
     
     --accent-primary: #55c995;
     --accent-primary-hover: #37af79;
@@ -297,7 +297,7 @@ body[data-shop-palette].light-theme {
     --border-glass: hsla(var(--pa) 40% 30% / .24);
     --text-primary: hsl(var(--ph) 28% 14%);
     --text-secondary: hsl(var(--ph) 20% 30%);
-    --text-muted: hsl(var(--ph) 12% 40%);
+    --text-muted: hsl(var(--ph) 12% 39%);
     --accent-primary: hsl(var(--pa) 65% 29%);
     --accent-primary-hover: hsl(var(--pa) 65% 23%);
     --accent-secondary: hsl(var(--ph) 55% 30%);
@@ -328,7 +328,7 @@ body[data-color-scheme="opal"] .glass-card {
     
     --text-primary: #17281f;
     --text-secondary: #4c6556;
-    --text-muted: #718779;
+    --text-muted: #536b5d;
     
     --accent-primary: #16865c;
     --accent-primary-hover: #0f714c;
@@ -1501,8 +1501,8 @@ tbody tr:hover {
     backface-visibility: hidden;
     -webkit-backface-visibility: hidden; /* Safari */
     display: flex;
-    align-items: center;
-    justify-content: center;
+    align-items: safe center;
+    justify-content: safe center;
     padding: var(--spacing-xl);
     text-align: center;
     font-size: 1.5rem;
@@ -1512,6 +1512,7 @@ tbody tr:hover {
     box-shadow: var(--shadow-md);
     overflow-y: auto;
     overflow-wrap: anywhere;
+    white-space: pre-wrap;
 }
 
 .flashcard-back {
@@ -1918,8 +1919,11 @@ body.mpg-active { overflow: hidden; }
 .mpg-results-card { max-height: 90dvh; overflow-y: auto; }
 .mpg-summary { text-align: left; border-top: 1px solid #ffffff26; padding-top: 10px; }
 .mpg-summary summary { cursor: pointer; padding: 10px 0; font-weight: 700; }
-.mpg-summary ul { padding: 0; list-style: none; display: grid; gap: 8px; }
-.mpg-summary ul li { display: grid; grid-template-columns: 1fr; overflow-wrap: anywhere; }
+.game-answer-list { padding: 0; list-style: none; display: grid; gap: 8px; }
+.game-answer-list > li { display: grid; grid-template-columns: 1fr; gap: 5px; padding: 8px 10px; overflow-wrap: anywhere; background: var(--bg-glass-hover); border-radius: 8px; }
+.mpg-summary .game-answer-list > li { background: rgba(255,255,255,.06); }
+.saved-game-summary { margin-top: 8px; }
+.saved-game-summary summary { cursor: pointer; padding: 8px 0; font-weight: 600; }
 .mpg-answer-right { border-left: 3px solid #4ade80; }
 .mpg-answer-wrong { border-left: 3px solid #f87171; }
 .mpg-answer-skip { border-left: 3px solid #94a3b8; }
@@ -2424,7 +2428,7 @@ body[data-color-scheme="ocean"].dark-theme {
     --border-glass: rgba(171, 213, 245, 0.14);
     --text-primary: #eff7ff;
     --text-secondary: #b5ccdf;
-    --text-muted: #849fb7;
+    --text-muted: #8ba6be;
     --accent-primary: #63b3ed;
     --accent-primary-hover: #4299e1;
     --accent-secondary: #81e6d9;
@@ -2439,7 +2443,7 @@ body[data-color-scheme="ocean"].light-theme {
     --border-glass: rgba(30, 91, 139, 0.16);
     --text-primary: #142b3d;
     --text-secondary: #45657e;
-    --text-muted: #6f899e;
+    --text-muted: #516d83;
     --accent-primary: #1479b8;
     --accent-primary-hover: #0f6397;
     --accent-secondary: #0f9f9a;
@@ -2454,7 +2458,7 @@ body[data-color-scheme="violet"].dark-theme {
     --border-glass: rgba(218, 198, 247, 0.14);
     --text-primary: #f7f1ff;
     --text-secondary: #c9bbdc;
-    --text-muted: #9b8bad;
+    --text-muted: #a394b6;
     --accent-primary: #b49aff;
     --accent-primary-hover: #9a7bea;
     --accent-secondary: #f0abfc;
@@ -2469,7 +2473,7 @@ body[data-color-scheme="violet"].light-theme {
     --border-glass: rgba(105, 70, 150, 0.16);
     --text-primary: #2b1c3b;
     --text-secondary: #604d75;
-    --text-muted: #837493;
+    --text-muted: #6e5e7f;
     --accent-primary: #7653c7;
     --accent-primary-hover: #6040ad;
     --accent-secondary: #a03fb2;
@@ -2499,8 +2503,8 @@ body[data-color-scheme="sunset"].light-theme {
     --border-glass: rgba(151, 75, 40, 0.16);
     --text-primary: #392317;
     --text-secondary: #765542;
-    --text-muted: #977c6a;
-    --accent-primary: #c65327;
+    --text-muted: #7e6250;
+    --accent-primary: #bd4b21;
     --accent-primary-hover: #a94320;
     --accent-secondary: #b93b70;
     --accent-on-primary: #ffffff;
@@ -2533,7 +2537,7 @@ body[data-color-scheme="monochrome"].light-theme {
     --border-glass: rgba(0, 0, 0, 0.16);
     --text-primary: #101010;
     --text-secondary: #3f3f3f;
-    --text-muted: #696969;
+    --text-muted: #666666;
     --accent-primary: #111111;
     --accent-primary-hover: #333333;
     --accent-secondary: #555555;

@@ -72,6 +72,22 @@ async function run() {
     assert.ok(!sql.includes('abs(rank - target)'));
     assert.ok(!/\b900\b/.test(sql), 'daily SQL goal is five minutes throughout');
 
+    const setupIds = ['multiplayer-preview-title', 'multiplayer-preview-description', 'host-game-resource-label', 'solo-game-resource-label'];
+    for (const id of setupIds) elements.set(id, {});
+    for (const [mode, resource, multiplier] of [
+        ['sports', 'Energy', 1], ['miner', 'Fuel', 1], ['shooter', 'Ammo', 1],
+        ['river', 'Bait', 1], ['frenzy', 'Bait', 1], ['fishing', 'Bait', 1],
+        ['crypto', 'Research cash', 8], ['hack', 'Crypto', 3]
+    ]) {
+        assert.deepEqual(normal(app.questionRewardInfo(mode)), { resource, multiplier });
+        app.updateMultiplayerModeSetup(mode);
+        const label = elements.get('host-game-resource-label').textContent;
+        assert.ok(label.startsWith(`${resource} per correct answer`));
+        if (multiplier > 1) assert.ok(label.includes(`${multiplier}x setting`), 'cash/crypto bonuses explain their setting multiplier');
+        assert.equal(elements.get('solo-game-resource-label').textContent, label, 'host and solo setup agree on question rewards');
+    }
+    for (const id of setupIds) elements.delete(id);
+
     const now = Date.now();
     const cards = Array.from({ length: 4 }, (_, i) => ({ id: `card${i}`, question: `Q${i}`, answer: `A${i}` }));
     const newSession = new window.AnkiStudySession(cards, { now });
@@ -87,6 +103,11 @@ async function run() {
     assert.ok(good.dueAt > now && easy.fields.interval > good.fields.interval);
     assert.equal(again.fields.state, 'relearning');
     assert.ok(again.dueAt < good.dueAt);
+    assert.equal(app.deckStudyCount({ cards: [reviews.at(-1)] }), 0, 'future reviews are visibly unavailable in the deck UI');
+    assert.equal(app.deckStudyCount({ cards: [{ ...cards[0], suspended: true }] }), 0);
+    assert.equal(app.deckStudyCount({ cards: cards.slice(0, 2) }), 2);
+    const limitDeck = { cards: cards.slice(0, 2), ankiToday: { day: window.SM2Engine.dayNumber(now), newDone: 20, reviewsDone: 200 } };
+    assert.equal(app.deckStudyCount(limitDeck), 0, 'deck status respects the same daily limits as the study session');
 
     const base = { version: 1, state: { courses: [{ id: 'math', grade: 80 }], assignments: [], gameMetrics: { xp: 400, level: 1, streakDays: 1 }, settings: { theme: 'dark' } }, flashcards: [], studyHistory: [] };
     const local = clone(base);
@@ -218,6 +239,27 @@ async function run() {
     assert.equal(savedMatch.gameSummary.standings[0].goal, 1);
     await app.saveGameSummary({ ...match, testing: true });
     assert.equal(state.state.studyHistory.length, 2, 'admin tests never save study/game summaries');
+
+    const storedHistory = state.state.studyHistory;
+    state.state.studyHistory = Array.from({ length: 4 }, (_, i) => ({
+        id: `short-session-${i}`, timestamp: new Date().toISOString(), durationSec: 20,
+        title: 'Short match', method: 'game', gameSummary: savedMatch.gameSummary
+    }));
+    for (const id of ['study-progress-summary', 'study-week-summary', 'study-history-list']) elements.set(id, {});
+    app.getStudyRecommendations = () => [];
+    let renderedQuestions;
+    window.StudBudArcade = { util: { questionHistoryMarkup(questions) { renderedQuestions = questions; return '<ol>Question history</ol>'; } } };
+    app.renderStudyProgress();
+    assert.match(elements.get('study-week-summary').textContent, /1 min logged/, 'short sessions are summed before rounding minutes');
+    const historyMarkup = elements.get('study-history-list').innerHTML;
+    assert.match(historyMarkup, /Not rated/, 'unrated sessions are not presented as zero effectiveness');
+    assert.match(historyMarkup, /50% correct · 2 answered/, 'saved match counts describe answered questions, not the correct-answer fraction');
+    assert.match(historyMarkup, /saved-game-summary/);
+    assert.equal(renderedQuestions, savedMatch.gameSummary.questions, 'saved summaries reuse the shared question history renderer');
+    state.state.studyHistory = storedHistory;
+    delete app.getStudyRecommendations;
+    delete window.StudBudArcade;
+    for (const id of ['study-progress-summary', 'study-week-summary', 'study-history-list']) elements.delete(id);
 
     community.ownedDecks = async () => [{ id: 'published', source_deck_id: 'source', title: 'From another device', course: null, cards: [{ question: 'Q', answer: 'A' }] }];
     app.renderDecks = () => {};
