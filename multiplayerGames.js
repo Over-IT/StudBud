@@ -880,13 +880,13 @@
                 if (ax) me.face = ax;
                 me.vy = Math.min(1150, me.vy + 2300 * dt);
                 if (this.wallDir && me.vy > 130) me.vy = 130;
-                if (!s.down('Space', 'ArrowUp', 'KeyW') && me.vy < -250 && !this.sprung) me.vy += 2600 * dt;
+                if (!s.down('Space', 'ArrowUp', 'KeyW') && !s.stickJumpHeld && me.vy < -250 && !this.sprung) me.vy += 2600 * dt;
                 if (!exhausted && s.pressed('ShiftLeft', 'ShiftRight') && this.dashCd <= 0 && !this.finished && s.spend(25)) {
                     this.dash = 0.16; this.dashCd = 0.9; s.sfx('dash');
                 }
             }
             if (me.onGround) { this.coyote = 0.1; this.airJumps = 1; this.sprung = false; } else this.coyote -= dt;
-            if (s.pressed('Space', 'ArrowUp', 'KeyW') && !this.finished && !exhausted) this.buffer = 0.13; else this.buffer -= dt;
+            if ((s.pressed('Space', 'ArrowUp', 'KeyW') || (s.stickJumpHeld && me.onGround)) && !this.finished && !exhausted) this.buffer = 0.13; else this.buffer -= dt;
             if (this.buffer > 0) {
                 if (this.coyote > 0) {
                     if (!s.spend(6)) { this.buffer = 0; } else {
@@ -1089,13 +1089,10 @@
 
         draw(ctx, w, h) {
             const s = this.s, me = this.me, W = this.WIDTH;
-            const k = 1 - Math.exp(-6 * (this.dtLast || 0.016));
+            const k = 1 - Math.exp(-6 * (this.drawDt ?? this.dtLast ?? 0.016));
             const cssScale = s.scale || 1, cssW = w * cssScale, cssH = h * cssScale;
             const small = !s.preview && (cssW < 700 || cssH < 550);
-            const landscape = w >= h;
-            const zoom = this.zoom = small
-                ? landscape ? clamp(Math.min(1, w / 760, h / 500), 0.7, 0.98) : clamp(Math.min(1, w / 460, h / 760), 0.68, 0.94)
-                : 1;
+            const zoom = this.zoom = s.preview ? 1 : A.util.sceneZoom(s, w, h, 720);
             const viewW = w / zoom, viewH = h / zoom;
             const lookX = small ? clamp((me.vx || 0) * 0.12, -80, 80) : 0;
             const lookY = small ? clamp(-(me.vy || 0) * 0.09, 0, 70) : 0;
@@ -1299,20 +1296,6 @@
             const hz = ctx.createLinearGradient(0, h * 0.8, 0, h);
             hz.addColorStop(0, 'rgba(148,163,184,0)'); hz.addColorStop(1, 'rgba(148,163,184,.14)');
             ctx.fillStyle = hz; ctx.fillRect(0, h * 0.8, w, h * 0.2);
-            if (s.preview) return;
-            const currentHeight = Math.max(0, -(this.me.y + this.me.h));
-            const heightLabel = `Height ${Math.round(currentHeight / 40)}m · Best ${Math.round(this.maxH / 40)}m`;
-            ctx.save();
-            ctx.font = '700 15px system-ui';
-            const labelWidth = ctx.measureText(heightLabel).width;
-            const panelWidth = Math.min(w - 24, labelWidth + 30);
-            const panelX = 0, panelY = 0;
-            s.placeHud(ctx, 0, 0, panelWidth, 34, 'top-right');
-            ctx.fillStyle = 'rgba(15,23,42,.78)'; roundRect(ctx, panelX, panelY, panelWidth, 34, 10); ctx.fill();
-            ctx.strokeStyle = 'rgba(250,204,21,.7)'; ctx.lineWidth = 1.5; roundRect(ctx, panelX, panelY, panelWidth, 34, 10); ctx.stroke();
-            ctx.fillStyle = '#fef3c7'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-            ctx.fillText(heightLabel, panelX + panelWidth / 2, panelY + 17);
-            ctx.restore(); ctx.restore();
         }
     }
 
@@ -1423,7 +1406,7 @@
             const fastFalling = !me.onGround && s.down('ArrowDown') && this.stun <= 0;
             me.vy = Math.min(fastFalling ? 1650 : 1200, me.vy + (fastFalling ? 3200 : 2400) * dt);
             if (me.onGround) { this.airJumps = 1; this.coyote = 0.1; } else this.coyote -= dt;
-            if (this.stun <= 0 && s.pressed('Space', 'KeyW', 'ArrowUp')) {
+            if (this.stun <= 0 && (s.pressed('Space', 'KeyW', 'ArrowUp') || (s.stickJumpHeld && me.onGround))) {
                 if (this.coyote > 0) { me.vy = -900; this.coyote = 0; s.sfx('jump'); }
                 else if (this.airJumps > 0) { me.vy = -820; this.airJumps--; s.sfx('jump'); this.particles.burst(me.x + 17, me.y + 56, '#bae6fd', 8, 120, 0.3, 4); }
             }
@@ -1480,10 +1463,8 @@
             const maxY = Math.max(...this.solids.map(p => p.y + p.h)) + 70;
             const centerX = (minX + maxX) / 2, centerY = (minY + maxY) / 2;
             const fit = Math.min(w / (maxX - minX), h / (maxY - minY));
-            // Session coordinates are already scaled for CSS size and DPR by the engine.
-            const cssScale = this.s.scale || 1, cssW = w * cssScale, cssH = h * cssScale;
-            const phone = !this.s.preview && (cssW < 600 || (cssW < 1100 && cssH < 500));
-            const z = phone ? Math.max(fit, 0.72 / cssScale) : fit;
+            const cssScale = this.s.scale || 1;
+            const z = this.s.preview ? fit : clamp(fit, .65 / cssScale, 1.15 / cssScale);
             const halfW = w / (2 * z), halfH = h / (2 * z);
             const fitsX = halfW * 2 >= maxX - minX - 0.01;
             const fitsY = halfH * 2 >= maxY - minY - 0.01;
@@ -1729,10 +1710,7 @@
         }
 
         cameraZoom(w = this.s.vw || 1280, h = this.s.vh || 720) {
-            if (this.s.overlay.classList.contains('has-touch') && w < 760) {
-                return w >= h ? clamp(h / 760, 0.62, 0.98) : clamp(w / 520, 0.68, 1.02);
-            }
-            return clamp(h / 900, 0.7, 1.2);
+            return A.util.sceneZoom(this.s, w, h, 900);
         }
 
         weaponInfo(type = this.weapon) {
@@ -1896,11 +1874,12 @@
             const halfW = s.vw / this.zoom / 2, halfH = s.vh / this.zoom / 2;
             const touch = s.overlay.classList.contains('has-touch');
             const look = touch && !s.mouse.down ? 0 : 0.18;
-            const tx = clamp(me.x + clamp((this.mouseWorld.x - me.x) * look, -110, 110), halfW, this.W - halfW);
-            const ty = clamp(me.y + clamp((this.mouseWorld.y - me.y) * look, -90, 90), halfH, this.H - halfH);
+            const fitsX = halfW * 2 >= this.W, fitsY = halfH * 2 >= this.H;
+            const tx = fitsX ? this.W / 2 : clamp(me.x + clamp((this.mouseWorld.x - me.x) * look, -110, 110), halfW, this.W - halfW);
+            const ty = fitsY ? this.H / 2 : clamp(me.y + clamp((this.mouseWorld.y - me.y) * look, -90, 90), halfH, this.H - halfH);
             const follow = 1 - Math.exp(-dt * 9);
-            this.cam.x = clamp(lerp(this.cam.x, tx, follow), halfW, this.W - halfW);
-            this.cam.y = clamp(lerp(this.cam.y, ty, follow), halfH, this.H - halfH);
+            this.cam.x = fitsX ? tx : clamp(lerp(this.cam.x, tx, follow), halfW, this.W - halfW);
+            this.cam.y = fitsY ? ty : clamp(lerp(this.cam.y, ty, follow), halfH, this.H - halfH);
             s.setGoal(this.kills + this.pk * 3);
             this.particles.update(dt, 0);
         }

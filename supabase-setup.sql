@@ -467,20 +467,20 @@ as $$
         ('acc_phoenix', 420),
         ('skin_bee', 150), ('skin_ocean', 200), ('skin_forest', 210), ('skin_ice', 350), ('skin_chrome', 380), ('skin_cosmic', 520),
         ('hat_beret', 90), ('hat_sombrero', 140), ('hat_frog', 150), ('hat_mushroom', 160), ('hat_unicorn', 230), ('hat_tiara', 300),
-        ('acc_lei', 90), ('acc_leaves', 190), ('acc_guitar', 210), ('acc_notes', 220), ('acc_bubbles', 230), ('acc_lightning', 320),
+        ('acc_lei', 90), ('acc_guitar', 210), ('acc_lightning', 320),
         ('palette_sunrise', 150), ('palette_arctic', 170), ('palette_toxic', 200), ('palette_royal', 320),
         ('palette_sand', 70), ('palette_sky', 75), ('palette_moss', 80), ('palette_plum', 85), ('palette_steel', 90),
         ('palette_eclipse', 700), ('palette_opal', 740),
         ('skin_sprout', 70), ('skin_sunny', 75), ('skin_berry', 80), ('skin_storm', 85), ('skin_minty', 90),
         ('skin_celestial', 750), ('skin_inferno', 800),
         ('hat_visor', 65), ('hat_bucket', 75), ('hat_astronaut', 210), ('hat_cosmic', 720),
-        ('acc_comet', 450), ('acc_aura', 760),
-        ('acc_rainbow_trail', 360), ('acc_firefly_trail', 280), ('acc_stardust_trail', 520), ('acc_leaf_trail', 240),
+        ('acc_aura', 760),
         ('acc_prism_effect', 680), ('acc_frost_effect', 420), ('acc_ember_effect', 500), ('acc_heart_effect', 320),
-        ('acc_dust_trail', 75), ('acc_confetti_trail', 130), ('acc_sakura_trail', 210),
-        ('acc_pixel_trail', 340), ('acc_meteor_trail', 520), ('acc_aurora_trail', 760),
         ('acc_dew_effect', 75), ('acc_leaf_effect', 130), ('acc_snowflake_effect', 210),
-        ('acc_electric_effect', 340), ('acc_solar_effect', 520), ('acc_vortex_effect', 760)
+        ('acc_electric_effect', 340), ('acc_solar_effect', 520), ('acc_vortex_effect', 760),
+        ('acc_cloud_effect', 85), ('acc_confetti_effect', 145), ('acc_sakura_effect', 230),
+        ('acc_pixel_effect', 360), ('acc_meteor_effect', 560), ('acc_aurora_effect', 780),
+        ('acc_rune_effect', 390), ('acc_lunar_effect', 640)
     ), pets(id, rarity) as (values
         ('pet_puppy', 'common'), ('pet_kitten', 'common'), ('pet_hamster', 'common'), ('pet_bunny', 'common'),
         ('pet_chick', 'common'), ('pet_frog', 'common'), ('pet_turtle', 'common'), ('pet_goldfish', 'common'),
@@ -500,6 +500,25 @@ as $$
     union all
     select pets.id, null::integer, pets.rarity from pets;
 $$;
+
+-- Retired trails are removed from inventories and the shared accessory slot.
+with retired(ids) as (values (array[
+    'acc_leaves', 'acc_notes', 'acc_bubbles', 'acc_comet',
+    'acc_rainbow_trail', 'acc_firefly_trail', 'acc_stardust_trail', 'acc_leaf_trail',
+    'acc_dust_trail', 'acc_confetti_trail', 'acc_sakura_trail', 'acc_pixel_trail',
+    'acc_meteor_trail', 'acc_aurora_trail'
+]::text[]))
+update public.studbud_multiplayer_profiles p
+set owned_items = array(
+        select item from unnest(p.owned_items) with ordinality as owned(item, position)
+        where not (item = any(r.ids))
+        order by position
+    ),
+    equipped_accessory = case when p.equipped_accessory = any(r.ids)
+        then '' else p.equipped_accessory end,
+    updated_at = now()
+from retired r
+where p.owned_items && r.ids or p.equipped_accessory = any(r.ids);
 
 create or replace function public.studbud_shop_price(p_item_id text)
 returns integer
@@ -631,7 +650,7 @@ begin
     elsif p_box = 'accessory' then
         v_cost := 140; v_prefix := 'acc\_%';
         v_rarity := case when v_roll < 0.40 then 'common' when v_roll < 0.72 then 'uncommon' when v_roll < 0.92 then 'rare' when v_roll < 0.99 then 'epic' else 'legendary' end;
-    elsif p_box in ('effect', 'trail') then
+    elsif p_box = 'effect' then
         v_cost := 200; v_prefix := 'acc\_%';
         v_rarity := case when v_roll < 0.25 then 'common' when v_roll < 0.60 then 'uncommon'
             when v_roll < 0.85 then 'rare' when v_roll < 0.97 then 'epic' when v_roll < 0.99 then 'legendary' else 'mythic' end;
@@ -655,11 +674,8 @@ begin
     select s.id into v_item_id
     from public.studbud_shop_items() s
     where s.id not like 'accessory\_%' and s.id not like 'pet\_%' and s.id like v_prefix
-      and (p_box not in ('effect', 'trail')
-        or (p_box = 'effect' and (s.id like 'acc\_%\_effect'
-            or s.id in ('acc_lightning', 'acc_flame', 'acc_sparkles', 'acc_aura')))
-        or (p_box = 'trail' and (s.id like 'acc\_%\_trail'
-            or s.id in ('acc_leaves', 'acc_notes', 'acc_bubbles', 'acc_comet'))))
+      and (p_box <> 'effect' or s.id like 'acc\_%\_effect'
+            or s.id in ('acc_lightning', 'acc_flame', 'acc_sparkles', 'acc_aura'))
       and not (s.id = any(v_profile.owned_items))
     order by case s.rarity when v_rarity then 0 else 1 end,
              abs(array_position(array['common','uncommon','rare','epic','legendary','mythic'], s.rarity)
@@ -737,6 +753,9 @@ declare
     v_profile public.studbud_multiplayer_profiles%rowtype;
 begin
     if v_user_id is null then raise exception 'Sign in to customize your multiplayer profile.'; end if;
+    if p_item_id like 'acc\_%\_trail' or p_item_id in ('acc_leaves', 'acc_notes', 'acc_bubbles', 'acc_comet') then
+        raise exception 'Trails have been retired. Choose an aura or accessory instead.';
+    end if;
     select * into v_profile from public.studbud_multiplayer_profiles where user_id = v_user_id for update;
     if not found or not p_item_id = any(v_profile.owned_items) then raise exception 'You do not own that item.'; end if;
     if p_item_id like 'avatar_%' then

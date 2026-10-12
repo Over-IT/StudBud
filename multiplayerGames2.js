@@ -54,11 +54,7 @@
         }
 
         begin(ctx, w, h, zoomBase = 820) {
-            const touch = this.s.overlay.classList.contains('has-touch');
-            const landscape = w >= h;
-            this.zoom = touch
-                ? landscape ? clamp(h / zoomBase, 0.55, 1.15) : clamp(w / (zoomBase * 1.08), 0.46, 0.88)
-                : clamp(h / zoomBase, 0.6, 1.25);
+            this.zoom = A.util.sceneZoom(this.s, w, h, zoomBase);
             const hw = w / this.zoom / 2, hh = h / this.zoom / 2;
             this.camX = this.W <= hw * 2 ? this.W / 2 : clamp(this.cam.x, hw, this.W - hw);
             this.camY = this.H <= hh * 2 ? this.H / 2 : clamp(this.cam.y, hh, this.H - hh);
@@ -1194,7 +1190,9 @@
             this.dir = 1; this.td = 0; this.yards = 0;
             this.me.y = this.H / 2; this.baseSpeed = 250;
             this.res = new A.Resource('Energy', '#38bdf8', 100, 60, 2);
-            this.kickCd = 0; this.contactCd = 0; this.pinchCd = 0; this.turbo = 0; this.freeze = 0; this.ballCorrection = null; this.msg = '';
+            this.kickCd = 0; this.contactCd = 0; this.pinchCd = 0; this.turbo = 0; this.freeze = 0; this.msg = '';
+            this.ballRevision = 0; this.ballOwner = ''; this.ballSequence = 0;
+            this.ballVisualOffset = { x: 0, y: 0 };
             this.goalH = 340; this.netD = 70;
             this.ball = { x: this.W / 2, y: this.H / 2, vx: 0, vy: 0, r: 13 };
             this.lastTouch = null; this.unclaimed = null;
@@ -1222,7 +1220,8 @@
         kickoff() {
             const me = this.me, r = Math.random;
             Object.assign(this.ball, { x: this.W / 2, y: this.H / 2, vx: 0, vy: 0 });
-            this.ballCorrection = null;
+            this.ballOwner = '';
+            this.ballVisualOffset.x = this.ballVisualOffset.y = 0;
             this.kickCharge = 0; this.kickHeld = false;
             this.keeper.y = this.H / 2; this.keeper.cd = .8;
             me.x = this.W * (this.dir > 0 ? 0.3 : 0.7); me.y = this.spawnY(); me.vx = me.vy = 0;
@@ -1304,20 +1303,7 @@
 
         onEvent(ev, from) {
             if (ev.k === 'kick' && this.freeze <= 0) {
-                const b = this.ball;
-                const ix = Number.isFinite(ev.ix) ? ev.ix : ev.vx - b.vx;
-                const iy = Number.isFinite(ev.iy) ? ev.iy : ev.vy - b.vy;
-                b.vx += ix; b.vy += iy;
-                const speed = Math.hypot(b.vx, b.vy);
-                if (speed > 1250) { b.vx *= 1250 / speed; b.vy *= 1250 / speed; }
-                const now = performance.now(), correction = this.ballCorrection;
-                if (correction && now < correction.until) {
-                    correction.count = Math.min(4, correction.count + 1);
-                    correction.x += (ev.x - correction.x) / correction.count;
-                    correction.y += (ev.y - correction.y) / correction.count;
-                } else this.ballCorrection = { x: ev.x, y: ev.y, count: 1 };
-                this.ballCorrection.until = now + 240;
-                this.lastTouch = from ? from.id : this.lastTouch;
+                this.receiveBall(ev, from);
             } else if (ev.k === 'gl' && this.teamsOn) {
                 if (this.unclaimed === ev.team || this.freeze <= 0) {
                     this.teamTd[ev.team]++;
@@ -1331,6 +1317,46 @@
             }
         }
 
+        onState(state, from) {
+            if (state.ball) this.receiveBall(state.ball, from);
+        }
+
+        ballState() {
+            const b = this.ball;
+            return {
+                x: b.x, y: b.y, vx: b.vx, vy: b.vy, spin: this.ballSpin, at: Date.now(),
+                revision: this.ballRevision, sequence: ++this.ballSequence, touch: this.lastTouch
+            };
+        }
+
+        receiveBall(state, from) {
+            if (this.freeze > 0 || !from || ![state.x, state.y, state.vx, state.vy, state.at].every(Number.isFinite)
+                || !Number.isSafeInteger(state.revision) || state.revision < 1
+                || !Number.isSafeInteger(state.sequence) || state.sequence < 1) return;
+            // A contact transfers authority; revisions plus sender IDs order simultaneous touches.
+            if (state.revision < this.ballRevision
+                || (state.revision === this.ballRevision && !this.ballOwner)
+                || (state.revision === this.ballRevision && from.id < this.ballOwner)
+                || (state.revision === this.ballRevision && from.id === this.ballOwner && state.sequence <= this.ballSequence)) return;
+            const b = this.ball, offset = this.ballVisualOffset;
+            const shownX = b.x + offset.x, shownY = b.y + offset.y;
+            this.ballRevision = state.revision; this.ballOwner = from.id; this.ballSequence = state.sequence;
+            Object.assign(b, { x: clamp(state.x, -this.netD, this.W + this.netD), y: clamp(state.y, b.r, this.H - b.r), vx: state.vx, vy: state.vy });
+            if (Number.isFinite(state.spin)) this.ballSpin = state.spin;
+            this.lastTouch = state.touch === null ? null : from.id;
+            // Advance the sender's state through the same collisions and drag, not back to an old kick point.
+            let age = clamp((Date.now() - state.at) / 1000, 0, .35);
+            while (age > 0) {
+                const dt = Math.min(age, 1 / 120);
+                const scored = this.stepBall(dt);
+                age -= dt;
+                if (scored >= 0) break;
+            }
+            const gap = Math.hypot(shownX - b.x, shownY - b.y);
+            offset.x = gap < 200 ? shownX - b.x : 0;
+            offset.y = gap < 200 ? shownY - b.y : 0;
+        }
+
         stepKeeper(dt) {
             const keeper = this.keeper, ball = this.ball;
             keeper.cd = Math.max(0, keeper.cd - dt);
@@ -1339,24 +1365,27 @@
             keeper.y = clamp(keeper.y, this.H / 2 - this.goalH / 2 + 26, this.H / 2 + this.goalH / 2 - 26);
             const dx = ball.x - keeper.x, dy = ball.y - keeper.y, distance = Math.hypot(dx, dy);
             if (keeper.cd <= 0 && distance < keeper.r + ball.r + 6) {
-                const pre = { vx: ball.vx, vy: ball.vy };
                 ball.x = keeper.x - keeper.r - ball.r - 2;
                 ball.vx = -Math.max(380, Math.abs(ball.vx) * .8);
                 ball.vy = clamp(dy * 14, -320, 320);
                 keeper.cd = .55; this.lastTouch = null;
-                this.sendKick(pre);
+                this.sendKick();
                 this.particles.burst(keeper.x, keeper.y, '#fbbf24', 10, 150, .4, 3);
             }
         }
 
-        sendKick(pre) {
-            const b = this.ball, p = pre || b;
-            const msg = { x: Math.round(b.x), y: Math.round(b.y), vx: Math.round(b.vx), vy: Math.round(b.vy), pvx: Math.round(p.vx), pvy: Math.round(p.vy), ix: Math.round(b.vx - p.vx), iy: Math.round(b.vy - p.vy) };
-            this.s.emit({ k: 'kick', ...msg });
+        sendKick() {
+            this.ballRevision++;
+            this.ballOwner = this.s.user.id; this.ballSequence = 0;
+            this.ballVisualOffset.x = this.ballVisualOffset.y = 0;
+            this.s.emit({ k: 'kick', ...this.ballState() });
+            this.s.sendState?.();
         }
 
         update(dt) {
             const s = this.s, me = this.me, b = this.ball;
+            const blend = Math.exp(-20 * dt);
+            this.ballVisualOffset.x *= blend; this.ballVisualOffset.y *= blend;
             this.kickCd -= dt; this.contactCd = Math.max(0, this.contactCd - dt); this.pinchCd = Math.max(0, this.pinchCd - dt); this.turbo = Math.max(0, this.turbo - dt);
             const wasFrozen = this.freeze > 0;
             this.freeze = Math.max(0, this.freeze - dt);
@@ -1399,7 +1428,7 @@
                         const speed = Math.hypot(b.vx, b.vy);
                         if (speed > 1250) { b.vx *= 1250 / speed; b.vy *= 1250 / speed; }
                         if (this.contactCd <= 0) {
-                            this.contactCd = 0.16; this.sendKick(pre);
+                            this.contactCd = 0.16; this.sendKick();
                             if (Math.abs(b.vx - pre.vx) + Math.abs(b.vy - pre.vy) > 12) s.sfx('act', 90);
                         }
                     }
@@ -1416,10 +1445,10 @@
                         if (s.spend(cost)) {
                             const aim = mousePass || (!tapped && !this.moving && this.kickAim) ? this.kickAim : null;
                             const angle = aim ? Math.atan2(aim.y - me.y, aim.x - me.x) : me.aim;
-                            const kickPre = { vx: b.vx, vy: b.vy }, power = 480 + charge * 650;
+                            const power = 480 + charge * 650;
                             b.vx = Math.cos(angle) * power; b.vy = Math.sin(angle) * power;
                             this.kickCd = .25 + charge * .2; this.contactCd = Math.max(this.contactCd, .2); this.lastTouch = s.user.id;
-                            this.sendKick(kickPre); s.sfx('shoot');
+                            this.sendKick(); s.sfx('shoot');
                             this.particles.burst(b.x, b.y, '#fde68a', 12, 220, .35, 3);
                         }
                     }
@@ -1428,12 +1457,6 @@
                 if (!this.teamsOn) this.stepKeeper(dt);
                 const scored = this.stepBall(dt);
                 if (scored >= 0) this.goalScored(scored);
-                else if (this.ballCorrection) {
-                    const correction = this.ballCorrection;
-                    const blend = Math.min(1, dt * 5);
-                    b.x += (correction.x - b.x) * blend; b.y += (correction.y - b.y) * blend;
-                    if (performance.now() >= correction.until || Math.hypot(correction.x - b.x, correction.y - b.y) < 1) this.ballCorrection = null;
-                }
             }
 
             for (const p of this.pads) {
@@ -1448,7 +1471,12 @@
             s.setGoal(this.teamsOn ? this.teamTd[this.myTeam] : this.td);
         }
 
-        ex() { return { t: this.turbo > 0 ? 1 : 0 }; }
+        ex() {
+            return {
+                t: this.turbo > 0 ? 1 : 0,
+                ...(this.freeze <= 0 && this.ballOwner === this.s.user.id ? { ball: this.ballState() } : {})
+            };
+        }
         goalText() {
             return this.teamsOn ? `Blue ${this.teamTd[0]} – ${this.teamTd[1]} Red · You ${this.td} goal${this.td === 1 ? '' : 's'}` : `${this.td} goal${this.td === 1 ? '' : 's'}`;
         }
@@ -1457,7 +1485,7 @@
         touchHint() { return 'Joystick to dribble · Tap toward a pass · Hold Power kick, release to shoot · Sprint to steal'; }
 
         draw(ctx, w, h) {
-            const me = this.me, t = this.anim, b = this.ball, W = this.W, H = this.H, gy0 = H / 2 - this.goalH / 2;
+            const me = this.me, t = this.anim, b = { ...this.ball, x: this.ball.x + this.ballVisualOffset.x, y: this.ball.y + this.ballVisualOffset.y }, W = this.W, H = this.H, gy0 = H / 2 - this.goalH / 2;
             ctx.fillStyle = '#14532d'; ctx.fillRect(0, 0, w, h);
             this.begin(ctx, w, h, w < 600 ? 650 : 800);
             ctx.fillStyle = '#273744'; ctx.fillRect(-90, -80, W + 180, H + 160);

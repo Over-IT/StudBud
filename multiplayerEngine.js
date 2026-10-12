@@ -234,12 +234,13 @@
         draw() { }
         net() { return {}; }
         onEvent() { }
+        onState() { }
         goalText() { return ''; }
         hint() { return ''; }
         touchHint() {
             return {
-                skyline: 'Joystick left/right · Use Jump to jump again in the air · Dash across gaps · Recharge on a wide ledge',
-                duel: 'Joystick left/right · Use Jump to jump twice · Tap the arena to swing · Heavy uses your last aim · Shield or Dodge to escape',
+                skyline: 'Joystick to move · Hold steeply up to jump on landing · Jump button for an air jump · Dash across gaps',
+                duel: 'Joystick to move · Hold steeply up to jump on landing · Jump button for an air jump · Tap to swing · Heavy, Guard or Dodge',
                 shooter: 'Joystick to move · Hold the arena to aim and fire · Dash between cover · Recharge behind cover',
                 market: 'Joystick to move · Hold Sprint for speed · Pick up and deliver packages · Building recesses are away from traffic',
                 river: 'Joystick to steer · Tap the water to cast · Shallow banks are calm places to recharge',
@@ -404,6 +405,7 @@
             r.seen = performance.now();
             if (p.d && !this.firstDone) this.firstDone = Date.now();
             for (const ev of p.ev || []) this.game.onEvent(ev, r);
+            this.game.onState(r.ex, r);
         }
 
         remoteList() { return [...this.remotes.values()]; }
@@ -718,21 +720,6 @@
                 else if (target.classList.contains('mpg-hud-toggle')) {
                     this.setHudCollapsed(!this.overlay.classList.contains('hud-collapsed'));
                 }
-                else if (target.classList.contains('mpg-menu-toggle')) {
-                    const menu = this.overlay.querySelector('.mpg-menu-panel');
-                    menu.hidden = !menu.hidden;
-                    target.setAttribute('aria-expanded', String(!menu.hidden));
-                }
-                else if (target.classList.contains('mpg-board-toggle')) {
-                    const open = this.overlay.classList.toggle('board-open');
-                    target.setAttribute('aria-expanded', String(open));
-                    target.setAttribute('aria-label', open ? 'Hide match standings' : 'Show match standings');
-                    this.overlay.querySelector('.mpg-menu-panel').hidden = true;
-                    const menuToggle = this.overlay.querySelector('.mpg-menu-toggle');
-                    menuToggle.setAttribute('aria-expanded', 'false');
-                    menuToggle.focus();
-                    this.layoutHud();
-                }
                 else if (target.classList.contains('mpg-test-pause') && this.testing) {
                     if (this.paused) {
                         const elapsed = Date.now() - this.testPauseAt;
@@ -761,13 +748,9 @@
                     <div class="mpg-chip"><strong class="mpg-name"></strong><span class="mpg-goal"></span>${this.testing ? '<small class="mpg-practice-indicator">Admin testing · infinite energy</small>' : this.practice ? '<small class="mpg-practice-indicator">Solo game · no coins</small>' : ''}</div>
                     <div class="mpg-timer"></div>
                     <div class="mpg-actions">
-                        <button type="button" class="mpg-hud-toggle" aria-expanded="true" aria-controls="mpg-match-details mpg-controls-hint" aria-label="Hide match details">HUD</button>
-                        <button type="button" class="mpg-menu-toggle" aria-expanded="false" aria-controls="mpg-menu-panel">Menu</button>
-                        <div class="mpg-menu-panel" id="mpg-menu-panel" hidden>
-                            <button type="button" class="mpg-board-toggle" aria-expanded="false" aria-controls="mpg-match-standings" aria-label="Show match standings">Ranks</button>
-                            ${this.testing ? `<details class="mpg-test-tools"><summary>Testing tools</summary><div class="mpg-test-panel"><div><button type="button" class="mpg-test-pause">Pause</button>${this.onRestart ? '<button type="button" class="mpg-test-restart">Restart</button>' : ''}</div><pre class="mpg-test-stats"></pre></div></details>` : ''}
-                            <button type="button" class="mpg-end ${this.isHost && !this.practice ? '' : 'hidden'}">End match</button>
-                        </div>
+                        <button type="button" class="mpg-hud-toggle" aria-expanded="true" aria-controls="mpg-match-details mpg-controls-hint mpg-match-standings" aria-label="Hide match details and standings">HUD</button>
+                        ${this.testing ? `<details class="mpg-test-tools"><summary>Tools</summary><div class="mpg-test-panel"><div><button type="button" class="mpg-test-pause">Pause</button>${this.onRestart ? '<button type="button" class="mpg-test-restart">Restart</button>' : ''}</div><pre class="mpg-test-stats"></pre></div></details>` : ''}
+                        <button type="button" class="mpg-end ${this.isHost && !this.practice ? '' : 'hidden'}">End match</button>
                         <button type="button" class="mpg-leave">${this.practice ? 'Close' : 'Leave'}</button>
                     </div>
                 </div>
@@ -775,7 +758,6 @@
                 <div class="mpg-score"><span>Score</span><strong>0</strong></div>
                 <div class="mpg-meter hidden">
                     <div class="mpg-meter-head"><span class="mpg-meter-label"></span><b class="mpg-meter-value"></b></div>
-                    <button type="button" class="mpg-recharge">Answer a question <kbd>Q</kbd></button>
                 </div>
                 <div class="mpg-hint" id="mpg-controls-hint"></div>
                 <div class="mpg-stick-zone" aria-hidden="true"></div>
@@ -812,38 +794,19 @@
             hud.className = 'mpg-hud';
             const status = document.createElement('div');
             status.className = 'mpg-status';
-            for (const selector of ['.mpg-score', '.mpg-meter', '.mpg-board']) status.appendChild(overlay.querySelector(selector));
-            hud.append(overlay.querySelector('.mpg-top'), status, overlay.querySelector('.mpg-toasts'));
+            for (const selector of ['.mpg-score', '.mpg-meter']) status.appendChild(overlay.querySelector(selector));
+            hud.append(overlay.querySelector('.mpg-top'), status, overlay.querySelector('.mpg-board'), overlay.querySelector('.mpg-hint'), overlay.querySelector('.mpg-toasts'));
             overlay.appendChild(hud);
             this.bindTouch(overlay);
             const compactHud = this.defaultHudCollapsed();
             this.setHudCollapsed(compactHud);
-            if (!compactHud) {
-                overlay.classList.add('board-open');
-                const ranks = overlay.querySelector('.mpg-board-toggle');
-                ranks.setAttribute('aria-expanded', 'true');
-                ranks.setAttribute('aria-label', 'Hide match standings');
-            }
             overlay.addEventListener('keydown', event => {
                 if (event.key !== 'Escape' || this.question) return;
-                const menu = overlay.querySelector('.mpg-menu-panel');
-                if (!menu.hidden) {
-                    menu.hidden = true;
-                    const toggle = overlay.querySelector('.mpg-menu-toggle');
-                    toggle.setAttribute('aria-expanded', 'false');
-                    toggle.focus();
+                const tools = overlay.querySelector('.mpg-test-tools');
+                if (tools?.open) {
+                    tools.open = false;
+                    tools.querySelector('summary').focus();
                 }
-                if (overlay.classList.contains('board-open')) {
-                    overlay.classList.remove('board-open');
-                    const toggle = overlay.querySelector('.mpg-board-toggle');
-                    toggle.setAttribute('aria-expanded', 'false');
-                    toggle.setAttribute('aria-label', 'Show match standings');
-                }
-            });
-            overlay.addEventListener('click', event => {
-                if (event.target.closest('.mpg-menu-panel, .mpg-menu-toggle')) return;
-                overlay.querySelector('.mpg-menu-panel').hidden = true;
-                overlay.querySelector('.mpg-menu-toggle').setAttribute('aria-expanded', 'false');
             });
             this.hudObserver = new ResizeObserver(() => this.layoutHud());
             for (const el of [hud, overlay.querySelector('.mpg-touch'), overlay.querySelector('.mpg-hint'), overlay.querySelector('.mpg-board')]) this.hudObserver.observe(el);
@@ -857,9 +820,10 @@
             this.overlay.classList.toggle('hud-collapsed', collapsed);
             this.overlay.querySelector('.mpg-match-details').hidden = collapsed;
             this.overlay.querySelector('.mpg-hint').hidden = collapsed;
+            this.overlay.querySelector('.mpg-board').hidden = collapsed;
             const toggle = this.overlay.querySelector('.mpg-hud-toggle');
             toggle.setAttribute('aria-expanded', String(!collapsed));
-            toggle.setAttribute('aria-label', collapsed ? 'Show match details' : 'Hide match details');
+            toggle.setAttribute('aria-label', collapsed ? 'Show match details and standings' : 'Hide match details and standings');
             this.layoutHud();
         }
 
@@ -898,16 +862,14 @@
                 // Platformers bind up/down to jump/shield/drop, so vertical input there needs a firm, mostly-vertical push.
                 const resolve = (dx, dy, max) => {
                     const n = Math.hypot(dx, dy) / max;
+                    this.stickJumpHeld = false;
                     if (n < 0.22) return { ...NONE };
-                    if (this.stickHorizontal) {
-                        return { KeyA: dx < -max * 0.22, KeyD: dx > max * 0.22, KeyW: false, KeyS: false };
-                    }
                     if (this.stickPlatform) {
-                        const steepNeed = dirs.KeyW || dirs.KeyS ? 1.0 : 1.5;
-                        const pushNeed = dirs.KeyW || dirs.KeyS ? 0.5 : 0.7;
-                        const vertical = Math.abs(dy) > Math.abs(dx) * steepNeed && n > pushNeed;
-                        const horizDead = vertical ? 0.4 : 0.22;
-                        return { KeyA: dx < -max * horizDead, KeyD: dx > max * horizDead, KeyW: vertical && dy < 0, KeyS: vertical && dy > 0 };
+                        const vertical = this.stickGroundJump
+                            ? Math.abs(dy) >= Math.abs(dx) * Math.sqrt(3) && n >= .65
+                            : Math.abs(dy) > Math.abs(dx) * (dirs.KeyW || dirs.KeyS ? 1 : 1.5) && n > (dirs.KeyW || dirs.KeyS ? .5 : .7);
+                        this.stickJumpHeld = this.stickGroundJump && vertical && dy < 0;
+                        return { KeyA: dx < -max * .22, KeyD: dx > max * .22, KeyW: !this.stickGroundJump && vertical && dy < 0, KeyS: vertical && dy > 0 };
                     }
                     // 8 equal sectors so a "mostly right" push never leaks into up or down.
                     const sector = ((Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) % 8) + 8) % 8;
@@ -921,6 +883,7 @@
                 const reset = () => {
                     activeId = null;
                     origin = null;
+                    this.stickJumpHeld = false;
                     setDirs({ ...NONE });
                     knob.style.transform = '';
                     stick.style.transform = '';
@@ -931,11 +894,10 @@
                     const max = b.width / 2;
                     const cx = origin ? origin.x : b.left + max, cy = origin ? origin.y : b.top + max;
                     let dx = e.clientX - cx, dy = e.clientY - cy;
-                    if (this.stickHorizontal) dy = 0;
                     const len = Math.hypot(dx, dy);
                     if (len > max) { dx = dx / len * max; dy = dy / len * max; }
                     knob.style.transform = `translate(${dx}px, ${dy}px)`;
-                    if (this.question || this.over) { setDirs({ ...NONE }); return; }
+                    if (this.question || this.over) { this.stickJumpHeld = false; setDirs({ ...NONE }); return; }
                     setDirs(resolve(dx, dy, max));
                 };
                 const begin = (e, floating) => {
@@ -992,9 +954,8 @@
                 if (key === this.touchLayoutKey) return;
                 this.touchLayoutKey = key;
                 this.stickPlatform = layout.platform ?? (layout.buttons || []).some(b => b.k === 'Space' && /jump/i.test(b.label || ''));
-                this.stickHorizontal = (layout.buttons || []).some(b => b.k === 'Space' && /jump/i.test(b.label || ''));
-                stick?.setAttribute('aria-label', this.stickHorizontal ? 'Move left or right; use the Jump button to jump' : 'Movement joystick');
-                stick?.classList.toggle('horizontal-stick', this.stickHorizontal);
+                this.stickGroundJump = (layout.buttons || []).some(b => b.k === 'Space' && /jump/i.test(b.label || ''));
+                stick?.setAttribute('aria-label', this.stickGroundJump ? 'Move left or right; push steeply up to jump on landing; use Jump for an air jump' : 'Movement joystick');
                 const box = pad.querySelector('.mpg-btns');
                 box.innerHTML = '';
                 const list = layout.buttons || [];
@@ -1039,7 +1000,7 @@
             this.canvas.width = Math.floor(w * dpr);
             this.canvas.height = Math.floor(h * dpr);
             this.dpr = dpr;
-            this.scale = Math.max(0.45, h / 720);
+            this.scale = clamp(h / 720, .65, 1.25);
             this.vw = w / this.scale;
             this.vh = h / this.scale;
             this.layoutHud();
@@ -1052,17 +1013,7 @@
             let top = header.bottom - root.top + 8;
             let bottom = 8;
             const touch = this.overlay.classList.contains('has-touch');
-            const hint = this.overlay.querySelector('.mpg-hint');
-            const board = this.overlay.querySelector('.mpg-board');
-            if (board.offsetWidth && board.offsetHeight) {
-                top = Math.max(top, board.getBoundingClientRect().bottom - root.top + 8);
-            }
-            if (touch && hint.offsetWidth && hint.offsetHeight) {
-                hint.style.top = `${top}px`;
-                hint.style.bottom = 'auto';
-                top = Math.max(top, hint.getBoundingClientRect().bottom - root.top + 8);
-            }
-            const selectors = touch ? ['.mpg-stick', '.mpg-btns'] : ['.mpg-hint'];
+            const selectors = touch ? ['.mpg-stick', '.mpg-btns'] : [];
             for (const selector of selectors) {
                 const el = this.overlay.querySelector(selector);
                 const rect = el.getBoundingClientRect();
@@ -1463,26 +1414,24 @@
 
     // Side-on character. (x, y) is the top-left of the body box.
     const COSMETIC_PARTICLES = {
-        acc_rainbow_trail: { trail: true, shape: 'ribbon', colors: ['#fb7185', '#fbbf24', '#4ade80', '#38bdf8', '#c084fc'] },
-        acc_firefly_trail: { trail: true, shape: 'spark', colors: ['#fde047', '#bef264', '#86efac'] },
-        acc_stardust_trail: { trail: true, shape: 'diamond', colors: ['#e0e7ff', '#c4b5fd', '#7dd3fc'] },
-        acc_leaf_trail: { trail: true, shape: 'leaf', colors: ['#f97316', '#eab308', '#dc2626'] },
         acc_prism_effect: { shape: 'diamond', colors: ['#22d3ee', '#c084fc'] },
         acc_frost_effect: { shape: 'snowflake', colors: ['#bae6fd', '#60a5fa'] },
         acc_ember_effect: { shape: 'flame', colors: ['#fb923c', '#ef4444'] },
         acc_heart_effect: { shape: 'heart', colors: ['#fb7185', '#f472b6'] },
-        acc_dust_trail: { trail: true, shape: 'dust', colors: ['#cbd5e1', '#f0f7f2'] },
-        acc_confetti_trail: { trail: true, shape: 'confetti', colors: ['#fb7185', '#fbbf24', '#55c995', '#a78bfa'] },
-        acc_sakura_trail: { trail: true, shape: 'petal', colors: ['#fbcfe8', '#f9a8d4', '#f472b6'] },
-        acc_pixel_trail: { trail: true, shape: 'pixel', colors: ['#22d3ee', '#55c995', '#b6a0ff'] },
-        acc_meteor_trail: { trail: true, shape: 'meteor', colors: ['#fde68a', '#fb923c', '#fbbf24'] },
-        acc_aurora_trail: { trail: true, shape: 'ribbon', colors: ['#70e2c0', '#a99bff', '#67e8f9'] },
         acc_dew_effect: { shape: 'bubble', colors: ['#99f6e4', '#bae6fd'] },
         acc_leaf_effect: { shape: 'leaf', colors: ['#86efac', '#55c995', '#bef264'] },
         acc_snowflake_effect: { shape: 'snowflake', colors: ['#e0f2fe', '#7dd3fc'] },
         acc_electric_effect: { shape: 'bolt', colors: ['#fde047', '#38bdf8'] },
         acc_solar_effect: { shape: 'ray', colors: ['#fde68a', '#fbbf24', '#fb923c'] },
-        acc_vortex_effect: { shape: 'vortex', colors: ['#c084fc', '#22d3ee', '#f0abfc'] }
+        acc_vortex_effect: { shape: 'vortex', colors: ['#c084fc', '#22d3ee', '#f0abfc'] },
+        acc_cloud_effect: { shape: 'dust', colors: ['#cbd5e1', '#f0f7f2', '#bae6fd'] },
+        acc_confetti_effect: { shape: 'confetti', colors: ['#fb7185', '#fbbf24', '#55c995', '#a78bfa'] },
+        acc_sakura_effect: { shape: 'petal', colors: ['#fbcfe8', '#f9a8d4', '#f472b6'] },
+        acc_pixel_effect: { shape: 'pixel', colors: ['#22d3ee', '#55c995', '#b6a0ff'] },
+        acc_meteor_effect: { shape: 'meteor', colors: ['#fde68a', '#fb923c', '#fbbf24'] },
+        acc_aurora_effect: { shape: 'ribbon', colors: ['#70e2c0', '#a99bff', '#67e8f9'] },
+        acc_rune_effect: { shape: 'rune', colors: ['#c4b5fd', '#a78bfa', '#22d3ee'] },
+        acc_lunar_effect: { shape: 'crescent', colors: ['#e0e7ff', '#93c5fd', '#c4b5fd'] }
     };
 
     function drawCosmeticParticle(ctx, shape, size) {
@@ -1530,6 +1479,15 @@
             drawCosmeticParticle(ctx, 'spark', size * .45);
         } else if (shape === 'dust') {
             ctx.arc(0, 0, size, 0, TAU); ctx.fill();
+        } else if (shape === 'rune') {
+            ctx.moveTo(0, -size); ctx.lineTo(size, 0); ctx.lineTo(0, size); ctx.lineTo(-size, 0); ctx.closePath(); ctx.stroke();
+            ctx.moveTo(-size, -size); ctx.lineTo(size, size); ctx.moveTo(size, -size); ctx.lineTo(-size, size); ctx.stroke();
+            ctx.beginPath(); ctx.arc(0, 0, size * .2, 0, TAU); ctx.fill();
+        } else if (shape === 'crescent') {
+            ctx.moveTo(0, -size);
+            ctx.bezierCurveTo(-size * 1.8, -size, -size * 1.8, size, 0, size);
+            ctx.bezierCurveTo(-size * .65, size * .5, -size * .65, -size * .5, 0, -size);
+            ctx.fill();
         } else {
             const narrow = shape === 'spark' || shape === 'meteor' ? .25 : .6;
             for (let i = 0; i < 8; i++) {
@@ -1544,21 +1502,22 @@
         }
     }
 
-    function drawCosmeticParticles(ctx, id, cx, cy, rx, ry, time, face = 1) {
+    function drawCosmeticParticles(ctx, id, cx, cy, rx, ry, time) {
         const def = COSMETIC_PARTICLES[id];
         if (!def) return;
         ctx.save();
         const alpha = ctx.globalAlpha;
-        if (def.trail && def.shape === 'ribbon') {
+        if (def.shape === 'ribbon') {
             for (let band = 0; band < def.colors.length; band++) {
                 ctx.strokeStyle = def.colors[band];
                 ctx.lineWidth = Math.max(1, rx * .09);
                 ctx.globalAlpha = alpha * .65;
                 ctx.beginPath();
-                for (let i = 0; i <= 16; i++) {
-                    const t = i / 16;
-                    const x = cx - face * rx * (.4 + t * 1.8);
-                    const y = cy + Math.sin(time * 4 - t * 5 + band * .5) * ry * .3 + band * ry * .06;
+                for (let i = 0; i <= 32; i++) {
+                    const a = i / 32 * TAU;
+                    const wave = .8 + Math.sin(time * 3 + a * 3 + band) * .12 + band * .06;
+                    const x = cx + Math.cos(a) * rx * wave;
+                    const y = cy + Math.sin(a) * ry * wave;
                     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
                 }
                 ctx.stroke();
@@ -1588,17 +1547,16 @@
             }
         } else {
             for (let i = 0; i < 7; i++) {
-                const t = (time * .65 + i / 7) % 1;
                 const a = time * .8 + i * TAU / 7;
-                let x = def.trail ? cx - face * rx * (.45 + t * 1.65) : cx + Math.cos(a) * rx;
-                let y = def.trail ? cy + Math.sin(time * 4 + i * 1.7) * ry * .32 : cy + Math.sin(a) * ry;
+                let x = cx + Math.cos(a) * rx;
+                let y = cy + Math.sin(a) * ry;
                 if (def.shape === 'pixel') { x = Math.round(x / 3) * 3; y = Math.round(y / 3) * 3; }
                 ctx.save();
                 ctx.translate(x, y);
                 ctx.rotate(def.shape === 'pixel' ? 0 : def.shape === 'ray' ? a : time * 1.5 + i);
-                ctx.globalAlpha = alpha * (def.trail ? (1 - t) * .8 : .55 + Math.sin(time * 3 + i) * .25);
+                ctx.globalAlpha = alpha * (.55 + Math.sin(time * 3 + i) * .25);
                 ctx.fillStyle = def.colors[i % def.colors.length];
-                drawCosmeticParticle(ctx, def.shape, Math.max(1.5, rx * (def.shape === 'dust' ? .14 + t * .12 : .16)));
+                drawCosmeticParticle(ctx, def.shape, Math.max(1.5, rx * (def.shape === 'dust' ? .2 + Math.sin(time * 2 + i) * .05 : .16)));
                 ctx.restore();
             }
         }
@@ -1618,13 +1576,7 @@
         ctx.fillRect(x + 2, y + h - 2, w - 4, 3);
         if (c.skin?.mythic) drawMythicAura(ctx, cx, y + h * 0.45, Math.max(w, h) * 0.75, c.skin.mythic, time);
         if (c.acc === 'acc_aura') drawMythicAura(ctx, cx, y + h * 0.45, Math.max(w, h) * 0.85, ['#22d3ee', '#f43f5e'], time + 1.3);
-        if (c.acc === 'acc_comet') {
-            for (let i = 5; i > 0; i--) {
-                ctx.fillStyle = `rgba(${i % 2 ? '125,211,252' : '196,181,253'},${0.12 * (6 - i)})`;
-                ctx.beginPath(); ctx.arc(cx - face * (w * 0.4 + i * 6), y + h * 0.5 + Math.sin(time * 8 + i) * 2, 3 + (6 - i) * 0.9, 0, TAU); ctx.fill();
-            }
-        }
-        drawCosmeticParticles(ctx, c.acc, cx, y + h * .5, w * .8, h * .55, time, face);
+        drawCosmeticParticles(ctx, c.acc, cx, y + h * .5, w * .8, h * .55, time);
         if (c.acc === 'acc_wings') {
             ctx.fillStyle = 'rgba(226,232,240,.9)';
             const flap = Math.sin(time * 10) * 4;
@@ -1706,8 +1658,6 @@
         const orbit = { acc_hearts: '❤️', acc_stars: '⭐', acc_snow: '❄️' }[c.acc];
         if (orbit) { ctx.font = '9px serif'; ctx.textAlign = 'center'; for (let i = 0; i < 3; i++) { const a = time * 1.6 + i * 2.1; ctx.fillText(orbit, cx + Math.cos(a) * (w * 0.85), y + 20 + Math.sin(a) * 20); } }
         if (c.acc === 'acc_lei') { const lei = ['#f472b6', '#facc15', '#a78bfa', '#fb923c']; for (let i = 0; i < 6; i++) { ctx.fillStyle = lei[i % 4]; ctx.beginPath(); ctx.arc(x + 2 + i * (w - 4) / 5, y + 18 + bob + Math.sin(i / 5 * Math.PI) * 4, 2.6, 0, TAU); ctx.fill(); } }
-        if (c.acc === 'acc_notes' || c.acc === 'acc_leaves') { const glyph = c.acc === 'acc_notes' ? '♪' : '🍃'; ctx.font = c.acc === 'acc_notes' ? 'bold 11px sans-serif' : '9px serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#c084fc'; for (let i = 0; i < 3; i++) { const t = (time * 0.7 + i / 3) % 1; ctx.globalAlpha = alpha * (1 - t); ctx.fillText(glyph, cx + Math.sin(t * 6 + i) * (w * 0.8), y + 8 - t * 22); } ctx.globalAlpha = alpha; }
-        if (c.acc === 'acc_bubbles') { ctx.strokeStyle = 'rgba(125,211,252,.85)'; ctx.lineWidth = 1.2; for (let i = 0; i < 4; i++) { const t = (time * 0.5 + i / 4) % 1; ctx.beginPath(); ctx.arc(cx - face * (w * 0.5 + t * 10) + Math.sin(t * 9) * 3, y + h - 14 - t * 40, 2 + i % 2 * 1.5, 0, TAU); ctx.stroke(); } }
         if (c.acc === 'acc_glasses') { ctx.strokeStyle = '#111827'; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.arc(cx + face * 5, y + 11 + bob, 4, 0, TAU); ctx.moveTo(cx + face * 1, y + 11 + bob); ctx.lineTo(cx - face * 10, y + 9 + bob); ctx.stroke(); }
         if (c.acc === 'acc_mask') { ctx.fillStyle = '#7c3aed'; ctx.fillRect(cx - 10, y + 7 + bob, 20, 6); ctx.fillStyle = '#f8fafc'; ctx.fillRect(cx + face * 4 - 1.5, y + 8.5 + bob, 3, 3); }
         if (c.acc === 'acc_headband') { ctx.fillStyle = '#ef4444'; ctx.fillRect(cx - 11, y + 3 + bob, 22, 3.5); ctx.beginPath(); ctx.moveTo(cx - face * 10, y + 4 + bob); ctx.lineTo(cx - face * 19, y + 7 + bob + run * 2); ctx.lineTo(cx - face * 10, y + 7.5 + bob); ctx.fill(); }
@@ -1747,7 +1697,6 @@
         }
         ctx.save();
         ctx.rotate(aim);
-        if (c.acc === 'acc_comet') { for (let i = 4; i > 0; i--) { ctx.fillStyle = `rgba(125,211,252,${0.14 * (5 - i)})`; ctx.beginPath(); ctx.arc(-r * (0.9 + i * 0.45), Math.sin(time * 8 + i) * r * 0.15, r * (0.2 + (5 - i) * 0.07), 0, TAU); ctx.fill(); } }
         drawCosmeticParticles(ctx, c.acc, 0, 0, r * 1.45, r * 1.45, time);
         if (c.acc === 'acc_cape') { ctx.fillStyle = '#dc2626'; ctx.beginPath(); ctx.moveTo(-r * 0.2, -r * 0.9); ctx.lineTo(-r * 1.7, 0); ctx.lineTo(-r * 0.2, r * 0.9); ctx.fill(); }
         if (c.acc === 'acc_wings') { ctx.fillStyle = 'rgba(226,232,240,.9)'; const f = Math.sin(time * 10) * 0.12; ctx.beginPath(); ctx.ellipse(-r * 0.3, -r * 1.15, r * 0.35, r * (1 + f), 0.4, 0, TAU); ctx.ellipse(-r * 0.3, r * 1.15, r * 0.35, r * (1 + f), -0.4, 0, TAU); ctx.fill(); }
@@ -1778,7 +1727,7 @@
         if (c.acc === 'acc_lei') { const lei = ['#f472b6', '#facc15', '#a78bfa', '#fb923c']; for (let i = 0; i < 8; i++) { ctx.fillStyle = lei[i % 4]; ctx.beginPath(); ctx.arc(Math.cos(i / 8 * TAU) * r * 0.82, Math.sin(i / 8 * TAU) * r * 0.82, r * 0.15, 0, TAU); ctx.fill(); } }
         if (c.acc === 'acc_guitar') { ctx.fillStyle = '#92400e'; ctx.beginPath(); ctx.ellipse(-r * 1.15, r * 0.3, r * 0.4, r * 0.5, 0, 0, TAU); ctx.fill(); ctx.fillStyle = '#451a03'; ctx.fillRect(-r * 1.2, -r * 1.0, r * 0.12, r * 1.0); }
         if (c.acc === 'acc_lightning') { ctx.strokeStyle = 'rgba(250,204,21,' + (0.45 + Math.abs(Math.sin(time * 14)) * 0.5) + ')'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, r * 1.3, time * 4, time * 4 + 1.2); ctx.moveTo(Math.cos(time * 4 + 3) * r * 1.3, Math.sin(time * 4 + 3) * r * 1.3); ctx.arc(0, 0, r * 1.3, time * 4 + 3, time * 4 + 4); ctx.stroke(); }
-        const orbitTop = { acc_hearts: '❤️', acc_stars: '⭐', acc_snow: '❄️', acc_notes: '🎵', acc_leaves: '🍃', acc_bubbles: '🫧' }[c.acc];
+        const orbitTop = { acc_hearts: '❤️', acc_stars: '⭐', acc_snow: '❄️' }[c.acc];
         ctx.restore();
         if (orbitTop) { ctx.font = `${Math.round(r * 0.7)}px serif`; ctx.textAlign = 'center'; for (let i = 0; i < 3; i++) { const a = time * 1.6 + i * 2.1; ctx.fillText(orbitTop, Math.cos(a) * r * 1.5, Math.sin(a) * r * 1.5); } }
         ctx.globalAlpha = alpha;
@@ -1786,8 +1735,16 @@
         ctx.restore();
     }
 
+    function sceneZoom(session, w, h, base = 820) {
+        if (session.preview) return clamp(h / base, .6, 1.25);
+        const scale = Number.isFinite(session.scale) && session.scale > 0 ? session.scale : 1;
+        const cssW = w * scale, cssH = h * scale, landscape = cssW >= cssH;
+        const zoom = Math.min(cssW / (base * (landscape ? 1.2 : .7)), cssH / (base * (landscape ? .75 : 1)));
+        return clamp(zoom, .65, 1.15) / scale;
+    }
+
     window.StudBudArcade = {
         Session, BaseGame, Particles, Resource, games: {},
-        util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, accountTagMarkup, who, playerCosmetics, avatarUrl, drawHat, drawFigureSide, drawFigureTop }
+        util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, accountTagMarkup, who, playerCosmetics, avatarUrl, drawHat, drawFigureSide, drawFigureTop, sceneZoom }
     };
 })(window);

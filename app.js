@@ -2364,9 +2364,9 @@
             const owned = profile.owned_items || [];
             const tab = this.shopTab || 'boxes';
             const catalog = games.catalog.filter(item => !item.legacy && item.type !== 'pet');
-            const equippedBy = { skin: profile.equipped_skin, hat: profile.equipped_hat, accessory: profile.equipped_accessory, effect: profile.equipped_accessory, trail: profile.equipped_accessory, palette: profile.equipped_palette };
-            const tabs = [['boxes', 'Mystery boxes'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['effect', 'Auras'], ['trail', 'Trails'], ['palette', 'Colors'], ['inventory', 'Inventory']];
-            const slotKey = { skin: 'skin', hat: 'hat', accessory: 'acc', effect: 'acc', trail: 'acc' };
+            const equippedBy = { skin: profile.equipped_skin, hat: profile.equipped_hat, accessory: profile.equipped_accessory, effect: profile.equipped_accessory, palette: profile.equipped_palette };
+            const tabs = [['boxes', 'Mystery boxes'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['effect', 'Auras'], ['palette', 'Colors'], ['inventory', 'Inventory']];
+            const slotKey = { skin: 'skin', hat: 'hat', accessory: 'acc', effect: 'acc' };
             const itemCard = item => {
                 const has = owned.includes(item.id);
                 const equipped = equippedBy[item.type] === item.id;
@@ -2377,7 +2377,7 @@
                 else preview = this.multiplayerAvatarMarkup({ skin: '', hat: '', acc: '', [slotKey[item.type]]: item.id });
                 const price = item.price == null ? '' : ` · ${item.price} <i class="fas fa-coins"></i>`;
                 let button;
-                if (has && equipped && equippedBy[item.type] !== undefined) button = `<button type="button" class="ghost-btn" data-action="multiplayer-unequip" data-slot="${item.type === 'effect' || item.type === 'trail' ? 'accessory' : item.type}">Unequip</button>`;
+                if (has && equipped && equippedBy[item.type] !== undefined) button = `<button type="button" class="ghost-btn" data-action="multiplayer-unequip" data-slot="${item.type === 'effect' ? 'accessory' : item.type}">Unequip</button>`;
                 else if (has) button = `<button type="button" class="secondary-btn" data-action="multiplayer-equip" data-id="${this.escapeHTML(item.id)}">Equip</button>`;
                 else if (item.price == null) button = '<button type="button" class="secondary-btn" disabled>Box only</button>';
                 else button = `<button type="button" class="secondary-btn" data-action="multiplayer-buy" data-id="${this.escapeHTML(item.id)}" ${profile.coins < item.price ? 'disabled' : ''}>Buy${price}</button>`;
@@ -2407,9 +2407,9 @@
                         <div class="box-details"><strong>${this.escapeHTML(box.name)}</strong><small>${this.escapeHTML(box.odds)}</small></div>
                         <details class="box-odds"><summary>Drop chances</summary><span class="box-chances" aria-label="Rarity drop chances">${Object.entries(box.chances).map(([rarity, chance]) => `<span class="rarity-${rarity}">${rarity} <b>${chance}%</b></span>`).join('')}</span></details>
                         <button type="button" class="secondary-btn" data-action="multiplayer-mystery" data-id="${box.id}" ${profile.coins < box.price ? 'disabled' : ''}>Open · ${box.price} <i class="fas fa-coins"></i></button></article>`).join('')}
-                    <p class="settings-hint">Drop chances show the rarity roll for each box. Open boxes to collect characters, hats, accessories, auras, trails and colors.</p>`;
+                    <p class="settings-hint">Drop chances show the rarity roll for each box. Open boxes to collect characters, hats, accessories, auras and colors.</p>`;
                                 } else if (tab === 'inventory') {
-                                    const typeNames = { skin: 'Characters', hat: 'Hats', accessory: 'Accessories', effect: 'Auras', trail: 'Trails', palette: 'Colors' };
+                                    const typeNames = { skin: 'Characters', hat: 'Hats', accessory: 'Accessories', effect: 'Auras', palette: 'Colors' };
                                     const order = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
                                     const mine = games.catalog.filter(item => item.type !== 'pet' && owned.includes(item.id));
                                     const total = catalog.length;
@@ -2426,7 +2426,7 @@
                                     const items = catalog.filter(item => item.type === tab)
                                         .sort((a, b) => rank(a) - rank(b) || (a.price ?? Infinity) - (b.price ?? Infinity) || String(a.name).localeCompare(String(b.name)));
                                     const count = items.filter(item => owned.includes(item.id)).length;
-                                    const remove = slotKey[tab] ? `<button type="button" class="ghost-btn shop-unequip" data-action="multiplayer-unequip" data-slot="${tab === 'effect' || tab === 'trail' ? 'accessory' : tab}">Remove</button>` : '';
+                                    const remove = slotKey[tab] ? `<button type="button" class="ghost-btn shop-unequip" data-action="multiplayer-unequip" data-slot="${tab === 'effect' ? 'accessory' : tab}">Remove</button>` : '';
                                     const groups = [...new Set(items.map(item => item.rarity))].sort((a, b) => rank({ rarity: a }) - rank({ rarity: b }));
                                     body = `<h4 class="shop-category-title">${count} / ${items.length} collected ${remove}</h4>${groups.map(rarity => {
                                         const list = items.filter(item => item.rarity === rarity);
@@ -3294,7 +3294,6 @@
             if (this.multiplayerFrame) cancelAnimationFrame(this.multiplayerFrame);
             this.multiplayerFrame = null;
             if (this.livePreviews) this.livePreviews.clear();
-            this.recordedCityPreview?.video?.pause();
         }
 
         drawCharacter(context, x, y, color, scale, time, swinging = false, accessoryId = '', tool = '') {
@@ -3977,8 +3976,7 @@
         // Starts the preview runner at a random checkpoint; used at the start and each time the next checkpoint has been reached.
         skylineCut(demo, game, c) {
             const S = demo.sky, me = game.me, cps = game.checkpoints, R = this.skyRoute(game);
-            const pool = cps.map((cp, k) => k).filter(k => k !== S.start);
-            const k = pool[Math.floor(Math.random() * pool.length)];
+            const k = (S.start + 1) % cps.length;
             const n = R.list[R.cpNode[k]];
             S.start = k; S.reachT = undefined; S.cur = R.cpNode[k]; S.flagDone = true;
             this.skyPlace(game, S, n, c);
@@ -4371,65 +4369,13 @@
             this.moveBotToward(bot, dx, dy, speed, dt);
         }
 
-        drawRecordedCityPreview(canvas) {
-            let preview = this.recordedCityPreview;
-            if (!preview) {
-                const video = document.createElement('video');
-                if (!video.canPlayType?.('video/mp4')) {
-                    this.recordedCityPreview = { failed: true };
-                    console.info('[City preview] Recorded video is unsupported; using live gameplay.');
-                    return false;
-                }
-                const clips = ['start', 'checkpoint-1', 'checkpoint-2', 'checkpoint-3'];
-                preview = this.recordedCityPreview = { video, clips, index: 0, failed: false, starting: false };
-                video.muted = true;
-                video.playsInline = true;
-                video.preload = 'auto';
-                video.addEventListener('error', () => {
-                    preview.failed = true;
-                    video.pause();
-                    console.warn('[City preview] Recorded clip could not load; using live gameplay.', video.error);
-                });
-                video.addEventListener('ended', () => {
-                    preview.index = (preview.index + 1) % clips.length;
-                    video.src = `./assets/previews/city-escape/${clips[preview.index]}.mp4`;
-                });
-                video.src = `./assets/previews/city-escape/${clips[0]}.mp4`;
-            }
-            if (preview.failed) return false;
-            const video = preview.video;
-            if (video.paused && !preview.starting) {
-                preview.starting = true;
-                video.play().then(() => { preview.starting = false; }).catch(error => {
-                    preview.starting = false;
-                    if (error.name === 'AbortError') return;
-                    preview.failed = true;
-                    console.warn('[City preview] Recorded playback unavailable; using live gameplay.', error);
-                });
-            }
-            if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) return false;
-            const rect = canvas.getBoundingClientRect();
-            const dpr = Math.min(1.5, Math.max(1, window.devicePixelRatio || 1));
-            const width = Math.max(1, Math.round(rect.width * dpr)), height = Math.max(1, Math.round(rect.height * dpr));
-            if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
-            const context = canvas.getContext('2d');
-            context.setTransform(1, 0, 0, 1, 0, 0);
-            context.fillStyle = '#111827';
-            context.fillRect(0, 0, width, height);
-            const scale = Math.min(width / video.videoWidth, height / video.videoHeight);
-            const w = video.videoWidth * scale, h = video.videoHeight * scale;
-            context.drawImage(video, (width - w) / 2, (height - h) / 2, w, h);
-            return true;
-        }
-
         drawLivePreview(canvas, mode, now) {
             const A = window.StudBudArcade;
             if (!canvas || !A?.games?.[mode] || !this.canvasIsVisible(canvas)) return false;
             A.previewDepth = (A.previewDepth || 0) + 1;
             try {
-                if (mode === 'skyline' && this.drawRecordedCityPreview(canvas)) return true;
                 const rect = canvas.getBoundingClientRect();
-                const dpr = Math.min(1.5, Math.max(1, window.devicePixelRatio || 1));
+                const dpr = Math.min(rect.width < 400 ? 1 : 1.5, Math.max(1, window.devicePixelRatio || 1));
                 const width = Math.max(1, Math.round(rect.width * dpr)), height = Math.max(1, Math.round(rect.height * dpr));
                 if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
                 const context = canvas.getContext('2d');
@@ -4458,8 +4404,8 @@
                     };
                     const cosmetics = this.profileCosmetics(this.multiplayerProfile || {});
                     const base = {
-                        preview: true, seed: 4242, local: { id: 'demo', color: '#38bdf8', nickname: 'You', cos: { skin: cosmetics.skin, hat: cosmetics.hat, acc: cosmetics.acc } }, user: { id: 'demo' }, t: 0, startedAt: Date.now(), done: false, finishMs: 0, over: false, paused: false, question: null, score: 0,
-                        vw: viewWidth, vh: viewHeight, canvas: mockCanvas, overlay: mockOverlay, roster: new Map(), cards: [], keys: hold, hudBounds() { return { x: 12, y: 12, w: Math.max(1, this.vw - 24), h: Math.max(1, this.vh - 24) }; }, mouse: { x: width / 2, y: height / 2, down: false, pressed: false, touchAt: 0 },
+                        preview: true, stickJumpHeld: false, seed: 4242, local: { id: 'demo', color: '#38bdf8', nickname: 'You', cos: { skin: cosmetics.skin, hat: cosmetics.hat, acc: cosmetics.acc } }, user: { id: 'demo' }, t: 0, startedAt: Date.now(), done: false, finishMs: 0, over: false, paused: false, question: null, score: 0,
+                        vw: viewWidth, vh: viewHeight, scale: 1, canvas: mockCanvas, overlay: mockOverlay, roster: new Map(), cards: [], keys: hold, hudBounds() { return { x: 12, y: 12, w: Math.max(1, this.vw - 24), h: Math.max(1, this.vh - 24) }; }, mouse: { x: width / 2, y: height / 2, down: false, pressed: false, touchAt: 0 },
                         down: (...keys) => keys.some(key => hold.has(key)), pressed: (...keys) => keys.some(key => tap.has(key)),
                         axis: () => ({ x: (hold.has('KeyD') || hold.has('ArrowRight') ? 1 : 0) - (hold.has('KeyA') || hold.has('ArrowLeft') ? 1 : 0), y: (hold.has('KeyS') || hold.has('ArrowDown') ? 1 : 0) - (hold.has('KeyW') || hold.has('ArrowUp') ? 1 : 0) }),
                         spend: () => true, rewardAmount: () => 20, refill: noop, sfx: noop, toast: noop, ask: () => false, remoteList: () => [], standings() { return [this.local, ...this.remoteList()].map(player => ({ id: player.id, n: player.nickname || player.name || player.id, color: player.color || '#94a3b8', s: Number(player.score) || 0 })); }, emit: event => demo?.onEmit?.(event), send: noop, setGoal: noop, addScore: noop,
@@ -4475,7 +4421,7 @@
                     base.roster.set('demo', base.local);
                     [['b1', 'Nova', '#f472b6'], ['b2', 'Kite', '#facc15'], ['b3', 'Rook', '#4ade80']].forEach(([id, nickname, color]) => base.roster.set(id, { id, nickname, color, cos: {} }));
                     const game = new A.games[mode](session); session.game = game;
-                    demo = { mode, session, game, hold, tap, last: now, clock: 0, meId: 'demo' };
+                    demo = { mode, session, game, hold, tap, last: now, clock: 0, accumulator: 0, meId: 'demo' };
                     demo.bots = this.initPreviewBots(demo, mode, game);
                     this.livePreviews.set(canvas, demo);
                 }
@@ -4484,15 +4430,22 @@
                 session.local.cos = { skin: cosmetics.skin, hat: cosmetics.hat, acc: cosmetics.acc };
                 session.remoteList = () => demo.bots;
                 session.remotes = new Map(demo.bots.map(bot => [bot.id, bot]));
-                const dt = Math.min(0.05, Math.max(0.001, (now - demo.last) / 1000));
-                demo.last = now; demo.clock += dt; session.t += dt; session.startedAt = Date.now() - demo.clock * 1000;
-                hold.clear(); tap.clear(); session.mouse.down = false; session.mouse.pressed = false;
+                const elapsed = Math.min(0.1, Math.max(0, (now - demo.last) / 1000));
+                demo.last = now;
                 session.vw = viewWidth; session.vh = viewHeight;
-                this.previewControls(demo, dt);
-                if (game.res && game.res.value < 35) game.res.value = game.res.max;
-                if (mode === 'skyline' && game.finished && !demo.endAt) demo.endAt = demo.clock;
+                demo.accumulator += elapsed;
+                const dt = 1 / 120;
+                while (demo.accumulator + 1e-9 >= dt) {
+                    demo.accumulator = Math.max(0, demo.accumulator - dt);
+                    demo.clock += dt; session.t += dt; session.startedAt = Date.now() - demo.clock * 1000;
+                    hold.clear(); tap.clear(); session.mouse.down = false; session.mouse.pressed = false;
+                    this.previewControls(demo, dt);
+                    if (game.res && game.res.value < 35) game.res.value = game.res.max;
+                    game.update(dt);
+                    if (mode === 'skyline' && game.finished && !demo.endAt) demo.endAt = demo.clock;
+                }
                 if (mode === 'skyline' && demo.endAt && demo.clock - demo.endAt > 1.5) this.livePreviews.delete(canvas);
-                game.update(dt);
+                game.drawDt = elapsed;
                 context.setTransform(1, 0, 0, 1, 0, 0);
                 context.save();
                 try {

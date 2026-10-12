@@ -124,9 +124,10 @@ function controlsFor(mode) {
     const status = new Element();
     const details = new Element();
     const hint = new Element();
+    const board = new Element();
     const toggle = new Element();
     const elements = { '.mpg-touch': pad, '.mpg-stick-zone': zone, '.mpg-status': status,
-        '.mpg-match-details': details, '.mpg-hint': hint, '.mpg-hud-toggle': toggle };
+        '.mpg-match-details': details, '.mpg-hint': hint, '.mpg-board': board, '.mpg-hud-toggle': toggle };
     overlay.querySelector = selector => selector === '.mpg-qbtn'
         ? status.children.find(el => el.className?.includes('mpg-qbtn'))
         : elements[selector];
@@ -135,18 +136,25 @@ function controlsFor(mode) {
     session.overlay = overlay;
     session.bindTouch(overlay);
     session.applyTouchLayout();
-    return { session, stick, knob, zone, buttons, status, details, hint, toggle };
+    return { session, stick, knob, zone, buttons, status, details, hint, board, toggle };
 }
 
 for (const mode of ['skyline', 'duel']) {
     const { session, stick, knob, zone, buttons } = controlsFor(mode);
-    assert.equal(session.stickHorizontal, true, `${mode} must have horizontal-only movement`);
-    assert.match(stick.attributes['aria-label'], /left or right/);
+    assert.equal(session.stickPlatform, true, `${mode} has guarded platformer input`);
+    assert.match(stick.attributes['aria-label'], /steeply up/);
     for (const surface of [stick, zone]) {
         surface.emit('pointerdown', 50, 50);
         surface.emit('pointermove', 50, -100);
-        assert.equal(session.keys.size, 0, 'pushing straight up must not jump');
-        assert.match(knob.style.transform, /^translate\(-?\d+px, 0px\)$/, 'knob stays on horizontal rail');
+        assert.equal(session.keys.size, 0, 'joystick jumping must not generate keyboard jump edges');
+        assert.equal(session.stickJumpHeld, true, 'a firm upward push requests grounded jumping');
+        assert.ok(Number(knob.style.transform.match(/, (-?[\d.]+)px/)[1]) < -40, 'normal joystick retains vertical motion');
+        surface.emit('pointermove', 50, 25);
+        assert.equal(session.stickJumpHeld, false, 'less than 65% deflection cannot jump');
+        surface.emit('pointermove', 100, 20);
+        assert.equal(session.stickJumpHeld, false, 'shallow upward diagonals cannot jump');
+        surface.emit('pointermove', 70, 10);
+        assert.equal(session.stickJumpHeld, true, 'a push above 60 degrees requests grounded jumping');
         surface.emit('pointermove', 100, -100);
         assert.equal(session.keys.has('KeyD'), true);
         assert.equal(session.keys.has('KeyW'), false);
@@ -157,6 +165,7 @@ for (const mode of ['skyline', 'duel']) {
         assert.equal(session.keys.has('KeyD'), false);
         surface.emit('pointercancel');
         assert.equal(session.keys.size, 0, 'cancel releases joystick movement');
+        assert.equal(session.stickJumpHeld, false, 'cancel releases automatic grounded jumping');
         session.justPressed.clear();
     }
     const jump = buttons.children.find(button => button.dataset.k === 'Space');
@@ -172,7 +181,7 @@ for (const mode of ['skyline', 'duel']) {
 
 for (const mode of ['miner', 'shooter', 'sports', 'market', 'river']) {
     const { session, stick } = controlsFor(mode);
-    assert.equal(session.stickHorizontal, false, `${mode} retains vertical movement`);
+    assert.equal(session.stickGroundJump, false, `${mode} retains vertical movement`);
     stick.emit('pointerdown', 50, 0);
     assert.equal(session.keys.has('KeyW'), true, `${mode} retains up input`);
     stick.emit('pointermove', 50, 100);
@@ -181,16 +190,20 @@ for (const mode of ['miner', 'shooter', 'sports', 'market', 'river']) {
     assert.equal(session.keys.size, 0);
 }
 
-const { session, details, hint, toggle, status } = controlsFor('skyline');
+const { session, details, hint, board, toggle, status } = controlsFor('skyline');
 for (const collapsed of [true, false, true]) {
     session.setHudCollapsed(collapsed);
     assert.equal(session.overlay.classList.contains('hud-collapsed'), collapsed);
     assert.equal(details.hidden, collapsed);
     assert.equal(hint.hidden, collapsed);
+    assert.equal(board.hidden, collapsed, 'HUD also controls standings');
     assert.equal(toggle.attributes['aria-expanded'], String(!collapsed));
-    assert.equal(toggle.attributes['aria-label'], collapsed ? 'Show match details' : 'Hide match details');
+    assert.equal(toggle.attributes['aria-label'], collapsed ? 'Show match details and standings' : 'Hide match details and standings');
     assert.equal(status.children[0].hidden, undefined, 'refill button remains available');
 }
+const engineSource = fs.readFileSync(path.join(__dirname, '..', 'multiplayerEngine.js'), 'utf8');
+assert.doesNotMatch(engineSource, /mpg-menu-toggle|mpg-menu-panel|mpg-board-toggle|board-open/);
+assert.match(engineSource, /aria-controls="mpg-match-details mpg-controls-hint mpg-match-standings"/);
 const duelButtons = controlsFor('duel').buttons.children;
 assert.equal(duelButtons.find(button => button.textContent === 'Guard').dataset.k, 'KeyS');
 assert.equal(duelButtons.find(button => button.textContent === 'Heavy').dataset.k, 'ShiftLeft');
@@ -198,4 +211,4 @@ assert.equal(duelButtons.find(button => button.textContent === 'Dodge').dataset.
 const soccerButtons = controlsFor('sports').buttons.children;
 assert.equal(soccerButtons.find(button => button.textContent === 'Sprint').dataset.k, 'Space');
 assert.equal(soccerButtons.find(button => button.textContent === 'Power kick').dataset.k, 'ShiftLeft');
-console.log('SQL constraint naming, desktop/mobile HUD defaults, horizontal joysticks, Jump buttons, nearby action bindings, and HUD disclosure passed.');
+console.log('SQL constraint naming, desktop/mobile HUD defaults, steep-angle joysticks, Jump buttons, nearby action bindings, and unified HUD disclosure passed.');

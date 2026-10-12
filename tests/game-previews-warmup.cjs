@@ -70,48 +70,80 @@ const beforeClears = clears;
 const originalControls = app.previewControls;
 app.previewControls = () => { throw new Error('Simulated preview failure'); };
 sandbox.console.warn = (...args) => errors.push(args);
-assert.equal(app.drawLivePreview(failedCanvas, 'miner', 1016), false);
+assert.equal(app.drawLivePreview(failedCanvas, 'miner', 1016), true, 'new preview renders its initial state before the first physics step');
+assert.equal(app.drawLivePreview(failedCanvas, 'miner', 1032), false);
 assert.ok(clears >= beforeClears + 2, 'mode switch and failure must clear the previous game');
 assert.equal(messages.at(-1), 'Game preview unavailable');
 assert.equal(app.livePreviews.has(failedCanvas), false);
 app.previewControls = originalControls;
-assert.equal(app.drawLivePreview(failedCanvas, 'miner', 1032), true, 'preview can recover after a failure');
+assert.equal(app.drawLivePreview(failedCanvas, 'miner', 1048), true, 'preview can recover after a failure');
 console.log('Mining card and selected previews passed.');
 
-const createElement = sandbox.document.createElement;
-const videoEvents = new Map();
-let pauses = 0;
-const recordedVideo = {
-    canPlayType: () => 'probably', paused: true, readyState: 2, videoWidth: 1280, videoHeight: 720,
-    addEventListener: (name, callback) => videoEvents.set(name, callback),
-    play() { this.paused = false; return Promise.resolve(); },
-    pause() { this.paused = true; pauses++; }
-};
-sandbox.document.createElement = tag => tag === 'video' ? recordedVideo : createElement(tag);
-const recordedApp = Object.create(sandbox.window.TestApp.prototype);
-recordedApp.canvasIsVisible = () => true;
-assert.equal(recordedApp.drawLivePreview(canvas(200, 112), 'skyline', 1000), true);
-assert.match(recordedVideo.src, /start\.mp4$/);
-assert.equal(recordedVideo.muted, true);
-assert.equal(recordedVideo.playsInline, true);
-for (const clip of ['checkpoint-1', 'checkpoint-2', 'checkpoint-3', 'start']) {
-    videoEvents.get('ended')();
-    assert.ok(recordedVideo.src.endsWith(`${clip}.mp4`));
+const previewPositions = [];
+for (const fps of [30, 60, 120]) {
+    const c = canvas(360, 200);
+    app.drawLivePreview(c, 'skyline', 1000);
+    const demo = app.livePreviews.get(c);
+    for (let frame = 1; frame <= fps * 3; frame++) app.drawLivePreview(c, 'skyline', 1000 + frame * 1000 / fps);
+    assert.ok(Math.abs(demo.clock - 3) < 1e-8, 'preview simulation keeps real elapsed time at each refresh rate');
+    assert.ok(Math.abs(demo.game.drawDt - 1 / fps) < 1e-8, 'camera interpolation uses render time, not the physics substep');
+    previewPositions.push([demo.game.me.x, demo.game.me.y]);
 }
-recordedApp.stopMultiplayerAnimation();
-assert.equal(pauses, 1);
-recordedVideo.readyState = 0;
-assert.equal(recordedApp.drawRecordedCityPreview(canvas(360, 240)), false, 'loading clips must allow the live fallback');
-videoEvents.get('error')();
-assert.equal(recordedApp.drawRecordedCityPreview(canvas(360, 240)), false, 'failed clips must allow the live fallback');
-sandbox.document.createElement = createElement;
-console.log('Recorded City Escape playlist, muted playback, pause, loading, and failure fallbacks passed.');
+for (const position of previewPositions) {
+    assert.ok(Math.hypot(position[0] - previewPositions[0][0], position[1] - previewPositions[0][1]) < .01, 'fixed-step parkour previews follow the same route at 30/60/120 FPS');
+}
+assert.doesNotMatch(source, /drawRecordedCityPreview|recordedCityPreview/);
+console.log('Live parkour previews have consistent physics and camera timing at 30, 60 and 120 FPS.');
 
 const demoFor = mode => {
     const c = canvas(900, 500);
     assert.equal(app.drawLivePreview(c, mode, 1000), true);
     return app.livePreviews.get(c);
 };
+for (const mode of ['skyline', 'duel']) {
+    const { session, game, hold, tap } = demoFor(mode);
+    hold.clear(); tap.clear();
+    session.axis = () => ({ x: 0, y: 0 });
+    session.mouse.pressed = false;
+    session.stickJumpHeld = true;
+    session.spend = amount => game.res.spend(amount);
+    game.res.value = 1000;
+    game.solids = [{ x: -1000, y: 0, w: 4000, h: 40 }];
+    Object.assign(game.me, { x: 400, y: -game.me.h, vx: 0, vy: 0, onGround: true, ground: null });
+    game.stun = game.respawn = game.hitlag = 0;
+    game.update(1 / 120);
+    assert.ok(game.me.vy < -700, `${mode} firm upward joystick jumps from the ground`);
+    for (let i = 0; i < 20; i++) game.update(1 / 120);
+    assert.equal(game.airJumps, 1, `${mode} held joystick does not spend the air jump`);
+    Object.assign(game.me, { y: -game.me.h, vy: 0, onGround: true });
+    game.update(1 / 120);
+    assert.ok(game.me.vy < -700, `${mode} still-held joystick jumps again after landing`);
+    assert.equal(game.airJumps, 1);
+    tap.add('Space');
+    game.update(1 / 120);
+    assert.equal(game.airJumps, 0, `${mode} deliberate Jump button still triggers an air jump`);
+}
+for (const mode of Object.keys(A.games)) {
+    for (const [width, height] of [[320, 568], [390, 844], [844, 390], [2000, 300], [1366, 768], [2560, 1440]]) {
+        const { session, game } = demoFor(mode);
+        session.preview = false;
+        session.scale = A.util.clamp(height / 720, .65, 1.25);
+        session.vw = width / session.scale; session.vh = height / session.scale;
+        session.overlay.classList.contains = () => width < 900;
+        game.draw(context, session.vw, session.vh);
+        const zoom = mode === 'duel' ? game.view.z : game.zoom;
+        if (Number.isFinite(zoom)) {
+            const physicalZoom = zoom * session.scale;
+            assert.ok(physicalZoom >= .65 - 1e-9 && physicalZoom <= 1.15 + 1e-9, `${mode} has readable, bounded world zoom at ${width}x${height}: ${physicalZoom}`);
+        }
+        if (game.mouseWorld && typeof game.mouseWorld === 'function') {
+            session.mouse.x = session.vw / 2; session.mouse.y = session.vh / 2;
+            const target = game.mouseWorld();
+            assert.ok(Number.isFinite(target.x) && Number.isFinite(target.y), `${mode} camera-to-input mapping stays finite`);
+        }
+    }
+}
+console.log('Grounded joystick auto-jump, deliberate air jumps, and readable scene zoom across all modes passed.');
 for (const [code, expected] of [['KeyS', 'guard'], ['KeyE', 'swing'], ['ShiftLeft', 'heavy'], ['KeyF', 'dodge']]) {
     const { session, game, hold, tap } = demoFor('duel');
     hold.clear(); tap.clear();
@@ -157,6 +189,107 @@ for (const action of ['pass', 'power']) {
     assert.ok(Math.hypot(game.ball.vx, game.ball.vy) > (action === 'power' ? 900 : 400), `${action} applies the expected impulse`);
 }
 console.log('Nearby King of the Hill actions and Soccer pass/charged power-kick input passed.');
+const realDate = sandbox.Date;
+let ballNow = 100000;
+sandbox.Date = class extends Date { static now() { return ballNow; } };
+const soccerPeer = id => {
+    const { session, game } = demoFor('sports');
+    session.user = { id };
+    session.roster = new Map([['a', {}], ['b', {}]]);
+    session.practice = session.preview = false;
+    session.remotes = new Map();
+    session.remoteList = () => [];
+    session.mouse.pressed = false;
+    session.axis = () => ({ x: 0, y: 0 });
+    session.down = session.pressed = () => false;
+    const events = [];
+    let sends = 0;
+    session.emit = event => events.push(event);
+    session.sendState = () => sends++;
+    game.teamsOn = true; game.teamIds = ['a', 'b']; game.myTeam = id === 'a' ? 0 : 1;
+    game.freeze = 0; game.me.x = 300; game.me.y = 200;
+    game.pads = [];
+    Object.assign(game.ball, { x: 1200, y: 550, vx: 0, vy: 0 });
+    return { session, game, events, sends: () => sends };
+};
+const left = soccerPeer('a'), right = soccerPeer('b');
+const advanceSoccer = (peer, seconds) => {
+    for (let i = 0; i < Math.round(seconds * 120); i++) peer.game.update(1 / 120);
+};
+for (let pass = 0; pass < 12; pass++) {
+    const sender = pass % 2 ? right : left, receiver = pass % 2 ? left : right;
+    sender.game.ball.vx = pass % 2 ? -650 : 650;
+    sender.game.ball.vy = pass % 3 ? 80 : -80;
+    sender.game.lastTouch = sender.session.user.id;
+    sender.game.sendKick();
+    const event = sender.events.at(-1);
+    assert.equal(sender.sends(), Math.floor(pass / 2) + 1, 'contacts flush immediately, not on the 100ms timer');
+    const transit = [.05, .15, .3][pass % 3];
+    ballNow += transit * 1000;
+    advanceSoccer(sender, transit);
+    receiver.game.ball.vx += 120;
+    receiver.game.ball.x -= 20;
+    receiver.game.onEvent(event, { id: sender.session.user.id });
+    assert.ok(Math.hypot(sender.game.ball.x - receiver.game.ball.x, sender.game.ball.y - receiver.game.ball.y) < .01, 'remote kick accounts for variable 50–300ms transit using the same physics');
+    assert.ok(Math.hypot(sender.game.ball.vx - receiver.game.ball.vx, sender.game.ball.vy - receiver.game.ball.vy) < .01, 'remote kick replaces divergent velocity rather than stacking impulses');
+    const beforeDuplicate = JSON.stringify(receiver.game.ball);
+    receiver.game.onEvent(event, { id: sender.session.user.id });
+    assert.equal(JSON.stringify(receiver.game.ball), beforeDuplicate, 'duplicate kick does not apply twice');
+    assert.ok(!receiver.game.ex().ball, 'non-owner does not broadcast a competing ball state');
+    const snapshot = sender.game.ex();
+    receiver.game.ball.x += 15; receiver.game.ball.vx += 40;
+    receiver.game.onState(snapshot, { id: sender.session.user.id });
+    assert.ok(Math.abs(receiver.game.ball.x - sender.game.ball.x) < .01, 'owner heartbeat corrects drift even without a new kick');
+    assert.ok(Math.abs(receiver.game.ballSpin - sender.game.ballSpin) < .01, 'snapshots do not double-count ball rotation during latency projection');
+    const corrected = JSON.stringify(receiver.game.ball);
+    receiver.game.onState(snapshot, { id: sender.session.user.id });
+    receiver.game.onEvent(event, { id: sender.session.user.id });
+    assert.equal(JSON.stringify(receiver.game.ball), corrected, 'older events and duplicate snapshots cannot rewind the ball');
+    advanceSoccer(sender, .1); advanceSoccer(receiver, .1); ballNow += 100;
+    assert.ok(Math.abs(sender.game.ball.x - receiver.game.ball.x) < .01, 'visual smoothing never changes physical trajectory');
+}
+const simultaneousA = soccerPeer('a'), simultaneousB = soccerPeer('b');
+simultaneousA.game.ball.vx = 500; simultaneousB.game.ball.vx = -700;
+simultaneousA.game.sendKick(); simultaneousB.game.sendKick();
+simultaneousA.game.onEvent(simultaneousB.events.at(-1), { id: 'b' });
+simultaneousB.game.onEvent(simultaneousA.events.at(-1), { id: 'a' });
+assert.equal(simultaneousA.game.ballOwner, 'b');
+assert.equal(simultaneousB.game.ballOwner, 'b');
+assert.equal(simultaneousA.game.ball.vx, simultaneousB.game.ball.vx, 'simultaneous touches resolve identically on both clients');
+const staleBeforeReset = simultaneousB.game.ex();
+simultaneousA.game.kickoff();
+simultaneousA.game.onState(staleBeforeReset, { id: 'b' });
+assert.equal(simultaneousA.game.ball.vx, 0, 'pre-goal snapshot cannot undo a kickoff');
+simultaneousA.game.freeze = 1;
+simultaneousB.game.sendKick();
+simultaneousA.game.onEvent(simultaneousB.events.at(-1), { id: 'b' });
+assert.equal(simultaneousA.game.ball.vx, 0, 'goal freeze rejects incoming kicks');
+simultaneousA.game.freeze = 0;
+simultaneousA.game.onEvent({ ...simultaneousB.events.at(-1), vx: NaN }, { id: 'b' });
+assert.equal(simultaneousA.game.ball.vx, 0, 'malformed realtime state cannot poison ball physics');
+const bounceSender = soccerPeer('a'), bounceReceiver = soccerPeer('b');
+Object.assign(bounceSender.game.ball, { y: 25, vx: 400, vy: -600 });
+bounceSender.game.sendKick();
+ballNow += 200; advanceSoccer(bounceSender, .2);
+bounceReceiver.game.onEvent(bounceSender.events.at(-1), { id: 'a' });
+assert.ok(Math.abs(bounceSender.game.ball.y - bounceReceiver.game.ball.y) < .01, 'latency projection includes pitch-wall bounces');
+assert.ok(bounceReceiver.game.ball.vy > 0);
+const transportSender = soccerPeer('a'), transportReceiver = soccerPeer('b');
+transportSender.session.connected = true;
+transportSender.session.outbox = [];
+transportSender.session.emit = A.Session.prototype.emit;
+transportSender.session.sendState = A.Session.prototype.sendState;
+transportSender.session.send = packet => A.Session.prototype.receive.call(transportReceiver.session, packet);
+transportSender.game.ball.vx = 600;
+transportSender.game.lastTouch = 'a';
+transportSender.game.sendKick();
+assert.equal(transportReceiver.game.ball.vx, 600, 'actual session packets deliver kick events and owner snapshots');
+transportSender.game.update(.1);
+transportReceiver.game.ball.vx = -100;
+transportSender.session.sendState();
+assert.equal(transportReceiver.game.ball.vx, transportSender.game.ball.vx, 'actual periodic state packets reconcile ball motion');
+sandbox.Date = realDate;
+console.log('Soccer alternating passes, latency, owner snapshots, duplicate/reordered updates, simultaneous touches, resets, and wall bounces passed.');
 const lava = demoFor('miner').game;
 lava.T.fill(1); lava.F.fill(0); lava.D.fill(0); lava.flowing.clear();
 for (let x = 2; x <= 40; x++) {
@@ -226,7 +359,7 @@ console.log('Admin pause freezes gameplay and retains stationary bots after the 
 const catalog = sandbox.window.StudBudCommunityGames.catalog;
 const skins = catalog.filter(item => item.type === 'skin');
 for (const skin of skins) {
-    for (const item of catalog.filter(item => ['hat', 'accessory', 'effect', 'trail'].includes(item.type))) {
+    for (const item of catalog.filter(item => ['hat', 'accessory', 'effect'].includes(item.type))) {
         const cosmetics = item.type === 'hat' ? { skin: skin.id, hat: item.id } : { skin: skin.id, accessory: item.id };
         A.util.drawFigureSide(context, cosmetics, 0, 0, 26, 42, 1, 0, false);
         A.util.drawFigureTop(context, cosmetics, 100, 100, 15, Math.PI / 2, 0);
@@ -236,7 +369,8 @@ console.log('Every catalog skin/hat/accessory combination renders in side and to
 
 const sql = fs.readFileSync(path.join(root, 'supabase-setup.sql'), 'utf8');
 const addedParticles = [
-    'acc_dust_trail', 'acc_confetti_trail', 'acc_sakura_trail', 'acc_pixel_trail', 'acc_meteor_trail', 'acc_aurora_trail',
+    'acc_cloud_effect', 'acc_confetti_effect', 'acc_sakura_effect', 'acc_pixel_effect',
+    'acc_meteor_effect', 'acc_aurora_effect', 'acc_rune_effect', 'acc_lunar_effect',
     'acc_dew_effect', 'acc_leaf_effect', 'acc_snowflake_effect', 'acc_electric_effect', 'acc_solar_effect', 'acc_vortex_effect'
 ];
 const rarityOrder = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
@@ -247,10 +381,10 @@ for (const id of addedParticles) {
     const basePrice = Number(tuple[1]);
     assert.equal(item.price, Math.round(basePrice * 2.5 / 5) * 5, `${id} price matches server`);
     assert.equal(item.rarity, sandbox.window.StudBudCommunityGames.constructor.rarityForPrice(basePrice));
-    assert.ok(item.type === 'effect' || item.type === 'trail');
+    assert.equal(item.type, 'effect');
     assert.ok(item.description);
 }
-for (const type of ['effect', 'trail']) {
+for (const type of ['effect']) {
     const box = sandbox.window.StudBudCommunityGames.constructor.boxes.find(entry => entry.id === type);
     if (type === 'effect') assert.equal(box.name, 'Auras Box', 'aura box keeps its compatible effect ID with the new visible name');
     assert.equal(box.price, 200);
@@ -263,7 +397,27 @@ for (const type of ['effect', 'trail']) {
     assert.ok(suffixPool.every(item => item.type === type), `${type} suffix cannot select another category`);
     assert.ok(sql.includes(`s.id like 'acc\\_%\\_${type}'`), `${type} server pool matches item suffix`);
 }
-assert.match(sql, /elsif p_box in \('effect', 'trail'\) then\s+v_cost := 200/);
+assert.match(sql, /elsif p_box = 'effect' then\s+v_cost := 200/);
+const retiredTrails = [
+    'acc_leaves', 'acc_notes', 'acc_bubbles', 'acc_comet',
+    'acc_rainbow_trail', 'acc_firefly_trail', 'acc_stardust_trail', 'acc_leaf_trail',
+    'acc_dust_trail', 'acc_confetti_trail', 'acc_sakura_trail', 'acc_pixel_trail',
+    'acc_meteor_trail', 'acc_aurora_trail'
+];
+assert.equal(catalog.filter(item => item.type === 'effect').length, 22);
+assert.ok(!catalog.some(item => item.type === 'trail' || retiredTrails.includes(item.id)));
+assert.ok(!sandbox.window.StudBudCommunityGames.constructor.boxes.some(box => box.id === 'trail'));
+assert.doesNotMatch(source, /\['trail',|trail: 'Trails'|item\.type === 'trail'/);
+assert.doesNotMatch(sql, /p_box = 'trail'|p_box in \('effect', 'trail'\)/);
+const retirement = sql.match(/with retired\(ids\) as \(values \(array\[([\s\S]*?)\]::text\[\]\)\)([\s\S]*?);/);
+assert.ok(retirement, 'server provides an idempotent trail cleanup');
+assert.deepEqual([...retirement[1].matchAll(/'([^']+)'/g)].map(match => match[1]), retiredTrails);
+assert.match(retirement[2], /where not \(item = any\(r\.ids\)\)\s+order by position/);
+assert.match(retirement[2], /equipped_accessory = case when p\.equipped_accessory = any\(r\.ids\)\s+then '' else p\.equipped_accessory end/);
+assert.match(retirement[2], /where p\.owned_items && r\.ids or p\.equipped_accessory = any\(r\.ids\)/);
+assert.doesNotMatch(retirement[2], /coins\s*=|equipped_(hat|skin|pet|palette|avatar)\s*=/);
+for (const id of retiredTrails) assert.doesNotMatch(sql, new RegExp(`\\('${id}',\\s*\\d+\\)`), `${id} cannot be bought or dropped`);
+assert.match(sql, /raise exception 'Trails have been retired/);
 assert.match(source, /\['effect', 'Auras'\]/, 'cosmetic tab displays Auras');
 assert.match(source, /effect: 'Auras'/, 'inventory category displays Auras');
 assert.doesNotMatch(source, /\['effect', 'Effects'\]|effect: 'Effects'/);
@@ -298,6 +452,11 @@ const particleTrace = (id, top, time, face = 1) => {
 };
 for (const top of [false, true]) {
     const baseline = particleTrace('', top, 0);
+    for (const id of retiredTrails) {
+        for (const time of [0, 1.7, 13.2]) {
+            assert.equal(particleTrace(id, top, time), particleTrace('', top, time), `${id} no longer renders from stale equipment`);
+        }
+    }
     const shapes = new Set();
     for (const id of addedParticles) {
         const frame = particleTrace(id, top, 0);
