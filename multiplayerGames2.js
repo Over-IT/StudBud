@@ -43,8 +43,12 @@
             this.moving = Math.hypot(me.vx, me.vy) > 30;
             if (this.moving && !this.aimLocked) me.aim = Math.atan2(me.vy, me.vx);
             const k = Math.min(1, dt * 6);
-            this.cam.x += (me.x - this.cam.x) * k;
-            this.cam.y += (me.y - this.cam.y) * k;
+            const touch = s.overlay?.classList?.contains('has-touch');
+            const look = !s.preview && s.mouse.active && (!touch || s.mouse.down) ? .2 : 0;
+            const lookX = clamp((s.mouse.x - s.vw / 2) / (this.zoom || 1) * look, -140, 140);
+            const lookY = clamp((s.mouse.y - s.vh / 2) / (this.zoom || 1) * look, -100, 100);
+            this.cam.x += (me.x + lookX - this.cam.x) * k;
+            this.cam.y += (me.y + lookY - this.cam.y) * k;
             this.particles.update(dt);
         }
 
@@ -115,7 +119,7 @@
         8: { name: 'Ruby', value: 90, color: '#fb7185' },
         9: { name: 'Diamond', value: 160, color: '#fef08a' }
     };
-    const LAVA_DOWN_INTERVAL = 0.3, LAVA_SIDE_INTERVAL = 1.2, LAVA_SIDE_REACH = 7;
+    const LAVA_DOWN_INTERVAL = 0.6, LAVA_SIDE_INTERVAL = 2, LAVA_SIDE_REACH = 4;
 
     class Miner extends Arena {
         constructor(s) {
@@ -410,7 +414,6 @@
             const r0 = Math.max(0, Math.floor(this.y0 / TS)), r1 = Math.min(ROWS - 1, Math.ceil(this.y1 / TS));
             const strata = ['#30221c', '#33231a', '#35231b', '#38241d', '#38231d', '#39231d'];
             const oreColor = Object.fromEntries(Object.entries(CRYSTALS).map(([type, crystal]) => [type, crystal.color]));
-            const oreName = Object.fromEntries(Object.entries(CRYSTALS).map(([type, crystal]) => [type, crystal.name.toUpperCase()]));
             for (let ty = Math.max(4, r0); ty <= r1; ty++) for (let tx = c0; tx <= c1; tx++) {
                 const idx = ty * COLS + tx, type = this.T[idx], x = tx * TS, y = ty * TS;
                 const color = strata[Math.min(strata.length - 1, Math.floor((ty - 4) / 8))];
@@ -441,6 +444,10 @@
                     continue;
                 }
                 if (type === 6) {
+                    if (!s.preview && Math.hypot(x + TS / 2 - (me.x + me.w / 2), y + TS / 2 - (me.y + me.h / 2)) > TS * 5) {
+                        ctx.fillStyle = '#30251e'; ctx.fillRect(x, y, TS, TS);
+                        continue;
+                    }
                     ctx.fillStyle = '#21140f'; ctx.fillRect(x, y, TS, TS);
                     const pulse = 0.76 + Math.sin(this.anim * 4 + idx) * 0.12;
                     const glow = ctx.createRadialGradient(x + 24, y + 24, 3, x + 24, y + 24, 38);
@@ -477,7 +484,9 @@
                     ctx.fillStyle = cc; ctx.beginPath(); ctx.moveTo(cx, y + 7); ctx.lineTo(x + 39, cy); ctx.lineTo(cx, y + 41); ctx.lineTo(x + 9, cy); ctx.closePath(); ctx.fill();
                     ctx.fillStyle = 'rgba(255,255,255,.72)'; ctx.beginPath(); ctx.moveTo(cx, y + 8); ctx.lineTo(x + 22, cy); ctx.lineTo(x + 11, cy); ctx.closePath(); ctx.fill();
                     if ((hash & 3) === 0) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx + Math.sin(this.anim * 4 + idx) * 7, y + 4); ctx.lineTo(cx, y + 11); ctx.lineTo(cx + 4, y + 7); ctx.stroke(); }
-                    if ((hash & 15) === 2) { ctx.fillStyle = 'rgba(255,255,255,.78)'; ctx.font = '700 8px system-ui'; ctx.textAlign = 'center'; ctx.fillText(oreName[type], cx, y + 46); }
+                    ctx.fillStyle = '#071018'; ctx.fillRect(x + 2, y + 33, TS - 4, 14);
+                    ctx.fillStyle = '#f8fafc'; ctx.font = '700 9px system-ui'; ctx.textAlign = 'center';
+                    ctx.fillText(`${CRYSTALS[type].value} pts`, cx, y + 44);
                 }
             }
 
@@ -1390,7 +1399,7 @@
             this.kickCd -= dt; this.contactCd = Math.max(0, this.contactCd - dt); this.pinchCd = Math.max(0, this.pinchCd - dt); this.turbo = Math.max(0, this.turbo - dt);
             const wasFrozen = this.freeze > 0;
             this.freeze = Math.max(0, this.freeze - dt);
-            const wantsSprint = s.down('Space') && this.moving;
+            const wantsSprint = s.down('ShiftLeft', 'ShiftRight') && this.moving;
             const free = this.turbo > 0;
             const winded = this.moving && !free && !this.res.has(1);
             const sprint = wantsSprint && (free || this.res.has(1));
@@ -1433,7 +1442,7 @@
                             if (Math.abs(b.vx - pre.vx) + Math.abs(b.vy - pre.vy) > 12) s.sfx('act', 90);
                         }
                     }
-                    const held = s.down('ShiftLeft', 'ShiftRight'), mousePass = s.mouse.pressed;
+                    const held = s.down('Space'), mousePass = s.mouse.pressed;
                     const tapped = mousePass || s.pressed('KeyE');
                     if (mousePass) this.kickAim = this.mouseWorld();
                     if (held && !this.kickHeld) this.kickCharge = 0;
@@ -1482,8 +1491,8 @@
         goalText() {
             return this.teamsOn ? `Blue ${this.teamTd[0]} – ${this.teamTd[1]} Red · You ${this.td} goal${this.td === 1 ? '' : 's'}` : `${this.td} goal${this.td === 1 ? '' : 's'}`;
         }
-        touchLayout() { return { stick: true, buttons: [{ k: 'Space', label: 'Sprint' }, { k: 'ShiftLeft', label: 'Power kick', cls: 'main' }] }; }
-        hint() { return `${this.teamsOn ? `${this.myTeam === 0 ? 'Blue' : 'Red'} team · ` : ''}WASD dribble · Space sprint / steal · E or click pass · hold Shift, release for a power kick (4–15 energy) · Q recharge`; }
+        touchLayout() { return { stick: true, buttons: [{ k: 'ShiftLeft', label: 'Sprint' }, { k: 'Space', label: 'Power kick', cls: 'main' }] }; }
+        hint() { return `${this.teamsOn ? `${this.myTeam === 0 ? 'Blue' : 'Red'} team · ` : ''}WASD dribble · Shift sprint · E or click pass · hold Space, release for a power kick (4–15 energy) · Q recharge`; }
         touchHint() { return 'Joystick to dribble · Tap toward a pass · Hold Power kick, release to shoot · Sprint to steal'; }
 
         draw(ctx, w, h) {

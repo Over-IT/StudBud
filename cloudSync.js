@@ -16,6 +16,54 @@
             this.syncRevision = 0;
             this.syncPromise = null;
             this.signOutHandling = null;
+            this.lastSnapshot = null;
+            this.restoringSnapshot = false;
+        }
+
+        static mergeData(base, local, remote, field = 'account') {
+            const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+            if (field === 'account.state.gameMetrics' && local && remote && !equal(local, base) && !equal(remote, base)) {
+                const xp = equal(local.xp, base?.xp) ? remote.xp : equal(remote.xp, base?.xp) ? local.xp
+                    : Number(local.xp) + Number(remote.xp) - Number(base?.xp || 0);
+                if (!Number.isFinite(xp) || xp < 0) throw new Error('Your saved study XP is invalid. Export a backup before reloading.');
+                return { ...remote, ...local, xp, level: Math.floor(xp / 500) + 1,
+                    streakDays: Math.max(local.streakDays || 0, remote.streakDays || 0),
+                    lastStudyDate: [local.lastStudyDate, remote.lastStudyDate].filter(Boolean).sort().at(-1) || null };
+            }
+            if (equal(local, base)) return remote;
+            if (equal(remote, base) || equal(local, remote)) return local;
+            if (Array.isArray(local) && Array.isArray(remote)) {
+                const key = [...local, ...remote].every(item => item && typeof item === 'object' && (item.id || item.code))
+                    ? item => item.id || item.code : null;
+                if (key) {
+                    const b = new Map((base || []).map(item => [key(item), item]));
+                    const l = new Map(local.map(item => [key(item), item]));
+                    const r = new Map(remote.map(item => [key(item), item]));
+                    return [...new Set([...r.keys(), ...l.keys()])].map(id =>
+                        this.mergeData(b.get(id), l.get(id), r.get(id), `${field}.${id}`)).filter(item => item !== undefined);
+                }
+            }
+            if (local && remote && !Array.isArray(local) && !Array.isArray(remote)
+                && typeof local === 'object' && typeof remote === 'object') {
+                const merged = {};
+                for (const key of new Set([...Object.keys(base || {}), ...Object.keys(local), ...Object.keys(remote)])) {
+                    if (key === 'exportedAt') { merged[key] = local[key]; continue; }
+                    const value = this.mergeData(base?.[key], local[key], remote[key], `${field}.${key}`);
+                    if (value !== undefined) merged[key] = value;
+                }
+                if (field === 'account' && local.state?.gameMetrics?.xp !== base?.state?.gameMetrics?.xp
+                    && remote.state?.gameMetrics?.xp !== base?.state?.gameMetrics?.xp) {
+                    const previous = new Set((base?.studyHistory || []).map(session => session.id));
+                    const remoteIds = new Set((remote.studyHistory || []).map(session => session.id));
+                    const sharedXp = (local.studyHistory || []).filter(session => !previous.has(session.id) && remoteIds.has(session.id))
+                        .reduce((xp, session) => xp + Math.max(1, Math.round((session.durationSec || 60) / 60)) * 10, 0);
+                    merged.state.gameMetrics.xp -= sharedXp;
+                    if (merged.state.gameMetrics.xp < 0) throw new Error('Your study history and XP disagree. Export a backup before reloading.');
+                    merged.state.gameMetrics.level = Math.floor(merged.state.gameMetrics.xp / 500) + 1;
+                }
+                return merged;
+            }
+            throw new Error(`Both devices changed ${field}. Export a backup before reloading to resolve the conflict; neither version was overwritten.`);
         }
 
         async bootstrap() {
@@ -197,7 +245,11 @@
             if (error) throw new Error(`Could not load your cloud data: ${error.message}`);
             if (version !== this.accountVersion) return;
 
-            this.initialSnapshot = row?.data || null;
+            const remoteSnapshot = row?.data || null;
+            const previousAccount = localStorage.getItem('STUDBUD_CLOUD_ACCOUNT_ID');
+            const savedBase = previousAccount === user.id ? localStorage.getItem('STUDBUD_CLOUD_SYNC_BASE') : null;
+            this.initialSnapshot = savedBase ? null : remoteSnapshot;
+            this.lastSnapshot = remoteSnapshot ? JSON.parse(JSON.stringify(remoteSnapshot)) : null;
             this.user = user;
             if (this.initialSnapshot) {
                 if (!this.appStarted) {
@@ -217,12 +269,19 @@
                 }
             }
             if (version !== this.accountVersion) return;
+            if (savedBase && remoteSnapshot) {
+                const local = JSON.parse(await window.NexusApp.AppState.exportAppState());
+                const merged = StudBudCloudSync.mergeData(JSON.parse(savedBase), local, remoteSnapshot);
+                await window.NexusApp.restoreCloudSnapshot(merged);
+                this.initialSnapshot = remoteSnapshot;
+            }
 
             localStorage.setItem('STUDBUD_CLOUD_ACCOUNT_ID', user.id);
             const username = user.user_metadata?.username || user.email;
             const accountName = document.getElementById('account-name');
             if (accountName) accountName.textContent = username;
             this.bindStateEvents();
+            await window.NexusApp.recoverOwnedCommunityDecks();
             this.accountReady = true;
             document.getElementById('auth-screen')?.classList.add('hidden');
             document.getElementById('app-container')?.classList.remove('hidden');
@@ -261,10 +320,16 @@
             const syncEvents = ['state:changed', 'state:restored', 'courses:updated', 'assignments:updated', 'flashcards:updated', 'study:recorded', 'metrics:updated'];
             syncEvents.forEach(eventName => window.NexusApp.EventBus.on(eventName, () => this.queueSync()));
             this.stateEventsBound = true;
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'hidden') {
+                    this.syncNow().catch(error => this.setCloudStatus(this.friendlyAuthError(error, 'Could not sync before leaving.'), true));
+                } else if (this.accountReady) this.queueSync();
+            });
+            window.addEventListener('online', () => this.queueSync());
         }
 
         queueSync() {
-            if (!this.accountReady || !this.user || !window.NexusApp?.AppState) return;
+            if (this.restoringSnapshot || !this.accountReady || !this.user || !window.NexusApp?.AppState) return;
             this.syncRevision++;
             window.clearTimeout(this.syncTimer);
             this.setCloudStatus('Syncing to your account…');
@@ -287,12 +352,35 @@
                     completedRevision = this.syncRevision;
                     const backup = JSON.parse(await window.NexusApp.AppState.exportAppState());
                     if (!this.accountReady || this.user?.id !== userId || this.accountVersion !== version) return;
-                    const { error } = await this.client.from('studbud_user_data').upsert({
-                        user_id: userId,
-                        data: backup,
-                        updated_at: new Date().toISOString()
-                    }, { onConflict: 'user_id' });
-                    if (error) throw new Error(error.message);
+                    let saved = false;
+                    for (let attempt = 0; attempt < 5 && !saved; attempt++) {
+                        const { data: current, error: readError } = await this.client.from('studbud_user_data')
+                            .select('data,updated_at').eq('user_id', userId).maybeSingle();
+                        if (readError) throw new Error(readError.message);
+                        const merged = current ? StudBudCloudSync.mergeData(this.lastSnapshot || {}, backup, current.data) : backup;
+                        if (!this.accountReady || this.user?.id !== userId || this.accountVersion !== version) return;
+                        const nextWrite = Math.max(Date.now(), current ? Date.parse(current.updated_at) + 1 : 0);
+                        const row = { user_id: userId, data: merged, updated_at: new Date(nextWrite).toISOString() };
+                        const { data, error } = current
+                            ? await this.client.from('studbud_user_data').update(row).eq('user_id', userId).eq('updated_at', current.updated_at).select('user_id')
+                            : await this.client.from('studbud_user_data').insert(row).select('user_id');
+                        if (error && error.code !== '23505') throw new Error(error.message);
+                        if (error || !data?.length) continue;
+                        this.lastSnapshot = backup;
+                        localStorage.setItem('STUDBUD_CLOUD_SYNC_BASE', JSON.stringify(backup));
+                        saved = true;
+                        if (completedRevision === this.syncRevision
+                            && JSON.stringify({ ...merged, exportedAt: '' }) !== JSON.stringify({ ...backup, exportedAt: '' })) {
+                            this.restoringSnapshot = true;
+                            try {
+                                await window.NexusApp.restoreCloudSnapshot(merged);
+                                this.lastSnapshot = merged;
+                                localStorage.setItem('STUDBUD_CLOUD_SYNC_BASE', JSON.stringify(merged));
+                            }
+                            finally { this.restoringSnapshot = false; }
+                        }
+                    }
+                    if (!saved) throw new Error('Your account changed on another device repeatedly. Please try syncing again.');
                     if (!this.accountReady || this.user?.id !== userId || this.accountVersion !== version) return;
                 } while (completedRevision !== this.syncRevision);
                 this.setCloudStatus(`Synced to your account · ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`);
@@ -310,11 +398,18 @@
 
         async clearDeviceCache() {
             localStorage.removeItem('PCHS_NEXUS_STATE_V1');
+            localStorage.removeItem('STUDBUD_CLOUD_SYNC_BASE');
             await Promise.all(['flashcards', 'studyHistory', 'gameMetrics'].map(store => window.NexusApp.clearLocalStore(store)));
         }
 
         async signOut() {
             if (!window.confirm('Sign out of StudBud on this device? Your synced account data will remain in the cloud.')) return;
+            try { await this.syncNow(); }
+            catch (error) {
+                console.error('[StudBudCloud] Could not save before sign-out:', error);
+                this.setCloudStatus(this.friendlyAuthError(error, 'Save failed. Please export a backup before signing out.'), true);
+                return;
+            }
             const { error } = await this.client.auth.signOut();
             if (error) {
                 console.error('[StudBudCloud] Sign-out failed:', error);

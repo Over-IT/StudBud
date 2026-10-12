@@ -134,7 +134,7 @@ for (const mode of Object.keys(A.games)) {
         const zoom = mode === 'duel' ? game.view.z : game.zoom;
         if (Number.isFinite(zoom)) {
             const physicalZoom = zoom * session.scale;
-            assert.ok(physicalZoom >= .65 - 1e-9 && physicalZoom <= 1.15 + 1e-9, `${mode} has readable, bounded world zoom at ${width}x${height}: ${physicalZoom}`);
+            assert.ok(physicalZoom >= .65 - 1e-9 && physicalZoom <= 1.6 + 1e-9, `${mode} has readable, bounded world zoom at ${width}x${height}: ${physicalZoom}`);
         }
         if (game.mouseWorld && typeof game.mouseWorld === 'function') {
             session.mouse.x = session.vw / 2; session.mouse.y = session.vh / 2;
@@ -143,8 +143,20 @@ for (const mode of Object.keys(A.games)) {
         }
     }
 }
-console.log('Grounded joystick auto-jump, deliberate air jumps, and readable scene zoom across all modes passed.');
-for (const [code, expected] of [['KeyS', 'guard'], ['KeyE', 'swing'], ['ShiftLeft', 'heavy'], ['KeyF', 'dodge']]) {
+for (const [width, height] of [[320, 568], [844, 390], [1366, 768], [2560, 1440]]) {
+    const { session, game } = demoFor('shooter');
+    session.preview = false;
+    session.scale = A.util.clamp(height / 720, .65, 1.25);
+    session.vw = width / session.scale; session.vh = height / session.scale;
+    game.weapon = 'rail';
+    const sniper = game.cameraZoom();
+    game.weapon = 'blaster';
+    const normal = game.cameraZoom();
+    game.weapon = 'shotgun';
+    assert.ok(sniper < normal && normal < game.cameraZoom(), `sniper sees farther and shotgun is closer at ${width}x${height}`);
+}
+console.log('Grounded joystick auto-jump, deliberate air jumps, and readable weapon-specific scene zoom across all modes passed.');
+for (const [code, expected] of [['KeyS', 'guard'], ['KeyE', 'swing'], ['KeyR', 'heavy'], ['ShiftLeft', 'dodge'], ['KeyF', 'dodge']]) {
     const { session, game, hold, tap } = demoFor('duel');
     hold.clear(); tap.clear();
     session.mouse.pressed = false;
@@ -154,8 +166,8 @@ for (const [code, expected] of [['KeyS', 'guard'], ['KeyE', 'swing'], ['ShiftLef
     game.update(1 / 60);
     if (expected === 'guard') assert.equal(game.guard, true, 'S guards');
     if (expected === 'swing') assert.ok(game.swingT > 0 && !game.swingHeavy, 'E swings');
-    if (expected === 'heavy') assert.ok(game.swingT > 0 && game.swingHeavy && !game.guard, 'Shift performs a heavy swing, not guard');
-    if (expected === 'dodge') assert.ok(game.dodge > 0, 'F dodges');
+    if (expected === 'heavy') assert.ok(game.swingT > 0 && game.swingHeavy && !game.guard, 'R performs a heavy swing, not guard');
+    if (expected === 'dodge') assert.ok(game.dodge > 0, 'Shift or F dodges');
 }
 for (const action of ['pass', 'power']) {
     const { session, game, hold, tap } = demoFor('sports');
@@ -172,14 +184,14 @@ for (const action of ['pass', 'power']) {
     const before = game.res.value;
     if (action === 'pass') tap.add('KeyE');
     else {
-        hold.add('ShiftLeft');
+        hold.add('Space');
         for (let i = 0; i < 48; i++) {
             game.ball.x = game.me.x + 45;
             game.ball.y = game.me.y;
             game.update(1 / 60);
         }
-        assert.ok(game.kickCharge >= .99, 'holding Shift charges the power kick');
-        hold.delete('ShiftLeft');
+        assert.ok(game.kickCharge >= .99, 'holding Space charges the power kick');
+        hold.delete('Space');
         game.ball.x = game.me.x + 45;
         game.ball.y = game.me.y;
     }
@@ -296,20 +308,20 @@ for (let x = 2; x <= 40; x++) {
     lava.T[10 * 70 + x] = 0;
     for (let y = 12; y <= 20; y++) lava.T[y * 70 + x] = 0;
 }
-lava.T[11 * 70 + 16] = 0;
+lava.T[11 * 70 + 14] = 0;
 lava.T[10 * 70 + 10] = 6; lava.flowing.add(10 * 70 + 10);
 lava.flowClock = lava.flowSideClock = 0;
 lava.flowLava(0.3);
 assert.equal(lava.tile(11, 10), 0, 'sideways lava waits for its slower interval');
 for (let i = 0; i < 300; i++) lava.flowLava(0.1);
-assert.equal(lava.tile(3, 10), 6, 'source spreads seven blocks sideways');
-assert.equal(lava.tile(2, 10), 0, 'source cannot spread beyond seven blocks');
-assert.equal(lava.F[10 * 70 + 3], 7);
-assert.equal(lava.tile(16, 20), 6, 'lava falls all the way to the lower floor');
-assert.equal(lava.F[20 * 70 + 16], 0, 'falling resets lateral reach');
-assert.equal(lava.D[15 * 70 + 16], 1, 'falling columns remain full-height');
-assert.equal(lava.tile(23, 20), 6, 'landed waterfall has a fresh sideways allowance');
-assert.equal(lava.tile(24, 20), 0);
+assert.equal(lava.tile(6, 10), 6, 'source spreads four blocks sideways');
+assert.equal(lava.tile(5, 10), 0, 'source cannot spread beyond four blocks');
+assert.equal(lava.F[10 * 70 + 6], 4);
+assert.equal(lava.tile(14, 20), 6, 'lava falls all the way to the lower floor');
+assert.equal(lava.F[20 * 70 + 14], 0, 'falling resets lateral reach');
+assert.equal(lava.D[15 * 70 + 14], 1, 'falling columns remain full-height');
+assert.equal(lava.tile(18, 20), 6, 'landed waterfall has a fresh sideways allowance');
+assert.equal(lava.tile(19, 20), 0);
 assert.equal(lava.D[10 * 70 + 10], 0, 'source stays a source rather than a falling block');
 assert.equal(lava.tile(15, 15), 0, 'falling lava does not spread sideways in midair');
 console.log('Source, lateral reach, falling columns, and waterfall lava regressions passed.');
@@ -404,7 +416,7 @@ const retiredTrails = [
     'acc_dust_trail', 'acc_confetti_trail', 'acc_sakura_trail', 'acc_pixel_trail',
     'acc_meteor_trail', 'acc_aurora_trail'
 ];
-assert.equal(catalog.filter(item => item.type === 'effect').length, 22);
+assert.equal(catalog.filter(item => item.type === 'effect').length, 24);
 assert.ok(!catalog.some(item => item.type === 'trail' || retiredTrails.includes(item.id)));
 assert.ok(!sandbox.window.StudBudCommunityGames.constructor.boxes.some(box => box.id === 'trail'));
 assert.doesNotMatch(source, /\['trail',|trail: 'Trails'|item\.type === 'trail'/);
@@ -421,7 +433,11 @@ assert.match(sql, /raise exception 'Trails have been retired/);
 assert.match(source, /\['effect', 'Auras'\]/, 'cosmetic tab displays Auras');
 assert.match(source, /effect: 'Auras'/, 'inventory category displays Auras');
 assert.doesNotMatch(source, /\['effect', 'Effects'\]|effect: 'Effects'/);
-assert.match(sql, /v_roll < 0\.25[\s\S]*v_roll < 0\.60[\s\S]*v_roll < 0\.85[\s\S]*v_roll < 0\.97[\s\S]*v_roll < 0\.99/);
+for (const box of sandbox.window.StudBudCommunityGames.constructor.boxes) {
+    const weights = sql.match(new RegExp(`when '${box.id}' then '(\\{[^']+\\})'::jsonb`));
+    assert.ok(weights, `${box.name} has explicit server odds`);
+    assert.deepEqual(JSON.parse(weights[1]), JSON.parse(JSON.stringify(box.chances)), `${box.name} client/server odds agree`);
+}
 
 const particleTrace = (id, top, time, face = 1) => {
     const commands = [], stack = [];
@@ -574,7 +590,7 @@ const questionBox = {
     querySelector: () => ({ textContent: '' })
 };
 const questionSession = Object.assign(Object.create(A.Session.prototype), {
-    preview: false, countdown: 0, answered: 0, correct: 0,
+    preview: false, countdown: 0, answered: 0, correct: 0, questionHistory: [],
     cards: [{ front: 'One plus one?', back: 'Two' }, { front: 'One plus two?', back: 'Three' }],
     overlay: { querySelector: () => questionBox }, canvas: { focus: noop },
     showQuestion: () => true, sfx: noop, toast: noop

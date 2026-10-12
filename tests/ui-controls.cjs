@@ -36,12 +36,17 @@ class Element {
     }
 }
 
+const windowHandlers = new Map();
 const sandbox = {
     console, performance, Date, Math, Map, Set,
     navigator: { maxTouchPoints: 1 },
     requestAnimationFrame() {},
     document: { addEventListener() {}, createElement: () => new Element() },
-    window: { matchMedia: () => ({ matches: true }) }
+    window: {
+        matchMedia: () => ({ matches: true }),
+        addEventListener(name, handler) { if (!windowHandlers.has(name)) windowHandlers.set(name, new Set()); windowHandlers.get(name).add(handler); },
+        removeEventListener(name, handler) { windowHandlers.get(name)?.delete(handler); }
+    }
 };
 vm.createContext(sandbox);
 for (const file of ['multiplayerEngine.js', 'multiplayerGames.js', 'multiplayerGames2.js', 'multiplayerGames3.js']) {
@@ -139,6 +144,19 @@ function controlsFor(mode) {
     return { session, stick, knob, zone, buttons, status, details, hint, board, toggle };
 }
 
+{
+    const { session, stick } = controlsFor('sports');
+    stick.setPointerCapture = () => { throw new Error('Pointer capture unavailable'); };
+    stick.emit('pointerdown', 50, 50);
+    assert.ok(windowHandlers.get('pointermove').has(session.stickHandlers.move));
+    session.stickHandlers.move({ pointerId: 1, clientX: 150, clientY: 50, preventDefault() {} });
+    assert.ok(session.keys.has('KeyD'), 'window movement survives unavailable capture and leaving the joystick');
+    session.stickHandlers.end({ pointerId: 2 });
+    assert.ok(session.keys.has('KeyD'), 'another finger cannot release the movement pointer');
+    session.stickHandlers.end({ pointerId: 1 });
+    assert.equal(session.keys.size, 0, 'global release cannot leave movement stuck');
+}
+
 for (const mode of ['skyline', 'duel']) {
     const { session, stick, knob, zone, buttons } = controlsFor(mode);
     assert.equal(session.stickPlatform, true, `${mode} has guarded platformer input`);
@@ -206,9 +224,9 @@ assert.doesNotMatch(engineSource, /mpg-menu-toggle|mpg-menu-panel|mpg-board-togg
 assert.match(engineSource, /aria-controls="mpg-match-details mpg-controls-hint mpg-match-standings"/);
 const duelButtons = controlsFor('duel').buttons.children;
 assert.equal(duelButtons.find(button => button.textContent === 'Guard').dataset.k, 'KeyS');
-assert.equal(duelButtons.find(button => button.textContent === 'Heavy').dataset.k, 'ShiftLeft');
-assert.equal(duelButtons.find(button => button.textContent === 'Dodge').dataset.k, 'KeyF');
+assert.equal(duelButtons.find(button => button.textContent === 'Heavy').dataset.k, 'KeyR');
+assert.equal(duelButtons.find(button => button.textContent === 'Dodge').dataset.k, 'ShiftLeft');
 const soccerButtons = controlsFor('sports').buttons.children;
-assert.equal(soccerButtons.find(button => button.textContent === 'Sprint').dataset.k, 'Space');
-assert.equal(soccerButtons.find(button => button.textContent === 'Power kick').dataset.k, 'ShiftLeft');
+assert.equal(soccerButtons.find(button => button.textContent === 'Sprint').dataset.k, 'ShiftLeft');
+assert.equal(soccerButtons.find(button => button.textContent === 'Power kick').dataset.k, 'Space');
 console.log('SQL constraint naming, desktop/mobile HUD defaults, steep-angle joysticks, Jump buttons, nearby action bindings, and unified HUD disclosure passed.');

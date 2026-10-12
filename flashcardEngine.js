@@ -479,8 +479,8 @@
     /**
      * Anki-style study session. Queue order:
      *   1. learning/relearning cards whose step is due now
-     *   2. due review cards (oldest due first, limited by reviewsPerDay)
-     *   3. new cards in deck order (limited by newCardsPerDay)
+     *   2. shuffled due review cards (limited by reviewsPerDay)
+     *   3. shuffled new cards (limited by newCardsPerDay)
      *   4. learning cards due within the learn-ahead window, or (learnAheadAll, default) the next learning card early
      * Answered learning cards are re-queued automatically when their next step falls today.
      */
@@ -517,7 +517,14 @@
                 } else if (dueAt < endOfToday || this.includeAll) this.learning.push({ card, dueAt, position });
             });
 
-            this.reviews.sort((a, b) => SM2Engine.dayNumber(a.dueAt, this.cfg) - SM2Engine.dayNumber(b.dueAt, this.cfg) || a.tiebreak - b.tiebreak);
+            const shuffle = queue => {
+                for (let i = queue.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [queue[i], queue[j]] = [queue[j], queue[i]];
+                }
+            };
+            shuffle(this.reviews);
+            shuffle(this.newCards);
             this.ahead.sort((a, b) => a.weight - b.weight);
             if (!this.includeAll) {
                 this.reviews = this.reviews.slice(0, Math.max(0, this.cfg.reviewsPerDay - this.reviewsDone));

@@ -1383,7 +1383,7 @@
                 this.res.drain(dt * 16);
                 if (this.res.value <= 0) { this.guard = false; this.shieldBreak = 0.8; s.sfx('click'); }
             }
-            if (this.stun <= 0 && this.dodgeCd <= 0 && s.pressed('KeyF')) {
+            if (this.stun <= 0 && this.dodgeCd <= 0 && s.pressed('ShiftLeft', 'ShiftRight', 'KeyF')) {
                 this.dodge = 0.18; this.dodgeCd = 0.85; this.invuln = Math.max(this.invuln, 0.16);
                 me.vx = (ax || me.face || 1) * 760; me.vy *= 0.45; this.guard = false; s.sfx('dash');
             }
@@ -1410,8 +1410,8 @@
                 if (this.coyote > 0) { me.vy = -900; this.coyote = 0; s.sfx('jump'); }
                 else if (this.airJumps > 0) { me.vy = -820; this.airJumps--; s.sfx('jump'); this.particles.burst(me.x + 17, me.y + 56, '#bae6fd', 8, 120, 0.3, 4); }
             }
-            if (this.stun <= 0 && !this.guard && this.dodge <= 0 && this.swingCd <= 0 && (s.mouse.pressed || s.pressed('KeyE', 'ShiftLeft', 'ShiftRight')) && s.spend(8)) {
-                const heavy = s.pressed('ShiftLeft', 'ShiftRight');
+            if (this.stun <= 0 && !this.guard && this.dodge <= 0 && this.swingCd <= 0 && (s.mouse.pressed || s.pressed('KeyE', 'KeyR')) && s.spend(8)) {
+                const heavy = s.pressed('KeyR');
                 this.swingHeavy = heavy;
                 this.swingT = heavy ? 0.28 : 0.22; this.swingCd = heavy ? 0.78 : 0.52; s.sfx('swing'); this.swingAim = this.aim;
                 s.emit({ k: 'sw', x: Math.round(me.x + 17), y: Math.round(me.y + 28), d: me.face, a: +this.aim.toFixed(2), p: (this.hammer > 0 ? 1.6 : 1) * (heavy ? 1.2 : 1), h: heavy ? 1 : 0, by: s.user.id, c: (this.dmg | 0) });
@@ -1547,8 +1547,8 @@
         }
 
         goalText() { return `${this.kos} KOs · ${this.falls} KOs against · ${Math.round(this.dmg)}% damage`; }
-        touchLayout() { return { stick: true, platform: true, buttons: [{ k: 'Space', label: 'Jump' }, { k: 'KeyS', label: 'Guard' }, { k: 'ShiftLeft', label: 'Heavy', small: true }, { k: 'KeyF', label: 'Dodge' }] }; }
-        hint() { return 'A/D move · Space jump twice · S guard · E or click swing · Shift heavy · F dodge · Down fast-fall / drop through ledges · Q recharge'; }
+        touchLayout() { return { stick: true, platform: true, buttons: [{ k: 'Space', label: 'Jump' }, { k: 'KeyS', label: 'Guard' }, { k: 'KeyR', label: 'Heavy', small: true }, { k: 'ShiftLeft', label: 'Dodge' }] }; }
+        hint() { return 'A/D move · Space jump twice · S guard · E or click swing · R heavy · Shift / F dodge · Down fast-fall / drop through ledges · Q recharge'; }
 
         drawFighter(ctx, x, y, who, face, state, dmg, name, hammer, swingAge, alpha, you, aim, swingAim, heavySwing = false) {
             const color = who.color;
@@ -1673,11 +1673,10 @@
             this.weapon = 'blaster'; this.weaponT = 0; this.damageTexts = []; this.streak = 0; this.streakT = 0; this.wave = 1;
             this.pickups = [];
             const types = ['shotgun', 'rapid', 'rail', 'health'];
-            for (let i = 0; i < 16; i++) {
+            for (let i = 0; i < 8; i++) {
                 const p = { x: 140 + r() * (this.W - 280), y: 140 + r() * (this.H - 280), type: types[i % types.length], t: 0 };
                 if (!this.walls.some(w => overlap({ x: p.x - 30, y: p.y - 30, w: 60, h: 60 }, w))) this.pickups.push(p);
             }
-            this.pickups.push({ x: this.me.x, y: this.me.y, type: 'shotgun', t: 0 });
             this.zoom = this.cameraZoom(s.vw, s.vh);
             s.canvas.style.cursor = 'none';
         }
@@ -1710,7 +1709,8 @@
         }
 
         cameraZoom(w = this.s.vw || 1280, h = this.s.vh || 720) {
-            return A.util.sceneZoom(this.s, w, h, 900);
+            const range = { shotgun: 1.12, rapid: 1, blaster: 1, rail: .78 }[this.weapon] || 1;
+            return A.util.sceneZoom(this.s, w, h, 780) * range;
         }
 
         weaponInfo(type = this.weapon) {
@@ -1768,8 +1768,8 @@
                 const acc = 2600 * dt;
                 me.vx += clamp(tx - me.vx, -acc, acc); me.vy += clamp(ty - me.vy, -acc, acc);
                 if (a.x || a.y) { this.dx = a.x / len; this.dy = a.y / len; }
-                if (s.pressed('Space', 'ShiftLeft') && this.dashCd <= 0) { this.dashT = 0.16; this.dashCd = 1.1; this.invuln = Math.max(this.invuln, 0.2); this.particles.burst(me.x, me.y, '#7dd3fc', 12, 200, 0.3, 4); }
-                if (s.pressed('KeyE') && this.novaCd <= 0 && s.spend(30)) {
+                if (s.pressed('ShiftLeft', 'ShiftRight') && this.dashCd <= 0) { this.dashT = 0.16; this.dashCd = 1.1; this.invuln = Math.max(this.invuln, 0.2); this.particles.burst(me.x, me.y, '#7dd3fc', 12, 200, 0.3, 4); }
+                if (s.pressed('Space', 'KeyE') && this.novaCd <= 0 && s.spend(30)) {
                     this.novaCd = 7; this.nova = 0.45;                     this.shake = 0.25; s.sfx('boom'); this.particles.burst(me.x, me.y, '#67e8f9', 40, 520, 0.5, 5);
                     for (const d of this.drones) if (dist(d.x, d.y, me.x, me.y) < 280) { d.hp -= 60; d.hit = 0.2; this.showDamage(d.x, d.y - d.r, 60); const a = Math.atan2(d.y - me.y, d.x - me.x); d.vx = Math.cos(a) * 500; d.vy = Math.sin(a) * 500; if (d.hp <= 0) this.killDrone(d); }
                     this.bullets = this.bullets.filter(b => b.own || dist(b.x, b.y, me.x, me.y) > 280);
@@ -1794,7 +1794,7 @@
                     if (p.t > 0 || dist(me.x, me.y, p.x, p.y) > 34 || (p.type === 'health' && this.hp >= this.maxHp)) continue;
                     if (p.type === 'health') { this.hp = Math.min(this.maxHp, this.hp + 35); s.toast('Repair +35 HP', '#4ade80'); }
                     else { this.weapon = p.type; this.weaponT = 14; s.toast(`${this.weaponInfo().name} · 14 seconds`, this.weaponInfo().color); }
-                    p.t = 24; s.sfx('coin'); this.particles.burst(p.x, p.y, p.type === 'health' ? '#4ade80' : this.weaponInfo().color, 12, 160, 0.4, 4);
+                    p.t = 40; s.sfx('coin'); this.particles.burst(p.x, p.y, p.type === 'health' ? '#4ade80' : this.weaponInfo().color, 12, 160, 0.4, 4);
                 }
                 for (const o of this.orbs) {
                     o.t = Math.max(0, o.t - dt);
@@ -1873,7 +1873,7 @@
             this.zoom = this.cameraZoom(s.vw, s.vh);
             const halfW = s.vw / this.zoom / 2, halfH = s.vh / this.zoom / 2;
             const touch = s.overlay.classList.contains('has-touch');
-            const look = touch && !s.mouse.down ? 0 : 0.18;
+            const look = !s.preview && s.mouse.active && (!touch || s.mouse.down) ? (this.weapon === 'rail' ? .3 : .2) : 0;
             const fitsX = halfW * 2 >= this.W, fitsY = halfH * 2 >= this.H;
             const tx = fitsX ? this.W / 2 : clamp(me.x + clamp((this.mouseWorld.x - me.x) * look, -110, 110), halfW, this.W - halfW);
             const ty = fitsY ? this.H / 2 : clamp(me.y + clamp((this.mouseWorld.y - me.y) * look, -90, 90), halfH, this.H - halfH);
@@ -1923,8 +1923,8 @@
         }
 
         goalText() { return `${this.multiplayer ? `${this.pk} player KOs` : `${this.kills} drones · ${this.pk} players`} · HP ${Math.max(0, Math.round(this.hp))}`; }
-        touchLayout() { return { stick: true, buttons: [{ k: 'Space', label: 'Dash' }, { k: 'KeyE', label: 'Blast', cls: 'e' }] }; }
-        hint() { return 'WASD move · hold F / click / canvas touch to fire · mouse aims · Space dash · E shockwave · colored pickups = timed weapons / repairs · Q reload'; }
+        touchLayout() { return { stick: true, buttons: [{ k: 'ShiftLeft', label: 'Dash' }, { k: 'Space', label: 'Blast', cls: 'e' }] }; }
+        hint() { return 'WASD move · hold F / click / canvas touch to fire · mouse aims · Shift dash · Space / E shockwave · colored pickups = timed weapons / repairs · Q reload'; }
 
         drawShip(ctx, x, y, aim, who, hp, name, you, alpha = 1, over = false) {
             const color = who.color;

@@ -148,7 +148,7 @@ begin
 end;
 $$;
 
--- Current streak for any user: consecutive UTC days with at least 15 minutes, ending today or yesterday.
+-- Current streak for any user: consecutive UTC days with at least 5 minutes, ending today or yesterday.
 create or replace function public.studbud_current_streak(p_user_id uuid)
 returns integer
 language sql
@@ -164,7 +164,7 @@ as $$
             from public.studbud_study_time_entries
             where user_id = p_user_id
             group by study_date
-            having sum(seconds) >= 900
+            having sum(seconds) >= 300
         ) days
         group by days.grp
     ) runs;
@@ -197,7 +197,7 @@ begin
     if p_period is null or p_period not in ('daily', 'weekly', 'monthly', 'alltime') then
         raise exception 'Choose a daily, weekly, monthly or all-time leaderboard.';
     end if;
-    if p_scope is null or p_scope not in ('global', 'friends') then raise exception 'Choose the global or friends leaderboard.'; end if;
+    if p_scope is null or p_scope not in ('global', 'friends') then raise exception 'Choose the global or buds leaderboard.'; end if;
     v_start := case p_period
         when 'weekly' then date_trunc('week', v_today::timestamp)::date
         when 'monthly' then date_trunc('month', v_today::timestamp)::date
@@ -224,7 +224,7 @@ begin
             from public.studbud_study_time_entries
             where user_id = v_user_id
             group by study_date
-            having sum(seconds) >= 900
+            having sum(seconds) >= 300
         ) days
         group by days.grp
     ) runs;
@@ -287,7 +287,7 @@ begin
         'ends_on', v_today,
         'today_seconds', v_today_seconds,
         'today_minutes', floor(v_today_seconds / 60.0)::integer,
-        'daily_goal_seconds', 900,
+        'daily_goal_seconds', 300,
         'streak_days', v_streak,
         'best_streak', greatest(v_best, v_streak),
         'active_days', v_active_days,
@@ -473,6 +473,9 @@ as $$
         ('palette_eclipse', 700), ('palette_opal', 740),
         ('skin_sprout', 70), ('skin_sunny', 75), ('skin_berry', 80), ('skin_storm', 85), ('skin_minty', 90),
         ('skin_celestial', 750), ('skin_inferno', 800),
+        ('skin_bookworm', 140), ('skin_astronaut', 230), ('skin_axolotl', 380),
+        ('hat_aviator', 220), ('hat_prism', 430), ('hat_satellite', 740),
+        ('acc_planet_effect', 440), ('acc_music_effect', 180),
         ('hat_visor', 65), ('hat_bucket', 75), ('hat_astronaut', 210), ('hat_cosmic', 720),
         ('acc_aura', 760),
         ('acc_prism_effect', 680), ('acc_frost_effect', 420), ('acc_ember_effect', 500), ('acc_heart_effect', 320),
@@ -494,7 +497,13 @@ as $$
         ('pet_elder', 'legendary'), ('pet_brain', 'legendary'), ('pet_trophy', 'legendary')
     )
     select priced.id, (round(priced.price * 2.5 / 5) * 5)::integer,
-        case when priced.price < 100 then 'common' when priced.price < 160 then 'uncommon'
+        case when priced.id like 'palette\_%' and priced.price < 400 then
+                case when priced.id in ('palette_aurora','palette_coral','palette_cyber','palette_galaxy','palette_royal') then 'rare'
+                     when priced.price < 100 then 'common' else 'uncommon' end
+             when priced.id = 'skin_gold' then 'epic'
+             when priced.id in ('skin_chrome','skin_shadow') then 'rare'
+             when priced.id = 'skin_crystal' then 'epic'
+             when priced.price < 100 then 'common' when priced.price < 160 then 'uncommon'
              when priced.price < 260 then 'rare' when priced.price < 400 then 'epic' when priced.price < 700 then 'legendary' else 'mythic' end
     from priced
     union all
@@ -633,36 +642,28 @@ declare
     v_refund integer := 0;
     v_duplicate boolean := false;
     v_prefix text := '%';
+    v_chances jsonb;
+    v_total numeric;
 begin
     if v_user_id is null then raise exception 'Sign in to open a mystery box.'; end if;
     if p_box = 'basic' then
         v_cost := 80;
-        v_rarity := case when v_roll < 0.70 then 'common' when v_roll < 0.92 then 'uncommon' when v_roll < 0.99 then 'rare' else 'epic' end;
     elsif p_box = 'rare' then
         v_cost := 200;
-        v_rarity := case when v_roll < 0.20 then 'common' when v_roll < 0.60 then 'uncommon' when v_roll < 0.88 then 'rare' when v_roll < 0.98 then 'epic' else 'legendary' end;
     elsif p_box = 'legendary' then
         v_cost := 500;
-        v_rarity := case when v_roll < 0.20 then 'uncommon' when v_roll < 0.60 then 'rare' when v_roll < 0.88 then 'epic' when v_roll < 0.98 then 'legendary' else 'mythic' end;
     elsif p_box = 'hat' then
         v_cost := 130; v_prefix := 'hat\_%';
-        v_rarity := case when v_roll < 0.40 then 'common' when v_roll < 0.72 then 'uncommon' when v_roll < 0.92 then 'rare' when v_roll < 0.99 then 'epic' else 'legendary' end;
     elsif p_box = 'accessory' then
         v_cost := 140; v_prefix := 'acc\_%';
-        v_rarity := case when v_roll < 0.40 then 'common' when v_roll < 0.72 then 'uncommon' when v_roll < 0.92 then 'rare' when v_roll < 0.99 then 'epic' else 'legendary' end;
     elsif p_box = 'effect' then
         v_cost := 200; v_prefix := 'acc\_%';
-        v_rarity := case when v_roll < 0.25 then 'common' when v_roll < 0.60 then 'uncommon'
-            when v_roll < 0.85 then 'rare' when v_roll < 0.97 then 'epic' when v_roll < 0.99 then 'legendary' else 'mythic' end;
     elsif p_box = 'palette' then
         v_cost := 160; v_prefix := 'palette\_%';
-        v_rarity := case when v_roll < 0.50 then 'uncommon' when v_roll < 0.85 then 'rare' when v_roll < 0.98 then 'epic' else 'legendary' end;
     elsif p_box = 'skin' then
         v_cost := 260; v_prefix := 'skin\_%';
-        v_rarity := case when v_roll < 0.40 then 'uncommon' when v_roll < 0.75 then 'rare' when v_roll < 0.95 then 'epic' else 'legendary' end;
     elsif p_box = 'mythic' then
         v_cost := 1000;
-        v_rarity := case when v_roll < 0.40 then 'epic' when v_roll < 0.85 then 'legendary' else 'mythic' end;
     else
         raise exception 'Unknown mystery box.';
     end if;
@@ -671,16 +672,45 @@ begin
     select * into v_profile from public.studbud_multiplayer_profiles where user_id = v_user_id for update;
     if v_profile.coins < v_cost then raise exception 'You need % multiplayer coins to open that box.', v_cost; end if;
 
+    v_chances := case p_box
+        when 'basic' then '{"common":70,"uncommon":22,"rare":7,"epic":1}'::jsonb
+        when 'rare' then '{"common":20,"uncommon":40,"rare":28,"epic":10,"legendary":2}'::jsonb
+        when 'legendary' then '{"uncommon":20,"rare":40,"epic":28,"legendary":10,"mythic":2}'::jsonb
+        when 'hat' then '{"common":40,"uncommon":32,"rare":20,"epic":7,"legendary":1}'::jsonb
+        when 'accessory' then '{"common":40,"uncommon":32,"rare":20,"epic":7,"legendary":1}'::jsonb
+        when 'effect' then '{"common":25,"uncommon":35,"rare":25,"epic":12,"legendary":2,"mythic":1}'::jsonb
+        when 'palette' then '{"uncommon":50,"rare":35,"epic":13,"legendary":2}'::jsonb
+        when 'skin' then '{"uncommon":40,"rare":35,"epic":20,"legendary":5}'::jsonb
+        when 'mythic' then '{"epic":40,"legendary":45,"mythic":15}'::jsonb
+    end;
+    -- Remove exhausted tiers, then reweight only the tiers allowed by this box.
+    select coalesce(jsonb_object_agg(r.key, r.value), '{}'::jsonb), sum(r.value::numeric)
+    into v_chances, v_total
+    from jsonb_each_text(v_chances) r
+    where exists (
+        select 1 from public.studbud_shop_items() s
+        where s.rarity = r.key and s.id like v_prefix
+          and s.id not like 'accessory\_%' and s.id not like 'pet\_%'
+          and (p_box <> 'effect' or s.id like 'acc\_%\_effect'
+              or s.id in ('acc_lightning', 'acc_flame', 'acc_sparkles', 'acc_aura'))
+          and not (s.id = any(v_profile.owned_items))
+    );
+    if v_total is null then raise exception 'You already own every item that box can contain!'; end if;
+    select key into v_rarity
+    from (
+        select key, sum(value::numeric) over (order by key) as cumulative
+        from jsonb_each_text(v_chances)
+    ) tiers
+    where cumulative > v_roll * v_total
+    order by cumulative limit 1;
     select s.id into v_item_id
     from public.studbud_shop_items() s
     where s.id not like 'accessory\_%' and s.id not like 'pet\_%' and s.id like v_prefix
       and (p_box <> 'effect' or s.id like 'acc\_%\_effect'
             or s.id in ('acc_lightning', 'acc_flame', 'acc_sparkles', 'acc_aura'))
       and not (s.id = any(v_profile.owned_items))
-    order by case s.rarity when v_rarity then 0 else 1 end,
-             abs(array_position(array['common','uncommon','rare','epic','legendary','mythic'], s.rarity)
-               - array_position(array['common','uncommon','rare','epic','legendary','mythic'], v_rarity)),
-             random()
+      and s.rarity = v_rarity
+    order by random()
     limit 1;
     if v_item_id is null then raise exception 'You already own every item that box can contain!'; end if;
     select s.rarity into v_rarity from public.studbud_shop_items() s where s.id = v_item_id;
@@ -2001,8 +2031,8 @@ begin
     select * into v_existing from public.studbud_friendships
         where least(requester_id, addressee_id) = least(v_uid, v_target) and greatest(requester_id, addressee_id) = greatest(v_uid, v_target);
     if found then
-        if v_existing.status = 'accepted' then raise exception 'You are already friends.'; end if;
-        if v_existing.requester_id = v_uid then raise exception 'Friend request already sent.'; end if;
+        if v_existing.status = 'accepted' then raise exception 'You are already buds.'; end if;
+        if v_existing.requester_id = v_uid then raise exception 'Bud request already sent.'; end if;
         update public.studbud_friendships set status = 'accepted' where id = v_existing.id;
         return jsonb_build_object('status', 'accepted');
     end if;
@@ -2079,16 +2109,16 @@ begin
         select 1 from public.studbud_friendships f
         where f.status = 'accepted'
           and ((f.requester_id = v_uid and f.addressee_id = p_user_id) or (f.addressee_id = v_uid and f.requester_id = p_user_id))
-    ) then raise exception 'You can only view the profiles of your friends.'; end if;
+    ) then raise exception 'You can only view the profiles of your buds.'; end if;
     if public.studbud_is_hidden_user(p_user_id) then raise exception 'This profile is unavailable.'; end if;
     select coalesce(nullif(raw_user_meta_data ->> 'username', ''), 'Student') into v_name from auth.users where id = p_user_id;
     select * into v_prof from public.studbud_multiplayer_profiles where user_id = p_user_id;
     select * into v_pub from public.studbud_public_profiles where user_id = p_user_id;
     v_show := coalesce(v_pub.show_stats, true);
     v_day := v_today;
-    if coalesce((select sum(seconds) from public.studbud_study_time_entries where user_id = p_user_id and study_date = v_day), 0) < 900 then v_day := v_day - 1; end if;
+    if coalesce((select sum(seconds) from public.studbud_study_time_entries where user_id = p_user_id and study_date = v_day), 0) < 300 then v_day := v_day - 1; end if;
     loop
-        exit when coalesce((select sum(seconds) from public.studbud_study_time_entries where user_id = p_user_id and study_date = v_day), 0) < 900;
+        exit when coalesce((select sum(seconds) from public.studbud_study_time_entries where user_id = p_user_id and study_date = v_day), 0) < 300;
         v_streak := v_streak + 1;
         v_day := v_day - 1;
     end loop;
@@ -2264,9 +2294,9 @@ begin
     select * into v_pub from public.studbud_public_profiles where user_id = p_user_id;
     v_show := coalesce(v_pub.show_stats, true);
     v_day := v_today;
-    if coalesce((select sum(seconds) from public.studbud_study_time_entries where user_id = p_user_id and study_date = v_day), 0) < 900 then v_day := v_day - 1; end if;
+    if coalesce((select sum(seconds) from public.studbud_study_time_entries where user_id = p_user_id and study_date = v_day), 0) < 300 then v_day := v_day - 1; end if;
     loop
-        exit when coalesce((select sum(seconds) from public.studbud_study_time_entries where user_id = p_user_id and study_date = v_day), 0) < 900;
+        exit when coalesce((select sum(seconds) from public.studbud_study_time_entries where user_id = p_user_id and study_date = v_day), 0) < 300;
         v_streak := v_streak + 1;
         v_day := v_day - 1;
     end loop;

@@ -276,6 +276,7 @@
             this.score = 0;
             this.goal = 0;
             this.answered = 0;
+            this.questionHistory = [];
             this.paused = false;
             this.over = false;
             this.touchHintUntil = Date.now() + 5500;
@@ -495,6 +496,10 @@
             this.closeQuestion(true);
             this.renderResults();
             const me = this.standingsCache.findIndex(row => row.id === this.user.id);
+            window.NexusApp?.saveGameSummary?.(this).catch(error => {
+                console.error('[Game] Could not save match summary:', error);
+                this.toast('Your match summary could not be saved. Check your connection and export a backup.', '#f87171');
+            });
             window.StudBudSfx?.stopMusic();
             this.sfx(me === 0 ? 'win' : 'lose');
         }
@@ -591,6 +596,7 @@
             const correct = index >= 0 && index < q.options.length && normalizeChoiceText(q.options[index]) === normalizeChoiceText(q.card.back);
             this.answered++;
             if (correct) this.correct++;
+            this.questionHistory.push({ prompt: q.card.front, answer: q.card.back, chosen: q.options[index] ?? '', correct });
             try { q.onAnswer?.(correct); } catch (error) { console.error(error); }
             this.sfx(correct ? 'correct' : 'wrong');
             const box = this.overlay.querySelector('.mpg-question');
@@ -609,6 +615,7 @@
         skipQuestion() {
             const q = this.question;
             if (!q || q.locked) return;
+            this.questionHistory.push({ prompt: q.card.front, answer: q.card.back, chosen: '', correct: null });
             this.closeQuestion(true);
             q.callback?.(null);
         }
@@ -650,7 +657,7 @@
             const typing = e => /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || '');
             this.handlers = {
                 keydown: e => {
-                    if (typing(e)) return;
+                    if (typing(e) && e.code !== 'Tab') return;
                     if (this.question) {
                         if (e.code === 'Escape') { this.skipQuestion(); e.preventDefault(); return; }
                         if (e.code === 'Tab') {
@@ -666,7 +673,7 @@
                         return;
                     }
                     if (e.code === 'Tab') {
-                        const targets = [this.canvas, ...this.overlay.querySelectorAll('.mpg-hud button, .mpg-hud summary, .mpg-touch button')].filter(el => el.offsetWidth && el.offsetHeight);
+                        const targets = [this.canvas, ...this.overlay.querySelectorAll('.mpg-hud button, .mpg-hud summary, .mpg-hud input, .mpg-touch button')].filter(el => el.offsetWidth && el.offsetHeight);
                         const index = targets.indexOf(document.activeElement);
                         targets[(index + (e.shiftKey ? -1 : 1) + targets.length) % targets.length]?.focus();
                         e.preventDefault(); return;
@@ -693,8 +700,11 @@
                 const b = canvas.getBoundingClientRect();
                 this.mouse.x = (e.clientX - b.left) / this.scale;
                 this.mouse.y = (e.clientY - b.top) / this.scale;
+                this.mouse.active = true;
             });
+            canvas.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && !this.mouse.down) this.mouse.active = false; });
             canvas.addEventListener('pointerdown', e => {
+                this.mouse.active = true;
                 if (e.button !== 2 && this.aimPointer != null) return;
                 if (e.button !== 2) this.aimPointer = e.pointerId;
                 if (e.pointerType === 'touch') this.mouse.touchAt = performance.now();
@@ -749,6 +759,12 @@
                     <div class="mpg-timer"></div>
                     <div class="mpg-actions">
                         <button type="button" class="mpg-hud-toggle" aria-expanded="true" aria-controls="mpg-match-details mpg-controls-hint mpg-match-standings" aria-label="Hide match details and standings">HUD</button>
+                        <details class="mpg-audio-settings"><summary>Settings</summary><div class="mpg-audio-panel">
+                            <label>Game volume <input type="range" min="0" max="100" value="${Math.round((window.StudBudSfx?.settings.volume ?? .7) * 100)}" data-audio="volume"></label>
+                            <label>Music volume <input type="range" min="0" max="100" value="${Math.round((window.StudBudSfx?.settings.musicVolume ?? .5) * 100)}" data-audio="musicVolume"></label>
+                            <label><input type="checkbox" data-audio="game" ${window.StudBudSfx?.settings.game !== false ? 'checked' : ''}> Game sounds</label>
+                            <label><input type="checkbox" data-audio="music" ${window.StudBudSfx?.settings.music !== false ? 'checked' : ''}> Music</label>
+                        </div></details>
                         ${this.testing ? `<details class="mpg-test-tools"><summary>Tools</summary><div class="mpg-test-panel"><div><button type="button" class="mpg-test-pause">Pause</button>${this.onRestart ? '<button type="button" class="mpg-test-restart">Restart</button>' : ''}</div><pre class="mpg-test-stats"></pre></div></details>` : ''}
                         <button type="button" class="mpg-end ${this.isHost && !this.practice ? '' : 'hidden'}">End match</button>
                         <button type="button" class="mpg-leave">${this.practice ? 'Close' : 'Leave'}</button>
@@ -798,6 +814,12 @@
             hud.append(overlay.querySelector('.mpg-top'), status, overlay.querySelector('.mpg-board'), overlay.querySelector('.mpg-hint'), overlay.querySelector('.mpg-toasts'));
             overlay.appendChild(hud);
             this.bindTouch(overlay);
+            overlay.addEventListener('input', event => {
+                const key = event.target.dataset.audio;
+                if (!key) return;
+                const value = event.target.type === 'checkbox' ? event.target.checked : Number(event.target.value) / 100;
+                window.NexusApp.updateGameAudio({ [key]: value });
+            });
             const compactHud = this.defaultHudCollapsed();
             this.setHudCollapsed(compactHud);
             overlay.addEventListener('keydown', event => {
@@ -807,6 +829,8 @@
                     tools.open = false;
                     tools.querySelector('summary').focus();
                 }
+                const audio = overlay.querySelector('.mpg-audio-settings');
+                if (audio?.open) { audio.open = false; audio.querySelector('summary').focus(); }
             });
             this.hudObserver = new ResizeObserver(() => this.layoutHud());
             for (const el of [hud, overlay.querySelector('.mpg-touch'), overlay.querySelector('.mpg-hint'), overlay.querySelector('.mpg-board')]) this.hudObserver.observe(el);
@@ -901,8 +925,9 @@
                     setDirs(resolve(dx, dy, max));
                 };
                 const begin = (e, floating) => {
-                    if (activeId !== null) return;
+                    if (activeId !== null || this.question || this.over || this.paused) return;
                     e.preventDefault();
+                    e.stopPropagation?.();
                     activeId = e.pointerId;
                     try { (floating ? zone : stick).setPointerCapture?.(e.pointerId); } catch (_) { /* pointer already gone */ }
                     stick.classList.add('active');
@@ -920,12 +945,19 @@
                     move(e);
                 };
                 stick.addEventListener('pointerdown', e => begin(e, false));
-                stick.addEventListener('pointermove', e => { if (e.pointerId === activeId) move(e); });
+                this.stickHandlers = {
+                    move: e => { if (e.pointerId === activeId) { e.preventDefault(); move(e); } },
+                    end: e => { if (e.pointerId === activeId) reset(); }
+                };
+                stick.addEventListener('pointermove', this.stickHandlers.move);
+                window.addEventListener('pointermove', this.stickHandlers.move, { passive: false });
+                window.addEventListener('pointerup', this.stickHandlers.end);
+                window.addEventListener('pointercancel', this.stickHandlers.end);
                 for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) stick.addEventListener(type, e => { if (e.pointerId === activeId) reset(); });
                 stick.addEventListener('contextmenu', e => e.preventDefault());
                 if (zone) {
                     zone.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') begin(e, true); });
-                    zone.addEventListener('pointermove', e => { if (e.pointerId === activeId) move(e); });
+                    zone.addEventListener('pointermove', this.stickHandlers.move);
                     for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) zone.addEventListener(type, e => { if (e.pointerId === activeId) reset(); });
                     zone.addEventListener('contextmenu', e => e.preventDefault());
                 }
@@ -1093,6 +1125,11 @@
                 <small>Match over</small>
                 <h2>${winner ? `${esc(winner.n)} wins!` : 'Game over'}</h2>
                 <ol>${rows.map((row, i) => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${i + 1}</span><img class="mpg-player-avatar" src="${avatarUrl(row)}" alt="" draggable="false"><strong>${esc(row.n)} ${accountTagMarkup(row.username)}</strong><b>${this.valueText(row)}</b><em>${this.rewards ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
+                <p class="mpg-accuracy">${this.answered ? Math.round(this.correct / this.answered * 100) : 0}% correct · ${this.correct} / ${this.answered} answered</p>
+                <details class="mpg-summary"><summary>Full game summary</summary>
+                    <p>${Math.round(this.t)} seconds played · ${(this.questionHistory || []).filter(answer => answer.correct === null).length} skipped</p>
+                    <ul>${(this.questionHistory || []).map(answer => `<li class="mpg-answer-${answer.correct === null ? 'skip' : answer.correct ? 'right' : 'wrong'}"><strong>${esc(answer.prompt)}</strong><span>${answer.correct === null ? 'Skipped' : answer.correct ? 'Correct' : `Your answer: ${esc(answer.chosen || 'No selection')}`}</span><span>Answer: ${esc(answer.answer)}</span></li>`).join('') || '<li>No questions answered in this game.</li>'}</ul>
+                </details>
                 <p>${this.practice ? 'Local results only. Solo games and admin tests do not award coins.' : this.rewards ? 'Coins have been added to your multiplayer wallet.' : 'Tallying coin rewards…'}</p>
                 <button type="button" class="mpg-exit">Back to lobby</button>
             </div>`;
@@ -1159,6 +1196,9 @@
             window.removeEventListener('keyup', this.handlers.keyup);
             window.removeEventListener('blur', this.handlers.blur);
             window.removeEventListener('resize', this.handlers.resize);
+            window.removeEventListener('pointermove', this.stickHandlers?.move);
+            window.removeEventListener('pointerup', this.stickHandlers?.end);
+            window.removeEventListener('pointercancel', this.stickHandlers?.end);
             try { if (this.channel) this.api.getClient().removeChannel(this.channel); } catch (error) { /* already closed */ }
             this.overlay.remove();
             document.body.classList.remove('mpg-active');
@@ -1229,7 +1269,10 @@
         skin_storm: { body: '#475569', head: '#cbd5e1', eye: '#0f172a', trim: '#38bdf8' },
         skin_minty: { body: '#34d399', head: '#d1fae5', eye: '#064e3b', trim: '#059669' },
         skin_celestial: { body: '#fef3c7', head: '#fffbeb', eye: '#7c3aed', trim: '#facc15', mythic: ['#fde047', '#a78bfa'] },
-        skin_inferno: { body: '#991b1b', head: '#fb923c', eye: '#fef08a', trim: '#fbbf24', mythic: ['#f97316', '#ef4444'] }
+        skin_inferno: { body: '#991b1b', head: '#fb923c', eye: '#fef08a', trim: '#fbbf24', mythic: ['#f97316', '#ef4444'] },
+        skin_bookworm: { body: '#92400e', head: '#fde7c8', eye: '#172554', trim: '#fef3c7' },
+        skin_astronaut: { body: '#e2e8f0', head: '#0e7490', eye: '#67e8f9', trim: '#fb923c' },
+        skin_axolotl: { body: '#6ee7b7', head: '#fbcfe8', eye: '#831843', trim: '#f472b6' }
     };
 
     // Shimmering aura shared by mythic skins and the Mythic Aura accessory.
@@ -1274,7 +1317,7 @@
     function who(p) {
         if (typeof p === 'string') return { color: p, skin: null, hat: '', acc: '' };
         const cos = playerCosmetics(p);
-        return { color: p?.color || '#94a3b8', skin: SKINS[cos.skin] || null, hat: LEGACY_HATS[cos.hat] || cos.hat || '', acc: cos.acc || '' };
+        return { color: p?.color || '#94a3b8', skinId: cos.skin || '', skin: SKINS[cos.skin] || null, hat: LEGACY_HATS[cos.hat] || cos.hat || '', acc: cos.acc || '' };
     }
 
     function drawHat(ctx, hat, cx, top, r, tilt = 0) {
@@ -1381,6 +1424,28 @@
             ctx.strokeStyle = '#f472b6'; ctx.lineWidth = r * 0.1; ctx.beginPath(); ctx.moveTo(-r * 0.22, -r * 0.1); ctx.lineTo(r * 0.2, -r * 0.4); ctx.moveTo(-r * 0.14, -r * 0.7); ctx.lineTo(r * 0.12, -r * 0.95); ctx.stroke();
             fill('#c084fc', () => ctx.arc(-r * 0.75, r * 0.15, r * 0.25, 0, TAU));
             fill('#f9a8d4', () => ctx.arc(r * 0.75, r * 0.15, r * 0.25, 0, TAU));
+        } else if (hat === 'hat_aviator') {
+            fill('#78350f', () => ctx.arc(0, r * .2, r, Math.PI, TAU));
+            ctx.fillStyle = '#92400e'; ctx.fillRect(-r * 1.05, r * .05, r * .35, r * .9); ctx.fillRect(r * .7, r * .05, r * .35, r * .9);
+            for (const side of [-1, 1]) {
+                fill('#facc15', () => ctx.ellipse(side * r * .4, -r * .1, r * .38, r * .28, 0, 0, TAU));
+                fill('#67e8f9', () => ctx.ellipse(side * r * .4, -r * .1, r * .26, r * .17, 0, 0, TAU));
+            }
+        } else if (hat === 'hat_prism') {
+            for (let i = 0; i < 3; i++) {
+                const x = (i - 1) * r * .65;
+                fill(['#67e8f9', '#c084fc', '#f9a8d4'][i], () => {
+                    ctx.moveTo(x, -r * (i === 1 ? 1.6 : .9)); ctx.lineTo(x + r * .4, r * .2);
+                    ctx.lineTo(x, r * .5); ctx.lineTo(x - r * .4, r * .2);
+                });
+                ctx.strokeStyle = '#f8fafc'; ctx.lineWidth = 1; ctx.stroke();
+            }
+        } else if (hat === 'hat_satellite') {
+            ctx.strokeStyle = '#67e8f9'; ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.ellipse(0, -r * .5, r * 1.6, r * .55, -.25, 0, TAU); ctx.stroke();
+            ctx.fillStyle = '#94a3b8'; ctx.fillRect(-r * .35, -r * 1.1, r * .7, r * .6);
+            ctx.fillStyle = '#2563eb'; ctx.fillRect(-r * 1.1, -r * 1.15, r * .6, r * .75); ctx.fillRect(r * .5, -r * 1.15, r * .6, r * .75);
+            fill('#facc15', () => ctx.arc(r * 1.25, -r * .8, r * .18, 0, TAU));
         } else if (hat === 'hat_tiara') {
             fill('#e5e7eb', () => { ctx.moveTo(-r * 0.9, r * 0.3); ctx.lineTo(-r * 0.6, -r * 0.2); ctx.lineTo(-r * 0.3, r * 0.05); ctx.lineTo(0, -r * 0.65); ctx.lineTo(r * 0.3, r * 0.05); ctx.lineTo(r * 0.6, -r * 0.2); ctx.lineTo(r * 0.9, r * 0.3); });
             fill('#ec4899', () => ctx.arc(0, -r * 0.25, r * 0.16, 0, TAU));
@@ -1431,14 +1496,22 @@
         acc_meteor_effect: { shape: 'meteor', colors: ['#fde68a', '#fb923c', '#fbbf24'] },
         acc_aurora_effect: { shape: 'ribbon', colors: ['#70e2c0', '#a99bff', '#67e8f9'] },
         acc_rune_effect: { shape: 'rune', colors: ['#c4b5fd', '#a78bfa', '#22d3ee'] },
-        acc_lunar_effect: { shape: 'crescent', colors: ['#e0e7ff', '#93c5fd', '#c4b5fd'] }
+        acc_lunar_effect: { shape: 'crescent', colors: ['#e0e7ff', '#93c5fd', '#c4b5fd'] },
+        acc_planet_effect: { shape: 'planet', colors: ['#38bdf8', '#c084fc', '#fb923c'] },
+        acc_music_effect: { shape: 'note', colors: ['#a7f3d0', '#fde68a', '#93c5fd'] }
     };
 
     function drawCosmeticParticle(ctx, shape, size) {
         ctx.lineWidth = Math.max(.8, size * .3);
         ctx.strokeStyle = ctx.fillStyle;
         ctx.beginPath();
-        if (shape === 'snowflake') {
+        if (shape === 'planet') {
+            ctx.arc(0, 0, size * .65, 0, TAU); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(0, 0, size * 1.3, size * .4, -.4, 0, TAU); ctx.stroke();
+        } else if (shape === 'note') {
+            ctx.ellipse(-size * .4, size * .5, size * .45, size * .3, -.4, 0, TAU); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(0, size * .5); ctx.lineTo(0, -size); ctx.lineTo(size * .65, -size * .6); ctx.stroke();
+        } else if (shape === 'snowflake') {
             for (let i = 0; i < 6; i++) {
                 const a = i * TAU / 6, x = Math.cos(a), y = Math.sin(a);
                 ctx.moveTo(0, 0); ctx.lineTo(x * size, y * size);
@@ -1563,6 +1636,58 @@
         ctx.restore();
     }
 
+    function drawSkinSignature(ctx, c, x, y, r, time) {
+        if (!c.skin) return;
+        const id = c.skinId;
+        ctx.save(); ctx.translate(x, y); ctx.scale(r / 12, r / 12);
+        ctx.fillStyle = c.skin.trim; ctx.strokeStyle = c.skin.trim; ctx.lineWidth = 1.8;
+        if (['skin_robot', 'skin_chrome', 'skin_cyber', 'skin_astronaut'].includes(id)) {
+            roundRect(ctx, -8, -7, 16, 14, 2); ctx.stroke();
+            ctx.fillStyle = c.skin.eye; ctx.fillRect(-5, -4, id === 'skin_cyber' ? 11 : 5, 3);
+            ctx.fillStyle = '#f8fafc'; ctx.fillRect(-5, 3, 3, 2); ctx.fillRect(2, 3, 3, 2);
+            if (id === 'skin_chrome') { ctx.fillStyle = '#ffffffaa'; ctx.fillRect(-8, -7, 4, 14); }
+            if (id === 'skin_astronaut') { ctx.beginPath(); ctx.arc(0, -15, 12, 0, TAU); ctx.stroke(); }
+        } else if (['skin_dragon', 'skin_axolotl', 'skin_inferno'].includes(id)) {
+            for (const side of [-1, 1]) for (let i = 0; i < 3; i++) {
+                const wave = id === 'skin_axolotl' ? Math.sin(time * 5 + i) * 2 : 0;
+                ctx.beginPath(); ctx.moveTo(side * 9, -12 + i * 5);
+                ctx.lineTo(side * (19 + wave), -17 + i * 6);
+                ctx.lineTo(side * 11, -8 + i * 5); ctx.fill();
+            }
+            ctx.fillStyle = c.skin.eye;
+            for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc((i - 1) * 5, 3, 1.5, 0, TAU); ctx.fill(); }
+        } else if (['skin_lava', 'skin_crystal', 'skin_ice'].includes(id)) {
+            ctx.beginPath(); ctx.moveTo(-7, -8); ctx.lineTo(2, -2); ctx.lineTo(-3, 3); ctx.lineTo(7, 8); ctx.stroke();
+            if (id !== 'skin_lava') {
+                ctx.beginPath(); ctx.moveTo(0, -12); ctx.lineTo(7, 0); ctx.lineTo(0, 10); ctx.lineTo(-7, 0); ctx.closePath(); ctx.stroke();
+            }
+        } else if (['skin_galaxy', 'skin_cosmic', 'skin_celestial', 'skin_rainbow'].includes(id)) {
+            for (let i = 0; i < 4; i++) {
+                const a = time * .3 + i * 2.1, px = Math.cos(a) * 7, py = Math.sin(a) * 7;
+                ctx.fillStyle = ['#fde047', '#67e8f9', '#f9a8d4', '#a78bfa'][i];
+                ctx.fillRect(px - 1, py - 3, 2, 6); ctx.fillRect(px - 3, py - 1, 6, 2);
+            }
+        } else if (['skin_mummy', 'skin_candy', 'skin_bee', 'skin_samurai'].includes(id)) {
+            for (let i = 0; i < 4; i++) {
+                ctx.fillRect(-9, -8 + i * 5, 18, id === 'skin_bee' ? 3 : 2);
+                if (id === 'skin_mummy') { ctx.beginPath(); ctx.moveTo(-7, -7 + i * 5); ctx.lineTo(7, -3 + i * 5); ctx.stroke(); }
+            }
+        } else if (['skin_forest', 'skin_sprout', 'skin_minty', 'skin_bookworm'].includes(id)) {
+            if (id === 'skin_bookworm') {
+                ctx.fillStyle = '#fff7ed'; ctx.fillRect(-7, -3, 14, 10);
+                ctx.strokeStyle = '#92400e'; ctx.beginPath(); ctx.moveTo(0, -3); ctx.lineTo(0, 7); ctx.stroke();
+            } else {
+                ctx.beginPath(); ctx.ellipse(-4, -4, 7, 3, -.5, 0, TAU); ctx.ellipse(4, 3, 7, 3, -.5, 0, TAU); ctx.fill();
+            }
+        } else if (['skin_gold', 'skin_steampunk', 'skin_neon'].includes(id)) {
+            ctx.beginPath(); ctx.arc(0, 0, 7, 0, TAU); ctx.stroke();
+            for (let i = 0; i < 6; i++) {
+                const a = i * TAU / 6; ctx.fillRect(Math.cos(a) * 9 - 1, Math.sin(a) * 9 - 1, 3, 3);
+            }
+        }
+        ctx.restore();
+    }
+
     function drawFigureSide(ctx, p, x, y, w, h, face, time, running, alpha = 1) {
         const c = who(p);
         const body = c.skin?.body || c.color;
@@ -1641,6 +1766,7 @@
         ctx.fillStyle = body;
         roundRect(ctx, x, y + 12 + bob, w, h - 24, 8);
         ctx.fill();
+        drawSkinSignature(ctx, c, cx, y + 27 + bob, w * .42, time);
         if (c.acc === 'acc_scarf') { ctx.fillStyle = '#ef4444'; ctx.fillRect(x + 1, y + 12 + bob, w - 2, 5); ctx.fillRect(cx - face * 6 - 2, y + 15 + bob, 5, 12); }
         ctx.fillStyle = head;
         ctx.beginPath(); ctx.arc(cx, y + 11 + bob, 11, 0, TAU); ctx.fill();
@@ -1710,6 +1836,7 @@
         ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
         ctx.fillStyle = c.skin?.trim || 'rgba(0,0,0,.25)';
         ctx.beginPath(); ctx.arc(0, 0, r, -0.9, 0.9); ctx.lineTo(0, 0); ctx.fill();
+        drawSkinSignature(ctx, c, 0, 0, r * .75, time);
         if (c.acc === 'acc_scarf') { ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(0, 0, r * 0.95, 0.6, 2.6); ctx.stroke(); }
         ctx.fillStyle = c.skin?.head || '#fde7c8';
         ctx.beginPath(); ctx.arc(r * 0.1, 0, r * 0.62, 0, TAU); ctx.fill();
@@ -1740,7 +1867,7 @@
         const scale = Number.isFinite(session.scale) && session.scale > 0 ? session.scale : 1;
         const cssW = w * scale, cssH = h * scale, landscape = cssW >= cssH;
         const zoom = Math.min(cssW / (base * (landscape ? 1.2 : .7)), cssH / (base * (landscape ? .75 : 1)));
-        return clamp(zoom, .65, 1.15) / scale;
+        return clamp(zoom, .75, 1.4) / scale;
     }
 
     window.StudBudArcade = {

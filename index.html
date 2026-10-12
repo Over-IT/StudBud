@@ -83,7 +83,7 @@
                         <i class="fas fa-ranking-star" aria-hidden="true"></i> <span>Leaderboards</span>
                     </li>
                     <li class="nav-item" data-target="friends-view" role="button" tabindex="0">
-                        <i class="fas fa-user-group" aria-hidden="true"></i> <span>Friends</span><strong id="friend-nav-badge" class="sidebar-coin-count hidden">0</strong>
+                        <i class="fas fa-user-group" aria-hidden="true"></i> <span>Buds</span><strong id="friend-nav-badge" class="sidebar-coin-count hidden">0</strong>
                     </li>
                     <li class="nav-item" data-target="exam-arcade-view" role="button" tabindex="0">
                         <i class="fas fa-gamepad"></i> <span>Practice & Arcade</span>
@@ -522,12 +522,12 @@
 
                 <section id="leaderboard-view" class="view hidden">
                     <div class="view-header">
-                        <div><h2>Study streaks &amp; leaderboards</h2><p class="study-guidance-intro">Build a daily learning habit: 15 minutes of study keeps your streak going. Compare study time with other StudBud students.</p></div>
+                        <div><h2>Study streaks &amp; leaderboards</h2><p class="study-guidance-intro">Build a daily learning habit: 5 minutes of study keeps your streak going. Compare study time with other StudBud students.</p></div>
                     </div>
                     <section class="glass-card daily-study-card leaderboard-habit-card">
                         <div id="leaderboard-streak-hero"></div>
-                        <div class="daily-study-stats"><strong id="leaderboard-today-time">0 min</strong><span>of 15 min today</span></div>
-                        <progress id="leaderboard-study-progress" class="daily-study-progress" max="900" value="0" aria-label="0 of 15 study minutes completed today"></progress>
+                        <div class="daily-study-stats"><strong id="leaderboard-today-time">0 min</strong><span>of 5 min today</span></div>
+                        <progress id="leaderboard-study-progress" class="daily-study-progress" max="300" value="0" aria-label="0 of 5 study minutes completed today"></progress>
                         <p id="leaderboard-goal-note" class="study-guidance-intro" role="status"></p>
                         <div id="leaderboard-streak-stats" class="streak-stats"></div>
                     </section>
@@ -545,7 +545,7 @@
                             </div>
                             <div class="study-leaderboard-tabs study-leaderboard-scope" role="group" aria-label="Who to compare with">
                                 <button class="secondary-btn selected" type="button" data-study-leaderboard-scope="global" aria-pressed="true"><i class="fas fa-earth-americas" aria-hidden="true"></i> Everyone</button>
-                                <button class="secondary-btn" type="button" data-study-leaderboard-scope="friends" aria-pressed="false"><i class="fas fa-user-group" aria-hidden="true"></i> Friends</button>
+                                <button class="secondary-btn" type="button" data-study-leaderboard-scope="friends" aria-pressed="false"><i class="fas fa-user-group" aria-hidden="true"></i> Buds</button>
                             </div>
                         </div>
                         <p id="study-leaderboard-status" class="community-status" role="status" aria-live="polite">Loading study progress…</p>
@@ -610,7 +610,7 @@
 
                 <section id="multiplayer-view" class="view hidden">
                     <div class="multiplayer-topline">
-                        <div><h2>Multiplayer Study Club</h2><p>Race friends, earn coins, and customize your player. Multiplayer rewards stay separate from your school planner.</p></div>
+                        <div><h2>Multiplayer Study Club</h2><p>Race buds, earn coins, and customize your player. Multiplayer rewards stay separate from your school planner.</p></div>
                         <div class="multiplayer-wallet"><i class="fas fa-coins"></i><strong id="multiplayer-wallet-coins">0</strong><span>coins</span></div>
                     </div>
                     <div class="multiplayer-layout">
@@ -822,18 +822,18 @@
 
                 <!-- 8. Settings View -->
                 <section id="friends-view" class="view hidden">
-                    <header class="view-header"><h2><i class="fas fa-user-group"></i> Friends</h2></header>
+                    <header class="view-header"><h2><i class="fas fa-user-group"></i> Buds</h2></header>
                     <div class="glass-card friends-card">
-                        <h3>Add a friend</h3>
+                        <h3>Add a bud</h3>
                         <form id="friend-add-form" class="friend-add-form">
-                            <input type="text" id="friend-username" maxlength="24" autocomplete="off" placeholder="Their username" aria-label="Friend's username" required>
+                            <input type="text" id="friend-username" maxlength="24" autocomplete="off" placeholder="Their username" aria-label="Bud's username" required>
                             <button class="primary-btn" type="submit"><i class="fas fa-user-plus"></i> Send request</button>
                         </form>
                         <p id="friend-status" class="settings-hint" role="status" aria-live="polite"></p>
                     </div>
                     <div id="friend-profile" class="glass-card friends-card hidden"></div>
                     <div class="glass-card friends-card"><h3>Requests for you</h3><ul id="friend-incoming" class="friend-list"></ul></div>
-                    <div class="glass-card friends-card"><h3>Your friends</h3><ul id="friend-list" class="friend-list"></ul></div>
+                    <div class="glass-card friends-card"><h3>Your buds</h3><ul id="friend-list" class="friend-list"></ul></div>
                     <div class="glass-card friends-card"><h3>Requests you sent</h3><ul id="friend-outgoing" class="friend-list"></ul></div>
                 </section>
 
@@ -921,7 +921,7 @@
                         
                         <div class="glass-card" id="public-profile-card">
                             <h2>Public profile</h2>
-                            <p class="settings-hint">Your friends can see this when they open your profile. Don't share personal contact details.</p>
+                            <p class="settings-hint">Your buds can see this when they open your profile. Don't share personal contact details.</p>
                             <div class="form-group"><label for="public-bio">About me</label><textarea id="public-bio" maxlength="160" rows="2" placeholder="A short bio"></textarea></div>
                             <div class="form-group"><label for="public-subject">Favorite subject</label><input type="text" id="public-subject" maxlength="40" autocomplete="off"></div>
                             <div class="form-group"><label for="public-grade">Grade / year</label>

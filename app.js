@@ -16,6 +16,7 @@
         constructor() {
             this.listeners = new Map();
         }
+
         /**
          * Subscribe a callback to an event.
          * @param {string} event 
@@ -111,6 +112,26 @@
                     console.error('[NexusDB] Database open error:', e.target.error);
                     reject(e.target.error);
                 };
+            });
+        }
+
+        async replaceStores(records) {
+            const db = await this.open();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(Object.keys(records), 'readwrite');
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => reject(tx.error);
+                tx.onabort = () => reject(tx.error || new Error('Restoring saved data was aborted.'));
+                try {
+                    for (const [name, rows] of Object.entries(records)) {
+                        const store = tx.objectStore(name);
+                        store.clear();
+                        for (const row of rows) store.put(row);
+                    }
+                } catch (error) {
+                    tx.abort();
+                    reject(error);
+                }
             });
         }
 
@@ -425,19 +446,10 @@
                     throw new Error("Invalid backup format.");
                 }
 
-                await NexusDB.clear('flashcards');
-                await NexusDB.clear('studyHistory');
-                await NexusDB.clear('gameMetrics');
-
-                if (Array.isArray(parsed.flashcards)) {
-                    for (const deck of parsed.flashcards) await NexusDB.put('flashcards', deck);
-                }
-
-                if (Array.isArray(parsed.studyHistory)) {
-                    for (const session of parsed.studyHistory) await NexusDB.put('studyHistory', session);
-                }
-
-                await NexusDB.put('gameMetrics', { id: 'user_metrics', ...(parsed.state.gameMetrics || this.state.gameMetrics) });
+                await NexusDB.replaceStores({
+                    flashcards: parsed.flashcards || [], studyHistory: parsed.studyHistory || [],
+                    gameMetrics: [{ id: 'user_metrics', ...(parsed.state.gameMetrics || this.state.gameMetrics) }]
+                });
 
                 this.state.profile = parsed.state.profile || this.state.profile;
                 this.state.courses = parsed.state.courses || [];
@@ -1018,10 +1030,30 @@
         }
 
         async restoreCloudSnapshot(snapshot) {
-            await AppState.importAppState(snapshot);
-            this.renderUI();
-            this.setCloudChartControls();
-            this.renderGradeProgress();
+            const container = document.getElementById('app-container');
+            const wasInert = container?.inert;
+            if (container) container.inert = true;
+            try {
+                if (!await AppState.importAppState(snapshot)) throw new Error('Your cloud backup could not be restored. Export a backup before reloading.');
+                this.renderUI();
+                this.setCloudChartControls();
+                this.renderGradeProgress();
+            } finally {
+                if (container) container.inert = wasInert;
+            }
+        }
+
+        async recoverOwnedCommunityDecks() {
+            const games = window.StudBudCommunityGames;
+            const decks = await games.ownedDecks();
+            for (const shared of decks) {
+                if ((AppState.get('flashcards') || []).some(deck => deck.id === shared.source_deck_id || deck.communityDeckId === shared.id || deck.communitySourceId === shared.id)) continue;
+                await AppState.saveFlashcardDeck({
+                    id: shared.source_deck_id, title: shared.title, communityPublished: true, communityDeckId: shared.id,
+                    courseTitle: shared.course || '', cards: shared.cards.map((card, index) => ({ ...card, id: `${shared.source_deck_id}_card_${index}` }))
+                });
+            }
+            this.renderDecks();
         }
 
         async clearLocalStore(storeName) {
@@ -1153,11 +1185,11 @@
                 if (event.target.matches('input[type="range"][id^="vol-"]')) this.setMixerLevel(event.target, false);
                 if (event.target.id === 'sfx-volume') {
                     const volume = Number(event.target.value) / 100;
-                    window.StudBudSfx.update({ volume });
+                    this.updateGameAudio({ volume });
                     document.getElementById('sfx-volume-value').value = `${event.target.value}%`;
                 }
                 if (event.target.id === 'music-volume') {
-                    window.StudBudSfx.update({ musicVolume: Number(event.target.value) / 100 });
+                    this.updateGameAudio({ musicVolume: Number(event.target.value) / 100 });
                     document.getElementById('music-volume-value').value = `${event.target.value}%`;
                 }
             });
@@ -2405,8 +2437,8 @@
                             <i class="fas ${box.icon}"></i>
                         </span>
                         <div class="box-details"><strong>${this.escapeHTML(box.name)}</strong><small>${this.escapeHTML(box.odds)}</small></div>
-                        <details class="box-odds"><summary>Drop chances</summary><span class="box-chances" aria-label="Rarity drop chances">${Object.entries(box.chances).map(([rarity, chance]) => `<span class="rarity-${rarity}">${rarity} <b>${chance}%</b></span>`).join('')}</span></details>
-                        <button type="button" class="secondary-btn" data-action="multiplayer-mystery" data-id="${box.id}" ${profile.coins < box.price ? 'disabled' : ''}>Open · ${box.price} <i class="fas fa-coins"></i></button></article>`).join('')}
+                        <details class="box-odds"><summary>Remaining drop chances</summary><span class="box-chances" aria-label="Rarity drop chances">${Object.entries(games.boxChances(box, owned)).map(([rarity, chance]) => `<span class="rarity-${rarity}">${rarity} <b>${chance}%</b></span>`).join('')}</span></details>
+                        ${games.boxPool(box, owned).length ? `<button type="button" class="secondary-btn" data-action="multiplayer-mystery" data-id="${box.id}" ${profile.coins < box.price ? 'disabled' : ''}>Open · ${box.price} <i class="fas fa-coins"></i></button>` : '<small class="box-complete">Collection complete</small>'}</article>`).join('')}
                     <p class="settings-hint">Drop chances show the rarity roll for each box. Open boxes to collect characters, hats, accessories, auras and colors.</p>`;
                                 } else if (tab === 'inventory') {
                                     const typeNames = { skin: 'Characters', hat: 'Hats', accessory: 'Accessories', effect: 'Auras', palette: 'Colors' };
@@ -2632,7 +2664,7 @@
                     p_study_goal: document.getElementById('public-goal').value,
                     p_show_stats: document.getElementById('public-show-stats').checked
                 });
-                status.textContent = 'Saved. Your friends will see this on your profile.';
+                status.textContent = 'Saved. Your buds will see this on your profile.';
             } catch (error) {
                 status.textContent = this.friendlyErrorMessage(error, 'Could not save your profile.');
             }
@@ -3625,7 +3657,7 @@
             const z = game.zoom || 1;
             session.mouse.x = session.vw / 2 + (ax - game.cam.x) * z; session.mouse.y = session.vh / 2 + (ay - game.cam.y) * z;
             session.mouse.down = d < 750;
-            if (Math.floor(c / 4) !== demo.lastDash) { demo.lastDash = Math.floor(c / 4); tap.add('Space'); }
+            if (Math.floor(c / 4) !== demo.lastDash) { demo.lastDash = Math.floor(c / 4); tap.add('ShiftLeft'); }
             if (game.drones.filter(o => Math.hypot(o.x - me.x, o.y - me.y) < 250).length >= 3) tap.add('KeyE');
         }
 
@@ -3692,7 +3724,7 @@
             const dx = tx - me.x, dy = ty - me.y;
             if (Math.abs(dx) > 8) hold.add(dx > 0 ? 'KeyD' : 'KeyA');
             if (Math.abs(dy) > 8) hold.add(dy > 0 ? 'KeyS' : 'KeyW');
-            if (dBall < 52 && Math.abs(goalX - ball.x) < 760 && Math.abs(ball.y - goalY) < 260 && (ball.x - me.x) * dir > 0) tap.add('Space');
+            if (dBall < 52 && Math.abs(goalX - ball.x) < 760 && Math.abs(ball.y - goalY) < 260 && (ball.x - me.x) * dir > 0) tap.add('KeyE');
         }
 
         // ---- City Escape autoplay ----
@@ -5047,6 +5079,19 @@
             if (room.status === 'waiting') this.arcadeLeft = false;
         }
 
+        async saveGameSummary(session) {
+            if (session.testing) return;
+            await AppState.recordStudySession({
+                id: `match_${window.crypto.randomUUID()}`, title: `Study game: ${session.game.title}`,
+                durationSec: Math.max(1, Math.round(session.t)), method: 'practice', source: 'multiplayer',
+                gameSummary: {
+                    mode: session.mode, score: session.score, answered: session.answered, correct: session.correct,
+                    questions: session.questionHistory.map(answer => ({ ...answer })),
+                    standings: session.standingsCache.map(row => ({ id: row.id, name: row.n, score: row.s, goal: row.g }))
+                }
+            });
+        }
+
         destroyArcadeSession() {
             if (this.arcadeSession) this.arcadeSession.destroy();
             this.arcadeSession = null;
@@ -5229,6 +5274,7 @@
         applyAppearance() {
             this.ensureSchemeButtons();
             const settings = AppState.get('settings') || {};
+            if (settings.gameAudio) window.StudBudSfx?.update(settings.gameAudio);
             const theme = settings.theme === 'light' ? 'light' : 'dark';
             const knownSchemes = ['forest', 'ocean', 'violet', 'sunset', 'monochrome', 'aurora', 'coral', 'midnight',
                 ...(window.StudBudCommunityGames?.catalog || []).filter(item => item.type === 'palette').map(item => item.color)];
@@ -5238,6 +5284,15 @@
             document.body.classList.toggle('compact-ui', Boolean(settings.compactUi));
             document.body.classList.toggle('sidebar-collapsed', Boolean(settings.sidebarCollapsed));
             document.body.dataset.colorScheme = colorScheme;
+            const palette = window.StudBudCommunityGames?.catalog.find(item => item.type === 'palette' && item.color === colorScheme && item.hue != null);
+            document.body.toggleAttribute('data-shop-palette', Boolean(palette));
+            if (palette) {
+                document.body.style.setProperty('--ph', palette.hue);
+                document.body.style.setProperty('--pa', palette.hue2);
+            } else {
+                document.body.style.removeProperty('--ph');
+                document.body.style.removeProperty('--pa');
+            }
             const themeSelect = document.getElementById('ui-theme-select');
             if (themeSelect) themeSelect.value = theme;
             const compact = document.getElementById('ui-compact-mode');
@@ -5285,6 +5340,12 @@
                 const output = document.getElementById(`vol-${channel}-value`);
                 if (output) output.value = `${value}%`;
             });
+        }
+
+        updateGameAudio(patch) {
+            window.StudBudSfx.update(patch);
+            AppState.set('settings', { ...AppState.get('settings'), gameAudio: { ...window.StudBudSfx.settings } });
+            this.syncMixerControls();
         }
 
         syncMixerDrawer() {
@@ -5348,7 +5409,7 @@
                 const attrs = row => `data-id="${this.escapeHTML(row.friendship_id)}" data-name="${this.escapeHTML(row.username)}"`;
                 lists.friends.innerHTML = data.friends.length
                     ? data.friends.map(row => person(row, `<button type="button" class="secondary-btn" data-action="friend-view" data-id="${this.escapeHTML(row.user_id)}">Profile</button><button type="button" class="ghost-btn" data-action="friend-remove" ${attrs(row)}>Remove</button>`)).join('')
-                    : '<li class="empty-state">No friends yet. Send a request using a username above.</li>';
+                    : '<li class="empty-state">No buds yet. Send a request using a username above.</li>';
                 lists.incoming.innerHTML = data.incoming.length
                     ? data.incoming.map(row => person(row, `<button type="button" class="primary-btn" data-action="friend-accept" ${attrs(row)}>Accept</button><button type="button" class="ghost-btn" data-action="friend-decline" ${attrs(row)}>Decline</button>`)).join('')
                     : '<li class="empty-state">No pending requests.</li>';
@@ -5359,7 +5420,7 @@
                 if (badge) { badge.textContent = String(data.incoming.length); badge.classList.toggle('hidden', !data.incoming.length); }
                 this.setFriendStatus('');
             } catch (error) {
-                this.setFriendStatus(this.friendlyErrorMessage(error, 'Could not load your friends.'), true);
+                this.setFriendStatus(this.friendlyErrorMessage(error, 'Could not load your buds.'), true);
             }
         }
 
@@ -5369,7 +5430,7 @@
             try {
                 const result = await window.StudBudCommunityGames.friendCall('studbud_friend_request', { p_username: name });
                 input.value = '';
-                this.setFriendStatus(result?.status === 'accepted' ? `You and ${name} are now friends!` : `Friend request sent to ${name}.`);
+                this.setFriendStatus(result?.status === 'accepted' ? `You and ${name} are now buds!` : `Bud request sent to ${name}.`);
                 await this.loadFriends();
             } catch (error) {
                 this.setFriendStatus(error.message || 'Could not send that request.', true);
@@ -5382,7 +5443,7 @@
                 if (action === 'friend-accept') await games.friendCall('studbud_friend_respond', { p_friendship_id: id, p_accept: true });
                 else if (action === 'friend-decline') await games.friendCall('studbud_friend_respond', { p_friendship_id: id, p_accept: false });
                 else await games.friendCall('studbud_friend_remove', { p_friendship_id: id });
-                this.setFriendStatus(action === 'friend-accept' ? `You are now friends with ${name}.` : '');
+                this.setFriendStatus(action === 'friend-accept' ? `You are now buds with ${name}.` : '');
                 const panel = document.getElementById('friend-profile');
                 if (panel && action === 'friend-remove') { panel.classList.add('hidden'); panel.innerHTML = ''; }
                 await this.loadFriends();
@@ -5429,7 +5490,7 @@
                 const avatar = this.multiplayerAvatarMarkup({ skin: p.skin, hat: p.hat, acc: p.accessory }, true);
                 const stat = (label, value) => `<div class="friend-stat"><strong>${value}</strong><small>${label}</small></div>`;
                 const facts = [p.grade_level && `🎓 ${p.grade_level}`, p.favorite_subject && `⭐ ${p.favorite_subject}`, p.study_goal && `🎯 ${p.study_goal}`].filter(Boolean).map(f => `<span class="friend-chip">${this.escapeHTML(f)}</span>`).join('');
-                panel.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.username)} ${this.accountTagMarkup(p.username)}</h3><small>Friend</small></div><button type="button" class="icon-btn profile-close" data-action="friend-profile-close" aria-label="Close profile"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
+                panel.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.username)} ${this.accountTagMarkup(p.username)}</h3>                <small>Bud</small></div><button type="button" class="icon-btn profile-close" data-action="friend-profile-close" aria-label="Close profile"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
                     ${p.bio ? `<p class="friend-bio">${this.escapeHTML(p.bio)}</p>` : ''}${facts ? `<div class="friend-chips">${facts}</div>` : ''}
                     <div class="friend-stats">${p.show_stats === false ? stat('Match wins', Number(p.wins) || 0) : `${stat('Studied today', this.formatStudyDuration(p.today_seconds))}${stat('This week', this.formatStudyDuration(p.week_seconds))}${stat('All time', this.formatStudyDuration(p.total_seconds))}${stat('Day streak', `${Number(p.streak_days) || 0} 🔥`)}${stat('Match wins', Number(p.wins) || 0)}`}</div>`;
                 panel.classList.remove('hidden');
@@ -5445,7 +5506,7 @@
                 { title: 'Welcome to StudBud', text: 'StudBud keeps your classes, grades, study plans, flashcards and games in one place. This quick tour shows what each part does. You can leave at any time.' },
                 { route: 'dashboard', sel: '#sidebar', title: 'Your menu', text: 'Everything lives in this menu. On a phone it sits along the top: swipe it sideways to see every page.' },
                 { route: 'dashboard', sel: '.priority-widget', title: 'Dashboard: what is due', text: 'See your most urgent assignments here, and use Add Assignment to put new work on your list.' },
-                { route: 'dashboard', sel: '.daily-study-card', title: 'Your home widget', text: 'Your streak, this week, today’s 15-minute goal, assignments to work on and your grades in one card. Tap Customize to choose what it shows or add StudBud to your home screen.' },
+                { route: 'dashboard', sel: '.daily-study-card', title: 'Your home widget', text: 'Your streak, this week, today’s 5-minute goal, assignments to work on and your grades in one card. Tap Customize to choose what it shows or add StudBud to your home screen.' },
                 { route: 'dashboard', sel: '#study-priority-list', title: 'Quizzes & tests', text: 'Add an upcoming quiz or test with the "Add quiz or test" button and StudBud suggests what to study today, how long, and the best way to do it.' },
                 { route: 'dashboard', sel: '.focus-sprint-widget', title: 'Focus sprint', text: 'Pick a quiz or test, choose anywhere from 5 to 90 minutes, and start a timer. Finished sprints are logged as study time.' },
                 { route: 'gpa', sel: '#add-course-btn', title: 'Classes & grades', text: 'Add your classes, set up grade categories and log assignment scores (decimals like 23.21/25 work). Your GPA updates automatically.' },
@@ -5456,14 +5517,14 @@
                 { route: 'flashcard', sel: nav('flashcard'), title: 'Flashcards', text: 'Study decks with spaced repetition. Tap a card to flip it as many times as you like, then rate how well you knew it.' },
                 { route: 'importer', sel: nav('importer'), title: 'Import or create cards', text: 'Paste a list to import cards in bulk, or switch to manual mode to type them one at a time.' },
                 { route: 'analytics', sel: nav('analytics'), title: 'Analytics', text: 'Charts of your grades, study time and habits so you can spot what is working.' },
-                { route: 'leaderboard', sel: nav('leaderboard'), title: 'Leaderboards', text: 'See your streak calendar and milestones, then compare study time today, this week, this month or all time, with everyone or just your friends.' },
-                { route: 'friends', sel: nav('friends'), title: 'Friends', text: 'Send a friend request by username, accept requests from others, and open a friend\'s profile to see their study time, streak and match wins.' },
+                { route: 'leaderboard', sel: nav('leaderboard'), title: 'Leaderboards', text: 'See your streak calendar and milestones, then compare study time today, this week, this month or all time, with everyone or just your buds.' },
+                { route: 'friends', sel: nav('friends'), title: 'Buds', text: 'Send a bud request by username, accept requests from others, and open a bud\'s profile to see their study time, streak and match wins.' },
                 { route: 'exam-arcade', sel: nav('exam-arcade'), title: 'Practice & Arcade', text: 'Practice exams and quick arcade games that use your own flashcards.' },
                 { route: 'multiplayer', sel: nav('multiplayer'), title: 'Multiplayer', text: 'Host or join a room and play City Escape, Soccer, King of the Hill and more. Every game has its own touch controls on phones, and a live leaderboard that ranks by what wins that game.' },
                 { route: 'shop', sel: nav('shop'), title: 'Shop & your character', text: 'Earn coins from games and open mystery boxes for characters, hats, accessories and colors. Equip items to wear them, and press Unequip on a worn item to take it off again.' },
                 { route: 'shop', sel: '#multiplayer-profile-button', title: 'Your profile button', text: 'This button in the top bar shows your character and name. Tap it any time to see your public profile, then edit it or jump to the shop.' },
                 { route: 'about', sel: nav('about'), title: 'About', text: 'What StudBud is for, how to use it, and who to email with questions or suggestions.' },
-                { route: 'settings', sel: '#public-profile-card', title: 'Public profile', text: 'Write a short bio, favorite subject, grade and study goal for your friends to see, and choose whether to share your study stats.' },
+                { route: 'settings', sel: '#public-profile-card', title: 'Public profile', text: 'Write a short bio, favorite subject, grade and study goal for your buds to see, and choose whether to share your study stats.' },
                 { route: 'settings', sel: nav('settings'), title: 'Settings', text: 'Set your graduation year and target GPA, change your username (once a week), back up or restore your data, and replay this tutorial any time.' },
                 { route: 'appearance', sel: '#appearance-view .settings-tabs', title: 'Appearance', text: 'Switch between light and dark, pick a color theme you have unlocked, and turn on compact mode. The sun/moon button in the top bar toggles light and dark quickly.' },
                 { route: 'sound', sel: '#sound-view .settings-tabs', title: 'Sound & music', text: 'Adjust the volume of interface sounds, game effects and music separately, or mute everything.' },
@@ -5624,7 +5685,7 @@
 
         studyStreakState() {
             const snap = this.studyLeaderboardSnapshot || {};
-            const goal = Number(snap.daily_goal_seconds) || 900;
+            const goal = Number(snap.daily_goal_seconds) || 300;
             const dayKey = time => {
                 const date = new Date(time);
                 return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : '';
@@ -5866,7 +5927,7 @@
                     : `<div class="podium-spot podium-spot-${i + 1}">${inner}</div>`;
             }).join('')}</li>` : '';
             const empty = friends
-                ? '<li class="empty-state">None of your friends have studied in this period yet. Add friends from the Friends page and challenge them!</li>'
+                ? '<li class="empty-state">None of your buds have studied in this period yet. Add buds from the Buds page and challenge them!</li>'
                 : '<li class="empty-state">No study time logged for this period yet. Start a session to be first on the board.</li>';
             list.innerHTML = board.length ? podium + board.map(row).join('') : empty;
 
@@ -5880,8 +5941,8 @@
                 const participants = Number(snap.participants) || board.length;
                 let text;
                 if (!this.studyLeaderboardSnapshot) text = '';
-                else if (!myRank) text = `You haven't studied in this period yet. Log ${Math.round((Number(snap.daily_goal_seconds) || 900) / 60)} minutes to get on the board.`;
-                else if (myRank === 1) text = participants > 1 ? `You're #1 of ${participants}! Keep studying to stay ahead.` : 'You\'re #1. Invite friends to compete!';
+                else if (!myRank) text = `You haven't studied in this period yet. Log ${Math.round((Number(snap.daily_goal_seconds) || 300) / 60)} minutes to get on the board.`;
+                else if (myRank === 1) text = participants > 1 ? `You're #1 of ${participants}! Keep studying to stay ahead.` : 'You\'re #1. Invite buds to compete!';
                 else text = `You're #${myRank} of ${participants} with ${fmt(mySeconds)}.${above ? ` Study about ${Math.ceil(gap / 60)} more min to pass ${above.username || 'the next student'}.` : ''}`;
                 me.innerHTML = text ? `<i class="fas fa-location-crosshairs" aria-hidden="true"></i><span>${this.escapeHTML(text)}</span>` : '';
                 me.classList.toggle('hidden', !text);
@@ -5889,7 +5950,7 @@
 
             const label = document.getElementById('study-leaderboard-period-label');
             const periodText = { daily: 'Today', weekly: 'This week', monthly: 'This month', alltime: 'All time' }[this.studyLeaderboardPeriod] || 'Today';
-            if (label) label.textContent = `${periodText} · ${friends ? 'You and your friends' : 'All StudBud students'}${this.studyLeaderboardPeriod === 'alltime' ? '' : ' · UTC'}`;
+            if (label) label.textContent = `${periodText} · ${friends ? 'You and your buds' : 'All StudBud students'}${this.studyLeaderboardPeriod === 'alltime' ? '' : ' · UTC'}`;
             document.querySelectorAll('[data-study-leaderboard-period]').forEach(button => {
                 const selected = button.dataset.studyLeaderboardPeriod === this.studyLeaderboardPeriod;
                 button.classList.toggle('selected', selected);
@@ -6731,12 +6792,12 @@
                 AppState.set('settings', { ...AppState.get('settings'), compactUi: event.target.checked });
                 this.applyAppearance();
             } else if (event.target.id === 'sfx-ui' || event.target.id === 'sfx-game') {
-                window.StudBudSfx.update({ [event.target.id === 'sfx-ui' ? 'ui' : 'game']: event.target.checked });
+                this.updateGameAudio({ [event.target.id === 'sfx-ui' ? 'ui' : 'game']: event.target.checked });
             } else if (event.target.id === 'music-on') {
-                window.StudBudSfx.update({ music: event.target.checked });
+                this.updateGameAudio({ music: event.target.checked });
                 if (!event.target.checked) window.StudBudSfx.stopMusic();
             } else if (event.target.id === 'music-style') {
-                window.StudBudSfx.update({ musicStyle: event.target.value });
+                this.updateGameAudio({ musicStyle: event.target.value });
             }
             if (event.target.id === 'host-game-goal-type') this.updateMultiplayerGoalInputs();
         }
@@ -7148,15 +7209,15 @@
             this.activeDeckId = deckId;
             this.cramMode = false;
             this.studySession = null;
-            // Flashcards are never "due": every card can be studied any time. Ready cards come first, then new cards,
-            // then the rest (weakest memory first); learning steps and early-review intervals keep spacing accurate.
-            const session = window.SM2Engine?.createSession ? window.SM2Engine.createSession(cards, { deck, includeAll: true }) : null;
+            if (!window.SM2Engine?.createSession) throw new Error('The spaced-repetition scheduler did not load. Reload before studying.');
+            const session = window.SM2Engine.createSession(cards, { deck });
             if (session && session.remaining) {
                 this.studySession = session;
                 this.studyCards = [];
             } else {
-                this.cramMode = true;
-                this.studyCards = cards.slice().sort(() => Math.random() - 0.5);
+                window.alert('You have finished the cards scheduled for today. Come back when your next review is due.');
+                this.studySession = null;
+                return;
             }
             this.activeCardIndex = 0;
             this.currentStudyCard = null;

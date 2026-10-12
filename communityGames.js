@@ -4,9 +4,9 @@
     class StudBudCommunityGames {
         constructor() {
             this.catalog = [
-                { id: 'palette_ocean', name: 'Tidal Glow', color: 'ocean', price: 120, type: 'palette' },
-                { id: 'palette_sunset', name: 'Heatwave', color: 'sunset', price: 120, type: 'palette' },
-                { id: 'palette_violet', name: 'Nebula', color: 'violet', price: 120, type: 'palette' },
+                { id: 'palette_ocean', name: 'Tidal Glow', color: 'ocean', hue: 205, hue2: 190, price: 120, type: 'palette' },
+                { id: 'palette_sunset', name: 'Heatwave', color: 'sunset', hue: 20, hue2: 350, price: 120, type: 'palette' },
+                { id: 'palette_violet', name: 'Nebula', color: 'violet', hue: 265, hue2: 280, price: 120, type: 'palette' },
                 { id: 'skin_robot', name: 'Robo Buddy', icon: 'fa-robot', price: 150, type: 'skin' },
                 { id: 'skin_ninja', name: 'Shadow Ninja', icon: 'fa-user-ninja', price: 180, type: 'skin' },
                 { id: 'skin_alien', name: 'Martian', icon: 'fa-user-astronaut', price: 180, type: 'skin' },
@@ -67,6 +67,14 @@
                 { id: 'skin_minty', name: 'Minty', icon: 'fa-leaf', price: 90, type: 'skin' },
                 { id: 'skin_celestial', name: 'Celestial Titan', icon: 'fa-sun', price: 750, type: 'skin' },
                 { id: 'skin_inferno', name: 'Inferno Phoenix', icon: 'fa-fire', price: 800, type: 'skin' },
+                { id: 'skin_bookworm', name: 'Bookworm', icon: 'fa-book', price: 140, type: 'skin', description: 'Pocket notebook, glasses and a scholarly vest' },
+                { id: 'skin_astronaut', name: 'Moonwalker', icon: 'fa-user-astronaut', price: 230, type: 'skin', description: 'Reflective visor and a panelled space suit' },
+                { id: 'skin_axolotl', name: 'Axolotl', icon: 'fa-fish', price: 380, type: 'skin', description: 'Animated pink gills and a spotted mint body' },
+                { id: 'hat_aviator', name: 'Aviator Cap', icon: 'fa-plane', price: 220, type: 'hat', description: 'Leather ear flaps and brass flight goggles' },
+                { id: 'hat_prism', name: 'Prism Diadem', icon: 'fa-gem', price: 430, type: 'hat', description: 'Three-cut crystal crown with contrasting facets' },
+                { id: 'hat_satellite', name: 'Satellite Halo', icon: 'fa-satellite', price: 740, type: 'hat', description: 'A miniature orbital station above your head' },
+                { id: 'acc_planet_effect', name: 'Planetary Rings', icon: 'fa-globe', price: 440, type: 'effect', description: 'Ringed planets in an elliptical orbit' },
+                { id: 'acc_music_effect', name: 'Study Symphony', icon: 'fa-music', price: 180, type: 'effect', description: 'Distinct musical notes circling you' },
                 { id: 'hat_visor', name: 'Sun Visor', icon: 'fa-sun', price: 65, type: 'hat' },
                 { id: 'hat_bucket', name: 'Bucket Hat', icon: 'fa-hat-cowboy-side', price: 75, type: 'hat' },
                 { id: 'hat_astronaut', name: 'Space Helmet', icon: 'fa-user-astronaut', price: 210, type: 'hat' },
@@ -154,13 +162,21 @@
                                     ['elder', 'Elder Dragon', '🐲', 'legendary'], ['brain', 'Big Brain', '🧠', 'legendary'], ['trophy', 'Golden Trophy', '🏆', 'legendary']
                                 ].map(([key, name, emoji, rarity]) => ({ id: `pet_${key}`, name, emoji, rarity, price: null, type: 'pet' }))
                             ].map(item => {
-                                const rarity = item.rarity || StudBudCommunityGames.rarityForPrice(item.price);
+                                const rarity = item.rarity || StudBudCommunityGames.rarityForItem(item);
                                 return { ...item, rarity, price: item.price == null ? null : Math.round(item.price * 2.5 / 5) * 5 };
                             });
                         }
 
                         static rarityForPrice(price) {
                             return price < 100 ? 'common' : price < 160 ? 'uncommon' : price < 260 ? 'rare' : price < 400 ? 'epic' : price < 700 ? 'legendary' : 'mythic';
+                        }
+
+                        static rarityForItem(item) {
+                            if (item.type === 'palette' && item.price < 400) {
+                                return ['aurora', 'coral', 'cyber', 'galaxy', 'royal'].includes(item.color) ? 'rare' : item.price < 100 ? 'common' : 'uncommon';
+                            }
+                            return { skin_gold: 'epic', skin_chrome: 'rare', skin_shadow: 'rare', skin_crystal: 'epic' }[item.id]
+                                || this.rarityForPrice(item.price);
                         }
 
                         static get boxes() {
@@ -186,6 +202,19 @@
         getUserId() {
             this.getClient();
             return window.StudBudCloud.user.id;
+        }
+
+        boxPool(box, owned = []) {
+            const types = { hat: ['hat'], accessory: ['accessory', 'effect'], effect: ['effect'], palette: ['palette'], skin: ['skin'] };
+            return this.catalog.filter(item => !item.legacy && item.type !== 'pet' && box.chances[item.rarity] > 0
+                && (!types[box.id] || types[box.id].includes(item.type)) && !owned.includes(item.id));
+        }
+
+        boxChances(box, owned = []) {
+            const pool = this.boxPool(box, owned);
+            const weights = Object.entries(box.chances).filter(([rarity]) => pool.some(item => item.rarity === rarity));
+            const total = weights.reduce((sum, [, weight]) => sum + weight, 0);
+            return Object.fromEntries(weights.map(([rarity, weight]) => [rarity, Math.round(weight / total * 1000) / 10]));
         }
 
         async searchDecks(query = '') {
@@ -232,6 +261,7 @@
                 const author = deck.communitySourceAuthor ? ` by ${deck.communitySourceAuthor}` : '';
                 throw new Error(`“${deck.title}” was added from another student's shared set${author}, so it can't be reposted. Make your own set to share it.`);
             }
+
             const title = String(deck.title || '').trim();
             if (!title || title.length > 100) throw new Error('Deck titles must be between 1 and 100 characters to share.');
             const cards = (deck.cards || []).map(card => ({
@@ -263,6 +293,13 @@
             }
             if (error) throw new Error(`Could not share this deck: ${error.message}`);
             return data;
+        }
+
+        async ownedDecks() {
+            const { data, error } = await this.getClient().from('studbud_community_decks')
+                .select('id,source_deck_id,title,cards,course').eq('owner_id', this.getUserId());
+            if (error) throw new Error(`Could not restore your published flashcards: ${error.message}`);
+            return data || [];
         }
 
         async unpublishDeck(deckId) {
