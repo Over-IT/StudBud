@@ -14,7 +14,7 @@
     <!-- Main Stylesheet -->
     <link rel="stylesheet" href="styles.css">
 </head>
-<body class="dark-theme">
+<body class="dark-theme" data-color-scheme="monochrome">
     <section id="auth-screen" class="auth-screen hidden" aria-labelledby="auth-title">
         <div class="glass-card auth-card">
             <div class="logo-container">
@@ -33,6 +33,7 @@
                 <label>Username (3–24 letters, numbers, or underscores)<input id="signup-username" type="text" autocomplete="username" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" title="Use 3–24 letters, numbers, or underscores." required></label>
                 <label>Password (at least 8 characters)<input id="signup-password" type="password" autocomplete="new-password" minlength="8" required></label>
                 <label>Confirm password<input id="signup-password-confirm" type="password" autocomplete="new-password" minlength="8" required></label>
+                <label>School<select id="signup-school" required><option value="">Choose your school…</option><option value="pchs">Parkway Central High School (PCHS)</option><option value="other">Other / not listed</option></select></label>
                 <button class="primary-btn full-width" type="submit">Create account</button>
             </form>
             <p id="auth-status" class="auth-message" role="status" aria-live="polite"></p>
@@ -62,7 +63,7 @@
                         <i class="fas fa-graduation-cap"></i> <span>GPA</span>
                     </li>
                     <li class="nav-item" data-target="grade-scenarios-view" role="button" tabindex="0">
-                        <i class="fas fa-flask"></i> <span>What-If Grades</span>
+                        <i class="fas fa-flask"></i> <span>Hypothetical Grades</span>
                     </li>
                     <li class="nav-item" data-target="planner-view" role="button" tabindex="0">
                         <i class="fas fa-calendar-check"></i> <span>Planner</span>
@@ -86,7 +87,7 @@
                         <i class="fas fa-user-group" aria-hidden="true"></i> <span>Buds</span><strong id="friend-nav-badge" class="sidebar-coin-count hidden">0</strong>
                     </li>
                     <li class="nav-item" data-target="exam-arcade-view" role="button" tabindex="0">
-                        <i class="fas fa-gamepad"></i> <span>Practice & Arcade</span>
+                        <i class="fas fa-gamepad"></i> <span>Practice</span>
                     </li>
                     <li class="nav-item" data-target="shop-view" role="button" tabindex="0">
                         <i class="fas fa-store"></i> <span>Shop</span><strong id="multiplayer-sidebar-coins" class="sidebar-coin-count">0 <i class="fas fa-coins"></i></strong>
@@ -295,6 +296,17 @@
                                 <label>Points earned<input name="pointsEarned" type="number" min="0" step="any" value="90" required></label>
                                 <label>Points possible<input name="maxPoints" type="number" min="0.01" step="any" value="100" required></label>
                                 <button class="primary-btn" type="submit"><i class="fas fa-plus"></i> Add to scenario</button>
+                                <div class="scenario-score-tools">
+                                    <span>Quick score</span>
+                                    <div role="group" aria-label="Set a quick hypothetical score">
+                                        <button type="button" class="secondary-btn" data-scenario-score-preset="50">50%</button>
+                                        <button type="button" class="secondary-btn" data-scenario-score-preset="70">70%</button>
+                                        <button type="button" class="secondary-btn" data-scenario-score-preset="80">80%</button>
+                                        <button type="button" class="secondary-btn" data-scenario-score-preset="90">90%</button>
+                                        <button type="button" class="secondary-btn" data-scenario-score-preset="100">100%</button>
+                                    </div>
+                                    <small id="grade-scenario-score-preview" aria-live="polite">90% score</small>
+                                </div>
                             </form>
                         </div>
                         <section class="glass-card scenario-existing">
@@ -560,9 +572,9 @@
                 <!-- 6. Practice Exams & Arcade View -->
                 <section id="exam-arcade-view" class="view hidden">
                     <div class="view-header">
-                        <h2>Interactive Learning Arcade</h2>
+                        <h2>Practice</h2>
                     </div>
-                    <div class="view-header"><p>Solo study games. Every game earns coins you can spend in the shop.</p><button class="primary-btn" type="button" data-target="multiplayer-view"><i class="fas fa-users"></i> Open Multiplayer</button></div>
+                    <div class="view-header"><p>Build confidence with flashcard quizzes or practice multiplayer games on your own. Practice sessions are private and do not award multiplayer coins.</p><button class="primary-btn" type="button" data-target="multiplayer-view"><i class="fas fa-users"></i> Open Multiplayer</button></div>
                     <div class="arcade-menu">
                         <div class="glass-card arcade-game-card">
                             <i class="fas fa-layer-group game-icon"></i>
@@ -601,6 +613,37 @@
                             <button class="primary-btn play-game-btn" data-game="test">Set Up Test</button>
                         </div>
                     </div>
+                    <section class="glass-card practice-multiplayer-setup" aria-labelledby="practice-multiplayer-heading">
+                        <div class="view-header">
+                            <div><h3 id="practice-multiplayer-heading">Practice multiplayer games on your own</h3><p>Try any multiplayer mode with simulated players and your flashcards. No room or invite code needed.</p></div>
+                        </div>
+                        <form id="practice-multiplayer-form" class="practice-multiplayer-form">
+                            <label>Game mode
+                                <select id="practice-multiplayer-mode">
+                                    <option value="skyline">City Escape</option>
+                                    <option value="river">River Fishing</option>
+                                    <option value="market">Package Delivery</option>
+                                    <option value="miner">Crystal Mining</option>
+                                    <option value="duel">King of the Hill</option>
+                                    <option value="shooter">Arena Shooter</option>
+                                    <option value="sports">Soccer</option>
+                                </select>
+                            </label>
+                            <label>Flashcard set<select id="practice-multiplayer-deck" required></select></label>
+                            <label>Practice time
+                                <select id="practice-multiplayer-time">
+                                    <option value="0">No time limit</option>
+                                    <option value="300">5 minutes</option>
+                                    <option value="600" selected>10 minutes</option>
+                                    <option value="1200">20 minutes</option>
+                                    <option value="1800">30 minutes</option>
+                                    <option value="3600">60 minutes</option>
+                                </select>
+                            </label>
+                            <button class="primary-btn" type="submit"><i class="fas fa-gamepad" aria-hidden="true"></i> Start solo practice</button>
+                        </form>
+                        <p id="practice-multiplayer-status" class="community-status" role="status" aria-live="polite"></p>
+                    </section>
                     <div id="arcade-canvas-container" class="glass-card hidden full-width">
                         <div class="arcade-header">
                             <h3 id="arcade-game-title">Game Title</h3>
@@ -656,7 +699,7 @@
                                     </form>
                                     </div>
                                     <div id="multiplayer-preview" class="multiplayer-preview">
-                                        <div class="preview-heading"><div><strong id="multiplayer-preview-title">City Escape</strong><span id="multiplayer-preview-description">Scale a lively rooftop course with every correct answer.</span></div><button id="preview-practice-btn" class="secondary-btn" type="button" data-action="toggle-solo-settings" aria-expanded="false"><i class="fas fa-gamepad" aria-hidden="true"></i> Set up solo game</button></div>
+                                        <div class="preview-heading"><div><strong id="multiplayer-preview-title">City Escape</strong><span id="multiplayer-preview-description">Scale a lively rooftop course with every correct answer.</span></div><button id="preview-practice-btn" class="secondary-btn" type="button" data-action="toggle-solo-settings" aria-expanded="false"><i class="fas fa-gamepad" aria-hidden="true"></i> Set up practice</button></div>
                                         <form id="solo-game-settings" class="solo-game-settings hidden">
                                             <label>Game time
                                                 <select name="timeLimit">
@@ -675,8 +718,8 @@
                                                 <button type="button" class="secondary-btn" data-action="recommended-reward" data-id="solo-game-reward">Use recommended amount</button>
                                                 <small>Choose an exact amount. Resources accumulate without a cap.</small>
                                             </div>
-                                            <button class="primary-btn" type="button" data-action="start-solo-game"><i class="fas fa-play" aria-hidden="true"></i> Start solo game</button>
-                                            <small>Correct answers give the resource shown above. End game opens your summary. Solo games award no multiplayer coins.</small>
+                                            <button class="primary-btn" type="button" data-action="start-solo-game"><i class="fas fa-play" aria-hidden="true"></i> Start practice</button>
+                                            <small>Correct answers give the resource shown above. End game opens your summary. Practice awards no multiplayer coins.</small>
                                         </form>
                                         <canvas id="multiplayer-game-canvas" width="900" height="360" aria-label="Animated preview of the selected multiplayer game"></canvas>
                                     </div>
@@ -719,7 +762,7 @@
                                 <div><h3>Warm-up</h3><p>Hop through grassy trails, dodge traffic, ride floating logs, and watch for the express train.</p></div>
                                 <canvas id="waiting-runner-canvas" width="520" height="360" aria-label="Pregame warm-up: tap to hop forward, swipe to change lanes, and keep moving as the screen scrolls."></canvas>
                                 <div class="waiting-runner-meta"><span>Rows <strong id="waiting-runner-score">0</strong> · Best <strong id="waiting-runner-best">0</strong></span><button id="waiting-runner-start" class="secondary-btn" type="button">Start warm-up</button></div>
-                                <div class="waiting-practice"><span>Want to play solo with bots? Practice awards no coins.</span><button id="waiting-practice-btn" class="primary-btn" type="button"><i class="fas fa-gamepad" aria-hidden="true"></i> Solo practice · no coins</button></div>
+                                <div class="waiting-practice"><span>Want to warm up with bots? Practice awards no coins.</span><button id="waiting-practice-btn" class="primary-btn" type="button"><i class="fas fa-gamepad" aria-hidden="true"></i> Start practice · no coins</button></div>
                             </section>
                         </main>
                     </div>
@@ -847,10 +890,10 @@
                         <h3>How to use it</h3>
                         <ul class="about-list">
                             <li><strong>Dashboard:</strong> see upcoming quizzes, study suggestions and your progress at a glance. Add a quiz or test to get a study plan.</li>
-                            <li><strong>GPA &amp; What-If:</strong> enter classes and assignments (decimals like 23.21/25 work), then try What-If scenarios by editing or adding grades.</li>
+                            <li><strong>GPA &amp; Hypothetical Grades:</strong> enter classes and assignments (decimals like 23.21/25 work), then try possible scores without changing your actual grades.</li>
                             <li><strong>Planner, Calendar &amp; Schedule:</strong> track assignments, due dates and your school day.</li>
                             <li><strong>Flashcards &amp; Import Cards:</strong> create or import decks. Study reviews new and due cards with Anki-style scheduling; quizzes and games can use all your cards anytime.</li>
-                            <li><strong>Practice &amp; Arcade / Multiplayer:</strong> answer questions from your cards to power games, alone or with other students.</li>
+                            <li><strong>Practice:</strong> quiz yourself with flashcards or try multiplayer game modes solo with simulated players. Open Multiplayer to play with other students.</li>
                             <li><strong>Leaderboards &amp; Shop:</strong> compete on study time and spend coins on avatar items.</li>
                             <li><strong>Settings:</strong> change your username (once a week), theme, sounds, and replay the tutorial.</li>
                         </ul>
@@ -877,6 +920,20 @@
                         <div class="glass-card">
                             <h2>Student Profile</h2>
                             <div class="form-group">
+                                <label for="settings-school">School</label>
+                                <select id="settings-school"><option value="pchs">Parkway Central High School (PCHS)</option><option value="other">Other / not listed</option></select>
+                                <small class="settings-hint">Your school is private unless you enable its public-profile tag.</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="settings-first-name">First name</label>
+                                <input type="text" id="settings-first-name" maxlength="60" autocomplete="given-name">
+                            </div>
+                            <div class="form-group">
+                                <label for="settings-last-name">Last name</label>
+                                <input type="text" id="settings-last-name" maxlength="60" autocomplete="family-name">
+                            </div>
+                            <p class="settings-hint">Your name is used in StudBud. It is only shown on your public profile if you choose to share it below.</p>
+                            <div class="form-group">
                                 <label for="settings-grad-year">Graduation Year</label>
                                 <select id="settings-grad-year">
                                     <option value="2026">Class of 2026</option>
@@ -900,6 +957,13 @@
                             </div>
                             <p class="settings-hint">Automatic term uses August–December for Semester 1 and January–July for Semester 2.</p>
                             <button id="save-profile-btn" class="primary-btn">Save Profile</button>
+                            <p id="school-profile-status" class="community-status" role="status" aria-live="polite"></p>
+                            <div id="other-grade-scale-panel" class="hidden">
+                                <h3>Other school grading scale</h3>
+                                <p class="settings-hint">Set the percentage cutoff and grade points for each letter. Weighted points apply only to classes you mark as weighted.</p>
+                                <div id="other-grade-scale-editor"></div>
+                                <button id="save-grade-scale-btn" class="secondary-btn" type="button">Save grading scale</button>
+                            </div>
                         </div>
 
                         <div class="glass-card hidden" id="tutorial-card">
@@ -928,6 +992,9 @@
                                 <select id="public-grade"><option value="">Prefer not to say</option><option>Freshman</option><option>Sophomore</option><option>Junior</option><option>Senior</option><option>Other</option></select>
                             </div>
                             <div class="form-group"><label for="public-goal">Study goal</label><input type="text" id="public-goal" maxlength="80" autocomplete="off" placeholder="e.g. Get an A in Chemistry"></div>
+                            <label class="settings-check"><input type="checkbox" id="public-show-real-name"> Show my first and last name on my public profile</label>
+                            <label class="settings-check"><input type="checkbox" id="public-show-school"> Show my PCHS tag on my public profile</label>
+                            <small class="settings-hint">Only PCHS has a public school tag. Other schools are never shown publicly.</small>
                             <label class="settings-check"><input type="checkbox" id="public-show-stats" checked> Show my study time, streak and match wins</label>
                             <p id="public-profile-status" class="community-status" role="status" aria-live="polite"></p>
                             <button id="save-public-profile-btn" class="primary-btn" type="button">Save public profile</button>
@@ -971,7 +1038,7 @@
                                 <button type="button" class="scheme-option" data-color-scheme="aurora" data-shop-item="palette_aurora"><span class="scheme-swatch aurora-swatch"></span><span>Aurora Drift</span><small class="scheme-lock-note">Unlock in multiplayer shop</small></button>
                                 <button type="button" class="scheme-option" data-color-scheme="coral" data-shop-item="palette_coral"><span class="scheme-swatch coral-swatch"></span><span>Coral Reef</span><small class="scheme-lock-note">Unlock in multiplayer shop</small></button>
                                 <button type="button" class="scheme-option" data-color-scheme="midnight" data-shop-item="palette_midnight"><span class="scheme-swatch midnight-swatch"></span><span>Midnight</span><small class="scheme-lock-note">Unlock in multiplayer shop</small></button>
-                                <button type="button" class="scheme-option" data-color-scheme="monochrome"><span class="scheme-swatch monochrome-swatch"></span><span>Black &amp; White</span></button>
+                                <button type="button" class="scheme-option" data-color-scheme="monochrome"><span class="scheme-swatch monochrome-swatch"></span><span>Black &amp; White</span><small class="scheme-lock-note">Default</small></button>
                             </div>
                         </section>
                         <section class="glass-card">
@@ -1118,7 +1185,7 @@
                 <div class="modal-body">
                     <form id="course-form">
                         <input type="hidden" id="course-id">
-                        <div class="form-group">
+                        <div class="form-group" id="course-catalog-fields">
                             <label for="course-search">Class</label>
                             <div class="course-autocomplete">
                                 <input type="search" id="course-search" placeholder="Type a class name or code…" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="course-suggestions" aria-expanded="false">
@@ -1126,6 +1193,11 @@
                                 <div id="course-suggestions" class="course-suggestions hidden" role="listbox" aria-label="PCHS course matches"></div>
                             </div>
                             <small id="course-selection-hint" class="form-hint">Choose a PCHS course from the matches.</small>
+                        </div>
+                        <div id="course-manual-fields" class="hidden">
+                            <div class="form-group"><label for="course-manual-title">Class name</label><input id="course-manual-title" maxlength="100" autocomplete="off" placeholder="e.g. Biology II" required></div>
+                            <div class="form-group"><label for="course-manual-code">Class code <span class="settings-hint">Optional</span></label><input id="course-manual-code" maxlength="30" autocomplete="off" placeholder="e.g. BIO-202"><small class="form-hint">Choose a code when adding the class; it can't be changed later because assignments link to it.</small></div>
+                            <label class="settings-check"><input type="checkbox" id="course-manual-weighted"> Weighted class</label>
                         </div>
                         <div class="form-group">
                             <label for="course-subject-category">Transcript subject area</label>
@@ -1153,12 +1225,12 @@
                             </div>
                             <div class="half-width">
                                 <label for="course-credits">Credits</label>
-                                <input type="number" id="course-credits" step="0.5" value="0.5" readonly required>
+                                <input type="number" id="course-credits" step="0.01" min="0" max="20" value="0.5" readonly required>
                             </div>
                         </div>
                         <div class="form-group row-group">
                             <div class="half-width">
-                                <span class="form-label">PCHS grade scale</span>
+                                <span class="form-label" id="course-scale-label">PCHS grade scale</span>
                                 <output id="course-weight-label" class="course-weight-label">Select a catalog course</output>
                             </div>
                             <div class="half-width"><span class="form-label">Grade</span><span>Calculated from assignment scores</span></div>

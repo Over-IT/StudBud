@@ -216,6 +216,7 @@
             event.preventDefault();
             const username = document.getElementById('signup-username').value.trim().toLowerCase();
             const password = document.getElementById('signup-password').value;
+            const school = document.getElementById('signup-school').value;
             try {
                 this.usernameEmail(username);
             } catch (error) {
@@ -230,12 +231,16 @@
                 this.setAuthStatus('The passwords do not match.', true);
                 return;
             }
+            if (!['pchs', 'other'].includes(school)) {
+                this.setAuthStatus('Choose your school to create an account.', true);
+                return;
+            }
             this.setAuthStatus('Creating your account…');
             try {
                 const { data, error } = await this.client.auth.signUp({
                     email: this.usernameEmail(username),
                     password,
-                    options: { data: { username } }
+                    options: { data: { username, school } }
                 });
                 if (error) throw error;
                 if (!data.session) {

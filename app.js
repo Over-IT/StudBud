@@ -226,6 +226,7 @@
                 gameMetrics: { level: 1, xp: 0, streakDays: 0, lastStudyDate: null },
                 settings: {
                     theme: "dark",
+                    colorScheme: "monochrome",
                     audioVolume: 0.70,
                     audioLevels: { lofi: 0.5, rain: 0.5, white: 0.3, binaural: 0.6 },
                     soundscapePreset: "off",
@@ -257,8 +258,6 @@
                 } else {
                     this.saveToLocalStorage();
                 }
-                if (this.state.profile) delete this.state.profile.lastName;
-
                 const flashcards = await NexusDB.getAll('flashcards');
                 const studyHistory = await NexusDB.getAll('studyHistory');
                 const metrics = await NexusDB.get('gameMetrics', 'user_metrics');
@@ -521,7 +520,7 @@
 
         navigate(route, updateHash = true) {
             if (route !== 'class' && !this.routes.includes(route)) route = "dashboard";
-            if (route === 'admin' && !window.NexusApp?.isAdmin) route = "dashboard";
+            if (route === 'admin' && !window.NexusApp?.canAccessStaff) route = "dashboard";
 
             this.activeRoute = route;
             AppState.set('currentView', route);
@@ -992,6 +991,10 @@
             this.hostedGamePollError = '';
             this.multiplayerProfile = null;
             this.multiplayerProfilePromise = null;
+            this.userTags = [];
+            this.canModerateFlashcards = false;
+            this.canTestGames = false;
+            this.canAccessStaff = false;
             this.waitingRunner = { running: false, started: false, x: 4, row: 0, cameraRow: 0, score: 0, best: 0, hop: null, lanes: new Map(), clock: 0, dead: false, saving: false };
             this.multiplayerFrame = null;
             this.multiplayerFrameTime = 0;
@@ -1075,8 +1078,8 @@
             })[character]);
         }
 
-        accountTagMarkup(username) {
-            return window.StudBudArcade.util.accountTagMarkup(username);
+        accountTagMarkup(username, tags = []) {
+            return window.StudBudArcade.util.accountTagMarkup(username, tags);
         }
 
         formatNumber(value) {
@@ -1161,6 +1164,9 @@
                 if (event.target.matches('#host-game-reward, #solo-game-reward')) {
                     if (event.target.validity.valid) document.querySelector(`[data-reward-slider="${event.target.id}"]`).value = event.target.value;
                     this.updateQuestionRewardGuidance();
+                }
+                if (event.target.matches('#grade-scenario-assignment-form [name="pointsEarned"], #grade-scenario-assignment-form [name="maxPoints"]')) {
+                    this.updateScenarioScorePreview();
                 }
                 if (event.target.matches('#assignment-search')) this.renderAssignments();
                 if (event.target.matches('#my-deck-search')) this.renderDecks();
@@ -1333,6 +1339,7 @@
                 `<option value="${this.escapeHTML(item.id)}">${this.escapeHTML(item.name)}</option>`
             ).join('');
             scenarioSelect.value = selectedId;
+            this.updateScenarioScorePreview();
             const nameInput = document.getElementById('grade-scenario-name');
             if (nameInput) nameInput.value = selectedScenario ? selectedScenario.name : '';
             const emptyState = document.getElementById('grade-scenario-empty');
@@ -1458,8 +1465,8 @@
                     const max = Number(item.maxPoints || 100);
                     return `<div class="scenario-existing-row${overridden ? ' is-changed' : ''}">
                         <div><strong>${this.escapeHTML(item.title)}</strong><small>${actual === null ? 'Not graded yet' : `Actual: ${this.formatNumber(actual)} / ${this.formatNumber(max)}`}</small></div>
-                        <label class="scenario-existing-input"><span class="sr-only">What-if score for ${this.escapeHTML(item.title)}</span>
-                            <input type="number" min="0" step="0.01" data-scenario-override="${this.escapeHTML(item.id)}" value="${overridden ? Number(Number(overrides[item.id]).toFixed(2)) : ''}" placeholder="${actual === null ? 'Score' : this.formatNumber(actual)}"> / ${this.formatNumber(max)}</label>
+                        <label class="scenario-existing-input"><span class="sr-only">Hypothetical score for ${this.escapeHTML(item.title)}</span>
+                            <input type="number" min="0" max="${max}" step="0.01" data-scenario-override="${this.escapeHTML(item.id)}" value="${overridden ? Number(Number(overrides[item.id]).toFixed(2)) : ''}" placeholder="${actual === null ? 'Score' : this.formatNumber(actual)}"> / ${this.formatNumber(max)}</label>
                         <button class="secondary-btn" data-action="reset-scenario-override" data-id="${this.escapeHTML(item.id)}" ${overridden ? '' : 'disabled'}>Reset</button>
                     </div>`;
                 }).join('');
@@ -1474,7 +1481,7 @@
             if (!selectedId || !assignment) return;
             const text = String(rawValue ?? '').trim();
             const value = Math.round(Number(text) * 100) / 100;
-            const clear = text === '' || !Number.isFinite(value) || value < 0;
+            const clear = text === '' || !Number.isFinite(value) || value < 0 || value > Number(assignment.maxPoints || 100);
             const scenarios = (AppState.get('gradeScenarios') || []).map(scenario => {
                 if (scenario.id !== selectedId) return scenario;
                 const overrides = { ...(scenario.overrides || {}) };
@@ -1483,6 +1490,17 @@
                 return { ...scenario, overrides };
             });
             this.saveGradeScenarioItems(scenarios);
+        }
+
+        updateScenarioScorePreview() {
+            const form = document.getElementById('grade-scenario-assignment-form');
+            const preview = document.getElementById('grade-scenario-score-preview');
+            if (!form || !preview) return;
+            const earned = Number(form.elements.pointsEarned.value);
+            const possible = Number(form.elements.maxPoints.value);
+            preview.textContent = Number.isFinite(earned) && Number.isFinite(possible) && possible > 0
+                ? `${(earned / possible * 100).toFixed(1)}% score`
+                : 'Enter valid points to preview the score';
         }
 
         saveGradeScenarioItems(scenarios) {
@@ -2006,7 +2024,7 @@
 
         /** Minimize the sum of class target percentages while meeting the credit-weighted GPA goal. */
         gpaTargetPlan(targetGpa, mode = 'weighted', courses = AppState.get('courses') || []) {
-            const scale = (window.PCHS_GRADE_SCALE || []).slice().sort((a, b) => a.minPct - b.minPct);
+            const scale = (window.studbudGradeScale?.() || window.PCHS_GRADE_SCALE || []).slice().sort((a, b) => a.minPct - b.minPct);
             const points = (item, course) => Number(mode === 'weighted' && course.isWeighted ? item.weighted : item.unweighted);
             const rows = courses.map(course => {
                 const ladder = [];
@@ -2135,7 +2153,7 @@
                 const game = session.gameSummary;
                 const accuracy = game?.answered ? Math.round(game.correct / game.answered * 100) : 0;
                 const standings = game?.standings || [];
-                const detail = game ? `<details class="saved-game-summary"><summary>${session.source === 'solo' ? 'Solo game' : 'Game'} summary · ${game.answered ? `${accuracy}% correct` : 'No answers submitted'} · ${Number(game.answered) || 0} answered</summary><p>${Number(game.correct) || 0} correct · ${Math.max(0, Number(game.answered || 0) - Number(game.correct || 0))} incorrect · ${(game.questions || []).filter(question => question.correct === null).length} skipped</p>${standings.length ? `<ol>${standings.map(row => `<li>${this.escapeHTML(row.name)} · ${this.formatNumber(game.objectiveBased ? row.goal : row.score)} ${this.escapeHTML(game.objectiveUnit || 'pts')}</li>`).join('')}</ol>` : ''}${window.StudBudArcade.util.questionHistoryMarkup(game.questions || [])}</details>` : '';
+                const detail = game ? `<details class="saved-game-summary"><summary>${session.source === 'solo' ? 'Practice game' : 'Game'} summary · ${game.answered ? `${accuracy}% correct` : 'No answers submitted'} · ${Number(game.answered) || 0} answered</summary><p>${Number(game.correct) || 0} correct · ${Math.max(0, Number(game.answered || 0) - Number(game.correct || 0))} incorrect · ${(game.questions || []).filter(question => question.correct === null).length} skipped</p>${standings.length ? `<ol>${standings.map(row => `<li>${this.escapeHTML(row.name)} · ${this.formatNumber(game.objectiveBased ? row.goal : row.score)} ${this.escapeHTML(game.objectiveUnit || 'pts')}</li>`).join('')}</ol>` : ''}${window.StudBudArcade.util.questionHistoryMarkup(game.questions || [])}</details>` : '';
                 return `<article class="study-history-item"><div><strong>${this.escapeHTML(session.title || 'Study session')}</strong><span>${this.formatStudyDuration(session.durationSec)} · ${this.escapeHTML(session.methodLabel || this.studyMethodLabel(session.method || 'retrieval'))}</span><small>${new Date(session.timestamp).toLocaleDateString()} · ${rated}${session.notes ? ` · ${this.escapeHTML(session.notes)}` : ''}</small></div>${detail}</article>`;
             }).join('')}` : '<p class="empty-state">Log a study session from a recommendation to help tune your future plan.</p>';
         }
@@ -2521,6 +2539,8 @@
             const select = document.getElementById('host-game-deck');
             if (!select) return;
             const previous = select.value;
+            const practiceSelect = document.getElementById('practice-multiplayer-deck');
+            const previousPracticeDeck = practiceSelect?.value;
             const decks = (AppState.get('flashcards') || []).map(deck => ({
                 ...deck,
                 completeCards: (deck.cards || []).filter(card =>
@@ -2530,6 +2550,13 @@
             select.innerHTML = decks.length
                 ? decks.map(deck => `<option value="${this.escapeHTML(deck.id)}">${this.escapeHTML(deck.title)} · ${deck.completeCards.length} cards</option>`).join('')
                 : '<option value="">Add a set with at least 1 complete card</option>';
+            if (practiceSelect) {
+                practiceSelect.innerHTML = decks.length
+                    ? decks.map(deck => `<option value="${this.escapeHTML(deck.id)}">${this.escapeHTML(deck.title)} · ${deck.completeCards.length} cards</option>`).join('')
+                    : '<option value="">Add a set with at least 1 complete card</option>';
+                if (decks.some(deck => deck.id === previousPracticeDeck)) practiceSelect.value = previousPracticeDeck;
+                practiceSelect.disabled = !decks.length;
+            }
             if (decks.some(deck => deck.id === previous)) select.value = previous;
             const nickname = this.multiplayerDisplayName().replace(/[^A-Za-z0-9 _-]/g, '').slice(0, 20);
             ['host-game-nickname', 'join-game-nickname'].forEach(id => {
@@ -2541,9 +2568,7 @@
         multiplayerDisplayName() {
             const user = window.StudBudCloud?.user;
             const profile = AppState.get('profile') || {};
-            const fullName = profile.firstName && profile.lastName
-                ? `${profile.firstName} ${profile.lastName}`.trim()
-                : '';
+            const fullName = [profile.firstName, profile.lastName].map(name => String(name || '').trim()).filter(Boolean).join(' ');
             return fullName || user?.user_metadata?.username || 'Student';
         }
 
@@ -2562,9 +2587,9 @@
             const owned = profile.owned_items || [];
             const tab = this.shopTab || 'boxes';
             const catalog = games.catalog.filter(item => !item.legacy && item.type !== 'pet');
-            const equippedBy = { skin: profile.equipped_skin, hat: profile.equipped_hat, accessory: profile.equipped_accessory, effect: profile.equipped_accessory, palette: profile.equipped_palette };
+            const equippedBy = { skin: profile.equipped_skin, hat: profile.equipped_hat, accessory: profile.equipped_accessory, effect: profile.equipped_effect, palette: profile.equipped_palette };
             const tabs = [['boxes', 'Mystery boxes'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['effect', 'Auras'], ['palette', 'Colors'], ['inventory', 'Inventory']];
-            const slotKey = { skin: 'skin', hat: 'hat', accessory: 'acc', effect: 'acc' };
+            const slotKey = { skin: 'skin', hat: 'hat', accessory: 'acc', effect: 'effect' };
             const previewCosmetics = item => ({ ...this.profileCosmetics(profile), [slotKey[item.type]]: item.id });
             const itemCard = item => {
                 const has = owned.includes(item.id);
@@ -2576,7 +2601,7 @@
                 else preview = this.multiplayerAvatarMarkup(previewCosmetics(item), false, item.type === 'effect' ? 'aura-preview' : '');
                 const price = item.price == null ? '' : ` · ${item.price} <i class="fas fa-coins"></i>`;
                 let button;
-                if (has && equipped && equippedBy[item.type] !== undefined) button = `<button type="button" class="ghost-btn" data-action="multiplayer-unequip" data-slot="${item.type === 'effect' ? 'accessory' : item.type}">Unequip</button>`;
+                if (has && equipped && equippedBy[item.type] !== undefined) button = `<button type="button" class="ghost-btn" data-action="multiplayer-unequip" data-slot="${item.type}">Unequip</button>`;
                 else if (has) button = `<button type="button" class="secondary-btn" data-action="multiplayer-equip" data-id="${this.escapeHTML(item.id)}">Equip</button>`;
                 else if (item.price == null) button = '<button type="button" class="secondary-btn" disabled>Box only</button>';
                 else button = `<button type="button" class="secondary-btn" data-action="multiplayer-buy" data-id="${this.escapeHTML(item.id)}" ${profile.coins < item.price ? 'disabled' : ''}>Buy${price}</button>`;
@@ -2630,7 +2655,7 @@
                                     const items = catalog.filter(item => item.type === tab)
                                         .sort((a, b) => rank(a) - rank(b) || (a.price ?? Infinity) - (b.price ?? Infinity) || String(a.name).localeCompare(String(b.name)));
                                     const count = items.filter(item => owned.includes(item.id)).length;
-                                    const remove = slotKey[tab] ? `<button type="button" class="ghost-btn shop-unequip" data-action="multiplayer-unequip" data-slot="${tab === 'effect' ? 'accessory' : tab}">Remove</button>` : '';
+                                    const remove = slotKey[tab] ? `<button type="button" class="ghost-btn shop-unequip" data-action="multiplayer-unequip" data-slot="${tab}">Remove</button>` : '';
                                     const groups = [...new Set(items.map(item => item.rarity))].sort((a, b) => rank({ rarity: a }) - rank({ rarity: b }));
                                     body = `<h4 class="shop-category-title">${count} / ${items.length} collected ${remove}</h4>${groups.map(rarity => {
                                         const list = items.filter(item => item.rarity === rarity);
@@ -2705,7 +2730,7 @@
                 const wins = document.getElementById('multiplayer-wins');
                 if (wins) wins.textContent = Number(profile.wins).toLocaleString();
                 this.renderMultiplayerShop(profile);
-                shopStatus.textContent = 'Earn coins from Practice & Arcade quizzes, multiplayer matches and your daily reward. Solo study games do not award coins.';
+                shopStatus.textContent = 'Earn coins from flashcard quizzes, multiplayer matches and your daily reward. Multiplayer practice games do not award coins.';
                 this.renderDailyReward(profile);
                 const best = document.getElementById('waiting-runner-best');
                 if (best) {
@@ -2808,9 +2833,28 @@
             if (accountName) accountName.innerHTML = `${this.escapeHTML(name)} ${this.accountTagMarkup(name)}`;
             this.isAdmin = ['overit', 'andy'].includes(name);
             try { if (await window.StudBudCommunityGames.isAdmin()) this.isAdmin = true; } catch (error) { /* keep the name check */ }
+            try {
+                const tags = await window.StudBudCommunityGames.friendCall('studbud_user_tags_for', {
+                    p_user_id: window.StudBudCloud?.user?.id
+                });
+                this.userTags = Array.isArray(tags) ? tags : [];
+            } catch (error) {
+                console.warn('[Profile] Could not load account tags:', error.message);
+                this.userTags = [];
+            }
+            if (accountName) accountName.innerHTML = `${this.escapeHTML(name)} ${this.accountTagMarkup(name, this.userTags)}`;
+            this.canModerateFlashcards = this.isAdmin || this.userTags.includes('moderator');
+            this.canTestGames = this.isAdmin || this.userTags.includes('tester');
+            this.canAccessStaff = this.canModerateFlashcards || this.canTestGames;
             window.NexusApp.isAdmin = this.isAdmin;
-            document.getElementById('admin-nav-item')?.classList.toggle('hidden', !this.isAdmin);
-            if (this.isAdmin && /^#\/?admin$/i.test(window.location.hash) && Router.activeRoute !== 'admin') Router.handleHashChange();
+            window.NexusApp.canAccessStaff = this.canAccessStaff;
+            document.getElementById('admin-nav-item')?.classList.toggle('hidden', !this.canAccessStaff);
+            document.querySelectorAll('#admin-view [data-admin-tab]').forEach(button => {
+                const allowed = this.isAdmin || (button.dataset.adminTab === 'decks' && this.canModerateFlashcards)
+                    || (button.dataset.adminTab === 'games' && this.canTestGames);
+                button.classList.toggle('hidden', !allowed);
+            });
+            if (this.canAccessStaff && /^#\/?admin$/i.test(window.location.hash) && Router.activeRoute !== 'admin') Router.handleHashChange();
             this.refreshUsernameCard();
             this.loadPublicProfileCard();
         }
@@ -2823,7 +2867,16 @@
                 document.getElementById('public-subject').value = p.favorite_subject || '';
                 document.getElementById('public-grade').value = p.grade_level || '';
                 document.getElementById('public-goal').value = p.study_goal || '';
+                document.getElementById('public-show-real-name').checked = p.show_real_name === true;
+                document.getElementById('public-show-school').checked = p.show_school === true;
                 document.getElementById('public-show-stats').checked = p.show_stats !== false;
+                const profile = AppState.get('profile') || {};
+                const school = ['pchs', 'other'].includes(p.school) ? p.school : 'pchs';
+                if (profile.school !== school) AppState.set('profile', { ...profile, school });
+                document.getElementById('settings-school').value = school;
+                this.updateCourseSchoolFields();
+                this.renderOtherGradeScaleEditor();
+                this.updatePublicSchoolOption();
             } catch (error) {
                 const status = document.getElementById('public-profile-status');
                 if (status) status.textContent = 'Profile sharing is unavailable right now. Re-run supabase-setup.sql in Supabase.';
@@ -2839,6 +2892,10 @@
                     p_favorite_subject: document.getElementById('public-subject').value,
                     p_grade_level: document.getElementById('public-grade').value,
                     p_study_goal: document.getElementById('public-goal').value,
+                    p_first_name: document.getElementById('settings-first-name').value.trim(),
+                    p_last_name: document.getElementById('settings-last-name').value.trim(),
+                    p_show_real_name: document.getElementById('public-show-real-name').checked,
+                    p_show_school: document.getElementById('public-show-school').checked,
                     p_show_stats: document.getElementById('public-show-stats').checked
                 });
                 status.textContent = 'Saved. Your buds will see this on your profile.';
@@ -2949,11 +3006,14 @@
         async loadAdminList() {
             const list = document.getElementById('admin-list');
             const status = document.getElementById('admin-status');
-            if (!list || !this.isAdmin) return;
-            const tab = this.adminTab || 'decks';
+            if (!list || !this.canAccessStaff) return;
+            let tab = this.adminTab || (this.canModerateFlashcards ? 'decks' : 'games');
+            if (tab === 'decks' && !this.canModerateFlashcards) tab = 'games';
+            if (['users', 'notices'].includes(tab) && !this.isAdmin) tab = this.canModerateFlashcards ? 'decks' : 'games';
+            this.adminTab = tab;
             document.getElementById('admin-search-form')?.classList.toggle('hidden', tab === 'games' || tab === 'notices');
             if (tab === 'games') {
-                status.textContent = 'Testing tools are available only to administrators. Test games have infinite energy and no rewards.';
+                status.textContent = 'Test games have infinite energy and no rewards.';
                 list.innerHTML = `<article class="admin-row">
                     <div><strong>Multiplayer game test bench</strong><small>Launch any arena with simulated players. Test sessions do not award coins or affect leaderboards.</small></div>
                     <div class="admin-test-settings">
@@ -2996,16 +3056,23 @@
                 status.textContent = rows.length ? `${rows.length} shown` : 'Nothing found.';
                 const esc = value => this.escapeHTML(String(value ?? ''));
                 list.innerHTML = tab === 'users'
-                    ? rows.map(user => `<article class="admin-row">
-                        <div><strong>${esc(user.username)} ${this.accountTagMarkup(user.username)}</strong>${user.banned ? ' <span class="admin-badge">banned</span>' : ''}${user.force_change ? ' <span class="admin-badge">rename required</span>' : ''}
-                        <small>${Number(user.coins)} coins · ${Number(user.wins)} wins · ${Number(user.decks)} public decks · joined ${esc(new Date(user.created_at).toLocaleDateString())}</small></div>
+                    ? rows.map(user => {
+                        const tags = Array.isArray(user.tags) ? user.tags : [];
+                        const roleControl = this.isAdmin ? `<details class="admin-tools"><summary>Manage tags</summary><div class="admin-actions admin-tag-options">
+                            ${[['teacher', 'Teacher'], ['tester', 'Tester'], ['moderator', 'Moderator']].map(([tag, label]) => `<label><input type="checkbox" data-user-tag="${tag}"${tags.includes(tag) ? ' checked' : ''}> ${label}</label>`).join('')}
+                            <button type="button" class="primary-btn" data-admin-action="save-user-tags" data-id="${esc(user.id)}" data-name="${esc(user.username)}">Save tags</button>
+                        </div></details>` : '';
+                        return `<article class="admin-row">
+                        <div><strong>${esc(user.username)} ${this.accountTagMarkup(user.username, tags)}</strong>${user.banned ? ' <span class="admin-badge">banned</span>' : ''}${user.force_change ? ' <span class="admin-badge">rename required</span>' : ''}
+                        <small>${Number(user.coins)} coins · ${Number(user.wins)} wins · ${Number(user.decks)} public decks · School: ${esc(user.school === 'pchs' ? 'PCHS' : 'Other')} · joined ${esc(new Date(user.created_at).toLocaleDateString())}</small></div>${roleControl}
                         <details class="admin-tools"><summary>Manage user</summary><div class="admin-actions">
                             <button type="button" class="secondary-btn" data-admin-action="profile" data-id="${esc(user.id)}">Public profile</button>
                             <button type="button" class="secondary-btn" data-admin-action="coins" data-id="${esc(user.id)}" data-name="${esc(user.username)}">Coins</button>
                             <button type="button" class="secondary-btn" data-admin-action="remove-decks" data-id="${esc(user.id)}" data-name="${esc(user.username)}">Remove decks</button>
                             <button type="button" class="secondary-btn" data-admin-action="${user.force_change ? 'cancel-rename' : 'force-rename'}" data-id="${esc(user.id)}" data-name="${esc(user.username)}">${user.force_change ? 'Cancel rename' : 'Force rename'}</button>
                             <button type="button" class="${user.banned ? 'secondary-btn' : 'danger-btn'}" data-admin-action="${user.banned ? 'unban' : 'ban'}" data-id="${esc(user.id)}" data-name="${esc(user.username)}">${user.banned ? 'Unban' : 'Ban'}</button>
-                        </div><small>Last sign-in: ${esc(user.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleString() : 'Never')}${user.ban_reason ? ` · Ban reason: ${esc(user.ban_reason)}` : ''}</small></details></article>`).join('')
+                        </div><small>Last sign-in: ${esc(user.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleString() : 'Never')}${user.ban_reason ? ` · Ban reason: ${esc(user.ban_reason)}` : ''}</small></details></article>`;
+                    }).join('')
                     : rows.map(deck => `<article class="admin-row">
                         <div><strong>${esc(deck.title)}</strong> <small>by ${esc(deck.owner)} ${this.accountTagMarkup(deck.owner)} · ${Number(deck.card_count)} cards · ${Number(deck.study_count)} studies</small>
                         ${deck.description ? `<small>${esc(deck.description)}</small>` : ''}
@@ -3026,7 +3093,7 @@
             const status = document.getElementById('admin-status');
             try {
                 if (action === 'test-game') {
-                    if (!this.isAdmin) throw new Error('Game testing is available only to administrators.');
+                    if (!this.canTestGames) throw new Error('Game testing is available only to testers and administrators.');
                     const mode = document.getElementById('admin-game-test-mode')?.value;
                     if (!window.StudBudArcade?.games?.[mode]) throw new Error('Choose a valid game to test.');
                     const botCount = Number(document.getElementById('admin-game-test-bots').value);
@@ -3036,10 +3103,21 @@
                     this.startPractice(mode, { testing: true, timeLimitSeconds: 0, questionReward: 100, botCount, seed });
                     return;
                 } else if (action === 'inspect-deck') {
+                    if (!this.canModerateFlashcards) throw new Error('Flashcard moderation is available only to moderators and administrators.');
                     const deck = await games.adminCall('studbud_admin_get_deck', { p_deck_id: data.id });
                     const panel = document.getElementById(`admin-deck-${data.id}`);
                     panel.innerHTML = `<details open><summary>${Number(deck.card_count)} cards · ${this.escapeHTML(deck.title)}</summary><ol class="admin-deck-cards">${deck.cards.map(card => `<li><strong>${this.escapeHTML(card.front)}</strong><p>${this.escapeHTML(card.back)}</p></li>`).join('')}</ol></details>`;
                     panel.classList.remove('hidden');
+                    return;
+                } else if (action === 'save-user-tags') {
+                    if (!this.isAdmin) throw new Error('Only administrators can assign account tags.');
+                    const row = document.querySelector(`[data-admin-action="save-user-tags"][data-id="${CSS.escape(data.id)}"]`)?.closest('.admin-row');
+                    if (!row) throw new Error('The selected account controls are no longer available.');
+                    const tags = [...row.querySelectorAll('[data-user-tag]:checked')].map(input => input.dataset.userTag);
+                    await games.adminCall('studbud_admin_set_user_tags', { p_user_id: data.id, p_tags: tags });
+                    await this.refreshAdminAccess();
+                    status.textContent = `Tags updated for ${data.name}.`;
+                    await this.loadAdminList();
                     return;
                 } else if (action === 'profile') {
                     await this.openUserProfile(data.id);
@@ -3099,6 +3177,7 @@
             }
             this.shopPurchaseBusy = true;
             try {
+                const previousProfile = this.multiplayerProfile || {};
                 const profile = action === 'multiplayer-buy'
                     ? await window.StudBudCommunityGames.purchaseItem(itemId)
                     : action === 'multiplayer-mystery'
@@ -3106,6 +3185,24 @@
                         : action === 'multiplayer-unequip'
                             ? await window.StudBudCommunityGames.unequipSlot(itemId)
                             : await window.StudBudCommunityGames.equipItem(itemId);
+                if (action === 'multiplayer-equip') {
+                    const equippedField = {
+                        skin: 'equipped_skin',
+                        hat: 'equipped_hat',
+                        accessory: 'equipped_accessory',
+                        effect: 'equipped_effect',
+                        palette: 'equipped_palette'
+                    };
+                    const item = window.StudBudCommunityGames.catalog.find(entry => entry.id === itemId);
+                    const field = item && equippedField[item.type];
+                    if (!field || profile[field] !== itemId) {
+                        throw new Error('The server did not equip that item in its own slot. Run the latest supabase-setup.sql and try again.');
+                    }
+                    if ((item.type === 'accessory' && profile.equipped_effect !== previousProfile.equipped_effect)
+                        || (item.type === 'effect' && profile.equipped_accessory !== previousProfile.equipped_accessory)) {
+                        throw new Error('The server changed your other equipped cosmetic. Run the latest supabase-setup.sql and try again.');
+                    }
+                }
                 const unlockedItem = profile.unlocked_item;
                 if (profile.collection_complete) {
                     this.completedShopBoxes ||= new Set();
@@ -3145,14 +3242,14 @@
                 if (note) note.textContent = unlocked ? 'Unlocked · select to apply' : 'Unlock in multiplayer shop';
                 button.setAttribute('aria-label', `${button.dataset.colorScheme} color scheme${unlocked ? ', unlocked' : ', locked; unlock in multiplayer shop'}`);
             });
-            const current = AppState.get('settings')?.colorScheme;
+            const current = AppState.get('settings')?.colorScheme || 'monochrome';
             const activePremiumScheme = Array.from(document.querySelectorAll('.scheme-option[data-shop-item]'))
                 .find(button => button.dataset.colorScheme === current);
             if (activePremiumScheme && !owned.includes(activePremiumScheme.dataset.shopItem)) {
-                AppState.set('settings', { ...AppState.get('settings'), colorScheme: 'forest' });
+                AppState.set('settings', { ...AppState.get('settings'), colorScheme: 'monochrome' });
                 this.applyAppearance();
             }
-            const selectedScheme = activePremiumScheme && !owned.includes(activePremiumScheme.dataset.shopItem) ? 'forest' : current;
+            const selectedScheme = activePremiumScheme && !owned.includes(activePremiumScheme.dataset.shopItem) ? 'monochrome' : current;
             document.querySelectorAll('.scheme-option').forEach(button =>
                 button.classList.toggle('selected', button.dataset.colorScheme === selectedScheme)
             );
@@ -4848,7 +4945,7 @@
                     };
                     const cosmetics = this.profileCosmetics(this.multiplayerProfile || {});
                     const base = {
-                        preview: true, stickJumpHeld: false, seed: 4242, local: { id: 'demo', color: '#38bdf8', nickname: 'You', cos: { skin: cosmetics.skin, hat: cosmetics.hat, acc: cosmetics.acc } }, user: { id: 'demo' }, t: 0, startedAt: Date.now(), done: false, finishMs: 0, over: false, paused: false, question: null, score: 0,
+                        preview: true, stickJumpHeld: false, seed: 4242, local: { id: 'demo', color: '#38bdf8', nickname: 'You', cos: { skin: cosmetics.skin, hat: cosmetics.hat, acc: cosmetics.acc, effect: cosmetics.effect } }, user: { id: 'demo' }, t: 0, startedAt: Date.now(), done: false, finishMs: 0, over: false, paused: false, question: null, score: 0,
                         vw: viewWidth, vh: viewHeight, scale: 1, canvas: mockCanvas, overlay: mockOverlay, roster: new Map(), cards: [], keys: hold, hudBounds() { return { x: 12, y: 12, w: Math.max(1, this.vw - 24), h: Math.max(1, this.vh - 24) }; }, mouse: { x: width / 2, y: height / 2, down: false, pressed: false, touchAt: 0 },
                         down: (...keys) => keys.some(key => hold.has(key)), pressed: (...keys) => keys.some(key => tap.has(key)),
                         axis: () => ({ x: (hold.has('KeyD') || hold.has('ArrowRight') ? 1 : 0) - (hold.has('KeyA') || hold.has('ArrowLeft') ? 1 : 0), y: (hold.has('KeyS') || hold.has('ArrowDown') ? 1 : 0) - (hold.has('KeyW') || hold.has('ArrowUp') ? 1 : 0) }),
@@ -4871,7 +4968,7 @@
                 }
                 const { session, game, hold, tap } = demo;
                 const cosmetics = this.profileCosmetics(this.multiplayerProfile || {});
-                session.local.cos = { skin: cosmetics.skin, hat: cosmetics.hat, acc: cosmetics.acc };
+                session.local.cos = { skin: cosmetics.skin, hat: cosmetics.hat, acc: cosmetics.acc, effect: cosmetics.effect };
                 session.remoteList = () => demo.bots;
                 session.remotes = new Map(demo.bots.map(bot => [bot.id, bot]));
                 const elapsed = Math.min(0.1, Math.max(0, (now - demo.last) / 1000));
@@ -5293,7 +5390,7 @@
                     const isSelf = player.id === window.StudBudCloud.user.id;
                     const kick = isHost && player.id !== room.host_id && room.status !== 'finished' ? `<button class="host-kick-btn" type="button" data-action="hosted-kick-player" data-id="${this.escapeHTML(player.id)}" aria-label="Remove ${this.escapeHTML(player.nickname)}">Remove</button>` : '';
                     if (room.status === 'waiting') {
-                        return `<li class="leaderboard-player lobby-player${isSelf ? ' is-self' : ''}">${avatarFor(player)}<span class="leaderboard-name">${this.escapeHTML(player.nickname)} ${this.accountTagMarkup(player.username)}${isSelf ? ' · you' : ''}</span><span class="lobby-tag${player.id === room.host_id ? ' is-host' : ''}">${player.id === room.host_id ? '<i class="fas fa-crown"></i> Host' : 'Ready'}</span>${kick}</li>`;
+                        return `<li class="leaderboard-player lobby-player${isSelf ? ' is-self' : ''}">${avatarFor(player)}<span class="leaderboard-name">${this.escapeHTML(player.nickname)} ${this.accountTagMarkup(player.username, player.tags)}${isSelf ? ' · you' : ''}</span><span class="lobby-tag${player.id === room.host_id ? ' is-host' : ''}">${player.id === room.host_id ? '<i class="fas fa-crown"></i> Host' : 'Ready'}</span>${kick}</li>`;
                     }
                     const progress = room.mode === 'sports' ? `${Number(player.touchdowns || 0)} goals`
                         : room.mode === 'shooter' ? `${Number(player.targets || 0)} targets · wave ${Number(player.wave || 1)}`
@@ -5307,7 +5404,7 @@
                     const unit = { sports: 'goals', shooter: 'kill pts', skyline: 'm', river: 'fish pts', market: 'deliveries', miner: 'crystals', duel: 'sec on hill' }[room.mode];
                     const valueLabel = room.mode === 'crypto' ? `$${Number(player.score || 0).toLocaleString()}` : `${Number(player.score || 0).toLocaleString()} ${unit || 'score'}`;
                     const profileBtn = `<button class="host-kick-btn" type="button" data-action="view-profile" data-id="${this.escapeHTML(player.id)}">Profile</button>`;
-                    return `<li class="leaderboard-player${isSelf ? ' is-self' : ''}">${avatarFor(player)}<span class="leaderboard-name">${index + 1}. ${this.escapeHTML(player.nickname)} ${this.accountTagMarkup(player.username)}${isSelf ? ' · you' : ''}</span><span class="leaderboard-stat"><strong>${this.escapeHTML(valueLabel)}</strong><small>${this.escapeHTML(progress)}</small></span>${profileBtn}${kick}</li>`;
+                    return `<li class="leaderboard-player${isSelf ? ' is-self' : ''}">${avatarFor(player)}<span class="leaderboard-name">${index + 1}. ${this.escapeHTML(player.nickname)} ${this.accountTagMarkup(player.username, player.tags)}${isSelf ? ' · you' : ''}</span><span class="leaderboard-stat"><strong>${this.escapeHTML(valueLabel)}</strong><small>${this.escapeHTML(progress)}</small></span>${profileBtn}${kick}</li>`;
                 }).join('');
             const sceneNames = {
                 skyline: 'City Escape', river: 'River Fishing', market: 'Package Delivery',
@@ -5376,7 +5473,7 @@
                 document.getElementById('hosted-podium').classList.remove('hidden');
                 const podiumUnit = { sports: 'goals', shooter: 'kill pts', skyline: 'm', river: 'fish pts', market: 'deliveries', miner: 'crystals', duel: 'sec on hill', crypto: '' }[room.mode] ?? 'points';
                 document.getElementById('hosted-podium').innerHTML = rankedPlayers.slice(0, 3).map((player, index) =>
-                    `<div class="podium-place place-${index + 1}"><span class="podium-rank">0${index + 1}</span><strong>${avatarFor(player)} ${this.escapeHTML(player.nickname)} ${this.accountTagMarkup(player.username)}</strong><small>${room.mode === 'crypto' ? '$' : ''}${Number(player.score || 0).toLocaleString()} ${podiumUnit} · +${Number(rewards[player.id] || 0)} coins <button class="host-kick-btn" type="button" data-action="view-profile" data-id="${this.escapeHTML(player.id)}">Profile</button></small></div>`
+                    `<div class="podium-place place-${index + 1}"><span class="podium-rank">0${index + 1}</span><strong>${avatarFor(player)} ${this.escapeHTML(player.nickname)} ${this.accountTagMarkup(player.username, player.tags)}</strong><small>${room.mode === 'crypto' ? '$' : ''}${Number(player.score || 0).toLocaleString()} ${podiumUnit} · +${Number(rewards[player.id] || 0)} coins <button class="host-kick-btn" type="button" data-action="view-profile" data-id="${this.escapeHTML(player.id)}">Profile</button></small></div>`
                 ).join('');
             } else {
                 document.getElementById('hosted-podium').classList.add('hidden');
@@ -5421,7 +5518,7 @@
         async saveGameSummary(session) {
             if (session.testing) return;
             await AppState.recordStudySession({
-                id: `match_${window.crypto.randomUUID()}`, title: `${session.practice ? 'Solo game' : 'Study game'}: ${session.game.title}`,
+                id: `match_${window.crypto.randomUUID()}`, title: `${session.practice ? 'Practice game' : 'Study game'}: ${session.game.title}`,
                 durationSec: Math.max(1, Math.round(session.t)), method: 'practice', source: session.practice ? 'solo' : 'multiplayer',
                 gameSummary: {
                     mode: session.mode, score: session.score, answered: session.answered, correct: session.correct,
@@ -5444,19 +5541,29 @@
             if (!this.arcadeSession) document.body.classList.remove('mpg-active');
         }
 
+        startMultiplayerPractice() {
+            const mode = document.getElementById('practice-multiplayer-mode')?.value;
+            const deckId = document.getElementById('practice-multiplayer-deck')?.value;
+            const timeLimitSeconds = Number(document.getElementById('practice-multiplayer-time')?.value);
+            if (!mode || !deckId || !Number.isFinite(timeLimitSeconds) || timeLimitSeconds < 0) {
+                throw new Error('Choose a game mode, flashcard set, and practice time.');
+            }
+            this.startPractice(mode, { deckId, timeLimitSeconds });
+        }
+
         startPractice(modeOverride, config = {}) {
             const arcade = window.StudBudArcade;
             if (this.practiceSession && (this.practiceSession.destroyed || !this.practiceSession.overlay?.isConnected)) {
                 try { this.practiceSession.destroy(); } catch (_) { /* already gone */ }
                 this.practiceSession = null;
             }
-            const deckId = document.getElementById('host-game-deck')?.value;
+            const deckId = config.deckId || document.getElementById('host-game-deck')?.value;
             if (config.testing && !this.isAdmin) throw new Error('Game testing is available only to administrators.');
             const botCount = config.botCount ?? 3;
             if (!Number.isInteger(botCount) || botCount < 0 || botCount > 3) throw new Error('Choose between zero and three simulated players.');
             const selectedDeck = (AppState.get('flashcards') || []).find(item => item.id === deckId);
             if (!config.testing && !(selectedDeck?.cards || []).some(card => card.front && card.back)) {
-                throw new Error('Select a flashcard set with complete cards before starting a solo game.');
+                throw new Error('Select a flashcard set with complete cards before starting practice.');
             }
             const room = modeOverride
                 ? { mode: modeOverride, deck_id: deckId, state: { players: [] } }
@@ -5471,7 +5578,8 @@
                 username: user.user_metadata?.username || roomPlayer.username || '',
                 skin: hasProfile ? cosmetics.skin : roomPlayer.skin || '',
                 hat: hasProfile ? cosmetics.hat : roomPlayer.hat || '',
-                accessory: hasProfile ? cosmetics.acc : roomPlayer.accessory || ''
+                accessory: hasProfile ? cosmetics.acc : roomPlayer.accessory || '',
+                effect: hasProfile ? cosmetics.effect : roomPlayer.effect || ''
             };
             const roomDeck = (AppState.get('flashcards') || []).find(item => item.id === room.deck_id || item.title === room.deck_title);
             const botDefs = [['b1', 'Nova', '#f472b6'], ['b2', 'Kite', '#facc15'], ['b3', 'Rook', '#4ade80']].slice(0, botCount);
@@ -5570,6 +5678,10 @@
 
         renderProfile() {
             const profile = AppState.get('profile') || {};
+            const firstName = document.getElementById('settings-first-name');
+            if (firstName) firstName.value = profile.firstName || '';
+            const lastName = document.getElementById('settings-last-name');
+            if (lastName) lastName.value = profile.lastName || '';
             const year = document.getElementById('settings-grad-year');
             if (year && profile.graduationYear) year.value = String(profile.graduationYear);
             const targetGpa = document.getElementById('settings-target-gpa');
@@ -5618,7 +5730,7 @@
             const theme = settings.theme === 'light' ? 'light' : 'dark';
             const knownSchemes = ['forest', 'ocean', 'violet', 'sunset', 'monochrome', 'aurora', 'coral', 'midnight',
                 ...(window.StudBudCommunityGames?.catalog || []).filter(item => item.type === 'palette').map(item => item.color)];
-            const colorScheme = knownSchemes.includes(settings.colorScheme) ? settings.colorScheme : 'forest';
+            const colorScheme = knownSchemes.includes(settings.colorScheme) ? settings.colorScheme : 'monochrome';
             document.body.classList.toggle('dark-theme', theme === 'dark');
             document.body.classList.toggle('light-theme', theme === 'light');
             document.body.classList.toggle('compact-ui', Boolean(settings.compactUi));
@@ -5746,7 +5858,7 @@
             try {
                 const data = await games.friendCall('studbud_friend_overview');
                 this.friendOverview = data;
-                const person = (row, buttons) => `<li class="friend-row">${this.multiplayerAvatarMarkup(this.profileCosmetics(row), false, 'friend-avatar')}<strong>${this.escapeHTML(row.username)} ${this.accountTagMarkup(row.username)}</strong><span class="friend-actions">${buttons}</span></li>`;
+                const person = (row, buttons) => `<li class="friend-row">${this.multiplayerAvatarMarkup(this.profileCosmetics(row), false, 'friend-avatar')}<strong>${this.escapeHTML(row.username)} ${this.accountTagMarkup(row.username, row.tags)}</strong><span class="friend-actions">${buttons}</span></li>`;
                 const attrs = row => `data-id="${this.escapeHTML(row.friendship_id)}" data-name="${this.escapeHTML(row.username)}"`;
                 lists.friends.innerHTML = data.friends.length
                     ? data.friends.map(row => person(row, `<button type="button" class="secondary-btn" data-action="friend-view" data-id="${this.escapeHTML(row.user_id)}">Profile</button><button type="button" class="ghost-btn" data-action="friend-remove" ${attrs(row)}>Remove</button>`)).join('')
@@ -5812,7 +5924,7 @@
                 const stat = (label, value) => `<div class="friend-stat"><strong>${value}</strong><small>${label}</small></div>`;
                 const facts = [p.grade_level && `🎓 ${p.grade_level}`, p.favorite_subject && `⭐ ${p.favorite_subject}`, p.study_goal && `🎯 ${p.study_goal}`].filter(Boolean).map(f => `<span class="friend-chip">${this.escapeHTML(f)}</span>`).join('');
                 const decks = (p.decks || []).map(d => `<li class="friend-row"><div><strong>${this.escapeHTML(d.title)}</strong>${d.course ? ` <span class="deck-chip"><i class="fas fa-book"></i> ${this.escapeHTML(d.course)}</span>` : ''}<br><small>${Number(d.card_count)} cards · studied by ${Number(d.study_count)}</small></div>${p.is_me && !this.findCommunityDeck(d.id) ? '' : this.communityDeckActionMarkup(d.id)}</li>`).join('');
-                modal.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.username)} ${this.accountTagMarkup(p.username)}${p.is_me ? ' <em class="you-badge">you</em>' : ''}</h3></div><button type="button" class="icon-btn profile-close" data-action="close-user-profile" aria-label="Close profile"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
+                modal.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.display_name || p.username)} ${this.accountTagMarkup(p.username, p.tags)}${p.is_me ? ' <em class="you-badge">you</em>' : ''}</h3></div><button type="button" class="icon-btn profile-close" data-action="close-user-profile" aria-label="Close profile"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
                     ${p.bio ? `<p class="friend-bio">${this.escapeHTML(p.bio)}</p>` : ''}${facts ? `<div class="friend-chips">${facts}</div>` : ''}
                     <div class="friend-stats">${p.show_stats === false ? stat('Match wins', Number(p.wins) || 0) : `${stat('Studied today', this.formatStudyDuration(p.today_seconds))}${stat('This week', this.formatStudyDuration(p.week_seconds))}${stat('All time', this.formatStudyDuration(p.total_seconds))}${stat('Day streak', `${Number(p.streak_days) || 0} 🔥`)}${stat('Match wins', Number(p.wins) || 0)}`}</div>
                     <h4>Shared flashcard sets</h4>
@@ -5831,7 +5943,7 @@
                 const avatar = this.multiplayerAvatarMarkup({ skin: p.skin, hat: p.hat, acc: p.accessory }, true);
                 const stat = (label, value) => `<div class="friend-stat"><strong>${value}</strong><small>${label}</small></div>`;
                 const facts = [p.grade_level && `🎓 ${p.grade_level}`, p.favorite_subject && `⭐ ${p.favorite_subject}`, p.study_goal && `🎯 ${p.study_goal}`].filter(Boolean).map(f => `<span class="friend-chip">${this.escapeHTML(f)}</span>`).join('');
-                panel.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.username)} ${this.accountTagMarkup(p.username)}</h3>                <small>Bud</small></div><button type="button" class="icon-btn profile-close" data-action="friend-profile-close" aria-label="Close profile"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
+                panel.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.display_name || p.username)} ${this.accountTagMarkup(p.username, p.tags)}</h3>                <small>Bud</small></div><button type="button" class="icon-btn profile-close" data-action="friend-profile-close" aria-label="Close profile"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
                     ${p.bio ? `<p class="friend-bio">${this.escapeHTML(p.bio)}</p>` : ''}${facts ? `<div class="friend-chips">${facts}</div>` : ''}
                     <div class="friend-stats">${p.show_stats === false ? stat('Match wins', Number(p.wins) || 0) : `${stat('Studied today', this.formatStudyDuration(p.today_seconds))}${stat('This week', this.formatStudyDuration(p.week_seconds))}${stat('All time', this.formatStudyDuration(p.total_seconds))}${stat('Day streak', `${Number(p.streak_days) || 0} 🔥`)}${stat('Match wins', Number(p.wins) || 0)}`}</div>`;
                 panel.classList.remove('hidden');
@@ -5851,7 +5963,7 @@
                 { route: 'dashboard', sel: '#study-priority-list', title: 'Quizzes & tests', text: 'Add an upcoming quiz or test with the "Add quiz or test" button and StudBud suggests what to study today, how long, and the best way to do it.' },
                 { route: 'dashboard', sel: '.focus-sprint-widget', title: 'Focus sprint', text: 'Pick a quiz or test, choose anywhere from 5 to 90 minutes, and start a timer. Finished sprints are logged as study time.' },
                 { route: 'gpa', sel: '#add-course-btn', title: 'Classes & grades', text: 'Add your classes, set up grade categories and log assignment scores (decimals like 23.21/25 work). Your GPA updates automatically.' },
-                { route: 'grade-scenarios', sel: nav('grade-scenarios'), title: 'What-If Grades', text: 'Try out possible scores, or change an existing grade, to see how your class grade and GPA would change. Nothing here touches your real transcript.' },
+                { route: 'grade-scenarios', sel: nav('grade-scenarios'), title: 'Hypothetical Grades', text: 'Try out possible scores, or change an existing grade, to see how your class grade and GPA would change. Nothing here touches your real transcript.' },
                 { route: 'planner', sel: nav('planner'), title: 'Planner', text: 'Turns your due dates and study logs into a day-by-day plan.' },
                 { route: 'calendar', sel: nav('calendar'), title: 'Calendar', text: 'A month view of everything due. Click a day to add an event.' },
                 { route: 'schedule', sel: nav('schedule'), title: 'Class schedule', text: 'Set your daily bell schedule so the dashboard always shows today\'s classes.' },
@@ -5860,7 +5972,7 @@
                 { route: 'analytics', sel: nav('analytics'), title: 'Analytics', text: 'Charts of your grades, study time and habits so you can spot what is working.' },
                 { route: 'leaderboard', sel: nav('leaderboard'), title: 'Leaderboards', text: 'See your streak calendar and milestones, then compare study time today, this week, this month or all time, with everyone or just your buds.' },
                 { route: 'friends', sel: nav('friends'), title: 'Buds', text: 'Send a bud request by username, accept requests from others, and open a bud\'s profile to see their study time, streak and match wins.' },
-                { route: 'exam-arcade', sel: nav('exam-arcade'), title: 'Practice & Arcade', text: 'Practice exams and quick arcade games that use your own flashcards.' },
+                { route: 'exam-arcade', sel: nav('exam-arcade'), title: 'Practice', text: 'Practice exams and quick arcade games that use your own flashcards. You can also practice multiplayer game modes solo with simulated players.' },
                 { route: 'multiplayer', sel: nav('multiplayer'), title: 'Multiplayer', text: 'Host or join a room and play City Escape, Soccer, King of the Hill and more. Every game has its own touch controls on phones, and a live leaderboard that ranks by what wins that game.' },
                 { route: 'shop', sel: nav('shop'), title: 'Shop & your character', text: 'Earn coins from games and open mystery boxes for characters, hats, accessories and colors. Equip items to wear them, and press Unequip on a worn item to take it off again.' },
                 { route: 'shop', sel: '#multiplayer-profile-button', title: 'Your profile button', text: 'This button in the top bar shows your character and name. Tap it any time to see your public profile, then edit it or jump to the shop.' },
@@ -6252,7 +6364,7 @@
                 : '';
             const row = player => {
                 const rank = Number(player.rank) || 0;
-                const name = `${this.escapeHTML(player.username || 'Student')} ${this.accountTagMarkup(player.username)}`;
+                const name = `${this.escapeHTML(player.username || 'Student')} ${this.accountTagMarkup(player.username, player.tags)}`;
                 const pct = Math.max(3, Math.round((Number(player.seconds) || 0) / top * 100));
                 return `<li class="study-leaderboard-row${player.is_me ? ' is-self' : ''}${rank >= 1 && rank <= 3 ? ` podium-${rank}` : ''}">
                     <span class="study-leaderboard-rank">${rank >= 1 && rank <= 3 ? medal[rank - 1] : (rank || '—')}</span>
@@ -6262,7 +6374,7 @@
             };
             const podium = board.length >= 3 ? `<li class="study-podium">${[1, 0, 2].map(i => {
                 const p = board[i];
-                const inner = `<span class="podium-medal">${medal[i]}</span>${this.multiplayerAvatarMarkup(this.profileCosmetics(p), false, 'study-leaderboard-avatar')}<b>${this.escapeHTML(p.username || 'Student')}</b>${this.accountTagMarkup(p.username)}<small>${fmt(p.seconds)}</small><div class="podium-block"></div>`;
+                const inner = `<span class="podium-medal">${medal[i]}</span>${this.multiplayerAvatarMarkup(this.profileCosmetics(p), false, 'study-leaderboard-avatar')}<b>${this.escapeHTML(p.username || 'Student')}</b>${this.accountTagMarkup(p.username, p.tags)}<small>${fmt(p.seconds)}</small><div class="podium-block"></div>`;
                 return p.user_id
                     ? `<button type="button" class="podium-spot podium-spot-${i + 1}" data-action="view-profile" data-id="${this.escapeHTML(p.user_id)}" aria-label="View ${this.escapeHTML(p.username || 'Student')}'s profile">${inner}</button>`
                     : `<div class="podium-spot podium-spot-${i + 1}">${inner}</div>`;
@@ -6732,6 +6844,14 @@
                 this.adjustAssignmentScore(document.getElementById(target.dataset.scoreInput), Number(target.dataset.scoreDelta));
                 return;
             }
+            if (target.matches('[data-scenario-score-preset]')) {
+                const form = document.getElementById('grade-scenario-assignment-form');
+                const maxPoints = Number(form?.elements.maxPoints.value);
+                if (!Number.isFinite(maxPoints) || maxPoints <= 0) return;
+                form.elements.pointsEarned.value = (maxPoints * Number(target.dataset.scenarioScorePreset) / 100).toFixed(2).replace(/\.00$/, '');
+                this.updateScenarioScorePreview();
+                return;
+            }
 
             if (target.matches('[data-target]')) {
                 event.preventDefault();
@@ -6772,7 +6892,7 @@
                     const form = document.getElementById('solo-game-settings');
                     const open = form?.classList.toggle('hidden') === false;
                     target.setAttribute('aria-expanded', String(open));
-                    target.innerHTML = `<i class="fas fa-gamepad" aria-hidden="true"></i> ${open ? 'Solo game settings' : 'Set up solo game'}`;
+                    target.innerHTML = `<i class="fas fa-gamepad" aria-hidden="true"></i> ${open ? 'Practice settings' : 'Set up practice'}`;
                 } else if (action === 'start-solo-game') {
                     const form = document.getElementById('solo-game-settings');
                     this.startPractice(this.selectedMultiplayerMode || 'skyline', {
@@ -6978,7 +7098,9 @@
                 } else if (target.matches('.sm2-btn[data-q]')) {
                     await this.rateCurrentCard(Number(target.dataset.q));
                 } else if (id === 'save-profile-btn') {
-                    this.saveProfile();
+                    await this.saveProfile();
+                } else if (id === 'save-grade-scale-btn') {
+                    await this.saveOtherGradeScale();
                 } else if (id === 'open-backup-modal-btn') {
                     this.openModal('backup-modal');
                 } else if (id === 'export-json-btn') {
@@ -7155,6 +7277,26 @@
                 await this.searchCommunityDecks(document.getElementById('community-deck-query').value);
                 return;
             }
+            if (form.id === 'practice-multiplayer-form') {
+                event.preventDefault();
+                const status = document.getElementById('practice-multiplayer-status');
+                const submit = form.querySelector('button[type="submit"]');
+                if (form.dataset.starting === 'true') return;
+                form.dataset.starting = 'true';
+                if (submit) submit.disabled = true;
+                status.textContent = 'Starting practice…';
+                try {
+                    this.startMultiplayerPractice();
+                    status.textContent = 'Practice started. Your progress is local and no multiplayer coins are awarded.';
+                } catch (error) {
+                    console.error('[NexusApp] Multiplayer practice could not start:', error);
+                    status.textContent = `Could not start practice. ${this.friendlyErrorMessage(error)}`;
+                } finally {
+                    delete form.dataset.starting;
+                    if (submit) submit.disabled = false;
+                }
+                return;
+            }
             if (form.id === 'host-game-form' || form.id === 'join-game-form') {
                 event.preventDefault();
                 if (form.dataset.connecting === 'true') return;
@@ -7221,6 +7363,12 @@
         }
 
         handleChange(event) {
+            if (event.target.id === 'settings-school') {
+                this.updateCourseSchoolFields();
+                this.renderOtherGradeScaleEditor();
+                this.updatePublicSchoolOption();
+                return;
+            }
             const widgetPref = event.target.dataset?.homeWidgetPref;
             if (widgetPref) {
                 const value = event.target.type === 'checkbox' ? event.target.checked : Number(event.target.value) || 3;
@@ -7383,7 +7531,8 @@
             document.getElementById('course-id').value = course ? course.code : '';
             document.getElementById('course-modal-title').textContent = course ? 'Edit Course' : 'Add Course';
             const search = document.getElementById('course-search');
-            const selectedCatalogCourse = course && (window.PCHS_COURSE_CATALOG || []).find(item => item.code === (course.catalogCode || course.code));
+            const selectedCatalogCourse = course && course.school !== 'other'
+                && (window.PCHS_COURSE_CATALOG || []).find(item => item.code === (course.catalogCode || course.code));
             search.value = selectedCatalogCourse ? `${selectedCatalogCourse.title} (${selectedCatalogCourse.code})` : '';
             document.getElementById('course-name').value = selectedCatalogCourse?.code || '';
             document.getElementById('course-selection-hint').textContent = selectedCatalogCourse ? 'PCHS catalog course selected.' : 'Choose a PCHS course from the matches.';
@@ -7391,10 +7540,64 @@
             document.getElementById('course-subject-category').value = course ? course.category || 'Electives' : 'Electives';
             document.getElementById('course-term').value = course ? (course.term || 'FY') : 'FY';
             document.getElementById('course-credits').value = course ? Number(Number(course.credits).toFixed(2)) : '0.5';
+            document.getElementById('course-manual-title').value = course && !selectedCatalogCourse ? course.title || '' : '';
+            const manualCode = document.getElementById('course-manual-code');
+            manualCode.value = course && !selectedCatalogCourse && !/^OTHER_\d+$/.test(String(course.code)) ? course.code || '' : '';
+            manualCode.disabled = Boolean(course);
+            document.getElementById('course-manual-weighted').checked = course ? Boolean(course.isWeighted) : false;
             document.getElementById('course-target-grade').value = course && course.targetPct !== null && course.targetPct !== undefined && Number.isFinite(Number(course.targetPct)) ? Number(Number(course.targetPct).toFixed(2)) : '';
             if (course) this.populateCourseFromCatalog();
             else document.getElementById('course-weight-label').textContent = 'Select a catalog course';
+            this.updateCourseSchoolFields(course?.school || this.currentSchool());
             this.openModal('course-modal');
+        }
+
+        currentSchool() {
+            const selected = document.getElementById('settings-school')?.value;
+            if (['pchs', 'other'].includes(selected)) return selected;
+            const profile = AppState.get('profile') || {};
+            return profile.school || window.StudBudCloud?.user?.user_metadata?.school || 'pchs';
+        }
+
+        updatePublicSchoolOption() {
+            const checkbox = document.getElementById('public-show-school');
+            if (!checkbox) return;
+            checkbox.disabled = this.currentSchool() !== 'pchs';
+            if (checkbox.disabled) checkbox.checked = false;
+        }
+
+        updateCourseSchoolFields(school = this.currentSchool()) {
+            const other = school === 'other';
+            document.getElementById('course-catalog-fields')?.classList.toggle('hidden', other);
+            document.getElementById('course-manual-fields')?.classList.toggle('hidden', !other);
+            document.getElementById('course-manual-title')?.toggleAttribute('required', other);
+            const credits = document.getElementById('course-credits');
+            if (credits) credits.readOnly = !other;
+            const scaleLabel = document.getElementById('course-scale-label');
+            if (scaleLabel) scaleLabel.textContent = other ? 'School grade scale' : 'PCHS grade scale';
+            const weightLabel = document.getElementById('course-weight-label');
+            if (weightLabel && other) weightLabel.textContent = 'Select whether this class is weighted.';
+        }
+
+        renderOtherGradeScaleEditor() {
+            const editor = document.getElementById('other-grade-scale-editor');
+            const panel = document.getElementById('other-grade-scale-panel');
+            if (!editor || !panel) return;
+            const isOther = this.currentSchool() === 'other';
+            panel.classList.toggle('hidden', !isOther);
+            if (!isOther) return;
+            const profile = AppState.get('profile') || {};
+            const scale = Array.isArray(profile.gradeScale) && profile.gradeScale.length
+                ? profile.gradeScale : window.STUDBUD_OTHER_GRADE_SCALE;
+            editor.innerHTML = `<div class="grade-scale-editor" role="table" aria-label="Custom grade scale">
+                <div class="grade-scale-row grade-scale-heading" role="row"><span>Letter</span><span>Minimum %</span><span>Unweighted</span><span>Weighted</span></div>
+                ${scale.map((grade, index) => `<div class="grade-scale-row" role="row">
+                    <strong>${this.escapeHTML(grade.letter)}</strong>
+                    <input type="number" data-grade-scale="${index}" data-grade-field="minPct" min="0" max="100" step="0.01" value="${Number(grade.minPct)}" aria-label="${this.escapeHTML(grade.letter)} minimum percent">
+                    <input type="number" data-grade-scale="${index}" data-grade-field="unweighted" min="0" max="5" step="0.01" value="${Number(grade.unweighted)}" aria-label="${this.escapeHTML(grade.letter)} unweighted points">
+                    <input type="number" data-grade-scale="${index}" data-grade-field="weighted" min="0" max="5" step="0.01" value="${Number(grade.weighted)}" aria-label="${this.escapeHTML(grade.letter)} weighted points">
+                </div>`).join('')}
+            </div>`;
         }
 
         filterCourseCatalog(query) {
@@ -7463,7 +7666,7 @@
             const categorySelect = document.getElementById('course-subject-category');
             if (Array.from(categorySelect.options).some(option => option.value === category)) categorySelect.value = category;
             document.getElementById('course-credits').value = catalogCourse.credits;
-            const weightedScale = (window.PCHS_GRADE_SCALE || []).map(item =>
+            const weightedScale = (window.studbudGradeScale?.() || window.PCHS_GRADE_SCALE || []).map(item =>
                 `${item.letter} ${catalogCourse.isWeighted ? item.weighted : item.unweighted.toFixed(2)}`
             ).join(' · ');
             document.getElementById('course-weight-label').textContent =
@@ -7538,7 +7741,7 @@
         }
 
         gradeForPercentage(percentage) {
-            const scale = window.PCHS_GRADE_SCALE || [];
+            const scale = window.studbudGradeScale?.() || window.PCHS_GRADE_SCALE || [];
             const grade = scale.slice().sort((a, b) => b.minPct - a.minPct).find(item => percentage >= item.minPct);
             return grade ? grade.letter : (percentage >= 90 ? 'A-' : percentage >= 80 ? 'B-' : percentage >= 70 ? 'C-' : percentage >= 60 ? 'D-' : 'F');
         }
@@ -7546,23 +7749,44 @@
         async saveCourse() {
             const oldCode = document.getElementById('course-id').value;
             const catalogCode = document.getElementById('course-name').value;
-            const catalogCourse = (window.PCHS_COURSE_CATALOG || []).find(item => item.code === catalogCode);
-            if (!catalogCourse) throw new Error('Select a course from the PCHS catalog.');
             const term = document.getElementById('course-term').value;
             const existingCourse = (AppState.get('courses') || []).find(item => item.code === oldCode);
-            const sameCatalogAlreadyUsed = (AppState.get('courses') || []).some(item =>
-                item.code !== oldCode && (item.catalogCode || item.code) === catalogCode
-            );
-            const code = oldCode || (sameCatalogAlreadyUsed ? `${catalogCode}_${term}_${Date.now()}` : catalogCode);
+            const school = existingCourse?.school || this.currentSchool();
+            const otherSchool = school === 'other';
+            const catalogCourse = otherSchool ? null : (window.PCHS_COURSE_CATALOG || []).find(item => item.code === catalogCode);
+            if (!otherSchool && !catalogCourse) throw new Error('Select a course from the PCHS catalog.');
+            let code, title, credits, isWeighted;
+            if (otherSchool) {
+                title = document.getElementById('course-manual-title').value.trim();
+                const requestedCode = document.getElementById('course-manual-code').value.trim();
+                if (!title || title.length > 100) throw new Error('Enter a class name of 1–100 characters.');
+                if (requestedCode && !/^[A-Za-z0-9_-]{1,30}$/.test(requestedCode)) throw new Error('Class codes can use up to 30 letters, numbers, underscores, or hyphens.');
+                code = oldCode || requestedCode || `OTHER_${Date.now()}`;
+                credits = Number(document.getElementById('course-credits').value);
+                if (!Number.isFinite(credits) || credits <= 0 || credits > 20) throw new Error('Class credits must be greater than 0 and no more than 20.');
+                isWeighted = document.getElementById('course-manual-weighted').checked;
+            } else {
+                const sameCatalogAlreadyUsed = (AppState.get('courses') || []).some(item =>
+                    item.code !== oldCode && (item.catalogCode || item.code) === catalogCode
+                );
+                code = oldCode || (sameCatalogAlreadyUsed ? `${catalogCode}_${term}_${Date.now()}` : catalogCode);
+                title = catalogCourse.title;
+                credits = Number(catalogCourse.credits);
+                isWeighted = Boolean(catalogCourse.isWeighted);
+            }
+            if ((AppState.get('courses') || []).some(item => item.code === code && item.code !== oldCode)) {
+                throw new Error('That class code is already in use. Choose another code.');
+            }
             const targetValue = document.getElementById('course-target-grade').value;
             const course = {
                 code,
-                catalogCode,
-                title: catalogCourse.title,
+                school,
+                ...(catalogCourse ? { catalogCode } : { catalogCode: '' }),
+                title,
                 term,
-                credits: Number(catalogCourse.credits),
+                credits,
                 category: document.getElementById('course-subject-category').value,
-                isWeighted: Boolean(catalogCourse.isWeighted),
+                isWeighted,
                 targetPct: targetValue === '' ? null : Number(targetValue)
             };
             if (existingCourse) {
@@ -7915,25 +8139,79 @@
             if (Number(profile.targetGpa) !== target) AppState.set('profile', { ...profile, targetGpa: target });
         }
 
-        saveProfile() {
+        async saveProfile() {
             const targetGpa = Number(document.getElementById('settings-target-gpa').value);
             const graduationYear = Number(document.getElementById('settings-grad-year').value);
+            const school = document.getElementById('settings-school').value;
             if (!Number.isFinite(targetGpa) || targetGpa < 0 || targetGpa > 5) {
                 throw new Error('Target GPA must be between 0 and 5.');
             }
             if (!Number.isInteger(graduationYear) || graduationYear < 2026 || graduationYear > 2030) {
                 throw new Error('Graduation year must be between 2026 and 2030.');
             }
+            if (!['pchs', 'other'].includes(school)) throw new Error('Choose PCHS or Other for your school.');
             const profile = {
                 ...AppState.get('profile'),
+                school,
+                firstName: document.getElementById('settings-first-name').value.trim(),
+                lastName: document.getElementById('settings-last-name').value.trim(),
                 graduationYear,
                 targetGpa,
                 currentTerm: document.getElementById('settings-current-term').value
             };
             AppState.set('profile', profile);
-            this.renderProfile();
-            this.renderDashboard();
+            const schoolStatus = document.getElementById('school-profile-status');
+            if (schoolStatus) schoolStatus.textContent = 'Saving school…';
+            try {
+                await window.StudBudCommunityGames.friendCall('studbud_set_school', { p_school: school });
+                if (schoolStatus) schoolStatus.textContent = 'School saved. Your school tag remains private unless you enable it on your public profile.';
+            } catch (error) {
+                if (schoolStatus) schoolStatus.textContent = `Your school was saved on this device, but not to your account. ${this.friendlyErrorMessage(error, 'Re-run supabase-setup.sql and try again.')}`;
+                throw error;
+            }
+            this.updateCourseSchoolFields();
+            this.renderOtherGradeScaleEditor();
+            this.updatePublicSchoolOption();
+            this.renderUI();
             window.alert('Profile saved.');
+        }
+
+        async saveOtherGradeScale() {
+            if (this.currentSchool() !== 'other') throw new Error('Custom grading scales are available for Other schools.');
+            if ((AppState.get('profile') || {}).school !== 'other') {
+                throw new Error('Save Other as your school before saving its grading scale.');
+            }
+            const fields = [...document.querySelectorAll('#other-grade-scale-editor [data-grade-scale]')];
+            const original = (AppState.get('profile') || {}).gradeScale || window.STUDBUD_OTHER_GRADE_SCALE;
+            const scale = original.map((grade, index) => {
+                const read = field => {
+                    const input = fields.find(item => Number(item.dataset.gradeScale) === index && item.dataset.gradeField === field);
+                    return input && input.value !== '' ? Number(input.value) : Number.NaN;
+                };
+                return { ...grade, minPct: read('minPct'), unweighted: read('unweighted'), weighted: read('weighted') };
+            });
+            if (scale.length !== 13 || scale[scale.length - 1].minPct !== 0) throw new Error('Keep all letter grades and set F minimum to 0%.');
+            for (let i = 0; i < scale.length; i++) {
+                const grade = scale[i];
+                if (![grade.minPct, grade.unweighted, grade.weighted].every(Number.isFinite)
+                    || grade.minPct < 0 || grade.minPct > 100
+                    || grade.unweighted < 0 || grade.unweighted > 5
+                    || grade.weighted < grade.unweighted || grade.weighted > 5) {
+                    throw new Error(`Check the percentage and point values for ${grade.letter}.`);
+                }
+                if (i && (scale[i - 1].minPct <= grade.minPct
+                    || scale[i - 1].unweighted < grade.unweighted
+                    || scale[i - 1].weighted < grade.weighted)) {
+                    throw new Error('Grade cutoffs and grade points must descend from A+ through F.');
+                }
+            }
+            scale.forEach((grade, index) => {
+                grade.maxPct = index === 0 ? 120 : Math.round((scale[index - 1].minPct - 0.01) * 100) / 100;
+            });
+            AppState.set('profile', { ...(AppState.get('profile') || {}), gradeScale: scale });
+            this.renderOtherGradeScaleEditor();
+            this.renderUI();
+            document.getElementById('school-profile-status').textContent = 'Custom grading scale saved.';
         }
 
         async exportBackup() {

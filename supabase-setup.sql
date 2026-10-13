@@ -272,6 +272,8 @@ begin
             'skin', coalesce(cosmetics.equipped_skin, ''),
             'hat', coalesce(cosmetics.equipped_hat, ''),
             'accessory', coalesce(cosmetics.equipped_accessory, ''),
+            'effect', coalesce(cosmetics.equipped_effect, ''),
+            'tags', to_jsonb(public.studbud_user_tags_for(ranked.user_id)),
             'is_me', ranked.user_id = v_user_id
         ) order by ranked.rank) filter (where ranked.rank <= 50), '[]'::jsonb),
         (jsonb_agg(jsonb_build_object('rank', ranked.rank, 'seconds', ranked.seconds)) filter (where ranked.user_id = v_user_id)) -> 0,
@@ -416,6 +418,7 @@ create table if not exists public.studbud_multiplayer_profiles (
     equipped_skin text not null default '',
     equipped_hat text not null default '',
     equipped_accessory text not null default '',
+    equipped_effect text not null default '',
     best_wait_score integer not null default 0 check (best_wait_score >= 0),
     updated_at timestamptz not null default now()
 );
@@ -424,10 +427,19 @@ alter table public.studbud_multiplayer_profiles
     add column if not exists equipped_skin text not null default '',
     add column if not exists equipped_hat text not null default '',
     add column if not exists equipped_accessory text not null default '',
+    add column if not exists equipped_effect text not null default '',
     add column if not exists best_wait_score integer not null default 0;
 
 -- Legacy 'accessory_default' placeholder from older versions means "nothing equipped".
 update public.studbud_multiplayer_profiles set equipped_accessory = '' where equipped_accessory = 'accessory_default';
+
+-- Move previously equipped auras out of the wearable slot without clearing them.
+update public.studbud_multiplayer_profiles
+set equipped_effect = equipped_accessory, equipped_accessory = ''
+where equipped_effect = ''
+  and (equipped_accessory like 'acc\_%\_effect'
+       or equipped_accessory in ('acc_aura', 'acc_sparkles', 'acc_flame', 'acc_lightning',
+                                 'acc_hearts', 'acc_stars', 'acc_snow'));
 
 alter table public.studbud_multiplayer_profiles
     add column if not exists equipped_pet text not null default '',
@@ -487,7 +499,9 @@ as $$
         ('acc_pixel_effect', 360), ('acc_meteor_effect', 560), ('acc_aurora_effect', 780),
         ('acc_rune_effect', 390), ('acc_lunar_effect', 640),
         ('acc_storm_effect', 900), ('acc_blackhole_effect', 880),
-        ('acc_firefly_effect', 150), ('acc_jellyfish_effect', 600)
+        ('acc_firefly_effect', 150), ('acc_jellyfish_effect', 600),
+        ('acc_blossom_effect', 190), ('acc_bubble_effect', 160), ('acc_comet_effect', 300),
+        ('acc_spiral_effect', 360), ('acc_spark_effect', 110)
     ), pets(id, rarity) as (values
         ('pet_puppy', 'common'), ('pet_kitten', 'common'), ('pet_hamster', 'common'), ('pet_bunny', 'common'),
         ('pet_chick', 'common'), ('pet_frog', 'common'), ('pet_turtle', 'common'), ('pet_goldfish', 'common'),
@@ -501,14 +515,9 @@ as $$
         ('pet_elder', 'legendary'), ('pet_brain', 'legendary'), ('pet_trophy', 'legendary')
     )
     select priced.id, (round(priced.price * 2.5 / 5) * 5)::integer,
-        case when priced.id like 'palette\_%' and priced.price < 400 then
-                case when priced.id in ('palette_aurora','palette_coral','palette_cyber','palette_galaxy','palette_royal') then 'rare'
-                     when priced.price < 100 then 'common' else 'uncommon' end
-             when priced.id = 'skin_gold' then 'epic'
-             when priced.id in ('skin_chrome','skin_shadow') then 'rare'
-             when priced.id = 'skin_crystal' then 'epic'
-             when priced.price < 100 then 'common' when priced.price < 160 then 'uncommon'
-             when priced.price < 260 then 'rare' when priced.price < 400 then 'epic' when priced.price < 700 then 'legendary' else 'mythic' end
+        case when priced.price < 100 then 'common' when priced.price < 200 then 'uncommon'
+             when priced.price < 350 then 'rare' when priced.price < 550 then 'epic'
+             when priced.price < 800 then 'legendary' else 'mythic' end
     from priced
     union all
     select pets.id, null::integer, pets.rarity from pets;
@@ -567,6 +576,7 @@ begin
         'equipped_skin', v_profile.equipped_skin,
         'equipped_hat', v_profile.equipped_hat,
         'equipped_accessory', v_profile.equipped_accessory,
+        'equipped_effect', v_profile.equipped_effect,
         'equipped_pet', v_profile.equipped_pet,
         'best_wait_score', v_profile.best_wait_score,
         'daily_claimed', v_profile.last_daily_claim = current_date,
@@ -694,7 +704,8 @@ begin
         where s.rarity = r.key and s.id like v_prefix
           and s.id not like 'accessory\_%' and s.id not like 'pet\_%'
           and (p_box <> 'effect' or s.id like 'acc\_%\_effect'
-              or s.id in ('acc_lightning', 'acc_flame', 'acc_sparkles', 'acc_aura'))
+              or s.id in ('acc_lightning', 'acc_flame', 'acc_sparkles', 'acc_aura',
+                          'acc_hearts', 'acc_stars', 'acc_snow'))
           and not (s.id = any(v_profile.owned_items))
     );
     if v_total is null then
@@ -713,7 +724,8 @@ begin
     from public.studbud_shop_items() s
     where s.id not like 'accessory\_%' and s.id not like 'pet\_%' and s.id like v_prefix
       and (p_box <> 'effect' or s.id like 'acc\_%\_effect'
-            or s.id in ('acc_lightning', 'acc_flame', 'acc_sparkles', 'acc_aura'))
+            or s.id in ('acc_lightning', 'acc_flame', 'acc_sparkles', 'acc_aura',
+                        'acc_hearts', 'acc_stars', 'acc_snow'))
       and not (s.id = any(v_profile.owned_items))
       and s.rarity = v_rarity
     order by random()
@@ -802,6 +814,10 @@ begin
         update public.studbud_multiplayer_profiles set equipped_skin = p_item_id, updated_at = now() where user_id = v_user_id;
     elsif p_item_id like 'hat_%' or p_item_id like 'accessory_%' then
         update public.studbud_multiplayer_profiles set equipped_hat = p_item_id, updated_at = now() where user_id = v_user_id;
+    elsif p_item_id like 'acc\_%\_effect'
+       or p_item_id in ('acc_aura', 'acc_sparkles', 'acc_flame', 'acc_lightning',
+                        'acc_hearts', 'acc_stars', 'acc_snow') then
+        update public.studbud_multiplayer_profiles set equipped_effect = p_item_id, updated_at = now() where user_id = v_user_id;
     elsif p_item_id like 'acc\_%' then
         update public.studbud_multiplayer_profiles set equipped_accessory = p_item_id, updated_at = now() where user_id = v_user_id;
     elsif p_item_id like 'pet\_%' then
@@ -827,12 +843,35 @@ begin
     if p_slot = 'skin' then update public.studbud_multiplayer_profiles set equipped_skin = '', updated_at = now() where user_id = v_user_id;
     elsif p_slot = 'hat' then update public.studbud_multiplayer_profiles set equipped_hat = '', updated_at = now() where user_id = v_user_id;
     elsif p_slot = 'accessory' then update public.studbud_multiplayer_profiles set equipped_accessory = '', updated_at = now() where user_id = v_user_id;
+    elsif p_slot = 'effect' then update public.studbud_multiplayer_profiles set equipped_effect = '', updated_at = now() where user_id = v_user_id;
     elsif p_slot = 'palette' then update public.studbud_multiplayer_profiles set equipped_palette = 'palette_default', updated_at = now() where user_id = v_user_id;
     elsif p_slot = 'pet' then update public.studbud_multiplayer_profiles set equipped_pet = '', updated_at = now() where user_id = v_user_id;
     else raise exception 'Unknown slot.'; end if;
     return public.studbud_get_multiplayer_profile();
 end;
 $$;
+
+create table if not exists public.studbud_user_tags (
+    user_id uuid not null references auth.users (id) on delete cascade,
+    tag text not null check (tag in ('teacher', 'tester', 'moderator')),
+    granted_by uuid references auth.users (id) on delete set null,
+    granted_at timestamptz not null default now(),
+    primary key (user_id, tag)
+);
+alter table public.studbud_user_tags enable row level security;
+revoke all on table public.studbud_user_tags from anon, authenticated;
+
+create or replace function public.studbud_user_tags_for(p_user_id uuid)
+returns text[]
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+    select coalesce(array_agg(tag order by case tag when 'teacher' then 1 when 'tester' then 2 else 3 end), array[]::text[])
+    from public.studbud_user_tags where user_id = p_user_id;
+$$;
+revoke all on function public.studbud_user_tags_for(uuid) from public, anon;
 
 create or replace function public.studbud_player_cosmetics(p_user_id uuid)
 returns jsonb
@@ -847,6 +886,8 @@ as $$
         'skin', coalesce(profile.equipped_skin, ''),
         'hat', coalesce(profile.equipped_hat, ''),
         'accessory', coalesce(profile.equipped_accessory, ''),
+        'effect', coalesce(profile.equipped_effect, ''),
+        'tags', to_jsonb(public.studbud_user_tags_for(p_user_id)),
         'pet', coalesce(profile.equipped_pet, '')
     )
     from (select p_user_id as user_id) user_ref
@@ -954,7 +995,9 @@ begin
                 'username', coalesce(account.raw_user_meta_data ->> 'username', ''),
                 'skin', coalesce(profile.equipped_skin, player ->> 'skin', ''),
                 'hat', coalesce(profile.equipped_hat, player ->> 'hat', ''),
-                'accessory', coalesce(profile.equipped_accessory, player ->> 'accessory', '')
+                'accessory', coalesce(profile.equipped_accessory, player ->> 'accessory', ''),
+                'effect', coalesce(profile.equipped_effect, player ->> 'effect', ''),
+                'tags', to_jsonb(public.studbud_user_tags_for(profile.user_id))
             ) order by position
         )
         from jsonb_array_elements(coalesce(v_state -> 'players', '[]'::jsonb))
@@ -1044,7 +1087,9 @@ begin
                 'distance', 0, 'loot', 0, 'deliveries', 0, 'depth', 0, 'yards', 0,
                 'touchdowns', 0, 'targets', 0, 'wave', 1, 'last_event', '', 'last_action', '',
                 'avatar', v_cosmetics ->> 'avatar', 'palette', v_cosmetics ->> 'palette',
-                'skin', v_cosmetics ->> 'skin', 'hat', v_cosmetics ->> 'hat', 'accessory', v_cosmetics ->> 'accessory', 'pet', v_cosmetics ->> 'pet'
+                'skin', v_cosmetics ->> 'skin', 'hat', v_cosmetics ->> 'hat',
+                'accessory', v_cosmetics ->> 'accessory', 'effect', v_cosmetics ->> 'effect',
+                'tags', v_cosmetics -> 'tags', 'pet', v_cosmetics ->> 'pet'
             )),
             'question_index', -1,
             'question', null,
@@ -1122,7 +1167,9 @@ begin
         'distance', 0, 'loot', 0, 'deliveries', 0, 'depth', 0, 'yards', 0,
         'touchdowns', 0, 'targets', 0, 'wave', 1, 'last_event', '', 'last_action', '',
         'avatar', v_cosmetics ->> 'avatar', 'palette', v_cosmetics ->> 'palette',
-        'skin', v_cosmetics ->> 'skin', 'hat', v_cosmetics ->> 'hat', 'accessory', v_cosmetics ->> 'accessory', 'pet', v_cosmetics ->> 'pet'
+        'skin', v_cosmetics ->> 'skin', 'hat', v_cosmetics ->> 'hat',
+        'accessory', v_cosmetics ->> 'accessory', 'effect', v_cosmetics ->> 'effect',
+        'tags', v_cosmetics -> 'tags', 'pet', v_cosmetics ->> 'pet'
     ));
     update public.studbud_game_rooms
     set state = jsonb_set(state, '{players}', v_players),
@@ -1703,6 +1750,43 @@ as $$
     );
 $$;
 
+create table if not exists public.studbud_user_tags (
+    user_id uuid not null references auth.users (id) on delete cascade,
+    tag text not null check (tag in ('teacher', 'tester', 'moderator')),
+    granted_by uuid references auth.users (id) on delete set null,
+    granted_at timestamptz not null default now(),
+    primary key (user_id, tag)
+);
+alter table public.studbud_user_tags enable row level security;
+revoke all on table public.studbud_user_tags from anon, authenticated;
+
+create or replace function public.studbud_has_user_tag(p_user_id uuid, p_tag text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+    select auth.uid() is not null
+       and exists (select 1 from public.studbud_user_tags where user_id = p_user_id and tag = p_tag);
+$$;
+revoke all on function public.studbud_has_user_tag(uuid, text) from public, anon, authenticated;
+
+create or replace function public.studbud_require_moderator()
+returns void
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    if not public.studbud_is_admin()
+       and not public.studbud_has_user_tag(auth.uid(), 'moderator') then
+        raise exception 'Flashcard moderation is available to moderators.';
+    end if;
+end;
+$$;
+
 create or replace function public.studbud_require_admin()
 returns void
 language plpgsql
@@ -1712,6 +1796,28 @@ set search_path = public, pg_temp
 as $$
 begin
     if not public.studbud_is_admin() then raise exception 'Only the admin can do this.'; end if;
+end;
+$$;
+
+create or replace function public.studbud_admin_set_user_tags(p_user_id uuid, p_tags text[])
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    perform public.studbud_require_admin();
+    if p_user_id is null or not exists (select 1 from auth.users where id = p_user_id) then
+        raise exception 'Choose a valid account.';
+    end if;
+    if exists (select 1 from unnest(coalesce(p_tags, array[]::text[])) tag
+               where tag is null or tag not in ('teacher', 'tester', 'moderator')) then
+        raise exception 'Only teacher, tester, and moderator tags can be assigned.';
+    end if;
+    delete from public.studbud_user_tags where user_id = p_user_id;
+    insert into public.studbud_user_tags (user_id, tag, granted_by)
+    select p_user_id, distinct_tags.tag, auth.uid()
+    from (select distinct unnest(coalesce(p_tags, array[]::text[])) as tag) distinct_tags;
 end;
 $$;
 
@@ -1753,7 +1859,9 @@ begin
                 (select count(*) from public.studbud_community_decks d where d.owner_id = a.id) as decks,
                 exists (select 1 from public.studbud_banned_users b where b.user_id = a.id) as banned,
                 (select b.reason from public.studbud_banned_users b where b.user_id = a.id) as ban_reason,
-                coalesce((select s.force_change from public.studbud_username_state s where s.user_id = a.id), false) as force_change
+                coalesce((select s.force_change from public.studbud_username_state s where s.user_id = a.id), false) as force_change,
+                coalesce((select array_agg(t.tag order by t.tag) from public.studbud_user_tags t where t.user_id = a.id), array[]::text[]) as tags,
+                coalesce((select pp.school from public.studbud_public_profiles pp where pp.user_id = a.id), a.raw_user_meta_data ->> 'school', 'pchs') as school
             from auth.users a
             left join public.studbud_multiplayer_profiles p on p.user_id = a.id
             where coalesce(p_query, '') = ''
@@ -1773,7 +1881,7 @@ security definer
 set search_path = public, pg_temp
 as $$
 begin
-    perform public.studbud_require_admin();
+    perform public.studbud_require_moderator();
     return coalesce((
         select jsonb_agg(row_to_json(d)) from (
             select c.id, c.title, c.description, c.card_count, c.study_count, c.updated_at, c.owner_id,
@@ -1798,7 +1906,7 @@ security definer
 set search_path = public, pg_temp
 as $$
 begin
-    perform public.studbud_require_admin();
+    perform public.studbud_require_moderator();
     delete from public.studbud_community_decks where id = p_deck_id;
 end;
 $$;
@@ -1852,8 +1960,11 @@ $$;
 revoke all on function public.studbud_is_admin() from public, anon;
 grant execute on function public.studbud_is_admin() to authenticated;
 revoke all on function public.studbud_require_admin() from public, anon, authenticated;
+revoke all on function public.studbud_require_moderator() from public, anon, authenticated;
 revoke all on function public.studbud_admin_list_users(text) from public, anon;
 grant execute on function public.studbud_admin_list_users(text) to authenticated;
+revoke all on function public.studbud_admin_set_user_tags(uuid, text[]) from public, anon;
+grant execute on function public.studbud_admin_set_user_tags(uuid, text[]) to authenticated;
 revoke all on function public.studbud_admin_list_decks(text) from public, anon;
 grant execute on function public.studbud_admin_list_decks(text) to authenticated;
 revoke all on function public.studbud_admin_delete_deck(uuid) from public, anon;
@@ -1975,7 +2086,9 @@ begin
                 'username', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student'),
                 'skin', coalesce(mp.equipped_skin, ''),
                 'hat', coalesce(mp.equipped_hat, ''),
-                'accessory', coalesce(mp.equipped_accessory, '')
+                'accessory', coalesce(mp.equipped_accessory, ''),
+                'effect', coalesce(mp.equipped_effect, ''),
+                'tags', to_jsonb(public.studbud_user_tags_for(a.id))
             ) order by coalesce(a.raw_user_meta_data ->> 'username', ''))
             from public.studbud_friendships f
             join auth.users a on a.id = case when f.requester_id = v_uid then f.addressee_id else f.requester_id end
@@ -1990,7 +2103,9 @@ begin
                 'username', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student'),
                 'skin', coalesce(mp.equipped_skin, ''),
                 'hat', coalesce(mp.equipped_hat, ''),
-                'accessory', coalesce(mp.equipped_accessory, '')
+                'accessory', coalesce(mp.equipped_accessory, ''),
+                'effect', coalesce(mp.equipped_effect, ''),
+                'tags', to_jsonb(public.studbud_user_tags_for(a.id))
             ) order by f.created_at)
             from public.studbud_friendships f
             join auth.users a on a.id = f.requester_id
@@ -2005,7 +2120,9 @@ begin
                 'username', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student'),
                 'skin', coalesce(mp.equipped_skin, ''),
                 'hat', coalesce(mp.equipped_hat, ''),
-                'accessory', coalesce(mp.equipped_accessory, '')
+                'accessory', coalesce(mp.equipped_accessory, ''),
+                'effect', coalesce(mp.equipped_effect, ''),
+                'tags', to_jsonb(public.studbud_user_tags_for(a.id))
             ) order by f.created_at)
             from public.studbud_friendships f
             join auth.users a on a.id = f.addressee_id
@@ -2086,11 +2203,39 @@ create table if not exists public.studbud_public_profiles (
     favorite_subject text not null default '',
     grade_level text not null default '',
     study_goal text not null default '',
+    first_name text not null default '',
+    last_name text not null default '',
+    show_real_name boolean not null default false,
+    school text not null default 'pchs' check (school in ('pchs', 'other')),
+    show_school boolean not null default false,
     show_stats boolean not null default true,
     updated_at timestamptz not null default now()
 );
+alter table public.studbud_public_profiles add column if not exists first_name text not null default '';
+alter table public.studbud_public_profiles add column if not exists last_name text not null default '';
+alter table public.studbud_public_profiles add column if not exists show_real_name boolean not null default false;
+alter table public.studbud_public_profiles add column if not exists school text not null default 'pchs';
+alter table public.studbud_public_profiles add column if not exists show_school boolean not null default false;
 alter table public.studbud_public_profiles enable row level security;
 revoke all on table public.studbud_public_profiles from anon, authenticated;
+
+create or replace function public.studbud_user_tags_for(p_user_id uuid)
+returns text[]
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+    select coalesce(array_agg(tags.tag order by tags.position), array[]::text[])
+    from (
+        select role.tag, case role.tag when 'teacher' then 1 when 'tester' then 2 else 3 end as position
+        from public.studbud_user_tags role where role.user_id = p_user_id
+        union all
+        select 'pchs', 4
+        from public.studbud_public_profiles profile
+        where profile.user_id = p_user_id and profile.school = 'pchs' and profile.show_school
+    ) tags;
+$$;
 
 create or replace function public.studbud_friend_profile(p_user_id uuid)
 returns jsonb
@@ -2131,15 +2276,23 @@ begin
     return jsonb_build_object(
         'user_id', p_user_id,
         'username', v_name,
+        'display_name', case when coalesce(v_pub.show_real_name, false)
+            then nullif(trim(concat_ws(' ', nullif(v_pub.first_name, ''), nullif(v_pub.last_name, ''))), '') end,
         'bio', coalesce(v_pub.bio, ''),
         'favorite_subject', coalesce(v_pub.favorite_subject, ''),
         'grade_level', coalesce(v_pub.grade_level, ''),
         'study_goal', coalesce(v_pub.study_goal, ''),
         'show_stats', v_show,
+        'tags', to_jsonb(public.studbud_user_tags_for(p_user_id)),
+        'school', case when coalesce(v_pub.school, (select a.raw_user_meta_data ->> 'school' from auth.users a where a.id = p_user_id), 'pchs') = 'pchs'
+                            and coalesce(v_pub.show_school, false) then 'pchs' end,
+        'show_school', coalesce(v_pub.show_school, false)
+            and coalesce(v_pub.school, (select a.raw_user_meta_data ->> 'school' from auth.users a where a.id = p_user_id), 'pchs') = 'pchs',
         'wins', coalesce(v_prof.wins, 0),
         'skin', coalesce(v_prof.equipped_skin, ''),
         'hat', coalesce(v_prof.equipped_hat, ''),
         'accessory', coalesce(v_prof.equipped_accessory, ''),
+        'effect', coalesce(v_prof.equipped_effect, ''),
         'palette', coalesce(v_prof.equipped_palette, 'palette_default'),
         'today_seconds', case when v_show then coalesce((select sum(seconds) from public.studbud_study_time_entries where user_id = p_user_id and study_date = v_today), 0) end,
         'week_seconds', case when v_show then coalesce((select sum(seconds) from public.studbud_study_time_entries where user_id = p_user_id and study_date between v_week and v_today), 0) end,
@@ -2161,11 +2314,26 @@ begin
     if auth.uid() is null then raise exception 'Sign in first.'; end if;
     select * into v from public.studbud_public_profiles where user_id = auth.uid();
     return jsonb_build_object('bio', coalesce(v.bio, ''), 'favorite_subject', coalesce(v.favorite_subject, ''),
-        'grade_level', coalesce(v.grade_level, ''), 'study_goal', coalesce(v.study_goal, ''), 'show_stats', coalesce(v.show_stats, true));
+        'grade_level', coalesce(v.grade_level, ''), 'study_goal', coalesce(v.study_goal, ''),
+        'show_real_name', coalesce(v.show_real_name, false), 'show_stats', coalesce(v.show_stats, true),
+        'school', coalesce(v.school, (select a.raw_user_meta_data ->> 'school' from auth.users a where a.id = auth.uid()), 'pchs'),
+        'show_school', coalesce(v.show_school, false));
 end;
 $$;
 
-create or replace function public.studbud_set_public_profile(p_bio text, p_favorite_subject text, p_grade_level text, p_study_goal text, p_show_stats boolean)
+drop function if exists public.studbud_set_public_profile(text, text, text, text, boolean);
+drop function if exists public.studbud_set_public_profile(text, text, text, text, text, text, boolean, boolean);
+create or replace function public.studbud_set_public_profile(
+    p_bio text,
+    p_favorite_subject text,
+    p_grade_level text,
+    p_study_goal text,
+    p_first_name text,
+    p_last_name text,
+    p_show_real_name boolean,
+    p_show_school boolean,
+    p_show_stats boolean
+)
 returns jsonb
 language plpgsql
 security definer
@@ -2173,19 +2341,46 @@ set search_path = public, pg_temp
 as $$
 begin
     if auth.uid() is null then raise exception 'Sign in first.'; end if;
-    insert into public.studbud_public_profiles (user_id, bio, favorite_subject, grade_level, study_goal, show_stats, updated_at)
+    insert into public.studbud_public_profiles (
+        user_id, bio, favorite_subject, grade_level, study_goal, first_name, last_name, show_real_name, show_school, show_stats, updated_at
+    )
     values (auth.uid(), left(trim(coalesce(p_bio, '')), 160), left(trim(coalesce(p_favorite_subject, '')), 40),
-        left(trim(coalesce(p_grade_level, '')), 20), left(trim(coalesce(p_study_goal, '')), 80), coalesce(p_show_stats, true), now())
+        left(trim(coalesce(p_grade_level, '')), 20), left(trim(coalesce(p_study_goal, '')), 80),
+        left(trim(coalesce(p_first_name, '')), 60), left(trim(coalesce(p_last_name, '')), 60),
+        coalesce(p_show_real_name, false), coalesce(p_show_school, false), coalesce(p_show_stats, true), now())
     on conflict (user_id) do update set bio = excluded.bio, favorite_subject = excluded.favorite_subject,
-        grade_level = excluded.grade_level, study_goal = excluded.study_goal, show_stats = excluded.show_stats, updated_at = now();
+        grade_level = excluded.grade_level, study_goal = excluded.study_goal, first_name = excluded.first_name,
+        last_name = excluded.last_name, show_real_name = excluded.show_real_name,
+        show_school = excluded.show_school, show_stats = excluded.show_stats, updated_at = now();
+    return public.studbud_get_public_profile();
+end;
+$$;
+
+create or replace function public.studbud_set_school(p_school text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    if auth.uid() is null then raise exception 'Sign in first.'; end if;
+    if p_school is null or p_school not in ('pchs', 'other') then raise exception 'Choose PCHS or Other for your school.'; end if;
+    insert into public.studbud_public_profiles (user_id, school, updated_at)
+    values (auth.uid(), p_school, now())
+    on conflict (user_id) do update set school = excluded.school, updated_at = now();
     return public.studbud_get_public_profile();
 end;
 $$;
 
 revoke all on function public.studbud_get_public_profile() from public, anon;
 grant execute on function public.studbud_get_public_profile() to authenticated;
-revoke all on function public.studbud_set_public_profile(text, text, text, text, boolean) from public, anon;
-grant execute on function public.studbud_set_public_profile(text, text, text, text, boolean) to authenticated;
+revoke all on function public.studbud_set_public_profile(text, text, text, text, text, text, boolean, boolean, boolean) from public, anon;
+grant execute on function public.studbud_set_public_profile(text, text, text, text, text, text, boolean, boolean, boolean) to authenticated;
+revoke all on function public.studbud_set_school(text) from public, anon;
+grant execute on function public.studbud_set_school(text) to authenticated;
+revoke all on function public.studbud_has_user_tag(uuid, text) from public, anon, authenticated;
+revoke all on function public.studbud_user_tags_for(uuid) from public, anon;
+grant execute on function public.studbud_user_tags_for(uuid) to authenticated;
 
 revoke all on function public.studbud_is_hidden_user(uuid) from public, anon, authenticated;
 revoke all on function public.studbud_friend_overview() from public, anon;
@@ -2318,16 +2513,24 @@ begin
     return jsonb_build_object(
         'user_id', p_user_id,
         'username', v_name,
+        'display_name', case when coalesce(v_pub.show_real_name, false)
+            then nullif(trim(concat_ws(' ', nullif(v_pub.first_name, ''), nullif(v_pub.last_name, ''))), '') end,
         'is_me', p_user_id = v_uid,
         'bio', coalesce(v_pub.bio, ''),
         'favorite_subject', coalesce(v_pub.favorite_subject, ''),
         'grade_level', coalesce(v_pub.grade_level, ''),
         'study_goal', coalesce(v_pub.study_goal, ''),
         'show_stats', v_show,
+        'tags', to_jsonb(public.studbud_user_tags_for(p_user_id)),
+        'school', case when coalesce(v_pub.school, (select a.raw_user_meta_data ->> 'school' from auth.users a where a.id = p_user_id), 'pchs') = 'pchs'
+                            and coalesce(v_pub.show_school, false) then 'pchs' end,
+        'show_school', coalesce(v_pub.show_school, false)
+            and coalesce(v_pub.school, (select a.raw_user_meta_data ->> 'school' from auth.users a where a.id = p_user_id), 'pchs') = 'pchs',
         'wins', coalesce(v_prof.wins, 0),
         'skin', coalesce(v_prof.equipped_skin, ''),
         'hat', coalesce(v_prof.equipped_hat, ''),
         'accessory', coalesce(v_prof.equipped_accessory, ''),
+        'effect', coalesce(v_prof.equipped_effect, ''),
         'palette', coalesce(v_prof.equipped_palette, 'palette_default'),
         'decks', v_decks,
         'today_seconds', case when v_show then coalesce((select sum(seconds) from public.studbud_study_time_entries where user_id = p_user_id and study_date = v_today), 0) end,
@@ -2351,7 +2554,7 @@ as $$
 declare
     v_deck jsonb;
 begin
-    perform public.studbud_require_admin();
+    perform public.studbud_require_moderator();
     select jsonb_build_object('id', d.id, 'title', d.title, 'card_count', d.card_count, 'cards', d.cards)
         into v_deck from public.studbud_community_decks d where d.id = p_deck_id;
     if v_deck is null then raise exception 'That shared set no longer exists.'; end if;

@@ -12,11 +12,17 @@
 
     const normalizeChoiceText = value => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 
-    function accountTagMarkup(username) {
+    function accountTagMarkup(username, tags = []) {
         const name = String(username ?? '').trim().toLowerCase();
-        if (name === 'overit') return '<span class="account-tag account-tag-owner">Owner</span>';
-        if (name === 'andy') return '<span class="account-tag account-tag-co-owner">Co-owner</span>';
-        return '';
+        const markup = [];
+        if (name === 'overit') markup.push('<span class="account-tag account-tag-owner">Owner</span>');
+        else if (name === 'andy') markup.push('<span class="account-tag account-tag-co-owner">Co-owner</span>');
+        const labels = { teacher: ['Teacher', 'teacher'], tester: ['Tester', 'tester'], moderator: ['Moderator', 'moderator'], pchs: ['PCHS', 'school'] };
+        for (const tag of [...new Set(Array.isArray(tags) ? tags : [])]) {
+            const item = labels[tag];
+            if (item) markup.push(`<span class="account-tag account-tag-${item[1]}">${item[0]}</span>`);
+        }
+        return markup.join(' ');
     }
 
     function mulberry32(seed) {
@@ -772,7 +778,7 @@
             overlay.innerHTML = `
                 <canvas class="mpg-canvas"></canvas>
                 <div class="mpg-top">
-                    <div class="mpg-chip"><strong class="mpg-name"></strong><span class="mpg-goal"></span>${this.testing ? '<small class="mpg-practice-indicator">Admin testing · infinite energy</small>' : this.practice ? '<small class="mpg-practice-indicator">Solo game · no coins</small>' : ''}</div>
+                    <div class="mpg-chip"><strong class="mpg-name"></strong><span class="mpg-goal"></span>${this.testing ? '<small class="mpg-practice-indicator">Admin testing · infinite energy</small>' : this.practice ? '<small class="mpg-practice-indicator">Practice · no coins</small>' : ''}</div>
                     <div class="mpg-timer"></div>
                     <div class="mpg-actions">
                         <button type="button" class="mpg-hud-toggle" aria-expanded="true" aria-controls="mpg-match-details mpg-controls-hint mpg-match-standings" aria-label="Hide match details and standings">HUD</button>
@@ -1146,7 +1152,7 @@
                 diagnostics.textContent = `Mode: ${this.mode}\nSeed: ${this.seed}\nTime: ${this.t.toFixed(1)}s\nPlayers: ${this.roster.size}\nPosition: ${position}\nResources: infinite\nScore: ${Math.round(this.score)}\nObjective: ${Math.round(this.goal)}`;
             }
             o.querySelector('.mpg-board').innerHTML = this.standings().slice(0, 6).map((row, i) =>
-                `<li class="${row.id === this.user.id ? 'me' : ''}">${avatarMarkup(row, 'mpg-player-avatar')}<span>${i + 1}. ${esc(row.n)} ${accountTagMarkup(row.username)}</span><b>${this.valueText(row)}</b></li>`).join('');
+                `<li class="${row.id === this.user.id ? 'me' : ''}">${avatarMarkup(row, 'mpg-player-avatar')}<span>${i + 1}. ${esc(row.n)} ${accountTagMarkup(row.username, row.tags)}</span><b>${this.valueText(row)}</b></li>`).join('');
             this.layoutHud();
         }
 
@@ -1176,15 +1182,15 @@
                 : winner ? tied ? 'First-place tie!' : `${winner.n} wins!` : 'Game over';
             panel.classList.remove('hidden');
             panel.innerHTML = `<div class="mpg-results-card">
-                <small>${this.testing ? 'Test finished' : this.practice ? 'Solo game complete' : 'Match over'}</small>
+                <small>${this.testing ? 'Test finished' : this.practice ? 'Practice complete' : 'Match over'}</small>
                 <h2>${esc(title)}</h2>
-                <ol>${rows.map(row => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${rows.findIndex(other => this.metric(other) === this.metric(row)) + 1}</span>${avatarMarkup(row, 'mpg-player-avatar')}<strong>${esc(row.n)} ${accountTagMarkup(row.username)}</strong><b>${this.valueText(row)}</b><em>${this.rewards ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
+                <ol>${rows.map(row => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${rows.findIndex(other => this.metric(other) === this.metric(row)) + 1}</span>${avatarMarkup(row, 'mpg-player-avatar')}<strong>${esc(row.n)} ${accountTagMarkup(row.username, row.tags)}</strong><b>${this.valueText(row)}</b><em>${this.rewards ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
                 <p class="mpg-accuracy">${this.answered ? `${Math.round(this.correct / this.answered * 100)}% correct` : 'No answers submitted'} · ${this.correct} correct · ${Math.max(0, this.answered - this.correct)} incorrect · ${this.answered} answered</p>
                 <details class="mpg-summary"><summary>Full game summary</summary>
                     <p>${Math.round(this.t)} seconds played · ${(this.questionHistory || []).filter(answer => answer.correct === null).length} skipped</p>
                     ${questionHistoryMarkup(this.questionHistory)}
                 </details>
-                <p>${this.practice ? 'Local results only. Solo games and admin tests do not award coins.' : this.rewards ? 'Coins have been added to your multiplayer wallet.' : 'Tallying coin rewards…'}</p>
+                <p>${this.practice ? 'Local results only. Practice games and admin tests do not award coins.' : this.rewards ? 'Coins have been added to your multiplayer wallet.' : 'Tallying coin rewards…'}</p>
                 <button type="button" class="mpg-exit">${this.practice ? 'Back to game setup' : 'Back to lobby'}</button>
             </div>`;
             panel.querySelector('.mpg-summary').open = Boolean(summaryOpen);
@@ -1270,13 +1276,21 @@
     }
 
     function playerCosmetics(player) {
+        const legacyAcc = player?.equipped_accessory ?? player?.accessory ?? player?.acc ?? player?.cos?.acc ?? '';
+        const explicitEffect = player?.equipped_effect ?? player?.effect ?? player?.cos?.effect ?? '';
+        const effect = explicitEffect || (isAuraCosmetic(legacyAcc) ? legacyAcc : '');
         return {
             skin: player?.equipped_skin ?? player?.skin ?? player?.cos?.skin ?? '',
             hat: player?.equipped_hat ?? player?.hat ?? player?.cos?.hat ?? '',
-            acc: player?.equipped_accessory ?? player?.accessory ?? player?.acc ?? player?.cos?.acc ?? '',
+            acc: isAuraCosmetic(legacyAcc) ? '' : legacyAcc,
+            effect,
             color: player?.color || player?.cos?.color || ((player?.equipped_palette || player?.palette)
                 ? playerColor({ ...player, palette: player.equipped_palette || player.palette }) : '#34d399')
         };
+    }
+
+    function isAuraCosmetic(id) {
+        return Boolean(id && (COSMETIC_PARTICLES[id] || ['acc_flame', 'acc_lightning'].includes(id)));
     }
 
     const avatarCache = new Map();
@@ -1286,7 +1300,7 @@
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.save();
         ctx.scale(canvas.width / 80, canvas.height / 80);
-        const stormHat = cos.acc === 'acc_storm_effect' && cos.hat;
+        const stormHat = cos.effect === 'acc_storm_effect' && cos.hat;
         if (stormHat) { ctx.translate(8, 8); ctx.scale(.8, .8); }
         drawFigureSide(ctx, { color: cos.color, cos }, 29, stormHat ? 40 : 30, 22, 37, 1, time, false);
         ctx.restore();
@@ -1294,7 +1308,7 @@
 
     function avatarUrl(player) {
         const cos = playerCosmetics(player);
-        const key = [cos.skin, cos.hat, cos.acc, cos.color].join('|');
+        const key = [cos.skin, cos.hat, cos.acc, cos.effect, cos.color].join('|');
         if (!avatarCache.has(key)) {
             const canvas = document.createElement('canvas');
             canvas.width = 240; canvas.height = 240;
@@ -1307,9 +1321,8 @@
 
     function animatedCosmetics(player) {
         const cos = playerCosmetics(player);
-        return Boolean(SKINS[cos.skin]?.mythic || cos.hat === 'hat_cosmic' || COSMETIC_PARTICLES[cos.acc]
-            || ['acc_wings', 'acc_phoenix', 'acc_fairy', 'acc_jetpack', 'acc_tail', 'acc_flame',
-                'acc_lightning', 'acc_sparkles', 'acc_hearts', 'acc_stars', 'acc_snow'].includes(cos.acc));
+        return Boolean(SKINS[cos.skin]?.mythic || cos.hat === 'hat_cosmic' || COSMETIC_PARTICLES[cos.effect]
+            || ['acc_wings', 'acc_phoenix', 'acc_fairy', 'acc_jetpack', 'acc_tail'].includes(cos.acc));
     }
 
     let avatarObserver = null;
@@ -1368,7 +1381,7 @@
 
     function avatarMarkup(player, className = '') {
         const cos = playerCosmetics(player);
-        const attrs = ['skin', 'hat', 'acc', 'color'].map(key => `data-${key}="${esc(cos[key])}"`).join(' ');
+        const attrs = ['skin', 'hat', 'acc', 'effect', 'color'].map(key => `data-${key}="${esc(cos[key])}"`).join(' ');
         const classAttr = `class="${esc(className)}"`;
         if (!animatedCosmetics(player)) return `<img ${classAttr} src="${avatarUrl(player)}" alt="" draggable="false">`;
         observeAvatars();
@@ -1458,9 +1471,9 @@
 
     // Accepts either a colour string or a player-like object ({ color, cos }).
     function who(p) {
-        if (typeof p === 'string') return { color: p, skin: null, hat: '', acc: '' };
+        if (typeof p === 'string') return { color: p, skin: null, hat: '', acc: '', effect: '' };
         const cos = playerCosmetics(p);
-        return { color: cos.color, skinId: cos.skin || '', skin: SKINS[cos.skin] || null, hat: LEGACY_HATS[cos.hat] || cos.hat || '', acc: cos.acc || '' };
+        return { color: cos.color, skinId: cos.skin || '', skin: SKINS[cos.skin] || null, hat: LEGACY_HATS[cos.hat] || cos.hat || '', acc: cos.acc || '', effect: cos.effect || '' };
     }
 
     function drawHat(ctx, hat, cx, top, r, tilt = 0, time = 0) {
@@ -1658,7 +1671,18 @@
         acc_rune_effect: { shape: 'rune', colors: ['#c4b5fd', '#a78bfa', '#22d3ee'] },
         acc_lunar_effect: { shape: 'crescent', colors: ['#e0e7ff', '#93c5fd', '#c4b5fd'] },
         acc_planet_effect: { shape: 'planet', colors: ['#38bdf8', '#c084fc', '#fb923c'] },
-        acc_music_effect: { shape: 'note', colors: ['#a7f3d0', '#fde68a', '#93c5fd'] }
+        acc_music_effect: { shape: 'note', colors: ['#a7f3d0', '#fde68a', '#93c5fd'] },
+        acc_blossom_effect: { shape: 'blossom', colors: ['#fbcfe8', '#f9a8d4', '#f472b6'] },
+        acc_bubble_effect: { shape: 'bubble', colors: ['#a5f3fc', '#c4b5fd', '#f9a8d4'] },
+        acc_comet_effect: { shape: 'comet', colors: ['#fef08a', '#67e8f9', '#f0abfc'] },
+        acc_spiral_effect: { shape: 'spiral', colors: ['#c4b5fd', '#22d3ee', '#fde68a'] },
+        acc_spark_effect: { shape: 'spark', colors: ['#fde68a', '#fb7185', '#67e8f9'] },
+        acc_sparkles: { shape: 'spark', colors: ['#fde68a', '#f0abfc', '#67e8f9'] },
+        acc_flame: { shape: 'flame', colors: ['#fb923c', '#ef4444', '#fde047'] },
+        acc_lightning: { shape: 'bolt', colors: ['#fde047', '#38bdf8'] },
+        acc_hearts: { shape: 'heart', colors: ['#fb7185', '#f472b6'] },
+        acc_stars: { shape: 'star', colors: ['#fde047', '#fef3c7'] },
+        acc_snow: { shape: 'snowflake', colors: ['#e0f2fe', '#7dd3fc'] }
     };
 
     function drawCosmeticParticle(ctx, shape, size) {
@@ -1703,6 +1727,27 @@
             ctx.bezierCurveTo(size * .2, -size * .2, size * 1.2, 0, size * .5, size);
             ctx.bezierCurveTo(-size, size * 1.5, -size, 0, 0, -size * 1.5);
             ctx.fill();
+        } else if (shape === 'blossom') {
+            for (let i = 0; i < 5; i++) {
+                ctx.save(); ctx.rotate(i * TAU / 5);
+                ctx.beginPath(); ctx.ellipse(0, -size * .62, size * .34, size * .62, 0, 0, TAU); ctx.fill();
+                ctx.restore();
+            }
+            ctx.fillStyle = '#fde68a'; ctx.beginPath(); ctx.arc(0, 0, size * .2, 0, TAU); ctx.fill();
+        } else if (shape === 'comet') {
+            ctx.lineCap = 'round';
+            ctx.lineWidth = size * .55;
+            ctx.beginPath(); ctx.moveTo(-size * 3, size * 1.4); ctx.lineTo(0, 0); ctx.stroke();
+            ctx.beginPath(); ctx.arc(0, 0, size * .8, 0, TAU); ctx.fill();
+        } else if (shape === 'spiral') {
+            ctx.beginPath();
+            for (let i = 0; i <= 28; i++) {
+                const a = i / 28 * TAU * 1.5, r = size * i / 28;
+                if (i === 0) ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+                else ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+            }
+            ctx.stroke();
+            ctx.beginPath(); ctx.arc(0, 0, size * .18, 0, TAU); ctx.fill();
         } else if (shape === 'bolt') {
             ctx.moveTo(size * .3, -size * 1.5); ctx.lineTo(-size, size * .2);
             ctx.lineTo(-size * .1, size * .2); ctx.lineTo(-size * .3, size * 1.5);
@@ -1740,7 +1785,38 @@
         if (!def) return;
         ctx.save();
         const alpha = ctx.globalAlpha;
-        if (def.shape === 'storm') {
+        if (def.shape === 'comet') {
+            for (let i = 0; i < 4; i++) {
+                const phase = (time * .32 + i / 4) % 1;
+                const angle = time * .55 + i * TAU / 4;
+                const x = cx + Math.cos(angle) * rx * (.3 + phase * .8);
+                const y = cy + Math.sin(angle) * ry * (.3 + phase * .8);
+                ctx.save(); ctx.translate(x, y); ctx.rotate(angle + Math.PI / 2);
+                ctx.globalAlpha = alpha * (1 - phase * .45);
+                ctx.fillStyle = def.colors[i % def.colors.length];
+                drawCosmeticParticle(ctx, 'comet', Math.max(2, rx * .11)); ctx.restore();
+            }
+        } else if (def.shape === 'spiral') {
+            for (let path = 0; path < 2; path++) {
+                ctx.save(); ctx.strokeStyle = def.colors[path];
+                ctx.lineWidth = Math.max(1, rx * .035); ctx.globalAlpha = alpha * .55;
+                ctx.beginPath();
+                for (let i = 0; i <= 48; i++) {
+                    const phase = i / 48, angle = time * (path ? -1 : 1) + phase * TAU * 2.5 + path * Math.PI;
+                    const radius = .2 + phase * .8;
+                    const x = cx + Math.cos(angle) * rx * radius;
+                    const y = cy + Math.sin(angle) * ry * radius;
+                    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                }
+                ctx.stroke(); ctx.restore();
+            }
+            for (let i = 0; i < 6; i++) {
+                const angle = time * (i % 2 ? -1 : 1) + i * TAU / 6;
+                ctx.save(); ctx.translate(cx + Math.cos(angle) * rx * .8, cy + Math.sin(angle) * ry * .8);
+                ctx.fillStyle = def.colors[i % def.colors.length]; ctx.globalAlpha = alpha * .9;
+                drawCosmeticParticle(ctx, 'star', Math.max(2, rx * .09)); ctx.restore();
+            }
+        } else if (def.shape === 'storm') {
             const cloudY = cy - ry * 1.5 - hatClearance, sway = Math.sin(time * .8) * rx * .08;
             for (let i = 0; i < 16; i++) {
                 const phase = (time * .9 + i * .618) % 1;
@@ -1842,11 +1918,16 @@
         } else {
             for (let i = 0; i < 7; i++) {
                 const a = time * .8 + i * TAU / 7;
-                const falling = ['petal', 'confetti', 'snowflake'].includes(def.shape);
+                const falling = ['petal', 'blossom', 'confetti', 'snowflake'].includes(def.shape);
                 const rising = def.shape === 'flame' || def.shape === 'bubble';
                 const phase = (time * .25 + i / 7) % 1;
                 let x = cx + Math.cos(a) * rx * (falling || rising ? .8 : 1);
                 let y = cy + (falling ? phase * 2 - 1 : rising ? 1 - phase * 2 : Math.sin(a)) * ry;
+                if (def.shape === 'blossom') x += Math.sin(time * 2 + i * 1.7) * rx * .16;
+                if (def.shape === 'spark') {
+                    x = cx + Math.sin(time * 1.8 + i * 8.3) * rx * .88;
+                    y = cy + Math.cos(time * 2.2 + i * 4.1) * ry * .88;
+                }
                 if (def.shape === 'pixel') { x = Math.round(x / 3) * 3; y = Math.round(y / 3) * 3; }
                 ctx.save();
                 ctx.translate(x, y);
@@ -1924,7 +2005,7 @@
         ctx.fillStyle = 'rgba(0,0,0,.25)';
         ctx.fillRect(x + 2, y + h - 2, w - 4, 3);
         if (c.skin?.mythic) drawMythicAura(ctx, cx, y + h * 0.45, Math.max(w, h) * 0.75, c.skin.mythic, time);
-        drawCosmeticParticles(ctx, c.acc, cx, y + h * .5, w * .8, h * .55, time, c.hat ? h * .45 : 0);
+        drawCosmeticParticles(ctx, c.effect, cx, y + h * .5, w * .8, h * .55, time, c.hat ? h * .45 : 0);
         if (c.acc === 'acc_wings') {
             ctx.fillStyle = 'rgba(226,232,240,.9)';
             const flap = Math.sin(time * 10) * 4;
@@ -1970,12 +2051,6 @@
             ctx.fillStyle = '#f8fafc';
             ctx.beginPath(); ctx.arc(cx - face * (w * 0.8 + 6), y + h - 30 + bob, 4, 0, TAU); ctx.fill();
         }
-        if (c.acc === 'acc_flame') {
-            for (let i = 0; i < 4; i++) {
-                ctx.fillStyle = i % 2 ? 'rgba(251,191,36,.8)' : 'rgba(249,115,22,.75)';
-                ctx.beginPath(); ctx.ellipse(x + w * (i / 3), y + h * 0.6, 4, 11 + Math.sin(time * 9 + i * 1.7) * 4, 0, 0, TAU); ctx.fill();
-            }
-        }
         ctx.fillStyle = c.skin?.trim || '#1e293b';
         ctx.fillRect(cx - 8 + run * 5, y + h - 14, 7, 14);
         ctx.fillRect(cx + 1 - run * 5, y + h - 14, 7, 14);
@@ -1985,7 +2060,6 @@
             ctx.fillStyle = '#451a03'; ctx.fillRect(-1.5, -20, 3, 22); ctx.beginPath(); ctx.arc(0, 6, 2.4, 0, TAU); ctx.fill();
             ctx.restore();
         }
-        if (c.acc === 'acc_lightning') { ctx.strokeStyle = 'rgba(250,204,21,' + (0.45 + Math.abs(Math.sin(time * 14)) * 0.5) + ')'; ctx.lineWidth = 2; ctx.beginPath(); for (let i = 0; i < 2; i++) { const sx = i ? x + w + 4 : x - 4; ctx.moveTo(sx, y + 6); ctx.lineTo(sx + (i ? 4 : -4), y + 18); ctx.lineTo(sx, y + 20); ctx.lineTo(sx + (i ? 5 : -5), y + 34); } ctx.stroke(); }
         ctx.fillStyle = body;
         roundRect(ctx, x, y + 12 + bob, w, h - 24, 8);
         ctx.fill();
@@ -1997,15 +2071,13 @@
         if (c.skin === SKINS.skin_ninja) { ctx.fillStyle = '#111827'; ctx.fillRect(cx - 11, y + 4 + bob, 22, 5); ctx.fillStyle = '#dc2626'; ctx.fillRect(cx - 11, y + 8 + bob, 22, 2); }
         if (!c.hat && c.skin === SKINS.skin_robot) { ctx.strokeStyle = '#475569'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx, y + bob); ctx.lineTo(cx, y - 7 + bob); ctx.stroke(); ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(cx, y - 8 + bob, 2.5, 0, TAU); ctx.fill(); }
         if (!c.hat && c.skin === SKINS.skin_alien) { ctx.strokeStyle = '#16a34a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx - 5, y + 1 + bob); ctx.lineTo(cx - 8, y - 6 + bob); ctx.moveTo(cx + 5, y + 1 + bob); ctx.lineTo(cx + 8, y - 6 + bob); ctx.stroke(); }
+        drawHat(ctx, c.hat, cx, y + bob, 11, face * 0.03, time);
         ctx.fillStyle = c.skin?.eye || '#0f172a';
         ctx.fillRect(cx + face * 4 - 1.5, y + 9 + bob, 3, 4);
         if (c.acc === 'acc_shades') { ctx.fillStyle = '#0f172a'; ctx.fillRect(cx + face * 4 - 6, y + 8 + bob, 12, 5); }
         if (c.acc === 'acc_monocle') { ctx.strokeStyle = '#facc15'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(cx + face * 5, y + 11 + bob, 4.5, 0, TAU); ctx.stroke(); }
         if (c.acc === 'acc_eyepatch') { ctx.fillStyle = '#0f172a'; ctx.fillRect(cx + face * 4 - 3, y + 8 + bob, 6, 5); ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(cx - 11, y + 5 + bob); ctx.lineTo(cx + 11, y + 12 + bob); ctx.stroke(); }
         if (c.acc === 'acc_bowtie') { ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.moveTo(cx, y + 21 + bob); ctx.lineTo(cx - 7, y + 17 + bob); ctx.lineTo(cx - 7, y + 25 + bob); ctx.moveTo(cx, y + 21 + bob); ctx.lineTo(cx + 7, y + 17 + bob); ctx.lineTo(cx + 7, y + 25 + bob); ctx.fill(); }
-        if (c.acc === 'acc_sparkles') { ctx.font = '10px serif'; ctx.textAlign = 'center'; for (let i = 0; i < 3; i++) { const a = time * 2 + i * 2.1; ctx.globalAlpha = 0.6 + Math.sin(time * 6 + i) * 0.4; ctx.fillText('✨', cx + Math.cos(a) * (w * 0.9), y + 22 + Math.sin(a) * 18); } ctx.globalAlpha = alpha; }
-        const orbit = { acc_hearts: '❤️', acc_stars: '⭐', acc_snow: '❄️' }[c.acc];
-        if (orbit) { ctx.font = '9px serif'; ctx.textAlign = 'center'; for (let i = 0; i < 3; i++) { const a = time * 1.6 + i * 2.1; ctx.fillText(orbit, cx + Math.cos(a) * (w * 0.85), y + 20 + Math.sin(a) * 20); } }
         if (c.acc === 'acc_lei') { const lei = ['#f472b6', '#facc15', '#a78bfa', '#fb923c']; for (let i = 0; i < 6; i++) { ctx.fillStyle = lei[i % 4]; ctx.beginPath(); ctx.arc(x + 2 + i * (w - 4) / 5, y + 18 + bob + Math.sin(i / 5 * Math.PI) * 4, 2.6, 0, TAU); ctx.fill(); } }
         if (c.acc === 'acc_glasses') { ctx.strokeStyle = '#111827'; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.arc(cx + face * 5, y + 11 + bob, 4, 0, TAU); ctx.moveTo(cx + face * 1, y + 11 + bob); ctx.lineTo(cx - face * 10, y + 9 + bob); ctx.stroke(); }
         if (c.acc === 'acc_mask') { ctx.fillStyle = '#7c3aed'; ctx.fillRect(cx - 10, y + 7 + bob, 20, 6); ctx.fillStyle = '#f8fafc'; ctx.fillRect(cx + face * 4 - 1.5, y + 8.5 + bob, 3, 3); }
@@ -2017,8 +2089,6 @@
         if (c.acc === 'acc_chain') { ctx.strokeStyle = '#facc15'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(cx, y + 15 + bob, 7, 0.2, Math.PI - 0.2); ctx.stroke(); ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(cx, y + 24 + bob, 2.5, 0, TAU); ctx.fill(); }
         if (c.acc === 'acc_tie') { ctx.fillStyle = '#2563eb'; ctx.beginPath(); ctx.moveTo(cx - 3, y + 18 + bob); ctx.lineTo(cx + 3, y + 18 + bob); ctx.lineTo(cx + 2.5, y + 30 + bob); ctx.lineTo(cx, y + 33 + bob); ctx.lineTo(cx - 2.5, y + 30 + bob); ctx.fill(); }
         if (c.acc === 'acc_medal') { ctx.strokeStyle = '#dc2626'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx - 6, y + 15 + bob); ctx.lineTo(cx, y + 26 + bob); ctx.lineTo(cx + 6, y + 15 + bob); ctx.stroke(); ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(cx, y + 28 + bob, 4, 0, TAU); ctx.fill(); }
-        ctx.globalAlpha = alpha;
-        drawHat(ctx, c.hat, cx, y + bob, 11, face * 0.03, time);
         ctx.restore();
     }
 
@@ -2032,18 +2102,7 @@
         ctx.fillStyle = 'rgba(0,0,0,.3)';
         ctx.beginPath(); ctx.ellipse(2, 4, r, r * 0.8, 0, 0, TAU); ctx.fill();
         if (c.skin?.mythic) drawMythicAura(ctx, 0, 0, r * 1.7, c.skin.mythic, time);
-        drawCosmeticParticles(ctx, c.acc, 0, 0, r * 1.45, r * 1.45, time, c.hat ? r * .7 : 0);
-        if (c.acc === 'acc_sparkles') {
-            for (let i = 0; i < 5; i++) {
-                const angle = time * 1.8 + i * TAU / 5;
-                ctx.globalAlpha = alpha * (c.skin?.alpha || 1) * (0.55 + Math.sin(time * 6 + i) * 0.35);
-                ctx.fillStyle = '#fde68a';
-                ctx.beginPath();
-                ctx.arc(Math.cos(angle) * r * 1.45, Math.sin(angle) * r * 1.45, r * 0.12, 0, TAU);
-                ctx.fill();
-            }
-            ctx.globalAlpha = alpha * (c.skin?.alpha || 1);
-        }
+        drawCosmeticParticles(ctx, c.effect, 0, 0, r * 1.45, r * 1.45, time, c.hat ? r * .7 : 0);
         ctx.save();
         ctx.rotate(aim);
         if (c.acc === 'acc_cape') { ctx.fillStyle = '#dc2626'; ctx.beginPath(); ctx.moveTo(-r * 0.2, -r * 0.9); ctx.lineTo(-r * 1.7, 0); ctx.lineTo(-r * 0.2, r * 0.9); ctx.fill(); }
@@ -2053,7 +2112,6 @@
         if (c.acc === 'acc_jetpack') { ctx.fillStyle = '#64748b'; roundRect(ctx, -r * 1.3, -r * 0.5, r * 0.7, r, 3); ctx.fill(); ctx.fillStyle = '#f97316'; ctx.fillRect(-r * 1.6 - Math.sin(time * 30) * 2, -r * 0.25, r * 0.4, r * 0.5); }
         if (c.acc === 'acc_tail') { ctx.fillStyle = '#f97316'; ctx.beginPath(); ctx.ellipse(-r * 1.3, Math.sin(time * 6) * r * 0.3, r * 0.6, r * 0.28, 0, 0, TAU); ctx.fill(); }
         if (c.acc === 'acc_fairy' || c.acc === 'acc_phoenix') { ctx.fillStyle = c.acc === 'acc_fairy' ? 'rgba(244,114,182,.7)' : 'rgba(249,115,22,.85)'; const f = Math.sin(time * 10) * 0.12; ctx.beginPath(); ctx.ellipse(-r * 0.3, -r * 1.15, r * 0.35, r * (1 + f), 0.4, 0, TAU); ctx.ellipse(-r * 0.3, r * 1.15, r * 0.35, r * (1 + f), -0.4, 0, TAU); ctx.fill(); }
-        if (c.acc === 'acc_flame') { ctx.fillStyle = 'rgba(249,115,22,.55)'; ctx.beginPath(); ctx.arc(0, 0, r * (1.35 + Math.sin(time * 9) * 0.1), 0, TAU); ctx.fill(); }
         ctx.fillStyle = body;
         ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
         ctx.fillStyle = c.skin?.trim || 'rgba(0,0,0,.25)';
@@ -2062,6 +2120,11 @@
         if (c.acc === 'acc_scarf') { ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(0, 0, r * 0.95, 0.6, 2.6); ctx.stroke(); }
         ctx.fillStyle = c.skin?.head || '#fde7c8';
         ctx.beginPath(); ctx.arc(r * 0.1, 0, r * 0.62, 0, TAU); ctx.fill();
+        if (c.hat) {
+            ctx.save(); ctx.rotate(-aim);
+            drawHat(ctx, c.hat, Math.cos(aim) * r * 0.1, Math.sin(aim) * r * 0.1 - r * 0.62, r * 0.62, 0, time);
+            ctx.restore();
+        }
         ctx.fillStyle = c.skin?.eye || '#0f172a';
         ctx.beginPath(); ctx.arc(r * 0.5, -r * 0.2, r * 0.1, 0, TAU); ctx.arc(r * 0.5, r * 0.2, r * 0.1, 0, TAU); ctx.fill();
         if (c.acc === 'acc_shades') { ctx.fillStyle = '#0f172a'; ctx.fillRect(r * 0.4, -r * 0.34, r * 0.26, r * 0.68); }
@@ -2075,12 +2138,8 @@
         if (c.acc === 'acc_medal' || c.acc === 'acc_chain') { ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(r * 0.3, 0, r * 0.14, 0, TAU); ctx.fill(); }
         if (c.acc === 'acc_lei') { const lei = ['#f472b6', '#facc15', '#a78bfa', '#fb923c']; for (let i = 0; i < 8; i++) { ctx.fillStyle = lei[i % 4]; ctx.beginPath(); ctx.arc(Math.cos(i / 8 * TAU) * r * 0.82, Math.sin(i / 8 * TAU) * r * 0.82, r * 0.15, 0, TAU); ctx.fill(); } }
         if (c.acc === 'acc_guitar') { ctx.fillStyle = '#92400e'; ctx.beginPath(); ctx.ellipse(-r * 1.15, r * 0.3, r * 0.4, r * 0.5, 0, 0, TAU); ctx.fill(); ctx.fillStyle = '#451a03'; ctx.fillRect(-r * 1.2, -r * 1.0, r * 0.12, r * 1.0); }
-        if (c.acc === 'acc_lightning') { ctx.strokeStyle = 'rgba(250,204,21,' + (0.45 + Math.abs(Math.sin(time * 14)) * 0.5) + ')'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, r * 1.3, time * 4, time * 4 + 1.2); ctx.moveTo(Math.cos(time * 4 + 3) * r * 1.3, Math.sin(time * 4 + 3) * r * 1.3); ctx.arc(0, 0, r * 1.3, time * 4 + 3, time * 4 + 4); ctx.stroke(); }
-        const orbitTop = { acc_hearts: '❤️', acc_stars: '⭐', acc_snow: '❄️' }[c.acc];
         ctx.restore();
-        if (orbitTop) { ctx.font = `${Math.round(r * 0.7)}px serif`; ctx.textAlign = 'center'; for (let i = 0; i < 3; i++) { const a = time * 1.6 + i * 2.1; ctx.fillText(orbitTop, Math.cos(a) * r * 1.5, Math.sin(a) * r * 1.5); } }
         ctx.globalAlpha = alpha;
-        if (c.hat) drawHat(ctx, c.hat, Math.cos(aim) * r * 0.1, Math.sin(aim) * r * 0.1 - r * 0.62, r * 0.62, 0, time);
         ctx.restore();
     }
 

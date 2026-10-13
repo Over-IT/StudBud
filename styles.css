@@ -1139,6 +1139,11 @@ input:focus, select:focus, textarea:focus {
 }
 .scenario-assignment-form label { display: grid; gap: 6px; color: var(--text-secondary); font-size: 0.84rem; }
 .scenario-assignment-form button { min-height: 43px; }
+.scenario-score-tools { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border-glass); }
+.scenario-score-tools > span { color: var(--text-secondary); font-size: .84rem; font-weight: 700; }
+.scenario-score-tools > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.scenario-score-tools button { min-height: 36px; padding: 6px 10px; font-size: .82rem; }
+.scenario-score-tools > small { margin-left: auto; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .scenario-results-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--spacing-lg); align-items: start; }
 .scenario-item-list, .scenario-grade-list { display: grid; gap: var(--spacing-sm); }
 .scenario-item, .scenario-grade-row {
@@ -1181,6 +1186,10 @@ input:focus, select:focus, textarea:focus {
 .scenario-existing-row small { color: var(--text-secondary); }
 .scenario-existing-input { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .scenario-existing-input input { width: 90px; }
+.practice-multiplayer-setup { margin-top: var(--spacing-lg); }
+.practice-multiplayer-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); align-items: end; gap: var(--spacing-md); }
+.practice-multiplayer-form label { display: grid; gap: 6px; color: var(--text-secondary); font-size: .86rem; font-weight: 700; }
+.practice-multiplayer-form select { min-width: 0; min-height: 42px; padding: 8px 10px; border: 1px solid var(--border-glass); border-radius: var(--border-radius-sm); color: var(--text-primary); background: var(--bg-base); font: inherit; }
 .assignment-filters {
     display: grid;
     grid-template-columns: minmax(200px, 1.4fr) minmax(160px, 1fr) minmax(150px, 0.8fr) auto;
@@ -3471,3 +3480,11 @@ body.compact-ui .streak-flame b { bottom: 4px; font-size: .85rem; }
     .mpg-hud .mpg-status { gap: 4px; }
     .mpg-overlay .mpg-status .mpg-qbtn { padding: 4px 6px; font-size: .65rem; }
 }
+.grade-scale-editor { display: grid; gap: 6px; overflow-x: auto; }
+.grade-scale-row { display: grid; grid-template-columns: 40px repeat(3, minmax(0, 1fr)); align-items: center; gap: 8px; }
+.grade-scale-row > strong, .grade-scale-heading { font-size: .76rem; }
+.grade-scale-row input { width: 100%; min-width: 0; padding: 7px 5px; }
+.grade-scale-heading { color: var(--text-secondary, #aeb7c8); font-weight: 700; }
+.admin-tag-options { align-items: center; }
+.admin-tag-options label { display: inline-flex; align-items: center; gap: 5px; }
+.admin-tag-options input { width: auto; }

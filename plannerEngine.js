@@ -65,7 +65,7 @@
             if (course && Number.isFinite(course.currentPct)) {
                 const pctDecimal = course.currentPct / 100;
                 // Standard PCHS grade boundaries
-                const boundaries = (window.PCHS_GRADE_SCALE || []).filter(grade => grade.minPct > 0).map(grade => grade.minPct / 100);
+                const boundaries = (window.studbudGradeScale?.() || window.PCHS_GRADE_SCALE || []).filter(grade => grade.minPct > 0).map(grade => grade.minPct / 100);
                 let minDiff = 1.0;
                 boundaries.forEach(b => {
                     const diff = Math.abs(b - pctDecimal);

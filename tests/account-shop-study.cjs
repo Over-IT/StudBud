@@ -27,7 +27,7 @@ const sandbox = {
     StudBudSfx: { settings: {}, save() {} }
 };
 const context = vm.createContext(sandbox);
-for (const file of ['communityGames.js', 'cloudSync.js', 'flashcardEngine.js']) vm.runInContext(source(file), context, { filename: file });
+for (const file of ['communityGames.js', 'cloudSync.js', 'flashcardEngine.js', 'pchsData.js']) vm.runInContext(source(file), context, { filename: file });
 const appSource = source('app.js');
 vm.runInContext(appSource.slice(appSource.indexOf('    class AppStateEngine'), appSource.indexOf('    const AppState =')), context);
 vm.runInContext('globalThis.AppState = new AppStateEngine();', context);
@@ -35,12 +35,117 @@ vm.runInContext(appSource.slice(appSource.indexOf('    class AppOrchestrator'), 
 const app = vm.runInContext('Object.create(AppOrchestrator.prototype)', context);
 app.animateShopAuras = () => {};
 const state = sandbox.AppState;
+window.NexusApp = { AppState: state };
 const community = window.StudBudCommunityGames;
 app.communityGames = community;
 const Cloud = window.StudBudCloud.constructor;
 const normal = value => clone(value);
 
 async function run() {
+    assert.equal(state.state.settings.colorScheme, 'monochrome', 'new accounts start with a non-green palette');
+    window.StudBudCloud.user = { user_metadata: { username: 'student' } };
+    state.state.profile.firstName = 'Ada';
+    state.state.profile.lastName = 'Lovelace';
+    assert.equal(app.multiplayerDisplayName(), 'Ada Lovelace', 'in-app multiplayer names use the saved real name');
+    state.state.profile.lastName = '';
+    assert.equal(app.multiplayerDisplayName(), 'Ada', 'either saved name can be used without falling back to the username');
+    delete window.StudBudCloud.user;
+
+    for (const [id, value] of [
+        ['public-bio', { value: '' }], ['public-subject', { value: '' }], ['public-grade', { value: '' }],
+        ['public-goal', { value: '' }], ['settings-first-name', { value: 'Ada' }], ['settings-last-name', { value: 'Lovelace' }],
+        ['public-show-real-name', { checked: true }], ['public-show-school', { checked: false }], ['public-show-stats', { checked: false }],
+        ['public-profile-status', { textContent: '' }]
+    ]) elements.set(id, value);
+    let publicProfileArgs;
+    const friendCall = community.friendCall;
+    community.friendCall = async (name, args) => { publicProfileArgs = { name, args }; };
+    await app.savePublicProfile();
+    assert.equal(publicProfileArgs.name, 'studbud_set_public_profile');
+    assert.equal(publicProfileArgs.args.p_first_name, 'Ada');
+    assert.equal(publicProfileArgs.args.p_last_name, 'Lovelace');
+    assert.equal(publicProfileArgs.args.p_show_real_name, true);
+    assert.equal(publicProfileArgs.args.p_show_school, false);
+    community.friendCall = friendCall;
+    for (const id of ['public-bio', 'public-subject', 'public-grade', 'public-goal', 'settings-first-name', 'settings-last-name', 'public-show-real-name', 'public-show-school', 'public-show-stats', 'public-profile-status']) elements.delete(id);
+
+    state.state.profile.school = 'other';
+    state.state.profile.gradeScale = clone(window.STUDBUD_OTHER_GRADE_SCALE);
+    state.state.profile.gradeScale.find(grade => grade.letter === 'A').minPct = 95;
+    state.state.profile.gradeScale.find(grade => grade.letter === 'A-').minPct = 92;
+    assert.equal(app.gradeForPercentage(94), 'A-', 'Other-school grade calculations use the account-specific grading scale');
+    const courseFields = {
+        'settings-school': { value: 'other' }, 'course-id': { value: '' }, 'course-name': { value: '' },
+        'course-term': { value: 'S1' }, 'course-manual-title': { value: 'Biology II' }, 'course-manual-code': { value: 'BIO-202' },
+        'course-credits': { value: '1' }, 'course-manual-weighted': { checked: true },
+        'course-subject-category': { value: 'Science' }, 'course-target-grade': { value: '' }
+    };
+    for (const [id, element] of Object.entries(courseFields)) elements.set(id, element);
+    await app.saveCourse();
+    assert.deepEqual(normal(state.state.courses.at(-1)), {
+        code: 'BIO-202', school: 'other', catalogCode: '', title: 'Biology II', term: 'S1', credits: 1,
+        category: 'Science', isWeighted: true, targetPct: null
+    }, 'Other-school classes save entered name, code, credits, subject and weighted status');
+    for (const id of Object.keys(courseFields)) elements.delete(id);
+    const gradeFields = state.state.profile.gradeScale.flatMap((grade, index) =>
+        ['minPct', 'unweighted', 'weighted'].map(field => ({
+            dataset: { gradeScale: String(index), gradeField: field },
+            value: String(grade[field])
+        }))
+    );
+    sandbox.document.querySelectorAll = () => gradeFields;
+    elements.set('school-profile-status', { textContent: '' });
+    const renderScale = app.renderOtherGradeScaleEditor;
+    const renderUI = app.renderUI;
+    app.renderOtherGradeScaleEditor = () => {};
+    app.renderUI = () => {};
+    await app.saveOtherGradeScale();
+    assert.equal(state.state.profile.gradeScale.find(grade => grade.letter === 'A').minPct, 95,
+        'custom grade cutoffs can be saved');
+    gradeFields[0].value = '';
+    await assert.rejects(app.saveOtherGradeScale(), /Check the percentage/,
+        'blank grading-scale values are rejected rather than treated as zero');
+    app.renderOtherGradeScaleEditor = renderScale;
+    app.renderUI = renderUI;
+    elements.delete('school-profile-status');
+    sandbox.document.querySelectorAll = undefined;
+    for (const [id, element] of Object.entries({
+        'settings-school': { value: 'other' }, 'settings-target-gpa': { value: '3.8' },
+        'settings-grad-year': { value: '2028' }, 'settings-first-name': { value: 'Ada' },
+        'settings-last-name': { value: 'Lovelace' }, 'settings-current-term': { value: 'S1' },
+        'school-profile-status': { textContent: '' }
+    })) elements.set(id, element);
+    const appMethods = ['updateCourseSchoolFields', 'renderOtherGradeScaleEditor', 'updatePublicSchoolOption', 'renderUI'];
+    const originalMethods = Object.fromEntries(appMethods.map(method => [method, app[method]]));
+    appMethods.forEach(method => { app[method] = () => {}; });
+    window.alert = () => {};
+    let schoolArgs;
+    community.friendCall = async (name, args) => { schoolArgs = { name, args }; };
+    await app.saveProfile();
+    assert.deepEqual(normal(schoolArgs), { name: 'studbud_set_school', args: { p_school: 'other' } },
+        'saving account settings persists the selected school to the account');
+    assert.equal(state.state.profile.school, 'other');
+    community.friendCall = friendCall;
+    appMethods.forEach(method => { app[method] = originalMethods[method]; });
+    for (const id of ['settings-school', 'settings-target-gpa', 'settings-grad-year', 'settings-first-name', 'settings-last-name', 'settings-current-term', 'school-profile-status']) elements.delete(id);
+
+    elements.set('practice-multiplayer-mode', { value: 'river' });
+    elements.set('practice-multiplayer-deck', { value: 'deck-1' });
+    elements.set('practice-multiplayer-time', { value: '600' });
+    let practiceLaunch;
+    const originalStartPractice = app.startPractice;
+    app.startPractice = (mode, config) => { practiceLaunch = { mode, config }; };
+    app.startMultiplayerPractice();
+    assert.deepEqual(normal(practiceLaunch), { mode: 'river', config: { deckId: 'deck-1', timeLimitSeconds: 600 } },
+        'practice setup launches the selected multiplayer mode locally with its chosen deck and duration');
+    app.startPractice = originalStartPractice;
+    elements.set('grade-scenario-assignment-form', { elements: { pointsEarned: { value: '45' }, maxPoints: { value: '60' } } });
+    elements.set('grade-scenario-score-preview', { textContent: '' });
+    app.updateScenarioScorePreview();
+    assert.equal(elements.get('grade-scenario-score-preview').textContent, '75.0% score',
+        'hypothetical assignment entry shows the resulting percentage');
+    for (const id of ['practice-multiplayer-mode', 'practice-multiplayer-deck', 'practice-multiplayer-time', 'grade-scenario-assignment-form', 'grade-scenario-score-preview']) elements.delete(id);
+
     for (const box of community.constructor.boxes) {
         const pool = community.boxPool(box);
         assert.ok(pool.length > 0, `${box.id} has rewards`);
@@ -69,6 +174,16 @@ async function run() {
     assert.ok(elements.get('multiplayer-shop-items').innerHTML.includes('Collection complete'));
     assert.ok(!elements.get('multiplayer-shop-items').innerHTML.includes('data-action="multiplayer-buy"'));
     const sql = source('supabase-setup.sql');
+    assert.match(sql, /show_real_name boolean not null default false/);
+    assert.match(sql, /'display_name', case when coalesce\(v_pub\.show_real_name, false\)/,
+        'public profile APIs disclose real names only after explicit opt-in');
+    assert.match(sql, /studbud_set_public_profile\([\s\S]*?p_first_name text,[\s\S]*?p_last_name text,[\s\S]*?p_show_real_name boolean/);
+    assert.match(sql, /grant execute on function public\.studbud_set_public_profile\(text, text, text, text, text, text, boolean, boolean, boolean\) to authenticated;/);
+    assert.match(sql, /tag text not null check \(tag in \('teacher', 'tester', 'moderator'\)\)/);
+    assert.match(sql, /revoke all on function public\.studbud_has_user_tag\(uuid, text\) from public, anon, authenticated/);
+    assert.match(sql, /profile\.user_id = p_user_id and profile\.school = 'pchs' and profile\.show_school/);
+    assert.match(sql, /'school', case when coalesce\(v_pub\.school,[\s\S]*?and coalesce\(v_pub\.show_school, false\) then 'pchs' end/,
+        'public profile payloads include PCHS only when opted in and never expose Other schools');
     assert.ok(sql.includes("s.rarity = v_rarity") && sql.includes("jsonb_each_text(v_chances)"));
     assert.ok(!sql.includes('abs(rank - target)'));
     assert.doesNotMatch(sql, /v_today_seconds\s*<\s*900|v_today_seconds\s*>=\s*900/, 'daily SQL goal is not fifteen minutes');

@@ -42,6 +42,21 @@ window.PCHS_GRADE_SCALE = [
     { letter: "F",  minPct: 0.0,  maxPct: 59.99, unweighted: 0.0, weighted: 0.0 }
 ];
 
+window.STUDBUD_OTHER_GRADE_SCALE = window.PCHS_GRADE_SCALE.map(grade => ({
+    ...grade,
+    weighted: Math.min(5, grade.unweighted + (grade.unweighted > 0 ? 1 : 0))
+}));
+
+window.studbudGradeScale = () => {
+    const profile = window.NexusApp?.AppState?.get('profile') || {};
+    if ((profile.school || window.StudBudCloud?.user?.user_metadata?.school || 'pchs') === 'other') {
+        const scale = profile.gradeScale;
+        if (Array.isArray(scale) && scale.length) return scale;
+        return window.STUDBUD_OTHER_GRADE_SCALE;
+    }
+    return window.PCHS_GRADE_SCALE;
+};
+
 // ============================================================================
 // 3. LATIN HONORS THRESHOLDS
 // ============================================================================

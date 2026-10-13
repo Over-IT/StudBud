@@ -93,6 +93,16 @@ assert.match(publishNoticeFunction, /if v_author_username is null then raise exc
 assert.match(publishNoticeFunction, /values \(btrim\(p_message\), auth.uid\(\), v_author_username\)/,
     'author is taken from the authenticated administrator, not browser input');
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+assert.match(html, /id="settings-first-name"/);
+assert.match(html, /id="settings-last-name"/);
+assert.match(html, /id="public-show-real-name"/);
+assert.match(html, /<body class="dark-theme" data-color-scheme="monochrome">/,
+    'the initial page paint uses the non-green default before app startup');
+assert.match(html, /<span>Hypothetical Grades<\/span>/);
+assert.match(html, /<span>Practice<\/span>/);
+assert.match(html, /id="practice-multiplayer-form"/);
+assert.match(html, /id="practice-multiplayer-mode"/);
+assert.match(html, /data-scenario-score-preset="100"/);
 const about = html.match(/<section id="about-view"[\s\S]*?<\/section>/)[0];
 assert.ok(about.indexOf('id="announcement-history-card"') > about.indexOf('Questions or suggestions?'),
     'announcement history belongs at the bottom of About');

@@ -347,7 +347,7 @@ assert.equal(local, rosterSession.local, 'roster refresh preserves the live loca
 assert.equal(local.cos.skin, 'skin_alien');
 assert.equal(rosterSession.remotes.get('other').cos.skin, 'skin_gold');
 assert.equal(A.util.playerCosmetics({ equipped_skin: '', skin: 'skin_robot' }).skin, '', 'unequipping does not restore a stale skin');
-assert.equal(A.util.playerCosmetics({ cos: { skin: 'skin_gold', acc: 'acc_sparkles' } }).acc, 'acc_sparkles');
+assert.equal(A.util.playerCosmetics({ cos: { skin: 'skin_gold', acc: 'acc_sparkles' } }).effect, 'acc_sparkles');
 assert.equal(A.util.who({ skin: 'skin_robot' }).skin.body, '#94a3b8');
 console.log('Resource parity and live cosmetic refresh regressions passed.');
 
@@ -417,7 +417,7 @@ const retiredTrails = [
     'acc_dust_trail', 'acc_confetti_trail', 'acc_sakura_trail', 'acc_pixel_trail',
     'acc_meteor_trail', 'acc_aurora_trail'
 ];
-assert.equal(catalog.filter(item => item.type === 'effect').length, 28);
+assert.equal(catalog.filter(item => item.type === 'effect').length, 36);
 assert.ok(!catalog.some(item => item.type === 'trail' || retiredTrails.includes(item.id)));
 assert.ok(!sandbox.window.StudBudCommunityGames.constructor.boxes.some(box => box.id === 'trail'));
 assert.doesNotMatch(source, /\['trail',|trail: 'Trails'|item\.type === 'trail'/);
@@ -856,6 +856,9 @@ async function checkCommunityAndAdminUi() {
     actions.forEach(action => assert.match(action.outerHTML, /Add to my decks/));
     console.log('Community search/profile added labels, duplicate prevention, and deletion refresh passed.');
 
+    app.canAccessStaff = true;
+    app.canModerateFlashcards = true;
+    app.canTestGames = true;
     app.adminTab = 'users';
     await app.loadAdminList();
     assert.match(nodes.get('admin-list').innerHTML, /<details class="admin-tools">/);

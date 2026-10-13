@@ -64,7 +64,7 @@
          * Converts a letter grade using the PCHS grade-scale data.
          */
         getGradePoints(grade, isWeighted) {
-            const pchsGrade = (window.PCHS_GRADE_SCALE || []).find(item => item.letter === String(grade).toUpperCase());
+            const pchsGrade = (window.studbudGradeScale?.() || window.PCHS_GRADE_SCALE || []).find(item => item.letter === String(grade).toUpperCase());
             if (pchsGrade) return isWeighted ? pchsGrade.weighted : pchsGrade.unweighted;
             let basePts = GRADE_SCALE[grade.toUpperCase()];
             if (basePts === undefined) return 0;

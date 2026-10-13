@@ -46,15 +46,21 @@ const util = sandbox.window.StudBudArcade.util;
 const catalog = sandbox.window.StudBudCommunityGames.catalog;
 assert.equal(util.animatedCosmetics({ cos: { skin: 'skin_celestial' } }), true);
 assert.equal(util.animatedCosmetics({ cos: { acc: 'acc_jetpack' } }), true);
+assert.equal(util.animatedCosmetics({ cos: { effect: 'acc_storm_effect' } }), true);
 assert.equal(util.animatedCosmetics({ cos: { hat: 'hat_cosmic' } }), true);
 assert.equal(util.animatedCosmetics({ cos: { hat: 'hat_fedora', acc: 'acc_shades' } }), false);
+assert.deepEqual({ ...util.playerCosmetics({ equipped_accessory: 'acc_shades', equipped_effect: 'acc_storm_effect' }) },
+    { skin: '', hat: '', acc: 'acc_shades', effect: 'acc_storm_effect', color: '#34d399' });
+assert.deepEqual({ ...util.playerCosmetics({ equipped_accessory: 'acc_storm_effect' }) },
+    { skin: '', hat: '', acc: '', effect: 'acc_storm_effect', color: '#34d399' }, 'legacy equipped auras remain visible');
 assert.equal(util.playerCosmetics({ cos: { color: '#123456' } }).color, '#123456');
 assert.equal(util.playerCosmetics({ equipped_palette: 'palette_ocean' }).color, '#38bdf8');
 assert.match(util.avatarMarkup({ cos: { hat: 'hat_fedora' } }), /^<img /);
 assert.match(util.avatarMarkup({ cos: { acc: 'acc_storm_effect' } }), /^<canvas .*data-avatar/);
+assert.match(util.avatarMarkup({ cos: { acc: 'acc_shades', effect: 'acc_storm_effect' } }), /data-acc="acc_shades" data-effect="acc_storm_effect"/);
 assert.match(util.avatarMarkup({ cos: { acc: 'acc_aura', color: '" onload="bad' } }), /data-color="&quot; onload=&quot;bad"/);
 
-const canvas = makeCanvas({ skin: 'skin_cosmic', hat: 'hat_fedora', acc: 'acc_storm_effect', color: '#123456' });
+const canvas = makeCanvas({ skin: 'skin_cosmic', hat: 'hat_fedora', acc: 'acc_shades', effect: 'acc_storm_effect', color: '#123456' });
 tracked.add(canvas);
 mutation();
 assert.ok(commands.some(([name]) => name === 'clearRect'), 'new canvases receive an initial frame');
@@ -95,12 +101,16 @@ intersection([{ target: canvas, isIntersecting: true }]);
 assert.equal(frames.size, 0, 'late intersection callbacks cannot retain removed avatars');
 
 for (const item of catalog.filter(item => ['skin', 'hat', 'accessory', 'effect'].includes(item.type) && !item.legacy)) {
-    const cos = { skin: 'skin_robot', hat: 'hat_fedora', acc: 'acc_storm_effect' };
-    cos[{ skin: 'skin', hat: 'hat', accessory: 'acc', effect: 'acc' }[item.type]] = item.id;
+    const cos = { skin: 'skin_robot', hat: 'hat_fedora', acc: 'acc_shades', effect: 'acc_storm_effect' };
+    cos[{ skin: 'skin', hat: 'hat', accessory: 'acc', effect: 'effect' }[item.type]] = item.id;
     for (const time of [0, 1.25]) {
         util.drawAvatar(canvas, { cos }, time);
         util.drawFigureTop(ctx, { cos }, 40, 40, 12, 1, time);
     }
+}
+for (const id of ['acc_blossom_effect', 'acc_bubble_effect', 'acc_comet_effect', 'acc_spiral_effect', 'acc_spark_effect']) {
+    assert.ok(catalog.some(item => item.id === id && item.type === 'effect'), `new aura ${id} is available in the catalog`);
+    assert.ok(util.animatedCosmetics({ equipped_effect: id }), `new aura ${id} animates`);
 }
 const fedora = catalog.find(item => item.id === 'hat_fedora');
 assert.equal(fedora.type, 'hat');
@@ -109,6 +119,9 @@ assert.equal(fedora.rarity, 'uncommon');
 const hatBox = sandbox.window.StudBudCommunityGames.constructor.boxes.find(box => box.id === 'hat');
 assert.ok(sandbox.window.StudBudCommunityGames.boxPool(hatBox).some(item => item.id === fedora.id));
 assert.match(source('supabase-setup.sql'), /\('hat_fedora', 110\)/);
+assert.equal(sandbox.window.StudBudCommunityGames.constructor.rarityForPrice(400), 'epic');
+assert.equal(sandbox.window.StudBudCommunityGames.constructor.rarityForPrice(600), 'legendary');
+assert.equal(sandbox.window.StudBudCommunityGames.constructor.rarityForPrice(820), 'mythic');
 const blackFedora = catalog.find(item => item.id === 'hat_fedora_black');
 assert.equal(blackFedora.name, 'Black Fedora');
 assert.equal(blackFedora.type, 'hat');
@@ -124,12 +137,41 @@ const app = Object.create(sandbox.TestApp.prototype);
 app.animateShopAuras = noop;
 const previews = [];
 app.multiplayerAvatarMarkup = cos => { previews.push(cos); return ''; };
+app.renderMultiplayerProfile = async () => {};
 app.shopTab = 'hat';
 elements.set('multiplayer-shop-coins', {});
 elements.set('multiplayer-shop-items', {});
 app.renderMultiplayerShop({ coins: 1000, owned_items: [], equipped_skin: 'skin_robot',
-    equipped_hat: 'hat_cap', equipped_accessory: 'acc_storm_effect' });
+    equipped_hat: 'hat_cap', equipped_accessory: 'acc_shades', equipped_effect: 'acc_storm_effect' });
 const preview = previews.find(cos => cos.hat === 'hat_fedora');
 assert.equal(preview.skin, 'skin_robot');
-assert.equal(preview.acc, 'acc_storm_effect', 'hat previews preserve the equipped skin and aura');
-console.log('Animated avatars, visibility/reduced-motion cleanup, all cosmetic combinations and fedora catalog parity passed.');
+assert.equal(preview.acc, 'acc_shades', 'hat previews preserve the equipped accessory');
+assert.equal(preview.effect, 'acc_storm_effect', 'hat previews preserve the equipped aura');
+assert.match(source('supabase-setup.sql'), /add column if not exists equipped_effect/);
+assert.match(source('supabase-setup.sql'), /set equipped_effect = equipped_accessory, equipped_accessory = ''/);
+assert.match(source('supabase-setup.sql'), /p_slot = 'effect'.*equipped_effect = ''/s);
+assert.match(source('supabase-setup.sql'), /priced\.price < 200 then 'uncommon'.*priced\.price < 350 then 'rare'.*priced\.price < 550 then 'epic'/s);
+
+(async () => {
+    const community = sandbox.window.StudBudCommunityGames;
+    const getElementById = document.getElementById;
+    document.getElementById = id => elements.get(id) || { textContent: '' };
+    sandbox.window.StudBudSfx = { play: noop };
+    app.multiplayerProfile = { equipped_accessory: 'acc_shades', equipped_effect: '' };
+    community.equipItem = async () => ({ equipped_accessory: 'acc_shades', equipped_effect: 'acc_storm_effect' });
+    await app.updateMultiplayerShop('multiplayer-equip', 'acc_storm_effect');
+    assert.equal(app.multiplayerProfile.equipped_accessory, 'acc_shades', 'equipping an aura preserves the wearable accessory');
+    assert.equal(app.multiplayerProfile.equipped_effect, 'acc_storm_effect', 'aura equips into its own slot');
+    app.multiplayerProfile = { equipped_accessory: '', equipped_effect: 'acc_storm_effect' };
+    community.equipItem = async () => ({ equipped_accessory: 'acc_shades', equipped_effect: 'acc_storm_effect' });
+    await app.updateMultiplayerShop('multiplayer-equip', 'acc_shades');
+    assert.equal(app.multiplayerProfile.equipped_effect, 'acc_storm_effect', 'equipping an accessory preserves the aura');
+    community.equipItem = async () => ({ equipped_accessory: '', equipped_effect: 'acc_storm_effect' });
+    await assert.rejects(app.updateMultiplayerShop('multiplayer-equip', 'acc_storm_effect'), /changed your other equipped cosmetic/,
+        'a server response that clears the other slot is reported instead of silently accepted');
+    document.getElementById = getElementById;
+    console.log('Independent accessory and aura slots, particles, animation, catalog rarity, and SQL parity passed.');
+})().catch(error => {
+    console.error(error);
+    process.exitCode = 1;
+});

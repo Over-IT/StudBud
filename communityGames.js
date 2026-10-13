@@ -102,6 +102,11 @@
                 { id: 'acc_jellyfish_effect', name: 'Sky Jellyfish', icon: 'fa-water', price: 600, type: 'effect', description: 'Bioluminescent jellyfish bob above you with flowing tentacles' },
                 { id: 'acc_rune_effect', name: 'Arcane Runes', icon: 'fa-wand-magic-sparkles', price: 390, type: 'effect', description: 'Rotating geometric runes with glowing centers' },
                 { id: 'acc_lunar_effect', name: 'Lunar Eclipse', icon: 'fa-moon', price: 640, type: 'effect', description: 'Silver crescent moons in a blue halo' },
+                { id: 'acc_blossom_effect', name: 'Petal Drift', icon: 'fa-spa', price: 190, type: 'effect', description: 'Soft blossom petals flutter past in the breeze' },
+                { id: 'acc_bubble_effect', name: 'Bubble Parade', icon: 'fa-circle', price: 160, type: 'effect', description: 'Iridescent bubbles wobble upward and pop' },
+                { id: 'acc_comet_effect', name: 'Comet Trails', icon: 'fa-meteor', price: 300, type: 'effect', description: 'Bright comets sweep around you with streaming tails' },
+                { id: 'acc_spiral_effect', name: 'Orbit Spiral', icon: 'fa-spiral', price: 360, type: 'effect', description: 'Tiny stars climb a pair of twisting orbital paths' },
+                { id: 'acc_spark_effect', name: 'Spark Shower', icon: 'fa-burst', price: 110, type: 'effect', description: 'A playful burst of twinkling sparks' },
                 { id: 'acc_glasses', name: 'Round Glasses', icon: 'fa-glasses', price: 70, type: 'accessory' },
                 { id: 'acc_headband', name: 'Sport Headband', icon: 'fa-ribbon', price: 70, type: 'accessory' },
                 { id: 'acc_bandana', name: 'Bandana', icon: 'fa-ribbon', price: 80, type: 'accessory' },
@@ -114,11 +119,11 @@
                 { id: 'acc_medal', name: 'Champion Medal', icon: 'fa-medal', price: 150, type: 'accessory' },
                 { id: 'acc_tail', name: 'Fox Tail', icon: 'fa-paw', price: 170, type: 'accessory' },
                 { id: 'acc_sword', name: 'Back Sword', icon: 'fa-khanda', price: 190, type: 'accessory' },
-                { id: 'acc_hearts', name: 'Heart Cloud', icon: 'fa-heart', price: 200, type: 'accessory' },
-                { id: 'acc_snow', name: 'Snow Flurry', icon: 'fa-snowflake', price: 210, type: 'accessory' },
+                { id: 'acc_hearts', name: 'Heart Cloud', icon: 'fa-heart', price: 200, type: 'effect' },
+                { id: 'acc_snow', name: 'Snow Flurry', icon: 'fa-snowflake', price: 210, type: 'effect' },
                 { id: 'acc_jetpack', name: 'Jetpack', icon: 'fa-rocket', price: 240, type: 'accessory' },
                 { id: 'acc_fairy', name: 'Fairy Wings', icon: 'fa-wand-magic', price: 260, type: 'accessory' },
-                { id: 'acc_stars', name: 'Orbit Stars', icon: 'fa-star', price: 280, type: 'accessory' },
+                { id: 'acc_stars', name: 'Orbit Stars', icon: 'fa-star', price: 280, type: 'effect' },
                 { id: 'acc_flame', name: 'Flame Aura', icon: 'fa-fire-flame-curved', price: 300, type: 'effect' },
                 { id: 'acc_phoenix', name: 'Phoenix Wings', icon: 'fa-dove', price: 420, type: 'accessory' },
                 { id: 'hat_cap', name: 'Sporty Cap', icon: 'fa-hat-cowboy-side', price: 60, type: 'hat' },
@@ -174,15 +179,11 @@
                         }
 
                         static rarityForPrice(price) {
-                            return price < 100 ? 'common' : price < 160 ? 'uncommon' : price < 260 ? 'rare' : price < 400 ? 'epic' : price < 700 ? 'legendary' : 'mythic';
+                            return price < 100 ? 'common' : price < 200 ? 'uncommon' : price < 350 ? 'rare' : price < 550 ? 'epic' : price < 800 ? 'legendary' : 'mythic';
                         }
 
                         static rarityForItem(item) {
-                            if (item.type === 'palette' && item.price < 400) {
-                                return ['aurora', 'coral', 'cyber', 'galaxy', 'royal'].includes(item.color) ? 'rare' : item.price < 100 ? 'common' : 'uncommon';
-                            }
-                            return { skin_gold: 'epic', skin_chrome: 'rare', skin_shadow: 'rare', skin_crystal: 'epic' }[item.id]
-                                || this.rarityForPrice(item.price);
+                            return this.rarityForPrice(item.price);
                         }
 
                         static get boxes() {
