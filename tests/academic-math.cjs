@@ -112,4 +112,72 @@ app.renderStudyAnalytics();
 assert.match(elements.get('study-analytics-summary').innerHTML, /66\.67%/);
 assert.match(elements.get('study-analytics-decks').innerHTML, /&lt;Deck&gt;/);
 assert.match(elements.get('study-analytics-decks').innerHTML, /1 reviewed · 2 lapses/);
+const chartClasses = () => ({ toggle(name, value) { this[name] = value; } });
+const plot = { classList: chartClasses() };
+const canvas = { parentElement: plot, setAttribute(name, value) { this[name] = value; } };
+elements.set('grade-progress-chart', canvas);
+for (const id of ['analytics-summary', 'grade-progress-caption', 'grade-progress-title', 'grade-progress-range']) elements.set(id, {});
+elements.set('grade-progress-empty', { classList: chartClasses() });
+elements.set('analytics-course-control', { classList: chartClasses() });
+elements.set('analytics-metric-select', { value: 'class' });
+elements.set('analytics-course-select', { value: 'all' });
+elements.set('analytics-chart-type', { value: 'line' });
+let dark = true, reduced = false, destroyed = 0;
+sandbox.document.body = { classList: { contains: () => dark } };
+sandbox.window.getComputedStyle = () => ({ getPropertyValue: key => ({
+    '--text-secondary': dark ? '#afc3b7' : '#334155',
+    '--bg-base': dark ? '#101a17' : '#ffffff',
+    '--accent-primary': '#55c995',
+    '--text-primary': dark ? '#f0f7f2' : '#0f172a'
+})[key] });
+sandbox.window.matchMedia = () => ({ matches: reduced });
+sandbox.window.Chart = class {
+    constructor(canvas, config) { this.config = config; }
+    destroy() { destroyed++; }
+};
+state.courses = [{ ...course, title: 'Math' }, { ...course, code: 'science', title: 'Science' }];
+state.assignments = [
+    { ...assignment(80, 100), gradedAt: '2026-10-01' },
+    { ...assignment(90, 100), gradedAt: '2026-10-10' },
+    { ...assignment(100, 100), courseCode: 'science', gradedAt: '2026-10-10' }
+];
+app.renderGradeProgress();
+let config = app.gradeProgressChart.config;
+assert.deepEqual([...config.data.datasets[0].data], [80, 85], 'chart styling preserves cumulative grades');
+assert.deepEqual([...config.data.datasets[1].data], [null, 100], 'missing history stays absent');
+assert.equal(config.options.color, '#afc3b7');
+assert.equal(config.options.scales.y.suggestedMax, 100);
+assert.equal(config.options.plugins.legend.labels.usePointStyle, true);
+assert.equal(config.options.plugins.tooltip.callbacks.label({ dataset: { label: 'Math' }, parsed: { y: 85 } }), 'Math: 85.00%');
+const stableColor = config.data.datasets[1].borderColor;
+elements.get('analytics-course-select').value = 'science';
+elements.get('analytics-chart-type').value = 'area';
+app.renderGradeProgress();
+config = app.gradeProgressChart.config;
+assert.equal(config.type, 'line');
+assert.equal(config.data.datasets[0].borderColor, stableColor, 'class colors remain stable when filtering');
+const stops = [];
+config.data.datasets[0].backgroundColor({ chart: { chartArea: { top: 0, bottom: 200 }, ctx: { createLinearGradient: () => ({ addColorStop: (...args) => stops.push(args) }) } } });
+assert.equal(stops.length, 2, 'area fill is a subtle gradient');
+assert.equal(config.data.datasets[0].fill, true);
+dark = false; reduced = true;
+elements.get('analytics-chart-type').value = 'bar';
+app.renderGradeProgress();
+config = app.gradeProgressChart.config;
+assert.equal(config.options.color, '#334155');
+assert.equal(config.options.animation.duration, 0);
+assert.equal(config.data.datasets[0].borderRadius, 6);
+assert.equal(config.data.datasets[0].maxBarThickness, 28);
+elements.get('analytics-metric-select').value = 'weighted';
+app.renderGradeProgress();
+config = app.gradeProgressChart.config;
+assert.equal(config.options.scales.y.suggestedMax, 5);
+assert.ok(config.data.datasets[0].data.every(Number.isFinite));
+state.assignments = [];
+app.renderGradeProgress();
+assert.equal(app.gradeProgressChart, null, 'no empty axes are rendered without history');
+assert.equal(plot.classList.hidden, true);
+assert.equal(elements.get('grade-progress-empty').classList.hidden, false);
+assert.ok(destroyed >= 4, 'old chart instances are cleaned up');
 console.log('Grade categories, precision-preserving GPA, exhaustive optimal target plans, priorities, study totals, answer normalization and real analytics passed.');
+console.log('Theme-aware line/area/bar charts, stable class colors, grade/GPA data, reduced motion and empty chart states passed.');

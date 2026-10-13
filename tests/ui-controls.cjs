@@ -35,9 +35,9 @@ class Element {
     setPointerCapture() {}
     focus() { sandbox.document.activeElement = this; }
     getBoundingClientRect() { return { left: 0, top: 0, right: 100, bottom: 100, width: 100, height: 100 }; }
-    emit(name, x, y) {
+    emit(name, x, y, extra = {}) {
         for (const handler of this.handlers[name] || []) {
-            handler({ pointerId: 1, pointerType: 'touch', clientX: x, clientY: y, preventDefault() {} });
+            handler({ type: name, pointerId: 1, pointerType: 'touch', clientX: x, clientY: y, preventDefault() {}, ...extra });
         }
     }
 }
@@ -174,11 +174,17 @@ for (const mode of ['skyline', 'duel']) {
         assert.equal(session.stickJumpHeld, true, 'a firm upward push requests grounded jumping');
         assert.ok(Number(knob.style.transform.match(/, (-?[\d.]+)px/)[1]) < -40, 'normal joystick retains vertical motion');
         surface.emit('pointermove', 50, 25);
-        assert.equal(session.stickJumpHeld, false, 'less than 65% deflection cannot jump');
+        assert.equal(session.stickJumpHeld, false, 'less than 60% deflection cannot jump');
         surface.emit('pointermove', 100, 20);
         assert.equal(session.stickJumpHeld, false, 'shallow upward diagonals cannot jump');
         surface.emit('pointermove', 70, 10);
-        assert.equal(session.stickJumpHeld, true, 'a push above 60 degrees requests grounded jumping');
+        assert.equal(session.stickJumpHeld, true, 'a steep diagonal requests grounded jumping');
+        for (const [angle, magnitude, expected] of [[54.9, 1, false], [55.1, 1, true], [70, .599, false], [70, .601, true], [45, 1, false]]) {
+            const radians = angle * Math.PI / 180;
+            const origin = surface === zone ? { x: 58, y: 50 } : { x: 50, y: 50 };
+            surface.emit('pointermove', origin.x + Math.cos(radians) * 50 * magnitude, origin.y - Math.sin(radians) * 50 * magnitude);
+            assert.equal(session.stickJumpHeld, expected, `${mode}: ${angle} degrees at ${magnitude * 100}% deflection`);
+        }
         surface.emit('pointermove', 100, -100);
         assert.equal(session.keys.has('KeyD'), true);
         assert.equal(session.keys.has('KeyW'), false);
@@ -201,6 +207,21 @@ for (const mode of ['skyline', 'duel']) {
     stick.emit('pointerup');
     jump.emit('pointerup');
     assert.equal(session.keys.size, 0);
+    jump.emit('pointerdown', 0, 0, { button: 2 });
+    assert.equal(session.keys.size, 0, 'right-click cannot trigger touch actions');
+    session.paused = true;
+    jump.emit('pointerdown');
+    stick.emit('pointerdown', 50, 0);
+    assert.equal(session.keys.size, 0, 'paused controls cannot trigger movement or actions');
+    assert.equal(session.stickJumpHeld, false);
+    session.paused = false;
+    jump.setPointerCapture = () => { throw new Error('Capture unavailable'); };
+    jump.emit('pointerdown', 0, 0, { pointerId: 7 });
+    jump.emit('pointerup', 0, 0, { pointerId: 8 });
+    assert.equal(session.keys.has('Space'), true, 'another finger cannot release the action button');
+    for (const handler of windowHandlers.get('pointercancel')) handler({ type: 'pointercancel', pointerId: 7 });
+    assert.equal(session.keys.has('Space'), false, 'global cancel releases actions even without pointer capture');
+    assert.equal(session.justPressed.has('Space'), false, 'cancel discards unconsumed action edges');
 }
 
 for (const mode of ['miner', 'shooter', 'sports', 'market', 'river']) {
@@ -378,5 +399,60 @@ vm.runInContext(appSource.slice(appSource.indexOf('    class AppOrchestrator {')
 const history = A.util.questionHistoryMarkup([{ prompt: '<img>', answer: '<script>', chosen: 'wrong', correct: false }, { prompt: 'Q', answer: 'A', correct: null }]);
 assert.ok(history.includes('&lt;img&gt;') && history.includes('&lt;script&gt;') && history.includes('Skipped'));
 assert.ok(!history.includes('<script>'));
-console.log('SQL constraint naming, desktop/mobile HUD defaults, steep-angle joysticks, Jump buttons, nearby action bindings, and unified HUD disclosure passed.');
+console.log('SQL constraint naming, HUD defaults, 55-degree/60% joystick thresholds, guarded multi-touch actions, Jump buttons, and HUD disclosure passed.');
 console.log('Modal/game-result focus, background input isolation and escaped shared question summaries passed.');
+
+(async () => {
+    const app = Object.create(sandbox.window.TestApp.prototype);
+    const card = new Element();
+    const handlers = {};
+    const message = {};
+    sandbox.document.getElementById = id => id === 'current-flashcard' ? card : id === 'hosted-game-message' ? message : null;
+    sandbox.document.addEventListener = (type, handler) => { handlers[type] = handler; };
+    app.hideCourseSuggestions = () => {};
+    let flips = 0;
+    app.revealCard = () => flips++;
+    app.bindFlashcardInteraction();
+    const event = { target: { closest: selector => selector === '#current-flashcard' ? card : null }, detail: 1 };
+    card.emit('pointerdown', 20, 20, { button: 0 });
+    handlers.pointermove({ pointerId: 1, clientX: 35, clientY: 20 });
+    await app.handleClick(event);
+    assert.equal(flips, 0, 'scroll/drag gestures cannot flip cards');
+    card.emit('pointerdown', 20, 20, { button: 0 });
+    handlers.pointerup({ pointerId: 1, clientX: 25, clientY: 20 });
+    await app.handleClick(event);
+    assert.equal(flips, 1, 'deliberate taps still flip');
+    await app.handleClick({ ...event, detail: 2 });
+    assert.equal(flips, 1, 'second click of a double click cannot undo the first flip');
+    card.emit('pointerdown', 20, 20, { button: 0 });
+    handlers.pointercancel({ pointerId: 1 });
+    await app.handleClick(event);
+    assert.equal(flips, 1, 'cancelled touches cannot flip');
+    card.emit('pointerdown', 20, 20, { button: 0 });
+    card.emit('pointerdown', 20, 20, { button: 0, pointerId: 2, isPrimary: false });
+    await app.handleClick(event);
+    assert.equal(flips, 1, 'multi-finger gestures cannot flip');
+    await app.handleClick({ ...event, detail: 0 });
+    assert.equal(flips, 2, 'keyboard activation remains available');
+
+    for (const id of ['host-game-form', 'join-game-form']) {
+        const button = { disabled: false };
+        const form = { id, dataset: {}, querySelector: () => button };
+        let calls = 0, finish;
+        app.hostGame = app.joinGame = () => { calls++; return new Promise(resolve => { finish = resolve; }); };
+        const event = { target: form, preventDefault() {} };
+        const first = app.handleSubmit(event);
+        await app.handleSubmit(event);
+        assert.equal(calls, 1, 'repeated taps cannot create/join multiple rooms');
+        assert.equal(button.disabled, true);
+        finish();
+        await first;
+        assert.equal(button.disabled, false);
+        assert.equal(form.dataset.connecting, undefined);
+        const next = app.handleSubmit(event);
+        assert.equal(calls, 2, 'controls recover after the request completes');
+        finish();
+        await next;
+    }
+    console.log('Intentional flashcard taps, drag/cancel/multi-touch guards and duplicate room-submit protection passed.');
+})().catch(error => { console.error(error); process.exitCode = 1; });

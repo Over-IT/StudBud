@@ -290,6 +290,11 @@
             };
             const save = payload => this.getClient().from('studbud_community_decks')
                 .upsert(payload, { onConflict: 'owner_id,source_deck_id' }).select('id').single();
+            // BEFORE INSERT guards run before ON CONFLICT, so reuse the published row's identity.
+            const existing = await this.getClient().from('studbud_community_decks')
+                .select('id').eq('owner_id', row.owner_id).eq('source_deck_id', row.source_deck_id).maybeSingle();
+            if (existing.error) throw new Error(`Could not check this deck's shared copy: ${existing.error.message}`);
+            if (existing.data) row.id = existing.data.id;
             let { data, error } = await save(row);
             if (error && /course/i.test(error.message)) {
                 const { course, ...withoutCourse } = row;

@@ -2224,10 +2224,15 @@ begin
                lower(regexp_replace(btrim(c ->> 'back'), '\s+', ' ', 'g')) as pair
         from jsonb_array_elements(new.cards) as c
     ) pairs;
-    if exists (select 1 from public.studbud_community_decks d where d.id <> new.id and d.title_key = new.title_key) then
+    -- An upsert can have a fresh UUID before ON CONFLICT resolves the existing source deck.
+    if exists (select 1 from public.studbud_community_decks d where d.id <> new.id
+        and not (d.owner_id = new.owner_id and d.source_deck_id = new.source_deck_id)
+        and d.title_key = new.title_key) then
         raise exception 'A shared set with that name already exists. Rename your deck to share it.';
     end if;
-    if exists (select 1 from public.studbud_community_decks d where d.id <> new.id and d.content_hash = new.content_hash) then
+    if exists (select 1 from public.studbud_community_decks d where d.id <> new.id
+        and not (d.owner_id = new.owner_id and d.source_deck_id = new.source_deck_id)
+        and d.content_hash = new.content_hash) then
         raise exception 'A shared set with exactly these cards already exists.';
     end if;
     -- Reposting: most of these cards already live in someone else's shared set.

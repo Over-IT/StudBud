@@ -719,6 +719,7 @@
             });
             canvas.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && !this.mouse.down) this.mouse.active = false; });
             canvas.addEventListener('pointerdown', e => {
+                if (this.question || this.over || this.paused) return;
                 this.mouse.active = true;
                 if (e.button !== 2 && this.aimPointer != null) return;
                 if (e.button !== 2) this.aimPointer = e.pointerId;
@@ -913,7 +914,9 @@
                     if (n < 0.22) return { ...NONE };
                     if (this.stickPlatform) {
                         const vertical = this.stickGroundJump
-                            ? Math.abs(dy) >= Math.abs(dx) * Math.sqrt(3) && n >= .65
+                            ? dy < 0
+                                ? Math.abs(dy) >= Math.abs(dx) * Math.tan(55 * Math.PI / 180) && n >= .60
+                                : Math.abs(dy) >= Math.abs(dx) * Math.sqrt(3) && n >= .65
                             : Math.abs(dy) > Math.abs(dx) * (dirs.KeyW || dirs.KeyS ? 1 : 1.5) && n > (dirs.KeyW || dirs.KeyS ? .5 : .7);
                         this.stickJumpHeld = this.stickGroundJump && vertical && dy < 0;
                         return { KeyA: dx < -max * .22, KeyD: dx > max * .22, KeyW: !this.stickGroundJump && vertical && dy < 0, KeyS: vertical && dy > 0 };
@@ -944,10 +947,11 @@
                     const len = Math.hypot(dx, dy);
                     if (len > max) { dx = dx / len * max; dy = dy / len * max; }
                     knob.style.transform = `translate(${dx}px, ${dy}px)`;
-                    if (this.question || this.over) { this.stickJumpHeld = false; setDirs({ ...NONE }); return; }
+                    if (this.question || this.over || this.paused) { this.stickJumpHeld = false; setDirs({ ...NONE }); return; }
                     setDirs(resolve(dx, dy, max));
                 };
                 const begin = (e, floating) => {
+                    if (e.button !== undefined && e.button !== 0) return;
                     if (activeId !== null || this.question || this.over || this.paused) return;
                     e.preventDefault();
                     e.stopPropagation?.();
@@ -987,10 +991,12 @@
                 this.resetTouchStick = reset;
             }
             const bindBtn = btn => {
+                let activeId = null;
                 btn.addEventListener('pointerdown', e => {
                     e.preventDefault();
-                    btn.setPointerCapture?.(e.pointerId);
-                    if (this.question || this.over) return;
+                    if (activeId !== null || this.question || this.over || this.paused || (e.button !== undefined && e.button !== 0)) return;
+                    activeId = e.pointerId;
+                    try { btn.setPointerCapture?.(e.pointerId); } catch (_) { /* pointer already gone */ }
                     btn.classList.add('on');
                     buzz(btn.dataset.q ? 15 : 8);
                     if (btn.dataset.q) { if (this.game?.res) { this.resetTouchStick?.(); this.recharge(); } return; }
@@ -998,7 +1004,20 @@
                     this.keys.add(btn.dataset.k);
                     if (btn.dataset.click) { this.mouse.down = true; this.mouse.pressed = true; }
                 });
-                for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) btn.addEventListener(type, () => release(btn));
+                const end = e => {
+                    if (e.pointerId !== activeId) return;
+                    activeId = null;
+                    release(btn);
+                    if (e.type === 'pointercancel' || e.type === 'lostpointercapture') {
+                        this.justPressed.delete(btn.dataset.k);
+                        if (btn.dataset.click) this.mouse.pressed = false;
+                    }
+                };
+                this.touchButtonHandlers ||= [];
+                this.touchButtonHandlers.push(end);
+                window.addEventListener('pointerup', end);
+                window.addEventListener('pointercancel', end);
+                for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) btn.addEventListener(type, end);
                 btn.addEventListener('contextmenu', e => e.preventDefault());
             };
             // Each game describes its own on-screen controls: { stick, buttons: [{ k, label, cls, click }] }. The recharge button is added automatically.
@@ -1007,6 +1026,11 @@
                 const layout = this.game?.touchLayout?.() || DEFAULT_LAYOUT;
                 const key = JSON.stringify(layout) + (this.game?.res ? 'q' : '');
                 if (key === this.touchLayoutKey) return;
+                for (const end of this.touchButtonHandlers || []) {
+                    window.removeEventListener('pointerup', end);
+                    window.removeEventListener('pointercancel', end);
+                }
+                this.touchButtonHandlers = [];
                 this.touchLayoutKey = key;
                 this.stickPlatform = layout.platform ?? (layout.buttons || []).some(b => b.k === 'Space' && /jump/i.test(b.label || ''));
                 this.stickGroundJump = (layout.buttons || []).some(b => b.k === 'Space' && /jump/i.test(b.label || ''));
@@ -1232,6 +1256,10 @@
             window.removeEventListener('pointermove', this.stickHandlers?.move);
             window.removeEventListener('pointerup', this.stickHandlers?.end);
             window.removeEventListener('pointercancel', this.stickHandlers?.end);
+            for (const end of this.touchButtonHandlers || []) {
+                window.removeEventListener('pointerup', end);
+                window.removeEventListener('pointercancel', end);
+            }
             try { if (this.channel) this.api.getClient().removeChannel(this.channel); } catch (error) { /* already closed */ }
             this.overlay.remove();
             document.body.classList.remove('mpg-active');

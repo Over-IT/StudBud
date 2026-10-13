@@ -507,7 +507,7 @@
                     <div id="analytics-summary" class="analytics-summary"></div>
                     <div class="glass-card chart-container grade-progress-chart">
                         <div class="chart-heading"><div><h3 id="grade-progress-title">Grade progress</h3><p id="grade-progress-caption" class="study-guidance-intro">Record assignment scores to build your progress chart.</p></div><span id="grade-progress-range" class="chart-range-label"></span></div>
-                        <canvas id="grade-progress-chart" aria-label="Grade progress chart"></canvas>
+                        <div class="chart-plot"><canvas id="grade-progress-chart" role="img" aria-label="Grade progress chart"></canvas></div>
                         <p id="grade-progress-empty" class="chart-empty-message hidden">Your dated assignment scores will appear here.</p>
                     </div>
                     <section class="glass-card">
@@ -647,7 +647,9 @@
                                                                                     </div>
                                         <div class="question-reward-control">
                                             <label id="host-game-resource-label" for="host-game-reward">Energy per correct answer</label>
-                                            <div class="question-reward-inputs"><input type="range" min="1" max="500" step="1" value="20" data-reward-slider="host-game-reward" aria-label="Energy per correct answer slider"><input id="host-game-reward" name="questionReward" type="number" min="1" max="500" step="1" value="20" required></div>
+                                            <div class="question-reward-inputs"><input type="range" min="1" max="500" step="1" value="20" data-reward-slider="host-game-reward" aria-label="Energy per correct answer slider" aria-describedby="host-game-reward-guidance"><input id="host-game-reward" name="questionReward" type="number" min="1" max="500" step="1" value="20" required aria-describedby="host-game-reward-guidance"></div>
+                                            <small id="host-game-reward-guidance" aria-live="polite"></small>
+                                            <button type="button" class="secondary-btn" data-action="recommended-reward" data-id="host-game-reward">Use recommended amount</button>
                                             <small>1–500 per answer. More resources means fewer refill questions; it does not change the questions.</small>
                                         </div>
                                                                                     <button class="primary-btn" type="submit"><i class="fas fa-door-open"></i> Create room</button>
@@ -668,7 +670,9 @@
                                             </label>
                                             <div class="question-reward-control">
                                                 <label id="solo-game-resource-label" for="solo-game-reward">Energy per correct answer</label>
-                                                <div class="question-reward-inputs"><input type="range" min="1" max="500" step="1" value="20" data-reward-slider="solo-game-reward" aria-label="Energy per correct answer slider"><input id="solo-game-reward" name="questionReward" type="number" min="1" max="500" step="1" value="20" required></div>
+                                                <div class="question-reward-inputs"><input type="range" min="1" max="500" step="1" value="20" data-reward-slider="solo-game-reward" aria-label="Energy per correct answer slider" aria-describedby="solo-game-reward-guidance"><input id="solo-game-reward" name="questionReward" type="number" min="1" max="500" step="1" value="20" required aria-describedby="solo-game-reward-guidance"></div>
+                                                <small id="solo-game-reward-guidance" aria-live="polite"></small>
+                                                <button type="button" class="secondary-btn" data-action="recommended-reward" data-id="solo-game-reward">Use recommended amount</button>
                                                 <small>Choose an exact amount. Resources accumulate without a cap.</small>
                                             </div>
                                             <button class="primary-btn" type="button" data-action="start-solo-game"><i class="fas fa-play" aria-hidden="true"></i> Start solo game</button>
@@ -1248,6 +1252,43 @@
                 </div>
             </div>
 
+            <div id="deck-editor-modal" class="glass-card modal-content hidden">
+                <div class="modal-header">
+                    <h2>Edit flashcard set</h2>
+                    <button class="close-modal-btn icon-btn" aria-label="Close editor"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body">
+                    <p class="deck-link-hint">Edit your set without resetting review progress. Changes are saved only when you choose Save changes. Shared sets update too; your test link stays private.</p>
+                    <form id="deck-editor-form">
+                        <div class="form-group">
+                            <label for="deck-editor-title">Set name</label>
+                            <input id="deck-editor-title" type="text" maxlength="100" required>
+                        </div>
+                        <div class="form-group row-group deck-link-fields">
+                            <div class="half-width">
+                                <label for="deck-editor-course">Class</label>
+                                <select id="deck-editor-course"></select>
+                            </div>
+                            <div class="half-width">
+                                <label for="deck-editor-assessment">Test / quiz (private)</label>
+                                <select id="deck-editor-assessment"></select>
+                            </div>
+                        </div>
+                    </form>
+                    <div class="deck-editor-toolbar">
+                        <label for="deck-editor-search">Find a card</label>
+                        <input id="deck-editor-search" type="search" placeholder="Search terms, answers or tags">
+                        <button type="button" class="secondary-btn" data-action="editor-add-card">Add card</button>
+                    </div>
+                    <p id="deck-editor-count" role="status"></p>
+                    <div id="deck-editor-cards"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="secondary-btn cancel-modal-btn">Cancel</button>
+                    <button type="submit" form="deck-editor-form" class="primary-btn">Save changes</button>
+                </div>
+            </div>
+
             <!-- Card Studio Builder Modal -->
             <div id="card-studio-modal" class="glass-card modal-content hidden">
                 <div class="modal-header">
@@ -1264,11 +1305,11 @@
                         </div>
                         <div class="form-group">
                             <label for="card-front">Front (Concept / Question)</label>
-                            <textarea id="card-front" rows="3" required></textarea>
+                            <textarea id="card-front" rows="3" maxlength="5000" required></textarea>
                         </div>
                         <div class="form-group">
                             <label for="card-back">Back (Definition / Answer)</label>
-                            <textarea id="card-back" rows="4" required></textarea>
+                            <textarea id="card-back" rows="4" maxlength="5000" required></textarea>
                         </div>
                     </form>
                 </div>

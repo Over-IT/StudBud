@@ -106,6 +106,34 @@ async function run() {
         assert.equal(elements.get('solo-game-resource-label').textContent, label, 'host and solo setup agree on question rewards');
     }
     for (const id of setupIds) elements.delete(id);
+    for (const prefix of ['host', 'solo']) {
+        elements.set(`${prefix}-game-reward`, { value: '20' });
+        elements.set(`${prefix}-game-reward-guidance`, {});
+    }
+    for (const [mode, min, max] of [
+        ['skyline', 25, 45], ['duel', 20, 35], ['miner', 25, 45], ['river', 20, 40],
+        ['frenzy', 20, 40], ['fishing', 20, 40], ['market', 30, 60], ['sports', 30, 50],
+        ['shooter', 20, 40], ['crypto', 15, 30], ['hack', 10, 25]
+    ]) {
+        const recommendation = app.questionRewardRecommendation(mode);
+        assert.equal(recommendation.min, min);
+        assert.equal(recommendation.max, max);
+        assert.ok(recommendation.suggested >= min && recommendation.suggested <= max);
+        assert.ok(recommendation.explanation.length);
+        for (const [amount, expected] of [[min - 1, 'Below recommended'], [min, 'Within'], [max, 'Within'], [max + 1, 'Above recommended'], ['', 'whole number']]) {
+            for (const prefix of ['host', 'solo']) elements.get(`${prefix}-game-reward`).value = String(amount);
+            app.updateQuestionRewardGuidance(mode);
+            const host = elements.get('host-game-reward-guidance').textContent;
+            assert.ok(host.includes(`Recommended setting: ${min}-${max}`));
+            assert.ok(host.includes(expected), `${mode} guidance at ${amount}`);
+            assert.equal(host, elements.get('solo-game-reward-guidance').textContent, 'host and solo recommendations agree');
+            assert.equal(elements.get('host-game-reward').value, String(amount), 'advice never silently overrides the setting');
+        }
+    }
+    for (const prefix of ['host', 'solo']) {
+        elements.delete(`${prefix}-game-reward`);
+        elements.delete(`${prefix}-game-reward-guidance`);
+    }
 
     const now = Date.now();
     const cards = Array.from({ length: 4 }, (_, i) => ({ id: `card${i}`, question: `Q${i}`, answer: `A${i}` }));
