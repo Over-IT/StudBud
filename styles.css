@@ -63,7 +63,7 @@
 .study-leaderboard-row .study-leaderboard-avatar, .podium-spot .study-leaderboard-avatar { width: 36px; height: 36px; }
 .study-leaderboard-main { display: grid; gap: 6px; min-width: 0; }
 .study-leaderboard-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.you-badge { padding: 1px 7px; border-radius: 999px; color: #fff; font-size: .68rem; font-style: normal; font-weight: 700; background: var(--accent-primary); vertical-align: middle; }
+.you-badge { padding: 1px 7px; border-radius: 999px; color: var(--accent-on-primary); font-size: .68rem; font-style: normal; font-weight: 700; background: var(--accent-primary); vertical-align: middle; }
 .account-tag { display: inline-flex; align-items: center; flex: 0 0 auto; gap: 3px; padding: 2px 7px; border: 1px solid var(--border-glass); border-radius: 999px; font-size: .65rem; font-weight: 750; line-height: 1.25; white-space: nowrap; vertical-align: middle; background: var(--bg-glass-hover); color: var(--text-primary); }
 .account-tag-owner { border-color: var(--accent-primary); color: var(--accent-primary); }
 .account-tag-co-owner { border-color: var(--text-secondary); color: var(--text-secondary); }
@@ -88,6 +88,7 @@
 
 /* DARK THEME (Default) */
 .dark-theme {
+    color-scheme: dark;
     /* Colors */
     --bg-base: #101a17;
     --bg-glass: rgba(28, 43, 37, 0.88);
@@ -284,7 +285,7 @@ body[data-shop-palette].dark-theme {
     --text-secondary: hsl(var(--ph) 18% 80%);
     --text-muted: hsl(var(--ph) 12% 68%);
     --accent-primary: hsl(var(--pa) 78% 72%);
-    --accent-primary-hover: hsl(var(--pa) 72% 64%);
+    --accent-primary-hover: hsl(var(--pa) 72% 68%);
     --accent-secondary: hsl(var(--ph) 72% 72%);
     --accent-on-primary: #101820;
     --bg-glow-one: hsla(var(--pa) 85% 60% / .16);
@@ -298,7 +299,7 @@ body[data-shop-palette].light-theme {
     --text-primary: hsl(var(--ph) 28% 14%);
     --text-secondary: hsl(var(--ph) 20% 30%);
     --text-muted: hsl(var(--ph) 12% 39%);
-    --accent-primary: hsl(var(--pa) 65% 29%);
+    --accent-primary: hsl(var(--pa) 65% 26%);
     --accent-primary-hover: hsl(var(--pa) 65% 23%);
     --accent-secondary: hsl(var(--ph) 55% 30%);
     --accent-on-primary: #ffffff;
@@ -330,7 +331,7 @@ body[data-color-scheme="opal"] .glass-card {
     --text-secondary: #4c6556;
     --text-muted: #536b5d;
     
-    --accent-primary: #16865c;
+    --accent-primary: #137b53;
     --accent-primary-hover: #0f714c;
     --accent-secondary: #7258cc;
     --accent-on-primary: #ffffff;
@@ -529,6 +530,7 @@ button {
     font-family: inherit;
     border: none;
     background: none;
+    color: inherit;
     outline: none;
 }
 
@@ -549,6 +551,9 @@ input, select, textarea {
     transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
+input::placeholder, textarea::placeholder { color: var(--text-muted); opacity: 1; }
+input[type="checkbox"], input[type="radio"], input[type="range"], progress { accent-color: var(--accent-primary); }
+
 input[type="checkbox"], input[type="radio"] {
     width: 18px;
     height: 18px;
@@ -560,10 +565,15 @@ input[type="checkbox"], input[type="radio"] {
     background-color: rgba(255,255,255,0.8);
 }
 
-body.dark-theme select { color-scheme: dark; }
-body.light-theme select { color-scheme: light; }
-body.dark-theme input[type="date"] { color-scheme: dark; }
-body.light-theme input[type="date"] { color-scheme: light; }
+.light-theme { color-scheme: light; }
+input:is([type="date"], [type="time"], [type="datetime-local"])::-webkit-calendar-picker-indicator {
+    opacity: 1;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+}
+body.dark-theme input:is([type="date"], [type="time"], [type="datetime-local"])::-webkit-calendar-picker-indicator { filter: brightness(0) invert(1); }
+body.light-theme input:is([type="date"], [type="time"], [type="datetime-local"])::-webkit-calendar-picker-indicator { filter: brightness(0); }
 .date-picker-field { display: flex; align-items: stretch; gap: 8px; }
 .date-picker-field input { min-width: 0; flex: 1; }
 .date-picker-field button { flex: 0 0 44px; padding: 8px; }
@@ -929,6 +939,7 @@ input:focus, select:focus, textarea:focus {
 .btn-base,
 .primary-btn,
 .secondary-btn,
+.ghost-btn,
 .danger-btn {
     padding: 8px 16px;
     border-radius: var(--border-radius-sm);
@@ -961,8 +972,11 @@ input:focus, select:focus, textarea:focus {
 }
 
 .secondary-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: color-mix(in srgb, var(--accent-primary) 12%, var(--bg-glass-hover));
 }
+
+.ghost-btn { color: var(--text-primary); border: 1px solid var(--border-glass); }
+.ghost-btn:hover { background: var(--bg-glass-hover); }
 
 .danger-btn {
     background: rgba(239, 68, 68, 0.1);
@@ -1147,7 +1161,7 @@ input:focus, select:focus, textarea:focus {
 .scenario-existing { margin-bottom: var(--spacing-lg); }
 .importer-mode-tabs { display: inline-flex; gap: 6px; padding: 4px; border: 1px solid var(--border-glass); border-radius: 12px; margin-bottom: var(--spacing-md); }
 .importer-mode-btn { border: 0; background: transparent; color: var(--text-secondary); padding: 8px 14px; border-radius: 8px; cursor: pointer; font: inherit; }
-.importer-mode-btn.active { background: var(--accent-primary); color: #fff; }
+.importer-mode-btn.active { background: var(--accent-primary); color: var(--accent-on-primary); }
 .manual-card-rows { display: grid; gap: 8px; margin-bottom: var(--spacing-md); }
 .manual-card-row { display: grid; grid-template-columns: 28px 1fr 1.5fr auto; gap: 8px; align-items: center; }
 .manual-card-number { color: var(--text-secondary); text-align: center; font-size: 0.85rem; }
@@ -2469,7 +2483,7 @@ body[data-color-scheme="ocean"].light-theme {
     --text-primary: #142b3d;
     --text-secondary: #45657e;
     --text-muted: #516d83;
-    --accent-primary: #1479b8;
+    --accent-primary: #126fa9;
     --accent-primary-hover: #0f6397;
     --accent-secondary: #0f9f9a;
     --accent-on-primary: #ffffff;
@@ -2787,7 +2801,7 @@ body.compact-ui .mystery-capsule svg { height: 112px; width: 128px; }
 .assignment-state-toggle label { position: relative; margin: 0; cursor: pointer; }
 .assignment-state-toggle input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
 .assignment-state-toggle span { display: block; padding: 8px 10px; text-align: center; border-radius: 7px; font-weight: 600; color: var(--text-secondary); }
-.assignment-state-toggle input:checked + span { background: var(--accent-primary); color: #fff; }
+.assignment-state-toggle input:checked + span { background: var(--accent-primary); color: var(--accent-on-primary); }
 .assignment-state-toggle input:focus-visible + span { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
 .assignment-more { border: 1px solid var(--border-glass); border-radius: 10px; padding: 8px 12px; }
 .assignment-more summary { cursor: pointer; font-weight: 600; color: var(--text-secondary); }
@@ -2848,7 +2862,7 @@ body.compact-ui .mystery-capsule svg { height: 112px; width: 128px; }
 .admin-panel { display: grid; gap: 12px; }
 .admin-tabs, .admin-search { display: flex; gap: 8px; flex-wrap: wrap; }
 .admin-search input { flex: 1 1 140px; min-width: 0; }
-.admin-tabs .selected { background: var(--accent, #6366f1); color: #fff; }
+.admin-tabs .selected { background: var(--accent-primary); color: var(--accent-on-primary); }
 .admin-list { display: grid; gap: 8px; }
 .admin-row { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; padding: 10px 12px; border-radius: 12px; background: rgba(148, 163, 184, .12); }
 .admin-row small { display: block; opacity: .75; }
@@ -2879,7 +2893,7 @@ button, [role="button"], .nav-item, select, input[type="checkbox"], input[type="
 button:not(:disabled):active, .nav-item:active, .glass-card.clickable:active { transform: scale(.98); }
 button:disabled, [aria-disabled="true"] { cursor: not-allowed; opacity: .55; }
 .primary-btn, .secondary-btn, .danger-btn, .icon-btn { transition: transform .12s ease, filter .15s ease, background-color .15s ease; }
-.primary-btn:not(:disabled):hover, .secondary-btn:not(:disabled):hover { filter: brightness(1.08); }
+.secondary-btn:not(:disabled):hover { filter: brightness(1.08); }
 textarea { resize: vertical; }
 
 @media (pointer: coarse) {
