@@ -1146,7 +1146,7 @@
                 diagnostics.textContent = `Mode: ${this.mode}\nSeed: ${this.seed}\nTime: ${this.t.toFixed(1)}s\nPlayers: ${this.roster.size}\nPosition: ${position}\nResources: infinite\nScore: ${Math.round(this.score)}\nObjective: ${Math.round(this.goal)}`;
             }
             o.querySelector('.mpg-board').innerHTML = this.standings().slice(0, 6).map((row, i) =>
-                `<li class="${row.id === this.user.id ? 'me' : ''}"><img class="mpg-player-avatar" src="${avatarUrl(row)}" alt="" draggable="false"><span>${i + 1}. ${esc(row.n)} ${accountTagMarkup(row.username)}</span><b>${this.valueText(row)}</b></li>`).join('');
+                `<li class="${row.id === this.user.id ? 'me' : ''}">${avatarMarkup(row, 'mpg-player-avatar')}<span>${i + 1}. ${esc(row.n)} ${accountTagMarkup(row.username)}</span><b>${this.valueText(row)}</b></li>`).join('');
             this.layoutHud();
         }
 
@@ -1178,7 +1178,7 @@
             panel.innerHTML = `<div class="mpg-results-card">
                 <small>${this.testing ? 'Test finished' : this.practice ? 'Solo game complete' : 'Match over'}</small>
                 <h2>${esc(title)}</h2>
-                <ol>${rows.map(row => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${rows.findIndex(other => this.metric(other) === this.metric(row)) + 1}</span><img class="mpg-player-avatar" src="${avatarUrl(row)}" alt="" draggable="false"><strong>${esc(row.n)} ${accountTagMarkup(row.username)}</strong><b>${this.valueText(row)}</b><em>${this.rewards ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
+                <ol>${rows.map(row => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${rows.findIndex(other => this.metric(other) === this.metric(row)) + 1}</span>${avatarMarkup(row, 'mpg-player-avatar')}<strong>${esc(row.n)} ${accountTagMarkup(row.username)}</strong><b>${this.valueText(row)}</b><em>${this.rewards ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
                 <p class="mpg-accuracy">${this.answered ? `${Math.round(this.correct / this.answered * 100)}% correct` : 'No answers submitted'} · ${this.correct} correct · ${Math.max(0, this.answered - this.correct)} incorrect · ${this.answered} answered</p>
                 <details class="mpg-summary"><summary>Full game summary</summary>
                     <p>${Math.round(this.t)} seconds played · ${(this.questionHistory || []).filter(answer => answer.correct === null).length} skipped</p>
@@ -1274,24 +1274,105 @@
             skin: player?.equipped_skin ?? player?.skin ?? player?.cos?.skin ?? '',
             hat: player?.equipped_hat ?? player?.hat ?? player?.cos?.hat ?? '',
             acc: player?.equipped_accessory ?? player?.accessory ?? player?.acc ?? player?.cos?.acc ?? '',
-            color: player?.color || '#34d399'
+            color: player?.color || player?.cos?.color || ((player?.equipped_palette || player?.palette)
+                ? playerColor({ ...player, palette: player.equipped_palette || player.palette }) : '#34d399')
         };
     }
 
     const avatarCache = new Map();
+    function drawAvatar(canvas, player, time = 0) {
+        const cos = playerCosmetics(player);
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        ctx.scale(canvas.width / 80, canvas.height / 80);
+        const stormHat = cos.acc === 'acc_storm_effect' && cos.hat;
+        if (stormHat) { ctx.translate(8, 8); ctx.scale(.8, .8); }
+        drawFigureSide(ctx, { color: cos.color, cos }, 29, stormHat ? 40 : 30, 22, 37, 1, time, false);
+        ctx.restore();
+    }
+
     function avatarUrl(player) {
         const cos = playerCosmetics(player);
         const key = [cos.skin, cos.hat, cos.acc, cos.color].join('|');
         if (!avatarCache.has(key)) {
             const canvas = document.createElement('canvas');
             canvas.width = 240; canvas.height = 240;
-            const ctx = canvas.getContext('2d');
-            ctx.scale(3, 3);
-            drawFigureSide(ctx, { color: cos.color, cos }, 27, 25, 26, 42, 1, 0, false);
+            drawAvatar(canvas, player);
             if (avatarCache.size >= 300) avatarCache.delete(avatarCache.keys().next().value);
             avatarCache.set(key, canvas.toDataURL('image/png'));
         }
         return avatarCache.get(key);
+    }
+
+    function animatedCosmetics(player) {
+        const cos = playerCosmetics(player);
+        return Boolean(SKINS[cos.skin]?.mythic || cos.hat === 'hat_cosmic' || COSMETIC_PARTICLES[cos.acc]
+            || ['acc_wings', 'acc_phoenix', 'acc_fairy', 'acc_jetpack', 'acc_tail', 'acc_flame',
+                'acc_lightning', 'acc_sparkles', 'acc_hearts', 'acc_stars', 'acc_snow'].includes(cos.acc));
+    }
+
+    let avatarObserver = null;
+    function observeAvatars() {
+        if (avatarObserver) return;
+        const canvases = new Set();
+        const visible = new Set();
+        const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+        let frame = 0, lastTime = -Infinity;
+        const draw = time => {
+            frame = 0;
+            if (document.hidden || motion.matches || !visible.size) return;
+            if (time - lastTime >= 1000 / 30) {
+                lastTime = time;
+                for (const canvas of visible) drawAvatar(canvas, { cos: canvas.dataset }, time / 1000);
+            }
+            frame = requestAnimationFrame(draw);
+        };
+        const resume = () => {
+            cancelAnimationFrame(frame);
+            frame = 0;
+            lastTime = -Infinity;
+            if (motion.matches) {
+                for (const canvas of canvases) drawAvatar(canvas, { cos: canvas.dataset });
+            } else if (!document.hidden && visible.size) frame = requestAnimationFrame(draw);
+        };
+        const intersection = new IntersectionObserver(entries => {
+            for (const entry of entries) {
+                if (entry.isIntersecting && canvases.has(entry.target) && entry.target.isConnected) visible.add(entry.target);
+                else visible.delete(entry.target);
+            }
+            resume();
+        });
+        const sync = () => {
+            for (const canvas of canvases) {
+                if (!canvas.isConnected) {
+                    intersection.unobserve(canvas);
+                    canvases.delete(canvas);
+                    visible.delete(canvas);
+                }
+            }
+            for (const canvas of document.querySelectorAll('canvas[data-avatar]')) {
+                if (canvases.has(canvas)) continue;
+                canvases.add(canvas);
+                drawAvatar(canvas, { cos: canvas.dataset });
+                intersection.observe(canvas);
+            }
+            if (!visible.size) { cancelAnimationFrame(frame); frame = 0; }
+        };
+        avatarObserver = new MutationObserver(sync);
+        avatarObserver.observe(document.body, { childList: true, subtree: true });
+        document.addEventListener('visibilitychange', resume);
+        motion.addEventListener('change', resume);
+        sync();
+    }
+
+    function avatarMarkup(player, className = '') {
+        const cos = playerCosmetics(player);
+        const attrs = ['skin', 'hat', 'acc', 'color'].map(key => `data-${key}="${esc(cos[key])}"`).join(' ');
+        const classAttr = `class="${esc(className)}"`;
+        if (!animatedCosmetics(player)) return `<img ${classAttr} src="${avatarUrl(player)}" alt="" draggable="false">`;
+        observeAvatars();
+        return `<canvas ${classAttr} width="240" height="240" data-avatar ${attrs} aria-hidden="true"></canvas>`;
     }
 
     // ---------- cosmetics ----------
@@ -1379,10 +1460,10 @@
     function who(p) {
         if (typeof p === 'string') return { color: p, skin: null, hat: '', acc: '' };
         const cos = playerCosmetics(p);
-        return { color: p?.color || '#94a3b8', skinId: cos.skin || '', skin: SKINS[cos.skin] || null, hat: LEGACY_HATS[cos.hat] || cos.hat || '', acc: cos.acc || '' };
+        return { color: cos.color, skinId: cos.skin || '', skin: SKINS[cos.skin] || null, hat: LEGACY_HATS[cos.hat] || cos.hat || '', acc: cos.acc || '' };
     }
 
-    function drawHat(ctx, hat, cx, top, r, tilt = 0) {
+    function drawHat(ctx, hat, cx, top, r, tilt = 0, time = 0) {
         if (!hat) return;
         ctx.save();
         ctx.translate(cx, top);
@@ -1406,6 +1487,17 @@
             ctx.fillStyle = '#111827'; ctx.fillRect(-r * 0.8, -r * 1.5, r * 1.6, r * 1.85);
             fill('#111827', () => ctx.ellipse(0, r * 0.3, r * 1.3, r * 0.28, 0, 0, TAU));
             ctx.fillStyle = '#dc2626'; ctx.fillRect(-r * 0.8, -r * 0.1, r * 1.6, r * 0.3);
+        } else if (hat === 'hat_fedora') {
+            fill('#78350f', () => ctx.ellipse(0, r * .3, r * 1.5, r * .25, -.04, 0, TAU));
+            fill('#a16207', () => {
+                ctx.moveTo(-r * .85, r * .25); ctx.lineTo(-r * .65, -r * .95);
+                ctx.quadraticCurveTo(-r * .25, -r * 1.15, 0, -r * .8);
+                ctx.quadraticCurveTo(r * .35, -r * 1.1, r * .65, -r * .85);
+                ctx.lineTo(r * .85, r * .25);
+            });
+            ctx.fillStyle = '#292524'; ctx.fillRect(-r * .78, -r * .05, r * 1.56, r * .25);
+            ctx.strokeStyle = '#fcd34d'; ctx.lineWidth = r * .08;
+            ctx.beginPath(); ctx.moveTo(-r * .52, -r * .8); ctx.lineTo(-r * .2, -r * .65); ctx.stroke();
         } else if (hat === 'hat_wizard') {
             fill('#4f46e5', () => { ctx.moveTo(-r * 1.1, r * 0.4); ctx.lineTo(r * 0.2, -r * 2.1); ctx.lineTo(r * 1.1, r * 0.4); });
             fill('#4338ca', () => ctx.ellipse(0, r * 0.4, r * 1.5, r * 0.3, 0, 0, TAU));
@@ -1525,7 +1617,7 @@
             fill('rgba(255,255,255,.6)', () => ctx.ellipse(-r * 0.55, r * 0.2, r * 0.22, r * 0.4, 0.5, 0, TAU));
             fill('#ef4444', () => ctx.arc(0, -r * 0.5, r * 0.16, 0, TAU));
         } else if (hat === 'hat_cosmic') {
-            const t = performance.now() / 1000;
+            const t = time;
             const glow = ctx.createLinearGradient(-r, -r, r, r);
             glow.addColorStop(0, '#f43f5e'); glow.addColorStop(0.5, '#a855f7'); glow.addColorStop(1, '#22d3ee');
             fill(glow, () => {
@@ -1642,13 +1734,13 @@
         }
     }
 
-    function drawCosmeticParticles(ctx, id, cx, cy, rx, ry, time) {
+    function drawCosmeticParticles(ctx, id, cx, cy, rx, ry, time, hatClearance = 0) {
         const def = COSMETIC_PARTICLES[id];
         if (!def) return;
         ctx.save();
         const alpha = ctx.globalAlpha;
         if (def.shape === 'storm') {
-            const cloudY = cy - ry * 1.5, sway = Math.sin(time * .8) * rx * .08;
+            const cloudY = cy - ry * 1.5 - hatClearance, sway = Math.sin(time * .8) * rx * .08;
             for (let i = 0; i < 16; i++) {
                 const phase = (time * .9 + i * .618) % 1;
                 const x = cx + sway + Math.sin(i * 17) * rx * .85 - phase * rx * .12;
@@ -1831,7 +1923,7 @@
         ctx.fillStyle = 'rgba(0,0,0,.25)';
         ctx.fillRect(x + 2, y + h - 2, w - 4, 3);
         if (c.skin?.mythic) drawMythicAura(ctx, cx, y + h * 0.45, Math.max(w, h) * 0.75, c.skin.mythic, time);
-        drawCosmeticParticles(ctx, c.acc, cx, y + h * .5, w * .8, h * .55, time);
+        drawCosmeticParticles(ctx, c.acc, cx, y + h * .5, w * .8, h * .55, time, c.hat ? h * .45 : 0);
         if (c.acc === 'acc_wings') {
             ctx.fillStyle = 'rgba(226,232,240,.9)';
             const flap = Math.sin(time * 10) * 4;
@@ -1902,8 +1994,8 @@
         ctx.beginPath(); ctx.arc(cx, y + 11 + bob, 11, 0, TAU); ctx.fill();
         if (!c.hat && !c.skin) { ctx.fillStyle = body; ctx.beginPath(); ctx.arc(cx, y + 8 + bob, 11.5, Math.PI, TAU); ctx.fill(); }
         if (c.skin === SKINS.skin_ninja) { ctx.fillStyle = '#111827'; ctx.fillRect(cx - 11, y + 4 + bob, 22, 5); ctx.fillStyle = '#dc2626'; ctx.fillRect(cx - 11, y + 8 + bob, 22, 2); }
-        if (c.skin === SKINS.skin_robot) { ctx.strokeStyle = '#475569'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx, y + bob); ctx.lineTo(cx, y - 7 + bob); ctx.stroke(); ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(cx, y - 8 + bob, 2.5, 0, TAU); ctx.fill(); }
-        if (c.skin === SKINS.skin_alien) { ctx.strokeStyle = '#16a34a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx - 5, y + 1 + bob); ctx.lineTo(cx - 8, y - 6 + bob); ctx.moveTo(cx + 5, y + 1 + bob); ctx.lineTo(cx + 8, y - 6 + bob); ctx.stroke(); }
+        if (!c.hat && c.skin === SKINS.skin_robot) { ctx.strokeStyle = '#475569'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx, y + bob); ctx.lineTo(cx, y - 7 + bob); ctx.stroke(); ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(cx, y - 8 + bob, 2.5, 0, TAU); ctx.fill(); }
+        if (!c.hat && c.skin === SKINS.skin_alien) { ctx.strokeStyle = '#16a34a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx - 5, y + 1 + bob); ctx.lineTo(cx - 8, y - 6 + bob); ctx.moveTo(cx + 5, y + 1 + bob); ctx.lineTo(cx + 8, y - 6 + bob); ctx.stroke(); }
         ctx.fillStyle = c.skin?.eye || '#0f172a';
         ctx.fillRect(cx + face * 4 - 1.5, y + 9 + bob, 3, 4);
         if (c.acc === 'acc_shades') { ctx.fillStyle = '#0f172a'; ctx.fillRect(cx + face * 4 - 6, y + 8 + bob, 12, 5); }
@@ -1925,7 +2017,7 @@
         if (c.acc === 'acc_tie') { ctx.fillStyle = '#2563eb'; ctx.beginPath(); ctx.moveTo(cx - 3, y + 18 + bob); ctx.lineTo(cx + 3, y + 18 + bob); ctx.lineTo(cx + 2.5, y + 30 + bob); ctx.lineTo(cx, y + 33 + bob); ctx.lineTo(cx - 2.5, y + 30 + bob); ctx.fill(); }
         if (c.acc === 'acc_medal') { ctx.strokeStyle = '#dc2626'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx - 6, y + 15 + bob); ctx.lineTo(cx, y + 26 + bob); ctx.lineTo(cx + 6, y + 15 + bob); ctx.stroke(); ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(cx, y + 28 + bob, 4, 0, TAU); ctx.fill(); }
         ctx.globalAlpha = alpha;
-        drawHat(ctx, c.hat, cx, y + bob, 11, face * 0.03);
+        drawHat(ctx, c.hat, cx, y + bob, 11, face * 0.03, time);
         ctx.restore();
     }
 
@@ -1939,7 +2031,7 @@
         ctx.fillStyle = 'rgba(0,0,0,.3)';
         ctx.beginPath(); ctx.ellipse(2, 4, r, r * 0.8, 0, 0, TAU); ctx.fill();
         if (c.skin?.mythic) drawMythicAura(ctx, 0, 0, r * 1.7, c.skin.mythic, time);
-        drawCosmeticParticles(ctx, c.acc, 0, 0, r * 1.45, r * 1.45, time);
+        drawCosmeticParticles(ctx, c.acc, 0, 0, r * 1.45, r * 1.45, time, c.hat ? r * .7 : 0);
         if (c.acc === 'acc_sparkles') {
             for (let i = 0; i < 5; i++) {
                 const angle = time * 1.8 + i * TAU / 5;
@@ -1987,7 +2079,7 @@
         ctx.restore();
         if (orbitTop) { ctx.font = `${Math.round(r * 0.7)}px serif`; ctx.textAlign = 'center'; for (let i = 0; i < 3; i++) { const a = time * 1.6 + i * 2.1; ctx.fillText(orbitTop, Math.cos(a) * r * 1.5, Math.sin(a) * r * 1.5); } }
         ctx.globalAlpha = alpha;
-        if (c.hat) drawHat(ctx, c.hat, Math.cos(aim) * r * 0.1, Math.sin(aim) * r * 0.1 - r * 0.62, r * 0.62);
+        if (c.hat) drawHat(ctx, c.hat, Math.cos(aim) * r * 0.1, Math.sin(aim) * r * 0.1 - r * 0.62, r * 0.62, 0, time);
         ctx.restore();
     }
 
@@ -2005,6 +2097,6 @@
 
     window.StudBudArcade = {
         Session, BaseGame, Particles, Resource, games: {},
-        util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, accountTagMarkup, who, playerCosmetics, avatarUrl, drawHat, drawFigureSide, drawFigureTop, sceneZoom, questionHistoryMarkup }
+        util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, accountTagMarkup, who, playerCosmetics, avatarUrl, avatarMarkup, animatedCosmetics, drawAvatar, observeAvatars, drawHat, drawFigureSide, drawFigureTop, sceneZoom, questionHistoryMarkup }
     };
 })(window);

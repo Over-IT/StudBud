@@ -2551,11 +2551,10 @@
             return window.StudBudArcade.util.playerCosmetics(profile);
         }
 
-        // Draws the same animated-game character to a cached image so lobby avatars match in-game characters.
         multiplayerAvatarMarkup(cos = {}, large = false, extraClass = '') {
             const util = window.StudBudArcade?.util;
-            const url = util?.avatarUrl({ color: cos.color, cos });
-            return `<span class="player-avatar char-avatar${large ? ' player-avatar-large' : ''}${extraClass ? ` ${this.escapeHTML(extraClass)}` : ''}">${url ? `<img src="${url}" alt="" draggable="false">` : '<i class="fas fa-user" aria-hidden="true"></i>'}</span>`;
+            const avatar = util?.avatarMarkup({ color: cos.color, cos });
+            return `<span class="player-avatar char-avatar${large ? ' player-avatar-large' : ''}${extraClass ? ` ${this.escapeHTML(extraClass)}` : ''}">${avatar || '<i class="fas fa-user" aria-hidden="true"></i>'}</span>`;
         }
 
         renderMultiplayerShop(profile) {
@@ -2566,7 +2565,7 @@
             const equippedBy = { skin: profile.equipped_skin, hat: profile.equipped_hat, accessory: profile.equipped_accessory, effect: profile.equipped_accessory, palette: profile.equipped_palette };
             const tabs = [['boxes', 'Mystery boxes'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['effect', 'Auras'], ['palette', 'Colors'], ['inventory', 'Inventory']];
             const slotKey = { skin: 'skin', hat: 'hat', accessory: 'acc', effect: 'acc' };
-            const auraPreview = item => `<span class="player-avatar char-avatar aura-preview"><canvas width="160" height="160" data-aura="${this.escapeHTML(item.id)}" aria-label="${this.escapeHTML(item.name)} animated preview"></canvas></span>`;
+            const previewCosmetics = item => ({ ...this.profileCosmetics(profile), [slotKey[item.type]]: item.id });
             const itemCard = item => {
                 const has = owned.includes(item.id);
                 const equipped = equippedBy[item.type] === item.id;
@@ -2574,7 +2573,7 @@
                 if (item.type === 'palette') preview = item.hue != null
                     ? `<span class="shop-palette" style="background: linear-gradient(135deg, hsl(${item.hue} 75% 55%), hsl(${item.hue2} 80% 40%))"></span>`
                     : `<span class="shop-palette ${this.escapeHTML(item.color)}"></span>`;
-                else preview = item.type === 'effect' ? auraPreview(item) : this.multiplayerAvatarMarkup({ skin: '', hat: '', acc: '', [slotKey[item.type]]: item.id });
+                else preview = this.multiplayerAvatarMarkup(previewCosmetics(item), false, item.type === 'effect' ? 'aura-preview' : '');
                 const price = item.price == null ? '' : ` · ${item.price} <i class="fas fa-coins"></i>`;
                 let button;
                 if (has && equipped && equippedBy[item.type] !== undefined) button = `<button type="button" class="ghost-btn" data-action="multiplayer-unequip" data-slot="${item.type === 'effect' ? 'accessory' : item.type}">Unequip</button>`;
@@ -2589,7 +2588,7 @@
             if (tab === 'boxes') {
                 const drop = this.lastDrop;
                 const dropItem = drop && games.catalog.find(entry => entry.id === drop.unlocked_item && entry.type !== 'pet');
-                body = `${dropItem ? `<div class="box-reveal rarity-${this.escapeHTML(dropItem.rarity)}">${dropItem.type === 'palette' ? `<span class="shop-palette" style="background: linear-gradient(135deg, hsl(${dropItem.hue} 75% 55%), hsl(${dropItem.hue2} 80% 40%))"></span>` : this.multiplayerAvatarMarkup({ skin: '', hat: '', acc: '', [slotKey[dropItem.type]]: dropItem.id }, true)}<div><small>${this.escapeHTML(dropItem.rarity)}</small><strong>${this.escapeHTML(dropItem.name)}</strong><span>New item added to your inventory!</span></div></div>` : ''}
+                body = `${dropItem ? `<div class="box-reveal rarity-${this.escapeHTML(dropItem.rarity)}">${dropItem.type === 'palette' ? `<span class="shop-palette" style="background: linear-gradient(135deg, hsl(${dropItem.hue} 75% 55%), hsl(${dropItem.hue2} 80% 40%))"></span>` : this.multiplayerAvatarMarkup(previewCosmetics(dropItem), true)}<div><small>${this.escapeHTML(dropItem.rarity)}</small><strong>${this.escapeHTML(dropItem.name)}</strong><span>New item added to your inventory!</span></div></div>` : ''}
                     ${games.constructor.boxes.map(box => {
                         const total = games.boxPool(box).length;
                         const remaining = games.boxPool(box, owned).length;
@@ -2662,24 +2661,7 @@
         }
 
         animateShopAuras() {
-            cancelAnimationFrame(this.shopAuraFrame);
-            const root = document.getElementById('multiplayer-shop-items');
-            const canvases = [...root.querySelectorAll('canvas[data-aura]')];
-            const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-            const draw = (time, initial = false) => {
-                if (!root.isConnected || (!initial && !root.offsetWidth)) return;
-                for (const canvas of canvases) {
-                    const rect = canvas.getBoundingClientRect();
-                    if (!initial && (!canvas.offsetWidth || (!reducedMotion && (rect.bottom < 0 || rect.top > innerHeight)))) continue;
-                    const ctx = canvas.getContext('2d');
-                    ctx.clearRect(0, 0, 160, 160);
-                    ctx.save(); ctx.scale(2, 2);
-                    window.StudBudArcade.util.drawFigureSide(ctx, { color: '#55c995', cos: { acc: canvas.dataset.aura } }, 29, 30, 22, 37, 1, time / 1000, false);
-                    ctx.restore();
-                }
-                if (canvases.length && root.offsetWidth && !reducedMotion) this.shopAuraFrame = requestAnimationFrame(draw);
-            };
-            if (canvases.length) draw(performance.now(), true);
+            window.StudBudArcade.util.observeAvatars();
         }
 
         async renderMultiplayerProfile(force = false) {
@@ -6949,6 +6931,8 @@
                     await this.copyHostedRoomCode();
                 } else if (id === 'quick-add-task-btn') {
                     this.openAssignmentForm();
+                } else if (id === 'assignment-calendar-btn') {
+                    this.openAssignmentDatePicker();
                 } else if (id === 'save-add-another-assignment-btn') {
                     this.saveAssignmentAndContinue();
                 } else if (action === 'add-assignment-to-category') {
@@ -7491,7 +7475,8 @@
             document.getElementById('assignment-modal-title').textContent = assignment ? 'Edit Assignment' : 'Add Assignment';
             document.getElementById('assignment-name').value = assignment ? assignment.title : '';
             document.getElementById('assignment-course').value = assignment ? assignment.courseCode : courseCode;
-            document.getElementById('assignment-due-date').value = assignment ? assignment.dueDate || '' : (dueDate || '');
+            document.getElementById('assignment-due-date').value = assignment ? (assignment.dueDate || '').slice(0, 10) : (dueDate || localDateKey(new Date()));
+            document.getElementById('assignment-date-hint').textContent = 'Type a date or use the calendar button.';
             document.getElementById('assignment-points').value = assignment ? Number(Number(assignment.pointsEarned ?? 0).toFixed(2)) : 0;
             document.getElementById('assignment-max-points').value = assignment ? Number(Number(assignment.maxPoints ?? 100).toFixed(2)) : 100;
             document.getElementById('assignment-kind').value = assignment ? assignment.kind || 'assignment' : (kind || 'assignment');
@@ -7505,6 +7490,16 @@
             this.syncAssignmentForm();
             this.openModal('assignment-modal');
             setTimeout(() => document.getElementById('assignment-name').focus(), 50);
+        }
+
+        openAssignmentDatePicker() {
+            const input = document.getElementById('assignment-due-date');
+            input.focus({ preventScroll: true });
+            if (typeof input.showPicker === 'function') {
+                input.showPicker();
+            } else {
+                document.getElementById('assignment-date-hint').textContent = 'Type the date, or select the calendar icon inside the date field.';
+            }
         }
 
         syncAssignmentForm() {

@@ -562,6 +562,12 @@ input[type="checkbox"], input[type="radio"] {
 
 body.dark-theme select { color-scheme: dark; }
 body.light-theme select { color-scheme: light; }
+body.dark-theme input[type="date"] { color-scheme: dark; }
+body.light-theme input[type="date"] { color-scheme: light; }
+.date-picker-field { display: flex; align-items: stretch; gap: 8px; }
+.date-picker-field input { min-width: 0; flex: 1; }
+.date-picker-field button { flex: 0 0 44px; padding: 8px; }
+.date-picker-hint { display: block; margin-top: 6px; color: var(--text-secondary); font-size: .75rem; }
 select option, select optgroup {
     background-color: var(--bg-base);
     color: var(--text-primary);
@@ -1839,7 +1845,7 @@ body.compact-ui .glass-card { padding: 14px; }
 #multiplayer-large-avatar > .char-avatar { width: 96px; height: 96px; }
 .multiplayer-player-card { display: grid; justify-items: center; text-align: center; gap: 6px; }
 .multiplayer-player-card h3, .multiplayer-player-card p { margin: 0; }
-.char-avatar img { width: 100%; height: 100%; object-fit: contain; transform: none; image-rendering: auto; pointer-events: none; display: block; }
+.char-avatar img, .char-avatar canvas { width: 100%; height: 100%; object-fit: contain; transform: none; image-rendering: auto; pointer-events: none; display: block; }
 .char-avatar { border-radius: 30%; min-width: 32px; min-height: 32px; flex-shrink: 0; }
 .char-avatar.player-avatar-large { width: 96px; height: 96px; border-radius: 22px; }
 .multiplayer-shop-item .char-avatar, .multiplayer-shop-item .shop-palette { width: 46px; height: 46px; border-radius: 12px; }
@@ -3375,7 +3381,7 @@ body.compact-ui .streak-flame b { bottom: 4px; font-size: .85rem; }
     #multiplayer-host-flow > * { grid-column: 1; }
 }
 
-.mpg-player-avatar { width: 28px; height: 28px; object-fit: contain; flex: none; }
+.mpg-player-avatar { width: 28px; height: 28px; object-fit: contain; flex: none; pointer-events: none; }
 .profile-close { align-self: flex-start; margin-left: auto; }
 .modal-header h2, .modal-header h3 { min-width: 0; overflow-wrap: anywhere; }
 .daily-period-class { min-width: 0; flex: 1; text-align: right; overflow-wrap: anywhere; }

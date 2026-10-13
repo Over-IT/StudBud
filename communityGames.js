@@ -130,6 +130,7 @@
                 { id: 'hat_headphones', name: 'Headphones', icon: 'fa-headphones', price: 120, type: 'hat' },
                 { id: 'hat_santa', name: 'Santa Hat', icon: 'fa-gift', price: 120, type: 'hat' },
                 { id: 'hat_tophat', name: 'Top Hat', icon: 'fa-hat-wizard', price: 130, type: 'hat' },
+                { id: 'hat_fedora', name: 'Classic Fedora', icon: 'fa-hat-cowboy-side', price: 110, type: 'hat', description: 'Pinched felt crown, dark ribbon and a gently curved brim' },
                 { id: 'hat_bunny', name: 'Bunny Ears', icon: 'fa-carrot', price: 140, type: 'hat' },
                 { id: 'hat_cat', name: 'Cat Ears', icon: 'fa-cat', price: 140, type: 'hat' },
                 { id: 'hat_wizard', name: 'Wizard Hat', icon: 'fa-hat-wizard', price: 160, type: 'hat' },

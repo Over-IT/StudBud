@@ -30,6 +30,8 @@ The game regression suite also checks nearby King of the Hill/Soccer action keys
 
 ## Accounts and cloud sync
 
+New assignments default their due date to today in your local time zone. You can type in the date field or choose its calendar button. Adding from a calendar day keeps that selected day; editing an assignment preserves its saved date. Save & add another keeps your chosen date for quick batch entry.
+
 StudBud uses Supabase Auth for username/password accounts and stores each account's full app backup (classes, assignments, grades, schedules, flashcards, study history, and UI preferences) in a row protected by Row Level Security. Passwords must be at least 8 characters. Usernames are unique, case-insensitive, and limited to 3–24 letters, numbers, or underscores.
 
 To connect the deployed static site to a Supabase project:
@@ -86,6 +88,10 @@ Analytics charts use theme-aware labels/tooltips, stable class colors, compact d
 The usernames **overit** and **andy** display **Owner** and **Co-owner** tags on profiles, account/player lists, community authors and leaderboards. Tags are visual labels only; administrator permissions are unchanged. Live rooms use the account username supplied by the server, not the editable game nickname, to determine the tag.
 
 The shop uses theme-matched illustrated boxes and responsive cosmetic previews. Expand **Drop chances** on any box to see its rarity odds before opening it. In games, **HUD** toggles objective details, standings and control hints without hiding score, resources, refill, timer, or exit controls. Desktop games start expanded, even in compact mode; small screens and short touch-screen landscape layouts start collapsed. Host end-match controls and collapsible admin testing tools are directly accessible without a separate leaderboard menu. Study ambience lives in the study-page toolbar under **Audio**, not in a floating button over mobile content.
+
+Profile, friend, lobby, leaderboard and game-result avatars animate equipped auras, mythic skin glows and moving accessories using the same character renderer as games. Offscreen avatars and hidden browser tabs pause animation; reduced-motion preferences show a still preview. Shop character, hat and accessory previews retain your other equipped cosmetics so you can judge combinations before buying. Hats hide conflicting robot/alien antennae, and storm clouds sit above hats instead of overlapping them. The Classic Fedora is available in the hat shop and eligible mystery boxes. Rerun `supabase-setup.sql` to enable its server-side purchase/drop entry. Auras and accessories continue to share the existing accessory slot.
+
+Run `node tests/cosmetics.cjs` for avatar animation/lifecycle, cosmetic composition and client/server fedora-catalog regression checks.
 
 Keyboard controls stay near the movement hand: King of the Hill uses **A/D** to move, **Space** to jump, **S** to guard, **E/click** to swing, **R** for a heavy swing, **Shift** to dodge (**F** remains an alias), and **Q** to refill. Soccer uses **WASD** to dribble, **Shift** to sprint/steal, **E/click** to pass, **hold Space then release** for a power kick, and **Q** to refill. Arena Shooter uses **F/click** to fire, **Space/E** for shockwave, and **Shift** to dash. Soccer's touch controls include a separate **Power kick** button. The joystick also tracks movement/release globally when pointer capture is unavailable.
 

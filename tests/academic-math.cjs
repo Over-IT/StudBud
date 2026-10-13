@@ -15,7 +15,7 @@ for (const file of ['pchsData.js', 'gpaCalculator.js', 'plannerEngine.js', 'flas
     vm.runInContext(source(file), sandbox, { filename: file });
 }
 const appSource = source('app.js');
-vm.runInContext(appSource.slice(appSource.indexOf('    class AppOrchestrator'), appSource.indexOf('    window.NexusApp ='))
+vm.runInContext(appSource.slice(appSource.indexOf('    function localDateKey'), appSource.indexOf('    window.NexusApp ='))
     + '\nglobalThis.app = Object.create(AppOrchestrator.prototype);', sandbox);
 const app = sandbox.app;
 const close = (actual, expected) => assert.ok(Math.abs(Number(actual) - expected) < 1e-9, `${actual} should equal ${expected}`);
@@ -112,6 +112,51 @@ app.renderStudyAnalytics();
 assert.match(elements.get('study-analytics-summary').innerHTML, /66\.67%/);
 assert.match(elements.get('study-analytics-decks').innerHTML, /&lt;Deck&gt;/);
 assert.match(elements.get('study-analytics-decks').innerHTML, /1 reviewed · 2 lapses/);
+const assignmentIds = ['assignment-form', 'assignment-id', 'assignment-modal-title', 'assignment-name',
+    'assignment-course', 'assignment-due-date', 'assignment-date-hint', 'assignment-points',
+    'assignment-max-points', 'assignment-kind', 'assignment-size', 'assignment-importance',
+    'assignment-course-group', 'save-add-another-assignment-btn'];
+for (const id of assignmentIds) elements.set(id, {
+    value: '', classList: { toggle() {} }, reset() {}, querySelector: () => ({}), focus() {}
+});
+const originalOpenModal = app.openModal;
+const originalSync = app.syncAssignmentForm;
+const originalCategories = app.updateAssignmentCategories;
+app.openModal = app.syncAssignmentForm = app.updateAssignmentCategories = () => {};
+sandbox.setTimeout = fn => fn();
+const localEvening = new Date(2026, 9, 12, 23, 30);
+sandbox.Date = class extends Date {
+    constructor(...args) { super(...(args.length ? args : [localEvening.getTime()])); }
+};
+app.openAssignmentForm();
+assert.equal(elements.get('assignment-due-date').value, '2026-10-12', 'new assignments default to local today, not UTC tomorrow');
+app.openAssignmentForm(null, 'math', '2026-11-03');
+assert.equal(elements.get('assignment-due-date').value, '2026-11-03', 'calendar day takes priority over today');
+app.openAssignmentForm({ id: 'edit', dueDate: '2026-09-15', graded: false });
+assert.equal(elements.get('assignment-due-date').value, '2026-09-15', 'editing preserves an existing past date');
+app.openAssignmentForm({ id: 'timestamp', dueDate: '2026-10-20T00:00:00Z', graded: false });
+assert.equal(elements.get('assignment-due-date').value, '2026-10-20', 'stored timestamps remain editable dates');
+app.openAssignmentForm({ id: 'graded', dueDate: '', graded: true });
+assert.equal(elements.get('assignment-due-date').value, '', 'editing does not invent a date for undated graded work');
+let pickerOpened = 0, dateFocused = 0;
+const dateInput = elements.get('assignment-due-date');
+dateInput.focus = () => dateFocused++;
+dateInput.showPicker = () => pickerOpened++;
+app.openAssignmentDatePicker();
+assert.equal(pickerOpened, 1);
+assert.equal(dateFocused, 1);
+dateInput.showPicker = undefined;
+app.openAssignmentDatePicker();
+assert.equal(dateFocused, 2);
+assert.match(elements.get('assignment-date-hint').textContent, /Type the date/);
+dateInput.showPicker = () => { throw new Error('Picker blocked'); };
+assert.throws(() => app.openAssignmentDatePicker(), /Picker blocked/, 'picker errors reach the standard UI error handler');
+app.openModal = originalOpenModal;
+app.syncAssignmentForm = originalSync;
+app.updateAssignmentCategories = originalCategories;
+sandbox.Date = Date;
+for (const id of assignmentIds) elements.delete(id);
+console.log('Assignment local-today defaults, selected calendar days, saved dates, typed entry and native-picker fallback passed.');
 const chartClasses = () => ({ toggle(name, value) { this[name] = value; } });
 const plot = { classList: chartClasses() };
 const canvas = { parentElement: plot, setAttribute(name, value) { this[name] = value; } };

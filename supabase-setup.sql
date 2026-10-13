@@ -450,6 +450,7 @@ as $$
         ('skin_shadow', 280), ('skin_crystal', 320), ('skin_galaxy', 450), ('skin_dragon', 500),
         ('hat_cap', 60), ('hat_party', 70), ('hat_beanie', 70), ('hat_flower', 90), ('hat_chef', 100), ('hat_cowboy', 110),
         ('hat_headphones', 120), ('hat_santa', 120), ('hat_tophat', 130), ('hat_bunny', 140), ('hat_cat', 140),
+        ('hat_fedora', 110),
         ('hat_wizard', 160), ('hat_pirate', 170), ('hat_viking', 190), ('hat_horns', 200), ('hat_halo', 250), ('hat_crown', 400),
         ('acc_bowtie', 70), ('acc_shades', 80), ('acc_eyepatch', 90), ('acc_scarf', 90), ('acc_backpack', 100),
         ('acc_monocle', 140), ('acc_cape', 180), ('acc_sparkles', 220), ('acc_wings', 350),
