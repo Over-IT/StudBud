@@ -2638,8 +2638,30 @@ body.compact-ui .nav-item { padding-top: 8px; padding-bottom: 8px; }
 .box-odds[open] summary::after { content: '-'; }
 .box-odds .box-chances { justify-content: center; margin-bottom: 8px; gap: 6px; }
 .box-odds .box-chances > span { font-size: .72rem; padding: 4px 7px; }
+.box-progress { font-size: .75rem; color: var(--text-secondary); margin-top: 6px; }
+.question-reward-control { display: grid; gap: 8px; min-width: 0; padding: 12px; border: 1px solid var(--border-glass); border-radius: var(--border-radius-md); background: var(--bg-glass); }
+.question-reward-inputs { display: grid; grid-template-columns: minmax(0, 1fr) 80px; align-items: center; gap: 12px; }
+.question-reward-inputs input { width: 100%; min-width: 0; }
+.question-reward-control small { color: var(--text-secondary); font-size: .75rem; }
+.matrix-quadrant li { overflow-wrap: anywhere; }
+.matrix-quadrant li small { display: block; color: var(--text-secondary); font-size: .75rem; margin-top: 4px; }
+.study-analytics-decks { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 12px; margin-top: 12px; }
+.study-analytics-decks article { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--border-glass); border-radius: 10px; overflow-wrap: anywhere; }
+.study-analytics-decks span, .study-analytics-decks small { color: var(--text-secondary); }
+.my-deck-heading { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.my-deck-heading input { flex: 1 1 220px; min-width: 0; }
+.table-scroll, .table-responsive { max-width: 100%; overflow-x: auto; }
+.table-scroll:focus-visible, .table-responsive:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 4px; }
+.community-deck-browser > summary { cursor: pointer; font-weight: 700; }
+.community-deck-browser[open] > summary { margin-bottom: 16px; }
+.multiplayer-shop .box-complete { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 8px; color: var(--text-primary); background: color-mix(in srgb, var(--accent-primary) 14%, var(--bg-glass)); border: 1px solid var(--border-glass); border-radius: 8px; width: 100%; grid-row: 4; }
+.multiplayer-shop .box-card.collection-complete { border-color: color-mix(in srgb, var(--accent-primary) 40%, var(--border-glass)); }
+.multiplayer-shop .multiplayer-shop-item .aura-preview { width: 112px; height: 112px; border-radius: 12px; background: transparent; }
+.aura-preview canvas { display: block; width: 100%; height: 100%; }
+.multiplayer-shop-item.rarity-mythic .shop-preview { background: radial-gradient(ellipse, color-mix(in srgb, #f472b6 18%, transparent), transparent 75%); }
 body.compact-ui .multiplayer-shop-item { padding: 12px 10px; gap: 8px; }
 body.compact-ui .shop-preview { height: 88px; }
+body.compact-ui .multiplayer-shop .multiplayer-shop-item .aura-preview { width: 88px; height: 88px; }
 body.compact-ui .multiplayer-shop .box-card .mystery-capsule { height: 112px; }
 body.compact-ui .mystery-capsule svg { height: 112px; width: 128px; }
 @media (max-width: 560px) {
@@ -2647,6 +2669,7 @@ body.compact-ui .mystery-capsule svg { height: 112px; width: 128px; }
   .multiplayer-shop .shop-grid-boxes { grid-template-columns: minmax(0, 1fr); }
   .multiplayer-shop .multiplayer-shop-item { padding: 12px 8px; gap: 8px; }
   .shop-preview { height: 88px; }
+  .multiplayer-shop .multiplayer-shop-item .aura-preview { width: 88px; height: 88px; }
   .multiplayer-shop .multiplayer-shop-item .char-avatar, .multiplayer-shop .multiplayer-shop-item .shop-palette { width: 68px; height: 68px; }
   .multiplayer-shop .shop-grid > .box-card { grid-template-columns: 96px minmax(0, 1fr); grid-template-rows: auto auto auto; justify-items: stretch; text-align: left; padding: 12px; gap: 4px 12px; }
   .multiplayer-shop .box-card .mystery-capsule { width: 96px; height: 96px; grid-row: 1 / 3; }
@@ -2655,6 +2678,8 @@ body.compact-ui .mystery-capsule svg { height: 112px; width: 128px; }
   .multiplayer-shop .box-card > .box-details { justify-items: start; align-self: end; }
   .box-odds summary { justify-content: flex-start; }
   .multiplayer-shop .box-card > button { grid-column: 1 / -1; margin-top: 6px; }
+  .multiplayer-shop .box-card > .box-complete { grid-column: 1 / -1; grid-row: 3; }
+  .multiplayer-shop .multiplayer-shop-item .aura-preview { width: 88px; height: 88px; }
   .shop-tabs { flex-wrap: wrap; gap: 6px; }
   .shop-tab { flex: 1 1 auto; min-height: 44px; padding: 6px 10px; white-space: normal; }
   .box-odds .box-chances { justify-content: flex-start; }

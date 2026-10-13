@@ -49,23 +49,23 @@
             const today = new Date();
             today.setHours(0, 0, 0, 0);
 
-            const dueDate = new Date(assignment.dueDate || today);
+            const dueDate = assignment.dueDate ? new Date(`${String(assignment.dueDate).slice(0, 10)}T00:00:00`) : new Date(today.getFullYear(), today.getMonth(), today.getDate() + 7);
             dueDate.setHours(0, 0, 0, 0);
 
             // 1. Due date proximity 'd' in days
             const diffMs = dueDate.getTime() - today.getTime();
-            const d = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+            const d = Number.isFinite(diffMs) ? Math.max(0, Math.round(diffMs / (1000 * 60 * 60 * 24))) : 7;
 
             // 2. Weight 'w'
-            const weightMap = { 'low': 0.8, 'medium': 1.0, 'high': 1.5, 'critical': 2.0 };
+            const weightMap = { 'none': 0.4, 'low': 0.8, 'medium': 1.0, 'high': 1.5, 'critical': 2.0 };
             const w = weightMap[assignment.priority] || 1.0;
 
             // 3. Grade boundary proximity 'deltaG'
             let deltaG = 0.05; // Default 5% gap if no course data
-            if (course && typeof course.currentPct === 'number') {
+            if (course && Number.isFinite(course.currentPct)) {
                 const pctDecimal = course.currentPct / 100;
                 // Standard PCHS grade boundaries
-                const boundaries = [0.98, 0.93, 0.90, 0.87, 0.83, 0.80, 0.77, 0.73, 0.70, 0.67, 0.63, 0.60];
+                const boundaries = (window.PCHS_GRADE_SCALE || []).filter(grade => grade.minPct > 0).map(grade => grade.minPct / 100);
                 let minDiff = 1.0;
                 boundaries.forEach(b => {
                     const diff = Math.abs(b - pctDecimal);
@@ -79,7 +79,7 @@
             const gradeTerm = 1 + sigmoid;
 
             // 5. BKT Mastery term (2 - P(L))
-            const clampedMastery = Math.min(1.0, Math.max(0.0, bktMastery));
+            const clampedMastery = Math.min(1.0, Math.max(0.0, Number.isFinite(bktMastery) ? bktMastery : .5));
             const masteryTerm = 2 - clampedMastery;
 
             // 6. Urgency base

@@ -33,6 +33,7 @@ vm.runInContext(appSource.slice(appSource.indexOf('    class AppStateEngine'), a
 vm.runInContext('globalThis.AppState = new AppStateEngine();', context);
 vm.runInContext(appSource.slice(appSource.indexOf('    class AppOrchestrator'), appSource.indexOf('    window.NexusApp =')), context);
 const app = vm.runInContext('Object.create(AppOrchestrator.prototype)', context);
+app.animateShopAuras = () => {};
 const state = sandbox.AppState;
 const community = window.StudBudCommunityGames;
 app.communityGames = community;
@@ -70,7 +71,25 @@ async function run() {
     const sql = source('supabase-setup.sql');
     assert.ok(sql.includes("s.rarity = v_rarity") && sql.includes("jsonb_each_text(v_chances)"));
     assert.ok(!sql.includes('abs(rank - target)'));
-    assert.ok(!/\b900\b/.test(sql), 'daily SQL goal is five minutes throughout');
+    assert.doesNotMatch(sql, /v_today_seconds\s*<\s*900|v_today_seconds\s*>=\s*900/, 'daily SQL goal is not fifteen minutes');
+    assert.match(sql, /'daily_goal_seconds', 300/, 'daily SQL goal is five minutes');
+
+    const originalClient = community.getClient;
+    const completeProfile = { user_id: 'complete', coins: 0, owned_items: [] };
+    community.getClient = () => ({ rpc: async () => ({ data: { ...completeProfile, collection_complete: true, completed_box: 'basic' } }) });
+    assert.equal((await community.buyMysteryItem()).collection_complete, true);
+    community.getClient = () => ({ rpc: async name => name === 'studbud_get_multiplayer_profile'
+        ? { data: completeProfile } : { error: { message: 'You already own every item that box can contain!' } } });
+    assert.equal((await community.buyMysteryItem()).coins, 0, 'old servers refresh the authoritative profile on completion');
+    community.getClient = () => ({ rpc: async () => ({ error: { message: 'Insufficient funds' } }) });
+    await assert.rejects(community.buyMysteryItem(), /Insufficient funds/);
+    community.getClient = () => ({ rpc: async name => ({ error: { message: name === 'studbud_get_multiplayer_profile' ? 'Profile unavailable' : 'You already own every item that box can contain!' } }) });
+    await assert.rejects(community.buyMysteryItem(), /Profile unavailable/);
+    community.getClient = originalClient;
+
+    for (const value of [1, 20, 500]) assert.equal(app.questionRewardValue(value), value);
+    for (const value of [0, 501, 1.5, '', 'invalid']) assert.throws(() => app.questionRewardValue(value), /1.*500/);
+    assert.match(sql, /v_reward not between 1 and 500/);
 
     const setupIds = ['multiplayer-preview-title', 'multiplayer-preview-description', 'host-game-resource-label', 'solo-game-resource-label'];
     for (const id of setupIds) elements.set(id, {});

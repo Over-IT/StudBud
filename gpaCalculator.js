@@ -94,8 +94,8 @@
 
             return {
                 totalCredits,
-                unweighted: totalCredits > 0 ? (unweightedPoints / totalCredits).toFixed(3) : "0.000",
-                weighted: totalCredits > 0 ? (weightedPoints / totalCredits).toFixed(3) : "0.000"
+                unweighted: totalCredits > 0 ? String(unweightedPoints / totalCredits) : "0",
+                weighted: totalCredits > 0 ? String(weightedPoints / totalCredits) : "0"
             };
         }
 
@@ -166,7 +166,7 @@
             const required = ((target * (completedCredits + futureCredits)) - (current * completedCredits)) / futureCredits;
             
             return {
-                requiredGpa: required.toFixed(3),
+                requiredGpa: String(required),
                 isPossible: required <= 5.0 && required >= 0,
                 isUnachievable: required > 5.0
             };
@@ -253,8 +253,8 @@
                         <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 relative overflow-hidden">
                             <div class="absolute top-0 right-0 w-24 h-24 bg-indigo-500/10 rounded-bl-full -mr-4 -mt-4"></div>
                             <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2">Weighted Cumulative</h3>
-                            <div class="text-5xl font-black text-white tracking-tighter">${gpaData.weighted}</div>
-                            <div class="mt-2 text-sm text-slate-400">Unweighted: <span class="text-slate-200">${gpaData.unweighted}</span></div>
+                            <div class="text-5xl font-black text-white tracking-tighter">${Number(gpaData.weighted).toFixed(2)}</div>
+                            <div class="mt-2 text-sm text-slate-400">Unweighted: <span class="text-slate-200">${Number(gpaData.unweighted).toFixed(2)}</span></div>
                         </div>
 
                         <!-- Latin Honors -->
@@ -269,7 +269,7 @@
                             <h3 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2">Target Solver (${targetProfileGpa.toFixed(2)})</h3>
                             ${solverData ? `
                                 <div class="text-3xl font-bold ${solverData.isUnachievable ? 'text-red-400' : 'text-emerald-400'}">
-                                    ${solverData.requiredGpa} <span class="text-lg font-medium text-slate-500">Req. Avg</span>
+                                    ${Number(solverData.requiredGpa).toFixed(2)} <span class="text-lg font-medium text-slate-500">Req. Avg</span>
                                 </div>
                                 <div class="mt-2 text-xs ${solverData.isUnachievable ? 'text-red-400' : 'text-slate-400'}">
                                     ${solverData.isUnachievable ? 'Mathematically unachievable (> 5.0 required).' : 'Achievable based on remaining credits.'}

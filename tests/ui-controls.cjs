@@ -27,6 +27,8 @@ class Element {
     }
     set innerHTML(value) { this.children = []; }
     appendChild(child) { child.parent = this; this.children.push(child); }
+    append(...children) { children.forEach(child => this.appendChild(child)); }
+    replaceWith(...elements) { this.replacements = elements; }
     remove() { this.parent.children = this.parent.children.filter(child => child !== this); }
     setAttribute(name, value) { this.attributes[name] = value; }
     addEventListener(name, handler) { (this.handlers[name] ||= []).push(handler); }
@@ -267,6 +269,60 @@ assert.equal(soccerButtons.find(button => button.textContent === 'Power kick').d
 
 const appSource = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 vm.runInContext(appSource.slice(appSource.indexOf('    class AppOrchestrator {'), appSource.indexOf('    window.NexusApp =')) + '\nwindow.TestApp = AppOrchestrator;', sandbox);
+{
+    const app = Object.create(sandbox.window.TestApp.prototype);
+    const content = new Element();
+    const find = (element, id) => element.id === id ? element : element.children.map(child => find(child, id)).find(Boolean);
+    sandbox.document.getElementById = id => id === 'arcade-game-content' ? content : find(content, id);
+    sandbox.FormData = class { constructor(form) { this.values = form.values; } get(key) { return this.values[key] ?? null; } };
+    app.practiceTestCards = [{ front: 'One minus three?', back: '-2' }];
+    app.practiceTestDeckCards = [...app.practiceTestCards, { front: 'Duplicate', back: '-2' }];
+    app.practiceTestQuestionTypes = ['multiple-choice'];
+    app.practiceTestAnswers = [];
+    app.arcadeQuestionIndex = app.arcadeScore = 0;
+    app.renderPracticeTestQuestion();
+    assert.equal(app.practiceTestQuestionTypes[0], 'written', 'identical answers fall back to written questions');
+    const form = find(content, 'practice-test-answer-form');
+    assert.ok(find(content, 'practice-test-written-answer'), 'written questions actually render a labeled answer field');
+    form.values = { answer: '2' };
+    app.submitPracticeTestAnswer(form);
+    assert.equal(app.arcadeScore, 0, 'a positive answer cannot match a negative one');
+    app.renderPracticeTestQuestion();
+    const retry = find(content, 'practice-test-answer-form');
+    retry.values = { answer: ' -2 ' };
+    app.submitPracticeTestAnswer(retry);
+    assert.equal(app.arcadeScore, 1);
+    app.practiceTestGroups = [[{ front: 'A', back: 'one' }, { front: 'B', back: 'two' }]];
+    assert.throws(() => app.submitPracticeTestAnswer({ dataset: { questionType: 'matching', defOrder: '[0,1]' }, values: { match0: '', match1: '1' } }), /every term/);
+}
+{
+    let saved = 0, left = 0;
+    sandbox.window.NexusApp = { saveGameSummary: async () => { saved++; } };
+    for (const testing of [false, true]) {
+        const session = Object.create(A.Session.prototype);
+        session.canvas = new Element();
+        session.overlay = new Element();
+        session.keys = new Set(); session.justPressed = new Set(); session.mouse = {};
+        session.practice = true; session.testing = testing; session.over = false;
+        session.user = { id: 'me' }; session.roster = new Map();
+        session.standings = () => [{ id: 'me', n: 'Me', s: 4, g: 0 }];
+        session.reportScore = session.closeQuestion = session.renderResults = session.sfx = () => {};
+        session.onLeave = () => left++;
+        session.bind();
+        const leave = new Element();
+        leave.classList.add('mpg-leave');
+        session.overlay.handlers.click[0]({ target: { closest: () => leave } });
+        if (testing) assert.equal(session.over, false, 'Close test exits without finishing or saving');
+        else {
+            assert.equal(session.over, true, 'End game finishes a solo session');
+            session.finish();
+            assert.equal(saved, 1, 'results save exactly once');
+        }
+    }
+    assert.equal(left, 1, 'only testing leaves directly');
+    assert.equal(saved, 1, 'testing never saves a solo result');
+    delete sandbox.window.NexusApp;
+}
 {
     const app = Object.create(sandbox.window.TestApp.prototype);
     const body = new Element();

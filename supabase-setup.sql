@@ -483,7 +483,9 @@ as $$
         ('acc_electric_effect', 340), ('acc_solar_effect', 520), ('acc_vortex_effect', 760),
         ('acc_cloud_effect', 85), ('acc_confetti_effect', 145), ('acc_sakura_effect', 230),
         ('acc_pixel_effect', 360), ('acc_meteor_effect', 560), ('acc_aurora_effect', 780),
-        ('acc_rune_effect', 390), ('acc_lunar_effect', 640)
+        ('acc_rune_effect', 390), ('acc_lunar_effect', 640),
+        ('acc_storm_effect', 900), ('acc_blackhole_effect', 880),
+        ('acc_firefly_effect', 150), ('acc_jellyfish_effect', 600)
     ), pets(id, rarity) as (values
         ('pet_puppy', 'common'), ('pet_kitten', 'common'), ('pet_hamster', 'common'), ('pet_bunny', 'common'),
         ('pet_chick', 'common'), ('pet_frog', 'common'), ('pet_turtle', 'common'), ('pet_goldfish', 'common'),
@@ -670,8 +672,6 @@ begin
     insert into public.studbud_multiplayer_profiles (user_id)
     values (v_user_id) on conflict (user_id) do nothing;
     select * into v_profile from public.studbud_multiplayer_profiles where user_id = v_user_id for update;
-    if v_profile.coins < v_cost then raise exception 'You need % multiplayer coins to open that box.', v_cost; end if;
-
     v_chances := case p_box
         when 'basic' then '{"common":70,"uncommon":22,"rare":7,"epic":1}'::jsonb
         when 'rare' then '{"common":20,"uncommon":40,"rare":28,"epic":10,"legendary":2}'::jsonb
@@ -695,7 +695,11 @@ begin
               or s.id in ('acc_lightning', 'acc_flame', 'acc_sparkles', 'acc_aura'))
           and not (s.id = any(v_profile.owned_items))
     );
-    if v_total is null then raise exception 'You already own every item that box can contain!'; end if;
+    if v_total is null then
+        return public.studbud_get_multiplayer_profile()
+            || jsonb_build_object('collection_complete', true, 'completed_box', p_box);
+    end if;
+    if v_profile.coins < v_cost then raise exception 'You need % multiplayer coins to open that box.', v_cost; end if;
     select key into v_rarity
     from (
         select key, sum(value::numeric) over (order by key) as cumulative
@@ -712,7 +716,7 @@ begin
       and s.rarity = v_rarity
     order by random()
     limit 1;
-    if v_item_id is null then raise exception 'You already own every item that box can contain!'; end if;
+    if v_item_id is null then raise exception 'The box reward could not be selected. Please try again.'; end if;
     select s.rarity into v_rarity from public.studbud_shop_items() s where s.id = v_item_id;
 
     update public.studbud_multiplayer_profiles
@@ -1007,7 +1011,7 @@ begin
     if v_time_limit not between 60 and 3600 then
         raise exception 'Choose a time limit between 1 minute and 1 hour.';
     end if;
-    if v_reward not in (10, 20, 30, 50) then raise exception 'Choose a supported question reward.'; end if;
+    if v_reward not between 1 and 500 then raise exception 'Choose resources per answer between 1 and 500.'; end if;
     if jsonb_typeof(v_cards) is distinct from 'array' then raise exception 'The selected deck is invalid.'; end if;
     if jsonb_array_length(v_cards) < 1 then raise exception 'A hosted game needs at least one card.'; end if;
     if exists (

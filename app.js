@@ -1079,6 +1079,10 @@
             return window.StudBudArcade.util.accountTagMarkup(username);
         }
 
+        formatNumber(value) {
+            return Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 });
+        }
+
         friendlyErrorMessage(error, fallback = 'Something went wrong. Please try again in a moment.') {
             const message = String(error?.message || error || '').trim();
             const code = String(error?.code || '');
@@ -1148,7 +1152,14 @@
             waitingCanvas.addEventListener('pointercancel', event => this.finishWaitingHop(event));
             waitingCanvas.addEventListener('contextmenu', event => event.preventDefault());
             document.addEventListener('input', event => {
+                if (event.target.matches('[data-reward-slider]')) {
+                    document.getElementById(event.target.dataset.rewardSlider).value = event.target.value;
+                }
+                if (event.target.matches('#host-game-reward, #solo-game-reward') && event.target.validity.valid) {
+                    document.querySelector(`[data-reward-slider="${event.target.id}"]`).value = event.target.value;
+                }
                 if (event.target.matches('#assignment-search')) this.renderAssignments();
+                if (event.target.matches('#my-deck-search')) this.renderDecks();
                 if (event.target.matches('#multiplayer-shop-search')) {
                     this.shopSearch = event.target.value.trim();
                     const query = event.target.value.trim().toLocaleLowerCase();
@@ -1217,7 +1228,10 @@
                 if (route === 'grade-scenarios') this.renderGradeScenarios();
                 if (route === 'analytics') this.renderGradeProgress();
                 if (route === 'leaderboard') this.refreshStudyLeaderboard(this.studyLeaderboardPeriod || 'daily');
-                if (route === 'shop') this.renderMultiplayerProfile(true);
+                if (route === 'shop') {
+                    this.animateShopAuras();
+                    this.renderMultiplayerProfile(true);
+                }
                 if (route === 'friends') this.loadFriends();
                 if (route === 'about') this.loadAnnouncementHistory();
                 if (route === 'admin') this.loadAdminList();
@@ -1368,10 +1382,10 @@
                 ? window.GPACalculator.calculateCurrentGPA(projectedCourses)
                 : currentGpa;
             summary.innerHTML = `
-                <article class="glass-card"><span class="gpa-summary-label">Current weighted GPA</span><strong>${currentGpa.weighted}</strong><small>Before hypothetical grades</small></article>
-                <article class="glass-card"><span class="gpa-summary-label">Projected weighted GPA</span><strong>${projectedGpa.weighted}</strong><small>${this.formatGpaChange(currentGpa.weighted, projectedGpa.weighted)}</small></article>
-                <article class="glass-card"><span class="gpa-summary-label">Current unweighted GPA</span><strong>${currentGpa.unweighted}</strong><small>Before hypothetical grades</small></article>
-                <article class="glass-card"><span class="gpa-summary-label">Projected unweighted GPA</span><strong>${projectedGpa.unweighted}</strong><small>${this.formatGpaChange(currentGpa.unweighted, projectedGpa.unweighted)}</small></article>
+                <article class="glass-card"><span class="gpa-summary-label">Current weighted GPA</span><strong>${Number(currentGpa.weighted).toFixed(2)}</strong><small>Before hypothetical grades</small></article>
+                <article class="glass-card"><span class="gpa-summary-label">Projected weighted GPA</span><strong>${Number(projectedGpa.weighted).toFixed(2)}</strong><small>${this.formatGpaChange(currentGpa.weighted, projectedGpa.weighted)}</small></article>
+                <article class="glass-card"><span class="gpa-summary-label">Current unweighted GPA</span><strong>${Number(currentGpa.unweighted).toFixed(2)}</strong><small>Before hypothetical grades</small></article>
+                <article class="glass-card"><span class="gpa-summary-label">Projected unweighted GPA</span><strong>${Number(projectedGpa.unweighted).toFixed(2)}</strong><small>${this.formatGpaChange(currentGpa.unweighted, projectedGpa.unweighted)}</small></article>
             `;
 
             itemsContainer.innerHTML = scenarioItems.length ? scenarioItems.map(item => {
@@ -1379,7 +1393,7 @@
                 const category = (course && course.categories || []).find(entry => entry.id === item.categoryId);
                 return `<article class="scenario-item">
                     <div><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(course ? course.title : 'Class removed')} · ${this.escapeHTML(category ? category.name : 'Uncategorized')}</span></div>
-                    <strong>${Number(item.pointsEarned)} / ${Number(item.maxPoints)} (${(Number(item.pointsEarned) / Number(item.maxPoints) * 100).toFixed(2)}%)</strong>
+                    <strong>${this.formatNumber(item.pointsEarned)} / ${this.formatNumber(item.maxPoints)} (${(Number(item.pointsEarned) / Number(item.maxPoints) * 100).toFixed(2)}%)</strong>
                     <button class="icon-btn scenario-remove-btn" data-action="remove-scenario-item" data-id="${this.escapeHTML(item.id)}" aria-label="Remove ${this.escapeHTML(item.title)} from scenario" title="Remove"><i class="fas fa-xmark"></i></button>
                 </article>`;
             }).join('') : '<p class="empty-state">Add hypothetical assignment scores to see their effect.</p>';
@@ -1398,7 +1412,7 @@
 
         formatGpaChange(current, projected) {
             const change = Number(projected) - Number(current);
-            return `${change > 0.0005 ? '+' : ''}${change.toFixed(3)} GPA points`;
+            return `${change >= 0.005 ? '+' : ''}${Math.abs(change) < .005 ? '0.00' : change.toFixed(2)} GPA points`;
         }
 
         calculateScenarioCourseGrade(course, assignments, hypotheticalAssignments) {
@@ -1431,9 +1445,9 @@
                     const actual = this.isGradedItem(item) ? Number(item.pointsEarned || 0) : null;
                     const max = Number(item.maxPoints || 100);
                     return `<div class="scenario-existing-row${overridden ? ' is-changed' : ''}">
-                        <div><strong>${this.escapeHTML(item.title)}</strong><small>${actual === null ? 'Not graded yet' : `Actual: ${actual} / ${max}`}</small></div>
+                        <div><strong>${this.escapeHTML(item.title)}</strong><small>${actual === null ? 'Not graded yet' : `Actual: ${this.formatNumber(actual)} / ${this.formatNumber(max)}`}</small></div>
                         <label class="scenario-existing-input"><span class="sr-only">What-if score for ${this.escapeHTML(item.title)}</span>
-                            <input type="number" min="0" step="0.01" data-scenario-override="${this.escapeHTML(item.id)}" value="${overridden ? Number(overrides[item.id]) : ''}" placeholder="${actual === null ? 'Score' : actual}"> / ${max}</label>
+                            <input type="number" min="0" step="0.01" data-scenario-override="${this.escapeHTML(item.id)}" value="${overridden ? Number(Number(overrides[item.id]).toFixed(2)) : ''}" placeholder="${actual === null ? 'Score' : this.formatNumber(actual)}"> / ${this.formatNumber(max)}</label>
                         <button class="secondary-btn" data-action="reset-scenario-override" data-id="${this.escapeHTML(item.id)}" ${overridden ? '' : 'disabled'}>Reset</button>
                     </div>`;
                 }).join('');
@@ -1473,8 +1487,8 @@
             const currentGpa = this.calculateTrackedGPA(courses);
             if (summary) {
                 summary.innerHTML = `
-                    <article class="glass-card"><span class="gpa-summary-label">Cumulative weighted GPA</span><strong>${currentGpa.weighted}</strong><small>Across ${currentGpa.totalCredits.toFixed(1)} tracked credits</small></article>
-                    <article class="glass-card"><span class="gpa-summary-label">Cumulative unweighted GPA</span><strong>${currentGpa.unweighted}</strong><small>Across ${currentGpa.totalCredits.toFixed(1)} tracked credits</small></article>
+                    <article class="glass-card"><span class="gpa-summary-label">Cumulative weighted GPA</span><strong>${Number(currentGpa.weighted).toFixed(2)}</strong><small>Across ${this.formatNumber(currentGpa.totalCredits)} tracked credits</small></article>
+                    <article class="glass-card"><span class="gpa-summary-label">Cumulative unweighted GPA</span><strong>${Number(currentGpa.unweighted).toFixed(2)}</strong><small>Across ${this.formatNumber(currentGpa.totalCredits)} tracked credits</small></article>
                 `;
             }
             if (body) {
@@ -1508,7 +1522,7 @@
                                     <strong>${this.escapeHTML(item.title)}</strong>
                                     <span>${this.escapeHTML(item.kind || 'Assignment')}${hasScore ? '' : ` · Due ${this.escapeHTML(item.dueDate || 'No due date')}`}</span>
                                 </div>
-                                <strong class="transcript-assignment-score">${hasScore ? `${Number(item.pointsEarned || 0)} / ${Number(item.maxPoints || 0)}` : 'Not graded'}</strong>
+                                <strong class="transcript-assignment-score">${hasScore ? `${this.formatNumber(item.pointsEarned || 0)} / ${this.formatNumber(item.maxPoints || 0)}` : 'Not graded'}</strong>
                                 <div class="transcript-assignment-actions">
                                     ${hasScore ? '' : `<button class="secondary-btn" data-action="toggle-assignment" data-id="${this.escapeHTML(item.id)}">${item.status === 'completed' ? 'Reopen' : 'Done'}</button>`}
                                     <button class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}" aria-label="Edit ${this.escapeHTML(item.title)}">Edit</button>
@@ -1531,7 +1545,7 @@
                         <details class="transcript-class-details" data-transcript-class="${this.escapeHTML(course.code)}">
                             <summary class="transcript-class-summary">
                                 <span class="transcript-chevron" aria-hidden="true"><i class="fas fa-chevron-right"></i></span>
-                                <span class="transcript-class-name"><strong>${this.escapeHTML(course.title)}</strong><small>${this.escapeHTML(this.termLabel(course.term))} · ${course.isWeighted ? 'Weighted' : 'Regular'} · ${Number(course.credits || 0).toFixed(1)} credits</small></span>
+                                <span class="transcript-class-name"><strong>${this.escapeHTML(course.title)}</strong><small>${this.escapeHTML(this.termLabel(course.term))} · ${course.isWeighted ? 'Weighted' : 'Regular'} · ${this.formatNumber(course.credits || 0)} credits</small></span>
                                 <span class="transcript-grade"><strong>${this.escapeHTML(gradeLetter)}</strong><small>${currentGrade === null ? 'No graded work' : `${currentGrade.toFixed(2)}%`}</small></span>
                                 <span class="transcript-class-target"><small>Target</small><strong>${course.targetPct !== null && course.targetPct !== undefined && Number.isFinite(Number(course.targetPct)) ? `${Number(course.targetPct).toFixed(2)}%` : '—'}</strong></span>
                                 <span class="transcript-item-count">${classAssignments.length} item${classAssignments.length === 1 ? '' : 's'}</span>
@@ -1659,7 +1673,7 @@
                     <td>${this.escapeHTML((categories.find(category => category.id === item.categoryId) || {}).name || 'Uncategorized')}</td>
                     <td>${this.escapeHTML(item.kind || 'assignment')}</td>
                     <td>${this.isGradedItem(item) ? '—' : this.escapeHTML(item.dueDate || 'No date')}</td>
-                    <td>${this.isGradedItem(item) ? `${item.pointsEarned ?? 0} / ${item.maxPoints ?? 100}` : 'Not graded'}</td>
+                    <td>${this.isGradedItem(item) ? `${this.formatNumber(item.pointsEarned ?? 0)} / ${this.formatNumber(item.maxPoints ?? 100)}` : 'Not graded'}</td>
                     <td class="actions">
                         <button class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit</button>
                         <button class="danger-btn" data-action="delete-assignment" data-id="${this.escapeHTML(item.id)}">Delete</button>
@@ -1675,7 +1689,7 @@
                     <section class="glass-card">
                         <h3>Grade targets</h3>
                         <label for="class-target-percent">Target grade (%)</label>
-                        <div class="inline-form"><input id="class-target-percent" type="number" min="0" max="100" step="0.1" value="${Number.isFinite(target) ? target : ''}" placeholder="${Number.isFinite(this.effectiveCourseTarget(course)) ? `${this.effectiveCourseTarget(course)} (from GPA goal)` : 'e.g. 90'}"><button class="primary-btn" data-action="save-class-target">Save target</button></div>
+                        <div class="inline-form"><input id="class-target-percent" type="number" min="0" max="100" step="0.01" value="${Number.isFinite(target) ? Number(target.toFixed(2)) : ''}" placeholder="${Number.isFinite(this.effectiveCourseTarget(course)) ? `${this.formatNumber(this.effectiveCourseTarget(course))} (from GPA goal)` : 'e.g. 90'}"><button class="primary-btn" data-action="save-class-target">Save target</button></div>
                         <p>${(() => {
                             const goal = this.effectiveCourseTarget(course);
                             if (!Number.isFinite(goal)) return 'Set a target here or a target GPA in your profile.';
@@ -1686,19 +1700,19 @@
                     </section>
                     <section class="glass-card">
                         <h3>Optional grade categories</h3>
-                        <p>Weights are percentages. Category averages use earned points / possible points; categories without scores are left out until work is graded.</p>
+                        <p>Weights are percentages. Category averages use earned points / possible points; categories without scores are left out until work is graded. Uncategorized scores use any remaining weight. When categories total 100%, assign scored work to a category to include it in the weighted grade.</p>
                         <div class="category-list">${categoryRows || '<p class="empty-state">No categories. Your graded assignments will use a points-based average.</p>'}</div>
                         <p class="${Math.abs(sumWeights - 100) < 0.01 ? 'weight-valid' : 'weight-note'}">Category weights total ${sumWeights.toFixed(1)}%${categories.length && Math.abs(sumWeights - 100) >= 0.01 ? ' (recommended total: 100%)' : ''}</p>
                         <div class="category-add-form">
-                            <input id="new-category-name" type="text" placeholder="Category name (e.g. Tests)">
-                            <input id="new-category-weight" type="number" min="0" max="100" step="0.1" placeholder="Weight %">
+                            <input id="new-category-name" type="text" aria-label="Category name" placeholder="Category name (e.g. Tests)">
+                            <input id="new-category-weight" type="number" aria-label="Category weight (%)" min="0" max="100" step="0.1" placeholder="Weight %">
                             <button class="secondary-btn" data-action="add-category">Add category</button>
                         </div>
                     </section>
                 </div>
                 <section class="glass-card full-width class-work-section">
                     <h3>Assignments, quizzes & tests</h3>
-                    <div class="table-responsive"><table><thead><tr><th>Status</th><th>Item</th><th>Category</th><th>Type</th><th>Due</th><th>Score</th><th>Actions</th></tr></thead><tbody>${workRows}</tbody></table></div>
+                    <div class="table-responsive" tabindex="0" role="region" aria-label="Class assignments table"><table><thead><tr><th>Status</th><th>Item</th><th>Category</th><th>Type</th><th>Due</th><th>Score</th><th>Actions</th></tr></thead><tbody>${workRows}</tbody></table></div>
                 </section>
                 <section class="glass-card class-focus-panel">
                     <div><h3>Study this class</h3><p>Start a 25-minute focus session for this class.</p></div>
@@ -1891,14 +1905,14 @@
             today.setHours(0, 0, 0, 0);
             const history = AppState.get('studyHistory') || [];
             // Only quizzes and tests need studying; homework is just done and turned in
-            const recommended = assignments.filter(item => item.status !== 'completed' && ['quiz', 'test'].includes(String(item.kind || 'assignment').toLowerCase())).map(item => {
+            const recommended = assignments.filter(item => item.status !== 'completed' && !this.isGradedItem(item) && ['quiz', 'test'].includes(String(item.kind || 'assignment').toLowerCase())).map(item => {
                 const course = courses.find(entry => entry.code === item.courseCode);
                 const grade = course ? this.calculateCourseGrade(course) : null;
                 const target = course ? this.effectiveCourseTarget(course, targetGpa) : NaN;
                 const targetFromGpa = course && !this.hasCourseTarget(course) && Number.isFinite(target);
                 const gradeGap = Number.isFinite(grade) && Number.isFinite(target) ? Math.max(0, target - grade) : 0;
                 const due = item.dueDate ? new Date(`${item.dueDate}T00:00:00`) : null;
-                const daysUntilDue = due && Number.isFinite(due.getTime()) ? Math.ceil((due - today) / 86400000) : 7;
+                const daysUntilDue = due && Number.isFinite(due.getTime()) ? Math.round((due - today) / 86400000) : 7;
                 const urgency = daysUntilDue < 0 ? 2 : 1 / Math.max(1, daysUntilDue + 1);
                 const importance = Math.min(5, Math.max(1, Number(item.importance || 3)));
                 const kind = String(item.kind || 'assignment').toLowerCase();
@@ -1912,9 +1926,9 @@
                 if (gpaGap >= 0.25) totalStudyMinutes += 15;
                 const taskSessions = history.filter(session => session.assignmentId === item.id)
                     .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
-                const minutesStudied = taskSessions.reduce((sum, session) =>
-                    sum + Math.max(0, Math.round(Number(session.durationSec || 0) / 60)), 0);
-                const recentRatings = taskSessions.slice(0, 3).map(session => Number(session.effectiveness)).filter(Number.isFinite);
+                const minutesStudied = Math.round(taskSessions.reduce((sum, session) =>
+                    sum + Math.max(0, Number(session.durationSec || 0)), 0) / 60);
+                const recentRatings = taskSessions.slice(0, 3).map(session => Number(session.effectiveness)).filter(rating => Number.isFinite(rating) && rating >= 1 && rating <= 5);
                 const averageEffectiveness = recentRatings.length
                     ? recentRatings.reduce((sum, rating) => sum + rating, 0) / recentRatings.length
                     : null;
@@ -1937,8 +1951,8 @@
                 if (gradeGap > 0) reason += ` ${gradeGap.toFixed(2)} points below the ${target.toFixed(2)}% ${targetFromGpa ? `needed in this class for your ${targetGpa.toFixed(2)} GPA goal` : 'class target'}.`;
                 if (gpaGap > 0) reason += ` Your current weighted GPA (${currentWeightedGpa.toFixed(2)}) is below your ${targetGpa.toFixed(2)} target.`;
                 const deckLinks = this.decksForAssessment(item);
-                const flashcardMinutes = taskSessions.filter(session => session.source === 'flashcards')
-                    .reduce((sum, session) => sum + Math.max(0, Math.round(Number(session.durationSec || 0) / 60)), 0);
+                const flashcardMinutes = Math.round(taskSessions.filter(session => session.source === 'flashcards')
+                    .reduce((sum, session) => sum + Math.max(0, Number(session.durationSec || 0)), 0) / 60);
                 const studyMethodKey = this.getStudyMethodKey(item, taskSessions);
                 const studyMethod = this.studyMethodLabel(studyMethodKey);
                 return {
@@ -1978,11 +1992,7 @@
             return entry ? Number(entry.minPct) : NaN;
         }
 
-        /**
-         * Lowest grade in each class that gets the credit-weighted GPA to the target: start every class at the lowest
-         * grade worth the target (or its best grade), then raise whichever class needs the fewest extra percentage
-         * points per GPA gained until the target is met.
-         */
+        /** Minimize the sum of class target percentages while meeting the credit-weighted GPA goal. */
         gpaTargetPlan(targetGpa, mode = 'weighted', courses = AppState.get('courses') || []) {
             const scale = (window.PCHS_GRADE_SCALE || []).slice().sort((a, b) => a.minPct - b.minPct);
             const points = (item, course) => Number(mode === 'weighted' && course.isWeighted ? item.weighted : item.unweighted);
@@ -1991,30 +2001,29 @@
                 scale.forEach(item => {
                     if (!ladder.length || points(item, course) > points(ladder[ladder.length - 1], course)) ladder.push(item);
                 });
-                const best = Math.max(...scale.map(item => points(item, course)));
-                const goal = Math.min(targetGpa, best);
-                let level = ladder.findIndex(item => points(item, course) >= goal);
-                if (level < 0) level = ladder.length - 1;
-                return { course, ladder, level, credits: Math.max(0, Number(course.credits) || 0) };
+                return { course, ladder, credits: Math.max(0, Number(course.credits) || 0) };
             });
             const totalCredits = rows.reduce((sum, row) => sum + row.credits, 0);
-            const gpa = () => totalCredits > 0 ? rows.reduce((sum, row) => sum + points(row.ladder[row.level], row.course) * row.credits, 0) / totalCredits : 0;
-            let guard = 0;
-            while (totalCredits > 0 && gpa() < targetGpa - 1e-9 && guard++ < 200) {
-                let bestRow = null;
-                let bestCost = Infinity;
-                rows.forEach(row => {
-                    const next = row.ladder[row.level + 1];
-                    if (!next || !row.credits) return;
-                    const gain = (points(next, row.course) - points(row.ladder[row.level], row.course)) * row.credits;
-                    const cost = (next.minPct - row.ladder[row.level].minPct) / Math.max(gain, 1e-6);
-                    if (gain > 0 && cost < bestCost) { bestCost = cost; bestRow = row; }
+            let plans = [{ earned: 0, cost: 0, grades: [] }];
+            for (const row of rows) {
+                const options = row.credits > 0 ? row.ladder : row.ladder.slice(0, 1);
+                const next = new Map();
+                for (const plan of plans) for (const grade of options) {
+                    const earned = Math.round((plan.earned + points(grade, row.course) * row.credits) * 1e9) / 1e9;
+                    const cost = plan.cost + grade.minPct;
+                    if (!next.has(earned) || cost < next.get(earned).cost) next.set(earned, { earned, cost, grades: [...plan.grades, grade] });
+                }
+                let cheapest = Infinity;
+                plans = [...next.values()].sort((a, b) => b.earned - a.earned).filter(plan => {
+                    if (plan.cost >= cheapest) return false;
+                    cheapest = plan.cost;
+                    return true;
                 });
-                if (!bestRow) break;
-                bestRow.level += 1;
             }
-            const byCode = new Map(rows.map(row => [row.course.code, row.ladder[row.level]]));
-            return { byCode, gpa: gpa(), reachable: totalCredits > 0 && gpa() >= targetGpa - 1e-9 };
+            const reachablePlans = plans.filter(plan => plan.earned >= targetGpa * totalCredits - 1e-9);
+            const best = reachablePlans.sort((a, b) => a.cost - b.cost || a.earned - b.earned)[0] || plans[0];
+            const byCode = new Map(rows.map((row, i) => [row.course.code, best.grades[i]]));
+            return { byCode, gpa: totalCredits > 0 ? best.earned / totalCredits : 0, reachable: totalCredits > 0 && reachablePlans.length > 0 };
         }
 
         /** Decks linked to a quiz/test first, then decks tagged with the same class. */
@@ -2035,7 +2044,7 @@
                 /\b(reading|chapter|vocabulary)\b/.test(title) ? 'chunk' : 'checklist';
             const lastSession = history[0];
             if (lastSession?.method && Number(lastSession.effectiveness) >= 4) recommended = lastSession.method;
-            else if (lastSession?.method && Number(lastSession.effectiveness) <= 2) {
+            else if (lastSession?.method && Number(lastSession.effectiveness) >= 1 && Number(lastSession.effectiveness) <= 2) {
                 const alternatives = { practice: 'explain', retrieval: 'flashcards', outline: 'explain', checklist: 'explain', chunk: 'retrieval', flashcards: 'explain', explain: 'practice' };
                 recommended = alternatives[recommended] || recommended;
             }
@@ -2113,9 +2122,15 @@
                 const rated = Number(session.effectiveness) > 0 ? `Effectiveness ${Number(session.effectiveness)}/5` : 'Not rated';
                 const game = session.gameSummary;
                 const accuracy = game?.answered ? Math.round(game.correct / game.answered * 100) : 0;
-                const detail = game ? `<details class="saved-game-summary"><summary>Game summary · ${accuracy}% correct · ${Number(game.answered) || 0} answered</summary>${window.StudBudArcade.util.questionHistoryMarkup(game.questions || [])}</details>` : '';
+                const standings = game?.standings || [];
+                const detail = game ? `<details class="saved-game-summary"><summary>${session.source === 'solo' ? 'Solo game' : 'Game'} summary · ${game.answered ? `${accuracy}% correct` : 'No answers submitted'} · ${Number(game.answered) || 0} answered</summary><p>${Number(game.correct) || 0} correct · ${Math.max(0, Number(game.answered || 0) - Number(game.correct || 0))} incorrect · ${(game.questions || []).filter(question => question.correct === null).length} skipped</p>${standings.length ? `<ol>${standings.map(row => `<li>${this.escapeHTML(row.name)} · ${this.formatNumber(game.objectiveBased ? row.goal : row.score)} ${this.escapeHTML(game.objectiveUnit || 'pts')}</li>`).join('')}</ol>` : ''}${window.StudBudArcade.util.questionHistoryMarkup(game.questions || [])}</details>` : '';
                 return `<article class="study-history-item"><div><strong>${this.escapeHTML(session.title || 'Study session')}</strong><span>${this.formatStudyDuration(session.durationSec)} · ${this.escapeHTML(session.methodLabel || this.studyMethodLabel(session.method || 'retrieval'))}</span><small>${new Date(session.timestamp).toLocaleDateString()} · ${rated}${session.notes ? ` · ${this.escapeHTML(session.notes)}` : ''}</small></div>${detail}</article>`;
             }).join('')}` : '<p class="empty-state">Log a study session from a recommendation to help tune your future plan.</p>';
+        }
+
+        assignmentPriority(item, courses = AppState.get('courses') || []) {
+            const course = courses.find(course => course.code === item.courseCode);
+            return window.PlannerEngine.calculatePriorityScore(item, course ? { currentPct: this.calculateCourseGrade(course) } : null);
         }
 
         renderAssignments() {
@@ -2160,8 +2175,8 @@
                         <td>${graded ? 'Graded' : `<button class="secondary-btn" data-action="toggle-assignment" data-id="${this.escapeHTML(item.id)}">${status === 'completed' ? 'Done' : 'Pending'}</button>`}</td>
                         <td>${this.escapeHTML(item.title)}</td>
                         <td>${this.escapeHTML(course ? course.title : item.courseCode || 'Unassigned')}</td>
-                        <td>${graded ? `${Number(item.pointsEarned || 0)} / ${Number(item.maxPoints || 0)}` : this.escapeHTML(item.dueDate || 'No due date')}</td>
-                        <td>${this.escapeHTML(item.priority || 'Normal')}</td>
+                        <td>${graded ? `${this.formatNumber(item.pointsEarned || 0)} / ${this.formatNumber(item.maxPoints || 0)}` : this.escapeHTML(item.dueDate || 'No due date')}</td>
+                        <td>${graded || status === 'completed' ? '—' : this.assignmentPriority(item, courses).score.toFixed(2)}</td>
                         <td class="actions">
                             <button class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit</button>
                             <button class="danger-btn" data-action="delete-assignment" data-id="${this.escapeHTML(item.id)}">Delete</button>
@@ -2173,8 +2188,8 @@
 
             const priorityList = document.getElementById('priority-task-list');
             if (priorityList) {
-                const upcoming = assignments.filter(item => item.status !== 'completed')
-                    .sort((a, b) => (a.dueDate || '9999').localeCompare(b.dueDate || '9999'))
+                const upcoming = assignments.filter(item => item.status !== 'completed' && !this.isGradedItem(item))
+                    .sort((a, b) => this.assignmentPriority(b, courses).score - this.assignmentPriority(a, courses).score)
                     .slice(0, 3);
                 priorityList.classList.toggle('empty-list', upcoming.length === 0);
                 priorityList.innerHTML = upcoming.length ? upcoming.map(item =>
@@ -2182,17 +2197,15 @@
                 ).join('') : '<li class="empty-state">No upcoming tasks.</li>';
             }
 
-            const matrixGroups = [
-                ['quad-1-list', 'high'],
-                ['quad-2-list', 'medium'],
-                ['quad-3-list', 'low'],
-                ['quad-4-list', 'none']
-            ];
-            matrixGroups.forEach(([id, priority]) => {
+            const openWork = assignments.filter(item => item.status !== 'completed' && !this.isGradedItem(item))
+                .map(item => ({ item, priority: this.assignmentPriority(item, courses) }))
+                .sort((a, b) => b.priority.score - a.priority.score);
+            const matrixGroups = [['quad-1-list', 'doFirst'], ['quad-2-list', 'schedule'], ['quad-3-list', 'quickFinish'], ['quad-4-list', 'lowPriority']];
+            matrixGroups.forEach(([id, quadrant]) => {
                 const list = document.getElementById(id);
                 if (!list) return;
-                const matches = assignments.filter(item => item.status !== 'completed' && (item.priority || 'high') === priority);
-                list.innerHTML = matches.map(item => `<li>${this.escapeHTML(item.title)}</li>`).join('') || '<li class="empty-state">No tasks.</li>';
+                const matches = openWork.filter(({ item, priority }) => window.PlannerEngine.getEisenhowerQuadrant(priority, Number(item.estimatedMinutes) || 30).id === quadrant);
+                list.innerHTML = matches.map(({ item, priority }) => `<li><button type="button" class="text-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">${this.escapeHTML(item.title)}</button><small>${this.escapeHTML(this.dueLabel(item.dueDate).text)} · priority ${priority.score.toFixed(2)}</small></li>`).join('') || '<li class="empty-state">No open tasks here.</li>';
             });
         }
 
@@ -2204,7 +2217,9 @@
         renderDecks() {
             const grid = document.getElementById('deck-grid');
             if (!grid) return;
-            const decks = AppState.get('flashcards') || [];
+            const allDecks = AppState.get('flashcards') || [];
+            const search = (document.getElementById('my-deck-search')?.value || '').trim().toLowerCase();
+            const decks = allDecks.filter(deck => !search || `${deck.title} ${this.deckLinkInfo(deck).course?.title || ''}`.toLowerCase().includes(search));
             this.refreshCommunityDeckActions();
             const myId = window.StudBudCloud?.user?.id;
             grid.innerHTML = decks.length ? decks.map(deck => {
@@ -2245,7 +2260,7 @@
                         <button class="danger-btn" data-action="delete-deck" data-id="${this.escapeHTML(deck.id)}">Delete</button>
                     </div>
                 </article>`;
-            }).join('') : '<div class="empty-state glass-card full-width">No decks available. Create one or import flashcards.</div>';
+            }).join('') : `<div class="empty-state glass-card full-width">${search ? 'No decks match your search. Try a different title or class.' : 'No decks yet. Create a deck, import flashcards, or browse community decks above.'}</div>`;
             const missingAuthors = decks.filter(deck => deck.communitySourceOwnerId && !deck.communitySourceAuthor);
             if (missingAuthors.length && myId && !this.deckAuthorBackfillStarted) {
                 this.deckAuthorBackfillStarted = true;
@@ -2434,6 +2449,7 @@
             const equippedBy = { skin: profile.equipped_skin, hat: profile.equipped_hat, accessory: profile.equipped_accessory, effect: profile.equipped_accessory, palette: profile.equipped_palette };
             const tabs = [['boxes', 'Mystery boxes'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['effect', 'Auras'], ['palette', 'Colors'], ['inventory', 'Inventory']];
             const slotKey = { skin: 'skin', hat: 'hat', accessory: 'acc', effect: 'acc' };
+            const auraPreview = item => `<span class="player-avatar char-avatar aura-preview"><canvas width="160" height="160" data-aura="${this.escapeHTML(item.id)}" aria-label="${this.escapeHTML(item.name)} animated preview"></canvas></span>`;
             const itemCard = item => {
                 const has = owned.includes(item.id);
                 const equipped = equippedBy[item.type] === item.id;
@@ -2441,7 +2457,7 @@
                 if (item.type === 'palette') preview = item.hue != null
                     ? `<span class="shop-palette" style="background: linear-gradient(135deg, hsl(${item.hue} 75% 55%), hsl(${item.hue2} 80% 40%))"></span>`
                     : `<span class="shop-palette ${this.escapeHTML(item.color)}"></span>`;
-                else preview = this.multiplayerAvatarMarkup({ skin: '', hat: '', acc: '', [slotKey[item.type]]: item.id });
+                else preview = item.type === 'effect' ? auraPreview(item) : this.multiplayerAvatarMarkup({ skin: '', hat: '', acc: '', [slotKey[item.type]]: item.id });
                 const price = item.price == null ? '' : ` · ${item.price} <i class="fas fa-coins"></i>`;
                 let button;
                 if (has && equipped && equippedBy[item.type] !== undefined) button = `<button type="button" class="ghost-btn" data-action="multiplayer-unequip" data-slot="${item.type === 'effect' ? 'accessory' : item.type}">Unequip</button>`;
@@ -2450,14 +2466,18 @@
                 else button = `<button type="button" class="secondary-btn" data-action="multiplayer-buy" data-id="${this.escapeHTML(item.id)}" ${profile.coins < item.price ? 'disabled' : ''}>Buy${price}</button>`;
                 const name = item.name;
                 const search = this.escapeHTML(`${name} ${item.rarity}`.toLocaleLowerCase());
-                return `<article class="multiplayer-shop-item rarity-${item.rarity}${equipped ? ' equipped' : ''}" data-search="${search}"><span class="shop-preview" aria-hidden="true">${preview}</span><div><strong>${this.escapeHTML(name)}</strong><small class="rarity-label">${item.rarity}</small>${item.description ? `<small>${this.escapeHTML(item.description)}</small>` : ''}</div>${button}</article>`;
+                return `<article class="multiplayer-shop-item rarity-${item.rarity}${equipped ? ' equipped' : ''}" data-search="${search}"><span class="shop-preview" aria-hidden="true">${preview}</span><div><strong>${this.escapeHTML(name)}</strong><small class="rarity-label">${item.rarity}${equipped ? ' · Equipped' : has ? ' · Owned' : ''}</small>${item.description ? `<small>${this.escapeHTML(item.description)}</small>` : ''}</div>${button}</article>`;
             };
             let body;
             if (tab === 'boxes') {
                 const drop = this.lastDrop;
                 const dropItem = drop && games.catalog.find(entry => entry.id === drop.unlocked_item && entry.type !== 'pet');
                 body = `${dropItem ? `<div class="box-reveal rarity-${this.escapeHTML(dropItem.rarity)}">${dropItem.type === 'palette' ? `<span class="shop-palette" style="background: linear-gradient(135deg, hsl(${dropItem.hue} 75% 55%), hsl(${dropItem.hue2} 80% 40%))"></span>` : this.multiplayerAvatarMarkup({ skin: '', hat: '', acc: '', [slotKey[dropItem.type]]: dropItem.id }, true)}<div><small>${this.escapeHTML(dropItem.rarity)}</small><strong>${this.escapeHTML(dropItem.name)}</strong><span>New item added to your inventory!</span></div></div>` : ''}
-                    ${games.constructor.boxes.map(box => `<article class="multiplayer-shop-item box-card box-${box.id}" data-search="${this.escapeHTML(`${box.name} ${box.id}`.toLocaleLowerCase())}">
+                    ${games.constructor.boxes.map(box => {
+                        const total = games.boxPool(box).length;
+                        const remaining = games.boxPool(box, owned).length;
+                        const complete = !remaining || this.completedShopBoxes?.has(`${profile.user_id}:${box.id}`);
+                        return `<article class="multiplayer-shop-item box-card box-${box.id}${complete ? ' collection-complete' : ''}" data-search="${this.escapeHTML(`${box.name} ${box.id}`.toLocaleLowerCase())}">
                         <span class="shop-preview mystery-capsule" aria-hidden="true">
                             <svg viewBox="0 0 160 140" focusable="false">
                                 <ellipse cx="80" cy="126" rx="56" ry="8" fill="currentColor" opacity=".12"/>
@@ -2471,10 +2491,11 @@
                             </svg>
                             <i class="fas ${box.icon}"></i>
                         </span>
-                        <div class="box-details"><strong>${this.escapeHTML(box.name)}</strong><small>${this.escapeHTML(box.odds)}</small></div>
-                        <details class="box-odds"><summary>Remaining drop chances</summary><span class="box-chances" aria-label="Rarity drop chances">${Object.entries(games.boxChances(box, owned)).map(([rarity, chance]) => `<span class="rarity-${rarity}">${rarity} <b>${chance}%</b></span>`).join('')}</span></details>
-                        ${games.boxPool(box, owned).length ? `<button type="button" class="secondary-btn" data-action="multiplayer-mystery" data-id="${box.id}" ${profile.coins < box.price ? 'disabled' : ''}>Open · ${box.price} <i class="fas fa-coins"></i></button>` : '<small class="box-complete">Collection complete</small>'}</article>`).join('')}
-                    <p class="settings-hint">Drop chances show the rarity roll for each box. Open boxes to collect characters, hats, accessories, auras and colors.</p>`;
+                        <div class="box-details"><strong>${this.escapeHTML(box.name)}</strong><small>${this.escapeHTML(box.odds)}</small><span class="box-progress">${complete ? 'All available rewards collected' : `${total - remaining} / ${total} rewards collected · ${remaining} left`}</span></div>
+                        ${complete ? '' : `<details class="box-odds"><summary>Remaining drop chances</summary><span class="box-chances" aria-label="Rarity drop chances">${Object.entries(games.boxChances(box, owned)).map(([rarity, chance]) => `<span class="rarity-${rarity}">${rarity} <b>${chance}%</b></span>`).join('')}</span></details>`}
+                        ${complete ? '<span class="box-complete"><i class="fas fa-check" aria-hidden="true"></i> Collection complete</span>' : `<button type="button" class="secondary-btn" data-action="multiplayer-mystery" data-id="${box.id}" ${profile.coins < box.price ? 'disabled' : ''}>Open · ${box.price} <i class="fas fa-coins"></i></button>`}</article>`;
+                    }).join('')}
+                    <p class="settings-hint">Each opening gives a new eligible item, never a duplicate. Chances adjust as you collect rewards. Completed boxes cannot be opened.</p>`;
                                 } else if (tab === 'inventory') {
                                     const typeNames = { skin: 'Characters', hat: 'Hats', accessory: 'Accessories', effect: 'Auras', palette: 'Colors' };
                                     const order = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
@@ -2520,6 +2541,28 @@
                 const empty = grid.querySelector('.shop-search-empty');
                 if (empty) empty.hidden = !query || [...grid.querySelectorAll('.multiplayer-shop-item')].some(card => !card.hidden);
             }
+            this.animateShopAuras();
+        }
+
+        animateShopAuras() {
+            cancelAnimationFrame(this.shopAuraFrame);
+            const root = document.getElementById('multiplayer-shop-items');
+            const canvases = [...root.querySelectorAll('canvas[data-aura]')];
+            const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            const draw = (time, initial = false) => {
+                if (!root.isConnected || (!initial && !root.offsetWidth)) return;
+                for (const canvas of canvases) {
+                    const rect = canvas.getBoundingClientRect();
+                    if (!initial && (!canvas.offsetWidth || (!reducedMotion && (rect.bottom < 0 || rect.top > innerHeight)))) continue;
+                    const ctx = canvas.getContext('2d');
+                    ctx.clearRect(0, 0, 160, 160);
+                    ctx.save(); ctx.scale(2, 2);
+                    window.StudBudArcade.util.drawFigureSide(ctx, { color: '#55c995', cos: { acc: canvas.dataset.aura } }, 29, 30, 22, 37, 1, time / 1000, false);
+                    ctx.restore();
+                }
+                if (canvases.length && root.offsetWidth && !reducedMotion) this.shopAuraFrame = requestAnimationFrame(draw);
+            };
+            if (canvases.length) draw(performance.now(), true);
         }
 
         async renderMultiplayerProfile(force = false) {
@@ -2951,27 +2994,45 @@
         }
 
         async updateMultiplayerShop(action, itemId) {
-            const profile = action === 'multiplayer-buy'
-                ? await window.StudBudCommunityGames.purchaseItem(itemId)
-                : action === 'multiplayer-mystery'
-                    ? await window.StudBudCommunityGames.buyMysteryItem(itemId || 'basic')
-                    : action === 'multiplayer-unequip'
-                        ? await window.StudBudCommunityGames.unequipSlot(itemId)
-                        : await window.StudBudCommunityGames.equipItem(itemId);
-            const unlockedItem = profile.unlocked_item;
-            window.StudBudSfx?.play(action === 'multiplayer-mystery' ? 'open' : action === 'multiplayer-buy' ? 'buy' : 'success', 'ui');
-            this.multiplayerProfile = profile;
-            if (action === 'multiplayer-mystery') this.lastDrop = { unlocked_item: unlockedItem, rarity: profile.rarity, duplicate: profile.duplicate, refund: profile.refund };
-            await this.renderMultiplayerProfile(true);
-            if (action === 'multiplayer-mystery') {
-                const item = window.StudBudCommunityGames.catalog.find(entry => entry.id === unlockedItem);
-                document.getElementById('multiplayer-shop-status').textContent = `New ${item?.rarity || profile.rarity} drop: ${item?.name || 'cosmetic'}!`;
-                window.StudBudSfx?.play(['epic', 'legendary', 'mythic'].includes(item?.rarity || profile.rarity) ? 'win' : 'success', 'ui', 0);
+            if (this.shopPurchaseBusy) {
+                document.getElementById('multiplayer-shop-status').textContent = 'A shop action is already in progress. Please wait.';
+                return;
             }
-            if (action === 'multiplayer-equip' && itemId.startsWith('palette_')) {
-                const colorScheme = itemId.slice('palette_'.length);
-                AppState.set('settings', { ...AppState.get('settings'), colorScheme });
-                this.applyAppearance();
+            this.shopPurchaseBusy = true;
+            try {
+                const profile = action === 'multiplayer-buy'
+                    ? await window.StudBudCommunityGames.purchaseItem(itemId)
+                    : action === 'multiplayer-mystery'
+                        ? await window.StudBudCommunityGames.buyMysteryItem(itemId || 'basic')
+                        : action === 'multiplayer-unequip'
+                            ? await window.StudBudCommunityGames.unequipSlot(itemId)
+                            : await window.StudBudCommunityGames.equipItem(itemId);
+                const unlockedItem = profile.unlocked_item;
+                if (profile.collection_complete) {
+                    this.completedShopBoxes ||= new Set();
+                    this.completedShopBoxes.add(`${profile.user_id}:${profile.completed_box || itemId || 'basic'}`);
+                    this.multiplayerProfile = profile;
+                    this.lastDrop = null;
+                    this.renderMultiplayerShop(profile);
+                    document.getElementById('multiplayer-shop-status').textContent = 'Collection complete — you own every available reward from this box. No coins were spent.';
+                    return;
+                }
+                window.StudBudSfx?.play(action === 'multiplayer-mystery' ? 'open' : action === 'multiplayer-buy' ? 'buy' : 'success', 'ui');
+                this.multiplayerProfile = profile;
+                if (action === 'multiplayer-mystery') this.lastDrop = { unlocked_item: unlockedItem, rarity: profile.rarity, duplicate: profile.duplicate, refund: profile.refund };
+                await this.renderMultiplayerProfile(true);
+                if (action === 'multiplayer-mystery') {
+                    const item = window.StudBudCommunityGames.catalog.find(entry => entry.id === unlockedItem);
+                    document.getElementById('multiplayer-shop-status').textContent = `New ${item?.rarity || profile.rarity} drop: ${item?.name || 'cosmetic'}!`;
+                    window.StudBudSfx?.play(['epic', 'legendary', 'mythic'].includes(item?.rarity || profile.rarity) ? 'win' : 'success', 'ui', 0);
+                }
+                if (action === 'multiplayer-equip' && itemId.startsWith('palette_')) {
+                    const colorScheme = itemId.slice('palette_'.length);
+                    AppState.set('settings', { ...AppState.get('settings'), colorScheme });
+                    this.applyAppearance();
+                }
+            } finally {
+                this.shopPurchaseBusy = false;
             }
         }
 
@@ -3010,6 +3071,12 @@
             return { resource, multiplier };
         }
 
+        questionRewardValue(value) {
+            const amount = Number(value);
+            if (!Number.isInteger(amount) || amount < 1 || amount > 500) throw new Error('Choose a whole-number resource amount between 1 and 500.');
+            return amount;
+        }
+
         updateMultiplayerModeSetup(mode) {
             const labels = {
                 skyline: ['City Escape', 'Climb a rooftop obstacle course before the tide.'],
@@ -3029,6 +3096,8 @@
             for (const id of ['host-game-resource-label', 'solo-game-resource-label']) {
                 const label = document.getElementById(id);
                 if (label) label.textContent = resourceLabel;
+                const slider = document.querySelector(`[data-reward-slider="${id === 'host-game-resource-label' ? 'host-game-reward' : 'solo-game-reward'}"]`);
+                if (slider) slider.setAttribute('aria-label', resourceLabel);
             }
         }
 
@@ -3621,7 +3690,12 @@
                 if (game.walls.some(w => U.overlap({ x: x - 22, y: y - 22, w: 44, h: 44 }, w))) continue;
                 b.x = x; b.y = y; return;
             }
-            b.x = game.W * sx; b.y = game.H * sy;
+            for (let y = 60; y < game.H - 60; y += 60) for (let x = 60; x < game.W - 60; x += 60) {
+                if (!game.walls.some(wall => U.overlap({ x: x - 22, y: y - 22, w: 44, h: 44 }, wall))) {
+                    b.x = x; b.y = y; return;
+                }
+            }
+            throw new Error('The arena has no safe bot respawn position.');
         }
 
         stepShooterBots(demo, dt) {
@@ -3645,8 +3719,10 @@
                     const ang = Math.atan2(tgt.y - b.y, tgt.x - b.x), dir = bd > 420 ? 1 : bd < 260 ? -1 : 0;
                     mx = Math.cos(ang) * dir + Math.cos(ang + Math.PI / 2) * b.strafe * 0.8;
                     my = Math.sin(ang) * dir + Math.sin(ang + Math.PI / 2) * b.strafe * 0.8;
-                    b.aim = ang + ((b.ai?.rng?.() || 0.5) - 0.5) * (0.08 + (1 - (b.ai?.aggression || 0.5)) * 0.1);
-                    if (b.cd <= 0 && bd < 780) {
+                    const lead = bd / 950;
+                    b.aim = Math.atan2(tgt.y + (tgt.vy || 0) * lead - b.y, tgt.x + (tgt.vx || 0) * lead - b.x)
+                        + ((b.ai?.rng?.() || 0.5) - 0.5) * (0.08 + (1 - (b.ai?.aggression || 0.5)) * 0.1);
+                    if (b.cd <= 0 && bd < 780 && this.botLineClear(b.x, b.y, tgt.x, tgt.y, game.walls)) {
                         b.ai.energy = Math.max(0, (b.ai.energy ?? 100) - 1);
                         b.cd = (b.ai?.reaction || 0.3) + (b.ai?.rng?.() || 0.5) * 0.25;
                         game.onEvent({ k: 'sh', x: b.x + Math.cos(b.aim) * 24, y: b.y + Math.sin(b.aim) * 24, a: b.aim, by: b.id }, b);
@@ -3654,7 +3730,12 @@
                 }
                 const k = Math.min(1, dt * 6);
                 b.vx = U.lerp(b.vx, mx * 230, k); b.vy = U.lerp(b.vy, my * 230, k);
-                b.x += b.vx * dt; b.y += b.vy * dt;
+                if (tgt && ready && !this.botLineClear(b.x, b.y, tgt.x, tgt.y, game.walls, b.r + 3)) {
+                    this.moveNavigatingBot(b, tgt.x, tgt.y, 230, dt, game.walls, game);
+                } else {
+                    b.x += b.vx * dt; b.y += b.vy * dt;
+                    b.ai.navPath = null;
+                }
                 for (const w of game.walls) U.pushCircleOutOfRect(b, w);
                 b.x = U.clamp(b.x, 30, game.W - 30); b.y = U.clamp(b.y, 30, game.H - 30);
                 b.f = b.aim || 0; b.a = 0; b.ex = { o: 0 }; b.tx = b.x; b.ty = b.y;
@@ -4260,8 +4341,8 @@
                 }
                 while (ai.path?.length > 1 && Math.hypot(bot.x - ai.path[0].x, bot.y - ai.path[0].y) < 30) ai.path.shift();
                 const waypoint = ai.path?.[0] || target;
-                const dx = waypoint.x - bot.x, dy = waypoint.y - bot.y;
-                this.moveBotToward(bot, dx, dy, speed, dt);
+                if (clock < (ai.recoverUntil || 0)) this.moveNavigatingBot(bot, waypoint.x, waypoint.y, speed, dt, game.walls, game);
+                else this.moveBotToward(bot, waypoint.x - bot.x, waypoint.y - bot.y, speed, dt);
                 for (const wall of game.walls) U.pushCircleOutOfRect(bot, wall);
                 ai.hitCd = Math.max(0, (ai.hitCd || 0) - dt);
                 if (ai.hitCd <= 0 && game.cars.some(car => U.overlap({ x: bot.x - 12, y: bot.y - 12, w: 24, h: 24 }, game.carRect(car, clock)))) {
@@ -4398,6 +4479,12 @@
                 ai.fuel = bot.fuel;
                 bot.ex = { c: bot.carry, n: bot.items }; bot.a = 1;
             } else if (mode === 'crypto') {
+                ai.researchUntil ||= clock + 1 + ai.reaction;
+                if (clock >= ai.researchUntil) {
+                    ai.cash += demo.session.rewardAmount() * 8;
+                    ai.researchAnswers = (ai.researchAnswers || 0) + 1;
+                    ai.researchUntil = clock + 2 + ai.reaction;
+                }
                 ai.tradeAt -= dt;
                 if (ai.tradeAt <= 0) {
                     const trend = game.price(ai.asset, clock) - game.price(ai.asset, Math.max(0, clock - 4));
@@ -4456,7 +4543,7 @@
                     setTarget({ x: term.x, y: term.y }, 6); target = ai.target;
                     ai.term = term;
                 }
-                this.moveBotToward(bot, target.x - bot.x, target.y - bot.y, speed, dt);
+                this.moveNavigatingBot(bot, target.x, target.y, speed, dt, game.walls, game);
                 for (const wall of game.walls) U.pushCircleOutOfRect(bot, wall);
                 if (ready && ai.term && Math.hypot(bot.x - ai.term.x, bot.y - ai.term.y) < 46 && ai.term.cd <= 0) {
                     ai.miningUntil = ai.miningUntil || clock + 1 + ai.reaction;
@@ -4471,14 +4558,90 @@
                 bot.ex = {};
             }
             const moved = Math.hypot(bot.x - ai.lastX, bot.y - ai.lastY);
-            ai.stuck = moved < 1.4 ? ai.stuck + dt : 0; ai.lastX = bot.x; ai.lastY = bot.y;
+            ai.stuck = ready && moved < 1.4 ? ai.stuck + dt : 0; ai.lastX = bot.x; ai.lastY = bot.y;
             if (ai.stuck > 1.1) {
-                if (mode !== 'market') { ai.target = null; ai.targetUntil = 0; }
+                if (mode === 'market') { ai.recoverUntil = clock + 4; ai.navPath = null; }
+                else { ai.target = null; ai.targetUntil = 0; }
                 ai.side *= -1; ai.stuck = 0;
             }
             bot.x = Math.max(20, Math.min(W - 20, bot.x)); bot.y = Math.max(20, Math.min(H - 20, bot.y));
             bot.f = Math.atan2((target?.y ?? bot.ty ?? bot.y) - bot.y, (target?.x ?? bot.tx ?? bot.x) - bot.x);
             bot.a = 1; bot.hp = 100; bot.tx = bot.x; bot.ty = bot.y; bot.seen = now; bot.ex = bot.ex || {};
+        }
+
+        botLineClear(x, y, tx, ty, walls, padding = 0) {
+            return !walls.some(wall => {
+                let enter = 0, exit = 1;
+                for (const [start, delta, min, max] of [
+                    [x, tx - x, wall.x - padding, wall.x + wall.w + padding],
+                    [y, ty - y, wall.y - padding, wall.y + wall.h + padding]
+                ]) {
+                    if (Math.abs(delta) < 1e-9) {
+                        if (start < min || start > max) return false;
+                    } else {
+                        const a = (min - start) / delta, b = (max - start) / delta;
+                        enter = Math.max(enter, Math.min(a, b));
+                        exit = Math.min(exit, Math.max(a, b));
+                        if (enter > exit) return false;
+                    }
+                }
+                return true;
+            });
+        }
+
+        moveNavigatingBot(bot, x, y, speed, dt, walls, bounds) {
+            if (speed === 0) { bot.vx = bot.vy = 0; return; }
+            const padding = (bot.r || 15) + 3;
+            const clearance = { x: bot.x, y: bot.y, r: padding + 1 };
+            for (const wall of walls) window.StudBudArcade.util.pushCircleOutOfRect(clearance, wall);
+            bot.x = clearance.x; bot.y = clearance.y;
+            bot.ai.navElapsed = (bot.ai.navElapsed || 0) + dt;
+            if (this.botLineClear(bot.x, bot.y, x, y, walls, padding)) {
+                bot.ai.navPath = null;
+                this.moveBotToward(bot, x - bot.x, y - bot.y, Math.min(speed, Math.hypot(x - bot.x, y - bot.y) * 6), dt);
+                return;
+            }
+            const goalChanged = !bot.ai.navGoal || Math.hypot(x - bot.ai.navGoal.x, y - bot.ai.navGoal.y) > 80;
+            if (!bot.ai.navPath || (goalChanged && bot.ai.navElapsed >= 1)) {
+                bot.ai.navElapsed = 0;
+                bot.ai.navGoal = { x, y };
+                const corners = walls.flatMap(wall => [
+                    { x: wall.x - padding - 4, y: wall.y - padding - 4 },
+                    { x: wall.x + wall.w + padding + 4, y: wall.y - padding - 4 },
+                    { x: wall.x - padding - 4, y: wall.y + wall.h + padding + 4 },
+                    { x: wall.x + wall.w + padding + 4, y: wall.y + wall.h + padding + 4 }
+                ]).filter(point => (!bounds || (point.x >= padding && point.x <= bounds.W - padding && point.y >= padding && point.y <= bounds.H - padding))
+                    && this.botLineClear(point.x, point.y, point.x, point.y, walls, padding));
+                const nodes = [{ x: bot.x, y: bot.y }, { x, y }, ...corners];
+                const costs = nodes.map(() => Infinity), previous = nodes.map(() => -1), visited = new Set();
+                costs[0] = 0;
+                while (visited.size < nodes.length) {
+                    let current = -1;
+                    for (let i = 0; i < nodes.length; i++) if (!visited.has(i) && (current < 0 || costs[i] < costs[current])) current = i;
+                    if (current < 0 || !Number.isFinite(costs[current]) || current === 1) break;
+                    visited.add(current);
+                    for (let i = 0; i < nodes.length; i++) {
+                        if (visited.has(i) || i === current) continue;
+                        const from = nodes[current], to = nodes[i];
+                        const cost = costs[current] + Math.hypot(to.x - from.x, to.y - from.y);
+                        if (cost >= costs[i] || !this.botLineClear(from.x, from.y, to.x, to.y, walls, padding)) continue;
+                        costs[i] = cost; previous[i] = current;
+                    }
+                }
+                bot.ai.navPath = [];
+                if (Number.isFinite(costs[1])) for (let i = 1; i > 0; i = previous[i]) bot.ai.navPath.unshift(nodes[i]);
+            }
+            const path = bot.ai.navPath;
+            while (path.length > 1 && Math.hypot(path[0].x - bot.x, path[0].y - bot.y) < 10
+                && this.botLineClear(bot.x, bot.y, path[1].x, path[1].y, walls, padding)) path.shift();
+            const target = path[0];
+            if (!target) {
+                bot.vx = bot.vy = 0;
+                if (bot.ai.navElapsed >= 1) bot.ai.navPath = null;
+                return;
+            }
+            const distance = Math.hypot(target.x - bot.x, target.y - bot.y);
+            this.moveBotToward(bot, target.x - bot.x, target.y - bot.y, Math.min(speed, distance * 6), dt);
         }
 
         moveBotToward(bot, dx, dy, speed, dt) {
@@ -4883,7 +5046,7 @@
                 goal_type: 'time',
                 point_limit: 1000,
                 time_limit_seconds: Math.min(60, Math.max(1, Number(form.elements.timeLimit.value) || 5)) * 60,
-                question_reward: Number(form.elements.questionReward.value)
+                question_reward: this.questionRewardValue(form.elements.questionReward.value)
             };
             let room;
             for (let attempt = 0; attempt < 3; attempt++) {
@@ -5124,10 +5287,11 @@
         async saveGameSummary(session) {
             if (session.testing) return;
             await AppState.recordStudySession({
-                id: `match_${window.crypto.randomUUID()}`, title: `Study game: ${session.game.title}`,
-                durationSec: Math.max(1, Math.round(session.t)), method: 'practice', source: 'multiplayer',
+                id: `match_${window.crypto.randomUUID()}`, title: `${session.practice ? 'Solo game' : 'Study game'}: ${session.game.title}`,
+                durationSec: Math.max(1, Math.round(session.t)), method: 'practice', source: session.practice ? 'solo' : 'multiplayer',
                 gameSummary: {
                     mode: session.mode, score: session.score, answered: session.answered, correct: session.correct,
+                    objectiveBased: session.game.scoreGoal === false, objectiveUnit: session.game.goalUnit || 'pts',
                     questions: session.questionHistory.map(answer => ({ ...answer })),
                     standings: session.standingsCache.map(row => ({ id: row.id, name: row.n, score: row.s, goal: row.g }))
                 }
@@ -5275,7 +5439,7 @@
             const year = document.getElementById('settings-grad-year');
             if (year && profile.graduationYear) year.value = String(profile.graduationYear);
             const targetGpa = document.getElementById('settings-target-gpa');
-            if (targetGpa) targetGpa.value = String(Number.isFinite(Number(profile.targetGpa)) && profile.targetGpa !== '' && profile.targetGpa !== null ? Number(profile.targetGpa) : 3.8);
+            if (targetGpa) targetGpa.value = String(Number.isFinite(Number(profile.targetGpa)) && profile.targetGpa !== '' && profile.targetGpa !== null ? Number(Number(profile.targetGpa).toFixed(2)) : 3.8);
             const currentTermSetting = document.getElementById('settings-current-term');
             if (currentTermSetting) currentTermSetting.value = profile.currentTerm || 'auto';
 
@@ -6192,7 +6356,26 @@
             if (selected === 'all' || (AppState.get('courses') || []).some(course => course.code === selected)) select.value = selected;
         }
 
+        renderStudyAnalytics() {
+            const summary = document.getElementById('study-analytics-summary');
+            const list = document.getElementById('study-analytics-decks');
+            if (!summary || !list) return;
+            const sessions = (AppState.get('studyHistory') || []).filter(session => Number(session.durationSec) > 0);
+            const seconds = sessions.reduce((sum, session) => sum + Number(session.durationSec), 0);
+            const answered = sessions.reduce((sum, session) => sum + Number(session.gameSummary?.answered || 0), 0);
+            const correct = sessions.reduce((sum, session) => sum + Number(session.gameSummary?.correct || 0), 0);
+            summary.innerHTML = `<article><span>Logged study time</span><strong>${this.formatStudyDuration(seconds)}</strong></article><article><span>Saved sessions</span><strong>${sessions.length}</strong></article><article><span>Game answer accuracy</span><strong>${answered ? `${(correct / answered * 100).toFixed(2)}%` : '—'}</strong><small>${answered} answers submitted</small></article>`;
+            const decks = AppState.get('flashcards') || [];
+            list.innerHTML = decks.length ? decks.map(deck => {
+                const cards = deck.cards || [];
+                const reviewed = cards.filter(card => card.lastReviewed || Number(card.reps || card.repetitions) > 0).length;
+                const lapses = cards.reduce((sum, card) => sum + Number(card.lapses || 0), 0);
+                return `<article><strong>${this.escapeHTML(deck.title)}</strong><span>${cards.length} cards · ${this.deckStudyCount(deck)} scheduled today</span><small>${reviewed} reviewed · ${lapses} lapses</small></article>`;
+            }).join('') : '<p class="empty-state">Create a deck and log some study sessions to see your activity here.</p>';
+        }
+
         renderGradeProgress() {
+            this.renderStudyAnalytics();
             const canvas = document.getElementById('grade-progress-chart');
             if (!canvas) return;
             const summary = document.getElementById('analytics-summary');
@@ -6212,7 +6395,8 @@
             const range = document.getElementById('grade-progress-range');
             if (courseControl) courseControl.classList.toggle('hidden', metric !== 'class');
             const datedAssignments = assignments.filter(item =>
-                (this.isGradedItem(item)) && (item.gradedAt || item.dueDate)
+                (this.isGradedItem(item)) && (item.gradedAt || item.dueDate) &&
+                (metric !== 'class' || selectedCode === 'all' || item.courseCode === selectedCode)
             );
             const dateFor = item => {
                 const value = String(item.gradedAt || item.dueDate);
@@ -6370,7 +6554,7 @@
                     const form = document.getElementById('solo-game-settings');
                     this.startPractice(this.selectedMultiplayerMode || 'skyline', {
                         timeLimitSeconds: Number(form?.elements.timeLimit.value) || 0,
-                        questionReward: Number(form?.elements.questionReward.value) || 20
+                        questionReward: this.questionRewardValue(form.elements.questionReward.value)
                     });
                 } else if (target.matches('[data-study-leaderboard-period]')) {
                     this.studyLeaderboardPeriod = target.dataset.studyLeaderboardPeriod;
@@ -6955,8 +7139,8 @@
             this.hideCourseSuggestions();
             document.getElementById('course-subject-category').value = course ? course.category || 'Electives' : 'Electives';
             document.getElementById('course-term').value = course ? (course.term || 'FY') : 'FY';
-            document.getElementById('course-credits').value = course ? course.credits : '0.5';
-            document.getElementById('course-target-grade').value = course && course.targetPct !== null && course.targetPct !== undefined && Number.isFinite(Number(course.targetPct)) ? course.targetPct : '';
+            document.getElementById('course-credits').value = course ? Number(Number(course.credits).toFixed(2)) : '0.5';
+            document.getElementById('course-target-grade').value = course && course.targetPct !== null && course.targetPct !== undefined && Number.isFinite(Number(course.targetPct)) ? Number(Number(course.targetPct).toFixed(2)) : '';
             if (course) this.populateCourseFromCatalog();
             else document.getElementById('course-weight-label').textContent = 'Select a catalog course';
             this.openModal('course-modal');
@@ -7049,8 +7233,8 @@
             document.getElementById('assignment-name').value = assignment ? assignment.title : '';
             document.getElementById('assignment-course').value = assignment ? assignment.courseCode : courseCode;
             document.getElementById('assignment-due-date').value = assignment ? assignment.dueDate || '' : (dueDate || '');
-            document.getElementById('assignment-points').value = assignment ? assignment.pointsEarned ?? 0 : 0;
-            document.getElementById('assignment-max-points').value = assignment ? assignment.maxPoints ?? 100 : 100;
+            document.getElementById('assignment-points').value = assignment ? Number(Number(assignment.pointsEarned ?? 0).toFixed(2)) : 0;
+            document.getElementById('assignment-max-points').value = assignment ? Number(Number(assignment.maxPoints ?? 100).toFixed(2)) : 100;
             document.getElementById('assignment-kind').value = assignment ? assignment.kind || 'assignment' : (kind || 'assignment');
             document.getElementById('assignment-size').value = assignment ? assignment.estimatedMinutes || 30 : 30;
             document.getElementById('assignment-importance').value = assignment ? assignment.importance || 3 : 3;
@@ -7087,13 +7271,13 @@
             if (!select) return;
             const selected = selectedId ?? select.value;
             select.innerHTML = '<option value="">None</option>' +
-                (course?.categories || []).map(category => `<option value="${this.escapeHTML(category.id)}">${this.escapeHTML(category.name)} (${Number(category.weight || 0)}%)</option>`).join('');
+                (course?.categories || []).map(category => `<option value="${this.escapeHTML(category.id)}">${this.escapeHTML(category.name)} (${this.formatNumber(category.weight || 0)}%)</option>`).join('');
             if ((course?.categories || []).some(category => category.id === selected)) select.value = selected;
         }
 
         gradeForPercentage(percentage) {
             const scale = window.PCHS_GRADE_SCALE || [];
-            const grade = scale.find(item => percentage >= item.minPct && percentage <= item.maxPct);
+            const grade = scale.slice().sort((a, b) => b.minPct - a.minPct).find(item => percentage >= item.minPct);
             return grade ? grade.letter : (percentage >= 90 ? 'A-' : percentage >= 80 ? 'B-' : percentage >= 70 ? 'C-' : percentage >= 60 ? 'D-' : 'F');
         }
 
@@ -7677,7 +7861,7 @@
             (AppState.get('flashcards') || []).forEach(deck => (deck.cards || []).forEach(card => this.arcadeCardDeck.set(card, deck)));
             const now = Date.now();
             // Spaced-repetition ordering: cards ready for review and struggling cards first, well-known cards last
-            const priority = card => (this.isCardDue(card, now) ? 0 : 10) + Math.min(5, Number(card.lapses || 0)) - (card.lastReviewed ? 0 : 1);
+            const priority = card => (this.isCardDue(card, now) ? 0 : 10) - Math.min(5, Number(card.lapses || 0)) - (card.lastReviewed ? 0 : 1);
             this.arcadeCards = Array.from(this.arcadeCardDeck.keys())
                 .filter(card => card.front && card.back)
                 .map(card => ({ card, key: priority(card) + Math.random() * 2 }))
@@ -7758,6 +7942,7 @@
             content.innerHTML = `
                 <form id="practice-test-config-form" class="practice-test-setup">
                     <p>Choose a deck, then how many questions of each type you want. Use 0 to skip a type.</p>
+                    <p class="settings-hint">Each matching group counts as one question and needs every pair correct. Larger tests may repeat cards. Typed answers match the saved wording, ignoring case and spacing but keeping mathematical signs.</p>
                     <label>Flashcard deck
                         <select name="deckId" required>${usableDecks.map(deck =>
                             `<option value="${this.escapeHTML(deck.id)}">${this.escapeHTML(deck.title)} · ${(deck.cards || []).filter(card => card.front && card.back).length} cards</option>`
@@ -7782,7 +7967,7 @@
             const count = name => Math.max(0, Math.min(50, Math.floor(Number(data.get(name)) || 0)));
             const counts = { 'multiple-choice': count('mcCount'), matching: count('matchCount'), written: count('typeCount') };
             if (!counts['multiple-choice'] && !counts.matching && !counts.written) throw new Error('Enter how many questions of at least one type you want.');
-            const shuffle = list => [...list].sort(() => Math.random() - 0.5);
+            const shuffle = list => this.shuffleCards(list);
             let pool = shuffle(availableCards);
             const draw = () => { if (!pool.length) pool = shuffle(availableCards); return pool.pop(); };
             const items = [];
@@ -7834,7 +8019,12 @@
             form.id = 'practice-test-answer-form';
             form.dataset.questionType = questionType;
             if (questionType === 'multiple-choice') {
-                const choices = [card, ...this.pickDistractorCards(card, this.practiceTestDeckCards || this.practiceTestCards, 3)].sort(() => Math.random() - 0.5);
+                const choices = this.shuffleCards([card, ...this.pickDistractorCards(card, this.practiceTestDeckCards || this.practiceTestCards, 3)]);
+                if (choices.length < 2) {
+                    this.practiceTestQuestionTypes[index] = 'written';
+                    this.renderPracticeTestQuestion();
+                    return;
+                }
                 const options = document.createElement('div');
                 options.className = 'arcade-answer-options';
                 choices.forEach((option, choiceIndex) => {
@@ -7849,7 +8039,7 @@
                 form.append(options);
             } else if (questionType === 'matching') {
                 const group = this.practiceTestGroups[index];
-                const definitions = [...group].sort(() => Math.random() - 0.5);
+                const definitions = this.shuffleCards(group);
                 question.textContent = 'Match each term with its definition';
                 const rows = document.createElement('div');
                 rows.className = 'practice-matching';
@@ -7874,8 +8064,10 @@
                 form.dataset.defOrder = JSON.stringify(definitions.map(def => group.indexOf(def)));
                 form.append(rows);
             } else {
+                const label = document.createElement('label');
+                label.className = 'practice-test-written';
                 label.htmlFor = 'practice-test-written-answer';
-                label.textContent = 'Your answer';
+                label.textContent = 'Your answer (match the saved answer; capitalization and spacing do not matter)';
                 const answer = document.createElement('textarea');
                 answer.id = 'practice-test-written-answer';
                 answer.name = 'answer';
@@ -7904,7 +8096,10 @@
             if (form.dataset.questionType === 'matching') {
                 const group = this.practiceTestGroups[this.arcadeQuestionIndex];
                 const order = JSON.parse(form.dataset.defOrder || '[]');
-                const picks = group.map((_, i) => order[Number(data.get(`match${i}`))]);
+                const picks = group.map((_, i) => {
+                    const value = data.get(`match${i}`);
+                    return value === null || value === '' ? undefined : order[Number(value)];
+                });
                 if (picks.some(pick => pick === undefined)) throw new Error('Pick a definition for every term.');
                 correct = picks.every((pick, i) => pick === i);
                 givenAnswer = group.map((item, i) => `${item.front} → ${group[picks[i]].back}`).join('; ');
@@ -7917,8 +8112,7 @@
             } else {
                 givenAnswer = String(data.get('answer') || '').trim();
                 if (!givenAnswer) throw new Error('Enter a written answer first.');
-                const normalize = value => value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
-                correct = normalize(givenAnswer) === normalize(card.back);
+                correct = this.answerKey(givenAnswer) === this.answerKey(card.back);
             }
             if (correct) this.arcadeScore += 1;
             this.practiceTestAnswers.push({ card: recorded, givenAnswer, correct });
@@ -7974,10 +8168,10 @@
                 labels.add(back);
                 return true;
             }).slice(0, 8);
-            this.memoryCards = selectedCards.flatMap((card, index) => [
+            this.memoryCards = this.shuffleCards(selectedCards.flatMap((card, index) => [
                 { pair: index, label: card.front },
                 { pair: index, label: card.back }
-            ]).sort(() => Math.random() - 0.5);
+            ]));
             this.memoryRevealed = [];
             this.memoryMatched = new Set();
             this.memoryLock = false;
@@ -8108,7 +8302,7 @@
             }
             const choices = [card];
             const distractors = this.pickDistractorCards(card, this.arcadeCards, 3);
-            this.arcadeOptions = [...choices, ...distractors].sort(() => Math.random() - 0.5);
+            this.arcadeOptions = this.shuffleCards([...choices, ...distractors]);
             this.arcadeOptions.forEach((option, index) => {
                 const button = document.createElement('button');
                 button.className = 'secondary-btn';
@@ -8122,6 +8316,15 @@
             content.append(progress, question, choicesContainer, feedback);
         }
 
+        shuffleCards(cards) {
+            const shuffled = [...cards];
+            for (let i = shuffled.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+            }
+            return shuffled;
+        }
+
         answerKey(text) {
             return String(text ?? '').normalize('NFKC').trim().replace(/\s+/g, ' ').replace(/[.!?;:,]+$/, '').toLowerCase();
         }
@@ -8130,7 +8333,7 @@
         pickDistractorCards(card, pool, count) {
             const used = new Set([this.answerKey(card.back)]);
             const picks = [];
-            for (const item of [...(pool || [])].sort(() => Math.random() - 0.5)) {
+            for (const item of this.shuffleCards(pool || [])) {
                 if (picks.length >= count) break;
                 if (!item || item === card) continue;
                 const key = this.answerKey(item.back);

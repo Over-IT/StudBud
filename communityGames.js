@@ -79,7 +79,7 @@
                 { id: 'hat_bucket', name: 'Bucket Hat', icon: 'fa-hat-cowboy-side', price: 75, type: 'hat' },
                 { id: 'hat_astronaut', name: 'Space Helmet', icon: 'fa-user-astronaut', price: 210, type: 'hat' },
                 { id: 'hat_cosmic', name: 'Cosmic Crown', icon: 'fa-crown', price: 720, type: 'hat' },
-                { id: 'acc_aura', name: 'Mythic Aura', icon: 'fa-infinity', price: 760, type: 'effect' },
+                { id: 'acc_aura', name: 'Celestial Gate', icon: 'fa-infinity', price: 760, type: 'effect', description: 'A rotating star gate with counter-orbiting constellations' },
                 { id: 'acc_prism_effect', name: 'Prism Pulse', icon: 'fa-circle-nodes', price: 680, type: 'effect' },
                 { id: 'acc_frost_effect', name: 'Frost Nova', icon: 'fa-snowflake', price: 420, type: 'effect' },
                 { id: 'acc_ember_effect', name: 'Ember Halo', icon: 'fa-fire-flame-curved', price: 500, type: 'effect' },
@@ -89,13 +89,17 @@
                 { id: 'acc_snowflake_effect', name: 'Snowflake Orbit', icon: 'fa-snowflake', price: 210, type: 'effect', description: 'Six-point crystals orbiting slowly' },
                 { id: 'acc_electric_effect', name: 'Electric Arc', icon: 'fa-bolt', price: 340, type: 'effect', description: 'Zigzag bolts crackling around you' },
                 { id: 'acc_solar_effect', name: 'Solar Crown', icon: 'fa-sun', price: 520, type: 'effect', description: 'Pulsing sun rays and golden sparks' },
-                { id: 'acc_vortex_effect', name: 'Vortex Bloom', icon: 'fa-hurricane', price: 760, type: 'effect', description: 'Spiraling rings and orbiting gems' },
+                { id: 'acc_vortex_effect', name: 'Vortex Bloom', icon: 'fa-hurricane', price: 760, type: 'effect', description: 'A three-armed dimensional spiral pulling gems inward' },
                 { id: 'acc_cloud_effect', name: 'Cloud Nine', icon: 'fa-cloud', price: 85, type: 'effect', description: 'Soft cloud puffs pulsing around you' },
                 { id: 'acc_confetti_effect', name: 'Confetti Carnival', icon: 'fa-shapes', price: 145, type: 'effect', description: 'Tumbling colorful confetti in a halo' },
                 { id: 'acc_sakura_effect', name: 'Sakura Bloom', icon: 'fa-spa', price: 230, type: 'effect', description: 'Pink petals orbiting like a blossom' },
                 { id: 'acc_pixel_effect', name: 'Pixel Pulse', icon: 'fa-gamepad', price: 360, type: 'effect', description: 'Neon squares dancing in a stepped orbit' },
                 { id: 'acc_meteor_effect', name: 'Meteor Halo', icon: 'fa-meteor', price: 560, type: 'effect', description: 'Golden shooting stars circling you' },
-                { id: 'acc_aurora_effect', name: 'Aurora Veil', icon: 'fa-rainbow', price: 780, type: 'effect', description: 'Flowing mint and violet rings around you' },
+                { id: 'acc_aurora_effect', name: 'Aurora Veil', icon: 'fa-rainbow', price: 780, type: 'effect', description: 'Layered northern-light curtains waving above a star field' },
+                { id: 'acc_storm_effect', name: 'Personal Tempest', icon: 'fa-cloud-bolt', price: 900, type: 'effect', description: 'An overhead thundercloud with endless rain, splashes and occasional lightning' },
+                { id: 'acc_blackhole_effect', name: 'Event Horizon', icon: 'fa-circle', price: 880, type: 'effect', description: 'A dark gravity well with a molten accretion disk and falling stardust' },
+                { id: 'acc_firefly_effect', name: 'Firefly Garden', icon: 'fa-seedling', price: 150, type: 'effect', description: 'Fireflies drift along independent paths with softly glowing wings' },
+                { id: 'acc_jellyfish_effect', name: 'Sky Jellyfish', icon: 'fa-water', price: 600, type: 'effect', description: 'Bioluminescent jellyfish bob above you with flowing tentacles' },
                 { id: 'acc_rune_effect', name: 'Arcane Runes', icon: 'fa-wand-magic-sparkles', price: 390, type: 'effect', description: 'Rotating geometric runes with glowing centers' },
                 { id: 'acc_lunar_effect', name: 'Lunar Eclipse', icon: 'fa-moon', price: 640, type: 'effect', description: 'Silver crescent moons in a blue halo' },
                 { id: 'acc_glasses', name: 'Round Glasses', icon: 'fa-glasses', price: 70, type: 'accessory' },
@@ -393,6 +397,10 @@
 
         async buyMysteryItem(box = 'basic') {
             const { data, error } = await this.getClient().rpc('studbud_buy_mystery_item', { p_box: box });
+            if (error && /You already own every item that box can contain!?/.test(error.message)) {
+                const profile = await this.getPlayerProfile();
+                return { ...profile, collection_complete: true, completed_box: box };
+            }
             if (error) throw new Error(`Could not open mystery capsule: ${error.message}`);
             return data;
         }

@@ -265,7 +265,7 @@
             this.preview = Boolean(options.preview);
             this.returnFocus = document.activeElement;
             this.correct = 0;
-            this.reward = Math.min(100, Math.max(1, Number(options.questionReward ?? this.room.state?.question_reward) || 20));
+            this.reward = Math.min(500, Math.max(1, Math.round(Number(options.questionReward ?? this.room.state?.question_reward) || 20)));
             this.mode = this.room.mode;
             this.code = this.room.room_code;
             this.seed = Number.isInteger(options.seed) ? options.seed >>> 0 : hashStr(`${this.code}:${this.mode}`);
@@ -758,6 +758,7 @@
                     }
                 }
                 else if (target.classList.contains('mpg-test-restart') && this.testing) this.onRestart?.();
+                else if (target.classList.contains('mpg-leave') && this.practice && !this.testing && !this.over) this.finish();
                 else if (target.classList.contains('mpg-leave') || target.classList.contains('mpg-exit')) this.onLeave?.();
                 else if (target.classList.contains('mpg-end')) this.hostEnd();
             });
@@ -782,7 +783,7 @@
                         </div></details>
                         ${this.testing ? `<details class="mpg-test-tools"><summary>Tools</summary><div class="mpg-test-panel"><div><button type="button" class="mpg-test-pause">Pause</button>${this.onRestart ? '<button type="button" class="mpg-test-restart">Restart</button>' : ''}</div><pre class="mpg-test-stats"></pre></div></details>` : ''}
                         <button type="button" class="mpg-end ${this.isHost && !this.practice ? '' : 'hidden'}">End match</button>
-                        <button type="button" class="mpg-leave">${this.practice ? 'Close' : 'Leave'}</button>
+                        <button type="button" class="mpg-leave">${this.testing ? 'Close test' : this.practice ? 'End game' : 'Leave'}</button>
                     </div>
                 </div>
                 <ol class="mpg-board" id="mpg-match-standings" aria-label="Match standings"></ol>
@@ -1140,25 +1141,31 @@
         renderResults() {
             if (this.preview) return;
             const panel = this.overlay.querySelector('.mpg-results');
+            const scrollTop = panel.querySelector('.mpg-results-card')?.scrollTop || 0;
             const focusSummary = panel.contains(document.activeElement) && document.activeElement.tagName === 'SUMMARY';
             const summaryOpen = panel.querySelector('.mpg-summary')?.open;
             const rows = this.standingsCache || this.standings();
             const winner = rows[0];
+            const tied = winner && rows.filter(row => this.metric(row) === this.metric(winner)).length > 1;
+            const title = this.game.teamsOn && this.game.teamTd
+                ? this.game.teamTd[0] === this.game.teamTd[1] ? 'Teams tied!' : `${this.game.teamTd[0] > this.game.teamTd[1] ? 'Blue' : 'Red'} team wins!`
+                : winner ? tied ? 'First-place tie!' : `${winner.n} wins!` : 'Game over';
             panel.classList.remove('hidden');
             panel.innerHTML = `<div class="mpg-results-card">
-                <small>Match over</small>
-                <h2>${winner ? `${esc(winner.n)} wins!` : 'Game over'}</h2>
-                <ol>${rows.map((row, i) => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${i + 1}</span><img class="mpg-player-avatar" src="${avatarUrl(row)}" alt="" draggable="false"><strong>${esc(row.n)} ${accountTagMarkup(row.username)}</strong><b>${this.valueText(row)}</b><em>${this.rewards ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
-                <p class="mpg-accuracy">${this.answered ? Math.round(this.correct / this.answered * 100) : 0}% correct · ${this.correct} correct · ${this.answered} answered</p>
+                <small>${this.testing ? 'Test finished' : this.practice ? 'Solo game complete' : 'Match over'}</small>
+                <h2>${esc(title)}</h2>
+                <ol>${rows.map(row => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${rows.findIndex(other => this.metric(other) === this.metric(row)) + 1}</span><img class="mpg-player-avatar" src="${avatarUrl(row)}" alt="" draggable="false"><strong>${esc(row.n)} ${accountTagMarkup(row.username)}</strong><b>${this.valueText(row)}</b><em>${this.rewards ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
+                <p class="mpg-accuracy">${this.answered ? `${Math.round(this.correct / this.answered * 100)}% correct` : 'No answers submitted'} · ${this.correct} correct · ${Math.max(0, this.answered - this.correct)} incorrect · ${this.answered} answered</p>
                 <details class="mpg-summary"><summary>Full game summary</summary>
                     <p>${Math.round(this.t)} seconds played · ${(this.questionHistory || []).filter(answer => answer.correct === null).length} skipped</p>
                     ${questionHistoryMarkup(this.questionHistory)}
                 </details>
                 <p>${this.practice ? 'Local results only. Solo games and admin tests do not award coins.' : this.rewards ? 'Coins have been added to your multiplayer wallet.' : 'Tallying coin rewards…'}</p>
-                <button type="button" class="mpg-exit">Back to lobby</button>
+                <button type="button" class="mpg-exit">${this.practice ? 'Back to game setup' : 'Back to lobby'}</button>
             </div>`;
             panel.querySelector('.mpg-summary').open = Boolean(summaryOpen);
             panel.querySelector(focusSummary ? '.mpg-summary summary' : '.mpg-exit').focus({ preventScroll: true });
+            panel.querySelector('.mpg-results-card').scrollTop = scrollTop;
         }
 
         // ---------- main loop ----------
@@ -1506,6 +1513,11 @@
 
     // Side-on character. (x, y) is the top-left of the body box.
     const COSMETIC_PARTICLES = {
+        acc_aura: { shape: 'gate', colors: ['#67e8f9', '#c4b5fd', '#fef3c7'] },
+        acc_storm_effect: { shape: 'storm', colors: ['#475569', '#7dd3fc', '#fef08a'] },
+        acc_blackhole_effect: { shape: 'blackhole', colors: ['#fb923c', '#c084fc', '#fef3c7'] },
+        acc_firefly_effect: { shape: 'firefly', colors: ['#bef264', '#fef08a', '#86efac'] },
+        acc_jellyfish_effect: { shape: 'jellyfish', colors: ['#67e8f9', '#c084fc', '#f9a8d4'] },
         acc_prism_effect: { shape: 'diamond', colors: ['#22d3ee', '#c084fc'] },
         acc_frost_effect: { shape: 'snowflake', colors: ['#bae6fd', '#60a5fa'] },
         acc_ember_effect: { shape: 'flame', colors: ['#fb923c', '#ef4444'] },
@@ -1607,17 +1619,78 @@
         if (!def) return;
         ctx.save();
         const alpha = ctx.globalAlpha;
-        if (def.shape === 'ribbon') {
+        if (def.shape === 'storm') {
+            const cloudY = cy - ry * 1.5, sway = Math.sin(time * .8) * rx * .08;
+            for (let i = 0; i < 16; i++) {
+                const phase = (time * .9 + i * .618) % 1;
+                const x = cx + sway + Math.sin(i * 17) * rx * .85 - phase * rx * .12;
+                const y = cloudY + ry * .25 + phase * ry * 2.05;
+                ctx.globalAlpha = alpha * (1 - phase * .6);
+                ctx.strokeStyle = '#7dd3fc'; ctx.lineWidth = Math.max(.7, rx * .045);
+                ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - rx * .05, y + ry * .16); ctx.stroke();
+                if (phase > .86) {
+                    ctx.beginPath(); ctx.ellipse(x, cy + ry * .7, rx * (phase - .86) * 1.3, ry * .035, 0, 0, TAU); ctx.stroke();
+                }
+            }
+            ctx.globalAlpha = alpha;
+            const cloud = ctx.createLinearGradient(0, cloudY - ry * .5, 0, cloudY + ry * .2);
+            cloud.addColorStop(0, '#94a3b8'); cloud.addColorStop(1, '#334155');
+            ctx.fillStyle = cloud;
+            ctx.beginPath();
+            ctx.ellipse(cx + sway, cloudY, rx, ry * .25, 0, 0, TAU);
+            ctx.ellipse(cx - rx * .4 + sway, cloudY - ry * .15, rx * .45, ry * .3, 0, 0, TAU);
+            ctx.ellipse(cx + rx * .2 + sway, cloudY - ry * .24, rx * .48, ry * .35, 0, 0, TAU); ctx.fill();
+            if (time % 4 < .18) {
+                ctx.save(); ctx.translate(cx + rx * .4, cloudY + ry * .55);
+                ctx.fillStyle = '#fef08a'; drawCosmeticParticle(ctx, 'bolt', rx * .28); ctx.restore();
+            }
+        } else if (def.shape === 'blackhole' || def.shape === 'gate') {
+            const hole = def.shape === 'blackhole';
+            ctx.fillStyle = hole ? '#080b18' : 'rgba(76,29,149,.14)';
+            ctx.beginPath(); ctx.ellipse(cx, cy, rx * .8, ry * .85, 0, 0, TAU); ctx.fill();
+            for (let ring = 0; ring < 3; ring++) {
+                ctx.strokeStyle = def.colors[ring]; ctx.lineWidth = Math.max(1, rx * (hole ? .09 : .045));
+                ctx.globalAlpha = alpha * (.6 + ring * .12);
+                ctx.beginPath(); ctx.ellipse(cx, cy, rx * (1 + ring * .08), ry * (hole ? .3 + ring * .08 : .9 + ring * .06), hole ? -.3 : 0, 0, TAU); ctx.stroke();
+            }
+            for (let i = 0; i < 12; i++) {
+                const angle = time * (i % 2 ? .5 : -.7) + i * TAU / 12;
+                const radius = hole ? 1.35 - (time * .3 + i / 12) % 1 * .75 : 1.12;
+                ctx.save(); ctx.translate(cx + Math.cos(angle) * rx * radius, cy + Math.sin(angle) * ry * radius);
+                ctx.rotate(angle); ctx.globalAlpha = alpha * .85;
+                ctx.fillStyle = def.colors[i % 3];
+                drawCosmeticParticle(ctx, hole ? 'meteor' : 'rune', rx * (hole ? .07 : .12)); ctx.restore();
+            }
+        } else if (def.shape === 'firefly' || def.shape === 'jellyfish') {
+            for (let i = 0; i < (def.shape === 'firefly' ? 9 : 3); i++) {
+                const jelly = def.shape === 'jellyfish', angle = i * 2.4 + time * .22;
+                const x = cx + Math.cos(angle) * rx * (jelly ? .85 : .8 + Math.sin(time + i) * .3);
+                const y = cy + Math.sin(angle * 1.3 + time * .4) * ry * .65 - (jelly ? ry * .6 : 0);
+                const size = rx * (jelly ? .22 : .06);
+                ctx.fillStyle = def.colors[i % 3]; ctx.strokeStyle = ctx.fillStyle;
+                ctx.globalAlpha = alpha * (.6 + Math.sin(time * 2 + i) * .25);
+                ctx.beginPath(); ctx.ellipse(x, y, size * (jelly ? 1 : 2.5), size, 0, jelly ? Math.PI : 0, TAU); ctx.fill();
+                if (jelly) {
+                    ctx.lineWidth = Math.max(.7, rx * .035);
+                    for (let leg = -1; leg <= 1; leg++) {
+                        ctx.beginPath(); ctx.moveTo(x + leg * size * .6, y);
+                        ctx.bezierCurveTo(x + leg * size, y + size, x + Math.sin(time * 3 + i + leg) * size, y + size * 1.8, x + leg * size * .7, y + size * 2.6); ctx.stroke();
+                    }
+                } else {
+                    ctx.globalAlpha *= .25;
+                    ctx.beginPath(); ctx.arc(x, y, size * 3, 0, TAU); ctx.fill();
+                }
+            }
+        } else if (def.shape === 'ribbon') {
             for (let band = 0; band < def.colors.length; band++) {
                 ctx.strokeStyle = def.colors[band];
                 ctx.lineWidth = Math.max(1, rx * .09);
                 ctx.globalAlpha = alpha * .65;
                 ctx.beginPath();
-                for (let i = 0; i <= 32; i++) {
-                    const a = i / 32 * TAU;
-                    const wave = .8 + Math.sin(time * 3 + a * 3 + band) * .12 + band * .06;
-                    const x = cx + Math.cos(a) * rx * wave;
-                    const y = cy + Math.sin(a) * ry * wave;
+                for (let i = 0; i <= 40; i++) {
+                    const a = i / 40;
+                    const x = cx + (a * 2 - 1) * rx * 1.15;
+                    const y = cy - ry * .8 + Math.sin(a * TAU * 1.5 + time + band * .6) * ry * .35 + band * ry * .22;
                     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
                 }
                 ctx.stroke();
@@ -1648,8 +1721,11 @@
         } else {
             for (let i = 0; i < 7; i++) {
                 const a = time * .8 + i * TAU / 7;
-                let x = cx + Math.cos(a) * rx;
-                let y = cy + Math.sin(a) * ry;
+                const falling = ['petal', 'confetti', 'snowflake'].includes(def.shape);
+                const rising = def.shape === 'flame' || def.shape === 'bubble';
+                const phase = (time * .25 + i / 7) % 1;
+                let x = cx + Math.cos(a) * rx * (falling || rising ? .8 : 1);
+                let y = cy + (falling ? phase * 2 - 1 : rising ? 1 - phase * 2 : Math.sin(a)) * ry;
                 if (def.shape === 'pixel') { x = Math.round(x / 3) * 3; y = Math.round(y / 3) * 3; }
                 ctx.save();
                 ctx.translate(x, y);
@@ -1727,7 +1803,6 @@
         ctx.fillStyle = 'rgba(0,0,0,.25)';
         ctx.fillRect(x + 2, y + h - 2, w - 4, 3);
         if (c.skin?.mythic) drawMythicAura(ctx, cx, y + h * 0.45, Math.max(w, h) * 0.75, c.skin.mythic, time);
-        if (c.acc === 'acc_aura') drawMythicAura(ctx, cx, y + h * 0.45, Math.max(w, h) * 0.85, ['#22d3ee', '#f43f5e'], time + 1.3);
         drawCosmeticParticles(ctx, c.acc, cx, y + h * .5, w * .8, h * .55, time);
         if (c.acc === 'acc_wings') {
             ctx.fillStyle = 'rgba(226,232,240,.9)';
@@ -1836,7 +1911,7 @@
         ctx.fillStyle = 'rgba(0,0,0,.3)';
         ctx.beginPath(); ctx.ellipse(2, 4, r, r * 0.8, 0, 0, TAU); ctx.fill();
         if (c.skin?.mythic) drawMythicAura(ctx, 0, 0, r * 1.7, c.skin.mythic, time);
-        if (c.acc === 'acc_aura') drawMythicAura(ctx, 0, 0, r * 1.9, ['#22d3ee', '#f43f5e'], time + 1.3);
+        drawCosmeticParticles(ctx, c.acc, 0, 0, r * 1.45, r * 1.45, time);
         if (c.acc === 'acc_sparkles') {
             for (let i = 0; i < 5; i++) {
                 const angle = time * 1.8 + i * TAU / 5;
@@ -1850,7 +1925,6 @@
         }
         ctx.save();
         ctx.rotate(aim);
-        drawCosmeticParticles(ctx, c.acc, 0, 0, r * 1.45, r * 1.45, time);
         if (c.acc === 'acc_cape') { ctx.fillStyle = '#dc2626'; ctx.beginPath(); ctx.moveTo(-r * 0.2, -r * 0.9); ctx.lineTo(-r * 1.7, 0); ctx.lineTo(-r * 0.2, r * 0.9); ctx.fill(); }
         if (c.acc === 'acc_wings') { ctx.fillStyle = 'rgba(226,232,240,.9)'; const f = Math.sin(time * 10) * 0.12; ctx.beginPath(); ctx.ellipse(-r * 0.3, -r * 1.15, r * 0.35, r * (1 + f), 0.4, 0, TAU); ctx.ellipse(-r * 0.3, r * 1.15, r * 0.35, r * (1 + f), -0.4, 0, TAU); ctx.fill(); }
         if (c.acc === 'acc_backpack') { ctx.fillStyle = '#b45309'; roundRect(ctx, -r * 1.25, -r * 0.5, r * 0.7, r, 3); ctx.fill(); }

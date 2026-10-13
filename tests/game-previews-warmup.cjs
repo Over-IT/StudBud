@@ -383,7 +383,8 @@ const sql = fs.readFileSync(path.join(root, 'supabase-setup.sql'), 'utf8');
 const addedParticles = [
     'acc_cloud_effect', 'acc_confetti_effect', 'acc_sakura_effect', 'acc_pixel_effect',
     'acc_meteor_effect', 'acc_aurora_effect', 'acc_rune_effect', 'acc_lunar_effect',
-    'acc_dew_effect', 'acc_leaf_effect', 'acc_snowflake_effect', 'acc_electric_effect', 'acc_solar_effect', 'acc_vortex_effect'
+    'acc_dew_effect', 'acc_leaf_effect', 'acc_snowflake_effect', 'acc_electric_effect', 'acc_solar_effect', 'acc_vortex_effect',
+    'acc_storm_effect', 'acc_blackhole_effect', 'acc_firefly_effect', 'acc_jellyfish_effect'
 ];
 const rarityOrder = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
 for (const id of addedParticles) {
@@ -416,7 +417,7 @@ const retiredTrails = [
     'acc_dust_trail', 'acc_confetti_trail', 'acc_sakura_trail', 'acc_pixel_trail',
     'acc_meteor_trail', 'acc_aurora_trail'
 ];
-assert.equal(catalog.filter(item => item.type === 'effect').length, 24);
+assert.equal(catalog.filter(item => item.type === 'effect').length, 28);
 assert.ok(!catalog.some(item => item.type === 'trail' || retiredTrails.includes(item.id)));
 assert.ok(!sandbox.window.StudBudCommunityGames.constructor.boxes.some(box => box.id === 'trail'));
 assert.doesNotMatch(source, /\['trail',|trail: 'Trails'|item\.type === 'trail'/);
@@ -447,6 +448,10 @@ const particleTrace = (id, top, time, face = 1) => {
             if (key in target) return target[key];
             if (key === 'save') return () => stack.push({ ...state });
             if (key === 'restore') return () => { Object.assign(state, stack.pop()); };
+            if (key === 'createLinearGradient' || key === 'createRadialGradient') return (...args) => {
+                commands.push([key, ...args]);
+                return { addColorStop: (...stops) => commands.push(['addColorStop', ...stops]) };
+            };
             return (...args) => {
                 for (const arg of args) if (typeof arg === 'number') assert.ok(Number.isFinite(arg), `${id} ${key} geometry is finite`);
                 commands.push([key, ...args]);
@@ -664,6 +669,22 @@ for (const bot of kickoff.bots) {
 }
 console.log('Forced bot respawns, parkour fall recovery and soccer kickoff resets passed.');
 
+const wall = [{ x: 100, y: 50, w: 50, h: 100 }];
+assert.equal(app.botLineClear(50, 100, 200, 100, wall), false, 'bots cannot shoot through cover');
+assert.equal(app.botLineClear(50, 25, 200, 25, wall), true);
+const navigating = { x: 50, y: 100, r: 15, ai: {} };
+for (let frame = 0; frame < 300; frame++) {
+    app.moveNavigatingBot(navigating, 200, 100, 100, 1 / 30, wall);
+    assert.ok(!A.util.overlap({ x: navigating.x - 15, y: navigating.y - 15, w: 30, h: 30 }, wall[0]), 'detour cannot cut through cover');
+}
+assert.ok(Math.hypot(navigating.x - 200, navigating.y - 100) < 10, `bots make progress around a blocked direct route: ${JSON.stringify(navigating)}`);
+const spawn = demoFor('shooter');
+const originalRandom = A.util.rand;
+A.util.rand = () => 0;
+app.placeShooterBot({ W: 500, H: 500, walls: [{ x: 0, y: 0, w: 230, h: 230 }] }, spawn.bots[0], 0);
+assert.ok(!A.util.overlap({ x: spawn.bots[0].x - 22, y: spawn.bots[0].y - 22, w: 44, h: 44 }, { x: 0, y: 0, w: 230, h: 230 }), 'fallback spawn is also collision-safe');
+A.util.rand = originalRandom;
+
 for (const mode of Object.keys(A.games)) {
     for (const testing of [false, true]) {
         const demo = demoFor(mode);
@@ -688,7 +709,7 @@ for (const mode of Object.keys(A.games)) {
             demo.game.update(1 / 30);
         }
         console.log(`${mode} ${testing ? 'testing' : 'solo'} three-minute bot objectives: ${demo.bots.map(bot => bot.goal).join(', ')}`);
-        if (mode === 'market') assert.ok(demo.bots.every(bot => bot.deliveries > 0), 'every market bot must complete real deliveries over a full run');
+        if (mode === 'market') assert.ok(demo.bots.every(bot => bot.deliveries > 0), `every market bot must complete real deliveries over a full run: ${JSON.stringify(demo.bots.filter(bot => !bot.deliveries))}`);
         if (mode === 'miner') assert.ok(demo.bots.every(bot => bot.goal > 0), 'every mining bot must bank real crystals');
         if (mode === 'sports') assert.ok(demo.bots.some(bot => bot.goal > 0), 'soccer bots must score team goals');
         if (mode === 'frenzy' || mode === 'fishing' || mode === 'river' || mode === 'hack') {
@@ -696,6 +717,7 @@ for (const mode of Object.keys(A.games)) {
         }
         if (mode === 'crypto') {
             assert.ok(demo.bots.every(bot => bot.ai.trades > 0), 'every trading bot must buy or sell assets');
+            assert.ok(demo.bots.every(bot => bot.ai.researchAnswers > 0), 'trading bots replenish funds by researching');
             for (const bot of demo.bots) assert.equal(bot.score, Math.round(bot.ai.cash + bot.ai.units.reduce((sum, units, asset) => sum + units * demo.game.price(asset, demo.clock), 0)), 'trading scores use actual portfolios');
         }
         sandbox.Date = Date;

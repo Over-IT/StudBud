@@ -327,6 +327,7 @@
                     <div class="planner-grid">
                         <div class="glass-card full-width">
                             <h2>Priorities</h2>
+                            <p class="settings-hint">Scores combine the due date, your chosen priority and current class grade. Open a task below to edit it; completed and graded work is excluded.</p>
                             <div class="eisenhower-matrix">
                                 <div class="matrix-quadrant quadrant-1">
                                     <h4>Do first</h4>
@@ -337,11 +338,11 @@
                                     <ul id="quad-2-list"></ul>
                                 </div>
                                 <div class="matrix-quadrant quadrant-3">
-                                    <h4>Quick / delegate</h4>
+                                    <h4>Quick wins</h4>
                                     <ul id="quad-3-list"></ul>
                                 </div>
                                 <div class="matrix-quadrant quadrant-4">
-                                    <h4>Skip if needed</h4>
+                                    <h4>Lower urgency</h4>
                                     <ul id="quad-4-list"></ul>
                                 </div>
                             </div>
@@ -361,6 +362,7 @@
                                 </select>
                                 <span id="assignment-result-count" class="assignment-result-count" aria-live="polite"></span>
                             </div>
+                            <div class="table-scroll" tabindex="0" role="region" aria-label="Assignments table">
                             <table id="assignment-table">
                                 <thead>
                                     <tr>
@@ -368,7 +370,7 @@
                                         <th>Assignment</th>
                                         <th>Course</th>
                                         <th>Due / Score</th>
-                                        <th>Smart Score (P)</th>
+                                        <th>Priority score</th>
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
@@ -376,6 +378,7 @@
                                     <tr><td colspan="6" class="empty-state">No assignments found.</td></tr>
                                 </tbody>
                             </table>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -425,7 +428,8 @@
                         <button id="create-deck-btn" class="primary-btn"><i class="fas fa-folder-plus"></i> New Deck</button>
                     </div>
                     <p class="study-guidance-intro">Study shuffles new and due cards using Anki-style scheduling and daily limits. Nothing scheduled? Your next reviews will appear when due; Practice &amp; Arcade quizzes and games can still use every card.</p>
-                    <section class="glass-card community-deck-browser">
+                    <details class="glass-card community-deck-browser">
+                        <summary>Browse community decks</summary>
                         <div class="community-heading">
                             <div><h3>Community decks</h3><p>Find sets shared by StudBud students. Your own decks stay private unless you choose to share them.</p></div>
                             <span class="community-badge"><i class="fas fa-users"></i> Shared library</span>
@@ -437,12 +441,17 @@
                         </form>
                         <p id="community-deck-status" class="community-status" role="status" aria-live="polite">Search for a set, or browse the most-studied decks.</p>
                         <div id="community-deck-results" class="community-deck-results"></div>
-                    </section>
+                    </details>
                     <section id="deck-recommendations" class="glass-card deck-recommendations hidden" aria-labelledby="deck-recommendations-title">
                         <h3 id="deck-recommendations-title"><i class="fas fa-bullseye"></i> Recommended for upcoming tests</h3>
                         <p class="settings-hint">Based on your quizzes, tests, grades and target GPA. Tag a deck with a class or test to see it here.</p>
                         <div id="deck-recommendation-list" class="deck-recommendation-list"></div>
                     </section>
+                    <div class="my-deck-heading">
+                        <h3>Your decks</h3>
+                        <label for="my-deck-search" class="sr-only">Search your decks by title or class</label>
+                        <input id="my-deck-search" type="search" maxlength="100" placeholder="Search your decks or classes">
+                    </div>
                     <div id="deck-grid" class="deck-grid">
                         <div class="empty-state glass-card full-width">No decks available. Create one or import flashcards.</div>
                     </div>
@@ -501,24 +510,16 @@
                         <canvas id="grade-progress-chart" aria-label="Grade progress chart"></canvas>
                         <p id="grade-progress-empty" class="chart-empty-message hidden">Your dated assignment scores will appear here.</p>
                     </div>
-                    <div class="analytics-grid">
-                        <div class="glass-card chart-container">
-                            <h3>BKT Mastery & Retrievability Decay</h3>
-                            <canvas id="bkt-decay-chart"></canvas>
-                        </div>
-                        <div class="glass-card chart-container">
-                            <h3>Projected Exam Scores</h3>
-                            <canvas id="exam-projection-chart"></canvas>
-                        </div>
-                        <div class="glass-card chart-container">
-                            <h3>Study Velocity & Time-on-Task</h3>
-                            <canvas id="velocity-chart"></canvas>
-                        </div>
-                        <div class="glass-card chart-container">
-                            <h3>Burnout Index Tracking</h3>
-                            <canvas id="burnout-chart"></canvas>
-                        </div>
-                    </div>
+                    <section class="glass-card">
+                        <h3>Your study activity</h3>
+                        <p class="settings-hint">Based on your saved sessions, not predicted exam grades. Game accuracy excludes skipped questions.</p>
+                        <div id="study-analytics-summary" class="analytics-summary"></div>
+                    </section>
+                    <section class="glass-card">
+                        <h3>Deck readiness</h3>
+                        <p class="settings-hint">Scheduled cards follow your daily limits. Lapses count times a reviewed card needed relearning; they are not an exam score.</p>
+                        <div id="study-analytics-decks" class="study-analytics-decks"></div>
+                    </section>
                 </section>
 
                 <section id="leaderboard-view" class="view hidden">
@@ -644,12 +645,11 @@
                                         <div class="multiplayer-goals">
                                             <label class="time-slider">Time limit: <strong id="host-game-time-value">5 min</strong><input id="host-game-time" name="timeLimit" type="range" min="1" max="60" step="1" value="5"></label>
                                                                                     </div>
-                                                                                    <label><span id="host-game-resource-label">Energy per correct answer</span><select id="host-game-reward" name="questionReward">
-                                                                                        <option value="10">10 (hard)</option>
-                                                                                        <option value="20" selected>20 (normal)</option>
-                                                                                        <option value="30">30 (easy)</option>
-                                                                                        <option value="50">50 (very easy)</option>
-                                                                                    </select></label>
+                                        <div class="question-reward-control">
+                                            <label id="host-game-resource-label" for="host-game-reward">Energy per correct answer</label>
+                                            <div class="question-reward-inputs"><input type="range" min="1" max="500" step="1" value="20" data-reward-slider="host-game-reward" aria-label="Energy per correct answer slider"><input id="host-game-reward" name="questionReward" type="number" min="1" max="500" step="1" value="20" required></div>
+                                            <small>1–500 per answer. More resources means fewer refill questions; it does not change the questions.</small>
+                                        </div>
                                                                                     <button class="primary-btn" type="submit"><i class="fas fa-door-open"></i> Create room</button>
                                     </form>
                                     </div>
@@ -666,18 +666,13 @@
                                                     <option value="3600">60 minutes</option>
                                                 </select>
                                             </label>
-                                            <label><span id="solo-game-resource-label">Energy per correct answer</span>
-                                                <select name="questionReward">
-                                                    <option value="10">10 · challenging</option>
-                                                    <option value="20" selected>20 · balanced</option>
-                                                    <option value="30">30 · relaxed</option>
-                                                    <option value="50">50 · generous</option>
-                                                    <option value="75">75 · very generous</option>
-                                                    <option value="100">100 · full refill</option>
-                                                </select>
-                                            </label>
+                                            <div class="question-reward-control">
+                                                <label id="solo-game-resource-label" for="solo-game-reward">Energy per correct answer</label>
+                                                <div class="question-reward-inputs"><input type="range" min="1" max="500" step="1" value="20" data-reward-slider="solo-game-reward" aria-label="Energy per correct answer slider"><input id="solo-game-reward" name="questionReward" type="number" min="1" max="500" step="1" value="20" required></div>
+                                                <small>Choose an exact amount. Resources accumulate without a cap.</small>
+                                            </div>
                                             <button class="primary-btn" type="button" data-action="start-solo-game"><i class="fas fa-play" aria-hidden="true"></i> Start solo game</button>
-                                            <small>Correct answers refill energy. Solo games award no multiplayer coins.</small>
+                                            <small>Correct answers give the resource shown above. End game opens your summary. Solo games award no multiplayer coins.</small>
                                         </form>
                                         <canvas id="multiplayer-game-canvas" width="900" height="360" aria-label="Animated preview of the selected multiplayer game"></canvas>
                                     </div>
@@ -689,7 +684,7 @@
                                         <label>6-character room code<input id="join-game-code" name="roomCode" type="text" inputmode="text" autocomplete="off" minlength="6" maxlength="6" pattern="[A-HJ-NP-Z2-9]{6}" required></label>
                                         <button class="secondary-btn" type="submit"><i class="fas fa-right-to-bracket"></i> Join room</button>
                                     </form>
-                                    <p>Enter the room code from your host. You’ll see the lobby and can play a warm-up while the host gets ready.</p>
+                                    <p>Ask your host for the six-character code. The lobby shows the game, time limit and resources per answer before you play. You can warm up while everyone joins.</p>
                                 </section>
                                 <p id="hosted-game-message" class="community-status" role="status" aria-live="polite"></p>
                                 <section id="hosted-game-room" class="hosted-game-room hidden" aria-live="polite">
@@ -1166,7 +1161,7 @@
                         </div>
                         <div class="form-group">
                             <label for="course-target-grade">Target grade (%) <span class="settings-hint">Optional</span></label>
-                            <input type="number" id="course-target-grade" min="0" max="100" step="0.1" placeholder="Optional">
+                            <input type="number" id="course-target-grade" min="0" max="100" step="0.01" placeholder="Optional">
                         </div>
                     </form>
                 </div>
