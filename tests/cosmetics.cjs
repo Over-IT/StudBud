@@ -109,6 +109,13 @@ assert.equal(fedora.rarity, 'uncommon');
 const hatBox = sandbox.window.StudBudCommunityGames.constructor.boxes.find(box => box.id === 'hat');
 assert.ok(sandbox.window.StudBudCommunityGames.boxPool(hatBox).some(item => item.id === fedora.id));
 assert.match(source('supabase-setup.sql'), /\('hat_fedora', 110\)/);
+const blackFedora = catalog.find(item => item.id === 'hat_fedora_black');
+assert.equal(blackFedora.name, 'Black Fedora');
+assert.equal(blackFedora.type, 'hat');
+assert.equal(blackFedora.price, fedora.price);
+assert.equal(blackFedora.rarity, fedora.rarity);
+assert.ok(sandbox.window.StudBudCommunityGames.boxPool(hatBox).some(item => item.id === blackFedora.id));
+assert.match(source('supabase-setup.sql'), /\('hat_fedora_black', 110\)/);
 
 const appSource = source('app.js');
 vm.runInContext(appSource.slice(appSource.indexOf('    class AppOrchestrator'), appSource.indexOf('    window.NexusApp ='))

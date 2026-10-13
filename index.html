@@ -1209,11 +1209,8 @@
                         <div class="form-group row-group" id="assignment-todo-fields">
                             <div class="half-width">
                                 <label for="assignment-due-date">Due date</label>
-                                <div class="date-picker-field">
-                                    <input type="date" id="assignment-due-date" aria-describedby="assignment-date-hint">
-                                    <button type="button" id="assignment-calendar-btn" class="secondary-btn" aria-label="Open due date calendar"><i class="fas fa-calendar-alt" aria-hidden="true"></i></button>
-                                </div>
-                                <small id="assignment-date-hint" class="date-picker-hint" role="status">Type a date or use the calendar button.</small>
+                                <input type="date" id="assignment-due-date" aria-describedby="assignment-date-hint">
+                                <small id="assignment-date-hint" class="date-picker-hint">Type a date or use the calendar icon in the date field.</small>
                             </div>
                             <div class="half-width">
                                 <label for="assignment-kind">Type</label>
@@ -1227,11 +1224,17 @@
                         <div class="form-group row-group hidden" id="assignment-graded-fields">
                             <div class="half-width">
                                 <label for="assignment-points">Score</label>
-                                <input type="number" id="assignment-points" step="0.01" min="0" value="0">
+                                <div class="score-number-field">
+                                    <input type="number" id="assignment-points" step="any" min="0" value="0">
+                                    <div class="score-number-arrows"><button type="button" data-score-input="assignment-points" data-score-delta="1" aria-label="Increase score by 1">▴</button><button type="button" data-score-input="assignment-points" data-score-delta="-1" aria-label="Decrease score by 1">▾</button></div>
+                                </div>
                             </div>
                             <div class="half-width">
                                 <label for="assignment-max-points">Out of</label>
-                                <input type="number" id="assignment-max-points" step="0.01" min="0.01" value="100">
+                                <div class="score-number-field">
+                                    <input type="number" id="assignment-max-points" step="any" min="0.01" value="100">
+                                    <div class="score-number-arrows"><button type="button" data-score-input="assignment-max-points" data-score-delta="1" aria-label="Increase out of by 1">▴</button><button type="button" data-score-input="assignment-max-points" data-score-delta="-1" aria-label="Decrease out of by 1">▾</button></div>
+                                </div>
                             </div>
                         </div>
                         <details class="assignment-more hidden" id="assignment-study-options">

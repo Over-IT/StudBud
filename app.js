@@ -6728,6 +6728,11 @@
             const target = event.target.closest('button, .nav-item[data-target]');
             if (!target) return;
 
+            if (target.dataset.scoreInput) {
+                this.adjustAssignmentScore(document.getElementById(target.dataset.scoreInput), Number(target.dataset.scoreDelta));
+                return;
+            }
+
             if (target.matches('[data-target]')) {
                 event.preventDefault();
                 Router.navigate(target.dataset.target.replace(/-view$/, ''));
@@ -6931,8 +6936,6 @@
                     await this.copyHostedRoomCode();
                 } else if (id === 'quick-add-task-btn') {
                     this.openAssignmentForm();
-                } else if (id === 'assignment-calendar-btn') {
-                    this.openAssignmentDatePicker();
                 } else if (id === 'save-add-another-assignment-btn') {
                     this.saveAssignmentAndContinue();
                 } else if (action === 'add-assignment-to-category') {
@@ -7041,6 +7044,11 @@
 
         handleKeydown(event) {
             if (document.body.classList.contains('mpg-active')) return;
+            if (['assignment-points', 'assignment-max-points'].includes(event.target.id) && ['ArrowUp', 'ArrowDown'].includes(event.key)) {
+                event.preventDefault();
+                this.adjustAssignmentScore(event.target, event.key === 'ArrowUp' ? 1 : -1);
+                return;
+            }
             const modalOverlay = document.getElementById('modal-container');
             const modalActive = modalOverlay && !modalOverlay.classList.contains('hidden');
             if (modalActive) {
@@ -7476,7 +7484,6 @@
             document.getElementById('assignment-name').value = assignment ? assignment.title : '';
             document.getElementById('assignment-course').value = assignment ? assignment.courseCode : courseCode;
             document.getElementById('assignment-due-date').value = assignment ? (assignment.dueDate || '').slice(0, 10) : (dueDate || localDateKey(new Date()));
-            document.getElementById('assignment-date-hint').textContent = 'Type a date or use the calendar button.';
             document.getElementById('assignment-points').value = assignment ? Number(Number(assignment.pointsEarned ?? 0).toFixed(2)) : 0;
             document.getElementById('assignment-max-points').value = assignment ? Number(Number(assignment.maxPoints ?? 100).toFixed(2)) : 100;
             document.getElementById('assignment-kind').value = assignment ? assignment.kind || 'assignment' : (kind || 'assignment');
@@ -7492,14 +7499,15 @@
             setTimeout(() => document.getElementById('assignment-name').focus(), 50);
         }
 
-        openAssignmentDatePicker() {
-            const input = document.getElementById('assignment-due-date');
-            input.focus({ preventScroll: true });
-            if (typeof input.showPicker === 'function') {
-                input.showPicker();
-            } else {
-                document.getElementById('assignment-date-hint').textContent = 'Type the date, or select the calendar icon inside the date field.';
+        adjustAssignmentScore(input, delta) {
+            const value = input.value === '' ? 0 : input.valueAsNumber;
+            if (!Number.isFinite(value)) {
+                input.reportValidity();
+                return;
             }
+            input.value = Math.max(Number(input.min), Math.round((value + delta) * 100) / 100);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
         }
 
         syncAssignmentForm() {

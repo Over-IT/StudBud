@@ -138,25 +138,36 @@ app.openAssignmentForm({ id: 'timestamp', dueDate: '2026-10-20T00:00:00Z', grade
 assert.equal(elements.get('assignment-due-date').value, '2026-10-20', 'stored timestamps remain editable dates');
 app.openAssignmentForm({ id: 'graded', dueDate: '', graded: true });
 assert.equal(elements.get('assignment-due-date').value, '', 'editing does not invent a date for undated graded work');
-let pickerOpened = 0, dateFocused = 0;
-const dateInput = elements.get('assignment-due-date');
-dateInput.focus = () => dateFocused++;
-dateInput.showPicker = () => pickerOpened++;
-app.openAssignmentDatePicker();
-assert.equal(pickerOpened, 1);
-assert.equal(dateFocused, 1);
-dateInput.showPicker = undefined;
-app.openAssignmentDatePicker();
-assert.equal(dateFocused, 2);
-assert.match(elements.get('assignment-date-hint').textContent, /Type the date/);
-dateInput.showPicker = () => { throw new Error('Picker blocked'); };
-assert.throws(() => app.openAssignmentDatePicker(), /Picker blocked/, 'picker errors reach the standard UI error handler');
+const assignmentHtml = source('index.html');
+assert.equal((assignmentHtml.match(/id="assignment-due-date"/g) || []).length, 1);
+assert.match(assignmentHtml, /<input type="date" id="assignment-due-date" aria-describedby="assignment-date-hint">/);
+assert.doesNotMatch(assignmentHtml, /assignment-calendar-btn/);
+assert.match(assignmentHtml, /Type a date or use the calendar icon in the date field\./);
+sandbox.Event = Event;
+for (const [id, min, initial] of [['assignment-points', '0', 0.46], ['assignment-max-points', '0.01', 100.25]]) {
+    assert.match(assignmentHtml, new RegExp(`id="${id}" step="any"`));
+    const events = [];
+    const input = {
+        value: String(initial), valueAsNumber: initial, min,
+        dispatchEvent: event => events.push(event.type)
+    };
+    app.adjustAssignmentScore(input, 1);
+    close(input.value, initial + 1);
+    input.valueAsNumber = Number(input.value);
+    app.adjustAssignmentScore(input, -1);
+    close(input.value, initial);
+    input.valueAsNumber = 0.01;
+    app.adjustAssignmentScore(input, -1);
+    close(input.value, Number(min));
+    assert.deepEqual(events, ['input', 'change', 'input', 'change', 'input', 'change']);
+}
+console.log('Score arrows change by whole points, preserve typed hundredths and respect minimums.');
 app.openModal = originalOpenModal;
 app.syncAssignmentForm = originalSync;
 app.updateAssignmentCategories = originalCategories;
 sandbox.Date = Date;
 for (const id of assignmentIds) elements.delete(id);
-console.log('Assignment local-today defaults, selected calendar days, saved dates, typed entry and native-picker fallback passed.');
+console.log('Assignment local-today defaults, selected calendar days, saved dates and single native date control passed.');
 const chartClasses = () => ({ toggle(name, value) { this[name] = value; } });
 const plot = { classList: chartClasses() };
 const canvas = { parentElement: plot, setAttribute(name, value) { this[name] = value; } };

@@ -30,7 +30,9 @@ The game regression suite also checks nearby King of the Hill/Soccer action keys
 
 ## Accounts and cloud sync
 
-New assignments default their due date to today in your local time zone. You can type in the date field or choose its calendar button. Adding from a calendar day keeps that selected day; editing an assignment preserves its saved date. Save & add another keeps your chosen date for quick batch entry.
+New assignments default their due date to today in your local time zone. You can type in the date field or use its single built-in calendar icon. Adding from a calendar day keeps that selected day; editing an assignment preserves its saved date. Save & add another keeps your chosen date for quick batch entry.
+
+Score and Out of arrows (including the keyboard's up/down arrows) adjust by one point. Type fractional scores directly; decimals remain valid and are saved to two decimal places.
 
 StudBud uses Supabase Auth for username/password accounts and stores each account's full app backup (classes, assignments, grades, schedules, flashcards, study history, and UI preferences) in a row protected by Row Level Security. Passwords must be at least 8 characters. Usernames are unique, case-insensitive, and limited to 3–24 letters, numbers, or underscores.
 
@@ -90,6 +92,8 @@ The usernames **overit** and **andy** display **Owner** and **Co-owner** tags on
 The shop uses theme-matched illustrated boxes and responsive cosmetic previews. Expand **Drop chances** on any box to see its rarity odds before opening it. In games, **HUD** toggles objective details, standings and control hints without hiding score, resources, refill, timer, or exit controls. Desktop games start expanded, even in compact mode; small screens and short touch-screen landscape layouts start collapsed. Host end-match controls and collapsible admin testing tools are directly accessible without a separate leaderboard menu. Study ambience lives in the study-page toolbar under **Audio**, not in a floating button over mobile content.
 
 Profile, friend, lobby, leaderboard and game-result avatars animate equipped auras, mythic skin glows and moving accessories using the same character renderer as games. Offscreen avatars and hidden browser tabs pause animation; reduced-motion preferences show a still preview. Shop character, hat and accessory previews retain your other equipped cosmetics so you can judge combinations before buying. Hats hide conflicting robot/alien antennae, and storm clouds sit above hats instead of overlapping them. The Classic Fedora is available in the hat shop and eligible mystery boxes. Rerun `supabase-setup.sql` to enable its server-side purchase/drop entry. Auras and accessories continue to share the existing accessory slot.
+
+The Black Fedora is a separate uncommon hat priced at 275 coins, matching the Classic Fedora. Apply the updated `supabase-setup.sql` to enable its purchase and mystery-box drops.
 
 Run `node tests/cosmetics.cjs` for avatar animation/lifecycle, cosmetic composition and client/server fedora-catalog regression checks.
 

@@ -1487,16 +1487,17 @@
             ctx.fillStyle = '#111827'; ctx.fillRect(-r * 0.8, -r * 1.5, r * 1.6, r * 1.85);
             fill('#111827', () => ctx.ellipse(0, r * 0.3, r * 1.3, r * 0.28, 0, 0, TAU));
             ctx.fillStyle = '#dc2626'; ctx.fillRect(-r * 0.8, -r * 0.1, r * 1.6, r * 0.3);
-        } else if (hat === 'hat_fedora') {
-            fill('#78350f', () => ctx.ellipse(0, r * .3, r * 1.5, r * .25, -.04, 0, TAU));
-            fill('#a16207', () => {
+        } else if (hat === 'hat_fedora' || hat === 'hat_fedora_black') {
+            const black = hat === 'hat_fedora_black';
+            fill(black ? '#09090b' : '#78350f', () => ctx.ellipse(0, r * .3, r * 1.5, r * .25, -.04, 0, TAU));
+            fill(black ? '#18181b' : '#a16207', () => {
                 ctx.moveTo(-r * .85, r * .25); ctx.lineTo(-r * .65, -r * .95);
                 ctx.quadraticCurveTo(-r * .25, -r * 1.15, 0, -r * .8);
                 ctx.quadraticCurveTo(r * .35, -r * 1.1, r * .65, -r * .85);
                 ctx.lineTo(r * .85, r * .25);
             });
-            ctx.fillStyle = '#292524'; ctx.fillRect(-r * .78, -r * .05, r * 1.56, r * .25);
-            ctx.strokeStyle = '#fcd34d'; ctx.lineWidth = r * .08;
+            ctx.fillStyle = black ? '#3f3f46' : '#292524'; ctx.fillRect(-r * .78, -r * .05, r * 1.56, r * .25);
+            ctx.strokeStyle = black ? '#71717a' : '#fcd34d'; ctx.lineWidth = r * .08;
             ctx.beginPath(); ctx.moveTo(-r * .52, -r * .8); ctx.lineTo(-r * .2, -r * .65); ctx.stroke();
         } else if (hat === 'hat_wizard') {
             fill('#4f46e5', () => { ctx.moveTo(-r * 1.1, r * 0.4); ctx.lineTo(r * 0.2, -r * 2.1); ctx.lineTo(r * 1.1, r * 0.4); });

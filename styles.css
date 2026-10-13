@@ -574,10 +574,13 @@ input:is([type="date"], [type="time"], [type="datetime-local"])::-webkit-calenda
 }
 body.dark-theme input:is([type="date"], [type="time"], [type="datetime-local"])::-webkit-calendar-picker-indicator { filter: brightness(0) invert(1); }
 body.light-theme input:is([type="date"], [type="time"], [type="datetime-local"])::-webkit-calendar-picker-indicator { filter: brightness(0); }
-.date-picker-field { display: flex; align-items: stretch; gap: 8px; }
-.date-picker-field input { min-width: 0; flex: 1; }
-.date-picker-field button { flex: 0 0 44px; padding: 8px; }
 .date-picker-hint { display: block; margin-top: 6px; color: var(--text-secondary); font-size: .75rem; }
+.score-number-field { position: relative; min-width: 0; }
+.score-number-field input { padding-right: 36px; appearance: textfield; -moz-appearance: textfield; }
+.score-number-field input::-webkit-inner-spin-button, .score-number-field input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.score-number-arrows { position: absolute; top: 1px; right: 1px; bottom: 1px; display: grid; width: 30px; }
+.score-number-arrows button { padding: 0; border: 0; background: transparent; color: var(--text-secondary); cursor: pointer; border-radius: 4px; }
+.score-number-arrows button:hover { background: var(--bg-glass); color: var(--text-primary); }
 select option, select optgroup {
     background-color: var(--bg-base);
     color: var(--text-primary);
