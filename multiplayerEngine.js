@@ -271,7 +271,7 @@
             this.preview = Boolean(options.preview);
             this.returnFocus = document.activeElement;
             this.correct = 0;
-            this.reward = Math.min(500, Math.max(1, Math.round(Number(options.questionReward ?? this.room.state?.question_reward) || 20)));
+            this.reward = Math.min(100, Math.max(5, Math.round((Number(options.questionReward ?? this.room.state?.question_reward) || 20) / 5) * 5));
             this.mode = this.room.mode;
             this.code = this.room.room_code;
             this.seed = Number.isInteger(options.seed) ? options.seed >>> 0 : hashStr(`${this.code}:${this.mode}`);

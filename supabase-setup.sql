@@ -1056,7 +1056,7 @@ begin
     if v_time_limit not between 60 and 3600 then
         raise exception 'Choose a time limit between 1 minute and 1 hour.';
     end if;
-    if v_reward not between 1 and 500 then raise exception 'Choose resources per answer between 1 and 500.'; end if;
+    if v_reward not between 5 and 100 or v_reward % 5 <> 0 then raise exception 'Choose resources per answer from 5 to 100 in increments of 5.'; end if;
     if jsonb_typeof(v_cards) is distinct from 'array' then raise exception 'The selected deck is invalid.'; end if;
     if jsonb_array_length(v_cards) < 1 then raise exception 'A hosted game needs at least one card.'; end if;
     if exists (

@@ -690,10 +690,10 @@
                                                                                     </div>
                                         <div class="question-reward-control">
                                             <label id="host-game-resource-label" for="host-game-reward">Energy per correct answer</label>
-                                            <div class="question-reward-inputs"><input type="range" min="1" max="500" step="1" value="20" data-reward-slider="host-game-reward" aria-label="Energy per correct answer slider" aria-describedby="host-game-reward-guidance"><input id="host-game-reward" name="questionReward" type="number" min="1" max="500" step="1" value="20" required aria-describedby="host-game-reward-guidance"></div>
+                                            <div class="question-reward-inputs"><input type="range" min="5" max="100" step="5" value="20" data-reward-slider="host-game-reward" aria-label="Energy per correct answer slider" aria-describedby="host-game-reward-guidance"><input id="host-game-reward" name="questionReward" type="number" min="5" max="100" step="5" value="20" required aria-describedby="host-game-reward-guidance"></div>
                                             <small id="host-game-reward-guidance" aria-live="polite"></small>
                                             <button type="button" class="secondary-btn" data-action="recommended-reward" data-id="host-game-reward">Use recommended amount</button>
-                                            <small>1–500 per answer. More resources means fewer refill questions; it does not change the questions.</small>
+                                            <small>5–100 per answer, in steps of 5. More resources means fewer refill questions; it does not change the questions.</small>
                                         </div>
                                                                                     <button class="primary-btn" type="submit"><i class="fas fa-door-open"></i> Create room</button>
                                     </form>
@@ -713,10 +713,10 @@
                                             </label>
                                             <div class="question-reward-control">
                                                 <label id="solo-game-resource-label" for="solo-game-reward">Energy per correct answer</label>
-                                                <div class="question-reward-inputs"><input type="range" min="1" max="500" step="1" value="20" data-reward-slider="solo-game-reward" aria-label="Energy per correct answer slider" aria-describedby="solo-game-reward-guidance"><input id="solo-game-reward" name="questionReward" type="number" min="1" max="500" step="1" value="20" required aria-describedby="solo-game-reward-guidance"></div>
+                                                <div class="question-reward-inputs"><input type="range" min="5" max="100" step="5" value="20" data-reward-slider="solo-game-reward" aria-label="Energy per correct answer slider" aria-describedby="solo-game-reward-guidance"><input id="solo-game-reward" name="questionReward" type="number" min="5" max="100" step="5" value="20" required aria-describedby="solo-game-reward-guidance"></div>
                                                 <small id="solo-game-reward-guidance" aria-live="polite"></small>
                                                 <button type="button" class="secondary-btn" data-action="recommended-reward" data-id="solo-game-reward">Use recommended amount</button>
-                                                <small>Choose an exact amount. Resources accumulate without a cap.</small>
+                                                <small>Choose an amount from 5 to 100 in steps of 5. Resources accumulate without a cap.</small>
                                             </div>
                                             <button class="primary-btn" type="button" data-action="start-solo-game"><i class="fas fa-play" aria-hidden="true"></i> Start practice</button>
                                             <small>Correct answers give the resource shown above. End game opens your summary. Practice awards no multiplayer coins.</small>

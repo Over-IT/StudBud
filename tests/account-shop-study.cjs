@@ -202,9 +202,9 @@ async function run() {
     await assert.rejects(community.buyMysteryItem(), /Profile unavailable/);
     community.getClient = originalClient;
 
-    for (const value of [1, 20, 500]) assert.equal(app.questionRewardValue(value), value);
-    for (const value of [0, 501, 1.5, '', 'invalid']) assert.throws(() => app.questionRewardValue(value), /1.*500/);
-    assert.match(sql, /v_reward not between 1 and 500/);
+    for (const value of [5, 20, 100]) assert.equal(app.questionRewardValue(value), value);
+    for (const value of [0, 1, 7, 101, 500, 1.5, '', 'invalid']) assert.throws(() => app.questionRewardValue(value), /5 to 100.*increments of 5/);
+    assert.match(sql, /v_reward not between 5 and 100 or v_reward % 5 <> 0/);
 
     const setupIds = ['multiplayer-preview-title', 'multiplayer-preview-description', 'host-game-resource-label', 'solo-game-resource-label'];
     for (const id of setupIds) elements.set(id, {});
@@ -234,8 +234,9 @@ async function run() {
         assert.equal(recommendation.min, min);
         assert.equal(recommendation.max, max);
         assert.ok(recommendation.suggested >= min && recommendation.suggested <= max);
+        assert.equal(recommendation.suggested % 5, 0);
         assert.ok(recommendation.explanation.length);
-        for (const [amount, expected] of [[min - 1, 'Below recommended'], [min, 'Within'], [max, 'Within'], [max + 1, 'Above recommended'], ['', 'whole number']]) {
+        for (const [amount, expected] of [[Math.max(5, min - 5), 'Below recommended'], [min, 'Within'], [max, 'Within'], [Math.min(100, max + 5), 'Above recommended'], ['', 'increments of 5']]) {
             for (const prefix of ['host', 'solo']) elements.get(`${prefix}-game-reward`).value = String(amount);
             app.updateQuestionRewardGuidance(mode);
             const host = elements.get('host-game-reward-guidance').textContent;

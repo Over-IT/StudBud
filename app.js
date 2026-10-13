@@ -3269,7 +3269,7 @@
 
         questionRewardValue(value) {
             const amount = Number(value);
-            if (!Number.isInteger(amount) || amount < 1 || amount > 500) throw new Error('Choose a whole-number resource amount between 1 and 500.');
+            if (!Number.isInteger(amount) || amount < 5 || amount > 100 || amount % 5 !== 0) throw new Error('Choose a resource amount from 5 to 100 in increments of 5.');
             return amount;
         }
 
@@ -3288,7 +3288,7 @@
                 hack: [10, 25, 'Pays 30-75 crypto per mining answer. This changes payouts, not question frequency.']
             };
             const [min, max, explanation] = recommendations[mode] || recommendations.skyline;
-            return { min, max, suggested: Math.round((min + max) / 2), explanation };
+            return { min, max, suggested: Math.round((min + max) / 10) * 5, explanation };
         }
 
         updateQuestionRewardGuidance(mode = this.selectedMultiplayerMode || 'skyline') {
@@ -3298,10 +3298,10 @@
                 const guidance = document.getElementById(`${prefix}-game-reward-guidance`);
                 if (!input || !guidance) continue;
                 const amount = Number(input.value);
-                const warning = !Number.isInteger(amount) || amount < 1 || amount > 500 ? ' Enter a whole number from 1 to 500.'
+                const warning = !Number.isInteger(amount) || amount < 5 || amount > 100 || amount % 5 !== 0 ? ' Choose a value from 5 to 100 in increments of 5.'
                     : amount < min ? ' Below recommended: expect more frequent questions.'
                         : amount > max ? ' Above recommended: expect fewer questions or larger payouts.' : ' Within the recommended range.';
-                guidance.textContent = `Recommended setting: ${min}-${max}. ${explanation}${warning} This is guidance, not a limit; play style affects pacing.`;
+                guidance.textContent = `Recommended setting: ${min}-${max}. ${explanation}${warning} Recommendations are guidance; the allowed range is 5-100 in increments of 5. Play style affects pacing.`;
                 const button = document.querySelector(`[data-action="recommended-reward"][data-id="${prefix}-game-reward"]`);
                 if (button) button.textContent = `Use recommended: ${suggested}`;
             }
