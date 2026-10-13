@@ -149,6 +149,16 @@ async function run() {
     assert.equal(Cloud.mergeData(base, equalXpLocal, equalXpRemote).state.gameMetrics.xp, 500, 'equal XP increments from distinct sessions both count');
     equalXpRemote.studyHistory = clone(equalXpLocal.studyHistory);
     assert.equal(Cloud.mergeData(base, equalXpLocal, equalXpRemote).state.gameMetrics.xp, 450, 'a shared session never awards XP twice');
+    const matchBase = clone(base);
+    matchBase.studyHistory = [{ id: 'match_1', durationSec: 60, leaderboardSyncPending: true }];
+    const matchLocal = clone(matchBase);
+    matchLocal.studyHistory[0].leaderboardSyncPending = false;
+    matchLocal.studyHistory[0].leaderboardSyncedAt = new Date().toISOString();
+    const matchRemote = clone(matchBase);
+    matchRemote.studyHistory = [];
+    const mergedStudy = Cloud.mergeData(matchBase, matchLocal, matchRemote);
+    assert.equal(mergedStudy.studyHistory.length, 1, 'study history preserves sessions missing on other device');
+    assert.equal(mergedStudy.studyHistory[0].leaderboardSyncPending, false, 'study history preserves synced state');
     const conflict = clone(remote);
     conflict.state.courses[0].grade = 95;
     assert.throws(() => Cloud.mergeData(base, local, conflict), /both devices/i);

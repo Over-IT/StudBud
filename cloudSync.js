@@ -23,12 +23,59 @@
         static mergeData(base, local, remote, field = 'account') {
             const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
             if (field === 'account.state.gameMetrics' && local && remote && !equal(local, base) && !equal(remote, base)) {
-                const xp = equal(local.xp, base?.xp) ? remote.xp : equal(remote.xp, base?.xp) ? local.xp
+                let xp = equal(local.xp, base?.xp) ? remote.xp : equal(remote.xp, base?.xp) ? local.xp
                     : Number(local.xp) + Number(remote.xp) - Number(base?.xp || 0);
-                if (!Number.isFinite(xp) || xp < 0) throw new Error('Your saved study XP is invalid. Export a backup before reloading.');
+                if (!Number.isFinite(xp) || xp < 0) xp = Math.max(0, Number(local.xp) || Number(remote.xp) || 0);
                 return { ...remote, ...local, xp, level: Math.floor(xp / 500) + 1,
                     streakDays: Math.max(local.streakDays || 0, remote.streakDays || 0),
                     lastStudyDate: [local.lastStudyDate, remote.lastStudyDate].filter(Boolean).sort().at(-1) || null };
+            }
+            if (field === 'account.studyHistory' && (Array.isArray(local) || Array.isArray(remote))) {
+                const localList = Array.isArray(local) ? local : [];
+                const remoteList = Array.isArray(remote) ? remote : [];
+                const lMap = new Map(localList.map(item => [item?.id || item?.timestamp, item]).filter(([k]) => Boolean(k)));
+                const rMap = new Map(remoteList.map(item => [item?.id || item?.timestamp, item]).filter(([k]) => Boolean(k)));
+                const allKeys = new Set([...lMap.keys(), ...rMap.keys()]);
+                const merged = [];
+                for (const id of allKeys) {
+                    const l = lMap.get(id);
+                    const r = rMap.get(id);
+                    if (l && !r) {
+                        merged.push(l);
+                    } else if (r && !l) {
+                        merged.push(r);
+                    } else if (l && r) {
+                        if (equal(l, r)) {
+                            merged.push(l);
+                        } else {
+                            const questions = (l.gameSummary?.questions?.length >= (r.gameSummary?.questions?.length || 0))
+                                ? l.gameSummary?.questions : (r.gameSummary?.questions || l.gameSummary?.questions);
+                            const standings = (l.gameSummary?.standings?.length >= (r.gameSummary?.standings?.length || 0))
+                                ? l.gameSummary?.standings : (r.gameSummary?.standings || l.gameSummary?.standings);
+                            const gameSummary = (l.gameSummary || r.gameSummary) ? {
+                                ...(r.gameSummary || {}),
+                                ...(l.gameSummary || {}),
+                                ...(questions ? { questions } : {}),
+                                ...(standings ? { standings } : {})
+                            } : null;
+                            merged.push({
+                                ...r,
+                                ...l,
+                                durationSec: Math.max(Number(l.durationSec) || 0, Number(r.durationSec) || 0),
+                                leaderboardSyncPending: Boolean(l.leaderboardSyncPending && r.leaderboardSyncPending),
+                                leaderboardSyncedAt: l.leaderboardSyncedAt || r.leaderboardSyncedAt || null,
+                                ...(gameSummary ? { gameSummary } : {})
+                            });
+                        }
+                    }
+                }
+                merged.sort((a, b) => (Date.parse(a.timestamp || 0) || 0) - (Date.parse(b.timestamp || 0) || 0));
+                return merged;
+            }
+            if (field.startsWith('account.studyHistory.')) {
+                if (!local) return remote;
+                if (!remote) return local;
+                return { ...(remote || {}), ...(local || {}) };
             }
             if (equal(local, base)) return remote;
             if (equal(remote, base) || equal(local, remote)) return local;
@@ -58,7 +105,7 @@
                     const sharedXp = (local.studyHistory || []).filter(session => !previous.has(session.id) && remoteIds.has(session.id))
                         .reduce((xp, session) => xp + Math.max(1, Math.round((session.durationSec || 60) / 60)) * 10, 0);
                     merged.state.gameMetrics.xp -= sharedXp;
-                    if (merged.state.gameMetrics.xp < 0) throw new Error('Your study history and XP disagree. Export a backup before reloading.');
+                    if (merged.state.gameMetrics.xp < 0) merged.state.gameMetrics.xp = 0;
                     merged.state.gameMetrics.level = Math.floor(merged.state.gameMetrics.xp / 500) + 1;
                 }
                 return merged;
@@ -271,9 +318,14 @@
             if (version !== this.accountVersion) return;
             if (savedBase && remoteSnapshot) {
                 const local = JSON.parse(await window.NexusApp.AppState.exportAppState());
-                const merged = StudBudCloudSync.mergeData(JSON.parse(savedBase), local, remoteSnapshot);
-                await window.NexusApp.restoreCloudSnapshot(merged);
-                this.initialSnapshot = remoteSnapshot;
+                try {
+                    const merged = StudBudCloudSync.mergeData(JSON.parse(savedBase), local, remoteSnapshot);
+                    await window.NexusApp.restoreCloudSnapshot(merged);
+                    this.initialSnapshot = remoteSnapshot;
+                } catch (mergeError) {
+                    this.pendingConflict = { user, remoteSnapshot, local, savedBase };
+                    throw mergeError;
+                }
             }
 
             localStorage.setItem('STUDBUD_CLOUD_ACCOUNT_ID', user.id);
@@ -292,10 +344,71 @@
 
         reportAccountError(error) {
             console.error('[StudBudCloud] Could not open account:', error);
+            const conflict = this.pendingConflict;
             this.user = null;
             this.accountReady = false;
             this.showAuth();
-            this.setAuthStatus(this.friendlyAuthError(error, 'Could not load your account data. Check your connection and try again.'), true);
+            const message = this.friendlyAuthError(error, 'Could not load your account data. Check your connection and try again.');
+            if (conflict && /both devices/i.test(message)) {
+                this.renderConflictResolution(conflict, message);
+                return;
+            }
+            this.setAuthStatus(message, true);
+        }
+
+        renderConflictResolution(conflict, message) {
+            const status = document.getElementById('auth-status');
+            if (!status) return;
+            status.classList.add('error');
+            status.innerHTML = `
+                <div class="auth-conflict-panel" style="text-align:center;">
+                    <p style="margin-bottom:10px;">${window.NexusApp?.escapeHTML?.(message) || message}</p>
+                    <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin-top:8px;">
+                        <button type="button" class="secondary-btn" id="auth-conflict-cloud-btn">Use Cloud Data</button>
+                        <button type="button" class="secondary-btn" id="auth-conflict-local-btn">Keep Device Data</button>
+                        <button type="button" class="text-btn" id="auth-conflict-backup-btn">Export Local Backup</button>
+                    </div>
+                </div>
+            `;
+            document.getElementById('auth-conflict-cloud-btn')?.addEventListener('click', async () => {
+                localStorage.removeItem('STUDBUD_CLOUD_SYNC_BASE');
+                this.pendingConflict = null;
+                this.setAuthStatus('Applying cloud data…');
+                try {
+                    await window.NexusApp.restoreCloudSnapshot(conflict.remoteSnapshot);
+                    await this.openAccount(conflict.user);
+                } catch (err) {
+                    this.reportAccountError(err);
+                }
+            });
+            document.getElementById('auth-conflict-local-btn')?.addEventListener('click', async () => {
+                localStorage.removeItem('STUDBUD_CLOUD_SYNC_BASE');
+                this.pendingConflict = null;
+                this.setAuthStatus('Uploading device data…');
+                try {
+                    this.initialSnapshot = conflict.local;
+                    this.lastSnapshot = conflict.local;
+                    await this.openAccount(conflict.user);
+                    await this.syncNow();
+                } catch (err) {
+                    this.reportAccountError(err);
+                }
+            });
+            document.getElementById('auth-conflict-backup-btn')?.addEventListener('click', () => {
+                try {
+                    const blob = new Blob([JSON.stringify(conflict.local, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `studbud-backup-conflict-${new Date().toISOString().slice(0, 10)}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                } catch (err) {
+                    console.error('Could not export backup:', err);
+                }
+            });
         }
 
         friendlyAuthError(error, fallback) {
