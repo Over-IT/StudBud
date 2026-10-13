@@ -248,7 +248,7 @@
                             </div>
                             <div class="text-right">
                                 <p class="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Avg Velocity</p>
-                                <p class="text-xl font-mono text-indigo-400">${this.globalAnalytics.velocity.toFixed(1)} f/m</p>
+                                <p class="text-xl font-mono text-indigo-400">${this.globalAnalytics.velocity.toFixed(2)} f/m</p>
                             </div>
                         </div>
                     </div>

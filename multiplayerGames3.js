@@ -227,7 +227,7 @@
                 ctx.fillStyle = '#94a3b8'; ctx.font = '600 11px system-ui'; ctx.fillText(`${a.kind}${this.units[i] ? ` · own ${this.units[i]}` : ''}`, lx + 50, y + 44);
                 this.chart(ctx, i, lx + 168, y + 12, 52, 40, t, false);
                 ctx.textAlign = 'right'; ctx.fillStyle = '#fff'; ctx.font = '800 14px system-ui'; ctx.fillText(money(p), lx + lw - 10, y + 27);
-                ctx.fillStyle = ch >= 0 ? '#4ade80' : '#f87171'; ctx.font = '700 12px system-ui'; ctx.fillText(`${ch >= 0 ? '▲' : '▼'} ${(Math.abs(ch) * 100).toFixed(1)}%`, lx + lw - 10, y + 46);
+                ctx.fillStyle = ch >= 0 ? '#4ade80' : '#f87171'; ctx.font = '700 12px system-ui'; ctx.fillText(`${ch >= 0 ? '▲' : '▼'} ${(Math.abs(ch) * 100).toFixed(2)}%`, lx + lw - 10, y + 46);
             });
 
             const e = this.newsEvent(Math.max(0, Math.floor(t / 22)));

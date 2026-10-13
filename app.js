@@ -1429,7 +1429,7 @@
             const categories = course ? course.categories || [] : [];
             const previousCategory = categorySelect.value;
             categorySelect.innerHTML = '<option value="">Uncategorized</option>' + categories.map(category =>
-                `<option value="${this.escapeHTML(category.id)}">${this.escapeHTML(category.name)} (${Number(category.weight || 0).toFixed(1)}%)</option>`
+                `<option value="${this.escapeHTML(category.id)}">${this.escapeHTML(category.name)} (${Number(category.weight || 0).toFixed(2)}%)</option>`
             ).join('');
             if (categories.some(category => category.id === previousCategory)) categorySelect.value = previousCategory;
         }
@@ -1534,7 +1534,7 @@
                             <summary>
                                 <span class="transcript-chevron" aria-hidden="true"><i class="fas fa-chevron-right"></i></span>
                                 <span class="transcript-category-name">${this.escapeHTML(group.name)}</span>
-                                <span class="transcript-category-meta">${group.weight === null ? 'Unweighted' : `${group.weight.toFixed(1)}% of grade`}</span>
+                                <span class="transcript-category-meta">${group.weight === null ? 'Unweighted' : `${group.weight.toFixed(2)}% of grade`}</span>
                                 <strong class="transcript-category-grade">${categoryGrade}</strong>
                                 <span class="transcript-item-count">${group.assignments.length} item${group.assignments.length === 1 ? '' : 's'}</span>
                             </summary>
@@ -1661,7 +1661,7 @@
                 const categoryGrade = possible > 0 ? `${(earned / possible * 100).toFixed(2)}%` : 'No graded work';
                 return `<div class="category-row">
                     <div><strong>${this.escapeHTML(category.name)}</strong><span>${categoryGrade} · ${items.length} items</span></div>
-                    <strong>${Number(category.weight || 0).toFixed(1)}%</strong>
+                    <strong>${Number(category.weight || 0).toFixed(2)}%</strong>
                     <button class="secondary-btn" data-action="add-assignment-to-category" data-course="${this.escapeHTML(course.code)}" data-category="${this.escapeHTML(category.id)}" aria-label="Add assignment to ${this.escapeHTML(category.name)}"><i class="fas fa-plus"></i> Add</button>
                     <button class="danger-btn" data-action="remove-category" data-id="${this.escapeHTML(category.id)}" aria-label="Remove ${this.escapeHTML(category.name)}">Remove</button>
                 </div>`;
@@ -1702,7 +1702,7 @@
                         <h3>Optional grade categories</h3>
                         <p>Weights are percentages. Category averages use earned points / possible points; categories without scores are left out until work is graded. Uncategorized scores use any remaining weight. When categories total 100%, assign scored work to a category to include it in the weighted grade.</p>
                         <div class="category-list">${categoryRows || '<p class="empty-state">No categories. Your graded assignments will use a points-based average.</p>'}</div>
-                        <p class="${Math.abs(sumWeights - 100) < 0.01 ? 'weight-valid' : 'weight-note'}">Category weights total ${sumWeights.toFixed(1)}%${categories.length && Math.abs(sumWeights - 100) >= 0.01 ? ' (recommended total: 100%)' : ''}</p>
+                        <p class="${Math.abs(sumWeights - 100) < 0.01 ? 'weight-valid' : 'weight-note'}">Category weights total ${sumWeights.toFixed(2)}%${categories.length && Math.abs(sumWeights - 100) >= 0.01 ? ' (recommended total: 100%)' : ''}</p>
                         <div class="category-add-form">
                             <input id="new-category-name" type="text" aria-label="Category name" placeholder="Category name (e.g. Tests)">
                             <input id="new-category-weight" type="number" aria-label="Category weight (%)" min="0" max="100" step="0.1" placeholder="Weight %">
@@ -2113,7 +2113,7 @@
             const thisWeek = sessions.filter(session => new Date(session.timestamp) >= weekStart);
             const minutes = Math.round(thisWeek.reduce((sum, session) => sum + Number(session.durationSec || 0), 0) / 60);
             const rated = thisWeek.map(session => Number(session.effectiveness)).filter(rating => Number.isFinite(rating) && rating > 0);
-            const average = rated.length ? (rated.reduce((sum, rating) => sum + rating, 0) / rated.length).toFixed(1) : '—';
+            const average = rated.length ? (rated.reduce((sum, rating) => sum + rating, 0) / rated.length).toFixed(2) : '—';
             const plan = this.getStudyRecommendations().slice(0, 5);
             const plannedMinutes = plan.reduce((sum, item) => sum + item.sessionMinutes, 0);
             weekSummary.textContent = `This week: ${thisWeek.length} session${thisWeek.length === 1 ? '' : 's'} · ${minutes} min logged · average effectiveness ${average}/5.`;
@@ -6495,7 +6495,7 @@
                             min: metric === 'class' ? 0 : 0,
                             max: metric === 'class' ? 100 : 5,
                             title: { display: true, text: metric === 'class' ? 'Grade (%)' : 'GPA (0–5)' },
-                            ticks: { callback: value => metric === 'class' ? `${value}%` : Number(value).toFixed(1) }
+                            ticks: { callback: value => metric === 'class' ? `${value}%` : Number(value).toFixed(2) }
                         }
                     }
                 }
@@ -7213,7 +7213,7 @@
             if (Array.from(categorySelect.options).some(option => option.value === category)) categorySelect.value = category;
             document.getElementById('course-credits').value = catalogCourse.credits;
             const weightedScale = (window.PCHS_GRADE_SCALE || []).map(item =>
-                `${item.letter} ${catalogCourse.isWeighted ? item.weighted : item.unweighted.toFixed(1)}`
+                `${item.letter} ${catalogCourse.isWeighted ? item.weighted : item.unweighted.toFixed(2)}`
             ).join(' · ');
             document.getElementById('course-weight-label').textContent =
                 `${catalogCourse.isWeighted ? 'Weighted' : 'Regular'} · ${weightedScale}`;
@@ -7402,7 +7402,7 @@
                 }
                 const existingTotal = (course.categories || []).reduce((sum, category) => sum + Number(category.weight || 0), 0);
                 if (existingTotal + weight > 100.001) {
-                    window.alert(`Category weights cannot exceed 100%. There is ${(100 - existingTotal).toFixed(1)}% available.`);
+                    window.alert(`Category weights cannot exceed 100%. There is ${(100 - existingTotal).toFixed(2)}% available.`);
                     return;
                 }
                 AppState.updateCourse(course.code, { categories: [...(course.categories || []), { id: `category_${Date.now()}`, name, weight }] });

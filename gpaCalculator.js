@@ -315,7 +315,7 @@
                             <div class="flex justify-between items-center mb-6">
                                 <h2 class="text-lg font-bold text-white">Graduation Requirements Audit</h2>
                                 <span class="px-3 py-1 bg-slate-700 text-slate-300 text-xs font-bold rounded-full">
-                                    ${auditData.totalEarned.toFixed(1)} / ${TOTAL_CREDITS_REQUIRED.toFixed(1)} Credits
+                                    ${auditData.totalEarned.toFixed(2)} / ${TOTAL_CREDITS_REQUIRED.toFixed(2)} Credits
                                 </span>
                             </div>
 
@@ -329,7 +329,7 @@
                                         <div class="audit-row">
                                             <div class="flex justify-between text-sm mb-1">
                                                 <span class="font-medium text-slate-300">${cat}</span>
-                                                <span class="text-slate-400">${bucket.earned.toFixed(1)} /${bucket.required.toFixed(1)}</span>
+                                                <span class="text-slate-400">${bucket.earned.toFixed(2)} /${bucket.required.toFixed(2)}</span>
                                             </div>
                                             <div class="w-full bg-slate-900 rounded-full h-2">
                                                 <div class="${color} h-2 rounded-full transition-all duration-1000" style="width: ${pct}%"></div>
