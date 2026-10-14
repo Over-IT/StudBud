@@ -922,6 +922,10 @@ begin
         select player from jsonb_array_elements(v_room.state -> 'players') as item(player)
         where coalesce((player ->> 'correct_count')::integer, 0) > 0 or coalesce((player ->> 'score')::integer, 0) > 0
     loop
+        if exists (select 1 from auth.users where id = (v_player ->> 'id')::uuid and is_anonymous) then
+            v_rewards := jsonb_set(v_rewards, array[v_player ->> 'id'], '0'::jsonb, true);
+            continue;
+        end if;
         v_is_winner := case when v_room.mode = 'chess' then coalesce(v_player ->> 'id' = v_chess_winner, false)
             else (v_player ->> 'score')::integer = v_high_score and v_high_score > 0 end;
         v_reward := least(250, coalesce((v_player ->> 'correct_count')::integer, 0) * 6)
@@ -1315,11 +1319,7 @@ begin
     v_correct := (v_room.state #> '{question,options}') ->> p_choice_index
         = v_room.state #>> '{question,correct_answer}';
     if coalesce(p_action, '') !~ '^[a-z_]{1,24}$' then raise exception 'Choose a valid game action.'; end if;
-    for v_player in select value from jsonb_array_elements(v_room.state -> 'players')     loop
-        if exists (select 1 from auth.users where id = (v_player ->> 'id')::uuid and is_anonymous) then
-            v_rewards := jsonb_set(v_rewards, array[v_player ->> 'id'], '0'::jsonb, true);
-            continue;
-        end if;
+    for v_player in select value from jsonb_array_elements(v_room.state -> 'players') loop
         if v_player ->> 'id' = auth.uid()::text then
             if coalesce((v_player ->> 'eliminated')::boolean, false) then raise exception 'You are out of this Survival round.'; end if;
             if coalesce((v_player ->> 'answered')::boolean, false) then raise exception 'You already answered this question.'; end if;
