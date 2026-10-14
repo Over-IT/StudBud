@@ -496,25 +496,25 @@
         { main: 'settings', tabs: [['settings', 'Profile & data'], ['appearance', 'Appearance'], ['sound', 'Sound'], ['about', 'About']] }
     ];
     const PAGE_GUIDES = {
-        dashboard: ['Home', 'Start with what is due today, then choose a study task.'],
-        gpa: ['Classes & grades', 'Import from Infinite Campus or add a class. Open a class to manage its scores.'],
+        dashboard: ['Home', 'What is due today and what to study next.'],
+        gpa: ['Classes & grades', 'Import from Infinite Campus or add a class.'],
         'grade-scenarios': ['What-if grades', 'Try possible scores without changing your saved grades.'],
-        analytics: ['Study insights', 'See your grades, study time and progress across classes.'],
-        planner: ['Tasks & deadlines', 'Add assignments, quizzes and tests. Mark work complete when it is done.'],
-        calendar: ['Calendar', 'See due dates by month. Select a day to add work for that date.'],
-        schedule: ['Class schedule', 'Set when your classes meet so Home can show today’s schedule.'],
-        flashcard: ['My study sets', 'Create or edit cards, then study due cards. Practice uses the same saved sets.'],
-        'exam-arcade': ['Practice & tests', 'Try a written test, a quick quiz or a solo game. Your results stay private.'],
-        importer: ['Import flashcards', 'Paste term-and-answer rows or build a new study set manually.'],
-        multiplayer: ['Multiplayer games', 'Choose a game, select a study set, then host or join a room.'],
-        friends: ['Buds', 'Find classmates by username and manage your bud requests.'],
-        leaderboard: ['Leaderboards', 'Compare study time and progress, not your private grades.'],
-        shop: ['Character & shop', 'Equip your cosmetics or spend earned coins. Purchases need a connection.'],
-        settings: ['Profile & backups', 'Manage your name, school, public privacy and saved data.'],
-        appearance: ['Appearance & performance', 'Choose readable spacing, colors and game detail. Lower detail keeps gameplay responsive.'],
-        sound: ['Sound & music', 'Adjust interface sounds, game effects and music independently.'],
-        about: ['Help & about', 'Replay the tour in Settings or read how StudBud works.'],
-        admin: ['Staff tools', 'Testers test games. Moderators review users and public sets. Administrators manage tags, coins and notices.']
+        analytics: ['Study insights', 'Grades, study time and progress.'],
+        planner: ['Tasks & deadlines', 'Assignments, quizzes and tests.'],
+        calendar: ['Calendar', 'Pick a day to add work.'],
+        schedule: ['Class schedule', 'When your classes meet.'],
+        flashcard: ['My study sets', 'Create sets and study due cards.'],
+        'exam-arcade': ['Practice & tests', 'Tests, quizzes and solo games. Results stay private.'],
+        importer: ['Import flashcards', 'Paste rows or build a set by hand.'],
+        multiplayer: ['Multiplayer games', 'Pick a game and a set, then host or join.'],
+        friends: ['Buds', 'Find classmates and manage requests.'],
+        leaderboard: ['Leaderboards', 'Study time and progress. Grades stay private.'],
+        shop: ['Character & shop', 'Equip cosmetics or spend coins.'],
+        settings: ['Profile & backups', 'Name, school, privacy and backups.'],
+        appearance: ['Appearance & performance', 'Colors, spacing and game detail.'],
+        sound: ['Sound & music', 'Interface sounds, effects and music.'],
+        about: ['Help & about', 'How StudBud works.'],
+        admin: ['Staff tools', 'Tools for testers, moderators and admins.']
     };
 
     class RouterEngine {
@@ -1055,7 +1055,9 @@
             this.updateMultiplayerModeSetup(this.selectedMultiplayerMode);
             this.renderUI();
             Router.init();
-            if (!window.StudBudCloud.offlineMode) {
+            if (window.StudBudCloud.isGuest?.()) {
+                this.refreshGuestFeatures();
+            } else if (!window.StudBudCloud.offlineMode) {
                 await this.renderMultiplayerProfile();
                 this.syncPendingStudyTime().catch(error => {
                     console.error('[NexusApp] Pending study time could not be loaded:', error);
@@ -1073,6 +1075,13 @@
             window.addEventListener('keydown', unlockAudio);
 
             EventBus.emit('app:ready', null);
+        }
+
+        refreshGuestFeatures() {
+            if (!window.StudBudCloud?.isGuest?.()) return;
+            this.multiplayerProfile = null;
+            this.renderMultiplayerProfile(true).catch(() => {});
+            if (window.navigator?.onLine !== false) this.refreshStudyLeaderboard(this.studyLeaderboardPeriod || 'daily');
         }
 
         async restoreCloudSnapshot(snapshot) {
@@ -3081,7 +3090,7 @@
             const user = window.StudBudCloud?.user;
             const profile = AppState.get('profile') || {};
             const fullName = [profile.firstName, profile.lastName].map(name => String(name || '').trim()).filter(Boolean).join(' ');
-            return fullName || user?.user_metadata?.username || 'Student';
+            return fullName || user?.user_metadata?.username || (window.StudBudCloud?.isGuest?.() ? (profile.guestName || 'Guest') : 'Student');
         }
 
         profileCosmetics(profile) {
@@ -3223,6 +3232,11 @@
             if (defaultAvatar) defaultAvatar.innerHTML = this.multiplayerAvatarMarkup({});
             const shopStatus = document.getElementById('multiplayer-shop-status');
             if (!shopStatus) return;
+            if (window.StudBudCloud?.isGuest?.()) {
+                shopStatus.textContent = 'Guests can play every game. Create a free account to earn coins, unlock cosmetics and claim daily rewards.';
+                this.renderGuestAppearance?.();
+                return;
+            }
             shopStatus.textContent = 'Loading your multiplayer profile…';
             try {
                 const profile = await window.StudBudCommunityGames.getPlayerProfile();
@@ -3256,7 +3270,38 @@
             }
         }
 
+        renderGuestAppearance() {
+            const games = window.StudBudCommunityGames;
+            const grid = document.getElementById('multiplayer-shop-items');
+            if (!games || !grid) return;
+            const current = games.guestColor() || games.guestColors[0];
+            const cosmetics = { color: current };
+            [document.getElementById('multiplayer-header-avatar'), document.getElementById('multiplayer-large-avatar')].forEach(element => {
+                if (element) element.innerHTML = this.multiplayerAvatarMarkup(cosmetics, element.id === 'multiplayer-large-avatar');
+            });
+            grid.innerHTML = `<div class="guest-colors"><h4>Pick your player color</h4><div class="guest-color-row">${games.guestColors.map(color => `
+                <button type="button" class="guest-color${color === current ? ' active' : ''}" data-action="guest-color" data-color="${color}" style="--swatch:${color}" aria-label="Player color ${color}" aria-pressed="${color === current}"></button>`).join('')}</div>
+                <p class="muted">Used in every game you join as a guest.</p></div>`;
+            const reward = document.getElementById('daily-reward-btn');
+            const rewardText = document.getElementById('daily-reward-text');
+            if (reward) { reward.disabled = false; reward.textContent = 'Create free account'; reward.dataset.action = 'guest-create-account'; }
+            if (rewardText) rewardText.textContent = 'Accounts earn coins, daily rewards and cosmetics. Your guest decks and progress come with you.';
+            ['multiplayer-wallet-coins', 'multiplayer-sidebar-coins', 'shop-wallet-coins'].forEach(id => {
+                const element = document.getElementById(id);
+                if (element) element.textContent = '0';
+            });
+        }
+
+        setGuestColor(color) {
+            const games = window.StudBudCommunityGames;
+            if (!games?.guestColors.includes(color)) return;
+            window.localStorage.setItem('studbud-guest-color', color);
+            this.renderGuestAppearance();
+        }
+
         renderDailyReward(profile) {
+            const reward = document.getElementById('daily-reward-btn');
+            if (reward && reward.dataset.action !== 'claim-daily-reward') reward.dataset.action = 'claim-daily-reward';
             const button = document.getElementById('daily-reward-btn');
             const text = document.getElementById('daily-reward-text');
             if (!button || !text) return;
@@ -3417,14 +3462,14 @@
         }
 
         async loadSiteNotice(force = false) {
-            if (!window.StudBudCloud?.user || !window.StudBudCommunityGames?.getSiteNotice) return;
-            const userId = window.StudBudCloud.user.id;
+            const userId = this.noticeUserId();
+            if (!userId || window.navigator?.onLine === false || !window.StudBudCommunityGames?.getSiteNotice) return;
             if (!force && this.siteNoticeUserId === userId && Date.now() - (this.siteNoticeCheckedAt || 0) < 60000) return;
             this.siteNoticeUserId = userId;
             this.siteNoticeCheckedAt = Date.now();
             try {
                 const notice = await window.StudBudCommunityGames.getSiteNotice();
-                if (window.StudBudCloud?.user?.id !== userId) return;
+                if (this.noticeUserId() !== userId) return;
                 this.siteNotice = notice;
                 const panel = document.getElementById('site-notice');
                 document.getElementById('site-notice-message').textContent = notice?.message || '';
@@ -3447,6 +3492,10 @@
             }
         }
 
+        noticeUserId() {
+            return window.StudBudCloud?.user?.id || (window.StudBudCloud?.isGuest?.() ? 'guest' : null);
+        }
+
         siteNoticeDismissalKey(userId, publicationId) {
             return `STUDBUD_NOTICE_DISMISSED:${userId}:${publicationId}`;
         }
@@ -3460,7 +3509,7 @@
 
         async dismissSiteNotice() {
             const notice = this.siteNotice;
-            const userId = window.StudBudCloud?.user?.id;
+            const userId = this.noticeUserId();
             const button = document.querySelector('[data-action="dismiss-site-notice"]');
             const status = document.getElementById('site-notice-status');
             if (this.siteNoticeDismissing) return;
@@ -3471,14 +3520,14 @@
                 if (!notice?.publication_id || !userId) {
                     throw new Error('Saved announcement dismissals require the latest supabase-setup.sql. Rerun it in Supabase, then refresh.');
                 }
-                await window.StudBudCommunityGames.dismissSiteNotice(notice.publication_id);
+                if (userId !== 'guest') await window.StudBudCommunityGames.dismissSiteNotice(notice.publication_id);
                 this.dismissedSiteNotice = `${userId}:${notice.publication_id}`;
                 try {
                     localStorage.setItem(this.siteNoticeDismissalKey(userId, notice.publication_id), '1');
                 } catch (error) {
                     console.warn('[Announcements] Device dismissal could not be cached; account dismissal is saved:', error);
                 }
-                if (window.StudBudCloud?.user?.id === userId && this.siteNotice?.publication_id === notice.publication_id) {
+                if (this.noticeUserId() === userId && this.siteNotice?.publication_id === notice.publication_id) {
                     this.siteNotice.dismissed = true;
                     document.getElementById('site-notice').classList.add('hidden');
                 }
@@ -4147,6 +4196,7 @@
         async saveWaitingRunnerBest() {
             const runner = this.waitingRunner;
             if (runner.score > 0) runner.best = Math.max(runner.best, this.saveWaitingBestLocal(runner.score));
+            if (!window.StudBudCommunityGames?.hasAccount?.()) return;
             if (runner.saving || runner.score <= 0 || runner.score <= Number(this.multiplayerProfile?.best_wait_score || 0)) return;
             runner.saving = true;
             try {
@@ -5719,8 +5769,9 @@
 
         communityDeckActionMarkup(deckId) {
             const id = this.escapeHTML(deckId);
-            return this.findCommunityDeck(deckId)
-                ? `<span class="community-deck-added" data-community-deck-id="${id}"><i class="fas fa-check-circle" aria-hidden="true"></i> Already in your decks</span>`
+            const deck = this.findCommunityDeck(deckId);
+            return deck
+                ? `<button class="secondary-btn community-deck-added" type="button" data-action="open-study-set" data-id="${this.escapeHTML(deck.id)}" data-community-deck-id="${id}"><i class="fas fa-check-circle" aria-hidden="true"></i> In your decks · Open</button>`
                 : `<button class="secondary-btn" type="button" data-action="import-community-deck" data-id="${id}" data-community-deck-id="${id}"><i class="fas fa-download" aria-hidden="true"></i> Add to my decks</button>`;
         }
 
@@ -5740,7 +5791,7 @@
             const status = document.getElementById('community-deck-status');
             const results = document.getElementById('community-deck-results');
             if (!status || !results) return;
-            if (window.StudBudCloud?.offlineMode || window.navigator?.onLine === false) {
+            if ((window.StudBudCloud?.offlineMode && !window.StudBudCloud?.isGuest?.()) || window.navigator?.onLine === false) {
                 status.textContent = 'The community library needs an internet connection. Your saved sets remain available offline.';
                 results.innerHTML = '<p class="empty-state">Open My sets to study, edit or practice offline.</p>';
                 return;
@@ -6029,8 +6080,9 @@
             finishButton.classList.toggle('hidden', !isHost || room.status === 'finished');
             const waitingCard = document.getElementById('waiting-arcade-card');
             const guestWaiting = room.status === 'waiting';
-            waitingCard.classList.toggle('hidden', !guestWaiting || !window.StudBudCloud.user);
-            if (guestWaiting && window.StudBudCloud.user && !this.waitingRunner.started) this.startWaitingRunner();
+            const hasWorkspace = Boolean(window.StudBudCloud.user || window.StudBudCloud.isGuest?.());
+            waitingCard.classList.toggle('hidden', !guestWaiting || !hasWorkspace);
+            if (guestWaiting && hasWorkspace && !this.waitingRunner.started) this.startWaitingRunner();
             if (!guestWaiting) this.stopWaitingRunner();
             try { this.syncArcadeSession(room, isHost); }
             catch (error) { console.error('[NexusApp] Arcade session could not sync:', error); }
@@ -6096,7 +6148,8 @@
         }
 
         async saveGameSummary(session) {
-            if (session.testing || (!window.StudBudCloud?.user && window.StudBudCloud?.guestUser)) return;
+            // Code-only guests have no local workspace; app guests keep summaries on this device.
+            if (session.testing || window.StudBudCloud?.guestLobbyOpen) return;
             const info = session.studySet || {};
             const deck = (AppState.get('flashcards') || []).find(item => item.id === info.deckId
                 || (info.publicId && [item.communityDeckId, item.communitySourceId].includes(info.publicId)));
@@ -6176,6 +6229,7 @@
                 accessory: hasProfile ? cosmetics.acc : roomPlayer.accessory || '',
                 effect: hasProfile ? cosmetics.effect : roomPlayer.effect || ''
             };
+            if (!hasProfile && window.StudBudCommunityGames?.guestColor?.()) me.color = window.StudBudCommunityGames.guestColor();
             const roomDeck = selectedDeck || this.roomStudyDeck(room);
             const botDefs = [['b1', 'Nova', '#f472b6'], ['b2', 'Kite', '#facc15'], ['b3', 'Rook', '#4ade80']].slice(0, botCount);
             const fake = {
@@ -7033,7 +7087,7 @@
         }
 
         async refreshStudyLeaderboard(period = 'daily') {
-            if (!window.StudBudCloud?.user) return;
+            if (!window.StudBudCloud?.user && !(window.StudBudCloud?.isGuest?.() && window.navigator?.onLine !== false)) return;
             this.studyLeaderboardPeriod = ['weekly', 'monthly', 'alltime'].includes(period) ? period : 'daily';
             const scope = this.studyLeaderboardScope === 'friends' ? 'friends' : 'global';
             const status = document.getElementById('study-leaderboard-status');
@@ -7542,6 +7596,10 @@
                     await this.runAdminAction(target.dataset.adminAction, target.dataset);
                 } else if (action === 'claim-daily-reward') {
                     await this.claimDailyReward();
+                } else if (action === 'guest-create-account') {
+                    await window.StudBudCloud?.connectOnline?.();
+                } else if (action === 'guest-color') {
+                    this.setGuestColor(target.dataset.color);
                 } else if (action === 'multiplayer-buy' || action === 'multiplayer-equip') {
                     await this.updateMultiplayerShop(action, target.dataset.id);
                 } else if (action === 'multiplayer-unequip') {
@@ -8788,7 +8846,7 @@
             window.FlashcardTools.recordAnswer(card, quality >= 3);
             deck.studiedCount = Number(deck.studiedCount || 0) + 1;
             await AppState.saveFlashcardDeck(deck);
-            if (deck.communitySourceId && deck.communitySourceOwnerId !== window.StudBudCloud.user.id && !deck.communityStudyRecorded) {
+            if (deck.communitySourceId && window.StudBudCommunityGames?.hasAccount?.() && deck.communitySourceOwnerId !== window.StudBudCloud.user.id && !deck.communityStudyRecorded) {
                 try {
                     await window.StudBudCommunityGames.recordDeckStudy(deck.communitySourceId);
                     await this.updateSavedDeck(deck.id, { communityStudyRecorded: true });
@@ -8899,13 +8957,17 @@
             };
             AppState.set('profile', profile);
             const schoolStatus = document.getElementById('school-profile-status');
-            if (schoolStatus) schoolStatus.textContent = 'Saving school…';
-            try {
-                await window.StudBudCommunityGames.friendCall('studbud_set_school', { p_school: school });
-                if (schoolStatus) schoolStatus.textContent = 'School saved. Your school tag remains private unless you enable it on your public profile.';
-            } catch (error) {
-                if (schoolStatus) schoolStatus.textContent = `Your school was saved on this device, but not to your account. ${this.friendlyErrorMessage(error, 'Re-run supabase-setup.sql and try again.')}`;
-                throw error;
+            if (window.StudBudCommunityGames?.hasAccount?.()) {
+                if (schoolStatus) schoolStatus.textContent = 'Saving school…';
+                try {
+                    await window.StudBudCommunityGames.friendCall('studbud_set_school', { p_school: school });
+                    if (schoolStatus) schoolStatus.textContent = 'School saved. Your school tag remains private unless you enable it on your public profile.';
+                } catch (error) {
+                    if (schoolStatus) schoolStatus.textContent = `Your school was saved on this device, but not to your account. ${this.friendlyErrorMessage(error, 'Re-run supabase-setup.sql and try again.')}`;
+                    throw error;
+                }
+            } else if (schoolStatus) {
+                schoolStatus.textContent = 'Saved on this device.';
             }
             this.updateCourseSchoolFields();
             this.renderOtherGradeScaleEditor();

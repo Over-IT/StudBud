@@ -74,7 +74,11 @@ async function run() {
     for (const fn of ['studbud_admin_set_ban', 'studbud_admin_remove_user_decks', 'studbud_admin_force_username']) {
         assert.ok(sql.slice(sql.indexOf(`function public.${fn}`)).split('$$;')[0].includes('studbud_require_account_moderation(p_user_id)'), `${fn} checks target privileges`);
     }
-    assert.match(sql, /Guests can join with a code; sign in to host a game/);
+    assert.match(sql, /Guests can host up to 3 open games at once/);
+    for (const fn of ['studbud_claim_daily_reward', 'studbud_buy_mystery_item', 'studbud_buy_multiplayer_item', 'studbud_friend_request', 'studbud_change_username', 'studbud_record_study_time']) {
+        assert.ok(sql.slice(sql.indexOf(`function public.${fn}`)).split('$$;')[0].includes('public.studbud_is_guest()'), `${fn} is account-only`);
+    }
+    assert.match(sql, /function public\.studbud_set_guest_color[\s\S]*?not public\.studbud_is_guest\(\)/);
     assert.match(sql, /auth\.users where id = \(v_player ->> 'id'\)::uuid and is_anonymous/);
 
     const guestCalls = [], options = [];
@@ -99,7 +103,8 @@ async function run() {
     assert.equal(options[0].auth.persistSession, false, 'guest tokens are not saved alongside account tokens');
     cloud.offlineMode = true;
     const api = guestSandbox.window.StudBudCommunityGames;
-    assert.throws(() => api.getClient(), /internet connection/, 'guests cannot use the private/community account API');
+    assert.throws(() => api.getClient(), /Create a free account/, 'guests cannot use the private/community account API');
+    assert.equal(api.hasAccount(), false);
     await api.joinRoom('ABC234', 'Guest Name');
     assert.equal(guestCalls.at(-1).name, 'studbud_join_game_room');
     assert.equal(guestCalls.at(-1).args.p_nickname, 'Guest Name');

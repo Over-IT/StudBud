@@ -99,6 +99,16 @@ create index if not exists studbud_study_time_entries_date_idx
 alter table public.studbud_study_time_entries enable row level security;
 revoke all on table public.studbud_study_time_entries from public, anon, authenticated;
 
+-- Anonymous guest sessions (Continue as guest / join with a code) can play but not use account-only features.
+create or replace function public.studbud_is_guest()
+returns boolean
+language sql
+stable
+set search_path = public, pg_temp
+as $$
+    select coalesce((auth.jwt() ->> 'is_anonymous')::boolean, false);
+$$;
+
 drop function if exists public.studbud_record_study_time(text, integer);
 create or replace function public.studbud_record_study_time(
     p_entry_id text,
@@ -114,6 +124,7 @@ declare
     v_user_id uuid := auth.uid();
     v_inserted integer;
 begin
+    if public.studbud_is_guest() then raise exception 'Create a free account to use this. Your guest data comes with you.'; end if;
     if v_user_id is null then raise exception 'Sign in to record study time.'; end if;
     if p_entry_id is null or char_length(btrim(p_entry_id)) not between 1 and 140 then
         raise exception 'That study session could not be recorded.';
@@ -333,6 +344,7 @@ declare
     v_user_id uuid := auth.uid();
     v_inserted integer;
 begin
+    if public.studbud_is_guest() then raise exception 'Create a free account to use this. Your guest data comes with you.'; end if;
     if v_user_id is null then
         raise exception 'Sign in to record a community deck study.';
     end if;
@@ -598,6 +610,7 @@ declare
     v_streak integer;
     v_reward integer;
 begin
+    if public.studbud_is_guest() then raise exception 'Create a free account to use this. Your guest data comes with you.'; end if;
     if v_user_id is null then raise exception 'Sign in to claim your daily reward.'; end if;
     perform public.studbud_get_multiplayer_profile();
     select * into v_profile from public.studbud_multiplayer_profiles where user_id = v_user_id for update;
@@ -623,6 +636,7 @@ declare
     v_used integer;
     v_award integer;
 begin
+    if public.studbud_is_guest() then raise exception 'Create a free account to use this. Your guest data comes with you.'; end if;
     if v_user_id is null then raise exception 'Sign in to earn coins.'; end if;
     if p_correct is null or p_total is null or p_correct < 0 or p_total < 1 or p_correct > p_total or p_total > 100 then
         raise exception 'That game result is invalid.';
@@ -659,6 +673,7 @@ declare
     v_chances jsonb;
     v_total numeric;
 begin
+    if public.studbud_is_guest() then raise exception 'Create a free account to use this. Your guest data comes with you.'; end if;
     if v_user_id is null then raise exception 'Sign in to open a mystery box.'; end if;
     if p_box = 'basic' then
         v_cost := 80;
@@ -752,6 +767,7 @@ as $$
 declare
     v_user_id uuid := auth.uid();
 begin
+    if public.studbud_is_guest() then raise exception 'Create a free account to use this. Your guest data comes with you.'; end if;
     if v_user_id is null then raise exception 'Sign in to save your personal best.'; end if;
     if p_score is null or p_score < 0 or p_score > 100000 then raise exception 'That warm-up score is invalid.'; end if;
     insert into public.studbud_multiplayer_profiles (user_id, best_wait_score)
@@ -774,6 +790,7 @@ declare
     v_cost integer;
     v_profile public.studbud_multiplayer_profiles%rowtype;
 begin
+    if public.studbud_is_guest() then raise exception 'Create a free account to use this. Your guest data comes with you.'; end if;
     if v_user_id is null then raise exception 'Sign in to shop.'; end if;
     if p_item_id like 'pet\_%' then raise exception 'Pets can only be found in mystery boxes.'; end if;
     v_cost := public.studbud_shop_price(p_item_id);
@@ -800,6 +817,7 @@ declare
     v_user_id uuid := auth.uid();
     v_profile public.studbud_multiplayer_profiles%rowtype;
 begin
+    if public.studbud_is_guest() then raise exception 'Create a free account to use this. Your guest data comes with you.'; end if;
     if v_user_id is null then raise exception 'Sign in to customize your multiplayer profile.'; end if;
     if p_item_id like 'acc\_%\_trail' or p_item_id in ('acc_leaves', 'acc_notes', 'acc_bubbles', 'acc_comet') then
         raise exception 'Trails have been retired. Choose an aura or accessory instead.';
@@ -838,6 +856,7 @@ as $$
 declare
     v_user_id uuid := auth.uid();
 begin
+    if public.studbud_is_guest() then raise exception 'Create a free account to use this. Your guest data comes with you.'; end if;
     if v_user_id is null then raise exception 'Sign in to customize your multiplayer profile.'; end if;
     insert into public.studbud_multiplayer_profiles (user_id) values (v_user_id) on conflict (user_id) do nothing;
     if p_slot = 'skin' then update public.studbud_multiplayer_profiles set equipped_skin = '', updated_at = now() where user_id = v_user_id;
@@ -961,20 +980,29 @@ declare
 begin
     v_card := p_cards -> (p_index % jsonb_array_length(p_cards));
 
-    select jsonb_agg(to_jsonb(answer) order by shuffle_key)
-    into v_options
-    from (
-        select answer, min(shuffle_key) as shuffle_key
-        from (
-            select card ->> 'back' as answer, random() as shuffle_key
-            from jsonb_array_elements(p_cards) as item(card)
-            where card ->> 'back' is not null
-                and (card ->> 'back') <> (v_card ->> 'back')
-        ) as definitions
+    -- Prefer the author's own wrong options, then other answers that look alike (similar length and both numeric or both text).
+    with custom as (
+        select btrim(value) as answer, 0 as tier, random() as score
+        from jsonb_array_elements_text(case when jsonb_typeof(v_card -> 'distractors') = 'array' then v_card -> 'distractors' else '[]'::jsonb end) as option(value)
+        where btrim(value) <> '' and lower(btrim(value)) <> lower(btrim(v_card ->> 'back'))
+    ), pool as (
+        select btrim(card ->> 'back') as answer, 1 as tier,
+            abs(char_length(btrim(card ->> 'back')) - char_length(btrim(v_card ->> 'back')))::numeric
+                / greatest(char_length(btrim(v_card ->> 'back')), 1)
+            + case when (card ->> 'back' ~ '^\s*[-+]?[0-9]') = (v_card ->> 'back' ~ '^\s*[-+]?[0-9]') then 0 else 1 end
+            + random() * 0.75 as score
+        from jsonb_array_elements(p_cards) as item(card)
+        where btrim(coalesce(card ->> 'back', '')) <> ''
+            and lower(btrim(card ->> 'back')) <> lower(btrim(v_card ->> 'back'))
+    ), picked as (
+        select answer from (select * from custom union all select * from pool) as candidates
         group by answer
-        order by min(shuffle_key)
+        order by min(tier), min(score)
         limit 3
-    ) as choices;
+    )
+    select jsonb_agg(to_jsonb(answer) order by random())
+    into v_options
+    from (select answer from picked union all select v_card ->> 'back') as choices;
 
     if not coalesce(v_options @> jsonb_build_array(v_card ->> 'back'), false) then
         v_options := coalesce(v_options, '[]'::jsonb) || jsonb_build_array(v_card ->> 'back');
@@ -1058,7 +1086,9 @@ declare
     v_cosmetics jsonb;
 begin
     if v_user_id is null then raise exception 'Sign in to host a game.'; end if;
-    if coalesce((auth.jwt() ->> 'is_anonymous')::boolean, false) then raise exception 'Guests can join with a code; sign in to host a game.'; end if;
+    if public.studbud_is_guest() and (select count(*) from public.studbud_game_rooms where host_id = v_user_id and expires_at > now() and status <> 'finished') >= 3 then
+        raise exception 'Guests can host up to 3 open games at once. Finish one first.';
+    end if;
     if p_code !~ '^[A-HJ-NP-Z2-9]{6}$' then raise exception 'The room code is invalid.'; end if;
     if char_length(v_nickname) not between 2 and 20 or v_nickname !~ '^[A-Za-z0-9 _-]+$' then
         raise exception 'Nickname must be 2–20 letters, numbers, spaces, underscores, or hyphens.';
@@ -1198,6 +1228,36 @@ begin
     return public.studbud_game_room_view(v_room);
 end;
 $$;
+
+-- Guests have no cosmetics, so they can pick one of a few free starter colors for their character.
+create or replace function public.studbud_set_guest_color(p_code text, p_color text)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_room public.studbud_game_rooms%rowtype;
+begin
+    if auth.uid() is null or not public.studbud_is_guest() then return; end if;
+    if lower(coalesce(p_color, '')) not in ('#34d399', '#60a5fa', '#f472b6', '#fbbf24', '#a78bfa', '#f87171', '#2dd4bf', '#fb923c') then
+        raise exception 'Choose one of the starter colors.';
+    end if;
+    select * into v_room from public.studbud_game_rooms
+    where room_code = upper(btrim(p_code)) and expires_at > now() for update;
+    if not found then return; end if;
+    update public.studbud_game_rooms
+    set state = jsonb_set(state, '{players}', (
+            select jsonb_agg(case when player ->> 'id' = auth.uid()::text
+                then player || jsonb_build_object('color', lower(p_color)) else player end order by position)
+            from jsonb_array_elements(state -> 'players') with ordinality as members(player, position)
+        )),
+        updated_at = now()
+    where id = v_room.id and jsonb_array_length(state -> 'players') > 0;
+end;
+$$;
+revoke all on function public.studbud_set_guest_color(text, text) from public, anon;
+grant execute on function public.studbud_set_guest_color(text, text) to authenticated;
 
 create or replace function public.studbud_get_game_room(p_code text)
 returns jsonb
@@ -1917,6 +1977,7 @@ create policy "Deck owners can publish community decks"
     on public.studbud_community_decks for insert
     to authenticated with check (
         auth.uid() = owner_id
+        and not public.studbud_is_guest()
         and public.studbud_current_user_can_publish_community_decks()
     );
 
@@ -2121,6 +2182,7 @@ declare
     v_email text;
     st public.studbud_username_state;
 begin
+    if public.studbud_is_guest() then raise exception 'Create a free account to use this. Your guest data comes with you.'; end if;
     if v_uid is null then raise exception 'Sign in first.'; end if;
     if public.studbud_is_admin() then raise exception 'The admin account''s username can''t be changed.'; end if;
     if v_name !~ '^[a-z0-9_]{3,24}$' then raise exception 'Username must be 3-24 characters and contain only letters, numbers, or underscores.'; end if;
@@ -2259,6 +2321,7 @@ declare
     v_target uuid;
     v_existing public.studbud_friendships;
 begin
+    if public.studbud_is_guest() then raise exception 'Create a free account to use this. Your guest data comes with you.'; end if;
     if v_uid is null then raise exception 'Sign in first.'; end if;
     if v_name = '' then raise exception 'Enter a username.'; end if;
     select id into v_target from auth.users
@@ -2454,6 +2517,7 @@ security definer
 set search_path = public, pg_temp
 as $$
 begin
+    if public.studbud_is_guest() then raise exception 'Create a free account to use this. Your guest data comes with you.'; end if;
     if auth.uid() is null then raise exception 'Sign in first.'; end if;
     insert into public.studbud_public_profiles (
         user_id, bio, favorite_subject, grade_level, study_goal, first_name, last_name, show_real_name, show_school, show_stats, updated_at
@@ -2477,6 +2541,7 @@ security definer
 set search_path = public, pg_temp
 as $$
 begin
+    if public.studbud_is_guest() then raise exception 'Create a free account to use this. Your guest data comes with you.'; end if;
     if auth.uid() is null then raise exception 'Sign in first.'; end if;
     if p_school is null or p_school not in ('pchs', 'other') then raise exception 'Choose PCHS or Other for your school.'; end if;
     insert into public.studbud_public_profiles (user_id, school, updated_at)

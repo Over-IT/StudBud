@@ -142,7 +142,10 @@ async function run() {
     window.alert = () => {};
     let schoolArgs;
     community.friendCall = async (name, args) => { schoolArgs = { name, args }; };
+    const hasAccount = community.hasAccount;
+    community.hasAccount = () => true;
     await app.saveProfile();
+    community.hasAccount = hasAccount;
     assert.deepEqual(normal(schoolArgs), { name: 'studbud_set_school', args: { p_school: 'other' } },
         'saving account settings persists the selected school to the account');
     assert.equal(state.state.profile.school, 'other');

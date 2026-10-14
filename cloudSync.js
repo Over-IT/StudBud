@@ -172,6 +172,7 @@
                 this.setCloudStatus('Offline: changes are saved on this device. Sync resumes after reconnecting.');
             });
             window.addEventListener('online', () => {
+                if (this.isGuest()) { this.updateOfflineNotice(); return; }
                 if (this.offlineMode && !this.user && !localStorage.getItem('STUDBUD_CLOUD_ACCOUNT_ID')) {
                     this.setCloudStatus('Internet is available. Continue locally or choose Connect account to sync.');
                     return;
@@ -184,27 +185,52 @@
         }
 
         updateOfflineNotice() {
-            document.getElementById('offline-notice')?.classList.toggle('hidden', !this.offlineMode);
+            const guest = this.isGuest();
+            const notice = document.getElementById('offline-notice');
+            notice?.classList.toggle('hidden', !this.offlineMode);
+            const text = notice?.querySelector?.('span');
+            if (text) text.textContent = guest
+                ? 'Guest mode: everything saves on this device. Create a free account to sync, earn coins and share sets.'
+                : 'Offline: changes stay on this device until you reconnect.';
+            const connect = document.getElementById('offline-connect-btn');
+            if (connect) connect.textContent = guest ? 'Create account' : 'Connect account';
             const signOut = document.getElementById('sign-out-btn');
-            if (signOut) signOut.textContent = this.offlineMode ? 'Connect account' : 'Sign out';
+            if (signOut) signOut.textContent = guest ? 'Sign in or create account' : this.offlineMode ? 'Connect account' : 'Sign out';
+            document.body?.classList.toggle('guest-mode', guest);
+        }
+
+        isGuest() {
+            return Boolean(this.offlineMode && !this.user && !(typeof localStorage !== 'undefined' && localStorage.getItem('STUDBUD_CLOUD_ACCOUNT_ID')));
         }
 
         async prepareGuestSession() {
-            if (this.user || this.guestUser) return;
-            if (window.navigator?.onLine === false) throw new Error('Guest games need an internet connection.');
+            if (this.guestUser) return;
+            if (window.navigator?.onLine === false) throw new Error('Online play needs an internet connection.');
             if (this.guestOpening) return this.guestOpening;
             this.guestOpening = (async () => {
                 const config = window.STUDBUD_SUPABASE_CONFIG || {};
-                if (!config.url || !config.anonKey || !window.supabase?.createClient) throw new Error('Guest games need the online Supabase configuration and SDK. Open StudBud online and reload.');
+                if (!config.url || !config.anonKey || !window.supabase?.createClient) throw new Error('Online features need the Supabase configuration and SDK. Open StudBud online and reload.');
+                // App guests keep one anonymous session across reloads; code-only joins forget it when the page closes.
+                const persist = this.isGuest();
                 this.guestClient ||= window.supabase.createClient(config.url, config.anonKey, {
-                    auth: { persistSession: false, detectSessionInUrl: false, storageKey: 'studbud-guest-game' }
+                    auth: { persistSession: persist, autoRefreshToken: true, detectSessionInUrl: false, storageKey: persist ? 'studbud-guest-session' : 'studbud-guest-game' }
                 });
+                const existing = persist ? (await this.guestClient.auth.getSession()).data?.session?.user : null;
+                if (existing?.is_anonymous) { this.guestUser = existing; return; }
                 const { data, error } = await this.guestClient.auth.signInAnonymously();
-                if (error) throw new Error(`Guest joining is unavailable: ${error.message}. The administrator must enable Anonymous Sign-ins in Supabase Authentication.`);
+                if (error) throw new Error(`Guest play is unavailable: ${error.message}. The administrator must enable Anonymous Sign-ins in Supabase Authentication.`);
                 if (!data?.user?.is_anonymous) throw new Error('The server did not create a valid guest session.');
                 this.guestUser = data.user;
             })();
             try { await this.guestOpening; } finally { this.guestOpening = null; }
+        }
+
+        async endGuestSession() {
+            const client = this.guestClient;
+            this.guestClient = null;
+            this.guestUser = null;
+            await client?.auth.signOut({ scope: 'local' }).catch(() => {});
+            localStorage.removeItem('studbud-guest-session');
         }
 
         async handleGuestJoin(event) {
@@ -270,8 +296,9 @@
             document.getElementById('app-container')?.classList.remove('hidden');
             this.updateOfflineNotice();
             const accountName = document.getElementById('account-name');
-            if (accountName) accountName.textContent = 'Offline on this device';
-            this.setCloudStatus('Offline / local mode: saved on this device. Cloud and community features require a connection.');
+            if (accountName) accountName.textContent = this.isGuest() ? 'Guest' : 'Offline on this device';
+            this.setCloudStatus(this.isGuest() ? 'Guest mode: saved on this device.' : 'Offline / local mode: saved on this device. Cloud and community features require a connection.');
+            window.NexusApp?.refreshGuestFeatures?.();
         }
 
         async connectOnline() {
@@ -329,10 +356,10 @@
             const signup = mode === 'signup';
             document.getElementById('login-form')?.classList.toggle('hidden', signup);
             document.getElementById('signup-form')?.classList.toggle('hidden', !signup);
-            document.getElementById('auth-title').textContent = signup ? 'Create your StudBud account' : 'Sign in to StudBud';
+            document.getElementById('auth-title').textContent = signup ? 'Create your free account' : 'Welcome to StudBud';
             document.getElementById('auth-description').textContent = signup
-                ? 'Create an account to keep your school data and preferences in sync.'
-                : 'Your classes, assignments, study history, and preferences sync to your account.';
+                ? 'Sync your classes and sets across devices, earn coins and share sets. Anything saved as a guest on this device comes with you.'
+                : 'Sign in to sync across devices, or continue as a guest. No account needed.';
             document.getElementById('auth-switch-prompt').textContent = signup ? 'Already have an account?' : 'New to StudBud?';
             document.getElementById('auth-switch-btn').textContent = signup ? 'Sign in' : 'Create an account';
             this.setAuthStatus('');
@@ -504,6 +531,7 @@
             this.accountReady = true;
             this.offlineMode = false;
             localStorage.removeItem('STUDBUD_LOCAL_MODE');
+            this.endGuestSession();
             this.updateOfflineNotice();
             document.getElementById('auth-screen')?.classList.add('hidden');
             document.getElementById('app-container')?.classList.remove('hidden');
@@ -615,7 +643,7 @@
             if (this.offlineMode || window.navigator?.onLine === false) {
                 this.syncRevision++;
                 if (!localStorage.getItem('STUDBUD_CLOUD_ACCOUNT_ID')) localStorage.setItem('STUDBUD_LOCAL_ONLY_DATA', 'true');
-                this.setCloudStatus('Offline / local mode: changes saved on this device; waiting to sync.');
+                this.setCloudStatus(this.isGuest() ? 'Guest mode: saved on this device.' : 'Offline / local mode: changes saved on this device; waiting to sync.');
                 return;
             }
             if (this.restoringSnapshot || !this.accountReady || !this.user || !window.NexusApp?.AppState) return;
@@ -695,6 +723,7 @@
             localStorage.removeItem('STUDBUD_CLOUD_SYNC_BASE');
             localStorage.removeItem('STUDBUD_LOCAL_ONLY_DATA');
             localStorage.removeItem('STUDBUD_LOCAL_MODE');
+            await this.endGuestSession();
             await Promise.all(['flashcards', 'studyHistory', 'gameMetrics'].map(store => window.NexusApp.clearLocalStore(store)));
         }
 

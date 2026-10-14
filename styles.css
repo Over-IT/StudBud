@@ -3139,7 +3139,11 @@ body.tutorial-active { overscroll-behavior: contain; }
 .card-attachment audio { max-width: 100%; width: 100%; }
 .tutorial-jump { display: grid; gap: 4px; font-size: .85rem; }
 .tutorial-jump select { width: 100%; min-height: 40px; font-size: 1rem; }
-.guest-join { margin: 18px 0; padding: 14px; border: 1px solid var(--border-glass); border-radius: 12px; }
+.guest-join { margin: 18px 0 0; padding: 14px; border: 1px solid var(--border-glass); border-radius: 12px; }
+.guest-start-btn { margin-top: 18px; min-height: 48px; font-size: 1rem; }
+.guest-start-hint { margin: 8px 0 0; text-align: center; }
+.auth-divider { display: flex; align-items: center; gap: 10px; margin: 18px 0 10px; color: var(--text-secondary); font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; }
+.auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--border-glass); }
 .guest-join summary { cursor: pointer; font-weight: 700; min-height: 30px; }
 .guest-join[open] summary { margin-bottom: 12px; }
 #guest-game-lobby { width: min(900px, calc(100vw - 24px)); margin: 24px auto; }
@@ -3615,3 +3619,14 @@ body.compact-ui .streak-flame b { bottom: 4px; font-size: .85rem; }
     #ic-import-modal .ic-more { min-width: 0; }
     #ic-import-modal .ic-more small { overflow-wrap: anywhere; }
 }
+
+.guest-colors h4 { margin: 0 0 10px; }
+.guest-color-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; }
+.guest-color { width: 42px; height: 42px; border-radius: 50%; border: 3px solid transparent; background: var(--swatch); cursor: pointer; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25); }
+.guest-color.active, .guest-color:focus-visible { border-color: var(--text-primary, #fff); outline: none; transform: scale(1.08); }
+body.guest-mode #multiplayer-shop .view-header p { display: none; }
+body.guest-mode .nav-item[data-target="friends-view"],
+body.guest-mode .workspace-tab[data-target="friends-view"],
+body.guest-mode #username-card,
+body.guest-mode #public-profile-card,
+body.guest-mode [data-study-leaderboard-scope="friends"] { display: none !important; }

@@ -3,6 +3,7 @@
 
     class StudBudCommunityGames {
         constructor() {
+            this.guestColors = ['#34d399', '#60a5fa', '#f472b6', '#fbbf24', '#a78bfa', '#f87171', '#2dd4bf', '#fb923c'];
             this.catalog = [
                 { id: 'palette_ocean', name: 'Tidal Glow', color: 'ocean', hue: 205, hue2: 190, price: 120, type: 'palette', description: 'Ocean-blue and turquoise colors for your character and app theme' },
                 { id: 'palette_sunset', name: 'Heatwave', color: 'sunset', hue: 20, hue2: 350, price: 120, type: 'palette', description: 'Warm orange and pink colors for your character and app theme' },
@@ -202,9 +203,16 @@
 
         getClient() {
             const cloud = window.StudBudCloud;
-            if (cloud?.offlineMode || window.navigator?.onLine === false) throw new Error('This feature needs an internet connection. Your private study tools and solo games work offline.');
-            if (!cloud?.client || !cloud.user) throw new Error('Sign in to use community decks and hosted games.');
+            if (window.navigator?.onLine === false) throw new Error('This feature needs an internet connection. Your private study tools and solo games work offline.');
+            if (cloud?.isGuest?.()) throw new Error('Create a free account to use this. Your guest data comes with you.');
+            if (cloud?.offlineMode) throw new Error('Connect your account to use this. Your saved data stays on this device until then.');
+            if (!cloud?.client || !cloud.user) throw new Error('Sign in to use this feature.');
             return cloud.client;
+        }
+
+        hasAccount() {
+            const cloud = window.StudBudCloud;
+            return Boolean(cloud?.client && cloud.user && !cloud.offlineMode);
         }
 
         getUserId() {
@@ -212,11 +220,24 @@
             return window.StudBudCloud.user.id;
         }
 
+        // Signed-in client when available, otherwise an anonymous guest session (created on first use).
+        async publicClient() {
+            if (this.hasAccount()) return window.StudBudCloud.client;
+            if (window.navigator?.onLine === false) throw new Error('This feature needs an internet connection. Your saved sets and solo games work offline.');
+            await window.StudBudCloud.prepareGuestSession();
+            return window.StudBudCloud.guestClient;
+        }
+
         getGameClient() {
             const cloud = window.StudBudCloud;
-            if (window.navigator?.onLine === false) throw new Error('Joining a game needs an internet connection.');
-            if (cloud?.guestClient && cloud.guestUser && !cloud.user) return cloud.guestClient;
+            if (window.navigator?.onLine === false) throw new Error('Playing online needs an internet connection.');
+            if (this.hasAccount()) return cloud.client;
+            if (cloud?.guestClient && cloud.guestUser) return cloud.guestClient;
             return this.getClient();
+        }
+
+        async gameClient() {
+            return this.hasAccount() ? window.StudBudCloud.client : this.publicClient();
         }
 
         boxPool(box, owned = []) {
@@ -233,7 +254,7 @@
         }
 
         async searchDecks(query = '') {
-            const client = this.getClient();
+            const client = (await this.publicClient());
             const term = String(query || '').trim().replace(/[%_,()]/g, '');
             const build = withCourse => {
                 let request = client.from('studbud_community_decks')
@@ -260,13 +281,13 @@
         async getAuthorNames(ids) {
             const list = [...new Set((ids || []).filter(Boolean))];
             if (!list.length) return {};
-            const { data, error } = await this.getClient().rpc('studbud_community_authors', { p_ids: list });
+            const { data, error } = await (await this.publicClient()).rpc('studbud_community_authors', { p_ids: list });
             if (error) throw new Error(error.message);
             return data || {};
         }
 
         async getUserProfile(userId) {
-            const { data, error } = await this.getClient().rpc('studbud_view_profile', { p_user_id: userId });
+            const { data, error } = await (await this.publicClient()).rpc('studbud_view_profile', { p_user_id: userId });
             if (error) throw new Error(error.message);
             return data;
         }
@@ -332,7 +353,8 @@
         }
 
         async importDeck(deckId) {
-            const load = columns => this.getClient().from('studbud_community_decks')
+            const client = await this.publicClient();
+            const load = columns => client.from('studbud_community_decks')
                 .select(columns)
                 .eq('id', deckId)
                 .single();
@@ -341,7 +363,7 @@
             if (error) throw new Error(`Could not load this community deck: ${error.message}`);
             if (!Array.isArray(data.cards) || data.cards.length < 2) throw new Error('This community deck no longer contains enough cards to study.');
             try {
-                const { data: names } = await this.getClient().rpc('studbud_community_authors', { p_ids: [data.owner_id] });
+                const { data: names } = await client.rpc('studbud_community_authors', { p_ids: [data.owner_id] });
                 data.author_name = names?.[data.owner_id] || 'Student';
             } catch (_) {
                 data.author_name = 'Student';
@@ -377,7 +399,7 @@
         }
 
         async getStudyLeaderboard(period = 'daily', scope = 'global') {
-            const client = this.getClient();
+            const client = (await this.publicClient());
             let { data, error } = await client.rpc('studbud_get_study_leaderboard', { p_period: period, p_scope: scope });
             // Older databases only know the one-argument daily/weekly version; keep the board working until setup is re-run.
             if (error && /p_scope|function|schema cache/i.test(error.message || '')) {
@@ -455,7 +477,7 @@
         }
 
         async getSiteNotice() {
-            const { data, error } = await this.getClient().rpc('studbud_get_site_notice');
+            const { data, error } = await (await this.publicClient()).rpc('studbud_get_site_notice');
             if (error) throw new Error(error.message.includes('Could not find the function')
                 ? 'Site announcements are not set up yet. Re-run supabase-setup.sql in Supabase.'
                 : error.message);
@@ -463,7 +485,7 @@
         }
 
         async getSiteNoticeHistory() {
-            const { data, error } = await this.getClient().rpc('studbud_get_site_notice_history');
+            const { data, error } = await (await this.publicClient()).rpc('studbud_get_site_notice_history');
             if (error) throw new Error(error.message.includes('Could not find the function')
                 ? 'Announcement history is not set up yet. Re-run supabase-setup.sql in Supabase.'
                 : error.message);
@@ -503,7 +525,7 @@
                 .map(card => ({ front: String(card.front).trim().slice(0, 1000), back: String(card.back).trim().slice(0, 1000),
                     distractors: (card.distractors || []).map(text => String(text).trim().slice(0, 1000)).filter(Boolean).slice(0, 3) }));
             if (!cards.length) throw new Error('Choose a set with at least one complete card.');
-            const { data, error } = await this.getClient().rpc('studbud_create_game_room', {
+            const { data, error } = await (await this.gameClient()).rpc('studbud_create_game_room', {
                 p_code: roomCode,
                 p_nickname: nickname,
                 p_deck_title: String(deck.title || 'Flashcards').slice(0, 100),
@@ -516,21 +538,39 @@
                 roomError.code = error.code;
                 throw roomError;
             }
-            return data;
+            return this.applyGuestColor(roomCode, data);
+        }
+
+        guestColor() {
+            const color = String(window.localStorage?.getItem('studbud-guest-color') || '').toLowerCase();
+            return this.guestColors.includes(color) ? color : '';
+        }
+
+        async applyGuestColor(roomCode, room) {
+            const color = this.guestColor();
+            if (this.hasAccount() || !color) return room;
+            try {
+                const client = await this.gameClient();
+                const { error } = await client.rpc('studbud_set_guest_color', { p_code: roomCode, p_color: color });
+                if (error) return room;
+                const { data } = await client.rpc('studbud_get_game_room', { p_code: roomCode });
+                return data || room;
+            } catch (_) {
+                return room;
+            }
         }
 
         async joinRoom(roomCode, nickname) {
-            if (!window.StudBudCloud?.user) await window.StudBudCloud.prepareGuestSession();
-            const { data, error } = await this.getGameClient().rpc('studbud_join_game_room', {
+            const { data, error } = await (await this.gameClient()).rpc('studbud_join_game_room', {
                 p_code: roomCode,
                 p_nickname: nickname
             });
             if (error) throw new Error(`Could not join the game: ${error.message}`);
-            return data;
+            return this.applyGuestColor(roomCode, data);
         }
 
         async getRoom(roomCode) {
-            const { data, error } = await this.getGameClient().rpc('studbud_get_game_room', {
+            const { data, error } = await (await this.gameClient()).rpc('studbud_get_game_room', {
                 p_code: roomCode
             });
             if (error) throw new Error(`Could not refresh the game: ${error.message}`);
@@ -538,7 +578,7 @@
         }
 
         async startRoom(roomCode) {
-            const { data, error } = await this.getClient().rpc('studbud_start_game_room', {
+            const { data, error } = await (await this.gameClient()).rpc('studbud_start_game_room', {
                 p_code: roomCode
             });
             if (error) throw new Error(`Could not start the game: ${error.message}`);
@@ -546,7 +586,7 @@
         }
 
         async submitAnswer(roomCode, questionNumber, choiceIndex, action = 'steady') {
-            const { data, error } = await this.getGameClient().rpc('studbud_submit_game_answer', {
+            const { data, error } = await (await this.gameClient()).rpc('studbud_submit_game_answer', {
                 p_code: roomCode,
                 p_question_number: questionNumber,
                 p_choice_index: choiceIndex,
@@ -557,7 +597,7 @@
         }
 
         async nextQuestion(roomCode) {
-            const { data, error } = await this.getClient().rpc('studbud_advance_game_room', {
+            const { data, error } = await (await this.gameClient()).rpc('studbud_advance_game_room', {
                 p_code: roomCode
             });
             if (error) throw new Error(`Could not move to the next question: ${error.message}`);
@@ -565,7 +605,7 @@
         }
 
         async finishRoom(roomCode) {
-            const { data, error } = await this.getClient().rpc('studbud_finish_game_room', {
+            const { data, error } = await (await this.gameClient()).rpc('studbud_finish_game_room', {
                 p_code: roomCode
             });
             if (error) throw new Error(`Could not end the game: ${error.message}`);
@@ -573,7 +613,7 @@
         }
 
         async kickPlayer(roomCode, playerId) {
-            const { data, error } = await this.getClient().rpc('studbud_kick_game_player', {
+            const { data, error } = await (await this.gameClient()).rpc('studbud_kick_game_player', {
                 p_code: roomCode,
                 p_player_id: playerId
             });
@@ -582,18 +622,18 @@
         }
 
         async getCards(roomCode) {
-            const { data, error } = await this.getGameClient().rpc('studbud_get_game_cards', { p_code: roomCode });
+            const { data, error } = await (await this.gameClient()).rpc('studbud_get_game_cards', { p_code: roomCode });
             if (error) throw new Error(`Could not load questions: ${error.message}`);
             return (Array.isArray(data) ? data : []).filter(card => card?.front && card?.back);
         }
 
         async saveChessState(roomCode, state) {
-            const { error } = await this.getClient().rpc('studbud_save_chess_state', { p_code: roomCode, p_state: state });
+            const { error } = await (await this.gameClient()).rpc('studbud_save_chess_state', { p_code: roomCode, p_state: state });
             if (error) throw new Error(`Could not save the chess board: ${error.message}`);
         }
 
         async reportScore(roomCode, score, answered, correct = 0) {
-            const { error } = await this.getGameClient().rpc('studbud_report_game_score', {
+            const { error } = await (await this.gameClient()).rpc('studbud_report_game_score', {
                 p_code: roomCode,
                 p_score: Math.max(0, Math.round(score)),
                 p_answered: Math.max(0, Math.round(answered)),
@@ -615,7 +655,7 @@
         }
 
         async leaveRoom(roomCode) {
-            const { data, error } = await this.getGameClient().rpc('studbud_leave_game_room', {
+            const { data, error } = await (await this.gameClient()).rpc('studbud_leave_game_room', {
                 p_code: roomCode
             });
             if (error) throw new Error(`Could not leave the game: ${error.message}`);

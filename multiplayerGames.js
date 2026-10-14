@@ -960,7 +960,7 @@
 
         goalText() { const last = this.checkpoints.length - 1; const current = Math.max(0, -(this.me.y + this.me.h)); return `${this.cp.id ? `Checkpoint ${this.cp.id}/${last}` : 'Start'} · Height ${Math.round(current / 40)}m · Best ${Math.round(this.maxH / 40)}m / ${Math.round(this.summitH / 40)}m · ${SKY_BIOMES[Math.min(3, Math.floor(this.maxH / this.summitH * 4))].name}`; }
         touchLayout() { return { stick: true, buttons: [{ k: 'Space', label: 'Jump', cls: 'main' }, { k: 'ShiftLeft', label: 'Dash' }] }; }
-        hint() { return 'A/D run · Space jump (twice) · Shift dash · R = back to checkpoint · climb to the summit before the tide · Q = recharge'; }
+        hint() { return 'A/D run · Space jump (twice) · Shift dash · R = back to checkpoint · Q = recharge'; }
 
         drawProp(ctx, p) {
             const { x, y, w, h } = p;
@@ -974,14 +974,26 @@
                 ctx.fillStyle = '#451a03'; for (let by = y + 14; by < y + h - 6; by += 16) ctx.fillRect(x, by, w, 3);
                 ctx.fillStyle = '#b45309'; ctx.fillRect(x, y, w, 5);
             } else {
-                const tint = [ '#a77950', '#bc8f60', '#9c7049' ][Math.abs(Math.round(x + y)) % 3];
-                ctx.fillStyle = tint; roundRect(ctx, x, y, w, h, 3); ctx.fill();
-                ctx.fillStyle = 'rgba(0,0,0,.16)'; ctx.fillRect(x + w * .72, y + 3, w * .28 - 3, h - 6);
-                ctx.strokeStyle = '#68472e'; ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
-                ctx.fillStyle = '#dbc497'; ctx.fillRect(x + w * .45, y + 1, Math.max(7, w * .12), h - 2);
-                ctx.fillStyle = '#eee2c6'; ctx.fillRect(x + 8, y + h * .48, Math.min(24, w * .35), 16);
-                ctx.fillStyle = '#604832'; for (let i = 0; i < 5; i++) ctx.fillRect(x + 11 + i * 3, y + h * .48 + 5, 1, 7);
-                ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.fillRect(x + 3, y + 2, w - 6, 3);
+                const seed = Math.abs(Math.round(x * 7 + y * 13));
+                if (seed % 2) {
+                    // wooden crate: frame, diagonal brace and plank seams
+                    ctx.fillStyle = '#b07a43'; roundRect(ctx, x, y, w, h, 3); ctx.fill();
+                    ctx.fillStyle = 'rgba(0,0,0,.14)'; for (let py = y + h / 4; py < y + h - 4; py += h / 4) ctx.fillRect(x + 6, py, w - 12, 2);
+                    ctx.strokeStyle = '#7c4a1e'; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(x + 7, y + h - 7); ctx.lineTo(x + w - 7, y + 7); ctx.stroke();
+                    ctx.strokeStyle = '#6b3d16'; ctx.lineWidth = 6; ctx.strokeRect(x + 3, y + 3, w - 6, h - 6);
+                    ctx.fillStyle = '#d6d3d1'; for (const [cx, cy] of [[x + 6, y + 6], [x + w - 6, y + 6], [x + 6, y + h - 6], [x + w - 6, y + h - 6]]) { ctx.beginPath(); ctx.arc(cx, cy, 2, 0, TAU); ctx.fill(); }
+                    ctx.fillStyle = 'rgba(255,255,255,.18)'; ctx.fillRect(x + 2, y + 1, w - 4, 2);
+                } else {
+                    // cardboard box: lit top flaps, packing tape and a shipping label
+                    ctx.fillStyle = '#c99a5b'; roundRect(ctx, x, y, w, h, 3); ctx.fill();
+                    ctx.fillStyle = '#ddb57a'; ctx.fillRect(x + 1, y + 1, w - 2, Math.min(12, h * 0.18));
+                    ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.fillRect(x + 1, y + Math.min(12, h * 0.18), w - 2, 2);
+                    ctx.fillStyle = 'rgba(0,0,0,.1)'; ctx.fillRect(x + w - 8, y + 2, 6, h - 4);
+                    ctx.fillStyle = 'rgba(230,214,170,.85)'; ctx.fillRect(x + w / 2 - 5, y + 1, 10, h * 0.45);
+                    ctx.fillStyle = '#f8f5ec'; ctx.fillRect(x + 7, y + h * 0.58, Math.min(26, w * 0.42), Math.min(16, h * 0.24));
+                    ctx.fillStyle = '#57534e'; for (let i = 0; i < 3; i++) ctx.fillRect(x + 10, y + h * 0.58 + 4 + i * 4, Math.min(18, w * 0.3) - i * 4, 1.5);
+                    ctx.strokeStyle = 'rgba(120,80,40,.55)'; ctx.lineWidth = 1.5; ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+                }
             }
         }
 
@@ -1082,19 +1094,41 @@
             if (p.bi === 3) { ctx.fillStyle = 'rgba(196,181,253,.35)'; ctx.fillRect(p.x - 3, p.y - 3, p.w + 6, 3); }
             if (this.s.lowDetail) return;
             const hsh = Math.abs(Math.round(p.x) * 73856093 ^ Math.round(p.y) * 19349663);
-            ctx.fillStyle = 'rgba(15,23,42,.3)';
-            if (hsh % 3 === 0) {
-                for (let x = p.x + 24; x < p.x + p.w - 3; x += 38) ctx.fillRect(x, p.y + 4, 2, Math.max(0, p.h - 6));
-                ctx.fillRect(p.x + 4, p.y + p.h / 2, p.w - 8, 1);
-            } else if (hsh % 3 === 1) {
-                ctx.fillRect(p.x + 5, p.y + 6, p.w - 10, 1);
-                ctx.fillRect(p.x + 8, p.y + p.h - 4, p.w - 16, 1);
+            const material = (hsh >> 2) % 4, base = B.ledge, dark = mixHex(base, '#0f172a', 0.55), lip = Math.max(0, p.h - 4);
+            if (material === 0) {
+                // steel girder with an open truss hanging underneath
+                ctx.fillStyle = dark; ctx.fillRect(p.x + 6, p.y + p.h, p.w - 12, 5); ctx.fillRect(p.x + 6, p.y + p.h + 24, p.w - 12, 5);
+                ctx.strokeStyle = dark; ctx.lineWidth = 3; ctx.beginPath();
+                for (let x = p.x + 6; x < p.x + p.w - 30; x += 30) { ctx.moveTo(x, p.y + p.h + 3); ctx.lineTo(x + 30, p.y + p.h + 26); ctx.moveTo(x + 30, p.y + p.h + 3); ctx.lineTo(x, p.y + p.h + 26); }
+                ctx.stroke();
+                ctx.fillStyle = 'rgba(226,232,240,.55)'; for (let x = p.x + 10; x < p.x + p.w - 6; x += 20) { ctx.beginPath(); ctx.arc(x, p.y + p.h / 2 + 2, 1.8, 0, TAU); ctx.fill(); }
+            } else if (material === 1) {
+                // brick ledge with mortar lines and a stone cap
+                ctx.fillStyle = mixHex('#b45309', base, 0.35); ctx.fillRect(p.x + 2, p.y + 4, p.w - 4, lip);
+                ctx.fillStyle = 'rgba(15,23,42,.35)';
+                for (let row = 0, y = p.y + 4; y < p.y + p.h - 2; y += 8, row++) {
+                    ctx.fillRect(p.x + 2, y + 7, p.w - 4, 1);
+                    for (let x = p.x + 2 + (row % 2) * 9; x < p.x + p.w - 4; x += 18) ctx.fillRect(x, y, 1, 7);
+                }
+                ctx.fillStyle = '#e7e5e4'; ctx.fillRect(p.x - 2, p.y, p.w + 4, 4);
+                ctx.fillStyle = dark; for (const x of [p.x + 14, p.x + p.w - 22]) ctx.fillRect(x, p.y + p.h, 8, 18);
+            } else if (material === 2) {
+                // wooden boardwalk with planks, nails and posts
+                const planks = ['#a16207', '#92400e', '#b45309'];
+                for (let k = 0, x = p.x + 2; x < p.x + p.w - 2; x += 22, k++) {
+                    ctx.fillStyle = mixHex(planks[(k + hsh) % 3], base, 0.25); ctx.fillRect(x, p.y + 3, Math.min(21, p.x + p.w - 2 - x), lip);
+                    ctx.fillStyle = 'rgba(254,243,199,.5)'; ctx.fillRect(x + 3, p.y + 6, 2, 2); ctx.fillRect(x + 15, p.y + 6, 2, 2);
+                }
+                ctx.fillStyle = '#78350f'; for (const x of [p.x + 10, p.x + p.w / 2 - 4, p.x + p.w - 18]) ctx.fillRect(x, p.y + p.h, 8, 30);
+                ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fillRect(p.x + 10, p.y + p.h + 12, p.w - 20, 4);
             } else {
-                for (let x = p.x + 10; x < p.x + p.w - 8; x += 24) ctx.fillRect(x, p.y + 5, 8, Math.max(0, p.h - 9));
+                // concrete slab with panel seams, rebar stubs and a hanging pipe
+                ctx.fillStyle = 'rgba(15,23,42,.28)';
+                for (let x = p.x + 36; x < p.x + p.w - 6; x += 46) ctx.fillRect(x, p.y + 4, 2, lip);
+                ctx.fillStyle = dark; ctx.fillRect(p.x + 4, p.y + p.h, p.w - 8, 7);
+                ctx.fillStyle = '#64748b'; roundRect(ctx, p.x + 12, p.y + p.h + 9, p.w - 24, 7, 3); ctx.fill();
+                ctx.fillStyle = '#a8a29e'; for (let x = p.x + 22; x < p.x + p.w - 14; x += 64) ctx.fillRect(x, p.y + p.h + 7, 4, 11);
             }
-            ctx.fillStyle = 'rgba(0,0,0,.3)';
-            ctx.beginPath(); ctx.moveTo(p.x + 10, p.y + p.h); ctx.lineTo(p.x + 10 + Math.min(34, p.w / 3), p.y + p.h); ctx.lineTo(p.x + 10, p.y + p.h + 22); ctx.fill();
-            ctx.beginPath(); ctx.moveTo(p.x + p.w - 10, p.y + p.h); ctx.lineTo(p.x + p.w - 10 - Math.min(34, p.w / 3), p.y + p.h); ctx.lineTo(p.x + p.w - 10, p.y + p.h + 22); ctx.fill();
             ctx.fillStyle = 'rgba(15,23,42,.35)';
             for (let rx = p.x + 12; rx < p.x + p.w - 8; rx += 26) ctx.fillRect(rx, p.y + 7, 3, 3);
             if (p.w < 120) return;

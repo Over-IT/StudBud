@@ -1010,10 +1010,10 @@ async function checkCommunityAndAdminUi() {
     app.multiplayerAvatarMarkup = () => '<img alt="">';
     app.isAdmin = true;
     await app.searchCommunityDecks('');
-    assert.equal((nodes.get('community-deck-results').innerHTML.match(/Already in your decks/g) || []).length, 2);
+    assert.equal((nodes.get('community-deck-results').innerHTML.match(/In your decks/g) || []).length, 2);
     assert.equal((nodes.get('community-deck-results').innerHTML.match(/data-action="import-community-deck"/g) || []).length, 1);
     await app.openUserProfile('author');
-    assert.equal((profile.innerHTML.match(/Already in your decks/g) || []).length, 2);
+    assert.equal((profile.innerHTML.match(/In your decks/g) || []).length, 2);
     assert.equal((profile.innerHTML.match(/data-action="import-community-deck"/g) || []).length, 1);
     for (const [username, tag] of [['overit', 'Owner'], ['andy', 'Co-owner'], ['student', '']]) {
         sandbox.window.StudBudCommunityGames.getUserProfile = async () => ({ username, show_stats: false, decks: shared });
@@ -1047,7 +1047,7 @@ async function checkCommunityAndAdminUi() {
     await app.importCommunityDeck('new-set');
     assert.equal(imports, 1);
     assert.equal(saves, 1);
-    actions.forEach(action => assert.match(action.outerHTML, /Already in your decks/));
+    actions.forEach(action => assert.match(action.outerHTML, /In your decks/));
     await app.importCommunityDeck('new-set');
     assert.equal(imports, 1);
     assert.equal(saves, 1);

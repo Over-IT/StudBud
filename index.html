@@ -21,8 +21,11 @@
                 <img class="logo-mark" src="./icons/studbud.svg" alt="" width="44" height="44">
                 <span class="logo-text">StudBud</span>
             </div>
-            <h1 id="auth-title">Sign in to StudBud</h1>
-            <p id="auth-description">Your classes, assignments, study history, and preferences sync to your account.</p>
+            <h1 id="auth-title">Welcome to StudBud</h1>
+            <p id="auth-description">Sign in to sync across devices, or continue as a guest. No account needed.</p>
+            <button id="offline-start-btn" class="primary-btn full-width guest-start-btn" type="button"><i class="fas fa-user-clock" aria-hidden="true"></i> Continue as guest</button>
+            <p class="settings-hint guest-start-hint">Everything works and saves on this device. Make an account later to sync.</p>
+            <div class="auth-divider" role="presentation"><span>or sign in</span></div>
             <p id="auth-config-message" class="auth-message error hidden" role="alert"></p>
             <form id="login-form" class="auth-form">
                 <label>Username<input id="login-username" type="text" autocomplete="username" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" title="Use 3–24 letters, numbers, or underscores." required></label>
@@ -39,16 +42,13 @@
             <p id="auth-status" class="auth-message" role="status" aria-live="polite"></p>
             <p class="auth-switch"><span id="auth-switch-prompt">New to StudBud?</span> <button id="auth-switch-btn" type="button" class="text-btn">Create an account</button></p>
             <details class="guest-join">
-                <summary>Join a game without an account</summary>
+                <summary>Just joining a game? Enter a code</summary>
                 <form id="guest-game-form" class="auth-form">
                     <label>Player name<input name="nickname" autocomplete="nickname" minlength="2" maxlength="20" pattern="[A-Za-z0-9 _\-]{2,20}" required></label>
                     <label>Room code<input name="roomCode" autocomplete="off" minlength="6" maxlength="6" pattern="[A-HJ-NP-Za-hj-np-z2-9]{6}" required></label>
-                    <button type="submit" class="primary-btn full-width">Join as guest</button>
-                    <p class="settings-hint">Play using the host’s set. No password, account signup or private-data sync. Your guest session lasts until you close or reload this page.</p>
+                    <button type="submit" class="primary-btn full-width">Join game</button>
                 </form>
             </details>
-            <button id="offline-start-btn" class="secondary-btn full-width" type="button">Continue offline on this device</button>
-            <p class="settings-hint">Use saved classes, flashcards, practice and solo games without an account connection. No cloud sync, public sharing, purchases or hosted matches. Sign out while online to clear private data on a shared device.</p>
         </div>
         <div id="guest-game-lobby" class="glass-card hidden"></div>
     </section>
@@ -358,7 +358,7 @@
                     <div class="planner-grid">
                         <div class="glass-card full-width">
                             <h2>Priorities</h2>
-                            <p class="settings-hint">Scores combine the due date, your chosen priority and current class grade. Open a task below to edit it; completed and graded work is excluded.</p>
+                            <p class="settings-hint">Ranked by due date, priority and class grade. Click a task to edit it.</p>
                             <div class="eisenhower-matrix">
                                 <div class="matrix-quadrant quadrant-1">
                                     <h4>Do first</h4>
@@ -456,7 +456,7 @@
                             <button id="remove-ic-schedule-btn" class="danger-btn" type="button"><i class="fas fa-calendar-xmark"></i> Remove imported schedule</button>
                         </div>
                     </div>
-                    <p class="settings-hint">PCHS dates shown are based on the built-in weekday rotation unless you import your Infinite Campus schedule, which adds real class times, school days, and day notes. Check school announcements for special schedule changes.</p>
+                    <p class="settings-hint">Uses the PCHS weekday rotation until you import Infinite Campus. Special schedules may differ.</p>
                 </section>
 
                 <!-- 4. Flashcard Studio View -->
@@ -482,7 +482,7 @@
                     </details>
                     <section id="deck-recommendations" class="glass-card deck-recommendations hidden" aria-labelledby="deck-recommendations-title">
                         <h3 id="deck-recommendations-title"><i class="fas fa-bullseye"></i> Recommended for upcoming tests</h3>
-                        <p class="settings-hint">Based on your quizzes, tests, grades and target GPA. Tag a deck with a class or test to see it here.</p>
+                        <p class="settings-hint">Tag a deck with a class or test to see it here.</p>
                         <div id="deck-recommendation-list" class="deck-recommendation-list"></div>
                     </section>
                     <div class="my-deck-heading">
@@ -550,12 +550,12 @@
                     </div>
                     <section class="glass-card">
                         <h3>Your study activity</h3>
-                        <p class="settings-hint">Based on your saved sessions, not predicted exam grades. Game accuracy excludes skipped questions.</p>
+                        <p class="settings-hint">From your saved sessions. Skipped questions don't count.</p>
                         <div id="study-analytics-summary" class="analytics-summary"></div>
                     </section>
                     <section class="glass-card">
                         <h3>Deck readiness</h3>
-                        <p class="settings-hint">Scheduled cards follow your daily limits. Lapses count times a reviewed card needed relearning; they are not an exam score.</p>
+                        <p class="settings-hint">Lapses = times a learned card was forgotten.</p>
                         <div id="study-analytics-decks" class="study-analytics-decks"></div>
                     </section>
                 </section>
@@ -591,7 +591,7 @@
                         <p id="study-leaderboard-status" class="community-status" role="status" aria-live="polite">Loading study progress…</p>
                         <div id="study-leaderboard-me" class="study-leaderboard-me"></div>
                         <ol id="study-leaderboard-list" class="study-leaderboard-list"></ol>
-                        <p class="settings-hint">Leaderboard periods use UTC. Usernames are visible to signed-in StudBud students. Study time is synced from the time users log or spend in supported study activities.</p>
+                        <p class="settings-hint">Periods reset in UTC. Study time counts logged and in-app study.</p>
                     </section>
                 </section>
 
@@ -801,7 +801,7 @@
                 <section id="admin-view" class="view hidden">
                     <div class="glass-card admin-panel">
                         <h2>Staff tools</h2>
-                        <p class="settings-hint">Testers can test games without rewards. Moderators can review public sets and moderate ordinary accounts. Administrators also manage coins, tags and announcements.</p>
+                        <p class="settings-hint">Testers: test games. Moderators: review sets and accounts. Admins: everything.</p>
                         <div class="admin-tabs">
                             <button type="button" class="secondary-btn selected" data-admin-tab="decks">Public flashcards</button>
                             <button type="button" class="secondary-btn" data-admin-tab="users">Users</button>
@@ -964,7 +964,7 @@
                                 <label for="settings-last-name">Last name</label>
                                 <input type="text" id="settings-last-name" maxlength="60" autocomplete="family-name">
                             </div>
-                            <p class="settings-hint">Your name is used in StudBud. It is only shown on your public profile if you choose to share it below.</p>
+                            <p class="settings-hint">Only shown publicly if you share it below.</p>
                             <div class="form-group">
                                 <label for="settings-grad-year">Graduation Year</label>
                                 <select id="settings-grad-year">
@@ -992,7 +992,7 @@
                             <p id="school-profile-status" class="community-status" role="status" aria-live="polite"></p>
                             <div id="other-grade-scale-panel" class="hidden">
                                 <h3>Other school grading scale</h3>
-                                <p class="settings-hint">Set the percentage cutoff and grade points for each letter. Weighted points apply only to classes you mark as weighted.</p>
+                                <p class="settings-hint">Cutoff and points per letter. Weighted points apply to weighted classes.</p>
                                 <div id="other-grade-scale-editor"></div>
                                 <button id="save-grade-scale-btn" class="secondary-btn" type="button">Save grading scale</button>
                             </div>
@@ -1087,7 +1087,7 @@
                             <p class="settings-hint">Compact mode fits more information on smaller displays.</p>
                             <div class="form-group"><label for="game-quality">Game performance</label>
                                 <select id="game-quality"><option value="auto">Auto (recommended)</option><option value="low">Low power / older devices</option><option value="full">Full visuals</option></select>
-                                <p class="settings-hint">Low power reduces render resolution, effects and preview frame rate. Movement, collisions and question rewards stay unchanged.</p>
+                                <p class="settings-hint">Low power lowers resolution and effects. Gameplay is unchanged.</p>
                             </div>
                         </section>
                     </div>
@@ -1399,12 +1399,12 @@
                         <button id="deck-editor-undo" type="button" class="secondary-btn hidden" data-action="editor-undo-delete">Undo deletion</button>
                     </div>
                     <details class="deck-editor-bulk-panel"><summary>Paste many cards</summary>
-                        <p class="settings-hint">Paste spreadsheet rows (Question, Answer, optional comma-separated tags) separated by tabs, or type Question :: Answer :: tags. Up to 300 rows at once. Duplicate question/answer pairs are skipped. Nothing is saved until Save changes.</p>
+                        <p class="settings-hint">Paste spreadsheet rows or type Question :: Answer :: tags (up to 300). Duplicates are skipped.</p>
                         <label for="deck-editor-bulk">Cards to add</label>
                         <textarea id="deck-editor-bulk" rows="5" placeholder="Capital of France :: Paris :: geography"></textarea>
                         <button class="secondary-btn" type="button" data-action="editor-bulk-add">Add pasted cards</button>
                     </details>
-                    <p class="settings-hint">Reverse copies start fresh without answer images, attachments, grading rules or wrong options. Paused cards are skipped in scheduled study but remain available in practice.</p>
+                    <p class="settings-hint">Paused cards are skipped in scheduled study. Reverse copies start fresh.</p>
                     <p id="deck-editor-count" role="status"></p>
                     <div id="deck-editor-cards"></div>
                 </div>
@@ -1439,23 +1439,23 @@
                         <details class="card-options"><summary>Written answers: wording, translations &amp; keywords</summary>
                             <div class="form-group"><label for="card-answer-mode">How to accept a typed answer</label>
                                 <select id="card-answer-mode"><option value="exact">Exact wording (case and spacing ignored)</option><option value="vocabulary">Vocabulary / translation (one small spelling mistake allowed)</option><option value="keywords">Definition (all keyword groups required)</option></select>
-                                <p class="settings-hint">Use vocabulary mode for short translations. Use keywords for explanations with more than one valid wording. Numbers, math signs and unexpected negation are not relaxed.</p>
+                                <p class="settings-hint">Vocabulary: exact translations. Keywords: answers with many valid wordings.</p>
                             </div>
                             <div class="form-group"><label for="card-accepted-answers">Other accepted answers (one per line)</label><textarea id="card-accepted-answers" rows="3" maxlength="15000" placeholder="Another correct translation or phrasing"></textarea></div>
                             <div class="form-group"><label for="card-keywords">Required keyword groups (one per line)</label><textarea id="card-keywords" rows="4" maxlength="8000" placeholder="sunlight | light energy&#10;carbon dioxide&#10;glucose | sugar"></textarea>
-                                <p class="settings-hint">Every line must appear in the response. Separate equivalent words or phrases on the same line with |. Phrases match whole words, in any group order. Your saved answer must also satisfy these groups.</p>
+                                <p class="settings-hint">One required idea per line. Use | for alternatives, e.g. <code>cell | cells</code>.</p>
                             </div>
                         </details>
                         <div class="form-group">
                             <label for="card-answer-image">Answer image (private)</label>
                             <input id="card-answer-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
-                            <p class="settings-hint">Up to 500 KB. Shown only after revealing the answer in personal study or practice review. Never published or used in multiplayer.</p>
+                            <p class="settings-hint">Up to 500 KB. Shown after the answer; never published or used in multiplayer.</p>
                             <img id="card-answer-image-preview" class="flashcard-answer-image hidden" alt="Saved answer illustration">
                             <label class="settings-check"><input id="card-remove-image" type="checkbox"> Remove saved answer image</label>
                         </div>
                         <details class="card-options"><summary>Private answer attachments</summary>
                             <div class="form-group"><label for="card-attachments">Add PDF, text or audio files</label><input id="card-attachments" type="file" multiple accept="application/pdf,text/plain,audio/mpeg,audio/wav,audio/ogg,audio/mp4,audio/webm">
-                                <p class="settings-hint">Up to 3 files, 1 MB each and 2 MB combined. Available after revealing the answer, including offline. Files are private: never shared publicly or sent to a multiplayer room. PDF and text files download rather than execute in the app.</p>
+                                <p class="settings-hint">Up to 3 files (1 MB each). Private, shown after the answer.</p>
                                 <div id="card-attachments-list"></div>
                                 <label><input type="checkbox" id="card-remove-attachments"> Remove all saved attachments</label>
                             </div>
@@ -1463,7 +1463,7 @@
                         <div class="form-group">
                             <label for="card-distractors">Multiple-choice wrong options (optional, one per line)</label>
                             <textarea id="card-distractors" rows="3" maxlength="15000" placeholder="Leave blank for related answers selected automatically"></textarea>
-                            <p class="settings-hint">Add up to 3 different wrong answers. The correct answer is always the card back; missing options are chosen from related cards.</p>
+                            <p class="settings-hint">Up to 3 wrong answers. Missing ones are picked from similar cards.</p>
                         </div>
                     </form>
                 </div>
@@ -1534,7 +1534,7 @@
                     <button class="close-modal-btn icon-btn" type="button" aria-label="Close"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="modal-body">
-                    <p class="settings-hint">Bring in this year's classes, grades, assignments, categories, schedule and school calendar. StudBud never sees your Campus password.</p>
+                    <p class="settings-hint">Imports classes, grades, assignments and schedule. StudBud never sees your password.</p>
                     <ol class="ic-steps">
                         <li>
                             <strong>Get the StudBud Import button (one time only).</strong>
