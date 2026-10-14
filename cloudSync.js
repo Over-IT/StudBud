@@ -323,6 +323,7 @@
             if (version !== this.accountVersion) return;
             if (savedBase && remoteSnapshot) {
                 const local = JSON.parse(await window.NexusApp.AppState.exportAppState());
+                if (version !== this.accountVersion) return;
                 try {
                     const merged = StudBudCloudSync.mergeData(JSON.parse(savedBase), local, remoteSnapshot);
                     await window.NexusApp.restoreCloudSnapshot(merged);
@@ -333,12 +334,14 @@
                 }
             }
 
+            if (version !== this.accountVersion) return;
             localStorage.setItem('STUDBUD_CLOUD_ACCOUNT_ID', user.id);
             const username = user.user_metadata?.username || user.email;
             const accountName = document.getElementById('account-name');
             if (accountName) accountName.textContent = username;
             this.bindStateEvents();
             await window.NexusApp.recoverOwnedCommunityDecks();
+            if (version !== this.accountVersion) return;
             this.accountReady = true;
             document.getElementById('auth-screen')?.classList.add('hidden');
             document.getElementById('app-container')?.classList.remove('hidden');
@@ -387,12 +390,12 @@
                 }
             });
             document.getElementById('auth-conflict-local-btn')?.addEventListener('click', async () => {
-                localStorage.removeItem('STUDBUD_CLOUD_SYNC_BASE');
                 this.pendingConflict = null;
                 this.setAuthStatus('Uploading device data…');
                 try {
-                    this.initialSnapshot = conflict.local;
-                    this.lastSnapshot = conflict.local;
+                    await window.NexusApp.restoreCloudSnapshot(conflict.local);
+                    localStorage.setItem('STUDBUD_CLOUD_ACCOUNT_ID', conflict.user.id);
+                    localStorage.setItem('STUDBUD_CLOUD_SYNC_BASE', JSON.stringify(conflict.remoteSnapshot));
                     await this.openAccount(conflict.user);
                     await this.syncNow();
                 } catch (err) {
@@ -470,18 +473,21 @@
                     completedRevision = this.syncRevision;
                     const backup = JSON.parse(await window.NexusApp.AppState.exportAppState());
                     if (!this.accountReady || this.user?.id !== userId || this.accountVersion !== version) return;
+                    if (completedRevision !== this.syncRevision) continue;
                     let saved = false;
                     for (let attempt = 0; attempt < 5 && !saved; attempt++) {
                         const { data: current, error: readError } = await this.client.from('studbud_user_data')
                             .select('data,updated_at').eq('user_id', userId).maybeSingle();
                         if (readError) throw new Error(readError.message);
-                        const merged = current ? StudBudCloudSync.mergeData(this.lastSnapshot || {}, backup, current.data) : backup;
                         if (!this.accountReady || this.user?.id !== userId || this.accountVersion !== version) return;
+                        if (completedRevision !== this.syncRevision) break;
+                        const merged = current ? StudBudCloudSync.mergeData(this.lastSnapshot || {}, backup, current.data) : backup;
                         const nextWrite = Math.max(Date.now(), current ? Date.parse(current.updated_at) + 1 : 0);
                         const row = { user_id: userId, data: merged, updated_at: new Date(nextWrite).toISOString() };
                         const { data, error } = current
                             ? await this.client.from('studbud_user_data').update(row).eq('user_id', userId).eq('updated_at', current.updated_at).select('user_id')
                             : await this.client.from('studbud_user_data').insert(row).select('user_id');
+                        if (!this.accountReady || this.user?.id !== userId || this.accountVersion !== version) return;
                         if (error && error.code !== '23505') throw new Error(error.message);
                         if (error || !data?.length) continue;
                         this.lastSnapshot = backup;
@@ -492,13 +498,14 @@
                             this.restoringSnapshot = true;
                             try {
                                 await window.NexusApp.restoreCloudSnapshot(merged);
+                                if (!this.accountReady || this.user?.id !== userId || this.accountVersion !== version) return;
                                 this.lastSnapshot = merged;
                                 localStorage.setItem('STUDBUD_CLOUD_SYNC_BASE', JSON.stringify(merged));
                             }
                             finally { this.restoringSnapshot = false; }
                         }
                     }
-                    if (!saved) throw new Error('Your account changed on another device repeatedly. Please try syncing again.');
+                    if (!saved && completedRevision === this.syncRevision) throw new Error('Your account changed on another device repeatedly. Please try syncing again.');
                     if (!this.accountReady || this.user?.id !== userId || this.accountVersion !== version) return;
                 } while (completedRevision !== this.syncRevision);
                 this.setCloudStatus(`Synced to your account · ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`);

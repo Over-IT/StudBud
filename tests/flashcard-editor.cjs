@@ -207,6 +207,39 @@ async function linksAndSharing() {
     await app.saveDeckEditor();
     assert.equal(deck().cards.length, 3, 'deleting an added card after a failed publication does not resurrect it');
 
+    sandbox.window.alert = () => {};
+    sandbox.window.StudBudCommunityGames.publishDeck = async () => {
+        const latest = clone(deck());
+        latest.title = 'Renamed while sharing';
+        latest.cards[0].interval = 60;
+        latest.cards.push({ id: 'during-share', front: 'New term', back: 'New answer' });
+        state.flashcards[0] = latest;
+        return { id: 'published' };
+    };
+    await app.publishCommunityDeck('set');
+    assert.equal(deck().title, 'Renamed while sharing', 'publication acknowledgement cannot restore the old set title');
+    assert.equal(deck().cards[0].interval, 60, 'publication preserves newer review progress');
+    assert.equal(deck().cards.at(-1).id, 'during-share', 'publication preserves concurrently added cards');
+    assert.equal(deck().communityPublished, true);
+    sandbox.window.StudBudCommunityGames.unpublishDeck = async () => {
+        const latest = clone(deck());
+        latest.title = 'Renamed while unsharing';
+        latest.cards[0].back = 'Newer definition';
+        state.flashcards[0] = latest;
+    };
+    await app.unpublishCommunityDeck('set');
+    assert.equal(deck().title, 'Renamed while unsharing', 'unsharing does not restore an older title');
+    assert.equal(deck().cards[0].back, 'Newer definition', 'unsharing does not overwrite card edits');
+    assert.equal(deck().communityPublished, false);
+    await app.updateSavedDeck('set', { communitySourceAuthor: 'Author', communityStudyRecorded: true });
+    assert.equal(deck().title, 'Renamed while unsharing', 'background author and study-count updates preserve newer set data');
+    assert.equal(deck().cards[0].interval, 60);
+    sandbox.window.StudBudCommunityGames.unpublishDeck = async () => { state.flashcards = []; };
+    const preservedDeck = clone(deck());
+    await assert.rejects(app.unpublishCommunityDeck('set'), /removed before the update finished/);
+    assert.equal(state.flashcards.length, 0, 'a late acknowledgement cannot resurrect a deleted set');
+    state.flashcards = [preservedDeck];
+
     const community = new sandbox.window.StudBudCommunityGames.constructor();
     const rows = new Map();
     let lookupError = false;

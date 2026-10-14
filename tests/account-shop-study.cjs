@@ -11,7 +11,7 @@ const events = [];
 const elements = new Map();
 const math = Object.create(Math);
 math.random = () => 0;
-const window = { addEventListener() {}, crypto: require('node:crypto').webcrypto };
+const window = { addEventListener() {}, setTimeout, clearTimeout, crypto: require('node:crypto').webcrypto };
 window.StudBudSfx = { settings: {}, update(patch) { Object.assign(this.settings, patch); } };
 const sandbox = {
     window, console, Math: math, Date, setTimeout, clearTimeout,
@@ -351,6 +351,176 @@ async function run() {
     assert.equal(cloud.lastSnapshot.state.gameMetrics.xp, 525);
     assert.deepEqual(JSON.parse(storage.get('STUDBUD_CLOUD_SYNC_BASE')), row.data);
 
+    const targetCloud = new Cloud();
+    const previousSyncBase = storage.get('STUDBUD_CLOUD_SYNC_BASE');
+    const targetBase = JSON.parse(await state.exportAppState());
+    targetBase.state.profile.targetGpa = 4;
+    targetBase.state.courses = [{ code: 'math', title: 'Math', credits: 1, targetPct: null }];
+    let targetRow = { data: clone(targetBase), updated_at: new Date(now).toISOString() };
+    targetRow.data.state.settings.theme = 'light';
+    targetCloud.accountReady = true;
+    targetCloud.user = { id: 'target-owner' };
+    targetCloud.lastSnapshot = clone(targetBase);
+    const previousNexusApp = window.NexusApp;
+    window.NexusApp = {
+        AppState: state,
+        restoreCloudSnapshot: snapshot => state.importAppState(snapshot)
+    };
+    targetCloud.client = { from: () => ({
+        select() { return this; }, eq() { return this; },
+        update(payload) { this.payload = payload; return this; },
+        maybeSingle: async () => ({ data: clone(targetRow), error: null }),
+        then(resolve) {
+            targetRow = clone(this.payload);
+            resolve({ data: [{ user_id: 'target-owner' }], error: null });
+        }
+    }) };
+    await state.importAppState(clone(targetBase));
+    await targetCloud.syncNow();
+    assert.equal(state.state.settings.theme, 'light', 'cloud changes trigger a snapshot restore');
+    sandbox.Router = { selectedClassCode: 'math' };
+    const renderClassDetail = app.renderClassDetail;
+    app.renderClassDetail = () => {};
+    elements.set('class-target-percent', { value: '90' });
+    await app.handleDataAction('save-class-target');
+    assert.equal(state.state.courses[0].targetPct, 90, 'Save target initially stores the entered percentage');
+    assert.equal(targetCloud.lastSnapshot.state.courses[0].targetPct, null,
+        'editing an imported course must not mutate the cloud merge baseline');
+    await targetCloud.syncNow();
+    assert.equal(state.state.courses[0].targetPct, 90, 'cloud sync does not erase the saved class target');
+    assert.equal(targetRow.data.state.courses[0].targetPct, 90, 'the exact target is saved in the cloud');
+    assert.equal(JSON.parse(storage.get(state.STORAGE_KEY)).courses[0].targetPct, 90,
+        'the exact target remains saved on the device');
+    await state.importAppState(clone(targetRow.data));
+    assert.equal(state.state.courses[0].targetPct, 90, 'restoring the saved cloud data preserves the target');
+    elements.get('class-target-percent').value = '';
+    await app.handleDataAction('save-class-target');
+    await targetCloud.syncNow();
+    assert.equal(targetRow.data.state.courses[0].targetPct, null, 'explicitly clearing the target still syncs');
+    app.renderClassDetail = renderClassDetail;
+    elements.delete('class-target-percent');
+    delete sandbox.Router;
+    window.NexusApp = previousNexusApp;
+    storage.set('STUDBUD_CLOUD_SYNC_BASE', previousSyncBase);
+
+    for (const phase of ['export', 'read', 'write', 'account-change']) {
+        const syncing = new Cloud();
+        syncing.accountReady = true;
+        syncing.user = { id: 'race-owner' };
+        syncing.lastSnapshot = clone(targetBase);
+        let live = clone(targetBase);
+        live.state.courses[0].targetPct = 90;
+        let raceRow = { data: clone(targetBase), updated_at: new Date(now).toISOString() };
+        raceRow.data.state.settings.theme = 'light';
+        let changed = false;
+        const writes = [];
+        const change = when => {
+            if (changed || phase !== when) return;
+            changed = true;
+            if (phase === 'account-change') {
+                syncing.accountVersion++;
+                syncing.user = { id: 'new-owner' };
+                storage.set('STUDBUD_CLOUD_SYNC_BASE', 'new-account-baseline');
+            } else {
+                live.state.courses[0].targetPct = 92;
+                live.state.assignments.push({ id: 'new-assignment', title: 'New work' });
+                syncing.syncRevision++;
+            }
+        };
+        window.NexusApp = {
+            AppState: {
+                exportAppState: async () => {
+                    const result = JSON.stringify(live);
+                    change('export');
+                    return result;
+                },
+                setSaveStatus() {}
+            },
+            restoreCloudSnapshot: async snapshot => { live = clone(snapshot); }
+        };
+        syncing.client = { from: () => ({
+            select() { return this; }, eq() { return this; },
+            update(payload) { this.payload = payload; return this; },
+            maybeSingle: async () => {
+                change('read');
+                return { data: clone(raceRow), error: null };
+            },
+            then(resolve) {
+                writes.push(clone(this.payload));
+                raceRow = clone(this.payload);
+                change('write');
+                change('account-change');
+                resolve({ data: [{ user_id: 'race-owner' }], error: null });
+            }
+        }) };
+        await syncing.syncNow();
+        if (phase === 'account-change') {
+            assert.equal(storage.get('STUDBUD_CLOUD_SYNC_BASE'), 'new-account-baseline',
+                'a late response from the previous account cannot replace the new account baseline');
+            assert.equal(live.state.settings.theme, targetBase.state.settings.theme,
+                'a late previous-account response cannot restore its cloud data');
+        } else {
+            assert.equal(live.state.courses[0].targetPct, 92, `${phase}: the newest local target survives`);
+            assert.equal(raceRow.data.state.courses[0].targetPct, 92, `${phase}: the newest target reaches the cloud`);
+            assert.equal(live.state.assignments[0].id, 'new-assignment', `${phase}: concurrent additions survive`);
+            assert.equal(live.state.settings.theme, 'light', `${phase}: unrelated remote changes survive`);
+            if (phase !== 'write') assert.equal(writes[0].data.state.courses[0].targetPct, 92,
+                `${phase}: a stale export is discarded before writing`);
+        }
+    }
+    window.NexusApp = previousNexusApp;
+    storage.set('STUDBUD_CLOUD_SYNC_BASE', previousSyncBase);
+
+    const conflictCloud = new Cloud();
+    const conflictLocal = clone(targetBase);
+    conflictLocal.state.courses[0].targetPct = 90;
+    const conflictRemote = clone(targetBase);
+    conflictRemote.state.courses[0].targetPct = 80;
+    let conflictLive = clone(conflictLocal);
+    let conflictRow = { data: clone(conflictRemote), updated_at: new Date(now).toISOString() };
+    const conflictHandlers = new Map();
+    const conflictElements = new Map();
+    for (const id of ['auth-status', 'auth-conflict-cloud-btn', 'auth-conflict-local-btn', 'auth-conflict-backup-btn']) {
+        conflictElements.set(id, elements.get(id));
+        elements.set(id, {
+            classList: { add() {} },
+            addEventListener: (event, handler) => conflictHandlers.set(id, handler)
+        });
+    }
+    window.NexusApp = {
+        AppState: { exportAppState: async () => JSON.stringify(conflictLive), setSaveStatus() {} },
+        restoreCloudSnapshot: async snapshot => { conflictLive = clone(snapshot); },
+        recoverOwnedCommunityDecks: async () => {}
+    };
+    conflictCloud.appStarted = true;
+    conflictCloud.setAuthStatus = conflictCloud.bindStateEvents = conflictCloud.queueSync = () => {};
+    conflictCloud.reportAccountError = error => { throw error; };
+    conflictCloud.client = { from: () => ({
+        select() { return this; }, eq() { return this; },
+        update(payload) { this.payload = payload; return this; },
+        maybeSingle: async () => ({ data: clone(conflictRow), error: null }),
+        then(resolve) {
+            conflictRow = clone(this.payload);
+            resolve({ data: [{ user_id: 'conflict-owner' }], error: null });
+        }
+    }) };
+    conflictCloud.renderConflictResolution({
+        user: { id: 'conflict-owner', email: 'fixture' },
+        local: conflictLocal,
+        remoteSnapshot: conflictRemote
+    }, 'Both devices changed a target.');
+    await conflictHandlers.get('auth-conflict-local-btn')();
+    assert.equal(conflictLive.state.courses[0].targetPct, 90,
+        'Keep Device Data does not immediately restore the rejected cloud value');
+    assert.equal(conflictRow.data.state.courses[0].targetPct, 90,
+        'Keep Device Data uploads the explicitly selected local value');
+    for (const [id, previous] of conflictElements) {
+        if (previous) elements.set(id, previous);
+        else elements.delete(id);
+    }
+    window.NexusApp = previousNexusApp;
+    storage.set('STUDBUD_CLOUD_SYNC_BASE', previousSyncBase);
+
     const offline = clone(row.data);
     offline.state.assignments[0].status = 'complete';
     const anotherDevice = clone(row.data);
@@ -386,7 +556,7 @@ async function run() {
     try { await cloud.signOut(); } finally { sandbox.console = originalConsole; }
     assert.deepEqual(signOutSteps, ['save', 'signout', 'clear'], 'failed save never signs out or clears local data');
 
-    state.state.courses = [{ id: 'course', grade: 91 }];
+    state.state.courses = [{ id: 'course', code: 'course', grade: 91 }];
     state.state.assignments = [{ id: 'assignment', courseId: 'course', status: 'pending' }];
     state.state.gradeScenarios = [{ id: 'scenario', name: 'Final', courses: [] }];
     state.state.selectedGradeScenarioId = 'scenario';
@@ -404,6 +574,67 @@ async function run() {
     assert.equal(state.state.settings.gameAudio.volume, .25);
     assert.equal(state.state.flashcards[0].cards[0].review.interval, 10);
     assert.equal(state.state.studyHistory[0].gameSummary.questions[0].correct, false);
+    const importedSnapshot = JSON.parse(backup);
+    const snapshotBeforeEdits = clone(importedSnapshot);
+    await state.importAppState(importedSnapshot);
+    state.state.profile.targetGpa = 2;
+    state.updateCourse('course', { targetPct: 90 });
+    state.state.courses[0].grade = 95;
+    state.updateAssignment('assignment', { status: 'completed' });
+    state.state.gradeScenarios[0].name = 'Edited scenario';
+    state.state.schedule.all.Monday[0].time = '10:00';
+    state.state.settings.gameAudio.volume = .9;
+    state.state.gameMetrics.xp += 100;
+    state.state.flashcards[0].cards[0].review.interval = 99;
+    state.state.studyHistory[0].gameSummary.questions[0].correct = true;
+    assert.deepEqual(importedSnapshot, snapshotBeforeEdits,
+        'edits to every restored data collection and nested field leave the input snapshot unchanged');
+    await state.importAppState(importedSnapshot);
+    importedSnapshot.state.profile.targetGpa = 1;
+    importedSnapshot.state.courses.length = 0;
+    importedSnapshot.flashcards[0].cards.length = 0;
+    importedSnapshot.studyHistory[0].gameSummary.questions[0].correct = true;
+    for (const key of Object.keys(snapshotBeforeEdits.state)) {
+        assert.deepEqual(normal(state.state[key]), snapshotBeforeEdits.state[key],
+            `mutating the source snapshot cannot change restored ${key}`);
+    }
+    assert.deepEqual(normal(state.state.flashcards), snapshotBeforeEdits.flashcards);
+    assert.deepEqual(normal(state.state.studyHistory), snapshotBeforeEdits.studyHistory);
+    const getAll = sandbox.NexusDB.getAll;
+    let exportChanged = false;
+    sandbox.NexusDB.getAll = async table => {
+        if (!exportChanged) {
+            exportChanged = true;
+            state.state.courses[0].grade = 92;
+            state.state.settings.gameAudio.volume = .7;
+        }
+        return getAll(table);
+    };
+    const inFlightExport = JSON.parse(await state.exportAppState());
+    assert.equal(inFlightExport.state.courses[0].grade, 91, 'export captures state before asynchronous storage reads');
+    assert.equal(inFlightExport.state.settings.gameAudio.volume, .25, 'export does not mix later nested edits into an older snapshot');
+    sandbox.NexusDB.getAll = getAll;
+    await state.importAppState(backup);
+
+    const originalRecordStudyTime = community.recordStudyTime;
+    const sessionBeforeSync = clone(state.state.studyHistory[0]);
+    sessionBeforeSync.leaderboardSyncPending = true;
+    community.recordStudyTime = async () => {
+        const latest = clone(state.state.studyHistory[0]);
+        latest.title = 'Newer study title';
+        latest.gameSummary.questions[0].chosen = 'Newer answer';
+        state.state.studyHistory[0] = latest;
+    };
+    window.NexusApp = { AppState: state };
+    window.StudBudCloud.user = { id: 'owner' };
+    await app.syncStudyTimeEntry(sessionBeforeSync, false);
+    assert.equal(state.state.studyHistory[0].title, 'Newer study title', 'late leaderboard acknowledgement preserves newer session fields');
+    assert.equal(state.state.studyHistory[0].gameSummary.questions[0].chosen, 'Newer answer');
+    assert.equal(state.state.studyHistory[0].leaderboardSyncPending, false);
+    assert.equal((await sandbox.NexusDB.getAll('studyHistory'))[0].title, 'Newer study title');
+    community.recordStudyTime = originalRecordStudyTime;
+    delete window.StudBudCloud.user;
+    await state.importAppState(backup);
     const match = { testing: false, mode: 'sports', t: 45, score: 5, answered: 2, correct: 1, game: { title: 'Soccer' },
         questionHistory: [{ prompt: 'Q', answer: 'A', chosen: 'wrong', correct: false }], standingsCache: [{ id: 'owner', n: 'Demo', s: 5, g: 1 }] };
     await app.saveGameSummary(match);
@@ -444,6 +675,7 @@ async function run() {
     assert.equal(state.state.settings.gameAudio.volume, .6);
     assert.equal(JSON.parse(storage.get(state.STORAGE_KEY)).assignments[0].id, 'assignment');
     console.log('Box eligibility/exhaustion, shuffled due-only Anki scheduling, conflict-safe cloud retries, owned decks, grades/assignments/schedules and audio persistence passed.');
+    console.log('Snapshot isolation across all data, stable exports, edits during export/read/write, account-switch guards, Keep Device Data and late study acknowledgements passed.');
 }
 
 run().catch(error => { console.error(error); process.exitCode = 1; });

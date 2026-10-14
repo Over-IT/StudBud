@@ -416,22 +416,23 @@
         }
 
         async exportAppState() {
+            const stateSnapshot = JSON.parse(JSON.stringify({
+                profile: this.state.profile,
+                courses: this.state.courses,
+                assignments: this.state.assignments,
+                gradeScenarios: this.state.gradeScenarios,
+                selectedGradeScenarioId: this.state.selectedGradeScenarioId,
+                gameMetrics: this.state.gameMetrics,
+                settings: this.state.settings,
+                schedule: this.state.schedule
+            }));
             const allFlashcards = await NexusDB.getAll('flashcards');
             const allHistory = await NexusDB.getAll('studyHistory');
 
             const fullBackup = {
                 version: "1.0.0",
                 exportedAt: new Date().toISOString(),
-                state: {
-                    profile: this.state.profile,
-                    courses: this.state.courses,
-                    assignments: this.state.assignments,
-                    gradeScenarios: this.state.gradeScenarios,
-                    selectedGradeScenarioId: this.state.selectedGradeScenarioId,
-                    gameMetrics: this.state.gameMetrics,
-                    settings: this.state.settings,
-                    schedule: this.state.schedule
-                },
+                state: stateSnapshot,
                 flashcards: allFlashcards,
                 studyHistory: allHistory
             };
@@ -441,7 +442,7 @@
 
         async importAppState(jsonData) {
             try {
-                const parsed = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
+                const parsed = JSON.parse(typeof jsonData === 'string' ? jsonData : JSON.stringify(jsonData));
 
                 if (!parsed.state || !parsed.version) {
                     throw new Error("Invalid backup format.");
@@ -1152,7 +1153,7 @@
                 // The bookmarklet only works from the bookmarks bar on the Campus page
                 if (!event.target.closest('#ic-bookmarklet-link')) return;
                 event.preventDefault();
-                this.setInfiniteCampusStatus('Drag “StudBud Import” to your bookmarks bar, then click it while you are on the signed-in Campus page.', 'warn');
+                this.setInfiniteCampusStatus('On a computer, drag StudBud Import to your bookmarks bar. On a phone, use the phone/tablet instructions below. Run the saved bookmark on the signed-in Campus website, not here.', 'warn');
             });
             document.addEventListener('change', event => {
                 if (event.target.id === 'ic-import-file' && event.target.files?.[0]) {
@@ -1857,6 +1858,10 @@
             const link = document.getElementById('ic-bookmarklet-link');
             const origin = /^https?:$/.test(window.location.protocol) ? window.location.origin : '';
             if (link) link.setAttribute('href', window.StudBudIC.buildBookmarklet(origin));
+            const bookmarkUrl = document.getElementById('ic-bookmarklet-url');
+            if (bookmarkUrl) bookmarkUrl.value = window.StudBudIC.buildBookmarklet(origin);
+            const mobileInstructions = document.getElementById('ic-mobile-instructions');
+            if (mobileInstructions && window.matchMedia('(pointer: coarse), (max-width: 680px)').matches) mobileInstructions.open = true;
             const urlInput = document.getElementById('ic-district-url');
             if (urlInput && !urlInput.value) urlInput.value = localStorage.getItem('studbud-ic-url') || (this.currentSchool() === 'pchs' ? PARKWAY_CAMPUS_URL : '');
             const moreAddress = urlInput?.closest('details');
@@ -1891,7 +1896,7 @@
                 const details = manual?.closest('details');
                 if (details) details.open = true;
                 manual?.focus();
-                this.setInfiniteCampusStatus('Your browser blocked reading the clipboard. Click in the box below, press Ctrl+V (⌘+V on Mac), then choose Preview.', 'warn');
+                this.setInfiniteCampusStatus('Your browser blocked reading the clipboard. Tap and hold in the data box and choose Paste on a phone, or press Ctrl+V (Cmd+V on Mac), then choose Preview.', 'warn');
                 return;
             }
             if (!text) throw new Error('Your clipboard is empty. On the Campus tab, choose Copy data in the StudBud box first.');
@@ -1922,8 +1927,25 @@
             // Keep the opener link so the helper can hand data straight back to this tab
             this.icWindow = window.open(url.href, 'studbud-ic');
             this.setInfiniteCampusStatus(this.icWindow
-                ? 'Campus opened in a new tab. Sign in, then click StudBud Import in your bookmarks bar there.'
+                ? 'Campus opened in a new tab. Sign in on the website (not the Campus app), then run your saved StudBud Import bookmark. On Chrome for Android, type the bookmark name in the address bar and tap the saved bookmark suggestion.'
                 : 'Your browser blocked the new tab. Open Campus yourself, then run the helper there.');
+        }
+
+        async copyInfiniteCampusBookmarklet() {
+            const origin = /^https?:$/.test(window.location.protocol) ? window.location.origin : '';
+            const input = document.getElementById('ic-bookmarklet-url');
+            input.value = window.StudBudIC.buildBookmarklet(origin);
+            try {
+                if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable.');
+                await navigator.clipboard.writeText(input.value);
+                this.setInfiniteCampusStatus('Bookmark URL copied. Bookmark a page as StudBud Import, edit that bookmark, and replace its entire address with the copied URL. Then run the bookmark on the signed-in Campus website.');
+            } catch {
+                document.getElementById('ic-mobile-instructions').open = true;
+                input.focus();
+                input.select();
+                input.setSelectionRange(0, input.value.length);
+                this.setInfiniteCampusStatus('Automatic copying is blocked. The bookmark URL is selected below: tap and hold and choose Copy on a phone, or press Ctrl+C (Cmd+C on Mac). Paste it into the address of your StudBud Import bookmark.', 'warn');
+            }
         }
 
         async copyInfiniteCampusScript() {
@@ -2619,7 +2641,7 @@
                 window.StudBudCommunityGames?.getAuthorNames(missingAuthors.map(deck => deck.communitySourceOwnerId))
                     .then(async names => {
                         for (const deck of missingAuthors) {
-                            if (names[deck.communitySourceOwnerId]) await AppState.saveFlashcardDeck({ ...deck, communitySourceAuthor: names[deck.communitySourceOwnerId] });
+                            if (names[deck.communitySourceOwnerId]) await this.updateSavedDeck(deck.id, { communitySourceAuthor: names[deck.communitySourceOwnerId] });
                         }
                     })
                     .catch(error => console.warn('[NexusApp] Deck authors could not load:', error));
@@ -2762,6 +2784,12 @@
         async saveEditedDeck(deck, updateShared = true) {
             await AppState.saveFlashcardDeck(deck);
             if (updateShared) await this.refreshEditedSharedDeck(deck);
+        }
+
+        async updateSavedDeck(deckId, changes) {
+            const current = (AppState.get('flashcards') || []).find(item => item.id === deckId);
+            if (!current) throw new Error('This set was removed before the update finished.');
+            await AppState.saveFlashcardDeck({ ...current, ...changes });
         }
 
         async refreshEditedSharedDeck(deck) {
@@ -5526,7 +5554,7 @@
                 if (/already shared|same title|identical|duplicate|already exists|reposted|reposting/i.test(message)) { window.alert(message); return; }
                 throw error;
             }
-            await AppState.saveFlashcardDeck({ ...deck, communityPublished: true, communityDeckId: published.id });
+            await this.updateSavedDeck(deckId, { communityPublished: true, communityDeckId: published.id });
             window.alert('Deck shared. Its title, class, card terms and definitions, and any source attribution are visible to signed-in StudBud users. Your linked test or quiz stays private. You can stop sharing it at any time.');
         }
 
@@ -5534,7 +5562,7 @@
             const deck = (AppState.get('flashcards') || []).find(item => item.id === deckId);
             if (!deck) throw new Error('This deck is no longer available.');
             await window.StudBudCommunityGames.unpublishDeck(deckId);
-            await AppState.saveFlashcardDeck({ ...deck, communityPublished: false, communityDeckId: null });
+            await this.updateSavedDeck(deckId, { communityPublished: false, communityDeckId: null });
         }
 
         async importCommunityDeck(deckId) {
@@ -6279,12 +6307,12 @@
             return [
                 { title: 'Welcome to StudBud', text: 'StudBud keeps your classes, grades, study plans, flashcards and games in one place. This quick tour shows what each part does. You can leave at any time.' },
                 { route: 'dashboard', sel: '#sidebar', title: 'Your menu', text: 'Everything lives in this menu. On a phone it sits along the top: swipe it sideways to see every page.' },
+                { route: 'gpa', sel: '#gpa-view .open-ic-import-btn', title: 'Import from Infinite Campus', text: 'Start here to skip the typing: import your classes, grades, assignments, categories, class times and school calendar before setting up your dashboard. On a computer, drag StudBud Import to your bookmarks bar. On a phone, follow the phone/tablet instructions to save the import bookmark. Run it on the signed-in Campus website, then check the class matches and press Import. Re-import any time to update.' },
                 { route: 'dashboard', sel: '.priority-widget', title: 'Dashboard: what is due', text: 'See your most urgent assignments here, and use Add Assignment to put new work on your list.' },
                 { route: 'dashboard', sel: '.daily-study-card', title: 'Your home widget', text: 'Your streak, this week, today’s 5-minute goal, assignments to work on and your grades in one card. Tap Customize to choose what it shows or add StudBud to your home screen.' },
                 { route: 'dashboard', sel: '#study-priority-list', title: 'Quizzes & tests', text: 'Add an upcoming quiz or test with the "Add quiz or test" button and StudBud suggests what to study today, how long, and the best way to do it.' },
                 { route: 'dashboard', sel: '.focus-sprint-widget', title: 'Focus sprint', text: 'Pick a quiz or test, choose anywhere from 5 to 90 minutes, and start a timer. Finished sprints are logged as study time.' },
                 { route: 'gpa', sel: '#add-course-btn', title: 'Classes & grades', text: 'Add your classes, set up grade categories and log assignment scores (decimals like 23.21/25 work). Your GPA updates automatically.' },
-                { route: 'gpa', sel: '#gpa-view .open-ic-import-btn', title: 'Import from Infinite Campus', text: 'Skip the typing: this button brings in your classes, grades, assignments, categories, class times and school calendar from Infinite Campus. Drag the StudBud Import button to your bookmarks bar once, open Campus and sign in, then click that bookmark. Check the class matches and press Import. Run it again any time to update.' },
                 { route: 'grade-scenarios', sel: nav('grade-scenarios'), title: 'Hypothetical Grades', text: 'Try out possible scores, or change an existing grade, to see how your class grade and GPA would change. Nothing here touches your real transcript.' },
                 { route: 'planner', sel: nav('planner'), title: 'Planner', text: 'Turns your due dates and study logs into a day-by-day plan.' },
                 { route: 'calendar', sel: nav('calendar'), title: 'Calendar', text: 'A month view of everything due. Click a day to add an event.' },
@@ -6769,11 +6797,13 @@
             const seconds = Math.min(21600, Math.max(1, Math.round(Number(session.durationSec) || 0)));
             try {
                 await window.StudBudCommunityGames.recordStudyTime(session.id, seconds, session.timestamp);
-                session.leaderboardSyncPending = false;
-                session.leaderboardSyncedAt = new Date().toISOString();
-                await NexusDB.put('studyHistory', session);
+                const current = AppState.state.studyHistory.find(item => item.id === session.id);
+                if (!current) throw new Error('This study session was removed before its time finished syncing.');
+                const synced = { ...current, leaderboardSyncPending: false, leaderboardSyncedAt: new Date().toISOString() };
+                await NexusDB.put('studyHistory', synced);
                 const index = AppState.state.studyHistory.findIndex(item => item.id === session.id);
-                if (index >= 0) AppState.state.studyHistory[index] = session;
+                if (index >= 0) AppState.state.studyHistory[index] = synced;
+                EventBus.emit('state:changed', { key: 'studyHistory', value: AppState.state.studyHistory });
                 AppState.setSaveStatus('Study session synced to your daily goal and leaderboard.');
                 if (refreshBoard) await this.refreshStudyLeaderboard(this.studyLeaderboardPeriod || 'daily');
             } catch (error) {
@@ -7431,6 +7461,8 @@
                     this.openInfiniteCampusSite();
                 } else if (id === 'ic-copy-script-btn') {
                     await this.copyInfiniteCampusScript();
+                } else if (id === 'ic-copy-bookmarklet-btn') {
+                    await this.copyInfiniteCampusBookmarklet();
                 } else if (id === 'ic-paste-clipboard-btn') {
                     await this.pasteInfiniteCampusFromClipboard();
                 } else if (id === 'ic-restart-btn') {
@@ -8390,8 +8422,7 @@
             if (deck.communitySourceId && deck.communitySourceOwnerId !== window.StudBudCloud.user.id && !deck.communityStudyRecorded) {
                 try {
                     await window.StudBudCommunityGames.recordDeckStudy(deck.communitySourceId);
-                    deck.communityStudyRecorded = true;
-                    await AppState.saveFlashcardDeck(deck);
+                    await this.updateSavedDeck(deck.id, { communityStudyRecorded: true });
                 } catch (error) {
                     console.error('[NexusApp] Community study count could not sync:', error);
                     AppState.setSaveStatus(`Card progress saved, but the community study count could not sync. ${this.friendlyErrorMessage(error)}`, 'error');

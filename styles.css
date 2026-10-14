@@ -3531,4 +3531,10 @@ body.compact-ui .streak-flame b { bottom: 4px; font-size: .85rem; }
 .calendar-day small.calendar-day-note { overflow: hidden; color: var(--accent-primary); text-overflow: ellipsis; white-space: nowrap; }
 .calendar-day.calendar-day-off { opacity: .7; }
 .calendar-day-note-text { color: var(--accent-primary); font-weight: 600; }
-@media (max-width: 640px) { .ic-class-row { grid-template-columns: 1fr; } }
+@media (max-width: 640px) {
+    .ic-class-row { grid-template-columns: 1fr; }
+    #ic-import-modal .ic-row > button, #ic-import-modal .ic-file-label { min-height: 44px; }
+    #ic-import-modal input, #ic-import-modal textarea, #ic-import-modal select { font-size: 16px; }
+    #ic-import-modal .ic-more { min-width: 0; }
+    #ic-import-modal .ic-more small { overflow-wrap: anywhere; }
+}

@@ -25,7 +25,7 @@
         box.id = 'studbud-ic-overlay';
         box.setAttribute('role', 'dialog');
         box.setAttribute('aria-label', 'StudBud import');
-        box.style.cssText = 'position:fixed;z-index:2147483647;top:16px;right:16px;width:360px;max-width:calc(100vw - 32px);background:#111827;color:#f9fafb;font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.45);padding:16px;text-align:left';
+        box.style.cssText = 'position:fixed;z-index:2147483647;top:16px;right:16px;box-sizing:border-box;width:360px;max-width:calc(100vw - 32px);max-height:calc(100dvh - 32px);overflow-y:auto;overscroll-behavior:contain;background:#111827;color:#f9fafb;font:16px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.45);padding:16px;text-align:left';
         const heading = document.createElement('strong');
         heading.textContent = 'StudBud · Infinite Campus import';
         const status = document.createElement('p');
@@ -40,7 +40,7 @@
             const element = document.createElement('button');
             element.type = 'button';
             element.textContent = label;
-            element.style.cssText = `border:0;border-radius:8px;padding:8px 12px;cursor:pointer;font:inherit;color:#fff;background:${secondary ? '#374151' : '#6366f1'}`;
+            element.style.cssText = `border:0;border-radius:8px;min-height:44px;padding:8px 12px;cursor:pointer;font:inherit;color:#fff;background:${secondary ? '#374151' : '#6366f1'}`;
             element.addEventListener('click', onClick);
             actions.appendChild(element);
             return element;
@@ -220,7 +220,9 @@
                     area.value = json;
                     area.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
                     document.body.appendChild(area);
+                    area.focus();
                     area.select();
+                    area.setSelectionRange(0, area.value.length);
                     let copied = false;
                     try { copied = document.execCommand('copy'); } catch (copyError) { copied = false; }
                     area.remove();
@@ -241,9 +243,24 @@
                 const copied = await writeClipboard();
                 say(copied
                     ? `${summary}\nCopied! Go back to StudBud and click "Paste data from Campus".`
-                    : `${summary}\nYour browser blocked copying. Use "Download .json" and choose the file in StudBud instead.`);
+                    : `${summary}\nYour browser blocked copying. Use "Show data" to select and copy it manually, or use "Download .json" and choose the file in StudBud.`);
             };
             button('Copy data', copy);
+            button('Show data', () => {
+                let area = box.querySelector('textarea');
+                if (!area) {
+                    area = document.createElement('textarea');
+                    area.value = json;
+                    area.readOnly = true;
+                    area.setAttribute('aria-label', 'Infinite Campus data to copy into StudBud');
+                    area.style.cssText = 'box-sizing:border-box;width:100%;height:120px;margin-top:12px;font:16px/1.4 system-ui;color:#111827;background:#fff';
+                    box.appendChild(area);
+                }
+                area.focus();
+                area.select();
+                area.setSelectionRange(0, area.value.length);
+                say(`${summary}\nTap and hold the selected data and choose Copy (or press Ctrl+C / Cmd+C), then return to StudBud and paste it into the data box.`);
+            }, true);
             button('Download .json', () => {
                 const link = document.createElement('a');
                 link.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));

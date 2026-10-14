@@ -164,4 +164,97 @@ assert.ok(bookmarklet.startsWith('javascript:'));
 new vm.Script(decodeURIComponent(bookmarklet.slice('javascript:'.length)));
 new vm.Script(IC.buildConsoleScript(''));
 
-console.log('infinite-campus-import tests passed');
+async function mobileImport() {
+    const elements = new Map();
+    const element = () => ({
+        value: '', open: false, dataset: {}, classList: { toggle() {} },
+        setAttribute(name, value) { this[name] = value; },
+        closest() { return { open: false }; },
+        focus() { this.focused = true; },
+        select() { this.selected = true; },
+        setSelectionRange(start, end) { this.selection = [start, end]; }
+    });
+    for (const id of ['ic-bookmarklet-link', 'ic-bookmarklet-url', 'ic-mobile-instructions',
+        'ic-district-url', 'ic-import-modal', 'ic-import-status', 'ic-import-textarea']) elements.set(id, element());
+    sandbox.document = { getElementById: id => elements.get(id) || null };
+    sandbox.localStorage = { getItem: () => null };
+    sandbox.location = { protocol: 'https:', origin: 'https://studbud.example' };
+    sandbox.matchMedia = () => ({ matches: true });
+    sandbox.navigator = { clipboard: { writeText: async text => { sandbox.copied = text; } } };
+    const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+    vm.runInContext(appSource.slice(appSource.indexOf('    function localDateKey'), appSource.indexOf('    window.NexusApp ='))
+        + '\nglobalThis.app = Object.create(AppOrchestrator.prototype);', sandbox);
+    const app = sandbox.app;
+    app.currentSchool = () => 'other';
+    app.openModal = () => {};
+    app.openInfiniteCampusImport();
+    assert.strictEqual(elements.get('ic-mobile-instructions').open, true, 'phone setup instructions open automatically');
+    assert.strictEqual(elements.get('ic-bookmarklet-url').value, bookmarklet);
+    await app.copyInfiniteCampusBookmarklet();
+    assert.strictEqual(sandbox.copied, bookmarklet, 'phone users copy the runnable bookmark URL, not a console-only script');
+    sandbox.navigator.clipboard.writeText = async () => { throw new Error('denied'); };
+    await app.copyInfiniteCampusBookmarklet();
+    assert.strictEqual(elements.get('ic-bookmarklet-url').selected, true);
+    assert.deepStrictEqual(elements.get('ic-bookmarklet-url').selection, [0, bookmarklet.length]);
+    assert.match(elements.get('ic-import-status').textContent, /tap and hold/);
+    await app.pasteInfiniteCampusFromClipboard();
+    assert.match(elements.get('ic-import-status').textContent, /Tap and hold/);
+    let preview;
+    app.previewInfiniteCampusData = value => { preview = IC.parsePayload(value); };
+    sandbox.navigator.clipboard.readText = async () => JSON.stringify(payload);
+    await app.pasteInfiniteCampusFromClipboard();
+    assert.strictEqual(preview.sections.length, 3, 'phone clipboard data reaches the same importer');
+    const fileInput = { files: [{ text: async () => JSON.stringify(payload) }] };
+    elements.set('ic-import-file', fileInput);
+    await app.previewInfiniteCampusFromInput();
+    assert.strictEqual(preview.sections.length, 3, 'downloaded JSON works through the phone file picker');
+    const steps = app.tutorialSteps();
+    assert.strictEqual(steps[2].title, 'Import from Infinite Campus', 'Campus import is step 3, before manual setup and dashboard explanations');
+    assert.strictEqual(steps.filter(step => step.title === 'Import from Infinite Campus').length, 1);
+    assert.match(steps[2].text, /phone/);
+
+    class HelperElement {
+        constructor(tag) { this.tag = tag; this.children = []; this.handlers = {}; this.style = {}; }
+        append(...children) { this.children.push(...children); }
+        appendChild(child) { this.children.push(child); }
+        setAttribute(name, value) { this[name] = value; }
+        addEventListener(name, handler) { this.handlers[name] = handler; }
+        querySelector(tag) { return this.children.find(child => child.tag === tag) || null; }
+        focus() { this.focused = true; }
+        select() { this.selected = true; }
+        setSelectionRange(start, end) { this.selection = [start, end]; }
+        remove() {}
+    }
+    const body = new HelperElement('body');
+    const collectorSandbox = {
+        console, URL, Blob, Set, location: { origin: 'https://district.infinitecampus.org', pathname: '/campus/portal/students' },
+        document: { body, getElementById: () => null, createElement: tag => new HelperElement(tag), execCommand: () => false },
+        navigator: { clipboard: { writeText: async () => { throw new Error('blocked'); } } },
+        fetch: async url => ({
+            ok: true, status: 200,
+            text: async () => JSON.stringify(url.endsWith('api/portal/students')
+                ? [{ personID: 1, firstName: 'Sam', enrollments: [] }] : [])
+        })
+    };
+    collectorSandbox.window = { opener: null, addEventListener() {} };
+    vm.createContext(collectorSandbox);
+    await vm.runInContext(IC.buildConsoleScript('https://studbud.example'), collectorSandbox);
+    const box = body.children.find(child => child.id === 'studbud-ic-overlay');
+    assert.match(box.style.cssText, /box-sizing:border-box/);
+    assert.match(box.style.cssText, /max-height:calc\(100dvh - 32px\)/);
+    assert.match(box.style.cssText, /overflow-y:auto/);
+    const actions = box.children[2];
+    assert.ok(actions.children.every(button => button.style.cssText.includes('min-height:44px')));
+    const copyButton = actions.children.find(child => child.textContent === 'Copy data');
+    await copyButton.handlers.click();
+    assert.match(box.children[1].textContent, /Show data/);
+    const showButton = actions.children.find(child => child.textContent === 'Show data');
+    showButton.handlers.click();
+    const manualData = box.querySelector('textarea');
+    assert.strictEqual(manualData.selected, true, 'clipboard-blocked phones can select the collected data');
+    assert.strictEqual(JSON.parse(manualData.value).format, IC.FORMAT);
+    showButton.handlers.click();
+    assert.strictEqual(box.children.filter(child => child.tag === 'textarea').length, 1, 'showing data again reuses the copy field');
+    console.log('Infinite Campus import, early tutorial, mobile bookmark setup, clipboard/file fallbacks and scrollable collector tests passed.');
+}
+mobileImport().catch(error => { console.error(error); process.exitCode = 1; });

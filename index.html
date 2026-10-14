@@ -1478,6 +1478,14 @@
                                 <span class="ic-drag-hint"><i class="fas fa-arrow-up"></i> Drag this up to your bookmarks bar</span>
                             </div>
                             <small>Don't see a bookmarks bar? Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> (<kbd>⌘</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> on Mac). Already added it? Skip to step 2.</small>
+                            <details id="ic-mobile-instructions" class="ic-more">
+                                <summary>On a phone or tablet? Set up the import bookmark</summary>
+                                <small>Use Safari or Chrome in a browser tab, not the Campus app or an in-app browser. Bookmark any page, name it <strong>StudBud Import</strong>, then edit that bookmark and replace its entire address with the URL below. Keep the <code>javascript:</code> at the beginning.</small>
+                                <div class="ic-row"><button id="ic-copy-bookmarklet-btn" class="secondary-btn" type="button"><i class="fas fa-copy"></i> Copy bookmark URL</button></div>
+                                <textarea id="ic-bookmarklet-url" rows="2" readonly aria-label="StudBud Import bookmark URL" spellcheck="false"></textarea>
+                                <small>Safari: use Share &rarr; Add Bookmark, then Bookmarks &rarr; Edit. Chrome for Android: bookmark a page using the star in the menu, then open Bookmarks and edit its address.</small>
+                                <small>Once you are signed in on the Campus website, run the saved bookmark. In Safari, choose it from Bookmarks. In Chrome for Android, type <strong>StudBud Import</strong> in the address bar and tap the bookmark suggestion, rather than a search result. Do not paste the URL into a search box.</small>
+                            </details>
                         </li>
                         <li>
                             <strong>Open Infinite Campus and sign in.</strong>
@@ -1491,7 +1499,7 @@
                             </details>
                         </li>
                         <li>
-                            <strong>On the Campus tab, click <em>StudBud Import</em> in your bookmarks bar.</strong>
+                            <strong>On the Campus tab, run your saved <em>StudBud Import</em> bookmark.</strong>
                             <small>It gathers your data and sends it back here. Come back to this tab to check your classes and finish.</small>
                             <details class="ic-more">
                                 <summary>Can't use bookmarks? Use the console instead</summary>
@@ -1501,7 +1509,7 @@
                         </li>
                         <li>
                             <strong>Nothing showed up here?</strong>
-                            <small>The helper copies your data when it can't send it. Click below to paste it.</small>
+                            <small>On a phone, tabs may not send data directly. In the Campus helper, tap Copy data, then return here and paste it. If copying is blocked, use Show data to select and copy it manually, or download the .json file.</small>
                             <div class="ic-row">
                                 <button id="ic-paste-clipboard-btn" class="secondary-btn" type="button"><i class="fas fa-paste"></i> Paste data from Campus</button>
                                 <label class="secondary-btn ic-file-label"><i class="fas fa-file-arrow-up"></i> Choose .json file<input id="ic-import-file" type="file" accept=".json,application/json" hidden></label>
