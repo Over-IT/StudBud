@@ -1200,7 +1200,7 @@
             this.dir = 1; this.td = 0; this.yards = 0;
             this.me.y = this.H / 2; this.baseSpeed = 250;
             this.res = new A.Resource('Energy', '#38bdf8', 100, 60, 2);
-            this.kickCd = 0; this.contactCd = 0; this.pinchCd = 0; this.turbo = 0; this.freeze = 0; this.msg = '';
+            this.kickCd = 0; this.heavyCd = 0; this.contactCd = 0; this.pinchCd = 0; this.turbo = 0; this.freeze = 0; this.msg = '';
             this.ballRevision = 0; this.ballOwner = ''; this.ballSequence = 0;
             this.ballVisualOffset = { x: 0, y: 0 };
             this.goalH = 340; this.netD = 70;
@@ -1397,6 +1397,7 @@
             const blend = Math.exp(-20 * dt);
             this.ballVisualOffset.x *= blend; this.ballVisualOffset.y *= blend;
             this.kickCd -= dt; this.contactCd = Math.max(0, this.contactCd - dt); this.pinchCd = Math.max(0, this.pinchCd - dt); this.turbo = Math.max(0, this.turbo - dt);
+            this.heavyCd = Math.max(0, this.heavyCd - dt);
             const wasFrozen = this.freeze > 0;
             this.freeze = Math.max(0, this.freeze - dt);
             const wantsSprint = s.down('ShiftLeft', 'ShiftRight') && this.moving;
@@ -1442,14 +1443,14 @@
                             if (Math.abs(b.vx - pre.vx) + Math.abs(b.vy - pre.vy) > 12) s.sfx('act', 90);
                         }
                     }
-                    const held = s.down('Space'), mousePass = s.mouse.pressed;
+                    const held = s.down('Space') && this.heavyCd <= 0, mousePass = s.mouse.pressed;
                     const tapped = mousePass || s.pressed('KeyE');
                     if (mousePass) this.kickAim = this.mouseWorld();
                     if (held && !this.kickHeld) this.kickCharge = 0;
                     if (held) this.kickCharge = Math.min(1, this.kickCharge + dt / .8);
                     const released = this.kickHeld && !held;
                     this.kickHeld = held;
-                    if ((tapped || released) && this.kickCd <= 0 && d < 78) {
+                    if ((tapped || (released && this.heavyCd <= 0)) && this.kickCd <= 0 && d < 78) {
                         const charge = tapped ? .12 : this.kickCharge;
                         const cost = Math.round(4 + charge * 11);
                         if (s.spend(cost)) {
@@ -1458,6 +1459,7 @@
                             const power = 480 + charge * 650;
                             b.vx = Math.cos(angle) * power; b.vy = Math.sin(angle) * power;
                             this.kickCd = .25 + charge * .2; this.contactCd = Math.max(this.contactCd, .2); this.lastTouch = s.user.id;
+                            if (!tapped) this.heavyCd = 3;
                             this.sendKick(); s.sfx('shoot');
                             this.particles.burst(b.x, b.y, '#fde68a', 12, 220, .35, 3);
                         }
@@ -1492,8 +1494,8 @@
             return this.teamsOn ? `Blue ${this.teamTd[0]} – ${this.teamTd[1]} Red · You ${this.td} goal${this.td === 1 ? '' : 's'}` : `${this.td} goal${this.td === 1 ? '' : 's'}`;
         }
         touchLayout() { return { stick: true, buttons: [{ k: 'ShiftLeft', label: 'Sprint' }, { k: 'Space', label: 'Power kick', cls: 'main' }] }; }
-        hint() { return `${this.teamsOn ? `${this.myTeam === 0 ? 'Blue' : 'Red'} team · ` : ''}WASD dribble · Shift sprint · E or click pass · hold Space, release for a power kick (4–15 energy) · Q recharge`; }
-        touchHint() { return 'Joystick to dribble · Tap toward a pass · Hold Power kick, release to shoot · Sprint to steal'; }
+        hint() { return `${this.teamsOn ? `${this.myTeam === 0 ? 'Blue' : 'Red'} team · ` : ''}WASD dribble · Shift sprint · E or click pass · hold Space, release for a power kick (4–15 energy, 3s cooldown) · Q recharge`; }
+        touchHint() { return 'Joystick to dribble · Tap toward a pass · Hold Power kick, release to shoot (3s cooldown) · Sprint to steal'; }
 
         draw(ctx, w, h) {
             const me = this.me, t = this.anim, b = { ...this.ball, x: this.ball.x + this.ballVisualOffset.x, y: this.ball.y + this.ballVisualOffset.y }, W = this.W, H = this.H, gy0 = H / 2 - this.goalH / 2;
@@ -1574,12 +1576,12 @@
             }
             this.end(ctx);
             if (this.s.preview) return;
-            if (this.kickHeld && !this.freeze) {
+            if ((this.kickHeld || this.heavyCd > 0) && !this.freeze) {
                 this.s.placeHud(ctx, 0, 0, 172, 31, 'top-center');
                 ctx.fillStyle = 'rgba(15,23,42,.8)'; roundRect(ctx, 0, 0, 172, 31, 9); ctx.fill();
                 ctx.fillStyle = '#253d51'; ctx.fillRect(11, 19, 150, 4);
-                ctx.fillStyle = '#38bdf8'; ctx.fillRect(11, 19, 150 * this.kickCharge, 4);
-                ctx.font = '700 10px system-ui'; ctx.textAlign = 'center'; ctx.fillStyle = '#e5eff9'; ctx.fillText(`SHOT ${Math.round(this.kickCharge * 100)}%`, 86, 13); ctx.restore();
+                ctx.fillStyle = '#38bdf8'; ctx.fillRect(11, 19, 150 * (this.heavyCd > 0 ? 1 - this.heavyCd / 3 : this.kickCharge), 4);
+                ctx.font = '700 10px system-ui'; ctx.textAlign = 'center'; ctx.fillStyle = '#e5eff9'; ctx.fillText(this.heavyCd > 0 ? `POWER KICK ${this.heavyCd.toFixed(1)}s` : `SHOT ${Math.round(this.kickCharge * 100)}%`, 86, 13); ctx.restore();
             }
             if (this.freeze > 0) {
                 ctx.fillStyle = `rgba(255,244,179,${Math.min(.3, this.freeze * .12)})`; ctx.fillRect(0, 0, w, h);

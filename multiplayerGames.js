@@ -1323,7 +1323,7 @@
             this.botSpawns = [[390, 440], [1190, 440], [790, 200]].map(([x, y]) => [(x + 17) * scaleX - 17, y]);
             this.spawn = spawns[hashStr(s.user.id) % spawns.length];
             this.me.x = this.spawn[0]; this.me.y = this.spawn[1] - 60;
-            this.dmg = 0; this.stun = 0; this.invuln = 1.5; this.swingT = 0; this.swingCd = 0; this.swingHeavy = false;
+            this.dmg = 0; this.stun = 0; this.invuln = 1.5; this.swingT = 0; this.swingCd = 0; this.heavyCd = 0; this.swingHeavy = false;
             this.guard = false; this.airJumps = 1; this.coyote = 0; this.hammer = 0; this.kos = 0; this.falls = 0; this.respawn = 0;
             this.lastHit = { by: null, at: 0 }; this.anim = 0; this.orb = { x: this.W / 2, y: 150, t: 0 }; this.state = 0; this.shake = 0;
             this.hitFlash = 0; this.hitlag = 0; this.dropTimer = 0; this.dodge = 0; this.dodgeCd = 0; this.shieldBreak = 0;
@@ -1345,8 +1345,24 @@
         }
 
         inHill(body, zone) {
-            const cx = body.x + 17, feet = body.y + 56;
-            return cx > zone.x && cx < zone.x + zone.w && Math.abs(feet - zone.y) < 14;
+            const cx = body.x + (body.w ?? 34) / 2, feet = body.y + (body.h ?? 56);
+            return cx >= zone.x && cx <= zone.x + zone.w && feet >= zone.y - 150 && feet <= zone.y + 14;
+        }
+
+        updateHill(dt) {
+            const s = this.s, zone = this.hill().zone;
+            const mine = this.respawn <= 0 && !s.question && this.inHill(this.me, zone);
+            const rivals = s.remoteList().some(r => r.a !== 5 && this.inHill(r, zone));
+            this.hillState = !mine ? 'away' : rivals ? 'contested' : 'holding';
+            if (this.hillState !== 'holding') return;
+            this.hillTick += dt;
+            const seconds = Math.floor(this.hillTick + 1e-9);
+            if (seconds > 0) {
+                this.hillTick = Math.max(0, this.hillTick - seconds);
+                this.hillSecs = (this.hillSecs || 0) + seconds;
+                s.setGoal(this.hillSecs); s.addScore(12 * seconds); s.sfx('coin', 300);
+                this.particles.burst(this.me.x + 17, this.me.y, '#fde047', 4, 120, 0.4, 3);
+            }
         }
 
         update(dt) {
@@ -1357,6 +1373,7 @@
             this.invuln = Math.max(0, this.invuln - dt);
             this.hammer = Math.max(0, this.hammer - dt);
             this.swingCd = Math.max(0, this.swingCd - dt); this.swingT = Math.max(0, this.swingT - dt); this.stun = Math.max(0, this.stun - dt);
+            this.heavyCd = Math.max(0, this.heavyCd - dt);
             this.dodgeCd = Math.max(0, this.dodgeCd - dt); this.dodge = Math.max(0, this.dodge - dt);
             this.shieldBreak = Math.max(0, this.shieldBreak - dt);
             if (this.dropTimer > 0) {
@@ -1365,6 +1382,7 @@
             }
             if (this.hitlag > 0) {
                 this.hitlag = Math.max(0, this.hitlag - dt);
+                this.updateHill(dt);
                 this.particles.update(dt, 300);
                 return;
             }
@@ -1375,6 +1393,7 @@
                     me.x = sp[0]; me.y = sp[1] - 60; me.vx = me.vy = 0; this.dmg = 0; this.invuln = 2.2; this.hammer = 0;
                 }
                 this.state = 5; this.particles.update(dt, 500);
+                this.hillState = 'away';
                 return;
             }
             const ax = this.stun > 0 || this.dodge > 0 ? 0 : s.axis().x;
@@ -1410,11 +1429,13 @@
                 if (this.coyote > 0) { me.vy = -900; this.coyote = 0; s.sfx('jump'); }
                 else if (this.airJumps > 0) { me.vy = -820; this.airJumps--; s.sfx('jump'); this.particles.burst(me.x + 17, me.y + 56, '#bae6fd', 8, 120, 0.3, 4); }
             }
-            if (this.stun <= 0 && !this.guard && this.dodge <= 0 && this.swingCd <= 0 && (s.mouse.pressed || s.pressed('KeyE', 'KeyR')) && s.spend(8)) {
-                const heavy = s.pressed('KeyR');
+            const heavy = s.pressed('KeyR');
+            const attack = heavy ? this.heavyCd <= 0 : s.mouse.pressed || s.pressed('KeyE');
+            if (this.stun <= 0 && !this.guard && this.dodge <= 0 && this.swingCd <= 0 && attack && s.spend(8)) {
                 this.swingHeavy = heavy;
+                if (heavy) this.heavyCd = 3;
                 this.swingT = heavy ? 0.28 : 0.22; this.swingCd = heavy ? 0.78 : 0.52; s.sfx('swing'); this.swingAim = this.aim;
-                s.emit({ k: 'sw', x: Math.round(me.x + 17), y: Math.round(me.y + 28), d: me.face, a: +this.aim.toFixed(2), p: (this.hammer > 0 ? 1.6 : 1) * (heavy ? 1.2 : 1), h: heavy ? 1 : 0, by: s.user.id, c: (this.dmg | 0) });
+                s.emit({ k: 'sw', x: Math.round(me.x + 17), y: Math.round(me.y + 28), d: me.face, a: +this.aim.toFixed(2), p: (this.hammer > 0 ? 1.6 : 1) * (heavy ? 2 : 1), h: heavy ? 1 : 0, by: s.user.id, c: (this.dmg | 0) });
                 this.particles.burst(me.x + 17 + Math.cos(this.aim) * 70, me.y + 28 + Math.sin(this.aim) * 70, '#fde68a', 8, 200, 0.25, 4);
             }
             moveBody(me, this.solids, dt);
@@ -1429,16 +1450,7 @@
                 if (opened) this.orb.t = 1;
             }
             if (this.respawn <= 0 && (me.x < -180 || me.x > this.W + 180 || me.y > this.H || me.y < -650)) this.ko();
-            if (!s.question && this.respawn <= 0) {
-                const zone = this.hill().zone;
-                const mine = this.inHill(me, zone);
-                const rivals = s.remoteList().some(r => r.a !== 5 && this.inHill({ x: r.x, y: r.y }, zone));
-                this.hillState = !mine ? 'away' : rivals ? 'contested' : 'holding';
-                if (this.hillState === 'holding') {
-                    this.hillTick += dt;
-                    if (this.hillTick >= 1) { this.hillTick -= 1; this.hillSecs = (this.hillSecs || 0) + 1; s.setGoal(this.hillSecs); s.addScore(12); s.sfx('coin', 300); this.particles.burst(me.x + 17, me.y, '#fde047', 4, 120, 0.4, 3); }
-                } else this.hillTick = 0;
-            }
+            this.updateHill(dt);
             this.state = this.guard ? 4 : this.dodge > 0 ? 6 : this.swingT > 0 ? 3 : !me.onGround ? 2 : Math.abs(me.vx) > 40 ? 1 : 0;
             this.particles.update(dt, 300);
         }
@@ -1504,10 +1516,37 @@
 
         attackHits(ev, body) {
             const angle = typeof ev.a === 'number' ? ev.a : (ev.d > 0 ? 0 : Math.PI);
-            const cx = body.x + body.w / 2, cy = body.y + body.h / 2;
-            const dx = cx - ev.x, dy = cy - ev.y, radius = Math.hypot(dx, dy);
-            const delta = Math.atan2(Math.sin(Math.atan2(dy, dx) - angle), Math.cos(Math.atan2(dy, dx) - angle));
-            return radius < 146 && radius > 8 && Math.abs(delta) < 0.86;
+            const reach = ev.h === 1 ? 136 : 110;
+            const sweep = [{ x: ev.x, y: ev.y }];
+            for (let i = 0; i <= 16; i++) {
+                const a = angle - 0.86 + i * 1.72 / 16;
+                sweep.push({ x: ev.x + Math.cos(a) * reach, y: ev.y + Math.sin(a) * reach });
+            }
+            const rect = [
+                { x: body.x, y: body.y }, { x: body.x + body.w, y: body.y },
+                { x: body.x + body.w, y: body.y + body.h }, { x: body.x, y: body.y + body.h }
+            ];
+            // Test the whole fighter rectangle against the visible hammer sweep.
+            const axes = [{ x: 1, y: 0 }, { x: 0, y: 1 }];
+            for (let i = 0; i < sweep.length; i++) {
+                const next = sweep[(i + 1) % sweep.length];
+                axes.push({ x: next.y - sweep[i].y, y: sweep[i].x - next.x });
+            }
+            return axes.every(axis => {
+                const a = sweep.map(p => p.x * axis.x + p.y * axis.y);
+                const b = rect.map(p => p.x * axis.x + p.y * axis.y);
+                return Math.max(...a) >= Math.min(...b) && Math.max(...b) >= Math.min(...a);
+            });
+        }
+
+        hitImpact(ev, damage, blocked = false) {
+            const power = ev.p || 1;
+            const nextDamage = Math.min(999, damage + 9 * power * (blocked ? 0.22 : 1));
+            return {
+                damage: nextDamage,
+                force: clamp((360 + nextDamage * 12) * power * (blocked ? 0.24 : 1), 0, 1700),
+                stun: blocked ? 0.1 : clamp(0.18 + nextDamage / 180, 0.18, 0.82)
+            };
         }
 
         onEvent(ev, from) {
@@ -1518,14 +1557,12 @@
                 from.swingHeavy = ev.h === 1;
                 if (this.respawn > 0 || this.invuln > 0 || this.stun > 0.2 || !this.attackHits(ev, me)) return;
                 const angle = from.swingAim, dx = Math.cos(angle), dy = Math.sin(angle);
-                const power = ev.p || 1;
                 const blocked = this.guard && me.face === -(dx >= 0 ? 1 : -1);
-                const base = 9 * power;
-                this.dmg = Math.min(999, this.dmg + (blocked ? base * 0.22 : base));
-                const force = clamp((360 + this.dmg * 12) * power * (blocked ? 0.24 : 1), 0, 1700);
+                const impact = this.hitImpact(ev, this.dmg, blocked), force = impact.force;
+                this.dmg = impact.damage;
                 me.vx = dx * force; me.vy = blocked ? 0 : dy * force * 0.58 - (150 + this.dmg * 2.2);
                 me.onGround = false;
-                this.stun = blocked ? 0.1 : clamp(0.18 + this.dmg / 180, 0.18, 0.82);
+                this.stun = impact.stun;
                 this.hitlag = blocked ? 0.035 : 0.055; this.hitFlash = 0.2; this.shake = 0.24;
                 s.sfx(blocked ? 'click' : 'hit', 60);
                 this.lastHit = { by: ev.by, at: Date.now() };
@@ -1546,14 +1583,15 @@
                 ex: { d: Math.round(this.dmg), h: this.hammer > 0 ? 1 : 0, hv: this.swingHeavy ? 1 : 0, i: this.invuln > 0 ? 1 : 0, t: +(this.aim || 0).toFixed(2), k: this.kos, f: this.falls } };
         }
 
-        goalText() { return `${this.kos} KOs · ${this.falls} KOs against · ${Math.round(this.dmg)}% damage`; }
+        goalText() { return `${this.kos} KOs · ${this.falls} KOs against · ${Math.round(this.dmg)}% damage · Heavy ${this.heavyCd > 0 ? `${this.heavyCd.toFixed(1)}s` : 'ready'}`; }
         touchLayout() { return { stick: true, platform: true, buttons: [{ k: 'Space', label: 'Jump' }, { k: 'KeyS', label: 'Guard' }, { k: 'KeyR', label: 'Heavy', small: true }, { k: 'ShiftLeft', label: 'Dodge' }] }; }
-        hint() { return 'A/D move · Space jump twice · S guard · E or click swing · R heavy · Shift / F dodge · Down fast-fall / drop through ledges · Q recharge'; }
+        touchHint() { return 'Joystick to move · Hold steeply up to jump on landing · Jump button for an air jump · Tap to swing · Heavy (2x power, 3s cooldown), Guard or Dodge'; }
+        hint() { return 'A/D move · Space jump twice · S guard · E or click swing · R heavy (2x power, 3s cooldown) · Shift / F dodge · Down fast-fall / drop through ledges · Q recharge'; }
 
         drawFighter(ctx, x, y, who, face, state, dmg, name, hammer, swingAge, alpha, you, aim, swingAim, heavySwing = false) {
             const color = who.color;
             drawRunner(ctx, x, y, 34, 56, who, face, this.anim, state === 1 ? 1 : 0, alpha);
-            const cx = x + 34 / 2, cy = y + 30;
+            const cx = x + 34 / 2, cy = y + 28;
             const duration = heavySwing ? 0.28 : 0.22;
             const swinging = state === 3 || swingAge < duration;
             ctx.save();
@@ -1562,13 +1600,15 @@
             const sweepProgress = Math.max(0, Math.min(1, swingAge / duration));
             const angle = base + (swinging ? -0.8 + sweepProgress * 1.6 : -0.35);
             ctx.globalAlpha = alpha;
-            if (swinging && heavySwing) {
-                ctx.fillStyle = 'rgba(253,230,138,.12)'; ctx.strokeStyle = 'rgba(253,230,138,.8)'; ctx.lineWidth = 4;
-                ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, 136, base - 0.86, base + 0.86); ctx.closePath(); ctx.fill(); ctx.stroke();
+            const reach = heavySwing ? 136 : 110;
+            if (swinging) {
+                ctx.fillStyle = 'rgba(253,230,138,.12)'; ctx.strokeStyle = 'rgba(253,230,138,.8)'; ctx.lineWidth = heavySwing ? 4 : 2;
+                ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, reach, base - 0.86, base + 0.86); ctx.closePath(); ctx.fill(); ctx.stroke();
             }
             ctx.rotate(angle);
-            ctx.fillStyle = '#92400e'; ctx.fillRect(0, -3, 62, 6);
-            ctx.fillStyle = hammer ? '#f472b6' : '#9ca3af'; roundRect(ctx, 52, -17, 30, 34, 6); ctx.fill();
+            const shaft = swinging ? reach - 20 : 62;
+            ctx.fillStyle = '#92400e'; ctx.fillRect(0, -3, shaft, 6);
+            ctx.fillStyle = hammer ? '#f472b6' : '#9ca3af'; roundRect(ctx, shaft - 10, -17, 30, 34, 6); ctx.fill();
             ctx.restore();
             if (state === 6) { ctx.strokeStyle = 'rgba(56,189,248,.9)'; ctx.lineWidth = 3; ctx.strokeRect(x - 3, y - 3, 40, 62); }
             if (state === 4) { ctx.strokeStyle = 'rgba(125,211,252,.85)'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(cx, cy, 44, 0, TAU); ctx.stroke(); }

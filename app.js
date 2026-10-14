@@ -2955,7 +2955,7 @@
                 else if (item.price == null) button = '<button type="button" class="secondary-btn" disabled>Box only</button>';
                 else button = `<button type="button" class="secondary-btn" data-action="multiplayer-buy" data-id="${this.escapeHTML(item.id)}" ${profile.coins < item.price ? 'disabled' : ''}>Buy${price}</button>`;
                 const name = item.name;
-                const search = this.escapeHTML(`${name} ${item.rarity}`.toLocaleLowerCase());
+                const search = this.escapeHTML(`${name} ${item.rarity} ${item.description || ''}`.toLocaleLowerCase());
                 return `<article class="multiplayer-shop-item rarity-${item.rarity}${equipped ? ' equipped' : ''}" data-search="${search}"><span class="shop-preview" aria-hidden="true">${preview}</span><div><strong>${this.escapeHTML(name)}</strong><small class="rarity-label">${item.rarity}${equipped ? ' · Equipped' : has ? ' · Owned' : ''}</small>${item.description ? `<small>${this.escapeHTML(item.description)}</small>` : ''}</div>${button}</article>`;
             };
             let body;
@@ -4165,15 +4165,14 @@
         }
 
         duelSwing(demo, ev) {
-            const U = window.StudBudArcade.util, game = demo.game;
+            const game = demo.game;
             const dx = Math.cos(ev.a), dy = Math.sin(ev.a);
-            const box = { x: ev.x + dx * 70 - 65, y: ev.y + dy * 70 - 58, w: 130, h: 116 };
             for (const t of demo.bots) {
-                if (t.id === ev.by || t.respawn > 0 || t.invuln > 0 || !U.overlap(box, t)) continue;
-                t.dmg += 9;
-                const force = 280 + t.dmg * 9;
-                t.vx = dx * force; t.vy = dy * force * 0.5 - (100 + t.dmg * 2); t.onGround = false;
-                t.stun = U.clamp(0.2 + t.dmg / 400, 0.2, 0.55); t.lastHit = ev.by;
+                if (t.id === ev.by || t.respawn > 0 || t.invuln > 0 || t.stun > 0.2 || !game.attackHits(ev, t)) continue;
+                const impact = game.hitImpact(ev, t.dmg), force = impact.force;
+                t.dmg = impact.damage;
+                t.vx = dx * force; t.vy = dy * force * 0.58 - (150 + t.dmg * 2.2); t.onGround = false;
+                t.stun = impact.stun; t.lastHit = ev.by;
                 game.particles.burst(t.x + 17, t.y + 28, '#fca5a5', 14, 260, 0.4, 5);
                 if (ev.by === demo.meId) game.shake = Math.max(game.shake, 0.12);
             }
@@ -4228,11 +4227,12 @@
                     if (b.lastHit === demo.meId) game.onEvent({ k: 'ko', by: demo.meId }, b);
                     b.lastHit = null;
                 }
-                const contested = game.inHill(me, zone) || demo.bots.some(other => other !== b && other.respawn <= 0 && game.inHill(other, zone));
+                const contested = (game.respawn <= 0 && game.inHill(me, zone)) || demo.bots.some(other => other !== b && other.respawn <= 0 && game.inHill(other, zone));
                 if (b.respawn <= 0 && !contested && game.inHill(b, zone)) {
                     b.hillTick = (b.hillTick || 0) + dt;
-                    if (b.hillTick >= 1) { b.hillSecs = (b.hillSecs || 0) + Math.floor(b.hillTick); b.hillTick %= 1; }
-                } else b.hillTick = 0;
+                    const seconds = Math.floor(b.hillTick + 1e-9);
+                    if (seconds > 0) { b.hillSecs = (b.hillSecs || 0) + seconds; b.hillTick = Math.max(0, b.hillTick - seconds); }
+                }
                 b.a = b.swingT > 0 ? 3 : !b.onGround ? 2 : Math.abs(b.vx) > 40 ? 1 : 0;
                 b.ex = { d: Math.round(b.dmg), h: 0, i: b.invuln > 0 ? 1 : 0, t: b.swingAim || 0 };
                 b.tx = b.x; b.ty = b.y; b.seen = now;
@@ -4408,7 +4408,7 @@
                     const shotSpeed = shoot ? 850 + b.ai.aggression * 90 : 300;
                     ball.vx = Math.cos(goalAngle) * shotSpeed; ball.vy = Math.sin(goalAngle) * shotSpeed;
                     game.lastTouch = b.id;
-                    if (shoot) { b.kickCd = 1.2 + b.ai.reaction; b.ai.energy = Math.max(0, (b.ai.energy ?? 100) - 10); }
+                    if (shoot) { b.kickCd = 3; b.ai.energy = Math.max(0, (b.ai.energy ?? 100) - 10); }
                 }
             }
         }

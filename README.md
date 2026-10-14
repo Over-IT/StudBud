@@ -114,9 +114,15 @@ Profile, friend, lobby, leaderboard and game-result avatars animate equipped aur
 
 The Black Fedora is a separate uncommon hat priced at 275 coins, matching the Classic Fedora. Apply the updated `supabase-setup.sql` to enable its purchase and mystery-box drops.
 
-Run `node tests/cosmetics.cjs` for avatar animation/lifecycle, cosmetic composition and client/server fedora-catalog regression checks.
+Every character, hat, accessory, aura and color palette has a description in the shop and inventory, including owned legacy cosmetics. Shop search also matches descriptions.
+
+Run `node tests/cosmetics.cjs` for avatar animation/lifecycle, cosmetic composition, description coverage/rendering/search and client/server fedora-catalog regression checks.
 
 Keyboard controls stay near the movement hand: King of the Hill uses **A/D** to move, **Space** to jump, **S** to guard, **E/click** to swing, **R** for a heavy swing, **Shift** to dodge (**F** remains an alias), and **Q** to refill. Soccer uses **WASD** to dribble, **Shift** to sprint/steal, **E/click** to pass, **hold Space then release** for a power kick, and **Q** to refill. Arena Shooter uses **F/click** to fire, **Space/E** for shockwave, and **Shift** to dash. Soccer's touch controls include a separate **Power kick** button. The joystick also tracks movement/release globally when pointer capture is unavailable.
+
+King of the Hill heavy swings deal twice the normal damage, with stronger knockback and a 3-second heavy cooldown. Soccer power kicks also have a 3-second cooldown; light swings and passes remain available during heavy cooldowns after their normal action recovery. The cooldown is shown in the hill objective details and Soccer's shot HUD. Hill attacks test the fighter's full bounds against the displayed hammer sweep, using the same damage and hit detection for solo bots and multiplayer players.
+
+Hill time is awarded only while you are the sole player inside the highlighted hill zone. Brief jumps within the zone count; contested time, time outside the zone, respawns and answering questions do not. Earned fractions of a second are preserved across interruptions and hill moves instead of resetting, and hitlag does not discard eligible time. Gameplay tests check this at 30, 60 and 120 FPS, plus heavy cooldowns, damage and hitbox boundaries.
 
 Cameras scale using actual screen dimensions, and top-down modes look toward the cursor without drifting toward an inactive pointer. Shooter weapon framing differs: the sniper sees farther and the shotgun is closer. Shooter weapon/health pickups are less frequent. Crystal tiles show their point value, and lava spreads more slowly, at most four tiles sideways; outside a five-tile reveal radius it looks like dark rock, but remains hazardous. Previews reveal lava for clarity.
 

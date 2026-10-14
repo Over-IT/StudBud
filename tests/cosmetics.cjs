@@ -44,6 +44,10 @@ vm.createContext(sandbox);
 for (const file of ['communityGames.js', 'multiplayerEngine.js']) vm.runInContext(source(file), sandbox);
 const util = sandbox.window.StudBudArcade.util;
 const catalog = sandbox.window.StudBudCommunityGames.catalog;
+for (const item of catalog.filter(item => item.type !== 'pet')) {
+    assert.ok(typeof item.description === 'string' && item.description.trim().length >= 15,
+        `${item.id} has a useful shop description`);
+}
 assert.equal(util.animatedCosmetics({ cos: { skin: 'skin_celestial' } }), true);
 assert.equal(util.animatedCosmetics({ cos: { acc: 'acc_jetpack' } }), true);
 assert.equal(util.animatedCosmetics({ cos: { effect: 'acc_storm_effect' } }), true);
@@ -147,6 +151,17 @@ const preview = previews.find(cos => cos.hat === 'hat_fedora');
 assert.equal(preview.skin, 'skin_robot');
 assert.equal(preview.acc, 'acc_shades', 'hat previews preserve the equipped accessory');
 assert.equal(preview.effect, 'acc_storm_effect', 'hat previews preserve the equipped aura');
+for (const tab of ['skin', 'hat', 'accessory', 'effect', 'palette', 'inventory']) {
+    app.shopTab = tab;
+    app.renderMultiplayerShop({ coins: 1000, owned_items: catalog.filter(item => item.type !== 'pet').map(item => item.id) });
+    const markup = elements.get('multiplayer-shop-items').innerHTML;
+    for (const item of catalog.filter(item => item.type !== 'pet' && (tab === 'inventory' || (!item.legacy && item.type === tab)))) {
+        assert.ok(markup.includes(`<small>${app.escapeHTML(item.description)}</small>`),
+            `${tab} displays ${item.id}'s description`);
+        assert.ok(markup.includes(app.escapeHTML(`${item.name} ${item.rarity} ${item.description}`.toLocaleLowerCase())),
+            `${item.id}'s description is searchable`);
+    }
+}
 assert.match(source('supabase-setup.sql'), /add column if not exists equipped_effect/);
 assert.match(source('supabase-setup.sql'), /set equipped_effect = equipped_accessory, equipped_accessory = ''/);
 assert.match(source('supabase-setup.sql'), /p_slot = 'effect'.*equipped_effect = ''/s);
