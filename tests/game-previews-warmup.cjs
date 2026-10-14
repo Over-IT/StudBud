@@ -774,8 +774,10 @@ for (const mode of ['duel', 'shooter', 'skyline']) {
         assert.equal(bot.y, demo.game.checkpoints[1].y - bot.h, 'parkour bot returns to its latest checkpoint');
         bot.invuln = 0; bot.y = demo.game.checkpoints[1].y + 900;
         app.stepSkylineBot(demo, bot, 0, .02);
-        assert.ok(bot.respawn > 0, 'falling parkour bot starts its respawn timer');
-        app.stepSkylineBot(demo, bot, 0, 2);
+        assert.ok(bot.st.assist, 'falling parkour bot follows a smooth recovery hop toward its next route node');
+        app.stepSkylineBot(demo, bot, 0, bot.st.assist.duration);
+        assert.equal(bot.st.assist, null);
+        assert.ok(bot.onGround);
     }
     assert.ok(bot.respawn <= 0 && bot.invuln > 0, `${mode} bot respawns with protection`);
     assert.equal(bot.vx, 0); assert.equal(bot.vy, 0);
@@ -790,6 +792,55 @@ for (const bot of kickoff.bots) {
     assert.equal(bot.vx, 0); assert.equal(bot.vy, 0);
 }
 console.log('Forced bot respawns, parkour fall recovery and soccer kickoff resets passed.');
+for (const fps of [30, 60, 120]) {
+    const demo = demoFor('duel'), bot = demo.bots[0];
+    Object.assign(bot, { x: demo.game.stage.x + 100, y: demo.game.stage.y + 300, invuln: 0 });
+    app.stepDuelBots(demo, 1 / fps);
+    assert.ok(bot.respawn > 0, `${fps} FPS bot under the stage is recovered, not trapped there`);
+    app.stepDuelBots(demo, 2);
+    assert.ok(bot.y + bot.h < demo.game.stage.y && bot.x >= demo.game.stage.x);
+}
+const rememberedLava = demoFor('miner').game;
+rememberedLava.me.x = 20 * 48; rememberedLava.me.y = 20 * 48;
+const lavaIndex = 20 * 70 + 21;
+rememberedLava.T[lavaIndex] = 6;
+rememberedLava.revealLava(1 / 60);
+assert.ok(rememberedLava.lavaVisibility[lavaIndex] > 0 && rememberedLava.lavaVisibility[lavaIndex] < .1, 'lava fades in rather than appearing instantly');
+for (let i = 0; i < 120; i++) rememberedLava.revealLava(1 / 60);
+assert.equal(rememberedLava.lavaVisibility[lavaIndex], 1);
+rememberedLava.me.x = 100; rememberedLava.me.y = 100;
+rememberedLava.revealLava(5);
+assert.equal(rememberedLava.lavaVisibility[lavaIndex], 1, 'revealed lava remains known after leaving');
+for (const [fps, seed] of [[30, 12345], [60, 67890], [120, 45678]]) {
+    const paced = demoFor('skyline');
+    paced.session.seed = seed;
+    paced.game = new paced.game.constructor(paced.session);
+    paced.bots = app.initPreviewBots(paced, 'skyline', paced.game);
+    const finishTimes = new Map();
+    for (let i = 0; i < fps * 1200 && !paced.bots.every(bot => bot.done); i++) {
+        paced.clock += 1 / fps;
+        paced.bots.forEach((bot, index) => {
+            const previousNode = bot.st.i;
+            app.stepSkylineBot(paced, bot, index, 1 / fps);
+            assert.ok(bot.st.i >= previousNode, 'paced opponents do not lose route progress');
+            if (bot.done && !finishTimes.has(bot.id)) finishTimes.set(bot.id, paced.clock);
+        });
+    }
+    assert.ok(paced.bots.every(bot => bot.done), `${fps} FPS seed ${seed}: all parkour bots reach the summit: ${paced.bots.map(bot => bot.st.i)}`);
+    assert.ok(new Set(finishTimes.values()).size > 1, 'different bot paces produce different finish times');
+}
+for (const fps of [30, 60, 120]) {
+    const { game } = demoFor('skyline');
+    game.solids = []; game.spikes = []; game.saws = []; game.lasers = []; game.balls = [];
+    game.springs = [{ x: 100, y: -100, w: 40, h: 16 }];
+    Object.assign(game.me, { x: 100 - game.me.w - 2, y: -100 - game.me.h - 10, vx: 0, vy: 1100, onGround: false, ground: null });
+    game.update(1 / fps);
+    if (game.me.vy >= 0) game.update(1 / fps);
+    assert.equal(game.me.vy, -1280, 'fast downward near-edge foot contact launches reliably');
+    game.update(1 / fps);
+    assert.ok(game.me.vy > -1280 && game.me.vy < 0, 'upward departure does not trigger the spring again');
+}
+console.log('Safe below-stage recovery, gradual permanent lava discovery and guaranteed paced parkour completion passed.');
 
 const wall = [{ x: 100, y: 50, w: 50, h: 100 }];
 assert.equal(app.botLineClear(50, 100, 200, 100, wall), false, 'bots cannot shoot through cover');
@@ -942,6 +993,13 @@ async function checkCommunityAndAdminUi() {
                     notice.publication_id = String(history.length + 1);
                     history.push({ ...notice, published_at: '2026-10-12T01:00:00Z' });
                 }
+                return;
+            }
+            if (name === 'studbud_admin_delete_site_notice') {
+                const index = history.findIndex(item => item.publication_id === args.p_publication_id);
+                if (index < 0) throw new Error('That announcement no longer exists.');
+                history.splice(index, 1);
+                if (notice.publication_id === args.p_publication_id) notice = { ...notice, message: '', active: false, publication_id: null };
                 return;
             }
             if (name === 'studbud_admin_get_deck') return { title: 'Full <set>', card_count: 2, cards: [{ front: '<term>', back: '<definition>' }, { front: 'Second', back: 'Card' }] };
@@ -1117,6 +1175,13 @@ async function checkCommunityAndAdminUi() {
     assert.equal(nodes.get('site-notice').classList.contains('hidden'), true);
     assert.equal(history.length, 3, 'unpublishing retains history without creating a new announcement');
     assert.ok(nodes.get('announcement-history').innerHTML.includes('Test announcement'), 'unpublished announcements stay in About');
+    const latestId = notice.publication_id;
+    assert.match(nodes.get('admin-list').innerHTML, /Delete announcement/);
+    sandbox.confirm = () => true;
+    await app.runAdminAction('delete-notice', { id: latestId });
+    assert.equal(history.length, 2, 'deleting removes the selected history entry');
+    assert.ok(!nodes.get('announcement-history').innerHTML.includes('Test announcement'));
+    assert.equal(nodes.get('site-notice').classList.contains('hidden'), true);
     console.log('Admin moderation and announcement history, escaping, account-scoped persistent dismissal, reload and failure handling passed.');
 }
 checkCommunityAndAdminUi().catch(error => { console.error(error); process.exitCode = 1; });

@@ -2,6 +2,19 @@
     'use strict';
 
     const TAU = Math.PI * 2;
+    const GAME_GOALS = {
+        skyline: 'Reach the summit before the rising tide',
+        duel: 'Hold the glowing hill alone to earn time',
+        river: 'Catch valuable fish and avoid river hazards',
+        market: 'Deliver packages to marked destinations',
+        miner: 'Mine crystals and return them to base',
+        sports: 'Score in the opposing team goal',
+        chess: 'Checkmate the opposing king',
+        crypto: 'Grow your portfolio by trading and mining',
+        frenzy: 'Score by answering quickly and accurately',
+        fishing: 'Catch fish to build the most valuable haul',
+        hack: 'Hack terminals to earn the most payouts'
+    };
     const sfx = (name, gap) => { if (window.StudBudArcade?.previewDepth > 0) return; try { window.StudBudSfx?.play(name, 'game', gap); } catch (error) { /* audio is optional */ } };
     const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
     const lerp = (a, b, t) => a + (b - a) * t;
@@ -90,8 +103,46 @@
         return s.slope > 0 ? s.y + s.h - t * s.h : s.y + t * s.h;
     }
 
+    class VerticalIndex {
+        constructor(items, bounds = item => item) {
+            this.items = items;
+            this.count = items.length;
+            this.bounds = bounds;
+            this.buckets = new Map();
+            this.broad = [];
+            this.result = [];
+            this.indices = [];
+            this.matches = new Set();
+            items.forEach((item, index) => {
+                const rect = bounds(item), first = Math.floor(rect.y / 256), last = Math.floor((rect.y + rect.h) / 256);
+                if (item.mover || last - first > 128) { this.broad.push(index); return; }
+                for (let band = first; band <= last; band++) {
+                    if (!this.buckets.has(band)) this.buckets.set(band, []);
+                    this.buckets.get(band).push(index);
+                }
+            });
+        }
+        query(top, bottom) {
+            if (this.items.length !== this.count) Object.assign(this, new VerticalIndex(this.items, this.bounds));
+            this.matches.clear();
+            for (const index of this.broad) this.matches.add(index);
+            for (let band = Math.floor(top / 256); band <= Math.floor(bottom / 256); band++) {
+                for (const index of this.buckets.get(band) || []) this.matches.add(index);
+            }
+            this.result.length = 0;
+            this.indices.length = 0;
+            for (const index of this.matches) this.indices.push(index);
+            this.indices.sort((a, b) => a - b);
+            for (const index of this.indices) this.result.push(this.items[index]);
+            return this.result;
+        }
+    }
+
     // Axis-aligned body vs. rectangles. Solids may carry dx/dy (moving platforms) and `oneway`/`off` flags.
     function moveBody(b, solids, dt) {
+        if (solids.spatialIndex?.items === solids) {
+            solids = solids.spatialIndex.query(Math.min(b.y, b.y + b.vy * dt) - 256, Math.max(b.y + b.h, b.y + b.h + b.vy * dt) + 256);
+        }
         b.onGround = false;
         b.wall = 0;
         b.ground = null;
@@ -187,7 +238,7 @@
     function graphicsProfile(mode = window.NexusApp?.AppState?.get('settings')?.gameQuality || 'auto', device = window.navigator || {}) {
         const low = mode === 'low' || (mode === 'auto' && ((device.hardwareConcurrency || 8) <= 4
             || (device.deviceMemory || 8) <= 4 || device.connection?.saveData || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches));
-        return { low: Boolean(low), maxDpr: low ? 1 : 2, fps: low ? 30 : 60, previewFps: low ? 12 : 24,
+        return { low: Boolean(low), maxDpr: low ? 1 : 2, fps: low ? 60 : 120, previewFps: low ? 12 : 24,
             avatarFps: low ? 12 : 30, particleScale: low ? .35 : 1, particleLimit: low ? 90 : 320 };
     }
 
@@ -417,7 +468,7 @@
             if (this.over || this.countdown > 0) return;
             this.send({
                 t: 's', id: this.user.id, s: Math.round(this.score), g: Math.round(this.goal), q: this.answered,
-                d: this.done ? 1 : 0, ft: this.finishMs, ...this.game.net(), ev: this.outbox.splice(0, 40)
+                d: this.done ? 1 : 0, ft: this.finishMs, ...this.game.net(), sentAt: Date.now(), ev: this.outbox.splice(0, 40)
             });
         }
 
@@ -436,6 +487,8 @@
             r.hp = p.hp; r.ex = p.ex || {};
             r.score = p.s || 0; r.goal = p.g || 0; r.answered = p.q || 0; r.done = p.d; r.ft = p.ft || 0;
             r.seen = performance.now();
+            r.networkAge = Number.isFinite(p.sentAt) ? clamp((Date.now() - p.sentAt) / 1000, 0, .15) : 0;
+            r.networked = true;
             if (p.d && !this.firstDone) this.firstDone = Date.now();
             for (const ev of p.ev || []) this.game.onEvent(ev, r);
             this.game.onState(r.ex, r);
@@ -804,7 +857,7 @@
             overlay.innerHTML = `
                 <canvas class="mpg-canvas"></canvas>
                 <div class="mpg-top">
-                    <div class="mpg-chip"><strong class="mpg-name"></strong><span class="mpg-goal"></span>${this.testing ? '<small class="mpg-practice-indicator">Admin testing · infinite energy</small>' : this.practice ? '<small class="mpg-practice-indicator">Practice · no coins</small>' : ''}</div>
+                    <div class="mpg-chip"><strong class="mpg-name"></strong><span class="mpg-goal"></span>${this.testing ? '<small class="mpg-practice-indicator">Staff testing · infinite resources</small>' : this.practice ? '<small class="mpg-practice-indicator">Practice · no coins</small>' : ''}</div>
                     <div class="mpg-timer"></div>
                     <div class="mpg-actions">
                         <button type="button" class="mpg-hud-toggle" aria-expanded="true" aria-controls="mpg-match-details mpg-controls-hint mpg-match-standings" aria-label="Hide match details and standings">HUD</button>
@@ -1107,7 +1160,7 @@
 
         resize() {
             this.graphics = graphicsProfile();
-            const dpr = Math.min(window.devicePixelRatio || 1, this.graphics.maxDpr);
+            const dpr = Math.min(window.devicePixelRatio || 1, this.graphics.maxDpr) * (this.resolutionScale || 1);
             const w = this.overlay.clientWidth, h = this.overlay.clientHeight;
             if (this.canvas.width !== Math.floor(w * dpr)) this.canvas.width = Math.floor(w * dpr);
             if (this.canvas.height !== Math.floor(h * dpr)) this.canvas.height = Math.floor(h * dpr);
@@ -1123,6 +1176,7 @@
             const root = this.overlay.getBoundingClientRect();
             const header = this.overlay.querySelector('.mpg-hud').getBoundingClientRect();
             let top = header.bottom - root.top + 8;
+            if (this.mode === 'chess') this.overlay.style.setProperty('--chess-top', `${top}px`);
             let bottom = 8;
             const touch = this.overlay.classList.contains('has-touch');
             const selectors = touch ? ['.mpg-stick', '.mpg-btns'] : [];
@@ -1170,7 +1224,11 @@
             const touch = o.classList.contains('has-touch');
             const hint = touch ? (this.game.touchHint?.() || this.game.hint()) : this.game.hint();
             const controlsHint = touch ? '' : 'Keyboard/mouse controls';
-            o.querySelector('.mpg-hint').textContent = this.question ? '' : [controlsHint, hint].filter(Boolean).join(' · ');
+            const goalInstructions = this.mode === 'shooter' ? `Eliminate ${this.game.multiplayer ? 'opponents' : 'drones'} to score`
+                : GAME_GOALS[this.mode] || 'Earn the highest score';
+            const hintText = this.question ? '' : [`Goal: ${goalInstructions}`, controlsHint, hint].filter(Boolean).join(' · ');
+            const hintNode = o.querySelector('.mpg-hint');
+            if (hintNode.textContent !== hintText) hintNode.textContent = hintText;
             this.applyTouchLayout?.();
             const diagnostics = o.querySelector('.mpg-test-stats');
             if (diagnostics) {
@@ -1217,19 +1275,20 @@
             const tied = winner && rows.filter(row => this.metric(row) === this.metric(winner)).length > 1;
             const title = this.game.teamsOn && this.game.teamTd
                 ? this.game.teamTd[0] === this.game.teamTd[1] ? 'Teams tied!' : `${this.game.teamTd[0] > this.game.teamTd[1] ? 'Blue' : 'Red'} team wins!`
-                : winner ? tied ? 'First-place tie!' : `${winner.n} wins!` : 'Game over';
+                : this.mode === 'chess' && this.game.state.winner === -2 ? 'Draw!'
+                    : winner ? tied ? 'First-place tie!' : `${winner.n} wins!` : 'Game over';
             panel.classList.remove('hidden');
             panel.innerHTML = `<div class="mpg-results-card">
                 <small>${this.testing ? 'Test finished' : this.practice ? 'Practice complete' : 'Match over'}</small>
                 <h2>${esc(title)}</h2>
-                <ol>${rows.map(row => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${rows.findIndex(other => this.metric(other) === this.metric(row)) + 1}</span>${avatarMarkup(row, 'mpg-player-avatar')}<strong>${esc(row.n)} ${accountTagMarkup(row.username, row.tags)}</strong><b>${this.valueText(row)}</b><em>${this.rewards ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
+                <ol>${rows.map(row => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${rows.findIndex(other => this.metric(other) === this.metric(row)) + 1}</span>${avatarMarkup(row, 'mpg-player-avatar')}<strong>${esc(row.n)} ${accountTagMarkup(row.username, row.tags)}</strong><b>${this.valueText(row)}</b><em>${!this.user.is_anonymous && this.rewards ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
                 <p class="mpg-accuracy">${this.answered ? `${Math.round(this.correct / this.answered * 100)}% correct` : 'No answers submitted'} · ${this.correct} correct · ${Math.max(0, this.answered - this.correct)} incorrect · ${this.answered} answered</p>
                 <details class="mpg-summary"><summary>Full game summary</summary>
                     <p>${Math.round(this.t)} seconds played · ${(this.questionHistory || []).filter(answer => answer.correct === null).length} skipped</p>
                     ${questionHistoryMarkup(this.questionHistory)}
                     ${window.NexusApp?.studySetMarkup?.(this.studySet) || ''}
                 </details>
-                <p>${this.practice ? 'Local results only. Practice games and admin tests do not award coins.' : this.rewards ? 'Coins have been added to your multiplayer wallet.' : 'Tallying coin rewards…'}</p>
+                <p>${this.user.is_anonymous ? 'Guest match complete. Guest sessions do not save account progress or earn coins.' : this.practice ? 'Local results only. Practice games and staff tests do not award coins.' : this.rewards ? 'Coins have been added to your multiplayer wallet.' : 'Tallying coin rewards…'}</p>
                 <button type="button" class="mpg-exit">${this.practice ? 'Back to game setup' : 'Back to lobby'}</button>
             </div>`;
             panel.querySelector('.mpg-summary').open = Boolean(summaryOpen);
@@ -1240,6 +1299,7 @@
         // ---------- main loop ----------
         frame(now) {
             if (this.destroyed) return;
+            const workStarted = performance.now();
             const dt = Math.min(0.05, (now - this.lastFrame) / 1000);
             this.lastFrame = now;
             if (!this.over) {
@@ -1255,7 +1315,10 @@
                     el.textContent = this.countdown > -0.2 ? text : '';
                     el.classList.toggle('hidden', this.countdown <= -0.2);
                 } else {
-                    this.overlay.querySelector('.mpg-countdown').classList.add('hidden');
+                    if (!this.countdownHidden) {
+                        this.overlay.querySelector('.mpg-countdown').classList.add('hidden');
+                        this.countdownHidden = true;
+                    }
                     if (!this.paused) {
                         this.t += dt;
                         this.onTick?.(dt);
@@ -1270,10 +1333,12 @@
             if (!this.paused) {
                 for (const r of this.remotes.values()) {
                     if (now - r.seen > 5000) { this.remotes.delete(r.id); continue; }
-                    const gap = dist(r.x, r.y, r.tx, r.ty);
-                    const k = gap > 500 ? 1 : Math.min(1, dt * 14);
-                    r.x += (r.tx - r.x) * k;
-                    r.y += (r.ty - r.y) * k;
+                    const age = this.mode === 'sports' && r.networked ? Math.min(.15, (now - r.seen) / 1000 + (r.networkAge || 0)) : 0;
+                    const tx = r.tx + r.vx * age, ty = r.ty + r.vy * age;
+                    const gap = dist(r.x, r.y, tx, ty);
+                    const k = gap > 500 ? 1 : 1 - Math.exp(-dt * (this.mode === 'sports' ? 24 : 14));
+                    r.x += (tx - r.x) * k;
+                    r.y += (ty - r.y) * k;
                 }
             }
             this.updateMeter();
@@ -1285,6 +1350,17 @@
                 const ctx = this.ctx;
                 ctx.setTransform(this.dpr * this.scale, 0, 0, this.dpr * this.scale, 0, 0);
                 this.game.draw(ctx, this.vw, this.vh);
+            }
+            if (this.mode !== 'chess' && !this.preview && !this.paused && !this.over) {
+                const cost = performance.now() - workStarted;
+                this.frameCost = this.frameCost === undefined ? cost : this.frameCost * .95 + cost * .05;
+                this.performanceFrames = (this.performanceFrames || 0) + 1;
+                if (this.performanceFrames >= 120) {
+                    this.performanceFrames = 0;
+                    const scale = this.resolutionScale || 1;
+                    const next = this.frameCost > 12 ? Math.max(.6, scale - .15) : this.frameCost < 5 ? Math.min(1, scale + .1) : scale;
+                    if (Math.abs(next - scale) > .01 && this.canvas) { this.resolutionScale = next; this.resize(); }
+                }
             }
             this.raf = requestAnimationFrame(t => this.frame(t));
         }
@@ -1308,7 +1384,10 @@
                 window.removeEventListener('pointerup', end);
                 window.removeEventListener('pointercancel', end);
             }
-            try { if (this.channel) this.api.getClient().removeChannel(this.channel); } catch (error) { /* already closed */ }
+            if (this.channel) {
+                try { (this.api.getGameClient?.() || this.api.getClient()).removeChannel(this.channel); }
+                catch (error) { console.error('[Multiplayer] Channel cleanup failed:', error); }
+            }
             this.overlay.remove();
             document.body.classList.remove('mpg-active');
             if (!this.preview && this.returnFocus?.isConnected) this.returnFocus.focus({ preventScroll: true });
@@ -1863,12 +1942,15 @@
             for (let i = 0; i < 16; i++) {
                 const phase = (time * .9 + i * .618) % 1;
                 const x = cx + sway + Math.sin(i * 17) * rx * .85 - phase * rx * .12;
-                const y = cloudY + ry * .25 + phase * ry * 2.05;
+                const groundY = cy + ry / 1.1;
+                const falling = Math.min(1, phase / .86);
+                const y = cloudY + ry * .25 + falling * (groundY - cloudY - ry * .25);
                 ctx.globalAlpha = alpha * (1 - phase * .6);
                 ctx.strokeStyle = '#7dd3fc'; ctx.lineWidth = Math.max(.7, rx * .045);
-                ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - rx * .05, y + ry * .16); ctx.stroke();
+                if (phase < .86) { ctx.beginPath(); ctx.moveTo(x, Math.max(cloudY, y - ry * .16)); ctx.lineTo(x - rx * .05, y); ctx.stroke(); }
                 if (phase > .86) {
-                    ctx.beginPath(); ctx.ellipse(x, cy + ry * .7, rx * (phase - .86) * 1.3, ry * .035, 0, 0, TAU); ctx.stroke();
+                    ctx.globalAlpha = alpha * (1 - (phase - .86) / .14);
+                    ctx.beginPath(); ctx.ellipse(x, groundY, rx * (phase - .86) * 1.8, ry * .035, 0, 0, TAU); ctx.stroke();
                 }
             }
             ctx.globalAlpha = alpha;
@@ -2200,6 +2282,6 @@
     window.StudBudArcade = {
         graphicsProfile,
         Session, BaseGame, Particles, Resource, games: {},
-        util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, accountTagMarkup, who, playerCosmetics, avatarUrl, avatarMarkup, animatedCosmetics, drawAvatar, observeAvatars, drawHat, drawFigureSide, drawFigureTop, sceneZoom, questionHistoryMarkup }
+        util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, VerticalIndex, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, accountTagMarkup, who, playerCosmetics, avatarUrl, avatarMarkup, animatedCosmetics, drawAvatar, observeAvatars, drawHat, drawFigureSide, drawFigureTop, sceneZoom, questionHistoryMarkup }
     };
 })(window);

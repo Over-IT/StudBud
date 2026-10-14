@@ -1041,6 +1041,45 @@
             }
             return edits + (x.length - i) + (y.length - j) <= 1;
         },
+        keywordGroups(text) {
+            const rows = String(text || '').split(/\r?\n/).map(row => row.trim()).filter(Boolean);
+            if (rows.length > 20) throw new Error('Use at most 20 required keyword groups.');
+            return rows.map(row => {
+                const options = row.split('|').map(value => value.trim());
+                if (options.length > 5 || options.some(value => !value || value.length > 80 || !/[\p{L}\p{N}]/u.test(value))) throw new Error('Each keyword line needs 1-5 words or phrases (up to 80 characters), separated by | for alternatives.');
+                return [...new Set(options)];
+            });
+        },
+        gradeCard(given, card, strict = true) {
+            const mode = card.answerMode || (strict ? 'exact' : 'vocabulary');
+            const answers = [card.back, ...(card.acceptedAnswers || [])];
+            if (answers.some(answer => this.gradeAnswer(given, answer, mode !== 'vocabulary'))) return true;
+            return mode === 'keywords' && this.matchesKeywords(given, card);
+        },
+        matchesKeywords(given, card) {
+            if (!card.keywords?.length || !String(given || '').trim()) return false;
+            const tokens = value => this.answerKey(value).match(/[\p{L}\p{N}]+/gu) || [];
+            const words = tokens(given), canonical = tokens(card.back);
+            const negated = list => list.some(word => ['not', 'never', 'no', 'without'].includes(word));
+            if (negated(words) !== negated(canonical)) return false;
+            const quantities = value => this.answerKey(value).match(/[+\-\u2212]?\d+(?:[.,]\d+)*/g) || [];
+            const operators = value => this.answerKey(value).match(/[+*/=<>^%\u2212\u00d7\u00f7\u00b1\u2264\u2265]|(?:^|\s)-(?=\s|\d)/g) || [];
+            if (JSON.stringify(quantities(given)) !== JSON.stringify(quantities(card.back))
+                || JSON.stringify(operators(given)) !== JSON.stringify(operators(card.back))) return false;
+            return card.keywords.every(group => Array.isArray(group) && group.length && group.some(phrase => {
+                const required = tokens(phrase);
+                return required.length && words.some((_, at) => required.every((word, offset) => words[at + offset] === word));
+            }));
+        },
+        attachmentSource(attachment) {
+            const types = ['application/pdf', 'text/plain', 'audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/mp4', 'audio/webm'];
+            return attachment && types.includes(attachment.type) && typeof attachment.data === 'string'
+                && attachment.data.length <= 1400000
+                && attachment.data.startsWith(`data:${attachment.type};base64,`)
+                && /^[A-Za-z0-9+/=\r\n]+$/.test(attachment.data.split(',')[1] || '')
+                && typeof attachment.name === 'string' && attachment.name.length > 0 && attachment.name.length <= 160
+                ? attachment.data : '';
+        },
         distractors(card, pool, count = 3) {
             const used = new Set([this.answerKey(card.back)]);
             const picks = [];

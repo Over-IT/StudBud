@@ -38,9 +38,19 @@
             </form>
             <p id="auth-status" class="auth-message" role="status" aria-live="polite"></p>
             <p class="auth-switch"><span id="auth-switch-prompt">New to StudBud?</span> <button id="auth-switch-btn" type="button" class="text-btn">Create an account</button></p>
+            <details class="guest-join">
+                <summary>Join a game without an account</summary>
+                <form id="guest-game-form" class="auth-form">
+                    <label>Player name<input name="nickname" autocomplete="nickname" minlength="2" maxlength="20" pattern="[A-Za-z0-9 _\-]{2,20}" required></label>
+                    <label>Room code<input name="roomCode" autocomplete="off" minlength="6" maxlength="6" pattern="[A-HJ-NP-Za-hj-np-z2-9]{6}" required></label>
+                    <button type="submit" class="primary-btn full-width">Join as guest</button>
+                    <p class="settings-hint">Play using the host’s set. No password, account signup or private-data sync. Your guest session lasts until you close or reload this page.</p>
+                </form>
+            </details>
             <button id="offline-start-btn" class="secondary-btn full-width" type="button">Continue offline on this device</button>
             <p class="settings-hint">Use saved classes, flashcards, practice and solo games without an account connection. No cloud sync, public sharing, purchases or hosted matches. Sign out while online to clear private data on a shared device.</p>
         </div>
+        <div id="guest-game-lobby" class="glass-card hidden"></div>
     </section>
     <div id="app-container">
         
@@ -101,7 +111,7 @@
                         <i class="fas fa-file-import"></i> <span>Import Cards</span>
                     </li>
                     <li id="admin-nav-item" class="nav-item hidden" data-target="admin-view" role="button" tabindex="0">
-                        <i class="fas fa-user-shield"></i> <span>Admin</span>
+                        <i class="fas fa-user-shield"></i> <span>Staff tools</span>
                     </li>
                     <li class="nav-item workspace-child" data-target="about-view" role="button" tabindex="0">
                         <i class="fas fa-circle-info"></i> <span>About</span>
@@ -120,6 +130,7 @@
             <header id="top-header" class="glass-panel">
                 <div class="header-left">
                     <h1 id="active-view-title">Dashboard</h1>
+                    <p id="page-guide" class="page-guide">Start with what is due today, then choose a study task.</p>
                 </div>
                 
                 <div class="header-right">
@@ -170,7 +181,7 @@
                     <div class="dashboard-grid">
                         <section id="tutorial-banner" class="glass-card widget full-width tutorial-banner hidden" aria-labelledby="tutorial-banner-title">
                             <div class="tutorial-banner-icon" aria-hidden="true"><i class="fas fa-wand-magic-sparkles"></i></div>
-                            <div class="tutorial-banner-text"><h3 id="tutorial-banner-title">New to StudBud? Take the 2-minute tour</h3><p class="study-guidance-intro">We'll walk through every part of the app so you know where things are and what they do.</p></div>
+                            <div class="tutorial-banner-text"><h3 id="tutorial-banner-title">New to StudBud? Take the quick tour</h3><p class="study-guidance-intro">Import classes, plan your work, make a study set and practice. Jump straight to the topic you need.</p></div>
                             <div class="tutorial-banner-actions"><button class="primary-btn" type="button" data-action="start-tutorial"><i class="fas fa-play"></i> Start tour</button><button class="secondary-btn" type="button" data-action="dismiss-tutorial">Maybe later</button></div>
                         </section>
                         <section class="glass-card widget full-width daily-study-card home-widget" aria-labelledby="daily-study-heading">
@@ -452,7 +463,7 @@
                 <section id="flashcard-view" class="view hidden">
                     <div class="view-header">
                         <h2>Study Decks</h2>
-                        <button id="create-deck-btn" class="primary-btn"><i class="fas fa-folder-plus"></i> New Deck</button>
+                        <button id="create-deck-btn" class="primary-btn"><i class="fas fa-folder-plus"></i> New study set</button>
                     </div>
                     <p class="study-guidance-intro">Study shuffles new and due cards using Anki-style scheduling and daily limits. Nothing scheduled? Your next reviews will appear when due; Practice &amp; Arcade quizzes and games can still use every card.</p>
                     <details class="glass-card community-deck-browser">
@@ -694,7 +705,7 @@
                                         <button type="button" class="multiplayer-mode" data-mode="duel"><canvas class="mode-preview-canvas" data-preview-mode="duel" aria-hidden="true"></canvas><strong>King of the Hill</strong><small>King of the Hill: hold the zone, knock rivals off</small></button>
                                         <button type="button" class="multiplayer-mode" data-mode="shooter"><canvas class="mode-preview-canvas" data-preview-mode="shooter" aria-hidden="true"></canvas><strong>Arena Shooter</strong><small>Aim, dash and blast drones and rivals</small></button>
                                         <button type="button" class="multiplayer-mode" data-mode="sports"><canvas class="mode-preview-canvas" data-preview-mode="sports" aria-hidden="true"></canvas><strong>Soccer</strong><small>Blue vs red teams, dribble and score goals</small></button>
-                                        <button type="button" class="multiplayer-mode" data-mode="chess"><canvas class="mode-preview-canvas" data-preview-mode="chess" aria-hidden="true"></canvas><strong>Question Chess</strong><small>1v1: answer for a move, capture the king</small></button>
+                                        <button type="button" class="multiplayer-mode" data-mode="chess"><canvas class="mode-preview-canvas" data-preview-mode="chess" aria-hidden="true"></canvas><strong>Question Chess</strong><small>1v1: answer for a move, win by checkmate</small></button>
                                     </div>
                                     <div class="hosted-game-setup">
                                     <form id="host-game-form" class="hosted-game-form">
@@ -702,7 +713,7 @@
                                         <label>Player name<input id="host-game-nickname" name="nickname" type="text" minlength="2" maxlength="20" pattern="[A-Za-z0-9 _\-]{2,20}" required></label>
                                         <label>Flashcard set<select id="host-game-deck" name="deckId" required></select></label>
                                         <input id="host-game-mode" name="mode" type="hidden" value="skyline">
-                                        <p id="chess-setup-note" class="settings-hint hidden">Chess is 1v1 with no timer or energy setting. Each correct answer earns exactly one move. Play until a king is captured.</p>
+                                        <p id="chess-setup-note" class="settings-hint hidden">1v1, no timer. Answer correctly to earn one move. Either player can move when ready; while in check, only the checked player moves.</p>
                                         <div class="multiplayer-goals">
                                             <label class="time-slider">Time limit: <strong id="host-game-time-value">5 min</strong><input id="host-game-time" name="timeLimit" type="range" min="1" max="60" step="1" value="5"></label>
                                                                                     </div>
@@ -786,9 +797,11 @@
                     </div>
                 </section>
 
-                <!-- Admin (only shown to the admin account) -->
+                <!-- Staff tools (role-appropriate tabs) -->
                 <section id="admin-view" class="view hidden">
                     <div class="glass-card admin-panel">
+                        <h2>Staff tools</h2>
+                        <p class="settings-hint">Testers can test games without rewards. Moderators can review public sets and moderate ordinary accounts. Administrators also manage coins, tags and announcements.</p>
                         <div class="admin-tabs">
                             <button type="button" class="secondary-btn selected" data-admin-tab="decks">Public flashcards</button>
                             <button type="button" class="secondary-btn" data-admin-tab="users">Users</button>
@@ -987,7 +1000,7 @@
 
                         <div class="glass-card hidden" id="tutorial-card">
                             <h2>Tutorial</h2>
-                            <p>Need a refresher? Replay the guided tour of every part of StudBud.</p>
+                            <p>Learn the workflow from importing classes to planning, studying and playing. Jump to any topic in the tour.</p>
                             <button class="primary-btn" type="button" data-action="start-tutorial"><i class="fas fa-circle-play"></i> Replay tutorial</button>
                         </div>
 
@@ -1381,7 +1394,7 @@
                     <div class="deck-editor-toolbar">
                         <label for="deck-editor-search">Find a card</label>
                         <input id="deck-editor-search" type="search" placeholder="Search terms, answers or tags">
-                        <select id="deck-editor-filter" aria-label="Filter cards"><option value="all">All cards</option><option value="weak">Accuracy below 75%</option><option value="images">With answer images</option><option value="paused">Paused scheduled study</option></select>
+                        <select id="deck-editor-filter" aria-label="Filter cards"><option value="all">All cards</option><option value="weak">Accuracy below 75%</option><option value="images">With answer images</option><option value="attachments">With private attachments</option><option value="keywords">Definition keyword answers</option><option value="paused">Paused scheduled study</option></select>
                         <button type="button" class="secondary-btn" data-action="editor-add-card">Add card</button>
                         <button id="deck-editor-undo" type="button" class="secondary-btn hidden" data-action="editor-undo-delete">Undo deletion</button>
                     </div>
@@ -1391,7 +1404,7 @@
                         <textarea id="deck-editor-bulk" rows="5" placeholder="Capital of France :: Paris :: geography"></textarea>
                         <button class="secondary-btn" type="button" data-action="editor-bulk-add">Add pasted cards</button>
                     </details>
-                    <p class="settings-hint">Reverse copies start fresh without images or wrong options. Paused cards are skipped in scheduled study but remain available in practice.</p>
+                    <p class="settings-hint">Reverse copies start fresh without answer images, attachments, grading rules or wrong options. Paused cards are skipped in scheduled study but remain available in practice.</p>
                     <p id="deck-editor-count" role="status"></p>
                     <div id="deck-editor-cards"></div>
                 </div>
@@ -1423,6 +1436,16 @@
                             <label for="card-back">Back (Definition / Answer)</label>
                             <textarea id="card-back" rows="4" maxlength="5000" required></textarea>
                         </div>
+                        <details class="card-options"><summary>Written answers: wording, translations &amp; keywords</summary>
+                            <div class="form-group"><label for="card-answer-mode">How to accept a typed answer</label>
+                                <select id="card-answer-mode"><option value="exact">Exact wording (case and spacing ignored)</option><option value="vocabulary">Vocabulary / translation (one small spelling mistake allowed)</option><option value="keywords">Definition (all keyword groups required)</option></select>
+                                <p class="settings-hint">Use vocabulary mode for short translations. Use keywords for explanations with more than one valid wording. Numbers, math signs and unexpected negation are not relaxed.</p>
+                            </div>
+                            <div class="form-group"><label for="card-accepted-answers">Other accepted answers (one per line)</label><textarea id="card-accepted-answers" rows="3" maxlength="15000" placeholder="Another correct translation or phrasing"></textarea></div>
+                            <div class="form-group"><label for="card-keywords">Required keyword groups (one per line)</label><textarea id="card-keywords" rows="4" maxlength="8000" placeholder="sunlight | light energy&#10;carbon dioxide&#10;glucose | sugar"></textarea>
+                                <p class="settings-hint">Every line must appear in the response. Separate equivalent words or phrases on the same line with |. Phrases match whole words, in any group order. Your saved answer must also satisfy these groups.</p>
+                            </div>
+                        </details>
                         <div class="form-group">
                             <label for="card-answer-image">Answer image (private)</label>
                             <input id="card-answer-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
@@ -1430,6 +1453,13 @@
                             <img id="card-answer-image-preview" class="flashcard-answer-image hidden" alt="Saved answer illustration">
                             <label class="settings-check"><input id="card-remove-image" type="checkbox"> Remove saved answer image</label>
                         </div>
+                        <details class="card-options"><summary>Private answer attachments</summary>
+                            <div class="form-group"><label for="card-attachments">Add PDF, text or audio files</label><input id="card-attachments" type="file" multiple accept="application/pdf,text/plain,audio/mpeg,audio/wav,audio/ogg,audio/mp4,audio/webm">
+                                <p class="settings-hint">Up to 3 files, 1 MB each and 2 MB combined. Available after revealing the answer, including offline. Files are private: never shared publicly or sent to a multiplayer room. PDF and text files download rather than execute in the app.</p>
+                                <div id="card-attachments-list"></div>
+                                <label><input type="checkbox" id="card-remove-attachments"> Remove all saved attachments</label>
+                            </div>
+                        </details>
                         <div class="form-group">
                             <label for="card-distractors">Multiple-choice wrong options (optional, one per line)</label>
                             <textarea id="card-distractors" rows="3" maxlength="15000" placeholder="Leave blank for related answers selected automatically"></textarea>

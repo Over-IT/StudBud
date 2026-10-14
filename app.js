@@ -495,6 +495,27 @@
         { main: 'multiplayer', tabs: [['multiplayer', 'Games'], ['friends', 'Buds'], ['leaderboard', 'Leaderboards'], ['shop', 'Shop']] },
         { main: 'settings', tabs: [['settings', 'Profile & data'], ['appearance', 'Appearance'], ['sound', 'Sound'], ['about', 'About']] }
     ];
+    const PAGE_GUIDES = {
+        dashboard: ['Home', 'Start with what is due today, then choose a study task.'],
+        gpa: ['Classes & grades', 'Import from Infinite Campus or add a class. Open a class to manage its scores.'],
+        'grade-scenarios': ['What-if grades', 'Try possible scores without changing your saved grades.'],
+        analytics: ['Study insights', 'See your grades, study time and progress across classes.'],
+        planner: ['Tasks & deadlines', 'Add assignments, quizzes and tests. Mark work complete when it is done.'],
+        calendar: ['Calendar', 'See due dates by month. Select a day to add work for that date.'],
+        schedule: ['Class schedule', 'Set when your classes meet so Home can show today’s schedule.'],
+        flashcard: ['My study sets', 'Create or edit cards, then study due cards. Practice uses the same saved sets.'],
+        'exam-arcade': ['Practice & tests', 'Try a written test, a quick quiz or a solo game. Your results stay private.'],
+        importer: ['Import flashcards', 'Paste term-and-answer rows or build a new study set manually.'],
+        multiplayer: ['Multiplayer games', 'Choose a game, select a study set, then host or join a room.'],
+        friends: ['Buds', 'Find classmates by username and manage your bud requests.'],
+        leaderboard: ['Leaderboards', 'Compare study time and progress, not your private grades.'],
+        shop: ['Character & shop', 'Equip your cosmetics or spend earned coins. Purchases need a connection.'],
+        settings: ['Profile & backups', 'Manage your name, school, public privacy and saved data.'],
+        appearance: ['Appearance & performance', 'Choose readable spacing, colors and game detail. Lower detail keeps gameplay responsive.'],
+        sound: ['Sound & music', 'Adjust interface sounds, game effects and music independently.'],
+        about: ['Help & about', 'Replay the tour in Settings or read how StudBud works.'],
+        admin: ['Staff tools', 'Testers test games. Moderators review users and public sets. Administrators manage tags, coins and notices.']
+    };
 
     class RouterEngine {
         constructor() {
@@ -575,11 +596,12 @@
             }
             const title = activeItem && activeItem.querySelector('span');
             const titleElement = document.getElementById('active-view-title');
-            if (title && titleElement) titleElement.textContent = title.textContent.trim();
-            else if (route === 'class' && titleElement) {
+            if (route === 'class' && titleElement) {
                 const course = (AppState.get('courses') || []).find(item => item.code === this.selectedClassCode);
                 titleElement.textContent = course ? course.title : 'Class';
-            }
+            } else if (titleElement) titleElement.textContent = PAGE_GUIDES[route]?.[0] || title?.textContent.trim() || 'StudBud';
+            const guide = document.getElementById('page-guide');
+            if (guide) guide.textContent = PAGE_GUIDES[route]?.[1] || 'Manage this class’s grades, assignments and study sets.';
 
             const studyRoute = viewId === 'flashcard-view' || viewId === 'exam-arcade-view';
             const ambience = document.getElementById('study-ambience');
@@ -2736,6 +2758,7 @@
         }
 
         studySetMarkup(info = {}) {
+            if (window.StudBudCloud?.guestLobbyOpen) return `<div class="review-study-set"><strong>Study set: ${this.escapeHTML(info.title || 'Flashcards')}</strong><small>Leave the match and sign in to save study sets to an account.</small></div>`;
             const deck = (AppState.get('flashcards') || []).find(item => item.id === info.deckId
                 || (info.publicId && [item.communityDeckId, item.communitySourceId].includes(info.publicId)));
             const action = deck ? `<button type="button" class="secondary-btn" data-action="open-study-set" data-id="${this.escapeHTML(deck.id)}">Open study set</button>`
@@ -2754,7 +2777,7 @@
             if (!(AppState.get('flashcards') || []).some(deck => deck.id === deckId)) throw new Error('This study set is no longer in your library.');
             this.closePractice();
             this.destroyArcadeSession();
-            Router.navigate('flashcards');
+            Router.navigate('flashcard');
             this.openDeckEditor(deckId);
         }
 
@@ -2901,6 +2924,8 @@
             const filter = document.getElementById('deck-editor-filter')?.value || 'all';
             const cards = draft.cards.filter(card => `${card.front} ${card.back} ${(card.tags || []).join(' ')} ${(card.distractors || []).join(' ')}`.toLowerCase().includes(query)
                 && (filter === 'all' || (filter === 'images' && window.FlashcardTools.imageSource(card.answerImage))
+                    || (filter === 'attachments' && (card.attachments || []).some(item => window.FlashcardTools.attachmentSource(item)))
+                    || (filter === 'keywords' && card.answerMode === 'keywords')
                     || (filter === 'paused' && card.suspended) || (filter === 'weak' && card.practiceStats?.attempts > 0 && card.practiceStats.correct / card.practiceStats.attempts < .75)));
             document.getElementById('deck-editor-undo')?.classList.toggle('hidden', !this.deckEditorUndo?.length);
             document.getElementById('deck-editor-count').textContent = `${cards.length} of ${draft.cards.length} cards`;
@@ -2909,6 +2934,7 @@
                     <strong>${this.escapeHTML(card.front)}</strong><p>${this.escapeHTML(card.back)}</p>
                     ${card.tags?.length ? `<small>${this.escapeHTML(card.tags.join(', '))}</small>` : ''}
                     <small>${card.practiceStats?.attempts > 0 ? `${Math.round(card.practiceStats.correct / card.practiceStats.attempts * 100)}% accuracy · ${Number(card.practiceStats.attempts)} attempts` : 'Not practiced yet'}${card.suspended ? ' · Paused scheduled study' : ''}${window.FlashcardTools.imageSource(card.answerImage) ? ' · Private image' : ''}</small>
+                    <small>${card.answerMode === 'keywords' ? 'Definition keywords' : card.answerMode === 'vocabulary' ? 'Vocabulary / translation' : card.answerMode === 'exact' ? 'Exact answer' : 'Test grading default'}${card.acceptedAnswers?.length ? ` · ${card.acceptedAnswers.length} alternative answers` : ''}${card.attachments?.length ? ` · ${card.attachments.length} private attachments` : ''}</small>
                     <div class="actions">
                         <button type="button" class="secondary-btn" data-action="editor-edit-card" data-id="${this.escapeHTML(card.id)}">Edit card</button>
                         <button type="button" class="secondary-btn" data-action="editor-copy-card" data-id="${this.escapeHTML(card.id)}">Duplicate</button>
@@ -2916,7 +2942,7 @@
                         <button type="button" class="secondary-btn" data-action="editor-pause-card" data-id="${this.escapeHTML(card.id)}">${card.suspended ? 'Resume' : 'Pause'} scheduled study</button>
                         <button type="button" class="danger-btn" data-action="editor-delete-card" data-id="${this.escapeHTML(card.id)}">Delete card</button>
                     </div>
-                </article>`).join('') || `<p class="empty-state">${query ? 'No cards match your search.' : 'No cards yet. Add your first card.'}</p>`;
+                </article>`).join('') || `<p class="empty-state">${query || filter !== 'all' ? 'No cards match your search or filter.' : 'No cards yet. Add your first card.'}</p>`;
         }
 
         addBulkEditorCards() {
@@ -2943,7 +2969,12 @@
             const next = { id: `card_${window.crypto.randomUUID()}`, front: reverse ? card.back : card.front,
                 back: reverse ? card.front : card.back, tags: [...(card.tags || [])],
                 repetitions: 0, interval: 0, easeFactor: 2.5, suspended: false };
-            if (!reverse) { next.answerImage = card.answerImage || ''; next.distractors = [...(card.distractors || [])]; }
+            if (!reverse) {
+                next.answerImage = card.answerImage || ''; next.distractors = [...(card.distractors || [])];
+                next.answerMode = card.answerMode; next.acceptedAnswers = [...(card.acceptedAnswers || [])];
+                next.keywords = (card.keywords || []).map(group => [...group]);
+                next.attachments = (card.attachments || []).map(attachment => ({ ...attachment }));
+            }
             this.deckEditorDraft.cards.splice(this.deckEditorDraft.cards.indexOf(card) + 1, 0, next);
             this.renderDeckEditorCards();
         }
@@ -2962,7 +2993,7 @@
                 if (current && original && !latest) throw new Error('A card was removed while you were editing. Reopen the editor.');
                 if (!latest) return card;
                 const next = { ...latest };
-                for (const field of ['front', 'back', 'tags', 'answerImage', 'distractors', 'suspended']) {
+                for (const field of ['front', 'back', 'tags', 'answerImage', 'distractors', 'suspended', 'answerMode', 'acceptedAnswers', 'keywords', 'attachments']) {
                     const before = JSON.stringify(original?.[field]);
                     const edited = JSON.stringify(card[field]);
                     const saved = JSON.stringify(field === 'tags' ? latest.tags || [] : latest[field]);
@@ -2993,6 +3024,15 @@
             document.getElementById('card-back').value = card?.back || '';
             document.getElementById('card-tags').value = (card?.tags || []).join(', ');
             document.getElementById('card-distractors').value = (card?.distractors || []).join('\n');
+            const setValue = (id, value) => { const node = document.getElementById(id); if (node) node.value = value; };
+            setValue('card-answer-mode', card?.answerMode || 'exact');
+            setValue('card-accepted-answers', (card?.acceptedAnswers || []).join('\n'));
+            setValue('card-keywords', (card?.keywords || []).map(group => group.join(' | ')).join('\n'));
+            setValue('card-attachments', '');
+            const removeAttachments = document.getElementById('card-remove-attachments');
+            if (removeAttachments) removeAttachments.checked = false;
+            const attachmentsList = document.getElementById('card-attachments-list');
+            if (attachmentsList) attachmentsList.innerHTML = this.cardAttachmentMarkup(card || {});
             document.getElementById('card-remove-image').checked = false;
             document.getElementById('card-answer-image').value = '';
             const imagePreview = document.getElementById('card-answer-image-preview');
@@ -3322,7 +3362,7 @@
             window.NexusApp.canAccessStaff = this.canAccessStaff;
             document.getElementById('admin-nav-item')?.classList.toggle('hidden', !this.canAccessStaff);
             document.querySelectorAll('#admin-view [data-admin-tab]').forEach(button => {
-                const allowed = this.isAdmin || (button.dataset.adminTab === 'decks' && this.canModerateFlashcards)
+                const allowed = this.isAdmin || (['decks', 'users'].includes(button.dataset.adminTab) && this.canModerateFlashcards)
                     || (button.dataset.adminTab === 'games' && this.canTestGames);
                 button.classList.toggle('hidden', !allowed);
             });
@@ -3481,7 +3521,8 @@
             if (!list || !this.canAccessStaff) return;
             let tab = this.adminTab || (this.canModerateFlashcards ? 'decks' : 'games');
             if (tab === 'decks' && !this.canModerateFlashcards) tab = 'games';
-            if (['users', 'notices'].includes(tab) && !this.isAdmin) tab = this.canModerateFlashcards ? 'decks' : 'games';
+            if (tab === 'games' && !this.canTestGames) tab = 'decks';
+            if ((tab === 'users' && !this.canModerateFlashcards) || (tab === 'notices' && !this.isAdmin)) tab = this.canModerateFlashcards ? 'decks' : 'games';
             this.adminTab = tab;
             document.getElementById('admin-search-form')?.classList.toggle('hidden', tab === 'games' || tab === 'notices');
             if (tab === 'games') {
@@ -3515,6 +3556,8 @@
                         <small>Publish one site-wide message at a time. Students can dismiss it; updating the message makes it visible again.</small>
                         <div class="admin-actions"><button type="submit" class="primary-btn">Publish announcement</button>${notice?.active ? '<button type="button" class="secondary-btn" data-admin-action="hide-notice">Unpublish</button>' : ''}</div>
                     </form>`;
+                    const history = await window.StudBudCommunityGames.getSiteNoticeHistory();
+                    list.innerHTML += `<section class="admin-notice-history"><h4>Announcement history</h4><p class="settings-hint">Unpublish hides the current banner. Delete permanently removes a selected announcement for everyone.</p>${history.map(item => `<article class="admin-row"><div><strong>${this.escapeHTML(this.formatAnnouncementTime(item.published_at))}</strong><p>${this.escapeHTML(item.message)}</p><small>By ${this.escapeHTML(item.author_name || 'Site administrator')}</small></div><button type="button" class="danger-btn" data-admin-action="delete-notice" data-id="${this.escapeHTML(item.publication_id)}">Delete announcement</button></article>`).join('') || '<p>No announcements yet.</p>'}</section>`;
                 } catch (error) {
                     status.textContent = this.friendlyErrorMessage(error, 'Could not load announcements.');
                     list.innerHTML = '';
@@ -3531,6 +3574,7 @@
                 list.innerHTML = tab === 'users'
                     ? rows.map(user => {
                         const tags = Array.isArray(user.tags) ? user.tags : [];
+                        const protectedAccount = !this.isAdmin && (user.id === window.StudBudCloud?.user?.id || tags.includes('moderator') || ['overit', 'andy'].includes(String(user.username).toLowerCase()));
                         const roleControl = this.isAdmin ? `<details class="admin-tools"><summary>Manage tags</summary><div class="admin-actions admin-tag-options">
                             ${[['teacher', 'Teacher'], ['tester', 'Tester'], ['moderator', 'Moderator']].map(([tag, label]) => `<label><input type="checkbox" data-user-tag="${tag}"${tags.includes(tag) ? ' checked' : ''}> ${label}</label>`).join('')}
                             <button type="button" class="primary-btn" data-admin-action="save-user-tags" data-id="${esc(user.id)}" data-name="${esc(user.username)}">Save tags</button>
@@ -3540,10 +3584,10 @@
                         <small>${Number(user.coins)} coins · ${Number(user.wins)} wins · ${Number(user.decks)} public decks · School: ${esc(user.school === 'pchs' ? 'PCHS' : 'Other')} · joined ${esc(new Date(user.created_at).toLocaleDateString())}</small></div>${roleControl}
                         <details class="admin-tools"><summary>Manage user</summary><div class="admin-actions">
                             <button type="button" class="secondary-btn" data-admin-action="profile" data-id="${esc(user.id)}">Public profile</button>
-                            <button type="button" class="secondary-btn" data-admin-action="coins" data-id="${esc(user.id)}" data-name="${esc(user.username)}">Coins</button>
-                            <button type="button" class="secondary-btn" data-admin-action="remove-decks" data-id="${esc(user.id)}" data-name="${esc(user.username)}">Remove decks</button>
+                            ${this.isAdmin ? `<button type="button" class="secondary-btn" data-admin-action="coins" data-id="${esc(user.id)}" data-name="${esc(user.username)}">Coins</button>` : ''}
+                            ${protectedAccount ? '<small>This staff account cannot be moderated by your role.</small>' : `<button type="button" class="secondary-btn" data-admin-action="remove-decks" data-id="${esc(user.id)}" data-name="${esc(user.username)}">Remove decks</button>
                             <button type="button" class="secondary-btn" data-admin-action="${user.force_change ? 'cancel-rename' : 'force-rename'}" data-id="${esc(user.id)}" data-name="${esc(user.username)}">${user.force_change ? 'Cancel rename' : 'Force rename'}</button>
-                            <button type="button" class="${user.banned ? 'secondary-btn' : 'danger-btn'}" data-admin-action="${user.banned ? 'unban' : 'ban'}" data-id="${esc(user.id)}" data-name="${esc(user.username)}">${user.banned ? 'Unban' : 'Ban'}</button>
+                            <button type="button" class="${user.banned ? 'secondary-btn' : 'danger-btn'}" data-admin-action="${user.banned ? 'unban' : 'ban'}" data-id="${esc(user.id)}" data-name="${esc(user.username)}">${user.banned ? 'Unban' : 'Ban'}</button>`}
                         </div><small>Last sign-in: ${esc(user.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleString() : 'Never')}${user.ban_reason ? ` · Ban reason: ${esc(user.ban_reason)}` : ''}</small></details></article>`;
                     }).join('')
                     : rows.map(deck => `<article class="admin-row">
@@ -3565,6 +3609,8 @@
             const games = window.StudBudCommunityGames;
             const status = document.getElementById('admin-status');
             try {
+                if (['coins', 'save-user-tags', 'publish-notice', 'hide-notice', 'delete-notice'].includes(action) && !this.isAdmin) throw new Error('This action is restricted to administrators.');
+                if (['inspect-deck', 'delete-deck', 'remove-decks', 'ban', 'unban', 'force-rename', 'cancel-rename'].includes(action) && !this.canModerateFlashcards) throw new Error('This action requires a moderator or administrator.');
                 if (action === 'test-game') {
                     if (!this.canTestGames) throw new Error('Game testing is available only to testers and administrators.');
                     const mode = document.getElementById('admin-game-test-mode')?.value;
@@ -3595,6 +3641,11 @@
                 } else if (action === 'profile') {
                     await this.openUserProfile(data.id);
                     return;
+                } else if (action === 'delete-notice') {
+                    if (!confirm('Permanently remove this announcement from the banner and history?')) return;
+                    await games.adminCall('studbud_admin_delete_site_notice', { p_publication_id: data.id });
+                    await this.loadSiteNotice(true);
+                    await this.loadAnnouncementHistory();
                 } else if (action === 'publish-notice' || action === 'hide-notice') {
                     const message = document.getElementById('admin-notice-message').value.trim();
                     if (action === 'publish-notice' && !message) throw new Error('Enter an announcement message.');
@@ -3798,7 +3849,7 @@
             }
             document.getElementById('chess-setup-note')?.classList.toggle('hidden', !chess);
             const soloNote = document.querySelector('#solo-game-settings > small');
-            if (soloNote) soloNote.textContent = chess ? 'One correct answer earns one move. No time limit. Capture the king to finish. Practice awards no multiplayer coins.'
+            if (soloNote) soloNote.textContent = chess ? 'One correct answer earns one move. No time limit. Checkmate wins; only the checked player can move while escaping check. Practice awards no multiplayer coins.'
                 : 'Correct answers give the resource shown above. End game opens your summary. Practice awards no multiplayer coins.';
             const labels = {
                 skyline: ['City Escape', 'Climb a rooftop obstacle course before the tide.'],
@@ -3809,7 +3860,7 @@
                 crypto: ['Crypto Trading', 'Trade six assets and answer questions for cash.'],
                 shooter: ['Arena Shooter', 'Twin-stick combat: dash, upgrade your blaster and battle rival pilots, with drones as a secondary threat.'],
                 sports: ['Soccer', 'Blue vs red: players are split into two teams. Dribble the ball, spend energy on power kicks and score in the rival goal.'],
-                chess: ['Question Chess', '1v1 real-time chess: each correct answer earns one move. Capture the king; no alternating turns.']
+                chess: ['Question Chess', '1v1 chess: each correct answer earns one move. Checkmate wins; the checked player has priority to escape.']
             };
             const [title, description] = labels[mode] || labels.skyline;
             document.getElementById('multiplayer-preview-title').textContent = title;
@@ -4265,6 +4316,7 @@
             if (mode === 'duel') {
                 const sp = game.botSpawns;
                 bots.forEach((b, i) => Object.assign(b, { w: 34, h: 56, sp: sp[i], x: sp[i][0], y: sp[i][1] - 60, dmg: 0, airJumps: 1, swingT: 0, swingCd: 0.5 + i * 0.4, f: i === 1 ? -1 : 1, ai: { ...b.ai, role: ['west-route', 'east-route', 'upper-route'][i], routeX: game.W / 2 + [-30, 30, 0][i] } }));
+                bots.forEach(b => game.placeAtSpawn(b, b.sp));
                 demo.onEmit = ev => { if (ev.k === 'sw') this.duelSwing(demo, ev); };
             } else if (mode === 'shooter') {
                 bots.forEach((b, i) => { b.r = 16; b.strafe = i % 2 ? -1 : 1; this.placeShooterBot(game, b, i); });
@@ -4333,7 +4385,7 @@
                 const ready = this.botResourceReady(demo, b, dt);
                 if (b.respawn > 0) {
                     b.respawn -= dt; b.a = 5;
-                    if (b.respawn <= 0) { b.x = b.sp[0]; b.y = b.sp[1] - 60; b.vx = b.vy = 0; b.dmg = 0; b.stun = b.swingT = 0; b.onGround = false; b.ground = null; b.airJumps = 1; b.invuln = 2; b.a = 0; }
+                    if (b.respawn <= 0) { game.placeAtSpawn(b, b.sp); b.dmg = 0; b.stun = b.swingT = 0; b.airJumps = 1; b.invuln = 2; b.a = 0; }
                     b.seen = now; continue;
                 }
                 b.stun = Math.max(0, b.stun - dt); b.invuln = Math.max(0, b.invuln - dt); b.swingT = Math.max(0, b.swingT - dt); b.swingCd -= dt;
@@ -4369,7 +4421,8 @@
                     const ev = { k: 'sw', x: b.x + 17, y: b.y + 28, d: b.f, a: ang, p: 1, by: b.id, c: b.dmg };
                     game.onEvent(ev, b); this.duelSwing(demo, ev);
                 }
-                if (b.x < -180 || b.x > game.W + 180 || b.y > game.H || b.y < -650) {
+                if (b.x < -180 || b.x > game.W + 180 || b.y > game.H || b.y < -650
+                    || (b.y > game.stage.y + 80 && b.x + b.w > game.stage.x && b.x < game.stage.x + game.stage.w)) {
                     b.respawn = 1.4; game.particles.burst(b.x, Math.min(b.y, 880), b.color, 30, 500, 0.8, 6);
                     if (b.lastHit === demo.meId) game.onEvent({ k: 'ko', by: demo.meId }, b);
                     b.lastHit = null;
@@ -4602,10 +4655,29 @@
             return game.botRoute = { list, flags, cpNode, props: game.solids.filter(p => p.prop) };
         }
 
-        // Advances a bot using the same jump, gravity, double-jump, dash and collision limits as the player.
+        // Practice opponents attempt real jumps, with paced recovery hops so procedural hazards cannot stall the race.
         skyStep(demo, game, b, st, dt, speed) {
             const U = window.StudBudArcade.util, R = this.skyRoute(game), n = R.list[st.i], nx = R.list[st.i + 1];
             const bw = b.w || 26, bh = b.h || 44;
+            if (st.assist) {
+                const hop = st.assist;
+                hop.elapsed += dt;
+                const progress = Math.min(1, hop.elapsed / hop.duration), target = R.list[hop.next];
+                const x = target.x + target.w / 2 - bw / 2, y = target.y - bh;
+                b.x = hop.x + (x - hop.x) * progress;
+                b.y = hop.y + (y - hop.y) * progress - Math.sin(Math.PI * progress) * Math.min(150, 50 + Math.abs(y - hop.y) * .3);
+                b.vx = (x - hop.x) / hop.duration; b.vy = 0; b.face = x >= hop.x ? 1 : -1;
+                st.air = progress < 1; st.moving = true;
+                b.onGround = progress === 1; b.ground = b.onGround ? target : null;
+                if (progress === 1) { st.i = hop.next; st.assist = null; st.jump = null; st.progressAt = demo.clock; b.vx = 0; }
+                return;
+            }
+            if (nx && (demo.clock - (st.progressAt ?? 0) > 2.2 / speed || b.y > n.y + 180 || n.off)) {
+                const distance = Math.hypot(nx.x + nx.w / 2 - b.x - bw / 2, nx.y - b.y - bh);
+                st.assist = { x: b.x, y: b.y, next: st.i + 1, elapsed: 0, duration: U.clamp(distance / (340 * speed), .45, 2.5) };
+                b.invuln = Math.max(b.invuln, st.assist.duration + .1);
+                return;
+            }
             st.air = false; st.moving = false;
             const ai = b.ai;
             ai.energy = ai.energy ?? 100;
@@ -4617,7 +4689,7 @@
             } else {
                 ai.energy = Math.max(0, ai.energy - (b.onGround ? 2 : 1.2) * dt);
                 const groundIndex = b.onGround ? R.list.indexOf(b.ground) : -1;
-                if (groundIndex >= 0 && groundIndex !== st.i) { st.i = groundIndex; st.flagDone = !R.flags.has(groundIndex); st.jump = null; }
+                if (groundIndex > st.i) { st.i = groundIndex; st.progressAt = demo.clock; st.flagDone = !R.flags.has(groundIndex); st.jump = null; }
                 if (st.wait > 0) st.wait -= dt;
 
                 if (b.onGround && st.wait <= 0 && nx) {
@@ -5006,7 +5078,7 @@
                     const checkpoint = game.checkpoints[bot.st.checkpoint || 0];
                     const node = route.cpNode[checkpoint.id];
                     Object.assign(bot, { x: checkpoint.x + 20 - bot.w / 2, y: checkpoint.y - bot.h, vx: 0, vy: 0, onGround: false, ground: null, airJumps: 1, dash: 0, dashCd: 0, invuln: 1.5 });
-                    Object.assign(bot.st, { i: node, jump: null, flagDone: true, wait: .2 });
+                    Object.assign(bot.st, { i: node, jump: null, assist: null, progressAt: demo.clock, flagDone: true, wait: .2 });
                 }
                 bot.tx = bot.x; bot.ty = bot.y; bot.a = 5; bot.seen = now;
                 return;
@@ -5026,14 +5098,6 @@
                 if (checkpoint.id > (bot.st.checkpoint || 0) && Math.abs(bot.x + bot.w / 2 - checkpoint.x - 20) < 90
                     && Math.abs(bot.y + bot.h - checkpoint.y) < 70) bot.st.checkpoint = checkpoint.id;
             }
-            const checkpoint = game.checkpoints[bot.st.checkpoint || 0];
-            const body = { x: bot.x + 3, y: bot.y + 3, w: bot.w - 6, h: bot.h - 6 };
-            const hit = bot.y > checkpoint.y + 800 || bot.y + bot.h > game.tideY
-                || game.spikes.some(spike => U.overlap(body, spike))
-                || game.saws.some(saw => Math.hypot(bot.x + bot.w / 2 - saw.x, bot.y + bot.h / 2 - saw.y) < saw.r + 14)
-                || game.lasers.some(laser => laser.on && U.overlap(body, laser))
-                || game.balls.some(ball => Math.hypot(bot.x + bot.w / 2 - ball.x, bot.y + bot.h / 2 - ball.y) < ball.r + 12);
-            if (hit && bot.invuln <= 0) { bot.respawn = 1.2; bot.vx = bot.vy = 0; bot.a = 5; bot.seen = now; return; }
             if (bot.onGround && bot.ground === game.summit) bot.done = true;
             bot.f = bot.face || 1; bot.a = bot.st.air ? 2 : bot.st.moving ? 1 : 0;
             bot.tx = bot.x; bot.ty = bot.y; bot.ex = {}; bot.seen = now;
@@ -5808,6 +5872,10 @@
             this.openHostedGame(room);
         }
 
+        gameUser() {
+            return window.StudBudCloud.user || window.StudBudCloud.guestUser;
+        }
+
         async copyHostedRoomCode() {
             const code = document.getElementById('hosted-room-code')?.textContent.trim();
             if (!code) return;
@@ -5849,6 +5917,7 @@
                     document.getElementById('hosted-game-room').classList.add('hidden');
                     document.getElementById('hosted-game-message').textContent = 'You left the room or were removed by the host.';
                     this.hostedGamePollError = error.message;
+                    if (!window.StudBudCloud.user) window.StudBudCloud.closeGuestLobby();
                     return;
                 }
                 const message = `Connection problem. ${this.friendlyErrorMessage(error, 'The game could not refresh. Please try again shortly.')}`;
@@ -5864,10 +5933,10 @@
         renderHostedGameRoom(room) {
             const panel = document.getElementById('hosted-game-room');
             if (!panel || !room) return;
-            const isHost = room.host_id === window.StudBudCloud.user.id;
+            const isHost = room.host_id === this.gameUser().id;
             const state = room.state || {};
             const players = Array.isArray(state.players) ? state.players : [];
-            const me = players.find(player => player.id === window.StudBudCloud.user.id);
+            const me = players.find(player => player.id === this.gameUser().id);
             const modeNames = {
                 classic: 'Classic', rush: 'Rush', survival: 'Survival',
                 skyline: 'City Escape', river: 'River Fishing', market: 'Package Delivery',
@@ -5878,13 +5947,13 @@
             const remainingSeconds = room.goal_type === 'time' && room.started_at
                 ? Math.max(0, Math.ceil((new Date(room.started_at).getTime() + Number(room.time_limit_seconds) * 1000 - Date.now()) / 1000))
                 : null;
-            const goalLabel = room.mode === 'chess' ? 'Capture the king · no time limit' : room.goal_type === 'time'
+            const goalLabel = room.mode === 'chess' ? 'Checkmate · one move per answer · no time limit' : room.goal_type === 'time'
                 ? remainingSeconds === null
                     ? `${Math.round(Number(room.time_limit_seconds) / 60)} minute limit`
                     : `Time left · ${Math.floor(remainingSeconds / 60)}:${String(remainingSeconds % 60).padStart(2, '0')}`
                 : room.mode === 'skyline' ? '36-section rooftop route'
                     : room.mode === 'sports' ? `${room.point_limit} goal${Number(room.point_limit) === 1 ? '' : 's'}`
-                    : room.mode === 'shooter' ? `${room.point_limit} drone targets`
+                    : room.mode === 'shooter' ? `${room.point_limit} combat points`
                         : `${Number(room.point_limit).toLocaleString()} point goal`;
             document.getElementById('hosted-room-meta').textContent = `${goalLabel} · ${players.length} / ${playerLimit} players`;
             document.getElementById('hosted-room-code').textContent = room.room_code;
@@ -5894,7 +5963,7 @@
             document.getElementById('hosted-leaderboard-title').textContent = room.status === 'waiting' ? 'Lobby' : 'Leaderboard';
             document.getElementById('hosted-room-players').innerHTML = rankedPlayers
                 .map((player, index) => {
-                    const isSelf = player.id === window.StudBudCloud.user.id;
+                    const isSelf = player.id === this.gameUser().id;
                     const kick = isHost && player.id !== room.host_id && room.status !== 'finished' ? `<button class="host-kick-btn" type="button" data-action="hosted-kick-player" data-id="${this.escapeHTML(player.id)}" aria-label="Remove ${this.escapeHTML(player.nickname)}">Remove</button>` : '';
                     if (room.status === 'waiting') {
                         return `<li class="leaderboard-player lobby-player${isSelf ? ' is-self' : ''}">${avatarFor(player)}<span class="leaderboard-name">${this.escapeHTML(player.nickname)} ${this.accountTagMarkup(player.username, player.tags)}${isSelf ? ' · you' : ''}</span><span class="lobby-tag${player.id === room.host_id ? ' is-host' : ''}">${player.id === room.host_id ? '<i class="fas fa-crown"></i> Host' : 'Ready'}</span>${kick}</li>`;
@@ -5935,9 +6004,9 @@
                     miner: ['Dig through the cavern, haul ore back to base and avoid lava.', 'WASD move · hold click dig · Q recharge'],
                     duel: ['Hold the glowing hill alone to score. Knock rivals off the stage.', 'A/D move · Space jump · S guard · E/click swing · R heavy · Shift dodge · Q recharge'],
                     crypto: ['Trade six assets, react to market news and build mining rigs.', '1-6 pick · B buy · S sell'],
-                    shooter: ['Blast drones and other players in an arena.', 'WASD move · mouse aim · F/click fire · Space/E blast · Shift dash · Q reload'],
+                    shooter: ['Eliminate other players to score. Solo runs without opponents use drones. Follow the edge arrows or minimap to find opponents.', 'WASD move · mouse aim · F/click fire · Space/E blast · Shift dash · Q reload'],
                     sports: ['Dribble the ball into the rival goal. Players are split into blue and red teams; sprinting and power kicks use energy.', 'WASD dribble · Shift sprint · E/click pass · hold Space, release for power kick · Q recharge'],
-                    chess: ['Each correct answer earns one move. Either player can move when ready; capture the king to win. No check, castling or en passant. Pawns promote to queens.', 'Q / Answer for a move · Select a piece, then a highlighted square']
+                    chess: ['Answer correctly to earn one move. Either player can move when ready; while in check, only the checked player moves.', 'Q / Answer for a move · Tap or drag a piece to a highlighted square']
                 }[room.mode] || ['Answer flashcard questions faster than everyone else.', 'Answer correctly to score points.'];
                 const { resource, multiplier } = this.questionRewardInfo(room.mode);
                 lobbyInfo.innerHTML = `<div class="lobby-mode"><strong>${this.escapeHTML(modeNames[room.mode] || 'Live game')}</strong><span>${this.escapeHTML(goalLabel)} · ${room.mode === 'chess' ? '1 move per correct answer' : `+${(Number(room.state?.question_reward) || 20) * multiplier} ${resource.toLowerCase()} per correct answer`}</span></div>
@@ -5960,8 +6029,8 @@
             finishButton.classList.toggle('hidden', !isHost || room.status === 'finished');
             const waitingCard = document.getElementById('waiting-arcade-card');
             const guestWaiting = room.status === 'waiting';
-            waitingCard.classList.toggle('hidden', !guestWaiting);
-            if (guestWaiting && !this.waitingRunner.started) this.startWaitingRunner();
+            waitingCard.classList.toggle('hidden', !guestWaiting || !window.StudBudCloud.user);
+            if (guestWaiting && window.StudBudCloud.user && !this.waitingRunner.started) this.startWaitingRunner();
             if (!guestWaiting) this.stopWaitingRunner();
             try { this.syncArcadeSession(room, isHost); }
             catch (error) { console.error('[NexusApp] Arcade session could not sync:', error); }
@@ -5976,7 +6045,9 @@
                     ? (players.length < 2 ? `Share the room code. ${room.mode === 'duel' ? 'Your rival' : 'At least one other player'} must join before the race starts.` : 'Host controls are ready. Kick a player or start when the lobby is set.')
                     : 'Waiting for the host to start the game.';
             } else if (room.status === 'finished') {
-                document.getElementById('hosted-room-status').textContent = 'Game over · final scores and multiplayer coin rewards are shown below.';
+                document.getElementById('hosted-room-status').textContent = this.gameUser().is_anonymous
+                    ? 'Game over · final scores are below. Guests do not earn account coins.'
+                    : 'Game over · final scores and multiplayer coin rewards are shown below.';
                 const rewards = state.coin_rewards || {};
                 document.getElementById('hosted-podium').classList.remove('hidden');
                 const podiumUnit = { sports: 'goals', shooter: 'kill pts', skyline: 'm', river: 'fish pts', market: 'deliveries', miner: 'crystals', duel: 'sec on hill', crypto: '', chess: 'chess pts' }[room.mode] ?? 'points';
@@ -5991,7 +6062,7 @@
             }
 
             if (room.status !== 'finished') document.getElementById('hosted-podium').classList.add('hidden');
-            if (this.multiplayerProfile && room.status === 'finished') this.renderMultiplayerProfile(true);
+            if (window.StudBudCloud.user && this.multiplayerProfile && room.status === 'finished') this.renderMultiplayerProfile(true);
             if (room.status === 'finished' && this.hostedGameInterval && (!this.arcadeSession || this.arcadeSession.rewards || this.arcadeSession.practice)) {
                 clearInterval(this.hostedGameInterval);
                 this.hostedGameInterval = null;
@@ -6004,9 +6075,9 @@
             if (room.status === 'playing' && arcade && !this.arcadeLeft) {
                 if (!this.arcadeSession || this.arcadeSession.destroyed) {
                     this.closePractice();
-                    const deck = this.roomStudyDeck(room);
+                    const deck = this.gameUser().is_anonymous ? null : this.roomStudyDeck(room);
                     this.arcadeSession = new arcade.Session({
-                        room, user: window.StudBudCloud.user, api, isHost,
+                        room, user: this.gameUser(), api, isHost,
                         fallbackCards: (deck?.cards || []).filter(card => card.front && card.back),
                         studySet: { deckId: deck?.id, title: room.deck_title || deck?.title, publicId: room.state?.public_deck_id || deck?.communityDeckId || deck?.communitySourceId },
                         finishRoom: () => api.finishRoom(room.room_code),
@@ -6025,7 +6096,7 @@
         }
 
         async saveGameSummary(session) {
-            if (session.testing) return;
+            if (session.testing || (!window.StudBudCloud?.user && window.StudBudCloud?.guestUser)) return;
             const info = session.studySet || {};
             const deck = (AppState.get('flashcards') || []).find(item => item.id === info.deckId
                 || (info.publicId && [item.communityDeckId, item.communitySourceId].includes(info.publicId)));
@@ -6081,7 +6152,7 @@
                 this.practiceSession = null;
             }
             const deckId = config.deckId || document.getElementById('host-game-deck')?.value;
-            if (config.testing && !this.isAdmin) throw new Error('Game testing is available only to administrators.');
+            if (config.testing && (!this.canTestGames || window.StudBudCloud?.offlineMode)) throw new Error('Game testing is available to testers and administrators while connected.');
             const chosenMode = modeOverride || this.hostedGameRoom?.mode || this.selectedMultiplayerMode || 'skyline';
             const botCount = chosenMode === 'chess' ? 1 : config.botCount ?? 3;
             if (!Number.isInteger(botCount) || botCount < 0 || botCount > 3) throw new Error('Choose between zero and three simulated players.');
@@ -6197,7 +6268,7 @@
             this.destroyArcadeSession();
             this.closePractice();
             await window.StudBudCommunityGames.leaveRoom(code);
-            await this.renderMultiplayerProfile(true);
+            if (window.StudBudCloud.user) await this.renderMultiplayerProfile(true);
             if (this.hostedGameInterval) clearInterval(this.hostedGameInterval);
             this.hostedGameInterval = null;
             this.hostedGameRoom = null;
@@ -6206,6 +6277,10 @@
             document.querySelector('.multiplayer-tabs').classList.remove('hidden');
             document.getElementById('hosted-start-btn').classList.add('hidden');
             document.getElementById('hosted-finish-btn').classList.add('hidden');
+            if (window.StudBudCloud.guestLobbyOpen) {
+                window.StudBudCloud.closeGuestLobby();
+                return;
+            }
             this.setMultiplayerScreen(this.multiplayerScreen);
         }
 
@@ -6495,43 +6570,31 @@
         tutorialSteps() {
             const nav = view => `.nav-item:not(.workspace-child)[data-target="${view}-view"], .nav-item:not(.workspace-child)[data-also~="${view}-view"]`;
             return [
-                { title: 'Welcome to StudBud', text: 'StudBud keeps your classes, grades, study plans, flashcards and games in one place. This quick tour shows what each part does. You can leave at any time.' },
+                { title: 'Start with one class and one task', text: 'This short tour follows a real workflow: bring in classes, add work, make a study set and practice. Use the topic menu to jump ahead. You can replay the tour in Settings.' },
                 { route: 'dashboard', sel: '#sidebar', title: 'Your menu', text: 'Six workspaces keep the menu short: Home, School, Plan, Study, Play and Settings. Related tools appear as tabs above the page. On a phone, swipe the menu or tabs sideways.' },
                 { route: 'gpa', sel: '#gpa-view .open-ic-import-btn', title: 'Import from Infinite Campus', text: 'Start here to skip the typing: import your classes, grades, assignments, categories, class times and school calendar before setting up your dashboard. On a computer, drag StudBud Import to your bookmarks bar. On a phone, follow the phone/tablet instructions to save the import bookmark. Run it on the signed-in Campus website, then check the class matches and press Import. Re-import any time to update.' },
-                { route: 'dashboard', sel: '.priority-widget', title: 'Dashboard: what is due', text: 'See your most urgent assignments here, and use Add Assignment to put new work on your list.' },
-                { route: 'dashboard', sel: '.daily-study-card', title: 'Your home widget', text: 'Your streak, this week, today’s 5-minute goal, assignments to work on and your grades in one card. Tap Customize to choose what it shows or add StudBud to your home screen.' },
-                { route: 'dashboard', sel: '#study-priority-list', title: 'Quizzes & tests', text: 'Add an upcoming quiz or test with the "Add quiz or test" button and StudBud suggests what to study today, how long, and the best way to do it.' },
-                { route: 'dashboard', sel: '.focus-sprint-widget', title: 'Focus sprint', text: 'Pick a quiz or test, choose anywhere from 5 to 90 minutes, and start a timer. Finished sprints are logged as study time.' },
-                { route: 'gpa', sel: '#add-course-btn', title: 'Classes & grades', text: 'Add your classes, set up grade categories and log assignment scores (decimals like 23.21/25 work). Your GPA updates automatically.' },
-                { route: 'grade-scenarios', sel: nav('grade-scenarios'), title: 'Hypothetical Grades', text: 'Try out possible scores, or change an existing grade, to see how your class grade and GPA would change. Nothing here touches your real transcript.' },
-                { route: 'planner', sel: nav('planner'), title: 'Planner', text: 'Turns your due dates and study logs into a day-by-day plan.' },
-                { route: 'calendar', sel: nav('calendar'), title: 'Calendar', text: 'A month view of everything due. Click a day to add an event.' },
-                { route: 'schedule', sel: nav('schedule'), title: 'Class schedule', text: 'Set your daily bell schedule so the dashboard always shows today\'s classes.' },
-                { route: 'flashcard', sel: nav('flashcard'), title: 'Flashcards', text: 'Study decks with spaced repetition. Tap a card to flip it as many times as you like, then rate how well you knew it.' },
-                { route: 'importer', sel: nav('importer'), title: 'Import or create cards', text: 'Paste a list to import cards in bulk, or switch to manual mode to type them one at a time.' },
-                { route: 'analytics', sel: nav('analytics'), title: 'Analytics', text: 'Charts of your grades, study time and habits so you can spot what is working.' },
-                { route: 'leaderboard', sel: nav('leaderboard'), title: 'Leaderboards', text: 'See your streak calendar and milestones, then compare study time today, this week, this month or all time, with everyone or just your buds.' },
-                { route: 'friends', sel: nav('friends'), title: 'Buds', text: 'Send a bud request by username, accept requests from others, and open a bud\'s profile to see their study time, streak and match wins.' },
-                { route: 'exam-arcade', sel: nav('exam-arcade'), title: 'Practice', text: 'Practice exams and quick arcade games that use your own flashcards. You can also practice multiplayer game modes solo with simulated players.' },
-                { route: 'multiplayer', sel: nav('multiplayer'), title: 'Multiplayer', text: 'Host or join a room and play City Escape, Soccer, King of the Hill and more. Every game has its own touch controls on phones, and a live leaderboard that ranks by what wins that game.' },
-                { route: 'shop', sel: nav('shop'), title: 'Shop & your character', text: 'Earn coins from games and open mystery boxes for characters, hats, accessories and colors. Equip items to wear them, and press Unequip on a worn item to take it off again.' },
-                { route: 'shop', sel: '#multiplayer-profile-button', title: 'Your profile button', text: 'This button in the top bar shows your character and name. Tap it any time to see your public profile, then edit it or jump to the shop.' },
-                { route: 'about', sel: nav('about'), title: 'About', text: 'What StudBud is for, how to use it, and who to email with questions or suggestions.' },
-                { route: 'settings', sel: '#public-profile-card', title: 'Public profile', text: 'Write a short bio, favorite subject, grade and study goal for your buds to see, and choose whether to share your study stats.' },
-                { route: 'settings', sel: nav('settings'), title: 'Settings', text: 'Set your graduation year and target GPA, change your username (once a week), back up or restore your data, and replay this tutorial any time.' },
-                { route: 'appearance', sel: '#workspace-tabs', title: 'Appearance', text: 'Switch between light and dark, pick a color theme, turn on compact spacing or choose low-power games. The sun/moon button toggles light and dark quickly.' },
-                { route: 'sound', sel: '#workspace-tabs', title: 'Sound & music', text: 'Adjust the volume of interface sounds, game effects and music separately, or mute everything.' },
-                { route: 'dashboard', title: 'You are all set!', text: 'Start by importing from Infinite Campus (or adding a class), then add an assignment or quiz. Have fun and happy studying!' }
+                { route: 'gpa', sel: '#workspace-tabs', title: 'Read grades or try a scenario', text: 'Classes & grades stores your real scores. What-if grades is a safe sandbox. Study insights shows trends. These tools share the School workspace, but scenarios never replace your transcript.' },
+                { route: 'planner', sel: '#workspace-tabs', title: 'Plan the next deadline', text: 'Tasks is your work list. Calendar shows the same due dates by month. Class schedule controls which classes appear on Home. Add a quiz or test to get a suggested study plan.' },
+                { route: 'dashboard', sel: '.focus-sprint-widget', title: 'Choose what to do today', text: 'Home brings together today’s classes and urgent work. Pick a quiz or test in Focus sprint, then start a timer. Finished focus time is logged automatically.' },
+                { route: 'flashcard', sel: '#create-deck-btn', title: 'Make a study set', text: 'Select New study set, give it a name and link it to a class or test. Add cards individually or paste many rows in the editor. Save changes commits the set; Cancel discards only your unsaved draft.' },
+                { route: 'flashcard', sel: '#deck-grid', title: 'Choose how to study', text: 'Study schedules due cards and asks you to rate recall. Edit changes card content. In the card editor, written answers can use exact wording, vocabulary spelling tolerance or required keyword groups. Answer images, PDFs, text and audio stay private.' },
+                { route: 'exam-arcade', sel: '#workspace-tabs', title: 'Test yourself without pressure', text: 'Practice uses your saved sets. Practice Test supports typing, choices and matching: study feedback explains each answer; exam feedback waits until the end. Retry missed cards to work on weaker answers.' },
+                { route: 'multiplayer', sel: '#workspace-tabs', title: 'Play, connect and customize', text: 'Games hosts or joins a room. Buds manages friends; Leaderboards compares progress; Shop equips your character. For solo games, use Study → Practice. Question Chess replaces normal turns with question-earned moves.' },
+                { route: 'settings', sel: '#public-profile-card', title: 'Keep private data private', text: 'Your real name is used inside the app. Public profiles show your username; your real name and school appear only if you choose to share them. Profile & backups also lets you export your saved data.' },
+                { route: 'appearance', sel: '#game-quality', title: 'Offline access and faster games', text: 'Open StudBud once online to cache it. Continue offline uses this device’s saved data; Connect account resumes sync. Game performance lowers visual detail rather than capping gameplay to 30 FPS. Sound controls are in the next tab.' },
+                { route: 'dashboard', title: 'Your first three steps', text: 'Import classes from Infinite Campus, add an upcoming quiz or assignment, then create a study set for it. Return to Home to decide what to work on next.' }
             ];
         }
 
         startTutorial() {
             this.endTutorialUI();
+            this.tutorialReturnFocus = document.activeElement;
             this.tutorialStep = 0;
             const root = document.createElement('div');
             root.id = 'tutorial-root';
-            root.innerHTML = '<div class="tutorial-spot" hidden></div><div class="tutorial-card" role="dialog" aria-modal="true" aria-labelledby="tutorial-title"><div class="tutorial-progress"><span class="tutorial-progress-bar"></span></div><small class="tutorial-count"></small><h3 id="tutorial-title"></h3><p class="tutorial-text"></p><div class="tutorial-buttons"><button type="button" class="text-btn" data-tour="skip">Skip</button><span class="tutorial-spacer"></span><button type="button" class="secondary-btn" data-tour="back">Back</button><button type="button" class="primary-btn" data-tour="next">Next</button></div></div>';
+            root.innerHTML = `<div class="tutorial-spot" hidden></div><div class="tutorial-card" role="dialog" aria-modal="true" aria-labelledby="tutorial-title" aria-describedby="tutorial-description"><div class="tutorial-progress"><span class="tutorial-progress-bar"></span></div><small class="tutorial-count"></small><label class="tutorial-jump">Jump to a topic<select aria-label="Tutorial topic">${this.tutorialSteps().map((step, index) => `<option value="${index}">${index + 1}. ${this.escapeHTML(step.title)}</option>`).join('')}</select></label><h3 id="tutorial-title"></h3><p id="tutorial-description" class="tutorial-text"></p><div class="tutorial-buttons"><button type="button" class="text-btn" data-tour="skip">Finish later</button><span class="tutorial-spacer"></span><button type="button" class="secondary-btn" data-tour="back">Back</button><button type="button" class="primary-btn" data-tour="next">Next</button></div></div>`;
             document.body.appendChild(root);
+            root.querySelector('select').addEventListener('change', event => this.showTutorialStep(Number(event.target.value)));
             root.addEventListener('click', event => {
                 const button = event.target.closest('[data-tour]');
                 if (!button) return;
@@ -6542,7 +6605,15 @@
                 else if (this.tutorialStep >= this.tutorialSteps().length - 1) this.finishTutorial();
                 else this.showTutorialStep(this.tutorialStep + 1);
             });
-            this.tutorialKeys = event => { if (event.key === 'Escape') this.finishTutorial(); };
+            this.tutorialKeys = event => {
+                if (event.key === 'Escape') { this.finishTutorial(); return; }
+                if (event.key !== 'Tab') return;
+                const controls = [...root.querySelectorAll('button, select')].filter(node => !node.hidden);
+                const first = controls[0], last = controls[controls.length - 1];
+                if ((event.shiftKey && document.activeElement === first) || (!event.shiftKey && document.activeElement === last) || !root.contains(document.activeElement)) {
+                    event.preventDefault(); (event.shiftKey ? last : first).focus();
+                }
+            };
             this.tutorialResize = () => this.positionTutorialSpot();
             document.addEventListener('keydown', this.tutorialKeys);
             window.addEventListener('resize', this.tutorialResize);
@@ -6562,6 +6633,7 @@
             root.querySelector('.tutorial-progress-bar').style.width = `${((this.tutorialStep + 1) / steps.length) * 100}%`;
             root.querySelector('#tutorial-title').textContent = step.title;
             root.querySelector('.tutorial-text').textContent = step.text;
+            root.querySelector('select').value = String(this.tutorialStep);
             root.querySelector('[data-tour="back"]').hidden = this.tutorialStep === 0;
             root.querySelector('[data-tour="next"]').textContent = this.tutorialStep === steps.length - 1 ? 'Finish' : 'Next';
             root.querySelector('[data-tour="skip"]').hidden = this.tutorialStep === steps.length - 1;
@@ -6622,6 +6694,10 @@
             }
             document.body.classList.remove('tutorial-active');
             this.tutorialKeys = this.tutorialResize = null;
+            const focusTarget = this.tutorialReturnFocus?.isConnected && this.tutorialReturnFocus.getClientRects().length
+                ? this.tutorialReturnFocus : document.querySelector('#workspace-tabs [aria-current="page"], #sidebar .nav-item.active');
+            focusTarget?.focus({ preventScroll: true });
+            this.tutorialReturnFocus = null;
         }
 
         finishTutorial() {
@@ -8414,7 +8490,8 @@
             const deck = this.cardEditorReturnToDeck ? this.deckEditorDraft : (AppState.get('flashcards') || []).find(item => item.id === deckId);
             if (!deck) throw new Error('The selected deck no longer exists.');
             const id = document.getElementById('card-id').value;
-            const existing = id ? (deck.cards || []).find(card => card.id === id) : null;
+            const savedCard = id ? (deck.cards || []).find(card => card.id === id) : null;
+            const existing = savedCard ? JSON.parse(JSON.stringify(savedCard)) : null;
             if (id && !existing) throw new Error('The selected card no longer exists.');
             const front = document.getElementById('card-front').value.trim();
             const back = document.getElementById('card-back').value.trim();
@@ -8423,6 +8500,31 @@
             if (distractors.length > 3 || distractors.some(text => text.length > 5000)) throw new Error('Add at most 3 wrong options, each up to 5000 characters.');
             const keys = distractors.map(text => this.answerKey(text));
             if (new Set(keys).size !== keys.length || keys.includes(this.answerKey(back))) throw new Error('Wrong options must be distinct from each other and the correct answer.');
+            const answerMode = document.getElementById('card-answer-mode')?.value || 'exact';
+            if (!['exact', 'vocabulary', 'keywords'].includes(answerMode)) throw new Error('Choose a supported written-answer mode.');
+            const acceptedAnswers = (document.getElementById('card-accepted-answers')?.value || '').split('\n').map(text => text.trim()).filter(Boolean);
+            if (acceptedAnswers.length > 10 || acceptedAnswers.some(text => text.length > 5000)) throw new Error('Use at most 10 other accepted answers, up to 5000 characters each.');
+            const keywords = window.FlashcardTools.keywordGroups(document.getElementById('card-keywords')?.value);
+            if (answerMode === 'keywords' && !window.FlashcardTools.matchesKeywords(back, { back, keywords })) throw new Error('Add required keyword groups that all appear in your saved answer.');
+            const attachments = document.getElementById('card-remove-attachments')?.checked ? [] : (existing?.attachments || []).map(item => ({ ...item }));
+            const files = [...(document.getElementById('card-attachments')?.files || [])];
+            if (attachments.length + files.length > 3) throw new Error('A card can have at most 3 attachments. Remove saved attachments before replacing them.');
+            const readFile = file => new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject(new Error(`Could not read ${file.name}. Select it again.`));
+                reader.readAsDataURL(file);
+            });
+            for (const file of files) {
+                if (file.size > 1000000) throw new Error('Each attachment must be 1 MB or less.');
+                const extensionTypes = { pdf: 'application/pdf', txt: 'text/plain', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4', webm: 'audio/webm' };
+                const type = file.type === 'audio/x-wav' ? 'audio/wav' : file.type || extensionTypes[file.name.split('.').pop().toLowerCase()] || '';
+                const data = await readFile(file);
+                const attachment = { name: file.name, type, data: data.replace(/^data:[^;,]*;base64,/, `data:${type};base64,`) };
+                if (!window.FlashcardTools.attachmentSource(attachment)) throw new Error('Choose a supported PDF, text or audio file with a name of 160 characters or less.');
+                attachments.push(attachment);
+            }
+            if (attachments.reduce((size, item) => size + item.data.length * .75, 0) > 2000000) throw new Error('Combined attachments must be 2 MB or less per card.');
             let answerImage = existing?.answerImage || '';
             if (document.getElementById('card-remove-image')?.checked) answerImage = '';
             const file = document.getElementById('card-answer-image')?.files?.[0];
@@ -8440,13 +8542,14 @@
             const latestDeck = this.cardEditorReturnToDeck ? this.deckEditorDraft : (AppState.get('flashcards') || []).find(item => item.id === deckId);
             const latestCard = id ? latestDeck?.cards?.find(item => item.id === id) : null;
             if (!latestDeck || (id && !latestCard)) throw new Error('This set or card was removed while saving.');
-            if (existing && ['front', 'back', 'tags', 'answerImage', 'distractors'].some(field => JSON.stringify(existing[field]) !== JSON.stringify(latestCard[field]))) throw new Error('This card was edited elsewhere. Reopen it before saving.');
+            if (existing && ['front', 'back', 'tags', 'answerImage', 'distractors', 'answerMode', 'acceptedAnswers', 'keywords', 'attachments'].some(field => JSON.stringify(existing[field]) !== JSON.stringify(latestCard[field]))) throw new Error('This card was edited elsewhere. Reopen it before saving.');
             const card = {
                 ...(latestCard || { id: `card_${window.crypto.randomUUID()}`, repetitions: 0, interval: 0, easeFactor: 2.5 }),
                 front,
                 back,
                 answerImage,
                 distractors,
+                answerMode, acceptedAnswers, keywords, attachments,
                 tags: document.getElementById('card-tags').value.split(',').map(tag => tag.trim()).filter(Boolean),
             };
             const cards = existing ? latestDeck.cards.map(item => item.id === id ? card : item) : [...(latestDeck.cards || []), card];
@@ -8457,6 +8560,14 @@
                 } finally {
                     if ((AppState.get('flashcards') || []).find(item => item.id === deckId)?.cards.some(item => item.id === card.id)) {
                         document.getElementById('card-id').value = card.id;
+                        for (const inputId of ['card-answer-image', 'card-attachments']) {
+                            const input = document.getElementById(inputId);
+                            if (input) input.value = '';
+                        }
+                        for (const inputId of ['card-remove-image', 'card-remove-attachments']) {
+                            const input = document.getElementById(inputId);
+                            if (input) input.checked = false;
+                        }
                     }
                 }
             }
@@ -9141,8 +9252,8 @@
                         <label>Typing <input type="number" name="typeCount" min="0" max="50" value="3"></label>
                     </fieldset>
                     <label>Feedback<select name="feedback"><option value="study">Study: feedback after each answer</option><option value="exam">Exam: answers only at the end</option></select></label>
-                    <label>Typed grading<select name="grading"><option value="strict">Strict: saved wording (ignore case and spacing)</option><option value="lenient">Lenient: punctuation, accents and one small typo</option></select></label>
-                    <p class="settings-hint">Lenient grading never guesses mathematical signs, quantities, negation or short answers.</p>
+                    <label>Default for cards without answer rules<select name="grading"><option value="strict">Exact wording (ignore case and spacing)</option><option value="lenient">Vocabulary: allow accents and one small typo</option></select></label>
+                    <p class="settings-hint">A card’s saved answer rules take priority. Use keywords for definitions; vocabulary mode is for fixed translations. Numerical values and mathematical signs are never guessed.</p>
                     <label class="settings-check"><input type="checkbox" name="adaptive" checked> Focus on weaker cards using your accuracy</label>
                     <button class="primary-btn" type="submit"><i class="fas fa-play"></i> Start practice test</button>
                 </form>`;
@@ -9260,7 +9371,9 @@
                 const label = document.createElement('label');
                 label.className = 'practice-test-written';
                 label.htmlFor = 'practice-test-written-answer';
-                label.textContent = this.practiceTestOptions?.strict === false ? 'Your answer (lenient grading)' : 'Your answer (saved wording; capitalization and spacing do not matter)';
+                label.textContent = card.answerMode === 'keywords' ? 'Explain in your own words (all saved keyword groups required)'
+                    : (card.answerMode === 'vocabulary' || (!card.answerMode && this.practiceTestOptions?.strict === false)) ? 'Type the translation or vocabulary answer (minor spelling tolerance)'
+                        : 'Your answer (saved wording or an accepted alternative; case and spacing ignored)';
                 const answer = document.createElement('textarea');
                 answer.id = 'practice-test-written-answer';
                 answer.name = 'answer';
@@ -9308,7 +9421,7 @@
             } else {
                 givenAnswer = String(data.get('answer') || '').trim();
                 if (!givenAnswer) throw new Error('Enter a written answer first.');
-                correct = window.FlashcardTools.gradeAnswer(givenAnswer, card.back, this.practiceTestOptions?.strict !== false);
+                correct = window.FlashcardTools.gradeCard(givenAnswer, card, this.practiceTestOptions?.strict !== false);
             }
             form.dataset.submitted = 'true';
             if (!outcomes.length) outcomes = [{ card, correct }];
@@ -9571,7 +9684,16 @@
 
         cardAnswerMarkup(card) {
             const image = window.FlashcardTools.imageSource(card.answerImage);
-            return `${this.escapeHTML(card.back || '')}${image ? `<img class="flashcard-answer-image" src="${image}" alt="Answer illustration">` : ''}`;
+            return `${this.escapeHTML(card.back || '')}${image ? `<img class="flashcard-answer-image" src="${image}" alt="Answer illustration">` : ''}${this.cardAttachmentMarkup(card)}`;
+        }
+
+        cardAttachmentMarkup(card) {
+            return (card.attachments || []).map(attachment => {
+                const data = window.FlashcardTools.attachmentSource(attachment);
+                if (!data) return '';
+                const name = this.escapeHTML(attachment.name);
+                return `<div class="card-attachment">${attachment.type.startsWith('audio/') ? `<audio controls preload="none" src="${data}" aria-label="${name}"></audio>` : ''}<a href="${data}" download="${name}">${name} <span>(download)</span></a></div>`;
+            }).join('');
         }
 
         async updateCardSchedule(card, correct) {

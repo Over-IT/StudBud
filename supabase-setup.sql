@@ -922,7 +922,7 @@ begin
         select player from jsonb_array_elements(v_room.state -> 'players') as item(player)
         where coalesce((player ->> 'correct_count')::integer, 0) > 0 or coalesce((player ->> 'score')::integer, 0) > 0
     loop
-        v_is_winner := case when v_chess_winner is not null then v_player ->> 'id' = v_chess_winner
+        v_is_winner := case when v_room.mode = 'chess' then coalesce(v_player ->> 'id' = v_chess_winner, false)
             else (v_player ->> 'score')::integer = v_high_score and v_high_score > 0 end;
         v_reward := least(250, coalesce((v_player ->> 'correct_count')::integer, 0) * 6)
             + case when v_is_winner then 25 else 0 end;
@@ -1054,6 +1054,7 @@ declare
     v_cosmetics jsonb;
 begin
     if v_user_id is null then raise exception 'Sign in to host a game.'; end if;
+    if coalesce((auth.jwt() ->> 'is_anonymous')::boolean, false) then raise exception 'Guests can join with a code; sign in to host a game.'; end if;
     if p_code !~ '^[A-HJ-NP-Z2-9]{6}$' then raise exception 'The room code is invalid.'; end if;
     if char_length(v_nickname) not between 2 and 20 or v_nickname !~ '^[A-Za-z0-9 _-]+$' then
         raise exception 'Nickname must be 2–20 letters, numbers, spaces, underscores, or hyphens.';
@@ -1314,7 +1315,11 @@ begin
     v_correct := (v_room.state #> '{question,options}') ->> p_choice_index
         = v_room.state #>> '{question,correct_answer}';
     if coalesce(p_action, '') !~ '^[a-z_]{1,24}$' then raise exception 'Choose a valid game action.'; end if;
-    for v_player in select value from jsonb_array_elements(v_room.state -> 'players') loop
+    for v_player in select value from jsonb_array_elements(v_room.state -> 'players')     loop
+        if exists (select 1 from auth.users where id = (v_player ->> 'id')::uuid and is_anonymous) then
+            v_rewards := jsonb_set(v_rewards, array[v_player ->> 'id'], '0'::jsonb, true);
+            continue;
+        end if;
         if v_player ->> 'id' = auth.uid()::text then
             if coalesce((v_player ->> 'eliminated')::boolean, false) then raise exception 'You are out of this Survival round.'; end if;
             if coalesce((v_player ->> 'answered')::boolean, false) then raise exception 'You already answered this question.'; end if;
@@ -1707,14 +1712,23 @@ begin
     end if;
     if v_room.status <> 'playing' then raise exception 'This chess match is not playing.'; end if;
     if v_board is null or v_board !~ '^[prnbqkPRNBQK.]{64}$' or length(p_state::text) > 4000
+        or length(v_board) - length(replace(v_board, 'K', '')) <> 1
+        or length(v_board) - length(replace(v_board, 'k', '')) <> 1
         or coalesce(p_state ->> 'serial', '') !~ '^[0-9]{1,9}$'
         or coalesce(p_state ->> 'revision', '') !~ '^[0-9]{1,9}$'
-        or coalesce(p_state ->> 'winner', '') not in ('-1', '0', '1')
+        or coalesce(p_state ->> 'winner', '') not in ('-2', '-1', '0', '1')
         or jsonb_typeof(p_state -> 'credits') is distinct from 'array'
         or jsonb_typeof(p_state -> 'ack') is distinct from 'array' then
         raise exception 'Invalid chess board state.';
     end if;
     if jsonb_typeof(p_state -> 'capturePoints') is distinct from 'array' then raise exception 'Invalid captured material scores.'; end if;
+    if jsonb_typeof(p_state -> 'castling') is distinct from 'array' then raise exception 'Invalid castling rights.'; end if;
+    if jsonb_array_length(p_state -> 'castling') <> 4
+        or exists (select 1 from jsonb_array_elements(p_state -> 'castling') c(value) where jsonb_typeof(value) <> 'boolean')
+        or coalesce(p_state ->> 'enPassant', '') !~ '^(-1|[0-9]{1,2})$'
+        or (p_state ->> 'enPassant')::integer > 63 then
+        raise exception 'Invalid special move state.';
+    end if;
     if jsonb_array_length(p_state -> 'capturePoints') <> 2
         or exists (select 1 from jsonb_array_elements_text(p_state -> 'capturePoints') as c(value) where value is null or value !~ '^[0-9]{1,3}$') then
         raise exception 'Invalid captured material scores.';
@@ -1915,6 +1929,30 @@ create table if not exists public.studbud_username_state (
 alter table public.studbud_username_state enable row level security;
 revoke all on public.studbud_username_state from anon, authenticated;
 
+create or replace function public.studbud_require_account_moderation(p_user_id uuid)
+returns void
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    perform public.studbud_require_moderator();
+    if not exists (select 1 from auth.users where id = p_user_id) then
+        raise exception 'Choose a valid account.';
+    end if;
+    if not public.studbud_is_admin() and (
+        p_user_id = auth.uid()
+        or public.studbud_has_user_tag(p_user_id, 'moderator')
+        or exists (select 1 from auth.users where id = p_user_id
+            and lower(raw_user_meta_data ->> 'username') in ('overit', 'andy'))
+    ) then
+        raise exception 'Only administrators can moderate staff accounts or your own account.';
+    end if;
+end;
+$$;
+revoke all on function public.studbud_require_account_moderation(uuid) from public, anon, authenticated;
+
 create or replace function public.studbud_admin_list_users(p_query text default '')
 returns jsonb
 language plpgsql
@@ -1923,7 +1961,7 @@ security definer
 set search_path = public, pg_temp
 as $$
 begin
-    perform public.studbud_require_admin();
+    perform public.studbud_require_moderator();
     return coalesce((
         select jsonb_agg(row_to_json(u)) from (
             select a.id,
@@ -1994,7 +2032,7 @@ security definer
 set search_path = public, pg_temp
 as $$
 begin
-    perform public.studbud_require_admin();
+    perform public.studbud_require_account_moderation(p_user_id);
     if p_user_id = auth.uid() then raise exception 'You can''t ban your own account.'; end if;
     if p_banned then
         insert into public.studbud_banned_users (user_id, reason) values (p_user_id, left(coalesce(p_reason, ''), 200))
@@ -2028,7 +2066,7 @@ security definer
 set search_path = public, pg_temp
 as $$
 begin
-    perform public.studbud_require_admin();
+    perform public.studbud_require_account_moderation(p_user_id);
     delete from public.studbud_community_decks where owner_id = p_user_id;
 end;
 $$;
@@ -2114,7 +2152,7 @@ security definer
 set search_path = public, pg_temp
 as $$
 begin
-    perform public.studbud_require_admin();
+    perform public.studbud_require_account_moderation(p_user_id);
     if p_user_id = auth.uid() then raise exception 'You can''t force your own account.'; end if;
     insert into public.studbud_username_state (user_id, force_change) values (p_user_id, p_force)
     on conflict (user_id) do update set force_change = excluded.force_change;
@@ -2786,5 +2824,25 @@ end;
 $$;
 revoke all on function public.studbud_admin_set_site_notice(text, boolean) from public, anon;
 grant execute on function public.studbud_admin_set_site_notice(text, boolean) to authenticated;
+
+create or replace function public.studbud_admin_delete_site_notice(p_publication_id bigint)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    perform public.studbud_require_admin();
+    if p_publication_id is null then raise exception 'Choose an announcement to delete.'; end if;
+    perform 1 from public.studbud_site_notice_history where id = p_publication_id for update;
+    if not found then raise exception 'That announcement no longer exists.'; end if;
+    update public.studbud_site_notice
+    set active = false, message = '', publication_id = null, updated_at = now(), updated_by = auth.uid()
+    where publication_id = p_publication_id;
+    delete from public.studbud_site_notice_history where id = p_publication_id;
+end;
+$$;
+revoke all on function public.studbud_admin_delete_site_notice(bigint) from public, anon;
+grant execute on function public.studbud_admin_delete_site_notice(bigint) to authenticated;
 
 notify pgrst, 'reload schema';

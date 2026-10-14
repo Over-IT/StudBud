@@ -161,6 +161,7 @@
             document.getElementById('auth-switch-btn')?.addEventListener('click', () => this.setAuthMode(this.authMode === 'login' ? 'signup' : 'login'));
             document.getElementById('login-form')?.addEventListener('submit', event => this.handleLogin(event));
             document.getElementById('signup-form')?.addEventListener('submit', event => this.handleSignup(event));
+            document.getElementById('guest-game-form')?.addEventListener('submit', event => this.handleGuestJoin(event));
             document.getElementById('sign-out-btn')?.addEventListener('click', () => this.signOut());
             document.getElementById('offline-start-btn')?.addEventListener('click', () => this.startOffline().catch(error => this.reportAccountError(error)));
             document.getElementById('offline-connect-btn')?.addEventListener('click', () => this.connectOnline().catch(error => this.reportAccountError(error)));
@@ -186,6 +187,66 @@
             document.getElementById('offline-notice')?.classList.toggle('hidden', !this.offlineMode);
             const signOut = document.getElementById('sign-out-btn');
             if (signOut) signOut.textContent = this.offlineMode ? 'Connect account' : 'Sign out';
+        }
+
+        async prepareGuestSession() {
+            if (this.user || this.guestUser) return;
+            if (window.navigator?.onLine === false) throw new Error('Guest games need an internet connection.');
+            if (this.guestOpening) return this.guestOpening;
+            this.guestOpening = (async () => {
+                const config = window.STUDBUD_SUPABASE_CONFIG || {};
+                if (!config.url || !config.anonKey || !window.supabase?.createClient) throw new Error('Guest games need the online Supabase configuration and SDK. Open StudBud online and reload.');
+                this.guestClient ||= window.supabase.createClient(config.url, config.anonKey, {
+                    auth: { persistSession: false, detectSessionInUrl: false, storageKey: 'studbud-guest-game' }
+                });
+                const { data, error } = await this.guestClient.auth.signInAnonymously();
+                if (error) throw new Error(`Guest joining is unavailable: ${error.message}. The administrator must enable Anonymous Sign-ins in Supabase Authentication.`);
+                if (!data?.user?.is_anonymous) throw new Error('The server did not create a valid guest session.');
+                this.guestUser = data.user;
+            })();
+            try { await this.guestOpening; } finally { this.guestOpening = null; }
+        }
+
+        async handleGuestJoin(event) {
+            event.preventDefault();
+            const form = event.currentTarget, button = form.querySelector('button[type="submit"]');
+            if (button.disabled) return;
+            button.disabled = true;
+            this.setAuthStatus('Joining as a guest...');
+            try {
+                await this.prepareGuestSession();
+                const app = window.NexusApp, panel = document.getElementById('hosted-game-room');
+                this.guestRoomParent ||= panel.parentElement;
+                this.guestLobbyOpen = true;
+                const lobby = document.getElementById('guest-game-lobby');
+                lobby.appendChild(panel);
+                lobby.classList.remove('hidden');
+                if (!this.guestControlsBound) {
+                    document.getElementById('hosted-leave-btn').addEventListener('click', () => !this.appStarted && app.leaveHostedGame().catch(error => {
+                        console.error('[Guest game] Leaving failed:', error);
+                        document.getElementById('hosted-room-status').textContent = error.message;
+                    }));
+                    document.getElementById('copy-hosted-room-code-btn').addEventListener('click', () => { if (!this.appStarted) app.copyHostedRoomCode(); });
+                    this.guestControlsBound = true;
+                }
+                await app.joinGame(form);
+                document.querySelector('.auth-card').classList.add('hidden');
+                this.setAuthStatus('');
+            } catch (error) {
+                console.error('[Guest game] Joining failed:', error);
+                this.closeGuestLobby();
+                this.setAuthStatus(error.message, true);
+            } finally { button.disabled = false; }
+        }
+
+        closeGuestLobby() {
+            if (!this.guestLobbyOpen) return;
+            this.guestLobbyOpen = false;
+            const panel = document.getElementById('hosted-game-room');
+            if (this.guestRoomParent) this.guestRoomParent.appendChild(panel);
+            panel?.classList.add('hidden');
+            document.getElementById('guest-game-lobby')?.classList.add('hidden');
+            document.querySelector('.auth-card')?.classList.remove('hidden');
         }
 
         async startOffline() {

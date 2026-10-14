@@ -765,6 +765,8 @@
             }
             const back = p => p.roof || p.wall || p.ground;
             this.drawList = [...solids.filter(back), ...solids.filter(p => !back(p))];
+            solids.spatialIndex = new A.util.VerticalIndex(solids);
+            this.drawIndex = new A.util.VerticalIndex(this.drawList, p => ({ y: p.y, h: p.roof ? (p.bodyH || 90) : Math.min(p.h, 1200) }));
             for (const w of this.saws) { w.x = w.cx; w.y = w.cy; }
         }
 
@@ -839,7 +841,7 @@
             this.wallDir = 0;
             if (!me.onGround && !this.finished && !exhausted && this.dash <= 0) {
                 const L = { x: me.x - 5, y: me.y + 6, w: 5, h: me.h - 12 }, R = { x: me.x + me.w, y: me.y + 6, w: 5, h: me.h - 12 };
-                for (const p of this.solids) {
+                for (const p of this.solids.spatialIndex?.query(me.y - 64, me.y + me.h + 64) || this.solids) {
                     if (!p.wallJ) continue;
                     if (overlap(L, p)) { this.wallDir = -1; break; }
                     if (overlap(R, p)) { this.wallDir = 1; break; }
@@ -903,15 +905,17 @@
                 }
             }
 
-            const wasAir = !me.onGround;
+            const wasAir = !me.onGround, previousFeet = me.y + me.h;
             moveBody(me, this.solids, dt);
             if (me.onGround && wasAir) this.particles.burst(me.x + 13, me.y + me.h, '#94a3b8', 5, 70, 0.25, 3);
             if (me.onGround && me.ground?.crumble && me.ground.timer <= 0 && !me.ground.off) me.ground.timer = 0.5;
 
             const box = { x: me.x + 3, y: me.y + 3, w: me.w - 6, h: me.h - 6 };
             for (const sp of this.springs) {
-                if (overlap(box, sp) && me.vy >= 0) {
-                    me.vy = -1280; this.sprung = true; this.airJumps = 1; s.sfx('powerup');
+                if (me.x + me.w > sp.x - 4 && me.x < sp.x + sp.w + 4 && me.vy >= 0
+                    && previousFeet <= sp.y + sp.h + 8 && me.y + me.h >= sp.y - 3) {
+                    me.vy = -1280; me.onGround = false; me.ground = null;
+                    this.sprung = true; this.airJumps = 1; s.sfx('powerup');
                     this.particles.burst(sp.x + 23, sp.y, '#fbbf24', 12, 160, 0.4, 4);
                 }
             }
@@ -970,10 +974,14 @@
                 ctx.fillStyle = '#451a03'; for (let by = y + 14; by < y + h - 6; by += 16) ctx.fillRect(x, by, w, 3);
                 ctx.fillStyle = '#b45309'; ctx.fillRect(x, y, w, 5);
             } else {
-                ctx.fillStyle = '#b7791f'; ctx.fillRect(x, y, w, h);
-                ctx.strokeStyle = '#78350f'; ctx.lineWidth = 3; ctx.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3);
-                ctx.beginPath(); ctx.moveTo(x + 4, y + 4); ctx.lineTo(x + w - 4, y + h - 4); ctx.moveTo(x + w - 4, y + 4); ctx.lineTo(x + 4, y + h - 4); ctx.stroke();
-                ctx.fillStyle = '#fcd34d'; ctx.fillRect(x, y, w, 3);
+                const tint = [ '#a77950', '#bc8f60', '#9c7049' ][Math.abs(Math.round(x + y)) % 3];
+                ctx.fillStyle = tint; roundRect(ctx, x, y, w, h, 3); ctx.fill();
+                ctx.fillStyle = 'rgba(0,0,0,.16)'; ctx.fillRect(x + w * .72, y + 3, w * .28 - 3, h - 6);
+                ctx.strokeStyle = '#68472e'; ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+                ctx.fillStyle = '#dbc497'; ctx.fillRect(x + w * .45, y + 1, Math.max(7, w * .12), h - 2);
+                ctx.fillStyle = '#eee2c6'; ctx.fillRect(x + 8, y + h * .48, Math.min(24, w * .35), 16);
+                ctx.fillStyle = '#604832'; for (let i = 0; i < 5; i++) ctx.fillRect(x + 11 + i * 3, y + h * .48 + 5, 1, 7);
+                ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.fillRect(x + 3, y + 2, w - 6, 3);
             }
         }
 
@@ -1062,19 +1070,34 @@
         drawLedge(ctx, p, B) {
             // soft drop shadow so ledges separate from the backdrop
             ctx.fillStyle = 'rgba(0,0,0,.22)'; roundRect(ctx, p.x + 3, p.y + 6, p.w, p.h + 2, 5); ctx.fill();
-            const lg = ctx.createLinearGradient(0, p.y, 0, p.y + p.h);
-            lg.addColorStop(0, B.ledgeTop); lg.addColorStop(0.3, B.ledge); lg.addColorStop(1, mixHex(B.ledge, '#0f172a', 0.45));
-            ctx.fillStyle = lg; roundRect(ctx, p.x, p.y, p.w, p.h, 4); ctx.fill();
+            if (this.s.lowDetail) ctx.fillStyle = B.ledge;
+            else {
+                const lg = ctx.createLinearGradient(0, p.y, 0, p.y + p.h);
+                lg.addColorStop(0, B.ledgeTop); lg.addColorStop(0.3, B.ledge); lg.addColorStop(1, mixHex(B.ledge, '#0f172a', 0.45));
+                ctx.fillStyle = lg;
+            }
+            roundRect(ctx, p.x, p.y, p.w, p.h, 4); ctx.fill();
             ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.fillRect(p.x + 3, p.y, p.w - 6, 2);
             ctx.fillStyle = B.ledgeTop; ctx.fillRect(p.x, p.y, p.w, 3);
             if (p.bi === 3) { ctx.fillStyle = 'rgba(196,181,253,.35)'; ctx.fillRect(p.x - 3, p.y - 3, p.w + 6, 3); }
+            if (this.s.lowDetail) return;
+            const hsh = Math.abs(Math.round(p.x) * 73856093 ^ Math.round(p.y) * 19349663);
+            ctx.fillStyle = 'rgba(15,23,42,.3)';
+            if (hsh % 3 === 0) {
+                for (let x = p.x + 24; x < p.x + p.w - 3; x += 38) ctx.fillRect(x, p.y + 4, 2, Math.max(0, p.h - 6));
+                ctx.fillRect(p.x + 4, p.y + p.h / 2, p.w - 8, 1);
+            } else if (hsh % 3 === 1) {
+                ctx.fillRect(p.x + 5, p.y + 6, p.w - 10, 1);
+                ctx.fillRect(p.x + 8, p.y + p.h - 4, p.w - 16, 1);
+            } else {
+                for (let x = p.x + 10; x < p.x + p.w - 8; x += 24) ctx.fillRect(x, p.y + 5, 8, Math.max(0, p.h - 9));
+            }
             ctx.fillStyle = 'rgba(0,0,0,.3)';
             ctx.beginPath(); ctx.moveTo(p.x + 10, p.y + p.h); ctx.lineTo(p.x + 10 + Math.min(34, p.w / 3), p.y + p.h); ctx.lineTo(p.x + 10, p.y + p.h + 22); ctx.fill();
             ctx.beginPath(); ctx.moveTo(p.x + p.w - 10, p.y + p.h); ctx.lineTo(p.x + p.w - 10 - Math.min(34, p.w / 3), p.y + p.h); ctx.lineTo(p.x + p.w - 10, p.y + p.h + 22); ctx.fill();
             ctx.fillStyle = 'rgba(15,23,42,.35)';
             for (let rx = p.x + 12; rx < p.x + p.w - 8; rx += 26) ctx.fillRect(rx, p.y + 7, 3, 3);
             if (p.w < 120) return;
-            const hsh = Math.abs(Math.round(p.x) * 73856093 ^ Math.round(p.y) * 19349663);
             const kind = hsh % 9, px = p.x + 14 + (hsh >> 3) % Math.max(1, p.w - 56);
             if (kind === 0) { ctx.fillStyle = '#64748b'; ctx.fillRect(px, p.y - 14, 28, 14); ctx.fillStyle = '#94a3b8'; ctx.fillRect(px + 3, p.y - 11, 22, 2); ctx.fillRect(px + 3, p.y - 7, 22, 2); }
             else if (kind === 1) { ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(px, p.y); ctx.lineTo(px, p.y - 34); ctx.moveTo(px - 8, p.y - 26); ctx.lineTo(px + 8, p.y - 26); ctx.moveTo(px - 5, p.y - 18); ctx.lineTo(px + 5, p.y - 18); ctx.stroke(); ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(px, p.y - 36, 3, 0, TAU); ctx.fill(); }
@@ -1102,13 +1125,16 @@
             this.cam.x += (targetX - this.cam.x) * k;
             this.cam.y += (targetY - this.cam.y) * k * 0.9;
             const prog = clamp(-(this.cam.y + viewH * 0.62) / this.summitH, 0, 1) * 4;
-            climbBackdrop(ctx, w, h, this.cam, this.camStart, prog, this.anim);
+            if (s.graphics?.low) {
+                ctx.fillStyle = SKY_BIOMES[Math.min(3, Math.floor(prog))].top;
+                ctx.fillRect(0, 0, w, h);
+            } else climbBackdrop(ctx, w, h, this.cam, this.camStart, prog, this.anim);
             ctx.save();
             ctx.scale(zoom, zoom);
             ctx.translate(-this.cam.x, -this.cam.y);
             const left = this.cam.x - 50, right = this.cam.x + viewW + 50, top = this.cam.y - 60, bottom = this.cam.y + viewH + 60;
             const seen = (y) => y > top - 300 && y < bottom + 300;
-            for (const p of this.drawList) {
+            for (const p of this.drawIndex?.items === this.drawList ? this.drawIndex.query(top, bottom) : this.drawList) {
                 if (p.x > right || p.x + p.w < left || (p.off && !p.blink) || p.y > bottom || p.y + (p.roof ? (p.bodyH || 90) : Math.min(p.h, 1200)) < top) continue;
                 const B = SKY_BIOMES[p.bi || 0];
                 if (p.wall) {
@@ -1322,7 +1348,7 @@
             const spawns = [[480, 440], [1080, 440], [790, 200], [790, 460]].map(([x, y]) => [(x + 17) * scaleX - 17, y]);
             this.botSpawns = [[390, 440], [1190, 440], [790, 200]].map(([x, y]) => [(x + 17) * scaleX - 17, y]);
             this.spawn = spawns[hashStr(s.user.id) % spawns.length];
-            this.me.x = this.spawn[0]; this.me.y = this.spawn[1] - 60;
+            this.placeAtSpawn(this.me, this.spawn);
             this.dmg = 0; this.stun = 0; this.invuln = 1.5; this.swingT = 0; this.swingCd = 0; this.heavyCd = 0; this.swingHeavy = false;
             this.guard = false; this.airJumps = 1; this.coyote = 0; this.hammer = 0; this.kos = 0; this.falls = 0; this.respawn = 0;
             this.lastHit = { by: null, at: 0 }; this.anim = 0; this.orb = { x: this.W / 2, y: 150, t: 0 }; this.state = 0; this.shake = 0;
@@ -1338,6 +1364,15 @@
         }
 
         // The hill moves every 20 seconds; all clients derive it from the shared start time
+        placeAtSpawn(body, point) {
+            body.x = clamp(point[0], this.stage.x + 8, this.stage.x + this.stage.w - body.w - 8);
+            const center = body.x + body.w / 2;
+            const support = this.solids.filter(p => center > p.x && center < p.x + p.w && p.y >= point[1] - 60)
+                .sort((a, b) => a.y - b.y)[0] || this.stage;
+            body.y = support.y - body.h - 12;
+            body.vx = body.vy = 0; body.onGround = false; body.ground = null;
+        }
+
         hill() {
             const elapsed = Math.max(0, Date.now() - this.s.startedAt) / 1000;
             const index = Math.floor(elapsed / 20) % this.zones.length;
@@ -1389,8 +1424,8 @@
             if (this.respawn > 0) {
                 this.respawn -= dt;
                 if (this.respawn <= 0) {
-                    const sp = this.spawn;
-                    me.x = sp[0]; me.y = sp[1] - 60; me.vx = me.vy = 0; this.dmg = 0; this.invuln = 2.2; this.hammer = 0;
+                    this.placeAtSpawn(me, this.spawn);
+                    this.dmg = 0; this.invuln = 2.2; this.hammer = 0; this.airJumps = 1;
                 }
                 this.state = 5; this.particles.update(dt, 500);
                 this.hillState = 'away';
@@ -1449,7 +1484,8 @@
                 });
                 if (opened) this.orb.t = 1;
             }
-            if (this.respawn <= 0 && (me.x < -180 || me.x > this.W + 180 || me.y > this.H || me.y < -650)) this.ko();
+            if (this.respawn <= 0 && (me.x < -180 || me.x > this.W + 180 || me.y > this.H || me.y < -650
+                || (me.y > this.stage.y + 80 && me.x + me.w > this.stage.x && me.x < this.stage.x + this.stage.w))) this.ko();
             this.updateHill(dt);
             this.state = this.guard ? 4 : this.dodge > 0 ? 6 : this.swingT > 0 ? 3 : !me.onGround ? 2 : Math.abs(me.vx) > 40 ? 1 : 0;
             this.particles.update(dt, 300);
@@ -1711,7 +1747,7 @@
                     this.cover.push(mirror({ x, y, w: 210, h: 46 }), mirror({ x, y: y + 46, w: 46, h: 140 }));
                 }
             }
-            this.multiplayer = !s.practice && s.roster.size > 1;
+            this.multiplayer = !s.preview && s.roster.size > 1;
             this.walls.push(...this.cover);
             this.orbs = [];
             for (let i = 0; i < 8; i++) this.orbs.push({ x: 250 + r() * (this.W - 500), y: 250 + r() * (this.H - 500), t: 0 });
@@ -1926,10 +1962,10 @@
             this.zoom = this.cameraZoom(s.vw, s.vh);
             const halfW = s.vw / this.zoom / 2, halfH = s.vh / this.zoom / 2;
             const touch = s.overlay.classList.contains('has-touch');
-            const look = !s.preview && s.mouse.active && (!touch || s.mouse.down) ? (this.weapon === 'rail' ? .3 : .2) : 0;
+            const look = !s.preview && s.mouse.active && (!touch || s.mouse.down) ? (this.weapon === 'rail' ? .42 : .32) : 0;
             const fitsX = halfW * 2 >= this.W, fitsY = halfH * 2 >= this.H;
-            const tx = fitsX ? this.W / 2 : clamp(me.x + clamp((this.mouseWorld.x - me.x) * look, -110, 110), halfW, this.W - halfW);
-            const ty = fitsY ? this.H / 2 : clamp(me.y + clamp((this.mouseWorld.y - me.y) * look, -90, 90), halfH, this.H - halfH);
+            const tx = fitsX ? this.W / 2 : clamp(me.x + clamp((this.mouseWorld.x - me.x) * look, -halfW * .38, halfW * .38), halfW, this.W - halfW);
+            const ty = fitsY ? this.H / 2 : clamp(me.y + clamp((this.mouseWorld.y - me.y) * look, -halfH * .38, halfH * .38), halfH, this.H - halfH);
             const follow = 1 - Math.exp(-dt * 9);
             this.cam.x = fitsX ? tx : clamp(lerp(this.cam.x, tx, follow), halfW, this.W - halfW);
             this.cam.y = fitsY ? ty : clamp(lerp(this.cam.y, ty, follow), halfH, this.H - halfH);
@@ -2006,19 +2042,21 @@
             ctx.scale(zoom, zoom);
             ctx.translate(-this.cam.x, -this.cam.y);
             const x0 = this.cam.x - w / zoom / 2, y0 = this.cam.y - h / zoom / 2;
-            ctx.fillStyle = '#0d1428'; ctx.fillRect(0, 0, this.W, this.H);
-            for (let gy = Math.max(0, Math.floor(y0 / 80) * 80); gy < Math.min(this.H, y0 + h / zoom + 80); gy += 80) {
-                for (let gx = Math.max(0, Math.floor(x0 / 80) * 80); gx < Math.min(this.W, x0 + w / zoom + 80); gx += 80) {
-                    const tile = (gx / 80 + gy / 80) % 2;
-                    ctx.fillStyle = tile ? '#111c31' : '#0e182b'; ctx.fillRect(gx + 2, gy + 2, 76, 76);
-                    ctx.fillStyle = 'rgba(148,163,184,.08)'; ctx.fillRect(gx + 9, gy + 11, 20, 2); ctx.fillRect(gx + 67, gy + 67, 3, 3);
+            if (!this.floorPattern && ctx.createPattern && !s.preview) {
+                const tile = document.createElement('canvas');
+                tile.width = tile.height = 160;
+                const paint = tile.getContext('2d');
+                paint.fillStyle = '#0d1428'; paint.fillRect(0, 0, 160, 160);
+                for (let y = 0; y < 160; y += 80) for (let x = 0; x < 160; x += 80) {
+                    paint.fillStyle = (x + y) % 160 ? '#111c31' : '#0e182b';
+                    paint.fillRect(x + 2, y + 2, 76, 76);
+                    paint.fillStyle = 'rgba(148,163,184,.08)'; paint.fillRect(x + 9, y + 11, 20, 2); paint.fillRect(x + 67, y + 67, 3, 3);
+                    paint.strokeStyle = 'rgba(99,102,241,.14)';
+                    paint.strokeRect(x, y, 80, 80);
                 }
+                this.floorPattern = ctx.createPattern(tile, 'repeat');
             }
-            ctx.strokeStyle = 'rgba(99,102,241,.14)'; ctx.lineWidth = 1;
-            ctx.beginPath();
-            for (let gx = Math.max(0, Math.floor(x0 / 80) * 80); gx < Math.min(this.W, x0 + w / zoom + 80); gx += 80) { ctx.moveTo(gx, Math.max(0, y0)); ctx.lineTo(gx, Math.min(this.H, y0 + h / zoom + 80)); }
-            for (let gy = Math.max(0, Math.floor(y0 / 80) * 80); gy < Math.min(this.H, y0 + h / zoom + 80); gy += 80) { ctx.moveTo(Math.max(0, x0), gy); ctx.lineTo(Math.min(this.W, x0 + w / zoom + 80), gy); }
-            ctx.stroke();
+            ctx.fillStyle = this.floorPattern || '#0e182b'; ctx.fillRect(0, 0, this.W, this.H);
             for (const wl of this.walls) {
                 if (wl.x > x0 + w / zoom + 50 || wl.x + wl.w < x0 - 50 || wl.y > y0 + h / zoom + 50 || wl.y + wl.h < y0 - 50) continue;
                 ctx.fillStyle = 'rgba(0,0,0,.38)'; ctx.fillRect(wl.x + 10, wl.y + 13, wl.w, wl.h);
@@ -2104,12 +2142,27 @@
             s.placeHud(ctx, 14, 142, 270, 58, 'top-left');
             ctx.fillStyle = 'rgba(8,12,24,.8)'; roundRect(ctx, 14, 142, 270, 58, 9); ctx.fill();
             ctx.textAlign = 'left'; ctx.font = '800 14px system-ui'; ctx.fillStyle = '#e2e8f0';
-            ctx.fillText(`WAVE ${this.wave} · ${this.drones.length} drones${this.streakT > 0 && this.streak > 1 ? ` · ${this.streak} streak` : ''}`, 25, 163, 248);
+            ctx.fillText(`${this.multiplayer ? `${this.pk} player KOs · PvP` : `WAVE ${this.wave} · ${this.drones.length} drones`}${this.streakT > 0 && this.streak > 1 ? ` · ${this.streak} streak` : ''}`, 25, 163, 248);
             const weapon = this.weaponInfo(); ctx.fillStyle = weapon.color;
             ctx.fillText(`${weapon.name}${this.weaponT > 0 ? ` · ${Math.ceil(this.weaponT)}s` : ''} · HP ${Math.max(0, Math.round(this.hp))}`, 25, 185, 248); ctx.restore();
             if (this.flash > 0) { ctx.fillStyle = `rgba(239,68,68,${this.flash * 1.4})`; ctx.fillRect(0, 0, w, h); }
             if (this.dead > 0) { ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.fillRect(0, 0, w, h); ctx.fillStyle = '#fff'; ctx.font = '800 36px system-ui'; ctx.textAlign = 'center'; ctx.fillText(`Respawning in ${Math.ceil(this.dead)}…`, w / 2, h / 2); }
             else {
+                const enemy = s.remoteList().filter(player => player.a !== 1)
+                    .sort((a, b) => dist(a.x, a.y, me.x, me.y) - dist(b.x, b.y, me.x, me.y))[0];
+                if (enemy) {
+                    const sx = w / 2 + (enemy.x - this.cam.x) * zoom, sy = h / 2 + (enemy.y - this.cam.y) * zoom;
+                    if (sx < 35 || sx > w - 35 || sy < 80 || sy > h - 90) {
+                        const dx = sx - w / 2, dy = sy - h / 2;
+                        const ratio = Math.min((w / 2 - 35) / Math.max(1, Math.abs(dx)), (h / 2 - 90) / Math.max(1, Math.abs(dy)));
+                        const x = w / 2 + dx * ratio, y = h / 2 + dy * ratio;
+                        ctx.save(); ctx.translate(x, y); ctx.rotate(Math.atan2(dy, dx));
+                        ctx.fillStyle = enemy.color || '#fb7185';
+                        ctx.beginPath(); ctx.moveTo(12, 0); ctx.lineTo(-8, -8); ctx.lineTo(-8, 8); ctx.closePath(); ctx.fill(); ctx.restore();
+                        ctx.fillStyle = '#f8fafc'; ctx.font = '700 11px system-ui'; ctx.textAlign = 'center';
+                        ctx.fillText(`${Math.round(dist(enemy.x, enemy.y, me.x, me.y) / 40)}m`, x, y + 22);
+                    }
+                }
                 const cx = s.mouse.x, cy = s.mouse.y, gap = this.hitmark > 0 ? 14 : 10;
                 ctx.strokeStyle = this.hitmark > 0 ? '#facc15' : '#e0f2fe'; ctx.lineWidth = 2.5;
                 ctx.beginPath(); ctx.arc(cx, cy, 11, 0, TAU);

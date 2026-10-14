@@ -170,11 +170,23 @@
             this.res = new A.Resource('Fuel', '#facc15', 100, 78, 2);
             this.F = new Uint8Array(COLS * ROWS);
             this.D = new Uint8Array(COLS * ROWS);
+            this.lavaVisibility = new Float32Array(COLS * ROWS);
             this.flowing = new Set(); this.flowClock = 0; this.flowSideClock = 0;
             for (let i = 0; i < tiles.length; i++) if (tiles[i] === 6) this.flowing.add(i);
         }
 
         tile(tx, ty) { return tx < 0 || ty < 0 || tx >= COLS || ty >= ROWS ? 10 : this.T[ty * COLS + tx]; }
+        revealLava(dt) {
+            const cx = this.me.x + this.me.w / 2, cy = this.me.y + this.me.h / 2;
+            const col = Math.floor(cx / TS), row = Math.floor(cy / TS), radius = TS * 5;
+            for (let y = Math.max(4, row - 5); y <= Math.min(ROWS - 1, row + 5); y++) {
+                for (let x = Math.max(1, col - 5); x <= Math.min(COLS - 2, col + 5); x++) {
+                    const index = y * COLS + x, distance = Math.hypot(x * TS + TS / 2 - cx, y * TS + TS / 2 - cy);
+                    if (this.T[index] !== 6 || distance > radius) continue;
+                    this.lavaVisibility[index] = Math.min(1, this.lavaVisibility[index] + dt * (1.6 - distance / radius));
+                }
+            }
+        }
         solid(type) { return type !== 0 && type !== 6; }
         depthAt(y) { return Math.max(0, Math.floor(y / TS) - 4); }
         digDuration(type, ty) {
@@ -304,7 +316,7 @@
             this.moving = Math.abs(me.vx) > 20 || Math.abs(me.vy) > 25;
             this.particles.update(dt, 500);
 
-            this.hitLava(); this.flowLava(dt);
+            this.hitLava(); this.flowLava(dt); this.revealLava(dt);
             this.depthMax = Math.max(this.depthMax, this.depthAt(me.y + me.h));
             const depth = this.depthAt(me.y + me.h);
             this.lowFuel = depth > 7 && this.res.value < Math.min(88, 24 + depth * 1.35);
@@ -444,10 +456,10 @@
                     continue;
                 }
                 if (type === 6) {
-                    if (!s.preview && Math.hypot(x + TS / 2 - (me.x + me.w / 2), y + TS / 2 - (me.y + me.h / 2)) > TS * 5) {
-                        ctx.fillStyle = '#30251e'; ctx.fillRect(x, y, TS, TS);
-                        continue;
-                    }
+                    ctx.fillStyle = '#30251e'; ctx.fillRect(x, y, TS, TS);
+                    const visibility = s.preview ? 1 : this.lavaVisibility[idx];
+                    if (visibility <= 0) continue;
+                    ctx.save(); ctx.globalAlpha = visibility;
                     ctx.fillStyle = '#21140f'; ctx.fillRect(x, y, TS, TS);
                     const pulse = 0.76 + Math.sin(this.anim * 4 + idx) * 0.12;
                     const glow = ctx.createRadialGradient(x + 24, y + 24, 3, x + 24, y + 24, 38);
@@ -464,6 +476,7 @@
                     ctx.lineTo(x + 44, y + TS - 3); ctx.closePath(); ctx.fill();
                     ctx.fillStyle = 'rgba(255,218,95,.56)';
                     ctx.fillRect(x + 4, surfaceY + 3, TS - 8, 2);
+                    ctx.restore();
                     continue;
                 }
                 const rockColor = type === 10 ? '#111827' : type === 2 ? '#475569' : color;
@@ -1350,6 +1363,7 @@
                 || (state.revision === this.ballRevision && from.id === this.ballOwner && state.sequence <= this.ballSequence)) return;
             const b = this.ball, offset = this.ballVisualOffset;
             const shownX = b.x + offset.x, shownY = b.y + offset.y;
+            const newContact = state.revision > this.ballRevision;
             this.ballRevision = state.revision; this.ballOwner = from.id; this.ballSequence = state.sequence;
             Object.assign(b, { x: clamp(state.x, -this.netD, this.W + this.netD), y: clamp(state.y, b.r, this.H - b.r), vx: state.vx, vy: state.vy });
             if (Number.isFinite(state.spin)) this.ballSpin = state.spin;
@@ -1363,8 +1377,8 @@
                 if (scored >= 0) break;
             }
             const gap = Math.hypot(shownX - b.x, shownY - b.y);
-            offset.x = gap < 200 ? shownX - b.x : 0;
-            offset.y = gap < 200 ? shownY - b.y : 0;
+            offset.x = !newContact && gap < 120 ? shownX - b.x : 0;
+            offset.y = !newContact && gap < 120 ? shownY - b.y : 0;
         }
 
         stepKeeper(dt) {

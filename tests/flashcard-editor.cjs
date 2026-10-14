@@ -352,6 +352,64 @@ async function linksAndSharing() {
     assert.match(sql, /d\.owner_id <> new\.owner_id/);
 }
 
-run().then(linksAndSharing).then(() => {
+async function privateAnswerTools() {
+    for (const id of ['card-answer-mode', 'card-accepted-answers', 'card-keywords', 'card-attachments', 'card-remove-attachments']) {
+        elements.set(id, { value: '', checked: false, files: [], textContent: '', classList: { toggle() {} } });
+    }
+    const attachment = { name: 'audio.mp3', type: 'audio/mpeg', data: 'data:audio/mpeg;base64,aGVsbG8=' };
+    state.flashcards = [{ id: 'private', title: 'Definitions', cards: [{ id: 'c', front: 'Meaning', back: 'Not soluble in water.',
+        answerMode: 'keywords', acceptedAnswers: ['insoluble in water'], keywords: [['soluble'], ['water']], attachments: [attachment] }] }];
+    app.openDeckEditor('private');
+    app.openCardForm('private', 'c', true);
+    assert.equal(elements.get('card-answer-mode').value, 'keywords');
+    value('card-front', 'Definition');
+    value('card-back', 'Not soluble in water.');
+    value('card-keywords', 'soluble\nwater');
+    value('card-accepted-answers', 'insoluble in water');
+    await app.saveCard();
+    assert.equal(app.deckEditorDraft.cards[0].attachments.length, 1);
+    app.copyEditorCard('c');
+    const copied = app.deckEditorDraft.cards.at(-1);
+    assert.deepEqual(clone(copied.attachments), [attachment]);
+    assert.notEqual(copied.attachments[0], app.deckEditorDraft.cards[0].attachments[0]);
+    assert.deepEqual(clone(copied.keywords), [['soluble'], ['water']]);
+    app.copyEditorCard('c', true);
+    const reversed = app.deckEditorDraft.cards[1];
+    for (const key of ['attachments', 'answerMode', 'acceptedAnswers', 'keywords']) assert.equal(reversed[key], undefined, 'reverse cards cannot inherit answer-only rules');
+    const markup = app.cardAttachmentMarkup({ attachments: [attachment, { ...attachment, type: 'text/html' }] });
+    assert.match(markup, /<audio controls preload="none"/);
+    assert.equal((markup.match(/download=/g) || []).length, 1);
+    assert.match(app.cardAttachmentMarkup({ attachments: [{ ...attachment, name: '<bad"name>.mp3' }] }), /&lt;bad&quot;name&gt;/);
+    sandbox.FileReader = class {
+        readAsDataURL() { this.result = 'data:application/octet-stream;base64,aGVsbG8='; this.onload(); }
+    };
+    app.openCardForm('private', 'c', true);
+    elements.get('card-attachments').files = [{ name: 'mobile.txt', type: '', size: 5 }];
+    await app.saveCard();
+    assert.equal(app.deckEditorDraft.cards[0].attachments[1].type, 'text/plain', 'empty mobile MIME resolves from a known extension');
+    assert.match(app.deckEditorDraft.cards[0].attachments[1].data, /^data:text\/plain;base64,/);
+    value('deck-editor-filter', 'attachments');
+    app.renderDeckEditorCards();
+    assert.equal(elements.get('deck-editor-count').textContent, '2 of 3 cards');
+    assert.match(elements.get('deck-editor-cards').innerHTML, /2 private attachments/);
+    value('deck-editor-filter', 'keywords');
+    app.renderDeckEditorCards();
+    assert.equal(elements.get('deck-editor-count').textContent, '2 of 3 cards');
+    value('deck-editor-filter', 'all');
+    let finishRead;
+    sandbox.FileReader = class {
+        readAsDataURL() { finishRead = () => { this.result = 'data:application/pdf;base64,aGVsbG8='; this.onload(); }; }
+    };
+    app.openCardForm('private', 'c', true);
+    value('card-front', 'New definition'); value('card-back', 'Not soluble in water.');
+    elements.get('card-attachments').files = [{ name: 'notes.pdf', type: 'application/pdf', size: 5 }];
+    const saving = app.saveCard();
+    app.deckEditorDraft.cards[0].back = 'Newer edit';
+    finishRead();
+    await assert.rejects(saving, /edited elsewhere/, 'file reads never overwrite concurrent answer edits');
+    assert.equal(app.deckEditorDraft.cards[0].back, 'Newer edit');
+}
+
+run().then(linksAndSharing).then(privateAnswerTools).then(() => {
     console.log('Flashcard drafts, editing/deletion, progress preservation, write failures, class/test switching and shared-set identity checks passed.');
 }).catch(error => { console.error(error); process.exitCode = 1; });

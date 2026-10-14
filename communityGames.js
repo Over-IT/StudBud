@@ -212,6 +212,13 @@
             return window.StudBudCloud.user.id;
         }
 
+        getGameClient() {
+            const cloud = window.StudBudCloud;
+            if (window.navigator?.onLine === false) throw new Error('Joining a game needs an internet connection.');
+            if (cloud?.guestClient && cloud.guestUser && !cloud.user) return cloud.guestClient;
+            return this.getClient();
+        }
+
         boxPool(box, owned = []) {
             const types = { hat: ['hat'], accessory: ['accessory', 'effect'], effect: ['effect'], palette: ['palette'], skin: ['skin'] };
             return this.catalog.filter(item => !item.legacy && item.type !== 'pet' && box.chances[item.rarity] > 0
@@ -513,7 +520,8 @@
         }
 
         async joinRoom(roomCode, nickname) {
-            const { data, error } = await this.getClient().rpc('studbud_join_game_room', {
+            if (!window.StudBudCloud?.user) await window.StudBudCloud.prepareGuestSession();
+            const { data, error } = await this.getGameClient().rpc('studbud_join_game_room', {
                 p_code: roomCode,
                 p_nickname: nickname
             });
@@ -522,7 +530,7 @@
         }
 
         async getRoom(roomCode) {
-            const { data, error } = await this.getClient().rpc('studbud_get_game_room', {
+            const { data, error } = await this.getGameClient().rpc('studbud_get_game_room', {
                 p_code: roomCode
             });
             if (error) throw new Error(`Could not refresh the game: ${error.message}`);
@@ -538,7 +546,7 @@
         }
 
         async submitAnswer(roomCode, questionNumber, choiceIndex, action = 'steady') {
-            const { data, error } = await this.getClient().rpc('studbud_submit_game_answer', {
+            const { data, error } = await this.getGameClient().rpc('studbud_submit_game_answer', {
                 p_code: roomCode,
                 p_question_number: questionNumber,
                 p_choice_index: choiceIndex,
@@ -574,7 +582,7 @@
         }
 
         async getCards(roomCode) {
-            const { data, error } = await this.getClient().rpc('studbud_get_game_cards', { p_code: roomCode });
+            const { data, error } = await this.getGameClient().rpc('studbud_get_game_cards', { p_code: roomCode });
             if (error) throw new Error(`Could not load questions: ${error.message}`);
             return (Array.isArray(data) ? data : []).filter(card => card?.front && card?.back);
         }
@@ -585,7 +593,7 @@
         }
 
         async reportScore(roomCode, score, answered, correct = 0) {
-            const { error } = await this.getClient().rpc('studbud_report_game_score', {
+            const { error } = await this.getGameClient().rpc('studbud_report_game_score', {
                 p_code: roomCode,
                 p_score: Math.max(0, Math.round(score)),
                 p_answered: Math.max(0, Math.round(answered)),
@@ -601,13 +609,13 @@
         }
 
         openChannel(roomCode) {
-            return this.getClient().channel(`studbud-room-${roomCode}`, {
+            return this.getGameClient().channel(`studbud-room-${roomCode}`, {
                 config: { broadcast: { self: false, ack: false } }
             });
         }
 
         async leaveRoom(roomCode) {
-            const { data, error } = await this.getClient().rpc('studbud_leave_game_room', {
+            const { data, error } = await this.getGameClient().rpc('studbud_leave_game_room', {
                 p_code: roomCode
             });
             if (error) throw new Error(`Could not leave the game: ${error.message}`);
