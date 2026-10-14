@@ -18,6 +18,7 @@
             this.signOutHandling = null;
             this.lastSnapshot = null;
             this.restoringSnapshot = false;
+            this.offlineMode = false;
         }
 
         static mergeData(base, local, remote, field = 'account') {
@@ -116,6 +117,7 @@
         async bootstrap() {
             this.bindAuthUI();
             this.showAuth();
+            if (window.navigator?.onLine === false || localStorage.getItem('STUDBUD_LOCAL_MODE') === 'true') return this.startOffline();
             const config = window.STUDBUD_SUPABASE_CONFIG || {};
             if (!config.url || !config.anonKey) {
                 this.showAuth();
@@ -127,6 +129,14 @@
             }
             this.client = window.supabase.createClient(config.url, config.anonKey);
             const { data: authListener } = this.client.auth.onAuthStateChange((event, session) => {
+                if (this.offlineMode) {
+                    if (event === 'SIGNED_OUT') {
+                        this.user = null;
+                        this.accountReady = false;
+                        this.setCloudStatus('Offline data is retained. Sign in again after reconnecting to sync.');
+                    }
+                    return;
+                }
                 if (event === 'SIGNED_OUT') {
                     this.handleSignedOut().catch(error => {
                         console.error('[StudBudCloud] Could not finish signing out:', error);
@@ -146,10 +156,96 @@
         }
 
         bindAuthUI() {
+            if (this.authUiBound) return;
+            this.authUiBound = true;
             document.getElementById('auth-switch-btn')?.addEventListener('click', () => this.setAuthMode(this.authMode === 'login' ? 'signup' : 'login'));
             document.getElementById('login-form')?.addEventListener('submit', event => this.handleLogin(event));
             document.getElementById('signup-form')?.addEventListener('submit', event => this.handleSignup(event));
             document.getElementById('sign-out-btn')?.addEventListener('click', () => this.signOut());
+            document.getElementById('offline-start-btn')?.addEventListener('click', () => this.startOffline().catch(error => this.reportAccountError(error)));
+            document.getElementById('offline-connect-btn')?.addEventListener('click', () => this.connectOnline().catch(error => this.reportAccountError(error)));
+            window.addEventListener('offline', () => {
+                this.offlineMode = true;
+                window.clearTimeout(this.syncTimer);
+                this.updateOfflineNotice();
+                this.setCloudStatus('Offline: changes are saved on this device. Sync resumes after reconnecting.');
+            });
+            window.addEventListener('online', () => {
+                if (this.offlineMode && !this.user && !localStorage.getItem('STUDBUD_CLOUD_ACCOUNT_ID')) {
+                    this.setCloudStatus('Internet is available. Continue locally or choose Connect account to sync.');
+                    return;
+                }
+                this.connectOnline().catch(error => {
+                    console.error('[StudBudCloud] Reconnection failed:', error);
+                    this.setCloudStatus(`Saved on this device. Reconnection failed: ${error.message}`, true);
+                });
+            });
+        }
+
+        updateOfflineNotice() {
+            document.getElementById('offline-notice')?.classList.toggle('hidden', !this.offlineMode);
+            const signOut = document.getElementById('sign-out-btn');
+            if (signOut) signOut.textContent = this.offlineMode ? 'Connect account' : 'Sign out';
+        }
+
+        async startOffline() {
+            if (this.accountOpening || this.syncPromise) throw new Error('Wait for the account operation to finish before opening offline mode.');
+            this.offlineMode = true;
+            localStorage.setItem('STUDBUD_LOCAL_MODE', 'true');
+            this.initialSnapshot = null;
+            this.user = null;
+            this.accountReady = false;
+            window.clearTimeout(this.syncTimer);
+            if (!this.appStarted) {
+                await window.NexusApp.init();
+                this.appStarted = true;
+            }
+            if (localStorage.getItem('STUDBUD_CLOUD_ACCOUNT_ID') && !localStorage.getItem('STUDBUD_CLOUD_SYNC_BASE')) {
+                const base = this.lastSnapshot || JSON.parse(await window.NexusApp.AppState.exportAppState());
+                localStorage.setItem('STUDBUD_CLOUD_SYNC_BASE', JSON.stringify(base));
+            }
+            this.bindStateEvents();
+            document.getElementById('auth-screen')?.classList.add('hidden');
+            document.getElementById('app-container')?.classList.remove('hidden');
+            this.updateOfflineNotice();
+            const accountName = document.getElementById('account-name');
+            if (accountName) accountName.textContent = 'Offline on this device';
+            this.setCloudStatus('Offline / local mode: saved on this device. Cloud and community features require a connection.');
+        }
+
+        async connectOnline() {
+            if (window.navigator?.onLine === false) {
+                this.setCloudStatus('Still offline. Your changes are saved on this device; connect to the internet to sync.', true);
+                return;
+            }
+            this.offlineMode = false;
+            localStorage.removeItem('STUDBUD_LOCAL_MODE');
+            this.updateOfflineNotice();
+            if (!this.client && this.appStarted && !window.STUDBUD_SUPABASE_CONFIG?.url) {
+                const script = document.createElement('script');
+                script.src = 'supabase-config.js';
+                try {
+                    await new Promise((resolve, reject) => {
+                        script.onload = resolve;
+                        script.onerror = () => reject(new Error('Could not load account connection settings. Your data remains saved on this device.'));
+                        document.head.appendChild(script);
+                    });
+                } finally {
+                    script.remove();
+                }
+            }
+            if (!this.client) return this.bootstrap();
+            const { data, error } = await this.client.auth.getSession();
+            if (error) throw error;
+            if (data.session?.user) {
+                await this.openAccount(data.session.user);
+                this.queueSync();
+                await window.NexusApp?.syncPendingStudyTime?.();
+                await window.NexusApp?.refreshPendingSharedDecks?.();
+            } else {
+                this.showAuth();
+                this.setAuthStatus('Sign in to connect your saved device data. You can also continue offline.');
+            }
         }
 
         showAuth() {
@@ -299,7 +395,8 @@
 
             const remoteSnapshot = row?.data || null;
             const previousAccount = localStorage.getItem('STUDBUD_CLOUD_ACCOUNT_ID');
-            const savedBase = previousAccount === user.id ? localStorage.getItem('STUDBUD_CLOUD_SYNC_BASE') : null;
+            const savedBase = previousAccount === user.id ? localStorage.getItem('STUDBUD_CLOUD_SYNC_BASE')
+                : !previousAccount && localStorage.getItem('STUDBUD_LOCAL_ONLY_DATA') ? '{}' : null;
             this.initialSnapshot = savedBase ? null : remoteSnapshot;
             this.lastSnapshot = remoteSnapshot ? JSON.parse(JSON.stringify(remoteSnapshot)) : null;
             this.user = user;
@@ -336,6 +433,7 @@
 
             if (version !== this.accountVersion) return;
             localStorage.setItem('STUDBUD_CLOUD_ACCOUNT_ID', user.id);
+            localStorage.removeItem('STUDBUD_LOCAL_ONLY_DATA');
             const username = user.user_metadata?.username || user.email;
             const accountName = document.getElementById('account-name');
             if (accountName) accountName.textContent = window.NexusApp?.multiplayerDisplayName?.() || username;
@@ -343,11 +441,15 @@
             await window.NexusApp.recoverOwnedCommunityDecks();
             if (version !== this.accountVersion) return;
             this.accountReady = true;
+            this.offlineMode = false;
+            localStorage.removeItem('STUDBUD_LOCAL_MODE');
+            this.updateOfflineNotice();
             document.getElementById('auth-screen')?.classList.add('hidden');
             document.getElementById('app-container')?.classList.remove('hidden');
             this.setCloudStatus(this.initialSnapshot ? 'Synced to your account.' : 'Saving your account data…');
             this.queueSync();
             window.NexusApp?.refreshAdminAccess?.();
+            await window.NexusApp?.refreshPendingSharedDecks?.();
         }
 
         reportAccountError(error) {
@@ -446,10 +548,15 @@
                     this.syncNow().catch(error => this.setCloudStatus(this.friendlyAuthError(error, 'Could not sync before leaving.'), true));
                 } else if (this.accountReady) this.queueSync();
             });
-            window.addEventListener('online', () => this.queueSync());
         }
 
         queueSync() {
+            if (this.offlineMode || window.navigator?.onLine === false) {
+                this.syncRevision++;
+                if (!localStorage.getItem('STUDBUD_CLOUD_ACCOUNT_ID')) localStorage.setItem('STUDBUD_LOCAL_ONLY_DATA', 'true');
+                this.setCloudStatus('Offline / local mode: changes saved on this device; waiting to sync.');
+                return;
+            }
             if (this.restoringSnapshot || !this.accountReady || !this.user || !window.NexusApp?.AppState) return;
             this.syncRevision++;
             window.clearTimeout(this.syncTimer);
@@ -463,6 +570,7 @@
         }
 
         async syncNow() {
+            if (this.offlineMode || window.navigator?.onLine === false) return;
             if (!this.accountReady || !this.user) return;
             if (this.syncPromise) return this.syncPromise;
             const userId = this.user.id;
@@ -524,10 +632,13 @@
         async clearDeviceCache() {
             localStorage.removeItem('PCHS_NEXUS_STATE_V1');
             localStorage.removeItem('STUDBUD_CLOUD_SYNC_BASE');
+            localStorage.removeItem('STUDBUD_LOCAL_ONLY_DATA');
+            localStorage.removeItem('STUDBUD_LOCAL_MODE');
             await Promise.all(['flashcards', 'studyHistory', 'gameMetrics'].map(store => window.NexusApp.clearLocalStore(store)));
         }
 
         async signOut() {
+            if (this.offlineMode) return this.connectOnline().catch(error => this.reportAccountError(error));
             if (!window.confirm('Sign out of StudBud on this device? Your synced account data will remain in the cloud.')) return;
             try { await this.syncNow(); }
             catch (error) {

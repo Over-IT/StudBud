@@ -488,6 +488,14 @@
     // ============================================================================
     // 4. ROUTER ENGINE
     // ============================================================================
+    const WORKSPACES = [
+        { main: 'gpa', tabs: [['gpa', 'Grades & GPA'], ['grade-scenarios', 'What-if grades'], ['analytics', 'Analytics']] },
+        { main: 'planner', tabs: [['planner', 'Tasks'], ['calendar', 'Calendar'], ['schedule', 'Class schedule']] },
+        { main: 'flashcard', tabs: [['flashcard', 'My sets'], ['exam-arcade', 'Practice'], ['importer', 'Import cards']] },
+        { main: 'multiplayer', tabs: [['multiplayer', 'Games'], ['friends', 'Buds'], ['leaderboard', 'Leaderboards'], ['shop', 'Shop']] },
+        { main: 'settings', tabs: [['settings', 'Profile & data'], ['appearance', 'Appearance'], ['sound', 'Sound'], ['about', 'About']] }
+    ];
+
     class RouterEngine {
         constructor() {
             this.routes = [
@@ -523,7 +531,7 @@
 
         navigate(route, updateHash = true) {
             if (route !== 'class' && !this.routes.includes(route)) route = "dashboard";
-            if (route === 'admin' && !window.NexusApp?.canAccessStaff) route = "dashboard";
+            if (route === 'admin' && (!window.NexusApp?.canAccessStaff || window.StudBudCloud?.offlineMode)) route = "dashboard";
 
             this.activeRoute = route;
             AppState.set('currentView', route);
@@ -535,6 +543,14 @@
             }
 
             const viewId = route === 'class' ? 'class-detail-view' : `${route}-view`;
+            const workspace = WORKSPACES.find(group => group.tabs.some(([tab]) => tab === route) || (route === 'class' && group.main === 'gpa'));
+            const tabs = document.getElementById('workspace-tabs');
+            if (tabs) {
+                const restoreFocus = tabs.contains(document.activeElement);
+                tabs.classList.toggle('hidden', !workspace);
+                tabs.innerHTML = workspace ? workspace.tabs.map(([tab, label]) => `<button type="button" class="workspace-tab${tab === route ? ' selected' : ''}" data-target="${tab}-view"${tab === route ? ' aria-current="page"' : ''}>${label}</button>`).join('') : '';
+                if (restoreFocus) tabs.querySelector('[aria-current="page"]')?.focus({ preventScroll: true });
+            }
             document.querySelectorAll('.view').forEach(view => {
                 const isActive = view.id === viewId;
                 view.classList.toggle('active', isActive);
@@ -1017,12 +1033,14 @@
             this.updateMultiplayerModeSetup(this.selectedMultiplayerMode);
             this.renderUI();
             Router.init();
-            await this.renderMultiplayerProfile();
-            this.syncPendingStudyTime().catch(error => {
-                console.error('[NexusApp] Pending study time could not be loaded:', error);
-                AppState.setSaveStatus(`Saved study time could not be synced. ${this.friendlyErrorMessage(error)}`, 'error');
-            });
-            this.refreshStudyLeaderboard('daily');
+            if (!window.StudBudCloud.offlineMode) {
+                await this.renderMultiplayerProfile();
+                this.syncPendingStudyTime().catch(error => {
+                    console.error('[NexusApp] Pending study time could not be loaded:', error);
+                    AppState.setSaveStatus(`Saved study time could not be synced. ${this.friendlyErrorMessage(error)}`, 'error');
+                });
+                this.refreshStudyLeaderboard('daily');
+            }
 
             const unlockAudio = () => {
                 Soundscape.initAudioContext();
@@ -1189,6 +1207,7 @@
                 if (event.target.matches('#assignment-search')) this.renderAssignments();
                 if (event.target.matches('#my-deck-search')) this.renderDecks();
                 if (event.target.matches('#deck-editor-search')) this.renderDeckEditorCards();
+                if (event.target.matches('#deck-editor-filter')) this.renderDeckEditorCards();
                 if (event.target.matches('#multiplayer-shop-search')) {
                     this.shopSearch = event.target.value.trim();
                     const query = event.target.value.trim().toLocaleLowerCase();
@@ -1572,6 +1591,7 @@
                                 </div>
                                 <strong class="transcript-assignment-score">${hasScore ? `${this.formatNumber(item.pointsEarned || 0)} / ${this.formatNumber(item.maxPoints || 0)}` : 'Not graded'}</strong>
                                 <div class="transcript-assignment-actions">
+                                    ${this.assessmentStudyButton(item)}
                                     ${hasScore ? '' : `<button class="secondary-btn" data-action="toggle-assignment" data-id="${this.escapeHTML(item.id)}">${item.status === 'completed' ? 'Reopen' : 'Done'}</button>`}
                                     <button class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}" aria-label="Edit ${this.escapeHTML(item.title)}">Edit</button>
                                     <button class="danger-btn" data-action="delete-assignment" data-id="${this.escapeHTML(item.id)}" aria-label="Delete ${this.escapeHTML(item.title)}">Delete</button>
@@ -1723,6 +1743,7 @@
                     <td>${this.isGradedItem(item) ? '—' : this.escapeHTML(item.dueDate || 'No date')}</td>
                     <td>${this.isGradedItem(item) ? `${this.formatNumber(item.pointsEarned ?? 0)} / ${this.formatNumber(item.maxPoints ?? 100)}` : 'Not graded'}</td>
                     <td class="actions">
+                        ${this.assessmentStudyButton(item)}
                         <button class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit</button>
                         <button class="danger-btn" data-action="delete-assignment" data-id="${this.escapeHTML(item.id)}">Delete</button>
                     </td>
@@ -2496,7 +2517,7 @@
                 const game = session.gameSummary;
                 const accuracy = game?.answered ? Math.round(game.correct / game.answered * 100) : 0;
                 const standings = game?.standings || [];
-                const detail = game ? `<details class="saved-game-summary"><summary>${session.source === 'solo' ? 'Practice game' : 'Game'} summary · ${game.answered ? `${accuracy}% correct` : 'No answers submitted'} · ${Number(game.answered) || 0} answered</summary><p>${Number(game.correct) || 0} correct · ${Math.max(0, Number(game.answered || 0) - Number(game.correct || 0))} incorrect · ${(game.questions || []).filter(question => question.correct === null).length} skipped</p>${standings.length ? `<ol>${standings.map(row => `<li>${this.escapeHTML(row.name)} · ${this.formatNumber(game.objectiveBased ? row.goal : row.score)} ${this.escapeHTML(game.objectiveUnit || 'pts')}</li>`).join('')}</ol>` : ''}${window.StudBudArcade.util.questionHistoryMarkup(game.questions || [])}</details>` : '';
+                const detail = game ? `<details class="saved-game-summary"><summary>${session.source === 'solo' ? 'Practice game' : 'Game'} summary · ${game.answered ? `${accuracy}% correct` : 'No answers submitted'} · ${Number(game.answered) || 0} answered</summary><p>${Number(game.correct) || 0} correct · ${Math.max(0, Number(game.answered || 0) - Number(game.correct || 0))} incorrect · ${(game.questions || []).filter(question => question.correct === null).length} skipped</p>${standings.length ? `<ol>${standings.map(row => `<li>${this.escapeHTML(row.name)} · ${this.formatNumber(game.objectiveBased ? row.goal : row.score)} ${this.escapeHTML(game.objectiveUnit || 'pts')}</li>`).join('')}</ol>` : ''}${window.StudBudArcade.util.questionHistoryMarkup(game.questions || [])}${game.studySet ? this.studySetMarkup(game.studySet) : ''}</details>` : '';
                 return `<article class="study-history-item"><div><strong>${this.escapeHTML(session.title || 'Study session')}</strong><span>${this.formatStudyDuration(session.durationSec)} · ${this.escapeHTML(session.methodLabel || this.studyMethodLabel(session.method || 'retrieval'))}</span><small>${new Date(session.timestamp).toLocaleDateString()} · ${rated}${session.notes ? ` · ${this.escapeHTML(session.notes)}` : ''}</small></div>${detail}</article>`;
             }).join('')}` : '<p class="empty-state">Log a study session from a recommendation to help tune your future plan.</p>';
         }
@@ -2551,6 +2572,7 @@
                         <td>${graded ? `${this.formatNumber(item.pointsEarned || 0)} / ${this.formatNumber(item.maxPoints || 0)}` : this.escapeHTML(item.dueDate || 'No due date')}</td>
                         <td>${graded || status === 'completed' ? '—' : this.assignmentPriority(item, courses).score.toFixed(2)}</td>
                         <td class="actions">
+                            ${this.assessmentStudyButton(item)}
                             <button class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit</button>
                             <button class="danger-btn" data-action="delete-assignment" data-id="${this.escapeHTML(item.id)}">Delete</button>
                         </td>
@@ -2707,6 +2729,35 @@
             return { courseCode, course, assessment };
         }
 
+        assessmentStudyButton(item) {
+            if (!['quiz', 'test'].includes(String(item.kind).toLowerCase())) return '';
+            const linked = (AppState.get('flashcards') || []).some(deck => String(deck.assessmentId) === String(item.id));
+            return `<button type="button" class="secondary-btn" data-action="assessment-study-set" data-id="${this.escapeHTML(item.id)}">${linked ? 'Open study set' : 'Create study set'}</button>`;
+        }
+
+        studySetMarkup(info = {}) {
+            const deck = (AppState.get('flashcards') || []).find(item => item.id === info.deckId
+                || (info.publicId && [item.communityDeckId, item.communitySourceId].includes(info.publicId)));
+            const action = deck ? `<button type="button" class="secondary-btn" data-action="open-study-set" data-id="${this.escapeHTML(deck.id)}">Open study set</button>`
+                : info.publicId ? this.communityDeckActionMarkup(info.publicId) : '<small>This private set is not in your library.</small>';
+            return `<div class="review-study-set"${info.publicId ? ` data-review-public-id="${this.escapeHTML(info.publicId)}" data-review-title="${this.escapeHTML(info.title || deck?.title || 'Flashcards')}"` : ''}><strong>Study set: ${this.escapeHTML(info.title || deck?.title || 'Flashcards')}</strong>${action}</div>`;
+        }
+
+        roomStudyDeck(room) {
+            const ownId = window.StudBudCloud?.user?.id;
+            const localId = room.deck_id || (room.host_id === ownId ? room.state?.source_deck_id : '');
+            const local = localId ? (AppState.get('flashcards') || []).find(deck => deck.id === localId) : null;
+            return local || (room.state?.public_deck_id ? this.findCommunityDeck(room.state.public_deck_id) : null);
+        }
+
+        openStudySet(deckId) {
+            if (!(AppState.get('flashcards') || []).some(deck => deck.id === deckId)) throw new Error('This study set is no longer in your library.');
+            this.closePractice();
+            this.destroyArcadeSession();
+            Router.navigate('flashcards');
+            this.openDeckEditor(deckId);
+        }
+
         deckCourseOptions(selected = '') {
             const courses = AppState.get('courses') || [];
             const known = courses.some(course => course.code === selected);
@@ -2794,11 +2845,31 @@
 
         async refreshEditedSharedDeck(deck) {
             if (deck.communityPublished) {
+                if (window.StudBudCloud?.offlineMode || window.navigator?.onLine === false) {
+                    await this.updateSavedDeck(deck.id, { communityUpdatePending: true });
+                    AppState.setSaveStatus('Saved on this device. Shared-set updates are queued until you reconnect.', 'saved');
+                    return;
+                }
                 try {
                     await window.StudBudCommunityGames.publishDeck({ ...deck, courseTitle: this.deckLinkInfo(deck).course?.title || '' });
                 } catch (error) {
                     throw Object.assign(new Error(`Your changes were saved locally, but the shared copy could not update. Retry Save changes or Share when connected, or stop sharing. ${this.friendlyErrorMessage(error)}`), { localChangesSaved: true });
                 }
+            }
+        }
+
+        async refreshPendingSharedDecks() {
+            const signature = deck => JSON.stringify([deck.title, deck.courseCode, deck.cards.map(card => [card.front, card.back, card.distractors])]);
+            for (const deck of (AppState.get('flashcards') || []).filter(item => item.communityPublished && item.communityUpdatePending)) {
+                try {
+                    await window.StudBudCommunityGames.publishDeck({ ...deck, courseTitle: this.deckLinkInfo(deck).course?.title || '' });
+                } catch (error) {
+                    console.error('[NexusApp] Queued shared-set update failed:', error);
+                    AppState.setSaveStatus(`Your private changes are saved. Shared-set update is still queued: ${this.friendlyErrorMessage(error)}`, 'error');
+                    return;
+                }
+                const latest = (AppState.get('flashcards') || []).find(item => item.id === deck.id);
+                if (latest && signature(latest) === signature(deck)) await this.updateSavedDeck(deck.id, { communityUpdatePending: false });
             }
         }
 
@@ -2808,12 +2879,17 @@
             if (!deck) throw new Error('The selected deck no longer exists.');
             this.deckEditorDraft = { ...deck, cards: (deck.cards || []).map(card => ({ ...card, tags: [...(card.tags || [])] })) };
             this.deckEditorExisting = Boolean(deckId);
+            this.deckEditorUndo = [];
             this.deckEditorOriginalCards = new Map(this.deckEditorDraft.cards.map(card => [card.id, { ...card, tags: [...card.tags] }]));
             const link = this.deckLinkInfo(deck);
             document.getElementById('deck-editor-title').value = deck.title;
             document.getElementById('deck-editor-course').innerHTML = this.deckCourseOptions(link.courseCode);
             document.getElementById('deck-editor-assessment').innerHTML = this.deckAssessmentOptions(link.courseCode, link.assessment?.id || '');
             document.getElementById('deck-editor-search').value = '';
+            const filter = document.getElementById('deck-editor-filter');
+            if (filter) filter.value = 'all';
+            const bulk = document.getElementById('deck-editor-bulk');
+            if (bulk) bulk.value = '';
             this.renderDeckEditorCards();
             this.openModal('deck-editor-modal');
         }
@@ -2822,17 +2898,54 @@
             const draft = this.deckEditorDraft;
             if (!draft) return;
             const query = document.getElementById('deck-editor-search').value.trim().toLowerCase();
-            const cards = draft.cards.filter(card => `${card.front} ${card.back} ${(card.tags || []).join(' ')}`.toLowerCase().includes(query));
+            const filter = document.getElementById('deck-editor-filter')?.value || 'all';
+            const cards = draft.cards.filter(card => `${card.front} ${card.back} ${(card.tags || []).join(' ')} ${(card.distractors || []).join(' ')}`.toLowerCase().includes(query)
+                && (filter === 'all' || (filter === 'images' && window.FlashcardTools.imageSource(card.answerImage))
+                    || (filter === 'paused' && card.suspended) || (filter === 'weak' && card.practiceStats?.attempts > 0 && card.practiceStats.correct / card.practiceStats.attempts < .75)));
+            document.getElementById('deck-editor-undo')?.classList.toggle('hidden', !this.deckEditorUndo?.length);
             document.getElementById('deck-editor-count').textContent = `${cards.length} of ${draft.cards.length} cards`;
             document.getElementById('deck-editor-cards').innerHTML = cards.map(card => `
                 <article class="deck-editor-card">
                     <strong>${this.escapeHTML(card.front)}</strong><p>${this.escapeHTML(card.back)}</p>
                     ${card.tags?.length ? `<small>${this.escapeHTML(card.tags.join(', '))}</small>` : ''}
+                    <small>${card.practiceStats?.attempts > 0 ? `${Math.round(card.practiceStats.correct / card.practiceStats.attempts * 100)}% accuracy · ${Number(card.practiceStats.attempts)} attempts` : 'Not practiced yet'}${card.suspended ? ' · Paused scheduled study' : ''}${window.FlashcardTools.imageSource(card.answerImage) ? ' · Private image' : ''}</small>
                     <div class="actions">
                         <button type="button" class="secondary-btn" data-action="editor-edit-card" data-id="${this.escapeHTML(card.id)}">Edit card</button>
+                        <button type="button" class="secondary-btn" data-action="editor-copy-card" data-id="${this.escapeHTML(card.id)}">Duplicate</button>
+                        <button type="button" class="secondary-btn" data-action="editor-reverse-card" data-id="${this.escapeHTML(card.id)}">Reverse copy</button>
+                        <button type="button" class="secondary-btn" data-action="editor-pause-card" data-id="${this.escapeHTML(card.id)}">${card.suspended ? 'Resume' : 'Pause'} scheduled study</button>
                         <button type="button" class="danger-btn" data-action="editor-delete-card" data-id="${this.escapeHTML(card.id)}">Delete card</button>
                     </div>
                 </article>`).join('') || `<p class="empty-state">${query ? 'No cards match your search.' : 'No cards yet. Add your first card.'}</p>`;
+        }
+
+        addBulkEditorCards() {
+            if (!this.deckEditorDraft) throw new Error('Open a set before adding cards.');
+            const input = document.getElementById('deck-editor-bulk');
+            const parsed = window.FlashcardTools.parseBulkCards(input.value);
+            const key = card => JSON.stringify([this.answerKey(card.front), this.answerKey(card.back)]);
+            const used = new Set(this.deckEditorDraft.cards.map(key));
+            const added = [];
+            for (const card of parsed) {
+                if (used.has(key(card))) continue;
+                used.add(key(card));
+                added.push({ ...card, id: `card_${window.crypto.randomUUID()}`, repetitions: 0, interval: 0, easeFactor: 2.5 });
+            }
+            this.deckEditorDraft.cards.push(...added);
+            input.value = '';
+            this.renderDeckEditorCards();
+            document.getElementById('deck-editor-count').textContent += ` · Added ${added.length}; skipped ${parsed.length - added.length} duplicates. Save changes to keep them.`;
+        }
+
+        copyEditorCard(cardId, reverse = false) {
+            const card = this.deckEditorDraft?.cards.find(item => item.id === cardId);
+            if (!card) throw new Error('This card is no longer in the editor.');
+            const next = { id: `card_${window.crypto.randomUUID()}`, front: reverse ? card.back : card.front,
+                back: reverse ? card.front : card.back, tags: [...(card.tags || [])],
+                repetitions: 0, interval: 0, easeFactor: 2.5, suspended: false };
+            if (!reverse) { next.answerImage = card.answerImage || ''; next.distractors = [...(card.distractors || [])]; }
+            this.deckEditorDraft.cards.splice(this.deckEditorDraft.cards.indexOf(card) + 1, 0, next);
+            this.renderDeckEditorCards();
         }
 
         async saveDeckEditor() {
@@ -2849,7 +2962,7 @@
                 if (current && original && !latest) throw new Error('A card was removed while you were editing. Reopen the editor.');
                 if (!latest) return card;
                 const next = { ...latest };
-                for (const field of ['front', 'back', 'tags']) {
+                for (const field of ['front', 'back', 'tags', 'answerImage', 'distractors', 'suspended']) {
                     const before = JSON.stringify(original?.[field]);
                     const edited = JSON.stringify(card[field]);
                     const saved = JSON.stringify(field === 'tags' ? latest.tags || [] : latest[field]);
@@ -2879,6 +2992,16 @@
             document.getElementById('card-front').value = card?.front || '';
             document.getElementById('card-back').value = card?.back || '';
             document.getElementById('card-tags').value = (card?.tags || []).join(', ');
+            document.getElementById('card-distractors').value = (card?.distractors || []).join('\n');
+            document.getElementById('card-remove-image').checked = false;
+            document.getElementById('card-answer-image').value = '';
+            const imagePreview = document.getElementById('card-answer-image-preview');
+            if (imagePreview) {
+                const image = window.FlashcardTools.imageSource(card?.answerImage);
+                if (image) imagePreview.src = image;
+                else imagePreview.removeAttribute('src');
+                imagePreview.classList.toggle('hidden', !image);
+            }
             document.querySelector('#card-studio-modal h2').textContent = card ? 'Edit flashcard' : 'Add flashcard';
             this.cardEditorReturnToDeck = fromEditor;
             this.openModal('card-studio-modal');
@@ -3371,6 +3494,7 @@
                             <option value="market">Package Delivery</option><option value="miner">Crystal Mining</option>
                             <option value="duel">King of the Hill</option><option value="shooter">Arena Shooter</option>
                             <option value="sports">Soccer</option>
+                            <option value="chess">Question Chess</option>
                         </select></label>
                         <label>Simulated players<select id="admin-game-test-bots"><option value="0">No bots</option><option value="1">1 bot</option><option value="2">2 bots</option><option value="3" selected>3 bots</option></select></label>
                         <label>Map seed (optional)<input id="admin-game-test-seed" type="number" min="0" max="4294967295" step="1" placeholder="Default map"></label>
@@ -3646,6 +3770,10 @@
                 const input = document.getElementById(`${prefix}-game-reward`);
                 const guidance = document.getElementById(`${prefix}-game-reward-guidance`);
                 if (!input || !guidance) continue;
+                if (mode === 'chess') {
+                    guidance.textContent = 'Chess always awards exactly one move per correct answer. Resource amount does not apply.';
+                    continue;
+                }
                 const amount = Number(input.value);
                 const warning = !Number.isInteger(amount) || amount < 5 || amount > 100 || amount % 5 !== 0 ? ' Choose a value from 5 to 100 in increments of 5.'
                     : amount < min ? ' Below recommended: expect more frequent questions.'
@@ -3657,6 +3785,21 @@
         }
 
         updateMultiplayerModeSetup(mode) {
+            const chess = mode === 'chess';
+            const controls = [
+                document.getElementById('host-game-time')?.closest('.multiplayer-goals'),
+                document.getElementById('host-game-reward')?.closest('.question-reward-control'),
+                document.getElementById('solo-game-settings')?.elements.timeLimit?.closest('label'),
+                document.getElementById('solo-game-reward')?.closest('.question-reward-control')
+            ];
+            for (const control of controls.filter(Boolean)) {
+                control.classList.toggle('hidden', chess);
+                control.querySelectorAll('input, select, button').forEach(input => { input.disabled = chess; });
+            }
+            document.getElementById('chess-setup-note')?.classList.toggle('hidden', !chess);
+            const soloNote = document.querySelector('#solo-game-settings > small');
+            if (soloNote) soloNote.textContent = chess ? 'One correct answer earns one move. No time limit. Capture the king to finish. Practice awards no multiplayer coins.'
+                : 'Correct answers give the resource shown above. End game opens your summary. Practice awards no multiplayer coins.';
             const labels = {
                 skyline: ['City Escape', 'Climb a rooftop obstacle course before the tide.'],
                 river: ['River Fishing', 'Steer a boat, dodge obstacles and catch fish.'],
@@ -3665,7 +3808,8 @@
                 duel: ['King of the Hill', 'King of the Hill: hold the glowing zone to score and knock rivals off.'],
                 crypto: ['Crypto Trading', 'Trade six assets and answer questions for cash.'],
                 shooter: ['Arena Shooter', 'Twin-stick combat: dash, upgrade your blaster and battle rival pilots, with drones as a secondary threat.'],
-                sports: ['Soccer', 'Blue vs red: players are split into two teams. Dribble the ball, spend energy on power kicks and score in the rival goal.']
+                sports: ['Soccer', 'Blue vs red: players are split into two teams. Dribble the ball, spend energy on power kicks and score in the rival goal.'],
+                chess: ['Question Chess', '1v1 real-time chess: each correct answer earns one move. Capture the king; no alternating turns.']
             };
             const [title, description] = labels[mode] || labels.skyline;
             document.getElementById('multiplayer-preview-title').textContent = title;
@@ -3985,21 +4129,24 @@
                 }
                 const delta = Math.min(0.1, Math.max(0, (now - this.multiplayerFrameTime) / 1000));
                 this.multiplayerFrameTime = now;
-                const modePreviews = document.querySelectorAll('.mode-preview-canvas');
-                for (const canvas of modePreviews) {
-                    if (this.canvasIsVisible(canvas)) this.drawLivePreview(canvas, canvas.dataset.previewMode, now);
-                    else if (this.livePreviews.has(canvas)) this.livePreviews.delete(canvas);
+                const drawPreviews = now - (this.lastPreviewDrawAt ?? -Infinity) >= 1000 / (window.StudBudArcade?.graphicsProfile().previewFps || 24);
+                if (drawPreviews) {
+                    this.lastPreviewDrawAt = now;
+                    for (const canvas of document.querySelectorAll('.mode-preview-canvas')) {
+                        if (this.canvasIsVisible(canvas)) this.drawLivePreview(canvas, canvas.dataset.previewMode, now);
+                        else if (this.livePreviews.has(canvas)) this.livePreviews.delete(canvas);
+                    }
+                    const preview = document.getElementById('multiplayer-game-canvas');
+                    const previewActive = !document.getElementById('multiplayer-host-flow').classList.contains('hidden');
+                    if (previewActive && this.canvasIsVisible(preview)) this.drawLivePreview(preview, this.selectedMultiplayerMode, now);
+                    const roomActive = this.hostedGameRoom && this.hostedGameRoom.status !== 'waiting' && !document.getElementById('hosted-game-room').classList.contains('hidden');
+                    const roomCanvas = document.getElementById('multiplayer-room-canvas');
+                    if (roomActive && this.canvasIsVisible(roomCanvas)) this.drawLivePreview(roomCanvas, this.hostedGameRoom.mode, now);
                 }
-                const preview = document.getElementById('multiplayer-game-canvas');
-                const previewActive = !document.getElementById('multiplayer-host-flow').classList.contains('hidden');
-                if (previewActive && this.canvasIsVisible(preview)) this.drawLivePreview(preview, this.selectedMultiplayerMode, now);
-                const roomActive = this.hostedGameRoom && this.hostedGameRoom.status !== 'waiting' && !document.getElementById('hosted-game-room').classList.contains('hidden');
-                const roomCanvas = document.getElementById('multiplayer-room-canvas');
-                if (roomActive && this.canvasIsVisible(roomCanvas)) this.drawLivePreview(roomCanvas, this.hostedGameRoom.mode, now);
                 const waiting = document.getElementById('waiting-arcade-card');
                 if (waiting && !waiting.classList.contains('hidden') && this.canvasIsVisible(document.getElementById('waiting-runner-canvas'))) {
                     this.stepWaitingRunner(delta);
-                    this.drawWaitingWarmup(document.getElementById('waiting-runner-canvas'), now / 1000);
+                    if (drawPreviews) this.drawWaitingWarmup(document.getElementById('waiting-runner-canvas'), now / 1000);
                 }
                 this.multiplayerFrame = requestAnimationFrame(animate);
             };
@@ -4092,7 +4239,7 @@
         // ---- Simulated lobby players for the live previews: they fight each other and the demo player like a real match ----
         initPreviewBots(demo, mode, game) {
             const U = window.StudBudArcade.util;
-            const names = [['b1', 'Nova', '#f472b6'], ['b2', 'Kite', '#facc15'], ['b3', 'Rook', '#4ade80']];
+            const names = [['b1', 'Nova', '#f472b6'], ['b2', 'Kite', '#facc15'], ['b3', 'Rook', '#4ade80']].slice(0, mode === 'chess' ? 1 : 3);
             const bots = names.map(([id, name, color], i) => {
                 const rng = U.mulberry32(U.hashStr(`${mode}:${id}:studbud-bot`));
                 const bot = {
@@ -5518,12 +5665,22 @@
                 const markup = this.communityDeckActionMarkup(element.dataset.communityDeckId);
                 if (element.outerHTML !== markup) element.outerHTML = markup;
             });
+            document.querySelectorAll('.review-study-set[data-review-public-id]').forEach(element => {
+                if (!element.dataset.reviewPublicId) return;
+                const markup = this.studySetMarkup({ publicId: element.dataset.reviewPublicId, title: element.dataset.reviewTitle });
+                if (element.outerHTML !== markup) element.outerHTML = markup;
+            });
         }
 
         async searchCommunityDecks(query) {
             const status = document.getElementById('community-deck-status');
             const results = document.getElementById('community-deck-results');
             if (!status || !results) return;
+            if (window.StudBudCloud?.offlineMode || window.navigator?.onLine === false) {
+                status.textContent = 'The community library needs an internet connection. Your saved sets remain available offline.';
+                results.innerHTML = '<p class="empty-state">Open My sets to study, edit or practice offline.</p>';
+                return;
+            }
             status.textContent = 'Searching shared decks…';
             try {
                 const decks = await window.StudBudCommunityGames.searchDecks(query);
@@ -5586,6 +5743,7 @@
                     id: `card_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
                     front: String(card.front || ''),
                     back: String(card.back || ''),
+                    distractors: Array.isArray(card.distractors) ? card.distractors.map(text => String(text).slice(0, 5000)).slice(0, 3) : [],
                     repetitions: 0,
                     interval: 0,
                     easeFactor: 2.5
@@ -5623,10 +5781,10 @@
                 throw new Error('Hosted game terms and definitions must be 1000 characters or fewer.');
             }
             const options = {
-                goal_type: 'time',
+                goal_type: form.elements.mode.value === 'chess' ? 'points' : 'time',
                 point_limit: 1000,
-                time_limit_seconds: Math.min(60, Math.max(1, Number(form.elements.timeLimit.value) || 5)) * 60,
-                question_reward: this.questionRewardValue(form.elements.questionReward.value)
+                time_limit_seconds: form.elements.mode.value === 'chess' ? 0 : Math.min(60, Math.max(1, Number(form.elements.timeLimit.value) || 5)) * 60,
+                question_reward: form.elements.mode.value === 'chess' ? 1 : this.questionRewardValue(form.elements.questionReward.value)
             };
             let room;
             for (let attempt = 0; attempt < 3; attempt++) {
@@ -5714,13 +5872,13 @@
                 classic: 'Classic', rush: 'Rush', survival: 'Survival',
                 skyline: 'City Escape', river: 'River Fishing', market: 'Package Delivery',
                 miner: 'Crystal Mining', duel: 'King of the Hill',
-                crypto: 'Crypto Trading', shooter: 'Arena Shooter', sports: 'Soccer'            };
+                crypto: 'Crypto Trading', shooter: 'Arena Shooter', sports: 'Soccer', chess: 'Question Chess' };
             document.getElementById('hosted-room-title').textContent = `${room.deck_title} · ${modeNames[room.mode] || room.mode}`;
-            const playerLimit = room.mode === 'duel' ? 8 : 16;
+            const playerLimit = room.mode === 'chess' ? 2 : room.mode === 'duel' ? 8 : 16;
             const remainingSeconds = room.goal_type === 'time' && room.started_at
                 ? Math.max(0, Math.ceil((new Date(room.started_at).getTime() + Number(room.time_limit_seconds) * 1000 - Date.now()) / 1000))
                 : null;
-            const goalLabel = room.goal_type === 'time'
+            const goalLabel = room.mode === 'chess' ? 'Capture the king · no time limit' : room.goal_type === 'time'
                 ? remainingSeconds === null
                     ? `${Math.round(Number(room.time_limit_seconds) / 60)} minute limit`
                     : `Time left · ${Math.floor(remainingSeconds / 60)}:${String(remainingSeconds % 60).padStart(2, '0')}`
@@ -5758,7 +5916,7 @@
             const sceneNames = {
                 skyline: 'City Escape', river: 'River Fishing', market: 'Package Delivery',
                 miner: 'Crystal Mining', duel: 'King of the Hill',
-                crypto: 'Crypto Trading', shooter: 'Arena Shooter', sports: 'Soccer',
+                crypto: 'Crypto Trading', shooter: 'Arena Shooter', sports: 'Soccer', chess: 'Question Chess',
                 classic: 'Flashcard Face-off', rush: 'Rapid Recall', survival: 'Last Learner Standing'
             };
             document.getElementById('multiplayer-scene-name').textContent = sceneNames[room.mode] || 'Live match';
@@ -5778,10 +5936,11 @@
                     duel: ['Hold the glowing hill alone to score. Knock rivals off the stage.', 'A/D move · Space jump · S guard · E/click swing · R heavy · Shift dodge · Q recharge'],
                     crypto: ['Trade six assets, react to market news and build mining rigs.', '1-6 pick · B buy · S sell'],
                     shooter: ['Blast drones and other players in an arena.', 'WASD move · mouse aim · F/click fire · Space/E blast · Shift dash · Q reload'],
-                    sports: ['Dribble the ball into the rival goal. Players are split into blue and red teams; sprinting and power kicks use energy.', 'WASD dribble · Shift sprint · E/click pass · hold Space, release for power kick · Q recharge']
+                    sports: ['Dribble the ball into the rival goal. Players are split into blue and red teams; sprinting and power kicks use energy.', 'WASD dribble · Shift sprint · E/click pass · hold Space, release for power kick · Q recharge'],
+                    chess: ['Each correct answer earns one move. Either player can move when ready; capture the king to win. No check, castling or en passant. Pawns promote to queens.', 'Q / Answer for a move · Select a piece, then a highlighted square']
                 }[room.mode] || ['Answer flashcard questions faster than everyone else.', 'Answer correctly to score points.'];
                 const { resource, multiplier } = this.questionRewardInfo(room.mode);
-                lobbyInfo.innerHTML = `<div class="lobby-mode"><strong>${this.escapeHTML(modeNames[room.mode] || 'Live game')}</strong><span>${this.escapeHTML(goalLabel)} · +${(Number(room.state?.question_reward) || 20) * multiplier} ${resource.toLowerCase()} per correct answer</span></div>
+                lobbyInfo.innerHTML = `<div class="lobby-mode"><strong>${this.escapeHTML(modeNames[room.mode] || 'Live game')}</strong><span>${this.escapeHTML(goalLabel)} · ${room.mode === 'chess' ? '1 move per correct answer' : `+${(Number(room.state?.question_reward) || 20) * multiplier} ${resource.toLowerCase()} per correct answer`}</span></div>
                     <p>${this.escapeHTML(info[0])}</p>
                     <p class="lobby-controls"><i class="fas fa-keyboard"></i> ${this.escapeHTML(info[1])}</p>
                     <p class="lobby-controls"><i class="fas fa-circle-question"></i> Answering questions powers you up. Press Q in game to open one.</p>`;
@@ -5820,7 +5979,7 @@
                 document.getElementById('hosted-room-status').textContent = 'Game over · final scores and multiplayer coin rewards are shown below.';
                 const rewards = state.coin_rewards || {};
                 document.getElementById('hosted-podium').classList.remove('hidden');
-                const podiumUnit = { sports: 'goals', shooter: 'kill pts', skyline: 'm', river: 'fish pts', market: 'deliveries', miner: 'crystals', duel: 'sec on hill', crypto: '' }[room.mode] ?? 'points';
+                const podiumUnit = { sports: 'goals', shooter: 'kill pts', skyline: 'm', river: 'fish pts', market: 'deliveries', miner: 'crystals', duel: 'sec on hill', crypto: '', chess: 'chess pts' }[room.mode] ?? 'points';
                 document.getElementById('hosted-podium').innerHTML = rankedPlayers.slice(0, 3).map((player, index) =>
                     `<div class="podium-place place-${index + 1}"><span class="podium-rank">0${index + 1}</span><strong>${avatarFor(player)} ${this.escapeHTML(player.nickname)} ${this.accountTagMarkup(player.username, player.tags)}</strong><small>${room.mode === 'crypto' ? '$' : ''}${Number(player.score || 0).toLocaleString()} ${podiumUnit} · +${Number(rewards[player.id] || 0)} coins <button class="host-kick-btn" type="button" data-action="view-profile" data-id="${this.escapeHTML(player.id)}">Profile</button></small></div>`
                 ).join('');
@@ -5845,10 +6004,11 @@
             if (room.status === 'playing' && arcade && !this.arcadeLeft) {
                 if (!this.arcadeSession || this.arcadeSession.destroyed) {
                     this.closePractice();
-                    const deck = (AppState.get('flashcards') || []).find(item => item.id === room.deck_id || item.title === room.deck_title);
+                    const deck = this.roomStudyDeck(room);
                     this.arcadeSession = new arcade.Session({
                         room, user: window.StudBudCloud.user, api, isHost,
                         fallbackCards: (deck?.cards || []).filter(card => card.front && card.back),
+                        studySet: { deckId: deck?.id, title: room.deck_title || deck?.title, publicId: room.state?.public_deck_id || deck?.communityDeckId || deck?.communitySourceId },
                         finishRoom: () => api.finishRoom(room.room_code),
                         onLeave: () => this.leaveHostedGame().catch(error => console.error(error))
                     });
@@ -5866,11 +6026,25 @@
 
         async saveGameSummary(session) {
             if (session.testing) return;
+            const info = session.studySet || {};
+            const deck = (AppState.get('flashcards') || []).find(item => item.id === info.deckId
+                || (info.publicId && [item.communityDeckId, item.communitySourceId].includes(info.publicId)));
+            if (deck) {
+                const cards = deck.cards.map(card => {
+                    const next = { ...card };
+                    for (const answer of session.questionHistory.filter(answer => answer.correct !== null && answer.prompt === card.front && answer.answer === card.back)) {
+                        window.FlashcardTools.recordAnswer(next, answer.correct);
+                    }
+                    return next;
+                });
+                await AppState.saveFlashcardDeck({ ...deck, cards });
+            }
             await AppState.recordStudySession({
                 id: `match_${window.crypto.randomUUID()}`, title: `${session.practice ? 'Practice game' : 'Study game'}: ${session.game.title}`,
                 durationSec: Math.max(1, Math.round(session.t)), method: 'practice', source: session.practice ? 'solo' : 'multiplayer',
                 gameSummary: {
                     mode: session.mode, score: session.score, answered: session.answered, correct: session.correct,
+                    studySet: session.studySet,
                     objectiveBased: session.game.scoreGoal === false, objectiveUnit: session.game.goalUnit || 'pts',
                     questions: session.questionHistory.map(answer => ({ ...answer })),
                     standings: session.standingsCache.map(row => ({ id: row.id, name: row.n, score: row.s, goal: row.g }))
@@ -5893,7 +6067,7 @@
         startMultiplayerPractice() {
             const mode = document.getElementById('practice-multiplayer-mode')?.value;
             const deckId = document.getElementById('practice-multiplayer-deck')?.value;
-            const timeLimitSeconds = Number(document.getElementById('practice-multiplayer-time')?.value);
+            const timeLimitSeconds = mode === 'chess' ? 0 : Number(document.getElementById('practice-multiplayer-time')?.value);
             if (!mode || !deckId || !Number.isFinite(timeLimitSeconds) || timeLimitSeconds < 0) {
                 throw new Error('Choose a game mode, flashcard set, and practice time.');
             }
@@ -5908,7 +6082,8 @@
             }
             const deckId = config.deckId || document.getElementById('host-game-deck')?.value;
             if (config.testing && !this.isAdmin) throw new Error('Game testing is available only to administrators.');
-            const botCount = config.botCount ?? 3;
+            const chosenMode = modeOverride || this.hostedGameRoom?.mode || this.selectedMultiplayerMode || 'skyline';
+            const botCount = chosenMode === 'chess' ? 1 : config.botCount ?? 3;
             if (!Number.isInteger(botCount) || botCount < 0 || botCount > 3) throw new Error('Choose between zero and three simulated players.');
             const selectedDeck = (AppState.get('flashcards') || []).find(item => item.id === deckId);
             if (!config.testing && !(selectedDeck?.cards || []).some(card => card.front && card.back)) {
@@ -5930,18 +6105,20 @@
                 accessory: hasProfile ? cosmetics.acc : roomPlayer.accessory || '',
                 effect: hasProfile ? cosmetics.effect : roomPlayer.effect || ''
             };
-            const roomDeck = (AppState.get('flashcards') || []).find(item => item.id === room.deck_id || item.title === room.deck_title);
+            const roomDeck = selectedDeck || this.roomStudyDeck(room);
             const botDefs = [['b1', 'Nova', '#f472b6'], ['b2', 'Kite', '#facc15'], ['b3', 'Rook', '#4ade80']].slice(0, botCount);
             const fake = {
                 mode: room.mode, room_code: 'PRACTICE', goal_type: 'points', point_limit: 99999, host_id: user.id,
+                deck_title: roomDeck?.title || 'Flashcards',
                 started_at: new Date().toISOString(),
                 state: { question_reward: config.questionReward || 20, players: [me, ...botDefs.map(([id, nickname, color], i) => ({ id, nickname, color, skin: ['skin_robot', 'skin_ninja', 'skin_alien'][i] }))] }
             };
             const s = this.practiceSession = new arcade.Session({
                 room: fake, user, api: window.StudBudCommunityGames, isHost: false, practice: true, testing: Boolean(config.testing),
-                timeLimitSeconds: config.timeLimitSeconds || 0, questionReward: config.questionReward || 20,
+                timeLimitSeconds: room.mode === 'chess' ? 0 : config.timeLimitSeconds || 0, questionReward: room.mode === 'chess' ? 1 : config.questionReward || 20,
                 seed: config.seed,
                 fallbackCards: (roomDeck?.cards || []).filter(card => card.front && card.back),
+                studySet: { deckId: roomDeck?.id, title: roomDeck?.title, publicId: roomDeck?.communityDeckId || roomDeck?.communitySourceId },
                 onLeave: () => this.closePractice(),
                 onRestart: config.testing ? () => { this.closePractice(); this.startPractice(room.mode, config); } : undefined
             });
@@ -5971,6 +6148,14 @@
         }
 
         tickPracticeBots(demo, dt) {
+            if (demo.mode === 'chess') {
+                demo.game.updateScore();
+                for (const bot of demo.bots) {
+                    const player = demo.session.roster.get(bot.id);
+                    if (player) { player.score = bot.score; player.goal = bot.goal; }
+                }
+                return;
+            }
             const { mode, game, bots } = demo, me = game.me, now = performance.now();
             demo.clock += dt;
             const c = demo.clock;
@@ -6100,6 +6285,9 @@
             if (themeSelect) themeSelect.value = theme;
             const compact = document.getElementById('ui-compact-mode');
             if (compact) compact.checked = Boolean(settings.compactUi);
+            const quality = document.getElementById('game-quality');
+            if (quality) quality.value = settings.gameQuality || 'auto';
+            document.body.classList.toggle('low-effects', Boolean(window.StudBudArcade?.graphicsProfile().low));
             document.querySelectorAll('.scheme-option').forEach(button => {
                 const selected = button.dataset.colorScheme === colorScheme;
                 button.classList.toggle('selected', selected);
@@ -6305,10 +6493,10 @@
         }
 
         tutorialSteps() {
-            const nav = view => `.nav-item[data-target="${view}-view"]`;
+            const nav = view => `.nav-item:not(.workspace-child)[data-target="${view}-view"], .nav-item:not(.workspace-child)[data-also~="${view}-view"]`;
             return [
                 { title: 'Welcome to StudBud', text: 'StudBud keeps your classes, grades, study plans, flashcards and games in one place. This quick tour shows what each part does. You can leave at any time.' },
-                { route: 'dashboard', sel: '#sidebar', title: 'Your menu', text: 'Everything lives in this menu. On a phone it sits along the top: swipe it sideways to see every page.' },
+                { route: 'dashboard', sel: '#sidebar', title: 'Your menu', text: 'Six workspaces keep the menu short: Home, School, Plan, Study, Play and Settings. Related tools appear as tabs above the page. On a phone, swipe the menu or tabs sideways.' },
                 { route: 'gpa', sel: '#gpa-view .open-ic-import-btn', title: 'Import from Infinite Campus', text: 'Start here to skip the typing: import your classes, grades, assignments, categories, class times and school calendar before setting up your dashboard. On a computer, drag StudBud Import to your bookmarks bar. On a phone, follow the phone/tablet instructions to save the import bookmark. Run it on the signed-in Campus website, then check the class matches and press Import. Re-import any time to update.' },
                 { route: 'dashboard', sel: '.priority-widget', title: 'Dashboard: what is due', text: 'See your most urgent assignments here, and use Add Assignment to put new work on your list.' },
                 { route: 'dashboard', sel: '.daily-study-card', title: 'Your home widget', text: 'Your streak, this week, today’s 5-minute goal, assignments to work on and your grades in one card. Tap Customize to choose what it shows or add StudBud to your home screen.' },
@@ -6331,8 +6519,8 @@
                 { route: 'about', sel: nav('about'), title: 'About', text: 'What StudBud is for, how to use it, and who to email with questions or suggestions.' },
                 { route: 'settings', sel: '#public-profile-card', title: 'Public profile', text: 'Write a short bio, favorite subject, grade and study goal for your buds to see, and choose whether to share your study stats.' },
                 { route: 'settings', sel: nav('settings'), title: 'Settings', text: 'Set your graduation year and target GPA, change your username (once a week), back up or restore your data, and replay this tutorial any time.' },
-                { route: 'appearance', sel: '#appearance-view .settings-tabs', title: 'Appearance', text: 'Switch between light and dark, pick a color theme you have unlocked, and turn on compact mode. The sun/moon button in the top bar toggles light and dark quickly.' },
-                { route: 'sound', sel: '#sound-view .settings-tabs', title: 'Sound & music', text: 'Adjust the volume of interface sounds, game effects and music separately, or mute everything.' },
+                { route: 'appearance', sel: '#workspace-tabs', title: 'Appearance', text: 'Switch between light and dark, pick a color theme, turn on compact spacing or choose low-power games. The sun/moon button toggles light and dark quickly.' },
+                { route: 'sound', sel: '#workspace-tabs', title: 'Sound & music', text: 'Adjust the volume of interface sounds, game effects and music separately, or mute everything.' },
                 { route: 'dashboard', title: 'You are all set!', text: 'Start by importing from Infinite Campus (or adding a class), then add an assignment or quiz. Have fun and happy studying!' }
             ];
         }
@@ -6464,7 +6652,7 @@
                     const decks = (item.deckLinks || []).slice(0, 2).map(({ deck }) =>
                         `<button class="secondary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}"><i class="fas fa-layer-group"></i> ${this.escapeHTML(deck.title)}</button>`).join('');
                     const studied = item.minutesStudied ? `<small class="study-time-logged"><i class="fas fa-clock"></i> ${item.minutesStudied} min studied${item.flashcardMinutes ? ` (${item.flashcardMinutes} with flashcards)` : ''}</small>` : '';
-                    return `<article class="study-priority-item"><span class="priority-rank">${index + 1}</span><div><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(item.courseTitle)} · ${this.escapeHTML(item.kind || 'assignment')} · ${item.sessionMinutes} min today (about ${item.remainingStudyMinutes} min remaining)</span>${studied}<small>${this.escapeHTML(item.reason)}</small><p><strong>Study method:</strong> ${this.escapeHTML(item.studyMethod)}</p><div class="study-priority-actions"><button class="secondary-btn" data-action="log-study" data-id="${this.escapeHTML(item.id)}"><i class="fas fa-stopwatch"></i> Log study session</button>${decks}</div></div></article>`;
+                    return `<article class="study-priority-item"><span class="priority-rank">${index + 1}</span><div><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(item.courseTitle)} · ${this.escapeHTML(item.kind || 'assignment')} · ${item.sessionMinutes} min today (about ${item.remainingStudyMinutes} min remaining)</span>${studied}<small>${this.escapeHTML(item.reason)}</small><p><strong>Study method:</strong> ${this.escapeHTML(item.studyMethod)}</p><div class="study-priority-actions"><button class="secondary-btn" data-action="log-study" data-id="${this.escapeHTML(item.id)}"><i class="fas fa-stopwatch"></i> Log study session</button>${this.assessmentStudyButton(item)}${decks}</div></div></article>`;
                 }).join('') : '<div class="empty-state empty-state-cta"><p>Add an upcoming quiz or test to get study suggestions.</p><button class="primary-btn" type="button" data-action="add-quiz"><i class="fas fa-plus"></i> Add a quiz or test</button></div>';
             }
             this.renderStudyProgress();
@@ -6815,6 +7003,7 @@
         }
 
         async syncPendingStudyTime() {
+            if (window.StudBudCloud?.offlineMode || window.navigator?.onLine === false) return;
             if (!window.StudBudCloud?.user || !window.StudBudCommunityGames) return;
             const pending = (await NexusDB.getAll('studyHistory')).filter(session => session.leaderboardSyncPending);
             for (const session of pending) await this.syncStudyTimeEntry(session, false);
@@ -7251,7 +7440,7 @@
                     const form = document.getElementById('solo-game-settings');
                     this.startPractice(this.selectedMultiplayerMode || 'skyline', {
                         timeLimitSeconds: Number(form?.elements.timeLimit.value) || 0,
-                        questionReward: this.questionRewardValue(form.elements.questionReward.value)
+                        questionReward: this.selectedMultiplayerMode === 'chess' ? 1 : this.questionRewardValue(form.elements.questionReward.value)
                     });
                 } else if (target.matches('[data-study-leaderboard-period]')) {
                     this.studyLeaderboardPeriod = target.dataset.studyLeaderboardPeriod;
@@ -7505,9 +7694,11 @@
                     this.selectedCalendarDate = target.dataset.date;
                     this.renderCalendar();
                 } else if (action === 'arcade-answer') {
-                    this.answerArcade(Number(target.dataset.index));
+                    await this.answerArcade(Number(target.dataset.index));
                 } else if (action === 'arcade-next') {
                     this.renderArcadeQuestion();
+                } else if (action === 'practice-retry-missed') {
+                    this.retryMissedPracticeCards();
                 } else if (action === 'arcade-restart') {
                     if (document.getElementById('arcade-game-title').textContent.includes('Memory')) {
                         this.prepareMemoryGame();
@@ -7703,7 +7894,7 @@
             if (form.id === 'practice-test-answer-form') {
                 event.preventDefault();
                 try {
-                    this.submitPracticeTestAnswer(form);
+                    await this.submitPracticeTestAnswer(form);
                 } catch (error) {
                     console.error('[NexusApp] Practice test answer could not be checked:', error);
                     window.alert(`Your answer could not be checked. ${this.friendlyErrorMessage(error)}`);
@@ -7735,6 +7926,12 @@
         }
 
         handleChange(event) {
+            if (event.target.id === 'practice-multiplayer-mode') {
+                const time = document.getElementById('practice-multiplayer-time');
+                const chess = event.target.value === 'chess';
+                time.closest('label').classList.toggle('hidden', chess);
+                time.disabled = chess;
+            }
             if (event.target.id === 'settings-school') {
                 this.updateCourseSchoolFields();
                 this.renderOtherGradeScaleEditor();
@@ -7812,6 +8009,11 @@
             } else if (event.target.id === 'ui-compact-mode') {
                 AppState.set('settings', { ...AppState.get('settings'), compactUi: event.target.checked });
                 this.applyAppearance();
+            } else if (event.target.id === 'game-quality') {
+                if (!['auto', 'low', 'full'].includes(event.target.value)) throw new Error('Choose a valid game quality.');
+                AppState.set('settings', { ...AppState.get('settings'), gameQuality: event.target.value });
+                this.applyAppearance();
+                this.arcadeSession?.resize(); this.practiceSession?.resize();
             } else if (event.target.id === 'sfx-ui' || event.target.id === 'sfx-game') {
                 this.updateGameAudio({ [event.target.id === 'sfx-ui' ? 'ui' : 'game']: event.target.checked });
             } else if (event.target.id === 'music-on') {
@@ -8217,17 +8419,41 @@
             const front = document.getElementById('card-front').value.trim();
             const back = document.getElementById('card-back').value.trim();
             if (!front || !back || front.length > 5000 || back.length > 5000) throw new Error('Enter a front and back of 1 to 5000 characters each.');
+            const distractors = (document.getElementById('card-distractors')?.value || '').split('\n').map(text => text.trim()).filter(Boolean);
+            if (distractors.length > 3 || distractors.some(text => text.length > 5000)) throw new Error('Add at most 3 wrong options, each up to 5000 characters.');
+            const keys = distractors.map(text => this.answerKey(text));
+            if (new Set(keys).size !== keys.length || keys.includes(this.answerKey(back))) throw new Error('Wrong options must be distinct from each other and the correct answer.');
+            let answerImage = existing?.answerImage || '';
+            if (document.getElementById('card-remove-image')?.checked) answerImage = '';
+            const file = document.getElementById('card-answer-image')?.files?.[0];
+            if (file) {
+                if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type) || file.size > 500000) throw new Error('Choose a PNG, JPEG, WebP or GIF image of 500 KB or less.');
+                answerImage = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = () => reject(new Error('Could not read the answer image. Try selecting it again.'));
+                    reader.readAsDataURL(file);
+                });
+                if (!window.FlashcardTools.imageSource(answerImage)) throw new Error('This image could not be loaded safely.');
+            }
+            // Image reads are asynchronous: do not replace a newer card with the editor's old snapshot.
+            const latestDeck = this.cardEditorReturnToDeck ? this.deckEditorDraft : (AppState.get('flashcards') || []).find(item => item.id === deckId);
+            const latestCard = id ? latestDeck?.cards?.find(item => item.id === id) : null;
+            if (!latestDeck || (id && !latestCard)) throw new Error('This set or card was removed while saving.');
+            if (existing && ['front', 'back', 'tags', 'answerImage', 'distractors'].some(field => JSON.stringify(existing[field]) !== JSON.stringify(latestCard[field]))) throw new Error('This card was edited elsewhere. Reopen it before saving.');
             const card = {
-                ...(existing || { id: `card_${window.crypto.randomUUID()}`, repetitions: 0, interval: 0, easeFactor: 2.5 }),
+                ...(latestCard || { id: `card_${window.crypto.randomUUID()}`, repetitions: 0, interval: 0, easeFactor: 2.5 }),
                 front,
                 back,
+                answerImage,
+                distractors,
                 tags: document.getElementById('card-tags').value.split(',').map(tag => tag.trim()).filter(Boolean),
             };
-            const cards = existing ? deck.cards.map(item => item.id === id ? card : item) : [...(deck.cards || []), card];
-            if (this.cardEditorReturnToDeck) this.deckEditorDraft = { ...deck, cards };
+            const cards = existing ? latestDeck.cards.map(item => item.id === id ? card : item) : [...(latestDeck.cards || []), card];
+            if (this.cardEditorReturnToDeck) this.deckEditorDraft = { ...latestDeck, cards };
             else {
                 try {
-                    await this.saveEditedDeck({ ...deck, cards });
+                    await this.saveEditedDeck({ ...latestDeck, cards });
                 } finally {
                     if ((AppState.get('flashcards') || []).find(item => item.id === deckId)?.cards.some(item => item.id === card.id)) {
                         document.getElementById('card-id').value = card.id;
@@ -8249,6 +8475,19 @@
                 this.renderUI();
             }
             if (action === 'edit-assignment') this.openAssignmentForm(assignments.find(item => item.id === id));
+            if (action === 'open-study-set') this.openStudySet(id);
+            if (action === 'assessment-study-set') {
+                const assessment = assignments.find(item => String(item.id) === String(id));
+                if (!assessment) throw new Error('This quiz or test no longer exists.');
+                const deck = (AppState.get('flashcards') || []).find(item => String(item.assessmentId) === String(id));
+                if (deck) this.openStudySet(deck.id);
+                else {
+                    this.openDeckEditor();
+                    document.getElementById('deck-editor-title').value = `${assessment.title} study set`.slice(0, 100);
+                    document.getElementById('deck-editor-course').innerHTML = this.deckCourseOptions(assessment.courseCode);
+                    document.getElementById('deck-editor-assessment').innerHTML = this.deckAssessmentOptions(assessment.courseCode, String(assessment.id));
+                }
+            }
             if (action === 'delete-assignment' && window.confirm('Delete this assignment and its saved grade?')) AppState.deleteAssignment(id);
             if (action === 'toggle-assignment') {
                 const assignment = assignments.find(item => item.id === id);
@@ -8314,9 +8553,25 @@
             if (action === 'edit-deck') this.openDeckEditor(id);
             if (action === 'editor-add-card') this.openCardForm(this.deckEditorDraft?.id, '', true);
             if (action === 'editor-edit-card') this.openCardForm(this.deckEditorDraft?.id, id, true);
+            if (action === 'editor-bulk-add') this.addBulkEditorCards();
+            if (action === 'editor-copy-card' || action === 'editor-reverse-card') this.copyEditorCard(id, action === 'editor-reverse-card');
+            if (action === 'editor-pause-card') {
+                const card = this.deckEditorDraft?.cards.find(item => item.id === id);
+                if (!card) throw new Error('This card is no longer in the editor.');
+                card.suspended = !card.suspended;
+                this.renderDeckEditorCards();
+            }
+            if (action === 'editor-undo-delete') {
+                const deleted = this.deckEditorUndo?.pop();
+                if (!deleted) throw new Error('There are no deleted cards to restore.');
+                this.deckEditorDraft.cards.splice(deleted.index, 0, deleted.card);
+                this.renderDeckEditorCards();
+            }
             if (action === 'editor-delete-card') {
                 if (!this.deckEditorDraft?.cards.some(card => card.id === id)) throw new Error('The selected card no longer exists.');
                 if (window.confirm('Delete this card and its review progress when you save the set?')) {
+                    const index = this.deckEditorDraft.cards.findIndex(card => card.id === id);
+                    (this.deckEditorUndo ||= []).push({ index, card: this.deckEditorDraft.cards[index] });
                     this.deckEditorDraft.cards = this.deckEditorDraft.cards.filter(card => card.id !== id);
                     this.renderDeckEditorCards();
                 }
@@ -8374,8 +8629,8 @@
             cardEl.classList.remove('is-flipped');
             // Hold the new back text until the card has flipped away so the answer never flashes
             clearTimeout(this.cardBackTimer);
-            if (wasFlipped) this.cardBackTimer = setTimeout(() => { backEl.textContent = card.back || ''; }, 350);
-            else backEl.textContent = card.back || '';
+            if (wasFlipped) this.cardBackTimer = setTimeout(() => { backEl.innerHTML = this.cardAnswerMarkup(card); }, 350);
+            else backEl.innerHTML = this.cardAnswerMarkup(card);
             document.getElementById('reveal-card-btn').classList.remove('hidden');
             document.getElementById('sm2-controls').classList.add('hidden');
         }
@@ -8394,7 +8649,7 @@
                 return;
             }
             clearTimeout(this.cardBackTimer);
-            document.getElementById('card-back-content').textContent = card.back || '';
+            document.getElementById('card-back-content').innerHTML = this.cardAnswerMarkup(card);
             cardEl.classList.add('is-flipped');
             document.getElementById('reveal-card-btn').classList.add('hidden');
             document.getElementById('sm2-controls').classList.remove('hidden');
@@ -8419,6 +8674,7 @@
                 this.studyCards.push(card);
             }
             deck.studiedAt = deck.studiedAt || new Date().toISOString();
+            window.FlashcardTools.recordAnswer(card, quality >= 3);
             deck.studiedCount = Number(deck.studiedCount || 0) + 1;
             await AppState.saveFlashcardDeck(deck);
             if (deck.communitySourceId && deck.communitySourceOwnerId !== window.StudBudCloud.user.id && !deck.communityStudyRecorded) {
@@ -8872,7 +9128,7 @@
             content.innerHTML = `
                 <form id="practice-test-config-form" class="practice-test-setup">
                     <p>Choose a deck, then how many questions of each type you want. Use 0 to skip a type.</p>
-                    <p class="settings-hint">Each matching group counts as one question and needs every pair correct. Larger tests may repeat cards. Typed answers match the saved wording, ignoring case and spacing but keeping mathematical signs.</p>
+                    <p class="settings-hint">Each matching group counts as one question. Larger tests may repeat cards. Adaptive practice favors lower-accuracy cards without excluding other cards.</p>
                     <label>Flashcard deck
                         <select name="deckId" required>${usableDecks.map(deck =>
                             `<option value="${this.escapeHTML(deck.id)}">${this.escapeHTML(deck.title)} · ${(deck.cards || []).filter(card => card.front && card.back).length} cards</option>`
@@ -8884,6 +9140,10 @@
                         <label>Matching (up to 4 pairs each) <input type="number" name="matchCount" min="0" max="50" value="2"></label>
                         <label>Typing <input type="number" name="typeCount" min="0" max="50" value="3"></label>
                     </fieldset>
+                    <label>Feedback<select name="feedback"><option value="study">Study: feedback after each answer</option><option value="exam">Exam: answers only at the end</option></select></label>
+                    <label>Typed grading<select name="grading"><option value="strict">Strict: saved wording (ignore case and spacing)</option><option value="lenient">Lenient: punctuation, accents and one small typo</option></select></label>
+                    <p class="settings-hint">Lenient grading never guesses mathematical signs, quantities, negation or short answers.</p>
+                    <label class="settings-check"><input type="checkbox" name="adaptive" checked> Focus on weaker cards using your accuracy</label>
                     <button class="primary-btn" type="submit"><i class="fas fa-play"></i> Start practice test</button>
                 </form>`;
         }
@@ -8893,13 +9153,15 @@
             const deck = (AppState.get('flashcards') || []).find(item => item.id === data.get('deckId'));
             if (!deck) throw new Error('Choose an available flashcard deck.');
             const availableCards = (deck.cards || []).filter(card => card.front && card.back);
-            if (availableCards.length < 2) throw new Error('Choose a deck with at least two complete cards.');
+            if (!availableCards.length) throw new Error('Choose a deck with at least one complete card.');
             const count = name => Math.max(0, Math.min(50, Math.floor(Number(data.get(name)) || 0)));
             const counts = { 'multiple-choice': count('mcCount'), matching: count('matchCount'), written: count('typeCount') };
             if (!counts['multiple-choice'] && !counts.matching && !counts.written) throw new Error('Enter how many questions of at least one type you want.');
             const shuffle = list => this.shuffleCards(list);
-            let pool = shuffle(availableCards);
-            const draw = () => { if (!pool.length) pool = shuffle(availableCards); return pool.pop(); };
+            this.practiceTestOptions = { strict: data.get('grading') !== 'lenient', exam: data.get('feedback') === 'exam', adaptive: data.get('adaptive') !== null };
+            const orderCards = () => this.practiceTestOptions.adaptive ? window.FlashcardTools.adaptiveOrder(availableCards) : shuffle(availableCards);
+            let pool = orderCards();
+            const draw = () => { if (!pool.length) pool = orderCards(); return pool.shift(); };
             const items = [];
             for (let i = 0; i < counts['multiple-choice']; i++) items.push({ type: 'multiple-choice', cards: [draw()] });
             for (let i = 0; i < counts.written; i++) items.push({ type: 'written', cards: [draw()] });
@@ -8913,13 +9175,15 @@
                 }).slice(0, Math.min(4, availableCards.length));
                 if (group.length >= 2) items.push({ type: 'matching', cards: group });
             }
-            const ordered = shuffle(items);
+            const ordered = items;
             if (!ordered.length) throw new Error('This deck needs cards with different answers for matching questions.');
             this.practiceTestCards = ordered.map(item => item.cards[0]);
             this.practiceTestDeckCards = availableCards;
             this.practiceTestGroups = ordered.map(item => item.cards);
             this.practiceTestQuestionTypes = ordered.map(item => item.type);
             this.practiceTestAnswers = [];
+            this.practiceTestDeckId = deck.id;
+            this.arcadeCardDeck = new Map(availableCards.map(card => [card, deck]));
             this.arcadeMode = 'test';
             this.arcadeQuestionIndex = 0;
             this.arcadeScore = 0;
@@ -8942,7 +9206,7 @@
             content.innerHTML = '';
             const progress = document.createElement('p');
             progress.className = 'practice-test-progress';
-            progress.textContent = `Question ${index + 1} of ${this.practiceTestCards.length} · ${this.arcadeScore} correct`;
+            progress.textContent = `Question ${index + 1} of ${this.practiceTestCards.length}${this.practiceTestOptions?.exam ? ' · Exam mode' : ` · ${this.arcadeScore} correct`}`;
             const question = document.createElement('h4');
             question.textContent = card.front;
             const form = document.createElement('form');
@@ -8962,10 +9226,9 @@
                     label.className = 'practice-test-choice';
                     label.innerHTML = `<input type="radio" name="answer" value="${choiceIndex}" required><span></span>`;
                     label.querySelector('span').textContent = option.back;
-                    label.dataset.correct = String(option === card);
                     options.append(label);
                 });
-                form.dataset.correctAnswer = String(choices.findIndex(option => option === card));
+                this.practiceTestCorrectChoice = choices.findIndex(option => option === card);
                 form.append(options);
             } else if (questionType === 'matching') {
                 const group = this.practiceTestGroups[index];
@@ -8997,7 +9260,7 @@
                 const label = document.createElement('label');
                 label.className = 'practice-test-written';
                 label.htmlFor = 'practice-test-written-answer';
-                label.textContent = 'Your answer (match the saved answer; capitalization and spacing do not matter)';
+                label.textContent = this.practiceTestOptions?.strict === false ? 'Your answer (lenient grading)' : 'Your answer (saved wording; capitalization and spacing do not matter)';
                 const answer = document.createElement('textarea');
                 answer.id = 'practice-test-written-answer';
                 answer.name = 'answer';
@@ -9010,19 +9273,21 @@
             const submit = document.createElement('button');
             submit.className = 'primary-btn';
             submit.type = 'submit';
-            submit.textContent = 'Check answer';
+            submit.textContent = this.practiceTestOptions?.exam ? 'Submit answer' : 'Check answer';
             form.append(submit);
             content.append(progress, question, form);
             if (questionType === 'written') document.getElementById('practice-test-written-answer').focus();
         }
 
-        submitPracticeTestAnswer(form) {
+        async submitPracticeTestAnswer(form) {
+            if (form.dataset.submitted === 'true') return;
             const card = this.practiceTestCards[this.arcadeQuestionIndex];
             if (!card) return;
             const data = new FormData(form);
             let correct;
             let givenAnswer;
             let recorded = card;
+            let outcomes = [];
             if (form.dataset.questionType === 'matching') {
                 const group = this.practiceTestGroups[this.arcadeQuestionIndex];
                 const order = JSON.parse(form.dataset.defOrder || '[]');
@@ -9032,29 +9297,51 @@
                 });
                 if (picks.some(pick => pick === undefined)) throw new Error('Pick a definition for every term.');
                 correct = picks.every((pick, i) => pick === i);
+                outcomes = group.map((item, i) => ({ card: item, correct: picks[i] === i }));
                 givenAnswer = group.map((item, i) => `${item.front} → ${group[picks[i]].back}`).join('; ');
                 recorded = { front: `Matching: ${group.map(item => item.front).join(', ')}`, back: group.map(item => `${item.front} → ${item.back}`).join('; ') };
             } else if (form.dataset.questionType === 'multiple-choice') {
                 const selected = data.get('answer');
                 if (selected === null) throw new Error('Choose an answer first.');
-                correct = selected === form.dataset.correctAnswer;
+                correct = Number(selected) === this.practiceTestCorrectChoice;
                 givenAnswer = form.querySelector(`input[value="${CSS.escape(selected)}"]`)?.closest('label').querySelector('span')?.textContent || '';
             } else {
                 givenAnswer = String(data.get('answer') || '').trim();
                 if (!givenAnswer) throw new Error('Enter a written answer first.');
-                correct = this.answerKey(givenAnswer) === this.answerKey(card.back);
+                correct = window.FlashcardTools.gradeAnswer(givenAnswer, card.back, this.practiceTestOptions?.strict !== false);
+            }
+            form.dataset.submitted = 'true';
+            if (!outcomes.length) outcomes = [{ card, correct }];
+            try {
+                await this.updateCardSchedules(outcomes);
+            } catch (error) {
+                delete form.dataset.submitted;
+                throw error;
             }
             if (correct) this.arcadeScore += 1;
-            this.practiceTestAnswers.push({ card: recorded, givenAnswer, correct });
+            this.practiceTestAnswers.push({ card: recorded, givenAnswer, correct, outcomes });
 
             const feedback = document.createElement('p');
-            feedback.className = `practice-test-feedback ${correct ? 'is-correct' : 'is-incorrect'}`;
-            feedback.textContent = correct ? 'Correct!' : `Not quite. Correct answer: ${recorded.back}`;
+            feedback.className = `practice-test-feedback${this.practiceTestOptions?.exam ? '' : correct ? ' is-correct' : ' is-incorrect'}`;
+            if (this.practiceTestOptions?.exam) feedback.textContent = 'Answer recorded.';
+            else feedback.innerHTML = `${correct ? 'Correct!' : 'Not quite.'} <div>${this.cardAnswerMarkup(recorded)}</div>`;
             const next = document.createElement('button');
             next.className = 'primary-btn';
             next.textContent = this.arcadeQuestionIndex + 1 === this.practiceTestCards.length ? 'See results' : 'Next question';
             next.addEventListener('click', () => {
                 this.arcadeQuestionIndex += 1;
+                if (this.practiceTestOptions?.adaptive) {
+                    const remaining = this.practiceTestCards.slice(this.arcadeQuestionIndex).map((item, i) => ({
+                        card: item, group: this.practiceTestGroups[this.arcadeQuestionIndex + i], type: this.practiceTestQuestionTypes[this.arcadeQuestionIndex + i]
+                    }));
+                    const ordered = window.FlashcardTools.adaptiveOrder(remaining.map(item => ({ ...item.card, entry: item })));
+                    ordered.forEach((item, i) => {
+                        const at = this.arcadeQuestionIndex + i;
+                        this.practiceTestCards[at] = item.entry.card;
+                        this.practiceTestGroups[at] = item.entry.group;
+                        this.practiceTestQuestionTypes[at] = item.entry.type;
+                    });
+                }
                 this.renderPracticeTestQuestion();
             });
             form.replaceWith(feedback, next);
@@ -9070,6 +9357,8 @@
                 <h4>Test complete</h4>
                 <p class="practice-test-score">${this.arcadeScore} / ${total} correct · ${percent}%</p>
                 <div class="practice-test-review"></div>
+                ${this.studySetMarkup({ deckId: this.practiceTestDeckId })}
+                ${this.practiceTestAnswers.some(answer => !answer.correct) ? '<button class="secondary-btn" data-action="practice-retry-missed">Retry missed cards</button>' : ''}
                 <button class="primary-btn" data-action="arcade-restart">Try another test</button>
             </section>`;
             const review = content.querySelector('.practice-test-review');
@@ -9083,8 +9372,25 @@
                 const expected = document.createElement('span');
                 expected.textContent = `Correct answer: ${answer.card.back}`;
                 row.append(heading, response, expected);
+                const illustration = document.createElement('div');
+                illustration.innerHTML = this.cardAnswerMarkup({ ...answer.card, back: '' });
+                row.append(illustration);
                 review.append(row);
             });
+        }
+
+        retryMissedPracticeCards() {
+            const missed = [...new Set(this.practiceTestAnswers.flatMap(answer => (answer.outcomes || []).filter(outcome => !outcome.correct).map(outcome => outcome.card)))];
+            if (!missed.length) throw new Error('There are no missed cards to retry.');
+            this.practiceTestCards = window.FlashcardTools.adaptiveOrder(missed);
+            this.practiceTestGroups = this.practiceTestCards.map(card => [card]);
+            this.practiceTestQuestionTypes = this.practiceTestCards.map(() => 'written');
+            this.practiceTestAnswers = [];
+            this.arcadeQuestionIndex = 0;
+            this.arcadeScore = 0;
+            this.arcadeStudyStartedAt = Date.now();
+            this.arcadeStudyRecorded = false;
+            this.renderPracticeTestQuestion();
         }
 
         prepareMemoryGame() {
@@ -9256,42 +9562,57 @@
         }
 
         answerKey(text) {
-            return String(text ?? '').normalize('NFKC').trim().replace(/\s+/g, ' ').replace(/[.!?;:,]+$/, '').toLowerCase();
+            return window.FlashcardTools.answerKey(text);
         }
 
-        /** Random cards whose answers differ from the correct answer and from each other. */
         pickDistractorCards(card, pool, count) {
-            const used = new Set([this.answerKey(card.back)]);
-            const picks = [];
-            for (const item of this.shuffleCards(pool || [])) {
-                if (picks.length >= count) break;
-                if (!item || item === card) continue;
-                const key = this.answerKey(item.back);
-                if (!key || used.has(key)) continue;
-                used.add(key);
-                picks.push(item);
+            return window.FlashcardTools.distractors(card, pool, count);
+        }
+
+        cardAnswerMarkup(card) {
+            const image = window.FlashcardTools.imageSource(card.answerImage);
+            return `${this.escapeHTML(card.back || '')}${image ? `<img class="flashcard-answer-image" src="${image}" alt="Answer illustration">` : ''}`;
+        }
+
+        async updateCardSchedule(card, correct) {
+            return this.updateCardSchedules([{ card, correct }]);
+        }
+
+        async updateCardSchedules(outcomes) {
+            const groups = new Map();
+            for (const outcome of outcomes) {
+                const deck = this.arcadeCardDeck?.get(outcome.card);
+                if (!deck) continue;
+                if (!groups.has(deck.id)) groups.set(deck.id, []);
+                groups.get(deck.id).push(outcome);
             }
-            return picks;
+            for (const [deckId, answers] of groups) {
+                const current = (AppState.get('flashcards') || []).find(item => item.id === deckId);
+                if (!current || answers.some(answer => !current.cards.some(card => card.id === answer.card.id))) throw new Error('This card was removed. Reopen practice before continuing.');
+                const cards = current.cards.map(saved => {
+                    const answer = answers.find(item => item.card.id === saved.id);
+                    if (!answer) return saved;
+                    const next = { ...saved };
+                    window.FlashcardTools.recordAnswer(next, answer.correct);
+                    const state = window.SM2Engine?.normalize(next).state;
+                    if (window.SM2Engine && (!answer.correct || state === 'new' || window.SM2Engine.isDue(next))) Object.assign(next, window.SM2Engine.evaluate(next, answer.correct ? 4 : 1));
+                    return next;
+                });
+                await AppState.saveFlashcardDeck({ ...current, cards });
+                answers.forEach(answer => Object.assign(answer.card, cards.find(card => card.id === answer.card.id)));
+            }
         }
 
-        updateCardSchedule(card, correct) {
-            const deck = this.arcadeCardDeck && this.arcadeCardDeck.get(card);
-            if (!deck || !window.SM2Engine || !card) return;
-            // Multiple choice is easier than free recall: a correct pick only counts once the card is ready for review
-            // (or is brand new), so games can't inflate intervals; a miss always counts.
-            const state = window.SM2Engine.normalize(card).state;
-            if (correct && state !== 'new' && !window.SM2Engine.isDue(card)) return;
-            Object.assign(card, window.SM2Engine.evaluate(card, correct ? 4 : 1));
-            AppState.saveFlashcardDeck(deck).catch(error => console.error('[NexusApp] Card progress could not be saved:', error));
-        }
-
-        answerArcade(index) {
+        async answerArcade(index) {
+            if (this.arcadeAnswerPending) return;
             const correctCard = this.arcadeCards[this.arcadeQuestionIndex];
             const correct = this.arcadeMode === 'truefalse'
                 ? this.arcadeOptions[index] === this.arcadeCurrentIsTrue
                 : this.arcadeOptions[index] === correctCard;
+            this.arcadeAnswerPending = true;
+            try { await this.updateCardSchedule(correctCard, correct); }
+            finally { this.arcadeAnswerPending = false; }
             if (correct) this.arcadeScore += 1;
-            this.updateCardSchedule(correctCard, correct);
             this.arcadeStreak = correct ? this.arcadeStreak + 1 : 0;
             if (this.arcadeMode === 'survival' && !correct) this.arcadeLives -= 1;
             document.querySelectorAll('#arcade-game-content [data-action="arcade-answer"]').forEach(button => {
@@ -9300,7 +9621,7 @@
                 if (this.arcadeMode === 'truefalse' ? answer === this.arcadeCurrentIsTrue : answer === correctCard) button.classList.add('correct');
             });
             const feedback = document.getElementById('arcade-feedback');
-            if (feedback) feedback.textContent = correct ? 'Correct!' : `Not quite. ${correctCard.back}`;
+            if (feedback) feedback.innerHTML = `${correct ? 'Correct!' : 'Not quite.'}<div>${this.cardAnswerMarkup(correctCard)}</div>`;
             const next = document.createElement('button');
             next.className = 'primary-btn';
             next.dataset.action = 'arcade-next';
@@ -9312,6 +9633,7 @@
         }
 
         async awardSoloCoins() {
+            if (window.StudBudCloud?.offlineMode || window.navigator?.onLine === false) return;
             const mode = this.arcadeMode;
             const correct = Number(this.arcadeScore) || 0;
             const total = mode === 'test' ? (this.practiceTestAnswers || []).length

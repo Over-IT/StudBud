@@ -368,7 +368,7 @@ create table if not exists public.studbud_game_rooms (
         jsonb_typeof(cards) = 'array'
         and jsonb_array_length(cards) >= 1
     ),
-    mode text not null check (mode in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'sports', 'fishing', 'hack')),
+    mode text not null check (mode in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'sports', 'fishing', 'hack', 'chess')),
     status text not null default 'waiting' check (status in ('waiting', 'playing', 'finished')),
     state jsonb not null default '{"players":[],"question_index":-1,"question":null}'::jsonb,
     goal_type text not null default 'points',
@@ -394,7 +394,7 @@ alter table public.studbud_game_rooms
 alter table public.studbud_game_rooms drop constraint if exists studbud_game_rooms_mode_check;
 alter table public.studbud_game_rooms
     add constraint studbud_game_rooms_mode_check
-    check (mode in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'sports', 'fishing', 'hack'));
+    check (mode in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'sports', 'fishing', 'hack', 'chess'));
 alter table public.studbud_game_rooms drop constraint if exists studbud_game_rooms_goal_type_check;
 alter table public.studbud_game_rooms
     add constraint studbud_game_rooms_goal_type_check check (goal_type in ('points', 'time'));
@@ -403,7 +403,7 @@ alter table public.studbud_game_rooms
     add constraint studbud_game_rooms_point_limit_check check (point_limit > 0);
 alter table public.studbud_game_rooms drop constraint if exists studbud_game_rooms_time_limit_seconds_check;
 alter table public.studbud_game_rooms
-    add constraint studbud_game_rooms_time_limit_seconds_check check (time_limit_seconds between 60 and 3600);
+    add constraint studbud_game_rooms_time_limit_seconds_check check (time_limit_seconds between 60 and 3600 or (mode = 'chess' and time_limit_seconds = 0));
 
 alter table public.studbud_game_rooms enable row level security;
 revoke all on table public.studbud_game_rooms from anon, authenticated;
@@ -906,24 +906,31 @@ declare
     v_high_score integer;
     v_rewards jsonb := '{}'::jsonb;
     v_reward integer;
+    v_chess_winner text;
+    v_is_winner boolean;
 begin
     select * into v_room from public.studbud_game_rooms where id = p_room_id for update;
     if not found or v_room.status <> 'finished' or v_room.rewards_paid then return; end if;
     select coalesce(max((player ->> 'score')::integer), 0)
     into v_high_score
     from jsonb_array_elements(v_room.state -> 'players') as item(player);
+    if v_room.mode = 'chess' and v_room.state -> 'chess' ->> 'winner' in ('0', '1') then
+        v_chess_winner := (v_room.state -> 'players' -> ((v_room.state -> 'chess' ->> 'winner')::integer)) ->> 'id';
+    end if;
 
     for v_player in
         select player from jsonb_array_elements(v_room.state -> 'players') as item(player)
         where coalesce((player ->> 'correct_count')::integer, 0) > 0 or coalesce((player ->> 'score')::integer, 0) > 0
     loop
+        v_is_winner := case when v_chess_winner is not null then v_player ->> 'id' = v_chess_winner
+            else (v_player ->> 'score')::integer = v_high_score and v_high_score > 0 end;
         v_reward := least(250, coalesce((v_player ->> 'correct_count')::integer, 0) * 6)
-            + case when (v_player ->> 'score')::integer = v_high_score and v_high_score > 0 then 25 else 0 end;
+            + case when v_is_winner then 25 else 0 end;
         insert into public.studbud_multiplayer_profiles (user_id)
         values ((v_player ->> 'id')::uuid) on conflict (user_id) do nothing;
         update public.studbud_multiplayer_profiles
         set coins = coins + v_reward,
-            wins = wins + case when (v_player ->> 'score')::integer = v_high_score and v_high_score > 0 then 1 else 0 end,
+            wins = wins + case when v_is_winner then 1 else 0 end,
             updated_at = now()
         where user_id = (v_player ->> 'id')::uuid;
         v_rewards := jsonb_set(v_rewards, array[v_player ->> 'id'], to_jsonb(v_reward), true);
@@ -1051,12 +1058,13 @@ begin
     if char_length(v_nickname) not between 2 and 20 or v_nickname !~ '^[A-Za-z0-9 _-]+$' then
         raise exception 'Nickname must be 2–20 letters, numbers, spaces, underscores, or hyphens.';
     end if;
-    if coalesce(p_mode, '') not in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'sports', 'fishing', 'hack') then raise exception 'Choose a valid game mode.'; end if;
+    if coalesce(p_mode, '') not in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'sports', 'fishing', 'hack', 'chess') then raise exception 'Choose a valid game mode.'; end if;
     if v_goal_type not in ('points', 'time') then raise exception 'Choose a valid match goal.'; end if;
-    if v_time_limit not between 60 and 3600 then
+    if p_mode = 'chess' then v_goal_type := 'points'; v_time_limit := 0; v_reward := 1; end if;
+    if p_mode <> 'chess' and v_time_limit not between 60 and 3600 then
         raise exception 'Choose a time limit between 1 minute and 1 hour.';
     end if;
-    if v_reward not between 5 and 100 or v_reward % 5 <> 0 then raise exception 'Choose resources per answer from 5 to 100 in increments of 5.'; end if;
+    if p_mode <> 'chess' and (v_reward not between 5 and 100 or v_reward % 5 <> 0) then raise exception 'Choose resources per answer from 5 to 100 in increments of 5.'; end if;
     if jsonb_typeof(v_cards) is distinct from 'array' then raise exception 'The selected deck is invalid.'; end if;
     if jsonb_array_length(v_cards) < 1 then raise exception 'A hosted game needs at least one card.'; end if;
     if exists (
@@ -1081,6 +1089,8 @@ begin
         v_cards,
         p_mode,
         jsonb_build_object(
+            'public_deck_id', (select d.id from public.studbud_community_decks d where d.id::text = p_options ->> 'public_deck_id'),
+            'source_deck_id', left(p_options ->> 'source_deck_id', 100),
             'players', jsonb_build_array(jsonb_build_object(
                 'id', v_user_id::text, 'nickname', v_nickname, 'score', 0,
                 'streak', 0, 'lives', 3, 'answered', false, 'answered_count', 0, 'eliminated', false,
@@ -1156,6 +1166,9 @@ begin
     if v_room.mode = 'duel' and jsonb_array_length(v_players) >= 8 then
         raise exception 'This 1v1 room already has both players.';
     end if;
+    if v_room.mode = 'chess' and jsonb_array_length(v_players) >= 2 then
+        raise exception 'This chess room already has both players.';
+    end if;
     if jsonb_array_length(v_players) >= 16 then raise exception 'This room is full (16 players maximum).'; end if;
     insert into public.studbud_multiplayer_profiles (user_id)
     values (v_user_id) on conflict (user_id) do nothing;
@@ -1228,12 +1241,15 @@ begin
     if v_room.status <> 'waiting' then raise exception 'This game has already started.'; end if;
     v_players := v_room.state -> 'players';
     if jsonb_array_length(v_players) < 2 then raise exception 'At least two players are needed to start.'; end if;
+    if v_room.mode = 'chess' and jsonb_array_length(v_players) <> 2 then raise exception 'Chess requires exactly two players.'; end if;
 
     update public.studbud_game_rooms
     set status = 'playing',
         started_at = now(),
         state = jsonb_build_object(
             'players', v_players,
+            'public_deck_id', v_room.state -> 'public_deck_id',
+            'source_deck_id', v_room.state -> 'source_deck_id',
             'question_index', 0,
             'question_reward', coalesce((v_room.state ->> 'question_reward')::integer, 20),
             'question', public.studbud_game_make_question(cards, 0)
@@ -1241,6 +1257,9 @@ begin
         updated_at = now()
     where id = v_room.id
     returning * into v_room;
+    if v_room.mode = 'chess' then
+        update public.studbud_game_rooms set expires_at = 'infinity'::timestamptz where id = v_room.id returning * into v_room;
+    end if;
     return public.studbud_game_room_view(v_room);
 end;
 $$;
@@ -1529,7 +1548,8 @@ declare
     v_room public.studbud_game_rooms%rowtype;
 begin
     update public.studbud_game_rooms
-    set status = 'finished', updated_at = now()
+    set status = 'finished', updated_at = now(),
+        expires_at = case when mode = 'chess' then now() + interval '2 hours' else expires_at end
     where room_code = upper(btrim(p_code))
         and host_id = auth.uid()
         and status <> 'finished'
@@ -1590,7 +1610,8 @@ begin
     if not found then return; end if;
     if v_room.host_id = auth.uid() then
         update public.studbud_game_rooms
-        set status = 'finished', updated_at = now()
+        set status = 'finished', updated_at = now(),
+            expires_at = case when mode = 'chess' then now() + interval '2 hours' else expires_at end
         where id = v_room.id returning * into v_room;
         perform public.studbud_pay_game_rewards(v_room.id);
     else
@@ -1600,8 +1621,11 @@ begin
         where player ->> 'id' <> auth.uid()::text;
         update public.studbud_game_rooms
         set state = jsonb_set(state, '{players}', v_players),
+            status = case when mode = 'chess' and status = 'playing' and jsonb_array_length(v_players) < jsonb_array_length(v_room.state -> 'players') then 'finished' else status end,
+            expires_at = case when mode = 'chess' and jsonb_array_length(v_players) < jsonb_array_length(v_room.state -> 'players') then now() + interval '2 hours' else expires_at end,
             updated_at = now()
-        where id = v_room.id;
+        where id = v_room.id returning * into v_room;
+        if v_room.mode = 'chess' and v_room.status = 'finished' then perform public.studbud_pay_game_rewards(v_room.id); end if;
     end if;
 end;
 $$;
@@ -1661,6 +1685,58 @@ $$;
 
 revoke all on function public.studbud_get_game_cards(text) from public, anon;
 grant execute on function public.studbud_get_game_cards(text) to authenticated;
+
+create or replace function public.studbud_save_chess_state(p_code text, p_state jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_room public.studbud_game_rooms%rowtype;
+    v_board text := p_state ->> 'board';
+    v_serial integer;
+    v_players jsonb;
+    v_white integer := 0;
+    v_black integer := 0;
+begin
+    select * into v_room from public.studbud_game_rooms
+    where room_code = upper(btrim(p_code)) and expires_at > now() for update;
+    if not found or v_room.host_id is distinct from auth.uid() or v_room.mode <> 'chess' then
+        raise exception 'Only the chess host can save this board.';
+    end if;
+    if v_room.status <> 'playing' then raise exception 'This chess match is not playing.'; end if;
+    if v_board is null or v_board !~ '^[prnbqkPRNBQK.]{64}$' or length(p_state::text) > 4000
+        or coalesce(p_state ->> 'serial', '') !~ '^[0-9]{1,9}$'
+        or coalesce(p_state ->> 'revision', '') !~ '^[0-9]{1,9}$'
+        or coalesce(p_state ->> 'winner', '') not in ('-1', '0', '1')
+        or jsonb_typeof(p_state -> 'credits') is distinct from 'array'
+        or jsonb_typeof(p_state -> 'ack') is distinct from 'array' then
+        raise exception 'Invalid chess board state.';
+    end if;
+    if jsonb_typeof(p_state -> 'capturePoints') is distinct from 'array' then raise exception 'Invalid captured material scores.'; end if;
+    if jsonb_array_length(p_state -> 'capturePoints') <> 2
+        or exists (select 1 from jsonb_array_elements_text(p_state -> 'capturePoints') as c(value) where value is null or value !~ '^[0-9]{1,3}$') then
+        raise exception 'Invalid captured material scores.';
+    end if;
+    if jsonb_array_length(p_state -> 'credits') <> 2 or jsonb_array_length(p_state -> 'ack') <> 2
+        or exists (select 1 from jsonb_array_elements_text(p_state -> 'credits') as c(value) where value is null or value not in ('0', '1'))
+        or exists (select 1 from jsonb_array_elements_text(p_state -> 'ack') as a(value) where value is null or value !~ '^[0-9]{1,9}$') then
+        raise exception 'Invalid chess move credits.';
+    end if;
+    v_serial := (p_state ->> 'serial')::integer;
+    if v_serial <= coalesce((v_room.state -> 'chess' ->> 'serial')::integer, -1) then return; end if;
+    v_white := (p_state -> 'capturePoints' ->> 0)::integer;
+    v_black := (p_state -> 'capturePoints' ->> 1)::integer;
+    select jsonb_agg(player || jsonb_build_object('score', case when ordinality = 1 then v_white else v_black end) order by ordinality)
+    into v_players from jsonb_array_elements(v_room.state -> 'players') with ordinality as players(player, ordinality);
+    update public.studbud_game_rooms
+    set state = jsonb_set(jsonb_set(state, '{chess}', p_state), '{players}', v_players), updated_at = now()
+    where id = v_room.id;
+end;
+$$;
+revoke all on function public.studbud_save_chess_state(text, jsonb) from public, anon;
+grant execute on function public.studbud_save_chess_state(text, jsonb) to authenticated;
 
 revoke all on function public.studbud_report_game_score(text, integer, integer, integer) from public, anon;
 grant execute on function public.studbud_report_game_score(text, integer, integer, integer) to authenticated;

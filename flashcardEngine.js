@@ -1003,7 +1003,101 @@
         }
     }
 
+    const FlashcardTools = {
+        parseBulkCards(text) {
+            const lines = String(text || '').split(/\r?\n/).filter(line => line.trim());
+            if (!lines.length || lines.length > 300) throw new Error('Paste between 1 and 300 cards.');
+            return lines.map((line, index) => {
+                const parts = line.split(line.includes('\t') ? '\t' : '::').map(part => part.trim());
+                if (parts.length < 2 || parts.length > 3 || !parts[0] || !parts[1] || parts[0].length > 5000 || parts[1].length > 5000) {
+                    throw new Error(`Row ${index + 1}: use Question, Answer and optional tags separated by tabs or ::. Each side must have 1-5000 characters.`);
+                }
+                const tags = [...new Set((parts[2] || '').split(',').map(tag => tag.trim()).filter(Boolean))];
+                if (tags.length > 20 || tags.some(tag => tag.length > 60)) throw new Error(`Row ${index + 1}: use at most 20 tags of 60 characters each.`);
+                return { front: parts[0], back: parts[1], tags };
+            });
+        },
+        answerKey(text) {
+            return String(text ?? '').normalize('NFKC').trim().replace(/\s+/g, ' ').replace(/[.!?;:,]+$/, '').toLowerCase();
+        },
+        gradeAnswer(given, expected, strict = true) {
+            const a = this.answerKey(given), b = this.answerKey(expected);
+            if (!a || !b) return false;
+            if (a === b) return true;
+            if (strict) return false;
+            // Keep quantities, operators and negation intact even during punctuation cleanup.
+            if (/[0-9+\-*/=<>^%\u2212\u00d7\u00f7\u00b1\u2264\u2265]/.test(a + b) || /\b(no|not|never|without)\b/.test(a + ' ' + b)) return false;
+            const relaxed = text => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/['"\u2018\u2019\u201c\u201d]/g, '')
+                .replace(/[.!?;:,]/g, ' ').replace(/\s+/g, ' ').trim();
+            const x = relaxed(a), y = relaxed(b);
+            if (x === y) return true;
+            if (x.length < 6 || y.length < 6 || Math.abs(x.length - y.length) > 1) return false;
+            let i = 0, j = 0, edits = 0;
+            while (i < x.length && j < y.length) {
+                if (x[i] === y[j]) { i++; j++; continue; }
+                if (++edits > 1) return false;
+                if (x.length >= y.length) i++;
+                if (y.length >= x.length) j++;
+            }
+            return edits + (x.length - i) + (y.length - j) <= 1;
+        },
+        distractors(card, pool, count = 3) {
+            const used = new Set([this.answerKey(card.back)]);
+            const picks = [];
+            for (const text of card.distractors || []) {
+                const key = this.answerKey(text);
+                if (key && !used.has(key)) { used.add(key); picks.push({ back: String(text) }); }
+                if (picks.length >= count) return picks;
+            }
+            const words = text => new Set(this.answerKey(text).match(/[\p{L}\p{N}]+/gu) || []);
+            const target = words(card.back), prompt = words(card.front);
+            const number = text => /^[+-]?\d+(?:\.\d+)?$/.test(this.answerKey(text));
+            const candidates = (pool || []).filter(item => item && item !== card).map(item => {
+                const terms = words(item.back), front = words(item.front);
+                const shared = [...terms].filter(word => target.has(word)).length;
+                const sameTag = (card.tags || []).some(tag => (item.tags || []).includes(tag));
+                const similarity = shared / Math.max(1, new Set([...target, ...terms]).size);
+                return { item, rank: similarity * 4 + (sameTag ? 2 : 0)
+                    + [...front].filter(word => prompt.has(word)).length / Math.max(1, prompt.size)
+                    + (number(card.back) === number(item.back) ? 1 : 0)
+                    + 1 / (1 + Math.abs(String(card.back).length - String(item.back).length)), tie: Math.random() };
+            }).sort((a, b) => b.rank - a.rank || a.tie - b.tie);
+            for (const { item } of candidates) {
+                const key = this.answerKey(item.back);
+                if (!key || used.has(key)) continue;
+                used.add(key); picks.push(item);
+                if (picks.length >= count) break;
+            }
+            return picks;
+        },
+        weight(card) {
+            const stats = card.practiceStats || {};
+            const attempts = Math.max(0, Number(stats.attempts) || 0);
+            const accuracy = (Math.max(0, Number(stats.correct) || 0) + 1) / (attempts + 2);
+            return 1 + (1 - accuracy) * 4 + Math.min(3, Math.max(0, Number(stats.missStreak) || 0))
+                + Math.min(2, Math.max(0, Number(card.lapses) || 0) * .25);
+        },
+        adaptiveOrder(cards) {
+            return cards.map(card => ({ card, rank: -Math.log(Math.max(Number.EPSILON, Math.random())) / this.weight(card) }))
+                .sort((a, b) => a.rank - b.rank).map(item => item.card);
+        },
+        recordAnswer(card, correct) {
+            const stats = card.practiceStats || {};
+            card.practiceStats = {
+                attempts: (Number(stats.attempts) || 0) + 1,
+                correct: (Number(stats.correct) || 0) + (correct ? 1 : 0),
+                missStreak: correct ? 0 : (Number(stats.missStreak) || 0) + 1,
+                lastCorrect: Boolean(correct), lastAnswered: new Date().toISOString()
+            };
+        },
+        imageSource(value) {
+            return typeof value === 'string' && value.length <= 700000
+                && /^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/=\r\n]+$/.test(value) ? value : '';
+        }
+    };
+
     // Export module
+    global.FlashcardTools = FlashcardTools;
     global.FlashcardEngine = new FlashcardEngine();
     global.ContextLinkedHierarchyBus = ContextLinkedHierarchyBus;
     global.SM2Engine = SM2Engine;
@@ -1011,7 +1105,7 @@
     global.AnkiStudySession = AnkiStudySession;
 
     if (typeof module !== 'undefined' && module.exports) {
-        module.exports = { SM2Engine, AnkiStudySession, BKTEngine, ContextLinkedHierarchyBus };
+        module.exports = { SM2Engine, AnkiStudySession, BKTEngine, ContextLinkedHierarchyBus, FlashcardTools };
     }
 
     // Boot hook

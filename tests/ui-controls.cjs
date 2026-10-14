@@ -47,7 +47,7 @@ const sandbox = {
     console, performance, Date, Math, Map, Set,
     navigator: { maxTouchPoints: 1 },
     requestAnimationFrame() {},
-    document: { addEventListener() {}, createElement: () => new Element() },
+    document: { addEventListener() {}, getElementById: () => null, createElement: () => new Element() },
     window: {
         matchMedia: () => ({ matches: true }),
         addEventListener(name, handler) { if (!windowHandlers.has(name)) windowHandlers.set(name, new Set()); windowHandlers.get(name).add(handler); },
@@ -55,7 +55,7 @@ const sandbox = {
     }
 };
 vm.createContext(sandbox);
-for (const file of ['multiplayerEngine.js', 'multiplayerGames.js', 'multiplayerGames2.js', 'multiplayerGames3.js']) {
+for (const file of ['flashcardEngine.js', 'multiplayerEngine.js', 'multiplayerGames.js', 'multiplayerGames2.js', 'multiplayerGames3.js']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), sandbox, { filename: file });
 }
 
@@ -300,7 +300,7 @@ assert.equal(soccerButtons.find(button => button.textContent === 'Power kick').d
 
 const appSource = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 vm.runInContext(appSource.slice(appSource.indexOf('    class AppOrchestrator {'), appSource.indexOf('    window.NexusApp =')) + '\nwindow.TestApp = AppOrchestrator;', sandbox);
-{
+async function checkPracticeGrading() {
     const app = Object.create(sandbox.window.TestApp.prototype);
     const content = new Element();
     const find = (element, id) => element.id === id ? element : element.children.map(child => find(child, id)).find(Boolean);
@@ -316,15 +316,15 @@ vm.runInContext(appSource.slice(appSource.indexOf('    class AppOrchestrator {')
     const form = find(content, 'practice-test-answer-form');
     assert.ok(find(content, 'practice-test-written-answer'), 'written questions actually render a labeled answer field');
     form.values = { answer: '2' };
-    app.submitPracticeTestAnswer(form);
+    await app.submitPracticeTestAnswer(form);
     assert.equal(app.arcadeScore, 0, 'a positive answer cannot match a negative one');
     app.renderPracticeTestQuestion();
     const retry = find(content, 'practice-test-answer-form');
     retry.values = { answer: ' -2 ' };
-    app.submitPracticeTestAnswer(retry);
+    await app.submitPracticeTestAnswer(retry);
     assert.equal(app.arcadeScore, 1);
     app.practiceTestGroups = [[{ front: 'A', back: 'one' }, { front: 'B', back: 'two' }]];
-    assert.throws(() => app.submitPracticeTestAnswer({ dataset: { questionType: 'matching', defOrder: '[0,1]' }, values: { match0: '', match1: '1' } }), /every term/);
+    await assert.rejects(app.submitPracticeTestAnswer({ dataset: { questionType: 'matching', defOrder: '[0,1]' }, values: { match0: '', match1: '1' } }), /every term/);
 }
 {
     let saved = 0, left = 0;
@@ -413,6 +413,7 @@ console.log('SQL constraint naming, HUD defaults, 55-degree/60% joystick thresho
 console.log('Modal/game-result focus, background input isolation and escaped shared question summaries passed.');
 
 (async () => {
+    await checkPracticeGrading();
     const app = Object.create(sandbox.window.TestApp.prototype);
     const card = new Element();
     const handlers = {};

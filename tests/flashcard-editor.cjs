@@ -10,10 +10,10 @@ const state = { flashcards: [], courses: [{ code: 'math', title: 'Math' }, { cod
     { id: 'past', courseCode: 'math', title: 'Old test', kind: 'test', dueDate: '2000-01-01', status: 'completed' }
 ] };
 const elements = new Map();
-for (const id of ['card-form', 'card-deck-id', 'card-id', 'card-front', 'card-back', 'card-tags',
+for (const id of ['card-form', 'card-deck-id', 'card-id', 'card-front', 'card-back', 'card-tags', 'card-answer-image', 'card-remove-image', 'card-distractors',
     'deck-editor-title', 'deck-editor-course', 'deck-editor-assessment', 'deck-editor-search',
-    'deck-editor-count', 'deck-editor-cards', 'modal-container']) {
-    const element = { value: '', textContent: '', reset() {}, classList: { add() {}, contains: () => false } };
+    'deck-editor-count', 'deck-editor-cards', 'deck-editor-filter', 'deck-editor-bulk', 'deck-editor-undo', 'modal-container']) {
+    const element = { value: '', textContent: '', reset() {}, classList: { add() {}, toggle() {}, contains: () => false } };
     Object.defineProperty(element, 'innerHTML', {
         get() { return this.html || ''; },
         set(html) {
@@ -36,6 +36,7 @@ const sandbox = {
     },
     AppState: {
         get: key => state[key],
+        setSaveStatus() {},
         saveFlashcardDeck: async deck => {
             if (failStorage) throw new Error('Storage failed');
             const index = state.flashcards.findIndex(item => item.id === deck.id);
@@ -46,6 +47,7 @@ const sandbox = {
 };
 vm.createContext(sandbox);
 vm.runInContext(source('communityGames.js'), sandbox);
+vm.runInContext(source('flashcardEngine.js'), sandbox);
 const appSource = source('app.js');
 vm.runInContext(appSource.slice(appSource.indexOf('    function localDateKey'), appSource.indexOf('    window.NexusApp ='))
     + '\nglobalThis.app = Object.create(AppOrchestrator.prototype);', sandbox);
@@ -69,6 +71,8 @@ async function run() {
     value('card-front', '  Edited <term>  ');
     value('card-back', '  Updated answer  ');
     value('card-tags', ' unit, edited, ');
+    value('card-distractors', 'Wrong answer\nAnother option');
+    app.deckEditorDraft.cards[0].answerImage = 'data:image/png;base64,aGVsbG8=';
     await app.saveCard();
     assert.equal(deck().cards[0].front, 'Before', 'draft changes stay private until saved');
     app.closeModal();
@@ -97,6 +101,8 @@ async function run() {
     }
     assert.equal(deck().cards[0].front, 'Edited <term>');
     assert.deepEqual(deck().cards[0].tags, ['unit', 'edited']);
+    assert.deepEqual(deck().cards[0].distractors, ['Wrong answer', 'Another option']);
+    assert.equal(deck().cards[0].answerImage, 'data:image/png;base64,aGVsbG8=');
 
     app.openDeckEditor('set');
     await app.handleDataAction('editor-delete-card', newId);
@@ -121,6 +127,13 @@ async function run() {
     failStorage = false;
     await app.saveCard();
     assert.equal(deck().cards.length, 2, 'editing replaces rather than duplicates');
+    app.openCardForm('set', 'original');
+    value('card-distractors', 'Updated answer');
+    await assert.rejects(app.saveCard(), /correct answer/);
+    value('card-distractors', '');
+    elements.get('card-remove-image').checked = true;
+    await app.saveCard();
+    assert.equal(deck().cards[0].answerImage, '');
     assert.throws(() => app.openCardForm('set', 'missing'), /selected card no longer exists/);
     app.openDeckEditor('set');
     deck().cards[0].back = 'Updated elsewhere';
@@ -145,10 +158,65 @@ async function run() {
 }
 
 async function linksAndSharing() {
+    state.flashcards = [{ id: 'set', title: 'Editor tools', cards: [{ ...clone(progress), answerImage: 'data:image/png;base64,aGVsbG8=', distractors: ['Other'] }] }];
+    app.openDeckEditor('set');
+    value('deck-editor-bulk', 'First :: Definition :: unit\nSecond\tOther definition\nFirst :: Definition');
+    app.addBulkEditorCards();
+    assert.equal(app.deckEditorDraft.cards.length, 3, 'bulk paste skips duplicate pairs without replacing existing cards');
+    assert.equal(deck().cards.length, 1, 'bulk changes remain staged');
+    value('deck-editor-bulk', 'Valid :: Answer\nMalformed row');
+    assert.throws(() => app.addBulkEditorCards(), /Row 2/);
+    assert.equal(app.deckEditorDraft.cards.length, 3, 'invalid bulk paste is atomic');
+    app.copyEditorCard('original');
+    const copied = app.deckEditorDraft.cards[1];
+    assert.notEqual(copied.id, 'original');
+    assert.equal(copied.answerImage, 'data:image/png;base64,aGVsbG8=');
+    assert.equal(copied.repetitions, 0);
+    assert.equal(copied.practiceStats, undefined);
+    app.copyEditorCard('original', true);
+    const reversed = app.deckEditorDraft.cards[1];
+    assert.equal(reversed.front, 'Answer');
+    assert.equal(reversed.back, 'Before');
+    assert.equal(reversed.answerImage, undefined, 'reverse copies cannot illustrate the wrong side');
+    assert.equal(reversed.distractors, undefined);
+    await app.handleDataAction('editor-pause-card', 'original');
+    await app.handleDataAction('editor-delete-card', copied.id);
+    await app.handleDataAction('editor-undo-delete');
+    assert.ok(app.deckEditorDraft.cards.some(card => card.id === copied.id));
+    await app.saveDeckEditor();
+    assert.equal(deck().cards.find(card => card.id === 'original').suspended, true);
+    assert.equal(deck().cards.find(card => card.id === 'original').interval, 20);
+
     state.flashcards = [{ id: 'set', title: 'Shared set', cards: [clone(progress), { id: 'two', front: 'Two', back: 'Second' }],
         courseCode: 'math', courseTitle: 'Math', assessmentId: 'math-test', communityPublished: true, communityDeckId: 'published' }];
     const published = [];
     sandbox.window.StudBudCommunityGames.publishDeck = async deck => { published.push(clone(deck)); return { id: 'published' }; };
+    sandbox.window.StudBudCloud = { offlineMode: true };
+    await app.refreshEditedSharedDeck(deck());
+    assert.equal(published.length, 0, 'offline edits never attempt public publication');
+    assert.equal(deck().communityUpdatePending, true);
+    sandbox.window.StudBudCloud.offlineMode = false;
+    await app.refreshPendingSharedDecks();
+    assert.equal(published.length, 1);
+    assert.equal(deck().communityUpdatePending, false);
+    const queuedOriginal = clone(deck());
+    await app.updateSavedDeck('set', { communityUpdatePending: true });
+    sandbox.window.StudBudCommunityGames.publishDeck = async () => {
+        await app.updateSavedDeck('set', { title: 'Edited during queued publication' });
+        return { id: 'published' };
+    };
+    await app.refreshPendingSharedDecks();
+    assert.equal(deck().title, 'Edited during queued publication');
+    assert.equal(deck().communityUpdatePending, true, 'acknowledging an older publication keeps newer edits queued');
+    sandbox.window.StudBudCommunityGames.publishDeck = async () => { throw new Error('Connection failed'); };
+    await app.refreshPendingSharedDecks();
+    assert.equal(deck().communityUpdatePending, true, 'publication failures retain the pending local copy');
+    sandbox.window.StudBudCommunityGames.publishDeck = async () => { state.flashcards = []; return { id: 'published' }; };
+    await app.refreshPendingSharedDecks();
+    assert.equal(state.flashcards.length, 0, 'queued publication acknowledgements cannot resurrect deleted sets');
+    state.flashcards = [queuedOriginal];
+    sandbox.window.StudBudCommunityGames.publishDeck = async deck => { published.push(clone(deck)); return { id: 'published' }; };
+    published.length = 0;
     await app.updateDeckLink('set', 'course', 'spanish');
     assert.equal(deck().assessmentId, '');
     await app.updateDeckLink('set', 'course', 'math');
@@ -274,7 +342,7 @@ async function linksAndSharing() {
     assert.equal(rows.size, 1);
     assert.equal(sent[2].course, 'Math');
     assert.equal(sent[2].assessmentId, undefined);
-    assert.deepEqual(Object.keys(sent[2].cards[0]).sort(), ['back', 'front'], 'public copies exclude review progress');
+    assert.deepEqual(Object.keys(sent[2].cards[0]).sort(), ['back', 'distractors', 'front'], 'public copies include choices but exclude private images and review progress');
     await assert.rejects(community.publishDeck({ ...shared, id: 'different-set' }), /already exists/, 'real duplicates remain blocked');
     await assert.rejects(community.publishDeck({ ...shared, communitySourceId: 'borrowed', communitySourceOwnerId: 'another' }), /reposted/);
     lookupError = true;

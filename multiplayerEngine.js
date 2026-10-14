@@ -184,6 +184,13 @@
         ctx.fillText(name, x, y);
     }
 
+    function graphicsProfile(mode = window.NexusApp?.AppState?.get('settings')?.gameQuality || 'auto', device = window.navigator || {}) {
+        const low = mode === 'low' || (mode === 'auto' && ((device.hardwareConcurrency || 8) <= 4
+            || (device.deviceMemory || 8) <= 4 || device.connection?.saveData || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches));
+        return { low: Boolean(low), maxDpr: low ? 1 : 2, fps: low ? 30 : 60, previewFps: low ? 12 : 24,
+            avatarFps: low ? 12 : 30, particleScale: low ? .35 : 1, particleLimit: low ? 90 : 320 };
+    }
+
     class Particles {
         constructor(session) { this.items = []; this.session = session; }
         burst(x, y, color, count = 10, speed = 160, life = 0.5, size = 4) {
@@ -191,15 +198,23 @@
                 if (count >= 24) sfx('boom', 160);
                 else if (count >= 8) sfx('pop', 70);
             }
-            for (let i = 0; i < count; i++) {
+            const profile = this.session?.graphics?.particleLimit ? this.session.graphics : graphicsProfile();
+            const amount = Math.max(0, Math.min(Math.ceil(count * profile.particleScale), profile.particleLimit - this.items.length));
+            for (let i = 0; i < amount; i++) {
                 const a = Math.random() * TAU;
                 const v = speed * (0.3 + Math.random() * 0.7);
                 this.items.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life, max: life, color, size });
             }
         }
         update(dt, gravity = 0) {
-            for (const p of this.items) { p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += gravity * dt; }
-            this.items = this.items.filter(p => p.life > 0);
+            let kept = 0;
+            for (const p of this.items) {
+                p.life -= dt;
+                if (p.life <= 0) continue;
+                p.x += p.vx * dt; p.y += p.vy * dt; p.vy += gravity * dt;
+                this.items[kept++] = p;
+            }
+            this.items.length = kept;
         }
         draw(ctx) {
             for (const p of this.items) {
@@ -269,10 +284,12 @@
             this.practice = Boolean(options.practice);
             this.testing = Boolean(options.testing);
             this.preview = Boolean(options.preview);
+            this.graphics = graphicsProfile();
             this.returnFocus = document.activeElement;
             this.correct = 0;
             this.reward = Math.min(100, Math.max(5, Math.round((Number(options.questionReward ?? this.room.state?.question_reward) || 20) / 5) * 5));
             this.mode = this.room.mode;
+            if (this.mode === 'chess') this.reward = 1;
             this.code = this.room.room_code;
             this.seed = Number.isInteger(options.seed) ? options.seed >>> 0 : hashStr(`${this.code}:${this.mode}`);
             this.roster = new Map();
@@ -291,6 +308,8 @@
             this.countdown = 3.4;
             this.t = 0;
             this.cards = [];
+            this.questionStats = new Map();
+            this.studySet = options.studySet || { title: this.room.deck_title || 'Flashcards', publicId: this.room.state?.public_deck_id };
             this.lastCard = -1;
             this.outbox = [];
             this.rewards = null;
@@ -300,7 +319,7 @@
             this.done = false;
             this.lastReport = { score: -1, answered: -1, at: 0 };
             this.startedAt = Date.parse(this.room.started_at) || Date.now();
-            this.deadline = this.practice
+            this.deadline = this.mode === 'chess' ? Infinity : this.practice
                 ? Number(options.timeLimitSeconds) > 0 ? this.startedAt + Number(options.timeLimitSeconds) * 1000 : Infinity
                 : this.room.goal_type === 'time'
                     ? this.startedAt + Number(this.room.time_limit_seconds) * 1000
@@ -311,6 +330,7 @@
             const Game = (window.StudBudArcade.games[this.mode]) || window.StudBudArcade.games.skyline;
             this.buildDom();
             this.game = new Game(this);
+            if (this.mode === 'chess') this.overlay.querySelector('.mpg-timer').classList.add('hidden');
             if (!this.preview) window.StudBudSfx?.startMusic(this.mode);
             else this.overlay.querySelectorAll('.mpg-hud, .mpg-hint, .mpg-touch, .mpg-countdown').forEach(element => element.classList.add('hidden'));
             this.bind();
@@ -355,6 +375,7 @@
             }
             this.room = room;
             this.updateRoster(room);
+            this.game.onRoom?.(room);
             if (room.status === 'finished' && !this.over) this.finish(this.standings());
         }
 
@@ -379,6 +400,10 @@
                 console.warn('[Arcade] Using local cards:', error.message);
             }
             if (!this.cards.length && fallback?.length) this.cards = fallback;
+            if (fallback?.length) {
+                const localStats = new Map(fallback.map(card => [JSON.stringify([card.front, card.back]), card.practiceStats]));
+                this.cards = this.cards.map(card => ({ ...card, practiceStats: localStats.get(JSON.stringify([card.front, card.back])) || card.practiceStats }));
+            }
         }
 
         send(payload) {
@@ -444,7 +469,7 @@
             return rows.sort((a, b) => (this.metric(b) - this.metric(a)) || (b.s - a.s));
         }
 
-        metric(row) { return this.game?.scoreGoal === false ? row.g : row.s; }
+        metric(row) { return this.game?.rankMetric ? this.game.rankMetric(row) : this.game?.scoreGoal === false ? row.g : row.s; }
 
         // What the leaderboard shows for a player: the number their game is actually won by.
         valueText(row) {
@@ -454,15 +479,15 @@
 
         checkEnd() {
             if (this.practice) {
-                if (!this.testing && !this.over && Date.now() >= this.deadline) this.finish(this.standings());
+                if (!this.testing && !this.over && (this.game.finished || Date.now() >= this.deadline)) this.finish(this.standings());
                 return;
             }
             if (this.over || this.ending || !this.isHost || this.countdown > 0) return;
             const now = Date.now();
             const rows = this.standings();
             const limit = Number(this.room.point_limit);
-            let end = now >= this.deadline;
-            if (this.room.goal_type !== 'time' && !this.game.race && rows.some(row => this.metric(row) >= limit)) end = true;
+            let end = Boolean(this.game.finished) || now >= this.deadline;
+            if (this.mode !== 'chess' && this.room.goal_type !== 'time' && !this.game.race && rows.some(row => this.metric(row) >= limit)) end = true;
             if (this.game.race) {
                 if (rows.length && rows.every(row => row.d)) end = true;
                 const first = this.done && !this.firstDone ? now : this.firstDone;
@@ -479,9 +504,13 @@
             this.finish(st);
             setTimeout(async () => {
                 try {
+                    await this.game.persistPromise;
                     const room = await this.finishRoom();
                     if (room?.state?.coin_rewards) { this.rewards = room.state.coin_rewards; this.renderResults(); }
-                } catch (error) { console.error('[Arcade] Could not finish room:', error); }
+                } catch (error) {
+                    console.error('[Arcade] Could not finish room:', error);
+                    this.toast('Could not finalize the match. Check your connection and end it again from the lobby.', '#f87171');
+                }
             }, 1800);
         }
 
@@ -544,6 +573,7 @@
 
         // Player-triggered question that refills the game's resource.
         recharge() {
+            if (this.game.recharge) return this.game.recharge();
             const res = this.game.res;
             if (!res || this.paused || this.question || this.over || this.countdown > 0) return;
             this.ask(correct => {
@@ -560,21 +590,14 @@
             if (this.paused || this.question || this.over || this.countdown > 0) return false;
             if (!manual && performance.now() < (this.askCooldownUntil || 0)) return false;
             if (!this.cards.length) { this.toast('Questions are still loading…', '#fbbf24'); return false; }
-            let index = opts?.cardIndex !== undefined ? opts.cardIndex % this.cards.length : Math.floor(Math.random() * this.cards.length);
+            const adaptiveCards = this.cards.map((card, index) => ({ ...card, practiceStats: this.questionStats.get(index) || card.practiceStats, cardIndex: index }));
+            let index = opts?.cardIndex !== undefined ? opts.cardIndex % this.cards.length
+                : window.FlashcardTools.adaptiveOrder(adaptiveCards.filter(card => this.cards.length === 1 || card.cardIndex !== this.lastCard))[0].cardIndex;
             if (opts?.cardIndex === undefined && this.cards.length > 1 && index === this.lastCard) index = (index + 1) % this.cards.length;
             this.lastCard = index;
             this.lastCardIndex = index;
             const card = this.cards[index];
-            const correctKey = normalizeChoiceText(card.back);
-            const seen = new Set([correctKey]);
-            const wrong = [];
-            for (const candidate of this.cards) {
-                const answer = candidate.back;
-                const key = normalizeChoiceText(answer);
-                if (key && !seen.has(key)) { seen.add(key); wrong.push(answer); }
-            }
-            for (let i = wrong.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [wrong[i], wrong[j]] = [wrong[j], wrong[i]]; }
-            const options = wrong.slice(0, 3).concat(card.back);
+            const options = window.FlashcardTools.distractors(card, this.cards, 3).map(item => item.back).concat(card.back);
             for (let i = options.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [options[i], options[j]] = [options[j], options[i]]; }
             this.question = { card, options, callback, locked: false, onAnswer: opts?.onAnswer };
             return this.showQuestion(card, options, note);
@@ -605,6 +628,9 @@
             const correct = index >= 0 && index < q.options.length && normalizeChoiceText(q.options[index]) === normalizeChoiceText(q.card.back);
             this.answered++;
             if (correct) this.correct++;
+            const progress = { practiceStats: this.questionStats.get(this.lastCardIndex) || q.card.practiceStats };
+            window.FlashcardTools.recordAnswer(progress, correct);
+            this.questionStats.set(this.lastCardIndex, progress.practiceStats);
             this.questionHistory.push({ prompt: q.card.front, answer: q.card.back, chosen: q.options[index] ?? '', correct });
             try { q.onAnswer?.(correct); } catch (error) { console.error(error); }
             this.sfx(correct ? 'correct' : 'wrong');
@@ -635,7 +661,7 @@
             const box = this.overlay.querySelector('.mpg-question');
             const restoreFocus = box.contains(document.activeElement);
             box.classList.add('hidden');
-            if (restoreFocus) this.canvas.focus({ preventScroll: true });
+            if (restoreFocus) (this.mode === 'chess' ? this.game.boardElement.querySelector('button') : this.canvas)?.focus({ preventScroll: true });
             if (resume) this.paused = false;
         }
 
@@ -693,7 +719,7 @@
                         return;
                     }
                     if (e.code === 'Tab') {
-                        const targets = [this.canvas, ...this.overlay.querySelectorAll('.mpg-hud button, .mpg-hud summary, .mpg-hud input, .mpg-touch button')].filter(el => el.offsetWidth && el.offsetHeight);
+                        const targets = [this.canvas, ...this.overlay.querySelectorAll('.mpg-hud button, .mpg-hud summary, .mpg-hud input, .mpg-touch button, .chess-panel button, .chess-panel summary')].filter(el => el.offsetWidth && el.offsetHeight);
                         const index = targets.indexOf(document.activeElement);
                         targets[(index + (e.shiftKey ? -1 : 1) + targets.length) % targets.length]?.focus();
                         e.preventDefault(); return;
@@ -1080,10 +1106,11 @@
         }
 
         resize() {
-            const dpr = window.devicePixelRatio || 1;
+            this.graphics = graphicsProfile();
+            const dpr = Math.min(window.devicePixelRatio || 1, this.graphics.maxDpr);
             const w = this.overlay.clientWidth, h = this.overlay.clientHeight;
-            this.canvas.width = Math.floor(w * dpr);
-            this.canvas.height = Math.floor(h * dpr);
+            if (this.canvas.width !== Math.floor(w * dpr)) this.canvas.width = Math.floor(w * dpr);
+            if (this.canvas.height !== Math.floor(h * dpr)) this.canvas.height = Math.floor(h * dpr);
             this.dpr = dpr;
             this.scale = clamp(h / 720, .65, 1.25);
             this.vw = w / this.scale;
@@ -1151,21 +1178,32 @@
                 const position = me ? `${Math.round(me.x)}, ${Math.round(me.y)}` : 'Not applicable';
                 diagnostics.textContent = `Mode: ${this.mode}\nSeed: ${this.seed}\nTime: ${this.t.toFixed(1)}s\nPlayers: ${this.roster.size}\nPosition: ${position}\nResources: infinite\nScore: ${Math.round(this.score)}\nObjective: ${Math.round(this.goal)}`;
             }
-            o.querySelector('.mpg-board').innerHTML = this.standings().slice(0, 6).map((row, i) =>
+            const boardMarkup = this.standings().slice(0, 6).map((row, i) =>
                 `<li class="${row.id === this.user.id ? 'me' : ''}">${avatarMarkup(row, 'mpg-player-avatar')}<span>${i + 1}. ${esc(row.n)} ${accountTagMarkup(row.username, row.tags)}</span><b>${this.valueText(row)}</b></li>`).join('');
-            this.layoutHud();
+            if (boardMarkup !== this.lastBoardMarkup) {
+                o.querySelector('.mpg-board').innerHTML = boardMarkup;
+                this.lastBoardMarkup = boardMarkup;
+            }
         }
 
         updateMeter() {
             if (this.preview) return;
             const res = this.game.res;
-            const box = this.overlay.querySelector('.mpg-meter');
-            if (!res || this.testing) { box.classList.add('hidden'); return; }
-            box.classList.remove('hidden');
-            const value = Math.round(res.value);
-            box.querySelector('.mpg-meter-label').textContent = res.label;
-            box.querySelector('.mpg-meter-value').textContent = `${value}`;
-            box.classList.toggle('low', res.value < 1);
+            const hidden = !res || this.testing;
+            const value = res ? Math.round(res.value) : 0, low = Boolean(res && res.value < 1), label = res?.label || '';
+            const previous = this.meterState;
+            if (previous && previous.hidden === hidden && previous.value === value && previous.low === low && previous.label === label) return;
+            const elements = this.meterElements ||= (() => {
+                const box = this.overlay.querySelector('.mpg-meter');
+                return { box, label: box.querySelector('.mpg-meter-label'), value: box.querySelector('.mpg-meter-value') };
+            })();
+            if (!previous || previous.hidden !== hidden) elements.box.classList.toggle('hidden', hidden);
+            if (!hidden) {
+                if (!previous || previous.hidden || previous.label !== label) elements.label.textContent = label;
+                if (!previous || previous.hidden || previous.value !== value) elements.value.textContent = `${value}`;
+                if (!previous || previous.hidden || previous.low !== low) elements.box.classList.toggle('low', low);
+            }
+            this.meterState = { hidden, value, low, label };
         }
 
         renderResults() {
@@ -1189,6 +1227,7 @@
                 <details class="mpg-summary"><summary>Full game summary</summary>
                     <p>${Math.round(this.t)} seconds played · ${(this.questionHistory || []).filter(answer => answer.correct === null).length} skipped</p>
                     ${questionHistoryMarkup(this.questionHistory)}
+                    ${window.NexusApp?.studySetMarkup?.(this.studySet) || ''}
                 </details>
                 <p>${this.practice ? 'Local results only. Practice games and admin tests do not award coins.' : this.rewards ? 'Coins have been added to your multiplayer wallet.' : 'Tallying coin rewards…'}</p>
                 <button type="button" class="mpg-exit">${this.practice ? 'Back to game setup' : 'Back to lobby'}</button>
@@ -1241,9 +1280,12 @@
             this.justPressed.clear();
             this.mouse.pressed = false;
             this.mouse.rpressed = false;
-            const ctx = this.ctx;
-            ctx.setTransform(this.dpr * this.scale, 0, 0, this.dpr * this.scale, 0, 0);
-            this.game.draw(ctx, this.vw, this.vh);
+            if ((this.mode !== 'chess' || this.preview) && now - (this.lastDrawAt ?? -Infinity) >= 1000 / (this.graphics?.fps || 60) - .1) {
+                this.lastDrawAt = now;
+                const ctx = this.ctx;
+                ctx.setTransform(this.dpr * this.scale, 0, 0, this.dpr * this.scale, 0, 0);
+                this.game.draw(ctx, this.vw, this.vh);
+            }
             this.raf = requestAnimationFrame(t => this.frame(t));
         }
 
@@ -1335,7 +1377,7 @@
         const draw = time => {
             frame = 0;
             if (document.hidden || motion.matches || !visible.size) return;
-            if (time - lastTime >= 1000 / 30) {
+            if (time - lastTime >= 1000 / graphicsProfile().avatarFps) {
                 lastTime = time;
                 for (const canvas of visible) drawAvatar(canvas, { cos: canvas.dataset }, time / 1000);
             }
@@ -2156,6 +2198,7 @@
     }
 
     window.StudBudArcade = {
+        graphicsProfile,
         Session, BaseGame, Particles, Resource, games: {},
         util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, accountTagMarkup, who, playerCosmetics, avatarUrl, avatarMarkup, animatedCosmetics, drawAvatar, observeAvatars, drawHat, drawFigureSide, drawFigureTop, sceneZoom, questionHistoryMarkup }
     };

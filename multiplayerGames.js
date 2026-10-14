@@ -1598,17 +1598,30 @@
             ctx.translate(cx, cy);
             const base = swinging && typeof swingAim === 'number' ? swingAim : (typeof aim === 'number' ? aim : (face > 0 ? 0 : Math.PI));
             const sweepProgress = Math.max(0, Math.min(1, swingAge / duration));
-            const angle = base + (swinging ? -0.8 + sweepProgress * 1.6 : -0.35);
+            const strike = Math.max(0, Math.min(1, (sweepProgress - .18) / .55));
+            const eased = 1 - Math.pow(1 - strike, 3);
+            const angle = base + (swinging ? sweepProgress < .18 ? -.62 - .24 * Math.sin(sweepProgress / .18 * Math.PI / 2) : -.86 + eased * 1.72 : -.35);
             ctx.globalAlpha = alpha;
             const reach = heavySwing ? 136 : 110;
-            if (swinging) {
-                ctx.fillStyle = 'rgba(253,230,138,.12)'; ctx.strokeStyle = 'rgba(253,230,138,.8)'; ctx.lineWidth = heavySwing ? 4 : 2;
-                ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, reach, base - 0.86, base + 0.86); ctx.closePath(); ctx.fill(); ctx.stroke();
+            if (swinging && strike > 0 && sweepProgress < .85) {
+                for (let trail = 0; trail < 3; trail++) {
+                    ctx.globalAlpha = alpha * (.5 - trail * .13);
+                    ctx.strokeStyle = hammer ? '#f9a8d4' : '#fde68a';
+                    ctx.lineWidth = (heavySwing ? 7 : 4) - trail;
+                    ctx.beginPath(); ctx.arc(0, 0, reach - 8 - trail * 8, Math.max(base - .86, angle - .55), angle); ctx.stroke();
+                }
+                ctx.globalAlpha = alpha;
             }
             ctx.rotate(angle);
-            const shaft = swinging ? reach - 20 : 62;
-            ctx.fillStyle = '#92400e'; ctx.fillRect(0, -3, shaft, 6);
-            ctx.fillStyle = hammer ? '#f472b6' : '#9ca3af'; roundRect(ctx, shaft - 10, -17, 30, 34, 6); ctx.fill();
+            const shaft = swinging ? 62 + (reach - 82) * Math.min(1, strike * 4) : 62;
+            ctx.fillStyle = '#713f12'; roundRect(ctx, 0, -4, shaft, 8, 3); ctx.fill();
+            ctx.fillStyle = '#d6a56a'; ctx.fillRect(6, -3, shaft - 16, 2);
+            ctx.fillStyle = '#334155';
+            for (let grip = 8; grip < 30; grip += 6) ctx.fillRect(grip, -5, 3, 10);
+            const headW = heavySwing ? 38 : 30, headH = heavySwing ? 44 : 34;
+            ctx.fillStyle = hammer ? '#be185d' : '#475569'; roundRect(ctx, shaft - headW / 2, -headH / 2, headW, headH, 6); ctx.fill();
+            ctx.fillStyle = hammer ? '#f9a8d4' : '#cbd5e1'; roundRect(ctx, shaft - headW / 2 + 3, -headH / 2 + 3, headW - 6, headH - 9, 4); ctx.fill();
+            ctx.fillStyle = hammer ? '#ec4899' : '#94a3b8'; ctx.fillRect(shaft - headW / 2 + 3, headH / 2 - 8, headW - 6, 4);
             ctx.restore();
             if (state === 6) { ctx.strokeStyle = 'rgba(56,189,248,.9)'; ctx.lineWidth = 3; ctx.strokeRect(x - 3, y - 3, 40, 62); }
             if (state === 4) { ctx.strokeStyle = 'rgba(125,211,252,.85)'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(cx, cy, 44, 0, TAU); ctx.stroke(); }

@@ -3086,6 +3086,48 @@ body.tutorial-active { overscroll-behavior: contain; }
 .friend-profile-head > div { flex: 1; min-width: 0; }
 .friend-profile-head h3 { margin: 0; overflow-wrap: anywhere; }
 .profile-real-name { display: block; margin-top: 3px; font-size: .85rem; color: var(--text-secondary); overflow-wrap: anywhere; }
+.flashcard-answer-image { display: block; max-width: 100%; max-height: 220px; object-fit: contain; margin: 12px auto 0; border-radius: 8px; }
+.flashcard-back { overflow-y: auto; }
+.review-study-set { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px; margin-top: 14px; border: 1px solid var(--border-glass); border-radius: 12px; }
+.chess-panel { position: absolute; z-index: 2; top: 112px; bottom: 72px; left: 8px; right: 8px; display: flex; flex-direction: column; align-items: center; gap: 8px; overflow-y: auto; color: #e2e8f0; }
+.chess-status { margin: 0; text-align: center; font-size: .9rem; }
+.mpg-chess { background: #111c30; }
+.mpg-chess .mpg-canvas { display: none; }
+.chess-board { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); grid-template-rows: repeat(8, minmax(0, 1fr)); width: min(100%, 460px, calc(100dvh - 250px)); aspect-ratio: 1; flex: 0 0 auto; border: 6px solid #28384d; border-radius: 8px; overflow: hidden; box-sizing: border-box; box-shadow: 0 10px 25px #0004; }
+.chess-square { position: relative; display: grid; place-items: center; padding: 0; border: 0; border-radius: 0; min-width: 0; min-height: 0; height: 100%; line-height: 1; color: #111827; touch-action: none; user-select: none; transition: background-color .12s; }
+.chess-square.light { background: #e9dfcc; }
+.chess-square.dark { background: #728b85; }
+.chess-square.last-move { background: #a4ad74; }
+.chess-square.selected { background: #d9b967; }
+.chess-square:hover { transform: none; box-shadow: inset 0 0 0 2px #fff5; }
+.chess-square.legal::before { content: ''; width: 24%; aspect-ratio: 1; border-radius: 50%; background: #153c4b55; position: absolute; }
+.chess-square.capture { box-shadow: inset 0 0 0 4px #d37648; }
+.chess-piece { width: 85%; height: 85%; pointer-events: none; }
+.white-piece { --piece-fill: #fffaf0; --piece-stroke: #5b5145; }
+.black-piece { --piece-fill: #243044; --piece-stroke: #aab8bf; }
+.chess-square::after { content: attr(data-file); position: absolute; right: 3px; bottom: 2px; font: 700 9px system-ui; color: #172d36; }
+.chess-rank { position: absolute; left: 3px; top: 2px; font: 700 9px system-ui; color: #172d36; pointer-events: none; }
+.chess-square.dragging .chess-piece { opacity: .25; }
+.chess-drag-ghost { position: fixed; z-index: 20; left: -28px; top: -28px; width: 56px; height: 56px; pointer-events: none; }
+.low-effects .glass-card, .low-effects .glass-panel, .low-effects .mpg-hud { backdrop-filter: none; -webkit-backdrop-filter: none; }
+.low-effects .scheme-swatch, .low-effects .logo-mark { animation: none; }
+.offline-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0; padding: 10px 14px; background: var(--bg-glass); border: 1px solid var(--border-glass); border-radius: 12px; font-size: .85rem; }
+.workspace-child, .settings-tabs { display: none !important; }
+.workspace-tabs { display: flex; gap: 6px; overflow-x: auto; padding: 8px 0 12px; margin-bottom: 6px; }
+.workspace-tab { flex: 0 0 auto; border: 1px solid var(--border-glass); background: var(--bg-glass); color: var(--text-secondary); padding: 9px 14px; border-radius: 10px; font: inherit; white-space: nowrap; cursor: pointer; }
+.workspace-tab.selected { color: var(--text-primary); background: var(--bg-glass-hover); border-color: var(--accent-primary); }
+.deck-editor-toolbar { flex-wrap: wrap; }
+.deck-editor-bulk-panel textarea { width: 100%; margin: 8px 0; }
+.deck-editor-card small { display: block; }
+.deck-editor-card .actions { flex-wrap: wrap; gap: 6px; }
+@media (max-width: 520px) { .offline-notice { flex-wrap: wrap; } }
+.chess-square:focus-visible { outline: 3px solid #38bdf8; outline-offset: -3px; }
+.chess-rules { max-width: 460px; font-size: .8rem; padding: 0 8px; }
+@media (max-height: 520px) {
+    .chess-panel { top: 64px; bottom: 8px; }
+    .chess-board { width: min(45vw, calc(100dvh - 160px)); }
+    .chess-square { font-size: clamp(16px, 6dvh, 32px); }
+}
 .friend-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
 .friend-stat { display: grid; gap: 2px; padding: 10px; border-radius: 12px; background: var(--bg-glass-hover); border: 1px solid var(--border-glass); text-align: center; }
 .friend-stat small { color: var(--text-secondary); }

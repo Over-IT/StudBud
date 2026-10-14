@@ -23,7 +23,7 @@ const sandbox = {
     }
 };
 vm.createContext(sandbox);
-for (const file of ['communityGames.js', 'multiplayerEngine.js', 'multiplayerGames.js', 'multiplayerGames2.js', 'multiplayerGames3.js', 'plannerEngine.js']) {
+for (const file of ['flashcardEngine.js', 'communityGames.js', 'multiplayerEngine.js', 'multiplayerGames.js', 'multiplayerGames2.js', 'multiplayerGames3.js', 'chessGame.js', 'plannerEngine.js']) {
     vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), sandbox, { filename: file });
 }
 const source = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
@@ -717,7 +717,7 @@ const questionBox = {
     querySelector: () => ({ textContent: '' })
 };
 const questionSession = Object.assign(Object.create(A.Session.prototype), {
-    preview: false, countdown: 0, answered: 0, correct: 0, questionHistory: [],
+    preview: false, countdown: 0, answered: 0, correct: 0, questionHistory: [], questionStats: new Map(),
     cards: [{ front: 'One plus one?', back: 'Two' }, { front: 'One plus two?', back: 'Three' }],
     overlay: { querySelector: () => questionBox }, canvas: { focus: noop },
     showQuestion: () => true, sfx: noop, toast: noop

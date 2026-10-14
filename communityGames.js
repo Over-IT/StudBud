@@ -202,6 +202,7 @@
 
         getClient() {
             const cloud = window.StudBudCloud;
+            if (cloud?.offlineMode || window.navigator?.onLine === false) throw new Error('This feature needs an internet connection. Your private study tools and solo games work offline.');
             if (!cloud?.client || !cloud.user) throw new Error('Sign in to use community decks and hosted games.');
             return cloud.client;
         }
@@ -273,7 +274,8 @@
             if (!title || title.length > 100) throw new Error('Deck titles must be between 1 and 100 characters to share.');
             const cards = (deck.cards || []).map(card => ({
                 front: String(card.front || '').trim(),
-                back: String(card.back || '').trim()
+                back: String(card.back || '').trim(),
+                distractors: (card.distractors || []).map(text => String(text).trim()).filter(Boolean).slice(0, 3)
             })).filter(card => card.front && card.back);
             if (cards.length < 2) throw new Error('A shared deck needs at least 2 complete cards.');
             if (cards.some(card => card.front.length > 5000 || card.back.length > 5000)) {
@@ -491,7 +493,8 @@
 
         async createRoom(roomCode, nickname, deck, mode, options = {}) {
             const cards = (deck.cards || []).filter(card => String(card.front || '').trim() && String(card.back || '').trim())
-                .map(card => ({ front: String(card.front).trim().slice(0, 1000), back: String(card.back).trim().slice(0, 1000) }));
+                .map(card => ({ front: String(card.front).trim().slice(0, 1000), back: String(card.back).trim().slice(0, 1000),
+                    distractors: (card.distractors || []).map(text => String(text).trim().slice(0, 1000)).filter(Boolean).slice(0, 3) }));
             if (!cards.length) throw new Error('Choose a set with at least one complete card.');
             const { data, error } = await this.getClient().rpc('studbud_create_game_room', {
                 p_code: roomCode,
@@ -499,7 +502,7 @@
                 p_deck_title: String(deck.title || 'Flashcards').slice(0, 100),
                 p_cards: cards,
                 p_mode: mode,
-                p_options: options
+                p_options: { ...options, source_deck_id: String(deck.id || '').slice(0, 100), public_deck_id: deck.communityDeckId || deck.communitySourceId || null }
             });
             if (error) {
                 const roomError = new Error(`Could not create the game: ${error.message}`);
@@ -574,6 +577,11 @@
             const { data, error } = await this.getClient().rpc('studbud_get_game_cards', { p_code: roomCode });
             if (error) throw new Error(`Could not load questions: ${error.message}`);
             return (Array.isArray(data) ? data : []).filter(card => card?.front && card?.back);
+        }
+
+        async saveChessState(roomCode, state) {
+            const { error } = await this.getClient().rpc('studbud_save_chess_state', { p_code: roomCode, p_state: state });
+            if (error) throw new Error(`Could not save the chess board: ${error.message}`);
         }
 
         async reportScore(roomCode, score, answered, correct = 0) {
