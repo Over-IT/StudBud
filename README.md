@@ -88,6 +88,20 @@ Edits and study history stay in local storage/IndexedDB. Cached accounts reconne
 
 Navigation now has six primary workspaces: **Home, School, Plan, Study, Play and Settings**. Tabs group related grades/analytics, tasks/calendar/schedule, sets/practice/import, games/buds/leaderboards/shop, and settings tools. Existing routes, class links and tutorial steps remain available.
 
+### Profile hub, seasonal boxes and reporting
+
+**Profile** is its own workspace with three tabs: **Profile** (public profile and account card), **Shop** and **Locker** (inventory and equipped cosmetics). The shop features a limited **seasonal box** each month (New Year in January through Christmas in December). Each box draws from its own cosmetic set, never gives duplicates, and leaves at the end of its month. **Seasonal sets** shows every holiday set and what you've collected. Opening any box plays a full-screen unboxing (shake, reel, reveal) that you can skip; reduced-motion settings shorten it. Guests see a **Sign in** button next to **Create account** on the guest banner. Default (no-cosmetics) players get a distinct random color in each match so they're easy to tell apart.
+
+Signed-in students can **Report** a shared flashcard set or a public profile (inappropriate, wrong answers, spam, copyright, harassment or other, with optional details). Reports are rate-limited, and you can't report your own content. Moderators and admins review grouped reports in **Admin ? Reports**, where they can inspect the set, open the author's profile, delete the set, or mark the report handled or dismissed.
+
+### Planner status
+
+Every assignment is in one of four states: **To do**, **Overdue**, **Done, waiting for grade** and **Graded**. Set the state when adding the assignment. Each row shows a status pill with a one-click **Mark done**, **Add grade** or **Undo**, and the summary chips above the list filter by state with live counts. Adding an assignment always shows the class picker (preselected when you have one class); if you have no classes yet, StudBud opens the class form first.
+
+### Game summaries and mining
+
+End-of-game reviews group repeated questions into one row showing your accuracy on that question. Multiple-choice options are reshuffled and drawn from a varied distractor pool each time a card appears, so you can't memorize the answer position. Crystal mining uses a much larger cave map with a closer camera, lantern-limited vision and arena-style mouse look.
+
 ### Community flashcards and hosted games
 
 After deploying the latest version, run the updated [`supabase-setup.sql`](./supabase-setup.sql) in the Supabase SQL editor. It adds the private-by-default community deck library and the protected RPC functions for live game rooms. No Supabase Realtime add-on or service-role key is required; room state is polled securely while players are connected.

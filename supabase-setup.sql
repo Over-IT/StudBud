@@ -460,6 +460,28 @@ alter table public.studbud_multiplayer_profiles
     add column if not exists solo_coins_day date,
     add column if not exists solo_coins_today integer not null default 0;
 
+-- Limited monthly sets. They only drop from that month's seasonal box (month is UTC).
+create or replace function public.studbud_seasonal_items()
+returns table (id text, month integer, rarity text)
+language sql
+immutable
+as $$
+    select * from (values
+        ('palette_seasonal_newyear', 1, 'uncommon'), ('hat_seasonal_newyear', 1, 'rare'), ('skin_seasonal_newyear', 1, 'epic'), ('acc_seasonal_newyear_effect', 1, 'legendary'),
+        ('palette_seasonal_valentine', 2, 'uncommon'), ('hat_seasonal_valentine', 2, 'rare'), ('skin_seasonal_valentine', 2, 'epic'), ('acc_seasonal_valentine_effect', 2, 'legendary'),
+        ('palette_seasonal_clover', 3, 'uncommon'), ('hat_seasonal_clover', 3, 'rare'), ('skin_seasonal_clover', 3, 'epic'), ('acc_seasonal_clover_effect', 3, 'legendary'),
+        ('palette_seasonal_spring', 4, 'uncommon'), ('hat_seasonal_spring', 4, 'rare'), ('skin_seasonal_spring', 4, 'epic'), ('acc_seasonal_spring_effect', 4, 'legendary'),
+        ('palette_seasonal_grad', 5, 'uncommon'), ('hat_seasonal_grad', 5, 'rare'), ('skin_seasonal_grad', 5, 'epic'), ('acc_seasonal_grad_effect', 5, 'legendary'),
+        ('palette_seasonal_summer', 6, 'uncommon'), ('hat_seasonal_summer', 6, 'rare'), ('skin_seasonal_summer', 6, 'epic'), ('acc_seasonal_summer_effect', 6, 'legendary'),
+        ('palette_seasonal_fireworks', 7, 'uncommon'), ('hat_seasonal_fireworks', 7, 'rare'), ('skin_seasonal_fireworks', 7, 'epic'), ('acc_seasonal_fireworks_effect', 7, 'legendary'),
+        ('palette_seasonal_school', 8, 'uncommon'), ('hat_seasonal_school', 8, 'rare'), ('skin_seasonal_school', 8, 'epic'), ('acc_seasonal_school_effect', 8, 'legendary'),
+        ('palette_seasonal_autumn', 9, 'uncommon'), ('hat_seasonal_autumn', 9, 'rare'), ('skin_seasonal_autumn', 9, 'epic'), ('acc_seasonal_autumn_effect', 9, 'legendary'),
+        ('palette_seasonal_halloween', 10, 'uncommon'), ('hat_seasonal_halloween', 10, 'rare'), ('skin_seasonal_halloween', 10, 'epic'), ('acc_seasonal_halloween_effect', 10, 'legendary'),
+        ('palette_seasonal_harvest', 11, 'uncommon'), ('hat_seasonal_harvest', 11, 'rare'), ('skin_seasonal_harvest', 11, 'epic'), ('acc_seasonal_harvest_effect', 11, 'legendary'),
+        ('palette_seasonal_holiday', 12, 'uncommon'), ('hat_seasonal_holiday', 12, 'rare'), ('skin_seasonal_holiday', 12, 'epic'), ('acc_seasonal_holiday_effect', 12, 'legendary')
+    ) as seasonal(id, month, rarity);
+$$;
+
 -- Single source of truth for priced items and rarity (pets are box-only, so price is null).
 create or replace function public.studbud_shop_items()
 returns table (id text, price integer, rarity text)
@@ -532,7 +554,9 @@ as $$
              when priced.price < 800 then 'legendary' else 'mythic' end
     from priced
     union all
-    select pets.id, null::integer, pets.rarity from pets;
+    select pets.id, null::integer, pets.rarity from pets
+    union all
+    select seasonal.id, null::integer, seasonal.rarity from public.studbud_seasonal_items() seasonal;
 $$;
 
 -- Retired trails are removed from inventories and the shared accessory slot.
@@ -693,6 +717,8 @@ begin
         v_cost := 260; v_prefix := 'skin\_%';
     elsif p_box = 'mythic' then
         v_cost := 1000;
+    elsif p_box = 'season' then
+        v_cost := 350;
     else
         raise exception 'Unknown mystery box.';
     end if;
@@ -709,6 +735,7 @@ begin
         when 'palette' then '{"uncommon":50,"rare":35,"epic":13,"legendary":2}'::jsonb
         when 'skin' then '{"uncommon":40,"rare":35,"epic":20,"legendary":5}'::jsonb
         when 'mythic' then '{"epic":40,"legendary":45,"mythic":15}'::jsonb
+        when 'season' then '{"uncommon":35,"rare":30,"epic":27,"legendary":8}'::jsonb
     end;
     -- Remove exhausted tiers, then reweight only the tiers allowed by this box.
     select coalesce(jsonb_object_agg(r.key, r.value), '{}'::jsonb), sum(r.value::numeric)
@@ -718,6 +745,9 @@ begin
         select 1 from public.studbud_shop_items() s
         where s.rarity = r.key and s.id like v_prefix
           and s.id not like 'accessory\_%' and s.id not like 'pet\_%'
+          and (case when p_box = 'season'
+                then s.id in (select z.id from public.studbud_seasonal_items() z where z.month = extract(month from now() at time zone 'utc')::integer)
+                else s.id not like '%\_seasonal\_%' end)
           and (p_box <> 'effect' or s.id like 'acc\_%\_effect'
               or s.id in ('acc_lightning', 'acc_flame', 'acc_sparkles', 'acc_aura',
                           'acc_hearts', 'acc_stars', 'acc_snow'))
@@ -738,6 +768,9 @@ begin
     select s.id into v_item_id
     from public.studbud_shop_items() s
     where s.id not like 'accessory\_%' and s.id not like 'pet\_%' and s.id like v_prefix
+      and (case when p_box = 'season'
+            then s.id in (select z.id from public.studbud_seasonal_items() z where z.month = extract(month from now() at time zone 'utc')::integer)
+            else s.id not like '%\_seasonal\_%' end)
       and (p_box <> 'effect' or s.id like 'acc\_%\_effect'
             or s.id in ('acc_lightning', 'acc_flame', 'acc_sparkles', 'acc_aura',
                         'acc_hearts', 'acc_stars', 'acc_snow'))
@@ -982,7 +1015,8 @@ begin
 
     -- Prefer the author's own wrong options, then other answers that look alike (similar length and both numeric or both text).
     with custom as (
-        select btrim(value) as answer, 0 as tier, random() as score
+        -- Usually keep the author's options, but sometimes swap one out so the choice set changes between rounds.
+        select btrim(value) as answer, case when random() < 0.7 then 0 else 2 end as tier, random() as score
         from jsonb_array_elements_text(case when jsonb_typeof(v_card -> 'distractors') = 'array' then v_card -> 'distractors' else '[]'::jsonb end) as option(value)
         where btrim(value) <> '' and lower(btrim(value)) <> lower(btrim(v_card ->> 'back'))
     ), pool as (
@@ -990,7 +1024,7 @@ begin
             abs(char_length(btrim(card ->> 'back')) - char_length(btrim(v_card ->> 'back')))::numeric
                 / greatest(char_length(btrim(v_card ->> 'back')), 1)
             + case when (card ->> 'back' ~ '^\s*[-+]?[0-9]') = (v_card ->> 'back' ~ '^\s*[-+]?[0-9]') then 0 else 1 end
-            + random() * 0.75 as score
+            + random() * 1.6 as score
         from jsonb_array_elements(p_cards) as item(card)
         where btrim(coalesce(card ->> 'back', '')) <> ''
             and lower(btrim(card ->> 'back')) <> lower(btrim(v_card ->> 'back'))
@@ -2909,5 +2943,105 @@ end;
 $$;
 revoke all on function public.studbud_admin_delete_site_notice(bigint) from public, anon;
 grant execute on function public.studbud_admin_delete_site_notice(bigint) to authenticated;
+
+-- Content reports: students flag public flashcard sets or profiles for moderator review.
+create table if not exists public.studbud_content_reports (
+    id bigint generated always as identity primary key,
+    reporter_id uuid not null references auth.users (id) on delete cascade,
+    target_type text not null check (target_type in ('deck', 'profile')),
+    target_id uuid not null,
+    reason text not null check (reason in ('inappropriate', 'wrong', 'spam', 'copyright', 'harassment', 'other')),
+    details text not null default '' check (char_length(details) <= 500),
+    status text not null default 'open' check (status in ('open', 'resolved', 'dismissed')),
+    created_at timestamptz not null default now(),
+    resolved_by uuid references auth.users (id) on delete set null,
+    resolved_at timestamptz,
+    unique (reporter_id, target_type, target_id)
+);
+create index if not exists studbud_content_reports_status_idx on public.studbud_content_reports (status, created_at desc);
+alter table public.studbud_content_reports enable row level security;
+revoke all on table public.studbud_content_reports from anon, authenticated;
+
+create or replace function public.studbud_report_content(p_target_type text, p_target_id uuid, p_reason text, p_details text default '')
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    if auth.uid() is null then raise exception 'Sign in or join as a guest to report content.'; end if;
+    if p_target_type not in ('deck', 'profile') then raise exception 'That content cannot be reported.'; end if;
+    if p_reason not in ('inappropriate', 'wrong', 'spam', 'copyright', 'harassment', 'other') then raise exception 'Choose a report reason.'; end if;
+    if p_target_type = 'deck' and not exists (select 1 from public.studbud_community_decks where id = p_target_id) then
+        raise exception 'That flashcard set is no longer shared.';
+    end if;
+    if p_target_type = 'profile' and not exists (select 1 from auth.users where id = p_target_id) then
+        raise exception 'That profile no longer exists.';
+    end if;
+    if p_target_type = 'profile' and p_target_id = auth.uid() then raise exception 'You cannot report your own profile.'; end if;
+    if (select count(*) from public.studbud_content_reports
+        where reporter_id = auth.uid() and created_at > now() - interval '1 day') >= 20 then
+        raise exception 'You have sent a lot of reports today. Please try again tomorrow.';
+    end if;
+    insert into public.studbud_content_reports (reporter_id, target_type, target_id, reason, details)
+    values (auth.uid(), p_target_type, p_target_id, p_reason, left(coalesce(btrim(p_details), ''), 500))
+    on conflict (reporter_id, target_type, target_id) do update
+        set reason = excluded.reason, details = excluded.details, status = 'open',
+            created_at = now(), resolved_by = null, resolved_at = null;
+end;
+$$;
+revoke all on function public.studbud_report_content(text, uuid, text, text) from public, anon;
+grant execute on function public.studbud_report_content(text, uuid, text, text) to authenticated;
+
+create or replace function public.studbud_admin_list_reports(p_status text default 'open')
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    perform public.studbud_require_moderator();
+    return coalesce((
+        select jsonb_agg(row_to_json(r) order by r.report_count desc, r.latest desc) from (
+            select cr.target_type, cr.target_id,
+                count(*)::int as report_count,
+                max(cr.created_at) as latest,
+                array_agg(distinct cr.reason) as reasons,
+                (select jsonb_agg(jsonb_build_object('id', x.id, 'reason', x.reason, 'details', x.details, 'created_at', x.created_at,
+                        'reporter', coalesce(nullif(ru.raw_user_meta_data ->> 'username', ''), 'Student')) order by x.created_at desc)
+                    from public.studbud_content_reports x left join auth.users ru on ru.id = x.reporter_id
+                    where x.target_type = cr.target_type and x.target_id = cr.target_id and x.status = coalesce(nullif(p_status, ''), 'open')) as reports,
+                case when cr.target_type = 'deck' then (select d.title from public.studbud_community_decks d where d.id = cr.target_id)
+                    else (select coalesce(nullif(u.raw_user_meta_data ->> 'username', ''), 'Student') from auth.users u where u.id = cr.target_id) end as target_name,
+                case when cr.target_type = 'deck' then (select d.owner_id from public.studbud_community_decks d where d.id = cr.target_id)
+                    else cr.target_id end as owner_id
+            from public.studbud_content_reports cr
+            where cr.status = coalesce(nullif(p_status, ''), 'open')
+            group by cr.target_type, cr.target_id
+            limit 100
+        ) r
+    ), '[]'::jsonb);
+end;
+$$;
+revoke all on function public.studbud_admin_list_reports(text) from public, anon;
+grant execute on function public.studbud_admin_list_reports(text) to authenticated;
+
+create or replace function public.studbud_admin_resolve_reports(p_target_type text, p_target_id uuid, p_status text default 'resolved')
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    perform public.studbud_require_moderator();
+    if p_status not in ('resolved', 'dismissed') then raise exception 'Choose resolved or dismissed.'; end if;
+    update public.studbud_content_reports
+    set status = p_status, resolved_by = auth.uid(), resolved_at = now()
+    where target_type = p_target_type and target_id = p_target_id and status = 'open';
+end;
+$$;
+revoke all on function public.studbud_admin_resolve_reports(text, uuid, text) from public, anon;
+grant execute on function public.studbud_admin_resolve_reports(text, uuid, text) to authenticated;
 
 notify pgrst, 'reload schema';

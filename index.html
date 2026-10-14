@@ -104,8 +104,14 @@
                     <li class="nav-item workspace-child" data-target="shop-view" role="button" tabindex="0">
                         <i class="fas fa-store"></i> <span>Shop</span>
                     </li>
-                    <li class="nav-item" data-target="multiplayer-view" data-also="shop-view friends-view leaderboard-view" role="button" tabindex="0">
-                        <i class="fas fa-users"></i> <span>Play</span><strong id="friend-nav-badge" class="sidebar-coin-count hidden">0</strong><strong id="multiplayer-sidebar-coins" class="sidebar-coin-count">0 <i class="fas fa-coins"></i></strong>
+                    <li class="nav-item" data-target="multiplayer-view" data-also="friends-view leaderboard-view" role="button" tabindex="0">
+                        <i class="fas fa-users"></i> <span>Play</span><strong id="friend-nav-badge" class="sidebar-coin-count hidden">0</strong>
+                    </li>
+                    <li class="nav-item" data-target="profile-view" data-also="shop-view inventory-view" role="button" tabindex="0">
+                        <i class="fas fa-user-astronaut"></i> <span>Profile</span><strong id="multiplayer-sidebar-coins" class="sidebar-coin-count">0 <i class="fas fa-coins"></i></strong>
+                    </li>
+                    <li class="nav-item workspace-child" data-target="inventory-view" role="button" tabindex="0">
+                        <i class="fas fa-box-open"></i> <span>Locker</span>
                     </li>
                     <li class="nav-item workspace-child" data-target="importer-view" role="button" tabindex="0">
                         <i class="fas fa-file-import"></i> <span>Import Cards</span>
@@ -152,7 +158,7 @@
                         <i class="fas fa-download"></i>
                         <span>Install app</span>
                     </button>
-                    <button id="multiplayer-profile-button" class="multiplayer-profile-button" type="button" data-action="view-my-profile" aria-label="Open your public profile">
+                    <button id="multiplayer-profile-button" class="multiplayer-profile-button" type="button" data-action="view-my-profile" aria-label="Open your profile">
                         <span id="multiplayer-header-avatar" class="multiplayer-avatar player-avatar"><i class="fas fa-user-astronaut" aria-hidden="true"></i></span>
                         <span id="multiplayer-header-name">Student</span>
                     </button>
@@ -166,7 +172,10 @@
             <nav id="workspace-tabs" class="workspace-tabs hidden" aria-label="Workspace sections"></nav>
             <aside id="offline-notice" class="offline-notice hidden" role="status">
                 <span>Offline / local mode: changes stay on this device until you reconnect. Online community features are unavailable.</span>
-                <button id="offline-connect-btn" class="secondary-btn" type="button">Connect account</button>
+                <div class="offline-notice-actions">
+                    <button id="offline-signin-btn" class="ghost-btn hidden" type="button">Sign in</button>
+                    <button id="offline-connect-btn" class="secondary-btn" type="button">Connect account</button>
+                </div>
             </aside>
             <aside id="site-notice" class="site-notice hidden" aria-label="Site announcement">
                 <div><strong>Announcement</strong><p id="site-notice-message"></p><small id="site-notice-metadata"></small><small>Past announcements are available at the bottom of About.</small><p id="site-notice-status" role="status"></p></div>
@@ -380,6 +389,7 @@
                         </div>
                         <div class="glass-card full-width">
                             <h2>Master Assignment List</h2>
+                            <div id="assignment-status-summary" class="assignment-status-summary" aria-label="Assignments by status"></div>
                             <div class="assignment-filters" role="search" aria-label="Filter assignments">
                                 <label class="assignment-search-field" for="assignment-search"><i class="fas fa-search" aria-hidden="true"></i><span class="sr-only">Search assignments</span><input id="assignment-search" type="search" placeholder="Search assignments or classes"></label>
                                 <label for="assignment-course-filter" class="sr-only">Filter by class</label>
@@ -387,9 +397,10 @@
                                 <label for="assignment-status-filter" class="sr-only">Filter by status</label>
                                 <select id="assignment-status-filter">
                                     <option value="all">All work</option>
-                                    <option value="open">Not completed</option>
-                                    <option value="completed">Completed</option>
+                                    <option value="todo">To do</option>
                                     <option value="overdue">Overdue</option>
+                                    <option value="awaiting">Done, waiting for grade</option>
+                                    <option value="graded">Graded</option>
                                 </select>
                                 <span id="assignment-result-count" class="assignment-result-count" aria-live="polite"></span>
                             </div>
@@ -804,6 +815,7 @@
                         <p class="settings-hint">Testers: test games. Moderators: review sets and accounts. Admins: everything.</p>
                         <div class="admin-tabs">
                             <button type="button" class="secondary-btn selected" data-admin-tab="decks">Public flashcards</button>
+                            <button type="button" class="secondary-btn" data-admin-tab="reports">Reports</button>
                             <button type="button" class="secondary-btn" data-admin-tab="users">Users</button>
                             <button type="button" class="secondary-btn" data-admin-tab="games">Game testing</button>
                             <button type="button" class="secondary-btn" data-admin-tab="notices">Announcements</button>
@@ -817,8 +829,8 @@
                     </div>
                 </section>
 
-                <!-- Shop, inventory and character -->
-                <section id="shop-view" class="view hidden">
+                <!-- Profile hub: character, rewards and public profile -->
+                <section id="profile-view" class="view hidden">
                     <div class="shop-top">
                         <section class="glass-card multiplayer-player-card">
                             <span id="multiplayer-large-avatar" class="multiplayer-large-avatar player-avatar player-avatar-large"><i class="fas fa-user-astronaut" aria-hidden="true"></i></span>
@@ -831,8 +843,47 @@
                             <button id="daily-reward-btn" class="primary-btn" type="button" data-action="claim-daily-reward">Claim reward</button>
                         </section>
                     </div>
+                    <div class="profile-grid">
+                        <div id="guest-appearance" class="glass-card guest-only hidden"></div>
+                        <div class="glass-card" id="public-profile-card">
+                            <div class="card-title-row"><h2>Public profile</h2><button type="button" class="secondary-btn" data-action="preview-public-profile"><i class="fas fa-eye" aria-hidden="true"></i> Preview</button></div>
+                            <p class="settings-hint">Your buds can see this when they open your profile. Don't share personal contact details.</p>
+                            <div class="form-group"><label for="public-bio">About me</label><textarea id="public-bio" maxlength="160" rows="2" placeholder="A short bio"></textarea></div>
+                            <div class="form-group"><label for="public-subject">Favorite subject</label><input type="text" id="public-subject" maxlength="40" autocomplete="off"></div>
+                            <div class="form-group"><label for="public-grade">Grade / year</label>
+                                <select id="public-grade"><option value="">Prefer not to say</option><option>Freshman</option><option>Sophomore</option><option>Junior</option><option>Senior</option><option>Other</option></select>
+                            </div>
+                            <div class="form-group"><label for="public-goal">Study goal</label><input type="text" id="public-goal" maxlength="80" autocomplete="off" placeholder="e.g. Get an A in Chemistry"></div>
+                            <label class="settings-check"><input type="checkbox" id="public-show-real-name"> Show my first and last name on my public profile</label>
+                            <label class="settings-check"><input type="checkbox" id="public-show-school"> Show my PCHS tag on my public profile</label>
+                            <small class="settings-hint">Only PCHS has a public school tag. Other schools are never shown publicly.</small>
+                            <label class="settings-check"><input type="checkbox" id="public-show-stats" checked> Show my study time, streak and match wins</label>
+                            <p id="public-profile-status" class="community-status" role="status" aria-live="polite"></p>
+                            <button id="save-public-profile-btn" class="primary-btn" type="button">Save public profile</button>
+                        </div>
+                        <div class="glass-card" id="username-card">
+                            <h2>Username</h2>
+                            <div class="form-group">
+                                <label for="settings-username">Username (3–24 letters, numbers, or underscores)</label>
+                                <input type="text" id="settings-username" maxlength="24" autocomplete="off" pattern="[A-Za-z0-9_]{3,24}">
+                            </div>
+                            <p id="username-hint" class="settings-hint">You can change your username once every 7 days. Use your new username the next time you sign in.</p>
+                            <p id="username-status" class="community-status" role="status" aria-live="polite"></p>
+                            <button id="change-username-btn" class="primary-btn" type="button">Change username</button>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="inventory-view" class="view hidden">
+                    <section class="glass-card multiplayer-shop">
+                        <p id="multiplayer-inventory-status" class="community-status" role="status" aria-live="polite"></p>
+                        <div id="multiplayer-inventory-items" class="multiplayer-shop-items"></div>
+                    </section>
+                </section>
+
+                <!-- Shop -->
+                <section id="shop-view" class="view hidden">
                     <section class="glass-card multiplayer-shop" id="multiplayer-shop">
-                        <div class="view-header"><div><h3><i class="fas fa-store"></i> Shop &amp; inventory</h3><p>Open mystery boxes, collect characters, hats and accessories, then equip them to show off in every game.</p></div></div>
                         <p id="multiplayer-shop-status" class="community-status" role="status" aria-live="polite"></p>
                         <div id="multiplayer-shop-items" class="multiplayer-shop-items"></div>
                     </section>
@@ -1002,34 +1053,6 @@
                             <h2>Tutorial</h2>
                             <p>Learn the workflow from importing classes to planning, studying and playing. Jump to any topic in the tour.</p>
                             <button class="primary-btn" type="button" data-action="start-tutorial"><i class="fas fa-circle-play"></i> Replay tutorial</button>
-                        </div>
-
-                        <div class="glass-card" id="username-card">
-                            <h2>Username</h2>
-                            <div class="form-group">
-                                <label for="settings-username">Username (3–24 letters, numbers, or underscores)</label>
-                                <input type="text" id="settings-username" maxlength="24" autocomplete="off" pattern="[A-Za-z0-9_]{3,24}">
-                            </div>
-                            <p id="username-hint" class="settings-hint">You can change your username once every 7 days. Use your new username the next time you sign in.</p>
-                            <p id="username-status" class="community-status" role="status" aria-live="polite"></p>
-                            <button id="change-username-btn" class="primary-btn" type="button">Change username</button>
-                        </div>
-                        
-                        <div class="glass-card" id="public-profile-card">
-                            <h2>Public profile</h2>
-                            <p class="settings-hint">Your buds can see this when they open your profile. Don't share personal contact details.</p>
-                            <div class="form-group"><label for="public-bio">About me</label><textarea id="public-bio" maxlength="160" rows="2" placeholder="A short bio"></textarea></div>
-                            <div class="form-group"><label for="public-subject">Favorite subject</label><input type="text" id="public-subject" maxlength="40" autocomplete="off"></div>
-                            <div class="form-group"><label for="public-grade">Grade / year</label>
-                                <select id="public-grade"><option value="">Prefer not to say</option><option>Freshman</option><option>Sophomore</option><option>Junior</option><option>Senior</option><option>Other</option></select>
-                            </div>
-                            <div class="form-group"><label for="public-goal">Study goal</label><input type="text" id="public-goal" maxlength="80" autocomplete="off" placeholder="e.g. Get an A in Chemistry"></div>
-                            <label class="settings-check"><input type="checkbox" id="public-show-real-name"> Show my first and last name on my public profile</label>
-                            <label class="settings-check"><input type="checkbox" id="public-show-school"> Show my PCHS tag on my public profile</label>
-                            <small class="settings-hint">Only PCHS has a public school tag. Other schools are never shown publicly.</small>
-                            <label class="settings-check"><input type="checkbox" id="public-show-stats" checked> Show my study time, streak and match wins</label>
-                            <p id="public-profile-status" class="community-status" role="status" aria-live="polite"></p>
-                            <button id="save-public-profile-btn" class="primary-btn" type="button">Save public profile</button>
                         </div>
 
                         <div class="glass-card">
@@ -1312,8 +1335,9 @@
                             </div>
                         </div>
                         <div class="assignment-state-toggle" role="radiogroup" aria-label="Assignment status">
-                            <label><input type="radio" name="assignment-state" value="todo" checked><span><i class="fas fa-clock"></i> Not graded yet</span></label>
-                            <label><input type="radio" name="assignment-state" value="graded"><span><i class="fas fa-circle-check"></i> Already graded</span></label>
+                            <label><input type="radio" name="assignment-state" value="todo" checked><span><i class="fas fa-clock"></i> To do</span></label>
+                            <label><input type="radio" name="assignment-state" value="done"><span><i class="fas fa-hourglass-half"></i> Done, waiting for grade</span></label>
+                            <label><input type="radio" name="assignment-state" value="graded"><span><i class="fas fa-circle-check"></i> Graded</span></label>
                         </div>
                         <div class="form-group row-group" id="assignment-todo-fields">
                             <div class="half-width">

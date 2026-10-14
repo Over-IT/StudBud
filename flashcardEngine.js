@@ -1080,14 +1080,18 @@
                 && typeof attachment.name === 'string' && attachment.name.length > 0 && attachment.name.length <= 160
                 ? attachment.data : '';
         },
-        distractors(card, pool, count = 3) {
+        distractors(card, pool, count = 3, { vary = false } = {}) {
             const used = new Set([this.answerKey(card.back)]);
             const picks = [];
-            for (const text of card.distractors || []) {
+            // Games pass vary so the same card does not always show the exact same four choices.
+            const custom = vary ? [...(card.distractors || [])].sort(() => Math.random() - 0.5) : (card.distractors || []);
+            const customLimit = vary && (pool || []).length > count + 2 && Math.random() < 0.35 ? count - 1 : count;
+            for (const text of custom) {
                 const key = this.answerKey(text);
                 if (key && !used.has(key)) { used.add(key); picks.push({ back: String(text) }); }
-                if (picks.length >= count) return picks;
+                if (picks.length >= customLimit) break;
             }
+            if (picks.length >= count) return picks;
             const words = text => new Set(this.answerKey(text).match(/[\p{L}\p{N}]+/gu) || []);
             const target = words(card.back), prompt = words(card.front);
             const number = text => /^[+-]?\d+(?:\.\d+)?$/.test(this.answerKey(text));
@@ -1099,7 +1103,8 @@
                 return { item, rank: similarity * 4 + (sameTag ? 2 : 0)
                     + [...front].filter(word => prompt.has(word)).length / Math.max(1, prompt.size)
                     + (number(card.back) === number(item.back) ? 1 : 0)
-                    + 1 / (1 + Math.abs(String(card.back).length - String(item.back).length)), tie: Math.random() };
+                    + 1 / (1 + Math.abs(String(card.back).length - String(item.back).length))
+                    + (vary ? Math.random() * 1.5 : 0), tie: Math.random() };
             }).sort((a, b) => b.rank - a.rank || a.tie - b.tie);
             for (const { item } of candidates) {
                 const key = this.answerKey(item.back);

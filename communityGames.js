@@ -173,7 +173,7 @@
                                     ['star', 'Star Spirit', '🌟', 'legendary'], ['planet', 'Planet Pal', '🪐', 'legendary'], ['rainbow', 'Rainbow', '🌈', 'legendary'],
                                     ['elder', 'Elder Dragon', '🐲', 'legendary'], ['brain', 'Big Brain', '🧠', 'legendary'], ['trophy', 'Golden Trophy', '🏆', 'legendary']
                                 ].map(([key, name, emoji, rarity]) => ({ id: `pet_${key}`, name, emoji, rarity, price: null, type: 'pet' }))
-                            ].map(item => {
+                            ].concat(StudBudCommunityGames.seasonalItems()).map(item => {
                                 const rarity = item.rarity || StudBudCommunityGames.rarityForItem(item);
                                 return { ...item, rarity, price: item.price == null ? null : Math.round(item.price * 2.5 / 5) * 5 };
                             });
@@ -185,6 +185,74 @@
 
                         static rarityForItem(item) {
                             return this.rarityForPrice(item.price);
+                        }
+
+                        // One limited box per month. Items are box-only and keep their set (season) for collections.
+                        static get seasons() {
+                            return [
+                                { month: 1, key: 'newyear', name: 'New Year', icon: 'fa-champagne-glasses', colors: ['#facc15', '#a5b4fc'],
+                                    skin: ['Midnight Sparkle', '#1e1b4b', '#fde68a', '#1e1b4b', '#facc15'], hat: ['Countdown Top Hat', 'tophat', '#111827', '#facc15', '#f8fafc'],
+                                    aura: ['Confetti Countdown', 'confetti', '#facc15', '#e2e8f0', '#a5b4fc'], palette: ['Golden Midnight', 45, 250] },
+                                { month: 2, key: 'valentine', name: "Valentine's", icon: 'fa-heart', colors: ['#fb7185', '#f9a8d4'],
+                                    skin: ['Sweetheart', '#e11d48', '#ffe4e6', '#881337', '#f9a8d4'], hat: ['Heart Headband', 'band', '#f43f5e', '#fecdd3', '#be123c'],
+                                    aura: ['Love Notes', 'heart', '#fb7185', '#fda4af', '#f9a8d4'], palette: ['Rose Petal', 345, 320] },
+                                { month: 3, key: 'clover', name: "St. Patrick's", icon: 'fa-clover', colors: ['#22c55e', '#facc15'],
+                                    skin: ['Lucky Clover', '#15803d', '#fde7c8', '#14532d', '#facc15'], hat: ['Lucky Top Hat', 'tophat', '#166534', '#facc15', '#bbf7d0'],
+                                    aura: ['Four-Leaf Flurry', 'leaf', '#22c55e', '#86efac', '#facc15'], palette: ['Emerald Luck', 140, 50] },
+                                { month: 4, key: 'spring', name: 'Spring', icon: 'fa-egg', colors: ['#f9a8d4', '#a7f3d0'],
+                                    skin: ['Spring Bloom', '#a7f3d0', '#fef9c3', '#4c1d95', '#f9a8d4'], hat: ['Bunny Ears', 'ears', '#f8fafc', '#f9a8d4', '#fbcfe8'],
+                                    aura: ['Petal Breeze', 'petal', '#f9a8d4', '#fde68a', '#a7f3d0'], palette: ['Pastel Garden', 320, 150] },
+                                { month: 5, key: 'grad', name: 'Graduation', icon: 'fa-graduation-cap', colors: ['#1d4ed8', '#facc15'],
+                                    skin: ['Valedictorian', '#1e3a8a', '#fde7c8', '#172554', '#facc15'], hat: ['Honors Mortarboard', 'mortar', '#0f172a', '#facc15', '#fde68a'],
+                                    aura: ['Cap Toss Stars', 'star', '#facc15', '#fef3c7', '#93c5fd'], palette: ['Class Colors', 225, 45] },
+                                { month: 6, key: 'summer', name: 'Summer', icon: 'fa-umbrella-beach', colors: ['#22d3ee', '#fbbf24'],
+                                    skin: ['Beach Day', '#0ea5e9', '#fed7aa', '#0c4a6e', '#fde047'], hat: ['Sun Hat', 'straw', '#fcd34d', '#f97316', '#fef3c7'],
+                                    aura: ['Heat Shimmer', 'ray', '#fde68a', '#fbbf24', '#22d3ee'], palette: ['Tropical Wave', 190, 40] },
+                                { month: 7, key: 'fireworks', name: 'Fireworks', icon: 'fa-burst', colors: ['#ef4444', '#3b82f6'],
+                                    skin: ['Firecracker', '#1d4ed8', '#f8fafc', '#1e3a8a', '#ef4444'], hat: ['Rocket Party Hat', 'cone', '#ef4444', '#f8fafc', '#3b82f6'],
+                                    aura: ['Sparkler Show', 'spark', '#ef4444', '#f8fafc', '#60a5fa'], palette: ['Star Spangled', 0, 220] },
+                                { month: 8, key: 'school', name: 'Back to School', icon: 'fa-pencil', colors: ['#f59e0b', '#38bdf8'],
+                                    skin: ['Honor Roll', '#ca8a04', '#fde7c8', '#422006', '#38bdf8'], hat: ['Varsity Cap', 'cap', '#2563eb', '#facc15', '#f8fafc'],
+                                    aura: ['Study Beats', 'note', '#fde68a', '#38bdf8', '#f472b6'], palette: ['Pencil Case', 40, 200] },
+                                { month: 9, key: 'autumn', name: 'Autumn', icon: 'fa-leaf', colors: ['#f97316', '#b45309'],
+                                    skin: ['Maple Ranger', '#c2410c', '#fde7c8', '#431407', '#fbbf24'], hat: ['Cozy Knit Beanie', 'beanie', '#ea580c', '#fde68a', '#9a3412'],
+                                    aura: ['Falling Maple', 'leaf', '#f97316', '#dc2626', '#fbbf24'], palette: ['Maple Glow', 25, 5] },
+                                { month: 10, key: 'halloween', name: 'Halloween', icon: 'fa-ghost', colors: ['#f97316', '#a855f7'],
+                                    skin: ['Jack-o\u2019-Spook', '#f97316', '#1c1917', '#facc15', '#7c3aed'], hat: ['Witching Hat', 'witch', '#3b0764', '#f97316', '#a855f7'],
+                                    aura: ['Spectral Flames', 'flame', '#a855f7', '#22c55e', '#f97316'], palette: ['Haunted Night', 275, 25] },
+                                { month: 11, key: 'harvest', name: 'Thanksgiving', icon: 'fa-wheat-awn', colors: ['#b45309', '#facc15'],
+                                    skin: ['Harvest Host', '#92400e', '#fde7c8', '#451a03', '#f59e0b'], hat: ['Pilgrim Hat', 'tophat', '#292524', '#a8a29e', '#facc15'],
+                                    aura: ['Harvest Breeze', 'leaf', '#b45309', '#f59e0b', '#facc15'], palette: ['Pumpkin Pie', 30, 15] },
+                                { month: 12, key: 'holiday', name: 'Christmas', icon: 'fa-tree', colors: ['#ef4444', '#22c55e'],
+                                    skin: ['Jolly Elf', '#15803d', '#fde7c8', '#14532d', '#ef4444'], hat: ['Santa Hat', 'santa', '#dc2626', '#f8fafc', '#fef2f2'],
+                                    aura: ['Let It Snow', 'snowflake', '#f8fafc', '#bae6fd', '#ef4444'], palette: ['Candy Cane', 355, 140] }
+                            ];
+                        }
+
+                        static seasonalItems() {
+                            return StudBudCommunityGames.seasons.flatMap(season => {
+                                const set = { season: season.month, set: season.name };
+                                const [skinName, body, head, eye, trim] = season.skin;
+                                const [hatName, shape, ...hatColors] = season.hat;
+                                const [auraName, particle, ...auraColors] = season.aura;
+                                const [paletteName, hue, hue2] = season.palette;
+                                return [
+                                    { ...set, id: `palette_seasonal_${season.key}`, name: paletteName, color: `seasonal_${season.key}`, hue, hue2, price: null, rarity: 'uncommon', type: 'palette', description: `${season.name} colors for your character and app theme` },
+                                    { ...set, id: `hat_seasonal_${season.key}`, name: hatName, icon: season.icon, price: null, rarity: 'rare', type: 'hat', hatShape: shape, hatColors, description: `A limited ${season.name} hat` },
+                                    { ...set, id: `skin_seasonal_${season.key}`, name: skinName, icon: season.icon, price: null, rarity: 'epic', type: 'skin', skinColors: { body, head, eye, trim }, description: `A limited ${season.name} character` },
+                                    { ...set, id: `acc_seasonal_${season.key}_effect`, name: auraName, icon: 'fa-wand-magic-sparkles', price: null, rarity: 'legendary', type: 'effect', particle: { shape: particle, colors: auraColors }, description: `A limited ${season.name} aura` }
+                                ];
+                            });
+                        }
+
+                        static currentSeason(date = new Date()) {
+                            return StudBudCommunityGames.seasons.find(season => season.month === date.getUTCMonth() + 1);
+                        }
+
+                        static get seasonalBox() {
+                            const season = StudBudCommunityGames.currentSeason();
+                            return { id: 'season', name: `${season.name} Box`, price: 350, icon: season.icon, seasonal: true, season,
+                                odds: `Limited ${season.name} set \u00b7 this month only`, chances: { uncommon: 35, rare: 30, epic: 27, legendary: 8 } };
                         }
 
                         static get boxes() {
@@ -242,7 +310,9 @@
 
         boxPool(box, owned = []) {
             const types = { hat: ['hat'], accessory: ['accessory', 'effect'], effect: ['effect'], palette: ['palette'], skin: ['skin'] };
+            const month = box.id === 'season' ? box.season?.month : null;
             return this.catalog.filter(item => !item.legacy && item.type !== 'pet' && box.chances[item.rarity] > 0
+                && (month ? item.season === month : !item.season)
                 && (!types[box.id] || types[box.id].includes(item.type)) && !owned.includes(item.id));
         }
 
@@ -465,6 +535,15 @@
             const { data, error } = await this.getClient().rpc('studbud_change_username', { p_username: username });
             if (error) throw new Error(error.message.includes('Could not find the function')
                 ? 'Username changes are not set up yet. Re-run supabase-setup.sql in Supabase.' : error.message);
+            return data;
+        }
+
+        async reportContent(targetType, targetId, reason, details = '') {
+            const { data, error } = await this.getClient().rpc('studbud_report_content', {
+                p_target_type: targetType, p_target_id: targetId, p_reason: reason, p_details: details
+            });
+            if (error) throw new Error(error.message.includes('Could not find the function')
+                ? 'Reporting is not set up yet. Re-run supabase-setup.sql in Supabase.' : error.message);
             return data;
         }
 

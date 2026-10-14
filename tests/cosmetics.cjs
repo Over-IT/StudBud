@@ -145,6 +145,7 @@ app.renderMultiplayerProfile = async () => {};
 app.shopTab = 'hat';
 elements.set('multiplayer-shop-coins', {});
 elements.set('multiplayer-shop-items', {});
+elements.set('multiplayer-inventory-items', {});
 app.renderMultiplayerShop({ coins: 1000, owned_items: [], equipped_skin: 'skin_robot',
     equipped_hat: 'hat_cap', equipped_accessory: 'acc_shades', equipped_effect: 'acc_storm_effect' });
 const preview = previews.find(cos => cos.hat === 'hat_fedora');
@@ -152,10 +153,11 @@ assert.equal(preview.skin, 'skin_robot');
 assert.equal(preview.acc, 'acc_shades', 'hat previews preserve the equipped accessory');
 assert.equal(preview.effect, 'acc_storm_effect', 'hat previews preserve the equipped aura');
 for (const tab of ['skin', 'hat', 'accessory', 'effect', 'palette', 'inventory']) {
-    app.shopTab = tab;
-    app.renderMultiplayerShop({ coins: 1000, owned_items: catalog.filter(item => item.type !== 'pet').map(item => item.id) });
-    const markup = elements.get('multiplayer-shop-items').innerHTML;
-    for (const item of catalog.filter(item => item.type !== 'pet' && (tab === 'inventory' || (!item.legacy && item.type === tab)))) {
+    const everything = { coins: 1000, owned_items: catalog.filter(item => item.type !== 'pet').map(item => item.id) };
+    if (tab === 'inventory') { app.inventoryTab = 'all'; app.renderInventory(everything); }
+    else { app.shopTab = tab; app.renderMultiplayerShop(everything); }
+    const markup = elements.get(tab === 'inventory' ? 'multiplayer-inventory-items' : 'multiplayer-shop-items').innerHTML;
+    for (const item of catalog.filter(item => item.type !== 'pet' && (tab === 'inventory' || (!item.legacy && !item.season && item.type === tab)))) {
         assert.ok(markup.includes(`<small>${app.escapeHTML(item.description)}</small>`),
             `${tab} displays ${item.id}'s description`);
         assert.ok(markup.includes(app.escapeHTML(`${item.name} ${item.rarity} ${item.description}`.toLocaleLowerCase())),

@@ -224,10 +224,18 @@
         ctx.closePath();
     }
 
+    const nameWidths = new WeakMap();
     function nameTag(ctx, name, x, y, color) {
         ctx.font = '700 13px system-ui, sans-serif';
         ctx.textAlign = 'center';
-        const w = ctx.measureText(name).width + 12;
+        let widths = nameWidths.get(ctx);
+        if (!widths) { widths = new Map(); nameWidths.set(ctx, widths); }
+        let w = widths.get(name);
+        if (w === undefined) {
+            w = ctx.measureText(name).width + 12;
+            if (widths.size >= 256) widths.clear();
+            widths.set(name, w);
+        }
         ctx.fillStyle = 'rgba(8,12,24,.62)';
         roundRect(ctx, x - w / 2, y - 14, w, 19, 9);
         ctx.fill();
@@ -403,13 +411,15 @@
         // ---------- roster / network ----------
         updateRoster(room) {
             const players = Array.isArray(room.state?.players) ? room.state.players : [];
-            const ids = new Set();
+            const ids = new Set(), defaults = defaultPlayerColors(players);
             players.forEach(player => {
                 ids.add(player.id);
                 const info = this.roster.get(player.id) || {};
+                const cos = playerCosmetics(player), assigned = defaults.get(player.id);
+                if (assigned) cos.color = assigned;
                 Object.assign(info, {
-                    id: player.id, nickname: player.nickname, username: player.username, score: Number(player.score || 0), color: playerColor(player), avatar: player.avatar,
-                    cos: playerCosmetics(player)
+                    id: player.id, nickname: player.nickname, username: player.username, score: Number(player.score || 0), color: assigned || playerColor(player), avatar: player.avatar,
+                    cos
                 });
                 this.roster.set(player.id, info);
                 const remote = this.remotes.get(player.id);
@@ -650,7 +660,7 @@
             this.lastCard = index;
             this.lastCardIndex = index;
             const card = this.cards[index];
-            const options = window.FlashcardTools.distractors(card, this.cards, 3).map(item => item.back).concat(card.back);
+            const options = window.FlashcardTools.distractors(card, this.cards, 3, { vary: true }).map(item => item.back).concat(card.back);
             for (let i = options.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [options[i], options[j]] = [options[j], options[i]]; }
             this.question = { card, options, callback, locked: false, onAnswer: opts?.onAnswer };
             return this.showQuestion(card, options, note);
@@ -801,11 +811,13 @@
                 this.mouse.x = (e.clientX - b.left) / this.scale;
                 this.mouse.y = (e.clientY - b.top) / this.scale;
                 this.mouse.active = true;
+                this.mouse.pointerType = e.pointerType;
             });
-            canvas.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && !this.mouse.down) this.mouse.active = false; });
+            canvas.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') this.mouse.active = false; });
             canvas.addEventListener('pointerdown', e => {
                 if (this.question || this.over || this.paused) return;
                 this.mouse.active = true;
+                this.mouse.pointerType = e.pointerType;
                 if (e.button !== 2 && this.aimPointer != null) return;
                 if (e.button !== 2) this.aimPointer = e.pointerId;
                 if (e.pointerType === 'touch') this.mouse.touchAt = performance.now();
@@ -1160,6 +1172,12 @@
 
         resize() {
             this.graphics = graphicsProfile();
+            if (this.adaptiveLow) {
+                this.graphics.low = true;
+                this.graphics.maxDpr = Math.min(this.graphics.maxDpr, 1);
+                this.graphics.particleScale = Math.min(this.graphics.particleScale, .35);
+                this.graphics.particleLimit = Math.min(this.graphics.particleLimit, 90);
+            }
             const dpr = Math.min(window.devicePixelRatio || 1, this.graphics.maxDpr) * (this.resolutionScale || 1);
             const w = this.overlay.clientWidth, h = this.overlay.clientHeight;
             if (this.canvas.width !== Math.floor(w * dpr)) this.canvas.width = Math.floor(w * dpr);
@@ -1300,6 +1318,8 @@
         frame(now) {
             if (this.destroyed) return;
             const workStarted = performance.now();
+            const elapsed = now - this.lastFrame;
+            this.frameInterval = this.frameInterval === undefined ? elapsed : this.frameInterval * .9 + elapsed * .1;
             const dt = Math.min(0.05, (now - this.lastFrame) / 1000);
             this.lastFrame = now;
             if (!this.over) {
@@ -1355,11 +1375,18 @@
                 const cost = performance.now() - workStarted;
                 this.frameCost = this.frameCost === undefined ? cost : this.frameCost * .95 + cost * .05;
                 this.performanceFrames = (this.performanceFrames || 0) + 1;
-                if (this.performanceFrames >= 120) {
+                if (this.performanceFrames >= (this.frameCost > 12 || this.frameInterval > 26 ? 30 : 240)) {
                     this.performanceFrames = 0;
                     const scale = this.resolutionScale || 1;
-                    const next = this.frameCost > 12 ? Math.max(.6, scale - .15) : this.frameCost < 5 ? Math.min(1, scale + .1) : scale;
-                    if (Math.abs(next - scale) > .01 && this.canvas) { this.resolutionScale = next; this.resize(); }
+                    const struggling = this.frameCost > 12 || this.frameInterval > 26;
+                    const recovered = this.frameCost < 5 && this.frameInterval < 19;
+                    const next = struggling ? Math.max(.5, scale - .15) : recovered ? Math.min(1, scale + .05) : scale;
+                    const low = struggling || (this.adaptiveLow && !(recovered && next >= .95));
+                    if (this.canvas && (Math.abs(next - scale) > .01 || !!low !== !!this.adaptiveLow)) {
+                        this.resolutionScale = next;
+                        this.adaptiveLow = !!low;
+                        this.resize();
+                    }
                 }
             }
             this.raf = requestAnimationFrame(t => this.frame(t));
@@ -1408,6 +1435,24 @@
             color: player?.color || player?.cos?.color || ((player?.equipped_palette || player?.palette)
                 ? playerColor({ ...player, palette: player.equipped_palette || player.palette }) : '#34d399')
         };
+    }
+
+    // Players with no skin, colour or palette get distinct colours so default characters are easy to tell apart.
+    function defaultPlayerColors(players) {
+        const isDefault = player => !(player?.equipped_skin ?? player?.skin ?? player?.cos?.skin)
+            && !(player?.color || player?.cos?.color || player?.equipped_palette || player?.palette);
+        const used = new Set(players.filter(player => !isDefault(player)).map(player => playerCosmetics(player).color));
+        const assigned = new Map();
+        for (const player of [...players].filter(isDefault).sort((a, b) => String(a.id).localeCompare(String(b.id)))) {
+            const start = hashStr(String(player.id || 'x')) % PALETTE.length;
+            let color = PALETTE[start];
+            for (let k = 0; k < PALETTE.length; k++) {
+                const candidate = PALETTE[(start + k) % PALETTE.length];
+                if (!used.has(candidate)) { color = candidate; break; }
+            }
+            used.add(color); assigned.set(player.id, color);
+        }
+        return assigned;
     }
 
     function isAuraCosmetic(id) {
@@ -1603,7 +1648,9 @@
         ctx.translate(cx, top);
         ctx.rotate(tilt);
         const fill = (color, fn) => { ctx.fillStyle = color; ctx.beginPath(); fn(); ctx.fill(); };
-        if (hat === 'hat_cap') {
+        if (SEASONAL_HATS[hat]) {
+            drawSeasonalHat(ctx, SEASONAL_HATS[hat], r);
+        } else if (hat === 'hat_cap') {
             fill('#ef4444', () => ctx.arc(0, r * 0.35, r * 1.02, Math.PI, TAU));
             fill('#b91c1c', () => ctx.rect(0, r * 0.2, r * 1.5, r * 0.28));
         } else if (hat === 'hat_party') {
@@ -1805,6 +1852,81 @@
         acc_stars: { shape: 'star', colors: ['#fde047', '#fef3c7'] },
         acc_snow: { shape: 'snowflake', colors: ['#e0f2fe', '#7dd3fc'] }
     };
+
+    const SEASONAL_HATS = {};
+    (window.StudBudCommunityGames?.catalog || []).forEach(item => {
+        if (!item.season) return;
+        if (item.skinColors) SKINS[item.id] = item.skinColors;
+        if (item.particle) COSMETIC_PARTICLES[item.id] = item.particle;
+        if (item.hatShape) SEASONAL_HATS[item.id] = { shape: item.hatShape, colors: item.hatColors };
+    });
+
+    function drawSeasonalHat(ctx, { shape, colors: [main, accent, detail] }, r) {
+        const fill = (color, fn) => { ctx.fillStyle = color; ctx.beginPath(); fn(); ctx.fill(); };
+        if (shape === 'tophat') {
+            ctx.fillStyle = main; ctx.fillRect(-r * .78, -r * 1.45, r * 1.56, r * 1.8);
+            fill(main, () => ctx.ellipse(0, r * .32, r * 1.3, r * .27, 0, 0, TAU));
+            ctx.fillStyle = accent; ctx.fillRect(-r * .78, -r * .12, r * 1.56, r * .3);
+            ctx.strokeStyle = detail; ctx.lineWidth = r * .1; ctx.strokeRect(-r * .22, -r * .1, r * .44, r * .26);
+        } else if (shape === 'band') {
+            ctx.strokeStyle = main; ctx.lineWidth = r * .24;
+            ctx.beginPath(); ctx.arc(0, r * .85, r * 1.05, Math.PI * 1.08, Math.PI * 1.92); ctx.stroke();
+            for (const side of [-1, 1]) {
+                const x = side * r * .55, y = -r * .55, h = r * .32;
+                fill(side < 0 ? accent : detail, () => {
+                    ctx.moveTo(x, y + h); ctx.bezierCurveTo(x - h * 1.6, y - h * .2, x - h * .5, y - h * 1.4, x, y - h * .3);
+                    ctx.bezierCurveTo(x + h * .5, y - h * 1.4, x + h * 1.6, y - h * .2, x, y + h);
+                });
+            }
+        } else if (shape === 'ears') {
+            for (const side of [-1, 1]) {
+                fill(main, () => ctx.ellipse(side * r * .45, -r * .75, r * .28, r * .95, side * .15, 0, TAU));
+                fill(accent, () => ctx.ellipse(side * r * .45, -r * .72, r * .13, r * .7, side * .15, 0, TAU));
+            }
+            ctx.strokeStyle = detail; ctx.lineWidth = r * .18;
+            ctx.beginPath(); ctx.arc(0, r * .8, r * 1.0, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
+        } else if (shape === 'mortar') {
+            fill(main, () => ctx.ellipse(0, r * .2, r * .85, r * .45, 0, 0, Math.PI));
+            ctx.fillStyle = main; ctx.fillRect(-r * .85, -r * .15, r * 1.7, r * .38);
+            fill(main, () => { ctx.moveTo(-r * 1.5, -r * .3); ctx.lineTo(0, -r * .85); ctx.lineTo(r * 1.5, -r * .3); ctx.lineTo(0, r * .2); });
+            ctx.strokeStyle = accent; ctx.lineWidth = r * .09;
+            ctx.beginPath(); ctx.moveTo(0, -r * .32); ctx.lineTo(r * 1.1, -r * .05); ctx.lineTo(r * 1.1, r * .55); ctx.stroke();
+            fill(detail, () => ctx.arc(r * 1.1, r * .62, r * .14, 0, TAU));
+        } else if (shape === 'straw') {
+            fill(main, () => ctx.ellipse(0, r * .32, r * 1.85, r * .38, 0, 0, TAU));
+            fill(detail, () => ctx.ellipse(0, -r * .2, r * .85, r * .62, 0, Math.PI, TAU));
+            ctx.fillStyle = detail; ctx.fillRect(-r * .85, -r * .22, r * 1.7, r * .5);
+            ctx.fillStyle = accent; ctx.fillRect(-r * .86, r * .02, r * 1.72, r * .22);
+        } else if (shape === 'cone' || shape === 'witch' || shape === 'santa') {
+            const tall = shape === 'witch' ? 2.2 : 1.8;
+            if (shape === 'witch') fill(main, () => ctx.ellipse(0, r * .38, r * 1.7, r * .3, 0, 0, TAU));
+            fill(main, () => {
+                ctx.moveTo(-r * .9, r * .4);
+                if (shape === 'santa') { ctx.quadraticCurveTo(-r * .2, -r * 1.6, r * 1.1, -r * .8); ctx.lineTo(r * .9, r * .4); }
+                else { ctx.lineTo(shape === 'witch' ? r * .35 : 0, -r * tall); ctx.lineTo(r * .9, r * .4); }
+            });
+            if (shape === 'cone') for (let i = 0; i < 3; i++) {
+                ctx.fillStyle = i % 2 ? detail : accent;
+                const y = -r * (.1 + i * .45), w = r * .9 * (1 - (i * .45 + .3) / 2.2);
+                ctx.fillRect(-w, y, w * 2, r * .18);
+            }
+            ctx.fillStyle = accent; ctx.fillRect(-r * (shape === 'witch' ? .85 : 1), r * .12, r * (shape === 'witch' ? 1.7 : 2), r * .3);
+            const tip = shape === 'santa' ? [r * 1.15, -r * .75] : [0, -r * tall];
+            if (shape !== 'witch') fill(shape === 'santa' ? accent : detail, () => ctx.arc(tip[0], tip[1], r * .24, 0, TAU));
+        } else if (shape === 'cap') {
+            fill(main, () => ctx.arc(0, r * .35, r * 1.02, Math.PI, TAU));
+            fill(accent, () => ctx.rect(0, r * .2, r * 1.55, r * .26));
+            ctx.strokeStyle = detail; ctx.lineWidth = r * .08;
+            ctx.beginPath(); ctx.arc(0, r * .35, r * .62, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke();
+            fill(accent, () => ctx.arc(0, -r * .66, r * .13, 0, TAU));
+        } else if (shape === 'beanie') {
+            fill(main, () => ctx.arc(0, r * .4, r * 1.0, Math.PI, TAU));
+            ctx.strokeStyle = detail; ctx.lineWidth = r * .07;
+            for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.moveTo(i * r * .3, r * .15); ctx.lineTo(i * r * .25, -r * .45); ctx.stroke(); }
+            ctx.fillStyle = detail; ctx.fillRect(-r * 1.02, r * .12, r * 2.04, r * .32);
+            fill(accent, () => ctx.arc(0, -r * .62, r * .3, 0, TAU));
+        }
+    }
 
     function drawCosmeticParticle(ctx, shape, size) {
         ctx.lineWidth = Math.max(.8, size * .3);
@@ -2268,7 +2390,28 @@
     }
 
     function questionHistoryMarkup(history = []) {
-        return `<ul class="game-answer-list">${history.map(answer => `<li class="mpg-answer-${answer.correct === null ? 'skip' : answer.correct ? 'right' : 'wrong'}"><strong>${esc(answer.prompt)}</strong><span>${answer.correct === null ? 'Skipped' : answer.correct ? 'Correct' : `Your answer: ${esc(answer.chosen || 'No selection')}`}</span><span>Answer: ${esc(answer.answer)}</span></li>`).join('') || '<li>No questions answered in this game.</li>'}</ul>`;
+        // One row per distinct question: repeated questions show attempts and accuracy instead of duplicates.
+        const groups = new Map();
+        for (const answer of history || []) {
+            const key = `${answer.prompt}\u0000${answer.answer}`;
+            const group = groups.get(key) || { prompt: answer.prompt, answer: answer.answer, attempts: 0, correct: 0, skipped: 0, wrong: [] };
+            group.attempts++;
+            if (answer.correct === null) group.skipped++;
+            else if (answer.correct) group.correct++;
+            else if (!group.wrong.includes(answer.chosen || 'No selection')) group.wrong.push(answer.chosen || 'No selection');
+            groups.set(key, group);
+        }
+        const rows = [...groups.values()].map(group => {
+            const answered = group.attempts - group.skipped;
+            return { ...group, answered, accuracy: answered ? Math.round(group.correct / answered * 100) : null };
+        }).sort((a, b) => (a.accuracy ?? -1) - (b.accuracy ?? -1) || b.attempts - a.attempts);
+        const items = rows.map(row => {
+            const tone = row.accuracy === null ? 'skip' : row.accuracy === 100 ? 'right' : row.accuracy === 0 ? 'wrong' : 'mixed';
+            const tally = row.accuracy === null ? 'Skipped' : row.attempts === 1 ? (row.correct ? 'Correct' : 'Incorrect')
+                : `${row.correct}/${row.answered} correct ? ${row.accuracy}%${row.skipped ? ` ? ${row.skipped} skipped` : ''}`;
+            return `<li class="mpg-answer-${tone}"><strong>${esc(row.prompt)}</strong><span class="answer-tally">${row.attempts > 1 ? `<b>${row.attempts}?</b> ` : ''}${tally}${row.accuracy !== null && row.attempts > 1 ? `<i class="answer-meter" style="--acc:${row.accuracy}%"></i>` : ''}</span>${row.wrong.length ? `<span>Your answer${row.wrong.length > 1 ? 's' : ''}: ${row.wrong.map(esc).join(', ')}</span>` : ''}<span>Answer: ${esc(row.answer)}</span></li>`;
+        }).join('');
+        return `<ul class="game-answer-list">${items || '<li>No questions answered in this game.</li>'}</ul>`;
     }
 
     function sceneZoom(session, w, h, base = 820) {
@@ -2282,6 +2425,6 @@
     window.StudBudArcade = {
         graphicsProfile,
         Session, BaseGame, Particles, Resource, games: {},
-        util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, VerticalIndex, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, accountTagMarkup, who, playerCosmetics, avatarUrl, avatarMarkup, animatedCosmetics, drawAvatar, observeAvatars, drawHat, drawFigureSide, drawFigureTop, sceneZoom, questionHistoryMarkup }
+        util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, VerticalIndex, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, accountTagMarkup, who, playerCosmetics, avatarUrl, avatarMarkup, animatedCosmetics, drawAvatar, observeAvatars, drawHat, drawFigureSide, drawFigureTop, sceneZoom, questionHistoryMarkup, defaultPlayerColors }
     };
 })(window);

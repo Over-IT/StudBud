@@ -492,7 +492,8 @@
         { main: 'gpa', tabs: [['gpa', 'Grades & GPA'], ['grade-scenarios', 'What-if grades'], ['analytics', 'Analytics']] },
         { main: 'planner', tabs: [['planner', 'Tasks'], ['calendar', 'Calendar'], ['schedule', 'Class schedule']] },
         { main: 'flashcard', tabs: [['flashcard', 'My sets'], ['exam-arcade', 'Practice'], ['importer', 'Import cards']] },
-        { main: 'multiplayer', tabs: [['multiplayer', 'Games'], ['friends', 'Buds'], ['leaderboard', 'Leaderboards'], ['shop', 'Shop']] },
+        { main: 'multiplayer', tabs: [['multiplayer', 'Games'], ['friends', 'Buds'], ['leaderboard', 'Leaderboards']] },
+        { main: 'profile', tabs: [['profile', 'Profile'], ['shop', 'Shop'], ['inventory', 'Locker']] },
         { main: 'settings', tabs: [['settings', 'Profile & data'], ['appearance', 'Appearance'], ['sound', 'Sound'], ['about', 'About']] }
     ];
     const PAGE_GUIDES = {
@@ -509,7 +510,9 @@
         multiplayer: ['Multiplayer games', 'Pick a game and a set, then host or join.'],
         friends: ['Buds', 'Find classmates and manage requests.'],
         leaderboard: ['Leaderboards', 'Study time and progress. Grades stay private.'],
-        shop: ['Character & shop', 'Equip cosmetics or spend coins.'],
+        profile: ['Your profile', 'Your character, rewards and public profile.'],
+        shop: ['Shop', 'Open boxes and buy cosmetics.'],
+        inventory: ['Locker', 'Everything you own. Equip it here.'],
         settings: ['Profile & backups', 'Name, school, privacy and backups.'],
         appearance: ['Appearance & performance', 'Colors, spacing and game detail.'],
         sound: ['Sound & music', 'Interface sounds, effects and music.'],
@@ -521,7 +524,7 @@
         constructor() {
             this.routes = [
                 "dashboard", "gpa", "grade-scenarios", "planner", "calendar", "schedule", "flashcard",
-                "analytics", "leaderboard", "exam-arcade", "multiplayer", "shop", "importer", "settings", "appearance", "sound", "admin", "about", "friends"
+                "analytics", "leaderboard", "exam-arcade", "multiplayer", "profile", "shop", "inventory", "importer", "settings", "appearance", "sound", "admin", "about", "friends"
             ];
             this.activeRoute = "dashboard";
         }
@@ -1239,29 +1242,11 @@
                 if (event.target.matches('#my-deck-search')) this.renderDecks();
                 if (event.target.matches('#deck-editor-search')) this.renderDeckEditorCards();
                 if (event.target.matches('#deck-editor-filter')) this.renderDeckEditorCards();
-                if (event.target.matches('#multiplayer-shop-search')) {
-                    this.shopSearch = event.target.value.trim();
-                    const query = event.target.value.trim().toLocaleLowerCase();
-                    const grid = event.target.closest('#multiplayer-shop-items')?.querySelector('.shop-grid');
-                    if (grid) {
-                        const cards = [...grid.querySelectorAll('.multiplayer-shop-item')];
-                        let visible = 0;
-                        for (const card of cards) {
-                            const matches = !query || card.dataset.search?.includes(query);
-                            card.hidden = !matches;
-                            if (matches) visible++;
-                        }
-                        for (const heading of grid.querySelectorAll('.shop-category-title')) {
-                            let sibling = heading.nextElementSibling, hasItems = false;
-                            while (sibling && !sibling.matches('.shop-category-title')) {
-                                if (sibling.matches('.multiplayer-shop-item') && !sibling.hidden) hasItems = true;
-                                sibling = sibling.nextElementSibling;
-                            }
-                            heading.hidden = !hasItems;
-                        }
-                        const empty = grid.querySelector('.shop-search-empty');
-                        if (empty) empty.hidden = !query || visible > 0;
-                    }
+                if (event.target.matches('.shop-search-input')) {
+                    const key = event.target.dataset.searchKey;
+                    if (key === 'multiplayer-inventory-items') this.inventorySearch = event.target.value.trim();
+                    else this.shopSearch = event.target.value.trim();
+                    this.filterShopGrid(document.getElementById(key), event.target.value);
                 }
                 if (event.target.matches('#course-search')) {
                     document.getElementById('course-name').value = '';
@@ -1307,7 +1292,7 @@
                 if (route === 'grade-scenarios') this.renderGradeScenarios();
                 if (route === 'analytics') this.renderGradeProgress();
                 if (route === 'leaderboard') this.refreshStudyLeaderboard(this.studyLeaderboardPeriod || 'daily');
-                if (route === 'shop') {
+                if (['shop', 'inventory', 'profile'].includes(route)) {
                     this.animateShopAuras();
                     this.renderMultiplayerProfile(true);
                 }
@@ -1614,7 +1599,7 @@
                         const categoryGrade = pointsPossible > 0 ? `${(pointsEarned / pointsPossible * 100).toFixed(2)}%` : '—';
                         const assignmentMarkup = group.assignments.length ? group.assignments.map(item => {
                             const hasScore = this.isGradedItem(item);
-                            return `<article class="transcript-assignment ${item.status === 'completed' ? 'is-complete' : ''}">
+                            return `<article class="transcript-assignment ${item.status === 'completed' ? 'is-complete' : ''} is-${this.assignmentState(item)}">
                                 <span class="assignment-status-dot" aria-hidden="true"></span>
                                 <div class="transcript-assignment-main">
                                     <strong>${this.escapeHTML(item.title)}</strong>
@@ -1622,8 +1607,8 @@
                                 </div>
                                 <strong class="transcript-assignment-score">${hasScore ? `${this.formatNumber(item.pointsEarned || 0)} / ${this.formatNumber(item.maxPoints || 0)}` : 'Not graded'}</strong>
                                 <div class="transcript-assignment-actions">
+                                    ${hasScore ? '' : this.assignmentStatusControl(item)}
                                     ${this.assessmentStudyButton(item)}
-                                    ${hasScore ? '' : `<button class="secondary-btn" data-action="toggle-assignment" data-id="${this.escapeHTML(item.id)}">${item.status === 'completed' ? 'Reopen' : 'Done'}</button>`}
                                     <button class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}" aria-label="Edit ${this.escapeHTML(item.title)}">Edit</button>
                                     <button class="danger-btn" data-action="delete-assignment" data-id="${this.escapeHTML(item.id)}" aria-label="Delete ${this.escapeHTML(item.title)}">Delete</button>
                                 </div>
@@ -1767,7 +1752,7 @@
             }).join('');
             const workRows = assignments.length ? assignments.map(item => `
                 <tr>
-                    <td>${this.isGradedItem(item) ? 'Graded' : `<button class="secondary-btn" data-action="toggle-assignment" data-id="${this.escapeHTML(item.id)}">${item.status === 'completed' ? 'Done' : 'Open'}</button>`}</td>
+                    <td>${this.assignmentStatusControl(item)}</td>
                     <td>${this.escapeHTML(item.title)}</td>
                     <td>${this.escapeHTML((categories.find(category => category.id === item.categoryId) || {}).name || 'Uncategorized')}</td>
                     <td>${this.escapeHTML(item.kind || 'assignment')}</td>
@@ -2581,12 +2566,9 @@
                 const course = courses.find(entry => entry.code === item.courseCode);
                 const matchesSearch = !query || `${item.title} ${item.kind || ''} ${course?.title || item.courseCode || ''}`.toLocaleLowerCase().includes(query);
                 const matchesCourse = !selectedCourse || item.courseCode === selectedCourse;
-                const completed = item.status === 'completed';
-                const overdue = !completed && item.dueDate && item.dueDate < today;
-                const matchesStatus = selectedStatus === 'all'
-                    || (selectedStatus === 'open' && !completed)
-                    || (selectedStatus === 'completed' && completed)
-                    || (selectedStatus === 'overdue' && overdue);
+                const state = this.assignmentState(item);
+                const matchesStatus = selectedStatus === 'all' || state === selectedStatus
+                    || (selectedStatus === 'todo' && state === 'overdue');
                 return matchesSearch && matchesCourse && matchesStatus;
             }).sort((left, right) =>
                 (left.dueDate || '9999-12-31').localeCompare(right.dueDate || '9999-12-31')
@@ -2596,8 +2578,8 @@
                     const course = courses.find(entry => entry.code === item.courseCode);
                     const status = item.status || 'pending';
                     const graded = this.isGradedItem(item);
-                    return `<tr>
-                        <td>${graded ? 'Graded' : `<button class="secondary-btn" data-action="toggle-assignment" data-id="${this.escapeHTML(item.id)}">${status === 'completed' ? 'Done' : 'Pending'}</button>`}</td>
+                    return `<tr class="assignment-row is-${this.assignmentState(item)}">
+                        <td>${this.assignmentStatusControl(item)}</td>
                         <td>${this.escapeHTML(item.title)}</td>
                         <td>${this.escapeHTML(course ? course.title : item.courseCode || 'Unassigned')}</td>
                         <td>${graded ? `${this.formatNumber(item.pointsEarned || 0)} / ${this.formatNumber(item.maxPoints || 0)}` : this.escapeHTML(item.dueDate || 'No due date')}</td>
@@ -2611,6 +2593,14 @@
                 }).join('') : `<tr><td colspan="6" class="empty-state">${assignments.length ? 'No assignments match these filters.' : 'No assignments found.'}</td></tr>`;
             }
             if (resultCount) resultCount.textContent = `${visibleAssignments.length} of ${assignments.length} assignment${assignments.length === 1 ? '' : 's'}`;
+            const summary = document.getElementById('assignment-status-summary');
+            if (summary) {
+                const counts = { todo: 0, overdue: 0, awaiting: 0, graded: 0 };
+                assignments.forEach(item => { counts[this.assignmentState(item)] += 1; });
+                const chip = (state, label, icon) => `<button type="button" class="status-summary-chip is-${state}${selectedStatus === state ? ' selected' : ''}" data-action="assignment-status-filter" data-status="${state}" aria-pressed="${selectedStatus === state}"><i class="fas ${icon}" aria-hidden="true"></i><strong>${counts[state]}</strong><span>${label}</span></button>`;
+                summary.innerHTML = chip('todo', 'To do', 'fa-clock') + chip('overdue', 'Overdue', 'fa-triangle-exclamation')
+                    + chip('awaiting', 'Waiting for grade', 'fa-hourglass-half') + chip('graded', 'Graded', 'fa-circle-check');
+            }
 
             const priorityList = document.getElementById('priority-task-list');
             if (priorityList) {
@@ -3094,7 +3084,7 @@
         }
 
         profileCosmetics(profile) {
-            return window.StudBudArcade.util.playerCosmetics(profile);
+            return window.StudBudArcade?.util?.playerCosmetics?.(profile) || {};
         }
 
         multiplayerAvatarMarkup(cos = {}, large = false, extraClass = '') {
@@ -3103,44 +3093,47 @@
             return `<span class="player-avatar char-avatar${large ? ' player-avatar-large' : ''}${extraClass ? ` ${this.escapeHTML(extraClass)}` : ''}">${avatar || '<i class="fas fa-user" aria-hidden="true"></i>'}</span>`;
         }
 
-        renderMultiplayerShop(profile) {
+        shopItemPreview(profile, item, large = false) {
+            if (item.type === 'palette') return item.hue != null
+                ? `<span class="shop-palette" style="background: linear-gradient(135deg, hsl(${item.hue} 75% 55%), hsl(${item.hue2} 80% 40%))"></span>`
+                : `<span class="shop-palette ${this.escapeHTML(item.color)}"></span>`;
+            const slotKey = { skin: 'skin', hat: 'hat', accessory: 'acc', effect: 'effect' };
+            const base = profile ? this.profileCosmetics(profile) : {};
+            return this.multiplayerAvatarMarkup({ ...base, [slotKey[item.type]]: item.id }, large, item.type === 'effect' ? 'aura-preview' : '');
+        }
+
+        shopItemCard(profile, item) {
+            const owned = profile.owned_items || [];
+            const equippedBy = { skin: profile.equipped_skin, hat: profile.equipped_hat, accessory: profile.equipped_accessory, effect: profile.equipped_effect, palette: profile.equipped_palette };
+            const has = owned.includes(item.id);
+            const equipped = equippedBy[item.type] === item.id;
+            const price = item.price == null ? '' : ` · ${item.price} <i class="fas fa-coins"></i>`;
+            let button;
+            if (has && equipped) button = `<button type="button" class="ghost-btn" data-action="multiplayer-unequip" data-slot="${item.type}">Unequip</button>`;
+            else if (has) button = `<button type="button" class="secondary-btn" data-action="multiplayer-equip" data-id="${this.escapeHTML(item.id)}">Equip</button>`;
+            else if (item.season) button = `<button type="button" class="secondary-btn" disabled>${this.escapeHTML(item.set)} box</button>`;
+            else if (item.price == null) button = '<button type="button" class="secondary-btn" disabled>Box only</button>';
+            else button = `<button type="button" class="secondary-btn" data-action="multiplayer-buy" data-id="${this.escapeHTML(item.id)}" ${profile.coins < item.price ? 'disabled' : ''}>Buy${price}</button>`;
+            const search = this.escapeHTML(`${item.name} ${item.rarity} ${item.description || ''} ${item.set || ''}`.toLocaleLowerCase());
+            const setTag = item.set ? `<small class="shop-set-tag"><i class="fas fa-calendar" aria-hidden="true"></i> ${this.escapeHTML(item.set)} set</small>` : '';
+            return `<article class="multiplayer-shop-item rarity-${item.rarity}${equipped ? ' equipped' : ''}" data-search="${search}"><span class="shop-preview" aria-hidden="true">${this.shopItemPreview(profile, item)}</span><div><strong>${this.escapeHTML(item.name)}</strong><small class="rarity-label">${item.rarity}${equipped ? ' · Equipped' : has ? ' · Owned' : ''}</small>${setTag}${item.description ? `<small>${this.escapeHTML(item.description)}</small>` : ''}</div>${button}</article>`;
+        }
+
+        shopSetPreview(profile, items) {
+            const owned = profile.owned_items || [];
+            return `<div class="season-set-preview">${items.map(item => `<span class="season-set-item rarity-${item.rarity}${owned.includes(item.id) ? ' owned' : ''}" title="${this.escapeHTML(`${item.name} (${item.rarity})${owned.includes(item.id) ? ' · owned' : ''}`)}">${this.shopItemPreview(profile, item)}<small>${this.escapeHTML(item.name)}</small></span>`).join('')}</div>`;
+        }
+
+        shopBoxCard(profile, box, featured = false) {
             const games = window.StudBudCommunityGames;
             const owned = profile.owned_items || [];
-            const tab = this.shopTab || 'boxes';
-            const catalog = games.catalog.filter(item => !item.legacy && item.type !== 'pet');
-            const equippedBy = { skin: profile.equipped_skin, hat: profile.equipped_hat, accessory: profile.equipped_accessory, effect: profile.equipped_effect, palette: profile.equipped_palette };
-            const tabs = [['boxes', 'Mystery boxes'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['effect', 'Auras'], ['palette', 'Colors'], ['inventory', 'Inventory']];
-            const slotKey = { skin: 'skin', hat: 'hat', accessory: 'acc', effect: 'effect' };
-            const previewCosmetics = item => ({ ...this.profileCosmetics(profile), [slotKey[item.type]]: item.id });
-            const itemCard = item => {
-                const has = owned.includes(item.id);
-                const equipped = equippedBy[item.type] === item.id;
-                let preview;
-                if (item.type === 'palette') preview = item.hue != null
-                    ? `<span class="shop-palette" style="background: linear-gradient(135deg, hsl(${item.hue} 75% 55%), hsl(${item.hue2} 80% 40%))"></span>`
-                    : `<span class="shop-palette ${this.escapeHTML(item.color)}"></span>`;
-                else preview = this.multiplayerAvatarMarkup(previewCosmetics(item), false, item.type === 'effect' ? 'aura-preview' : '');
-                const price = item.price == null ? '' : ` · ${item.price} <i class="fas fa-coins"></i>`;
-                let button;
-                if (has && equipped && equippedBy[item.type] !== undefined) button = `<button type="button" class="ghost-btn" data-action="multiplayer-unequip" data-slot="${item.type}">Unequip</button>`;
-                else if (has) button = `<button type="button" class="secondary-btn" data-action="multiplayer-equip" data-id="${this.escapeHTML(item.id)}">Equip</button>`;
-                else if (item.price == null) button = '<button type="button" class="secondary-btn" disabled>Box only</button>';
-                else button = `<button type="button" class="secondary-btn" data-action="multiplayer-buy" data-id="${this.escapeHTML(item.id)}" ${profile.coins < item.price ? 'disabled' : ''}>Buy${price}</button>`;
-                const name = item.name;
-                const search = this.escapeHTML(`${name} ${item.rarity} ${item.description || ''}`.toLocaleLowerCase());
-                return `<article class="multiplayer-shop-item rarity-${item.rarity}${equipped ? ' equipped' : ''}" data-search="${search}"><span class="shop-preview" aria-hidden="true">${preview}</span><div><strong>${this.escapeHTML(name)}</strong><small class="rarity-label">${item.rarity}${equipped ? ' · Equipped' : has ? ' · Owned' : ''}</small>${item.description ? `<small>${this.escapeHTML(item.description)}</small>` : ''}</div>${button}</article>`;
-            };
-            let body;
-            if (tab === 'boxes') {
-                const drop = this.lastDrop;
-                const dropItem = drop && games.catalog.find(entry => entry.id === drop.unlocked_item && entry.type !== 'pet');
-                body = `${dropItem ? `<div class="box-reveal rarity-${this.escapeHTML(dropItem.rarity)}">${dropItem.type === 'palette' ? `<span class="shop-palette" style="background: linear-gradient(135deg, hsl(${dropItem.hue} 75% 55%), hsl(${dropItem.hue2} 80% 40%))"></span>` : this.multiplayerAvatarMarkup(previewCosmetics(dropItem), true)}<div><small>${this.escapeHTML(dropItem.rarity)}</small><strong>${this.escapeHTML(dropItem.name)}</strong><span>New item added to your inventory!</span></div></div>` : ''}
-                    ${games.constructor.boxes.map(box => {
-                        const total = games.boxPool(box).length;
-                        const remaining = games.boxPool(box, owned).length;
-                        const complete = !remaining || this.completedShopBoxes?.has(`${profile.user_id}:${box.id}`);
-                        return `<article class="multiplayer-shop-item box-card box-${box.id}${complete ? ' collection-complete' : ''}" data-search="${this.escapeHTML(`${box.name} ${box.id}`.toLocaleLowerCase())}">
-                        <span class="shop-preview mystery-capsule" aria-hidden="true">
+            const all = games.boxPool(box);
+            const remaining = games.boxPool(box, owned).length;
+            const complete = !remaining || this.completedShopBoxes?.has(`${profile.user_id}:${box.id}`);
+            const order = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
+            const inside = order.filter(rarity => all.some(item => item.rarity === rarity)).map(rarity =>
+                `<li class="rarity-${rarity}"><b>${rarity}</b> ${all.filter(item => item.rarity === rarity).map(item => `<span class="${owned.includes(item.id) ? 'owned' : ''}">${owned.includes(item.id) ? '<i class="fas fa-check" aria-hidden="true"></i> ' : ''}${this.escapeHTML(item.name)}</span>`).join('')}</li>`).join('');
+            const capsule = `<span class="shop-preview mystery-capsule" aria-hidden="true">
                             <svg viewBox="0 0 160 140" focusable="false">
                                 <ellipse cx="80" cy="126" rx="56" ry="8" fill="currentColor" opacity=".12"/>
                                 <path d="M24 54 80 31 136 54 136 106 80 130 24 106Z" fill="currentColor"/>
@@ -3152,58 +3145,217 @@
                                 <path d="m32 23 3-9 3 9 9 3-9 3-3 9-3-9-9-3Zm91 1 2-6 2 6 6 2-6 2-2 6-2-6-6-2Z" fill="currentColor" opacity=".7"/>
                             </svg>
                             <i class="fas ${box.icon}"></i>
-                        </span>
-                        <div class="box-details"><strong>${this.escapeHTML(box.name)}</strong><small>${this.escapeHTML(box.odds)}</small><span class="box-progress">${complete ? 'All available rewards collected' : `${total - remaining} / ${total} rewards collected · ${remaining} left`}</span></div>
-                        ${complete ? '' : `<details class="box-odds"><summary>Remaining drop chances</summary><span class="box-chances" aria-label="Rarity drop chances">${Object.entries(games.boxChances(box, owned)).map(([rarity, chance]) => `<span class="rarity-${rarity}">${rarity} <b>${chance}%</b></span>`).join('')}</span></details>`}
-                        ${complete ? '<span class="box-complete"><i class="fas fa-check" aria-hidden="true"></i> Collection complete</span>' : `<button type="button" class="secondary-btn" data-action="multiplayer-mystery" data-id="${box.id}" ${profile.coins < box.price ? 'disabled' : ''}>Open · ${box.price} <i class="fas fa-coins"></i></button>`}</article>`;
-                    }).join('')}
-                    <p class="settings-hint">Each opening gives a new eligible item, never a duplicate. Chances adjust as you collect rewards. Completed boxes cannot be opened.</p>`;
-                                } else if (tab === 'inventory') {
-                                    const typeNames = { skin: 'Characters', hat: 'Hats', accessory: 'Accessories', effect: 'Auras', palette: 'Colors' };
-                                    const order = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
-                                    const mine = games.catalog.filter(item => item.type !== 'pet' && owned.includes(item.id));
-                                    const total = catalog.length;
-                                    const sections = Object.keys(typeNames).map(type => {
-                                        const list = mine.filter(item => item.type === type || (type === 'hat' && item.type === 'hat'))
-                                            .sort((a, b) => order.indexOf(b.rarity) - order.indexOf(a.rarity));
-                                        if (!list.length) return '';
-                                        return `<h4 class="shop-category-title">${typeNames[type]} · ${list.length}</h4>${list.map(itemCard).join('')}`;
-                                    }).join('');
-                                    body = `<h4 class="shop-category-title">${mine.filter(item => !item.legacy).length} / ${total} items collected</h4>${sections || '<p class="settings-hint">Nothing here yet — open a mystery box or buy something!</p>'}`;
-                                } else {
-                                    const order = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
-                                    const rank = item => { const i = order.indexOf(item.rarity); return i < 0 ? order.length : i; };
-                                    const items = catalog.filter(item => item.type === tab)
-                                        .sort((a, b) => rank(a) - rank(b) || (a.price ?? Infinity) - (b.price ?? Infinity) || String(a.name).localeCompare(String(b.name)));
-                                    const count = items.filter(item => owned.includes(item.id)).length;
-                                    const remove = slotKey[tab] ? `<button type="button" class="ghost-btn shop-unequip" data-action="multiplayer-unequip" data-slot="${tab}">Remove</button>` : '';
-                                    const groups = [...new Set(items.map(item => item.rarity))].sort((a, b) => rank({ rarity: a }) - rank({ rarity: b }));
-                                    body = `<h4 class="shop-category-title">${count} / ${items.length} collected ${remove}</h4>${groups.map(rarity => {
-                                        const list = items.filter(item => item.rarity === rarity);
-                                        return `<h4 class="shop-category-title shop-rarity-title rarity-${this.escapeHTML(rarity)}">${this.escapeHTML(rarity.charAt(0).toUpperCase() + rarity.slice(1))} · ${list.filter(item => owned.includes(item.id)).length}/${list.length}</h4>${list.map(itemCard).join('')}`;
-                                    }).join('')}`;
-                                }
-            document.getElementById('multiplayer-shop-items').innerHTML = `
-                <div class="shop-tabs" role="tablist">${tabs.map(([id, label]) => `<button type="button" class="shop-tab${tab === id ? ' selected' : ''}" role="tab" aria-selected="${tab === id}" data-shop-tab="${id}">${label}</button>`).join('')}</div>
-                <label class="shop-search"><i class="fas fa-magnifying-glass" aria-hidden="true"></i><span class="sr-only">Filter shop items</span><input id="multiplayer-shop-search" type="search" value="${this.escapeHTML(this.shopSearch || '')}" placeholder="Filter by name or rarity"></label>
-                <div class="shop-grid${tab === 'boxes' ? ' shop-grid-boxes' : ''}">${body}<p class="shop-search-empty" role="status" hidden>No matching shop items. Try another name or rarity.</p></div>`;
-            const search = document.getElementById('multiplayer-shop-search');
-            if (search && this.shopSearch) {
-                const query = this.shopSearch.toLocaleLowerCase();
-                for (const card of search.closest('#multiplayer-shop-items').querySelectorAll('.multiplayer-shop-item')) card.hidden = !card.dataset.search?.includes(query);
-                const grid = search.closest('#multiplayer-shop-items').querySelector('.shop-grid');
-                for (const heading of grid.querySelectorAll('.shop-category-title')) {
-                    let sibling = heading.nextElementSibling, hasItems = false;
-                    while (sibling && !sibling.matches('.shop-category-title')) {
-                        if (sibling.matches('.multiplayer-shop-item') && !sibling.hidden) hasItems = true;
-                        sibling = sibling.nextElementSibling;
-                    }
-                    heading.hidden = !hasItems;
+                        </span>`;
+            const style = box.seasonal ? ` style="--box-accent: ${box.season.colors[0]}; --box-accent-2: ${box.season.colors[1]}"` : '';
+            const now = new Date();
+            const daysLeft = Math.max(1, Math.ceil((Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1) - now) / 86400000));
+            const chances = complete ? '' : `<span class="box-chances" aria-label="Rarity drop chances">${Object.entries(games.boxChances(box, owned)).map(([rarity, chance]) => `<span class="rarity-${rarity}">${rarity} <b>${chance}%</b></span>`).join('')}</span>`;
+            return `<article class="multiplayer-shop-item box-card box-${box.id}${featured ? ' box-featured' : ''}${complete ? ' collection-complete' : ''}"${style} data-search="${this.escapeHTML(`${box.name} ${box.id} ${all.map(item => item.name).join(' ')}`.toLocaleLowerCase())}">
+                        ${capsule}
+                        <div class="box-details">${featured ? `<span class="season-badge"><i class="fas fa-hourglass-half" aria-hidden="true"></i> Limited · leaves in ${daysLeft} day${daysLeft === 1 ? '' : 's'}</span>` : ''}<strong>${this.escapeHTML(box.name)}</strong><small>${this.escapeHTML(box.odds)}</small><span class="box-progress">${complete ? 'All rewards collected' : `${all.length - remaining} / ${all.length} collected · ${remaining} left`}</span></div>
+                        ${featured ? this.shopSetPreview(profile, all) : ''}
+                        <details class="box-odds"><summary>What's inside</summary>${chances}<ul class="box-contents">${inside}</ul></details>
+                        ${complete ? '<span class="box-complete"><i class="fas fa-check" aria-hidden="true"></i> Collection complete</span>' : `<button type="button" class="${featured ? 'primary-btn' : 'secondary-btn'}" data-action="multiplayer-mystery" data-id="${box.id}" ${profile.coins < box.price ? 'disabled' : ''}>Open · ${box.price} <i class="fas fa-coins"></i></button>`}</article>`;
+        }
+
+        renderShopFrame(containerId, tabs, tab, tabAttr, body, query, label, gridClass = '') {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            container.innerHTML = `
+                <div class="shop-tabs" role="tablist">${tabs.map(([id, text]) => `<button type="button" class="shop-tab${tab === id ? ' selected' : ''}" role="tab" aria-selected="${tab === id}" ${tabAttr}="${id}">${text}</button>`).join('')}</div>
+                <label class="shop-search"><i class="fas fa-magnifying-glass" aria-hidden="true"></i><span class="sr-only">${label}</span><input class="shop-search-input" data-search-key="${containerId}" type="search" value="${this.escapeHTML(query || '')}" placeholder="Filter by name, rarity or set"></label>
+                <div class="shop-grid ${gridClass}">${body}<p class="shop-search-empty" role="status" hidden>Nothing matches. Try another name or rarity.</p></div>`;
+            this.filterShopGrid(container, query);
+        }
+
+        filterShopGrid(container, query = '') {
+            const grid = typeof container?.querySelector === 'function' ? container.querySelector('.shop-grid') : null;
+            if (!grid?.querySelectorAll) return;
+            const term = String(query || '').trim().toLocaleLowerCase();
+            const cards = [...grid.querySelectorAll('.multiplayer-shop-item, .season-set-card')];
+            for (const card of cards) card.hidden = Boolean(term) && !card.dataset.search?.includes(term);
+            for (const heading of grid.querySelectorAll('.shop-category-title')) {
+                let sibling = heading.nextElementSibling, hasItems = false;
+                while (sibling && !sibling.matches('.shop-category-title')) {
+                    if (!sibling.hidden && sibling.matches('.multiplayer-shop-item, .season-set-card')) hasItems = true;
+                    sibling = sibling.nextElementSibling;
                 }
-                const empty = grid.querySelector('.shop-search-empty');
-                if (empty) empty.hidden = !query || [...grid.querySelectorAll('.multiplayer-shop-item')].some(card => !card.hidden);
+                heading.hidden = Boolean(term) && !hasItems;
             }
+            const empty = grid.querySelector('.shop-search-empty');
+            if (empty) empty.hidden = !term || cards.some(card => !card.hidden);
+        }
+
+        renderMultiplayerShop(profile) {
+            const games = window.StudBudCommunityGames;
+            const Games = games.constructor;
+            const owned = profile.owned_items || [];
+            const tabs = [['boxes', 'Boxes'], ['sets', 'Seasonal sets'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['effect', 'Auras'], ['palette', 'Colors']];
+            const tab = tabs.some(([id]) => id === this.shopTab) ? this.shopTab : 'boxes';
+            const order = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
+            const rank = item => { const i = order.indexOf(item.rarity); return i < 0 ? order.length : i; };
+            let body;
+            if (tab === 'boxes') {
+                body = `<h4 class="shop-category-title"><i class="fas fa-calendar-day" aria-hidden="true"></i> This month only</h4>
+                    ${this.shopBoxCard(profile, Games.seasonalBox, true)}
+                    <h4 class="shop-category-title">Category boxes</h4>
+                    ${Games.boxes.map(box => this.shopBoxCard(profile, box)).join('')}
+                    <p class="settings-hint">Every opening gives something new, never a duplicate. Open "What's inside" to see each box's rewards.</p>`;
+            } else if (tab === 'sets') {
+                const current = Games.currentSeason();
+                const monthName = month => new Date(Date.UTC(2024, month - 1, 1)).toLocaleString(undefined, { month: 'long', timeZone: 'UTC' });
+                const seasons = [...Games.seasons].sort((a, b) => ((a.month - current.month + 12) % 12) - ((b.month - current.month + 12) % 12));
+                body = seasons.map(season => {
+                    const items = games.catalog.filter(item => item.season === season.month);
+                    const have = items.filter(item => owned.includes(item.id)).length;
+                    const live = season.month === current.month;
+                    return `<article class="season-set-card${live ? ' live' : ''}${have === items.length ? ' complete' : ''}" style="--box-accent: ${season.colors[0]}; --box-accent-2: ${season.colors[1]}" data-search="${this.escapeHTML(`${season.name} ${monthName(season.month)} ${items.map(item => item.name).join(' ')}`.toLocaleLowerCase())}">
+                        <header><i class="fas ${season.icon}" aria-hidden="true"></i><div><strong>${this.escapeHTML(season.name)} set</strong><small>${live ? 'Available now' : `Returns in ${monthName(season.month)}`} · ${have}/${items.length} collected</small></div>${live ? '<button type="button" class="secondary-btn" data-shop-tab="boxes">Open box</button>' : ''}</header>
+                        ${this.shopSetPreview(profile, items)}
+                    </article>`;
+                }).join('');
+            } else {
+                const items = games.catalog.filter(item => !item.legacy && !item.season && item.type === tab)
+                    .sort((a, b) => rank(a) - rank(b) || (a.price ?? Infinity) - (b.price ?? Infinity) || String(a.name).localeCompare(String(b.name)));
+                const count = items.filter(item => owned.includes(item.id)).length;
+                const groups = [...new Set(items.map(item => item.rarity))].sort((a, b) => rank({ rarity: a }) - rank({ rarity: b }));
+                body = `<h4 class="shop-category-title">${count} / ${items.length} owned</h4>${groups.map(rarity => {
+                    const list = items.filter(item => item.rarity === rarity);
+                    return `<h4 class="shop-category-title shop-rarity-title rarity-${this.escapeHTML(rarity)}">${this.escapeHTML(rarity.charAt(0).toUpperCase() + rarity.slice(1))} · ${list.filter(item => owned.includes(item.id)).length}/${list.length}</h4>${list.map(item => this.shopItemCard(profile, item)).join('')}`;
+                }).join('')}`;
+            }
+            this.renderShopFrame('multiplayer-shop-items', tabs, tab, 'data-shop-tab', body, this.shopSearch, 'Filter shop items', tab === 'boxes' ? 'shop-grid-boxes' : tab === 'sets' ? 'shop-grid-sets' : '');
+            this.renderInventory(profile);
             this.animateShopAuras();
+        }
+
+        renderInventory(profile) {
+            const games = window.StudBudCommunityGames;
+            const owned = profile.owned_items || [];
+            const tabs = [['all', 'All'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['effect', 'Auras'], ['palette', 'Colors']];
+            const tab = tabs.some(([id]) => id === this.inventoryTab) ? this.inventoryTab : 'all';
+            const typeNames = Object.fromEntries(tabs.slice(1));
+            const order = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
+            const mine = games.catalog.filter(item => item.type !== 'pet' && owned.includes(item.id));
+            const total = games.catalog.filter(item => !item.legacy && item.type !== 'pet').length;
+            const equippedBy = { skin: profile.equipped_skin, hat: profile.equipped_hat, accessory: profile.equipped_accessory, effect: profile.equipped_effect };
+            const sections = Object.keys(typeNames).filter(type => tab === 'all' || tab === type).map(type => {
+                const list = mine.filter(item => item.type === type).sort((a, b) => order.indexOf(b.rarity) - order.indexOf(a.rarity));
+                if (!list.length) return tab === 'all' ? '' : `<p class="settings-hint">No ${typeNames[type].toLocaleLowerCase()} yet. Find them in the shop.</p>`;
+                const remove = equippedBy[type] ? `<button type="button" class="ghost-btn shop-unequip" data-action="multiplayer-unequip" data-slot="${type}">Remove</button>` : '';
+                return `<h4 class="shop-category-title">${typeNames[type]} · ${list.length} ${remove}</h4>${list.map(item => this.shopItemCard(profile, item)).join('')}`;
+            }).join('');
+            const body = `<h4 class="shop-category-title">${mine.filter(item => !item.legacy).length} / ${total} items collected</h4>${sections || '<p class="settings-hint">Your locker is empty. Open a mystery box or buy something in the shop!</p>'}`;
+            this.renderShopFrame('multiplayer-inventory-items', tabs, tab, 'data-inventory-tab', body, this.inventorySearch, 'Filter your items');
+        }
+
+        // Full-screen unboxing: the box shakes while the server rolls, then a reel spins onto the reward.
+        openUnboxing(box) {
+            this.closeUnboxing();
+            const overlay = document.createElement('div');
+            overlay.className = 'unbox-overlay phase-shake';
+            overlay.setAttribute('role', 'dialog');
+            overlay.setAttribute('aria-modal', 'true');
+            overlay.setAttribute('aria-label', `Opening ${box.name}`);
+            if (box.seasonal) {
+                overlay.style.setProperty('--box-accent', box.season.colors[0]);
+                overlay.style.setProperty('--box-accent-2', box.season.colors[1]);
+            }
+            overlay.innerHTML = `<div class="unbox-backdrop"></div>
+                <div class="unbox-stage">
+                    <p class="unbox-title">${this.escapeHTML(box.name)}</p>
+                    <div class="unbox-rays" aria-hidden="true"></div>
+                    <div class="unbox-box" aria-hidden="true"><span class="unbox-lid"></span><span class="unbox-body"><i class="fas ${box.icon}"></i></span></div>
+                    <div class="unbox-reel" aria-hidden="true"><div class="unbox-strip"></div><span class="unbox-marker"></span></div>
+                    <div class="unbox-result" aria-live="polite"></div>
+                    <div class="unbox-confetti" aria-hidden="true"></div>
+                </div>
+                <button type="button" class="ghost-btn unbox-skip" data-action="unbox-skip">Skip</button>`;
+            document.body.appendChild(overlay);
+            overlay.querySelector('.unbox-skip').focus({ preventScroll: true });
+            this.unboxState = { overlay, box, skipped: false, startedAt: performance.now() };
+            return overlay;
+        }
+
+        closeUnboxing() {
+            clearTimeout(this.unboxState?.timer);
+            this.unboxState?.resolve?.();
+            this.unboxState?.overlay?.remove();
+            this.unboxState = null;
+        }
+
+        async revealUnboxing(item, profile) {
+            const state = this.unboxState;
+            if (!state || !item) return this.closeUnboxing();
+            const { overlay, box } = state;
+            const games = window.StudBudCommunityGames;
+            const pool = games.boxPool(box).filter(entry => entry.id !== item.id);
+            const chances = box.chances || {};
+            const pick = () => {
+                const total = pool.reduce((sum, entry) => sum + (chances[entry.rarity] || 1), 0);
+                let roll = Math.random() * total;
+                for (const entry of pool) { roll -= chances[entry.rarity] || 1; if (roll <= 0) return entry; }
+                return pool[0] || item;
+            };
+            const winnerIndex = 30;
+            const reel = Array.from({ length: 36 }, (_, index) => index === winnerIndex ? item : pick());
+            const strip = overlay.querySelector('.unbox-strip');
+            strip.innerHTML = reel.map(entry => `<span class="unbox-tile rarity-${entry.rarity}">${this.shopItemPreview(profile, entry)}<small>${this.escapeHTML(entry.name)}</small></span>`).join('');
+            const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+            const wait = ms => new Promise(resolve => {
+                state.resolve = resolve;
+                state.timer = setTimeout(resolve, state.skipped || reduce ? 0 : ms);
+            });
+            await wait(Math.max(0, 1000 - (performance.now() - state.startedAt)));
+            if (this.unboxState !== state) return;
+            overlay.classList.replace('phase-shake', 'phase-spin');
+            window.StudBudSfx?.play('open', 'ui');
+            const tileWidth = strip.firstElementChild?.getBoundingClientRect().width || 120;
+            const gap = parseFloat(getComputedStyle(strip).columnGap) || 10;
+            const reelWidth = overlay.querySelector('.unbox-reel').clientWidth;
+            const offset = winnerIndex * (tileWidth + gap) + tileWidth / 2 - reelWidth / 2 + (Math.random() - .5) * tileWidth * .6;
+            const spinMs = state.skipped || reduce ? 0 : 4200;
+            strip.style.transition = `transform ${spinMs}ms cubic-bezier(.08, .72, .16, 1)`;
+            requestAnimationFrame(() => { strip.style.transform = `translateX(${-offset}px)`; });
+            if (spinMs) {
+                let last = -1;
+                const started = performance.now();
+                const tick = () => {
+                    if (this.unboxState !== state || state.skipped) return;
+                    const t = Math.min(1, (performance.now() - started) / spinMs);
+                    const index = Math.floor((1 - Math.pow(1 - t, 3)) * winnerIndex);
+                    if (index !== last) window.StudBudSfx?.play('coin', 'ui', 0);
+                    last = index;
+                    if (t < 1) requestAnimationFrame(tick);
+                };
+                requestAnimationFrame(tick);
+            }
+            await wait(spinMs + 250);
+            if (this.unboxState !== state) return;
+            strip.style.transition = 'none';
+            strip.style.transform = `translateX(${-(winnerIndex * (tileWidth + gap) + tileWidth / 2 - reelWidth / 2)}px)`;
+            overlay.classList.remove('phase-spin');
+            overlay.classList.add('phase-reveal', `rarity-${item.rarity}`);
+            const big = ['legendary', 'mythic'].includes(item.rarity);
+            const pieces = big ? 64 : ['epic', 'rare'].includes(item.rarity) ? 40 : 22;
+            overlay.querySelector('.unbox-confetti').innerHTML = reduce ? '' : Array.from({ length: pieces }, (_, index) =>
+                `<i style="--x:${(Math.random() * 2 - 1).toFixed(2)};--y:${(-Math.random() - .35).toFixed(2)};--r:${Math.round(Math.random() * 720)}deg;--d:${(index % 8) * 35}ms;--h:${Math.round(Math.random() * 360)}"></i>`).join('');
+            const again = games.boxPool(box, profile.owned_items || []).length && profile.coins >= box.price;
+            overlay.querySelector('.unbox-result').innerHTML = `<div class="unbox-card rarity-${item.rarity}">
+                    <span class="unbox-card-preview">${this.shopItemPreview(profile, item, true)}</span>
+                    <small class="rarity-label">${this.escapeHTML(item.rarity)}${item.set ? ` · ${this.escapeHTML(item.set)} set` : ''}</small>
+                    <strong>${this.escapeHTML(item.name)}</strong>
+                    ${item.description ? `<span>${this.escapeHTML(item.description)}</span>` : ''}
+                    <div class="unbox-actions">
+                        <button type="button" class="primary-btn" data-action="multiplayer-equip" data-id="${this.escapeHTML(item.id)}">Equip now</button>
+                        ${again ? `<button type="button" class="secondary-btn" data-action="multiplayer-mystery" data-id="${this.escapeHTML(box.id)}">Open another · ${box.price} <i class="fas fa-coins"></i></button>` : ''}
+                        <button type="button" class="ghost-btn" data-action="unbox-close">Done</button>
+                    </div>
+                </div>`;
+            overlay.querySelector('.unbox-skip')?.remove();
+            overlay.querySelector('.unbox-actions .primary-btn')?.focus({ preventScroll: true });
+            this.animateShopAuras();
+            window.StudBudSfx?.play(big || item.rarity === 'epic' ? 'win' : 'success', 'ui', 0);
         }
 
         animateShopAuras() {
@@ -3238,6 +3390,7 @@
                 return;
             }
             shopStatus.textContent = 'Loading your multiplayer profile…';
+            document.getElementById('guest-appearance')?.classList.add('hidden');
             try {
                 const profile = await window.StudBudCommunityGames.getPlayerProfile();
                 this.multiplayerProfile = profile;
@@ -3272,8 +3425,13 @@
 
         renderGuestAppearance() {
             const games = window.StudBudCommunityGames;
-            const grid = document.getElementById('multiplayer-shop-items');
+            const grid = document.getElementById('guest-appearance');
             if (!games || !grid) return;
+            grid.classList.remove('hidden');
+            const browse = { owned_items: [], coins: 0, user_id: 'guest' };
+            this.renderMultiplayerShop(browse);
+            const locker = document.getElementById('multiplayer-inventory-items');
+            if (locker) locker.innerHTML = '<p class="settings-hint">Your locker fills up as you collect cosmetics. <button type="button" class="primary-btn" data-action="guest-create-account">Create free account</button></p>';
             const current = games.guestColor() || games.guestColors[0];
             const cosmetics = { color: current };
             [document.getElementById('multiplayer-header-avatar'), document.getElementById('multiplayer-large-avatar')].forEach(element => {
@@ -3407,7 +3565,7 @@
             window.NexusApp.canAccessStaff = this.canAccessStaff;
             document.getElementById('admin-nav-item')?.classList.toggle('hidden', !this.canAccessStaff);
             document.querySelectorAll('#admin-view [data-admin-tab]').forEach(button => {
-                const allowed = this.isAdmin || (['decks', 'users'].includes(button.dataset.adminTab) && this.canModerateFlashcards)
+                const allowed = this.isAdmin || (['decks', 'reports', 'users'].includes(button.dataset.adminTab) && this.canModerateFlashcards)
                     || (button.dataset.adminTab === 'games' && this.canTestGames);
                 button.classList.toggle('hidden', !allowed);
             });
@@ -3571,9 +3729,38 @@
             let tab = this.adminTab || (this.canModerateFlashcards ? 'decks' : 'games');
             if (tab === 'decks' && !this.canModerateFlashcards) tab = 'games';
             if (tab === 'games' && !this.canTestGames) tab = 'decks';
-            if ((tab === 'users' && !this.canModerateFlashcards) || (tab === 'notices' && !this.isAdmin)) tab = this.canModerateFlashcards ? 'decks' : 'games';
+            if ((['users', 'reports'].includes(tab) && !this.canModerateFlashcards) || (tab === 'notices' && !this.isAdmin)) tab = this.canModerateFlashcards ? 'decks' : 'games';
             this.adminTab = tab;
-            document.getElementById('admin-search-form')?.classList.toggle('hidden', tab === 'games' || tab === 'notices');
+            document.getElementById('admin-search-form')?.classList.toggle('hidden', ['games', 'notices', 'reports'].includes(tab));
+            if (tab === 'reports') {
+                status.textContent = 'Loading reports?';
+                try {
+                    const rows = await window.StudBudCommunityGames.adminCall('studbud_admin_list_reports', { p_status: 'open' });
+                    const esc = value => this.escapeHTML(String(value ?? ''));
+                    const reasonLabel = { inappropriate: 'Inappropriate', wrong: 'Wrong answers', spam: 'Spam', copyright: 'Copyright', harassment: 'Harassment', other: 'Other' };
+                    status.textContent = rows.length ? `${rows.length} reported item${rows.length === 1 ? '' : 's'} waiting for review.` : 'No open reports. Nice and quiet.';
+                    list.innerHTML = rows.map(row => {
+                        const isDeck = row.target_type === 'deck';
+                        const gone = !row.target_name;
+                        return `<article class="admin-row report-row">
+                        <div><strong>${isDeck ? '<i class="fas fa-layer-group" aria-hidden="true"></i>' : '<i class="fas fa-user" aria-hidden="true"></i>'} ${esc(row.target_name || (isDeck ? 'Deleted set' : 'Deleted account'))}</strong>
+                            <span class="admin-badge">${Number(row.report_count)} report${Number(row.report_count) === 1 ? '' : 's'}</span>
+                            ${(row.reasons || []).map(reason => `<span class="deck-chip">${esc(reasonLabel[reason] || reason)}</span>`).join(' ')}
+                            <ul class="report-details">${(row.reports || []).slice(0, 5).map(r => `<li><small>${esc(r.reporter)} ? ${esc(new Date(r.created_at).toLocaleString())}</small>${r.details ? `<p>${esc(r.details)}</p>` : ''}</li>`).join('')}</ul></div>
+                        <div class="admin-actions">
+                            ${isDeck && !gone ? `<button type="button" class="secondary-btn" data-admin-action="inspect-deck" data-id="${esc(row.target_id)}">Inspect cards</button>` : ''}
+                            ${row.owner_id && !gone ? `<button type="button" class="secondary-btn" data-admin-action="profile" data-id="${esc(row.owner_id)}">${isDeck ? 'Author profile' : 'View profile'}</button>` : ''}
+                            ${isDeck && !gone ? `<button type="button" class="danger-btn" data-admin-action="delete-deck" data-id="${esc(row.target_id)}" data-name="${esc(row.target_name)}" data-report-type="deck">Delete set</button>` : ''}
+                            <button type="button" class="primary-btn" data-admin-action="resolve-report" data-report-type="${esc(row.target_type)}" data-id="${esc(row.target_id)}">Mark handled</button>
+                            <button type="button" class="secondary-btn" data-admin-action="dismiss-report" data-report-type="${esc(row.target_type)}" data-id="${esc(row.target_id)}">Dismiss</button>
+                        </div>${isDeck ? `<div id="admin-deck-${esc(row.target_id)}" class="admin-deck-details hidden"></div>` : ''}</article>`;
+                    }).join('');
+                } catch (error) {
+                    status.textContent = this.friendlyErrorMessage(error, 'Could not load reports.');
+                    list.innerHTML = '';
+                }
+                return;
+            }
             if (tab === 'games') {
                 status.textContent = 'Test games have infinite energy and no rewards.';
                 list.innerHTML = `<article class="admin-row">
@@ -3659,7 +3846,7 @@
             const status = document.getElementById('admin-status');
             try {
                 if (['coins', 'save-user-tags', 'publish-notice', 'hide-notice', 'delete-notice'].includes(action) && !this.isAdmin) throw new Error('This action is restricted to administrators.');
-                if (['inspect-deck', 'delete-deck', 'remove-decks', 'ban', 'unban', 'force-rename', 'cancel-rename'].includes(action) && !this.canModerateFlashcards) throw new Error('This action requires a moderator or administrator.');
+                if (['inspect-deck', 'delete-deck', 'remove-decks', 'ban', 'unban', 'force-rename', 'cancel-rename', 'resolve-report', 'dismiss-report'].includes(action) && !this.canModerateFlashcards) throw new Error('This action requires a moderator or administrator.');
                 if (action === 'test-game') {
                     if (!this.canTestGames) throw new Error('Game testing is available only to testers and administrators.');
                     const mode = document.getElementById('admin-game-test-mode')?.value;
@@ -3701,9 +3888,13 @@
                     await games.adminCall('studbud_admin_set_site_notice', { p_message: message, p_active: action === 'publish-notice' });
                     await this.loadSiteNotice(true);
                     await this.loadAnnouncementHistory();
+                } else if (action === 'resolve-report' || action === 'dismiss-report') {
+                    await games.adminCall('studbud_admin_resolve_reports', { p_target_type: data.reportType, p_target_id: data.id, p_status: action === 'resolve-report' ? 'resolved' : 'dismissed' });
+                    status.textContent = action === 'resolve-report' ? 'Report marked as handled.' : 'Report dismissed.';
                 } else if (action === 'delete-deck') {
                     if (!confirm(`Delete the public deck "${data.name}"?`)) return;
                     await games.adminCall('studbud_admin_delete_deck', { p_deck_id: data.id });
+                    if (data.reportType === 'deck') await games.adminCall('studbud_admin_resolve_reports', { p_target_type: 'deck', p_target_id: data.id, p_status: 'resolved' }).catch(() => {});
                 } else if (action === 'remove-decks') {
                     if (!confirm(`Remove all public decks from ${data.name}?`)) return;
                     await games.adminCall('studbud_admin_remove_user_decks', { p_user_id: data.id });
@@ -3749,6 +3940,9 @@
                 return;
             }
             this.shopPurchaseBusy = true;
+            const Games = window.StudBudCommunityGames.constructor;
+            const box = action === 'multiplayer-mystery' ? [Games.seasonalBox, ...Games.boxes].find(entry => entry.id === (itemId || 'basic')) : null;
+            if (box) { this.openUnboxing(box); this.unboxState.startedAt = performance.now(); }
             try {
                 const previousProfile = this.multiplayerProfile || {};
                 const profile = action === 'multiplayer-buy'
@@ -3782,24 +3976,28 @@
                     this.completedShopBoxes.add(`${profile.user_id}:${profile.completed_box || itemId || 'basic'}`);
                     this.multiplayerProfile = profile;
                     this.lastDrop = null;
+                    this.closeUnboxing();
                     this.renderMultiplayerShop(profile);
                     document.getElementById('multiplayer-shop-status').textContent = 'Collection complete — you own every available reward from this box. No coins were spent.';
                     return;
                 }
-                window.StudBudSfx?.play(action === 'multiplayer-mystery' ? 'open' : action === 'multiplayer-buy' ? 'buy' : 'success', 'ui');
+                if (action !== 'multiplayer-mystery') window.StudBudSfx?.play(action === 'multiplayer-buy' ? 'buy' : 'success', 'ui');
                 this.multiplayerProfile = profile;
                 if (action === 'multiplayer-mystery') this.lastDrop = { unlocked_item: unlockedItem, rarity: profile.rarity, duplicate: profile.duplicate, refund: profile.refund };
                 await this.renderMultiplayerProfile(true);
                 if (action === 'multiplayer-mystery') {
                     const item = window.StudBudCommunityGames.catalog.find(entry => entry.id === unlockedItem);
                     document.getElementById('multiplayer-shop-status').textContent = `New ${item?.rarity || profile.rarity} drop: ${item?.name || 'cosmetic'}!`;
-                    window.StudBudSfx?.play(['epic', 'legendary', 'mythic'].includes(item?.rarity || profile.rarity) ? 'win' : 'success', 'ui', 0);
+                    await this.revealUnboxing(item, profile);
                 }
                 if (action === 'multiplayer-equip' && itemId.startsWith('palette_')) {
                     const colorScheme = itemId.slice('palette_'.length);
                     AppState.set('settings', { ...AppState.get('settings'), colorScheme });
                     this.applyAppearance();
                 }
+            } catch (error) {
+                if (box) this.closeUnboxing();
+                throw error;
             } finally {
                 this.shopPurchaseBusy = false;
             }
@@ -4353,7 +4551,7 @@
                 const W = game.W || game.WIDTH || 1600, H = game.H || 800;
                 bot.x = W * (0.16 + i * 0.32); bot.y = H * (0.28 + (i % 2) * 0.42);
                 if (mode === 'miner') {
-                    const sector = [[2, 24], [24, 47], [47, 68]][i];
+                    const sector = this.minerSectors(game)[i];
                     bot.w = 26; bot.h = 40; bot.x = ((sector[0] + sector[1]) / 2) * 48 - bot.w / 2;
                     bot.y = 4 * 48 - bot.h; bot.vx = 0; bot.vy = 0;
                     bot.ai.sector = sector; bot.ai.dig = null; bot.ai.fuel = 100;
@@ -4382,7 +4580,7 @@
                     b.x = b.home[0] + (slot - (mates.length - 1) / 2) * 46; b.y = b.lane;
                 });
             } else if (mode === 'miner') {
-                bots.forEach((b, i) => { b.x = 35 * 48 + (i - 1) * 76; b.y = 3.6 * 48; b.fuel = 100; b.carry = 0; b.items = 0; b.ai.sector = [[2, 24], [24, 47], [47, 68]][i]; });
+                bots.forEach((b, i) => { b.x = (game.spawnCol ?? 35) * 48 + (i - 1) * 76; b.y = 3.6 * 48; b.fuel = 100; b.carry = 0; b.items = 0; b.ai.sector = this.minerSectors(game)[i]; });
             } else if (mode === 'market') {
                 const shops = game.shops || [], houses = game.houses || [];
                 bots.forEach((b, i) => {
@@ -5023,8 +5221,8 @@
                     press('KeyW');
                 } else {
                     let target = null, best = Infinity;
-                    const x0 = Math.max(1, Math.floor(me.x / 48) - 10), x1 = Math.min(68, x0 + 20);
-                    const y0 = Math.max(4, Math.floor(me.y / 48) - 2), y1 = Math.min(44, y0 + 12);
+                    const x0 = Math.max(1, Math.floor(me.x / 48) - 10), x1 = Math.min((game.cols || 70) - 2, x0 + 20);
+                    const y0 = Math.max(4, Math.floor(me.y / 48) - 2), y1 = Math.min((game.rows || 46) - 2, y0 + 12);
                     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
                         const type = game.tile(x, y);
                         if (![3, 4, 5, 7, 8, 9].includes(type)) continue;
@@ -5153,6 +5351,11 @@
             bot.tx = bot.x; bot.ty = bot.y; bot.ex = {}; bot.seen = now;
         }
 
+        minerSectors(game) {
+            const cols = game?.cols || 70, third = Math.floor((cols - 4) / 3);
+            return [[2, 2 + third], [2 + third, 2 + third * 2], [2 + third * 2, cols - 2]];
+        }
+
         stepAmbientBot(demo, bot, index, dt) {
             const { mode, game, clock } = demo, now = performance.now();
             const U = window.StudBudArcade.util;
@@ -5233,7 +5436,8 @@
                     bot.ex = { c: bot.carry, n: bot.items }; bot.seen = now;
                     return;
                 }
-                const sector = ai.sector || [[2, 24], [24, 47], [47, 68]][index];
+                const sector = ai.sector || this.minerSectors(game)[index % 3];
+                const lastRow = (game.rows || 46) - 2, lastCol = (game.cols || 70) - 2;
                 const depth = game.depthAt(bot.y + bot.h);
                 if (bot.carry && !ai.tripStarted) ai.tripStarted = clock;
                 const returning = bot.carry >= 40 || bot.items >= game.cap || (bot.carry > 0 && clock - ai.tripStarted > 22) || bot.fuel < Math.min(78, 28 + depth * 1.6);
@@ -5244,12 +5448,12 @@
                     const targetTile = ai.ore, targetType = targetTile && game.tile(targetTile.x, targetTile.y);
                     if (!targetTile || !crystalValues[targetType] || clock > (ai.oreUntil || 0)) {
                         let best = -Infinity, pick = null;
-                        for (let y = 6; y < 44; y++) for (let x = sector[0]; x < sector[1]; x++) {
+                        for (let y = 6; y < lastRow; y++) for (let x = sector[0]; x < sector[1]; x++) {
                             const type = game.tile(x, y);
                             if (!crystalValues[type]) continue;
                             let lavaNear = false;
-                            for (let ly = Math.max(4, y - 2); ly <= Math.min(44, y + 2) && !lavaNear; ly++) {
-                                for (let lx = Math.max(1, x - 2); lx <= Math.min(68, x + 2); lx++) {
+                            for (let ly = Math.max(4, y - 2); ly <= Math.min(lastRow, y + 2) && !lavaNear; ly++) {
+                                for (let lx = Math.max(1, x - 2); lx <= Math.min(lastCol, x + 2); lx++) {
                                     if (game.tile(lx, ly) === 6) { lavaNear = true; break; }
                                 }
                             }
@@ -5805,7 +6009,7 @@
                         <div><strong>${this.escapeHTML(deck.title)}</strong>${deck.course ? ` <span class="deck-chip"><i class="fas fa-book"></i> ${this.escapeHTML(deck.course)}</span>` : ''}<p>${this.escapeHTML(deck.description || 'A student-shared study set.')}</p>
                             <small>${Number(deck.card_count)} cards · studied by ${Number(deck.study_count)} ${Number(deck.study_count) === 1 ? 'student' : 'students'}</small>
                             <small class="deck-author">by <button type="button" class="link-btn" data-action="view-profile" data-id="${this.escapeHTML(deck.owner_id)}">${this.escapeHTML(deck.author_name || 'Student')}</button> ${this.accountTagMarkup(deck.author_name)}</small></div>
-                        ${this.communityDeckActionMarkup(deck.id)}
+                        <div class="community-deck-actions">${this.communityDeckActionMarkup(deck.id)}${this.reportButtonMarkup('deck', deck.id, deck.title)}</div>
                     </article>`).join('') : '<p class="empty-state">No shared decks found. Try another search, or share one of your own after studying it.</p>';
                 status.textContent = `${decks.length} community deck${decks.length === 1 ? '' : 's'} found.`;
             } catch (error) {
@@ -6009,7 +6213,8 @@
             document.getElementById('hosted-room-meta').textContent = `${goalLabel} · ${players.length} / ${playerLimit} players`;
             document.getElementById('hosted-room-code').textContent = room.room_code;
             const rankedPlayers = players.slice().sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
-            const avatarFor = player => this.multiplayerAvatarMarkup(this.profileCosmetics(player));
+            const lobbyColors = window.StudBudArcade?.util?.defaultPlayerColors?.(players) || new Map();
+            const avatarFor = player => this.multiplayerAvatarMarkup({ ...this.profileCosmetics(player), ...(lobbyColors.get(player.id) ? { color: lobbyColors.get(player.id) } : {}) });
             document.getElementById('hosted-leaderboard-count').textContent = `${players.length} player${players.length === 1 ? '' : 's'}`;
             document.getElementById('hosted-leaderboard-title').textContent = room.status === 'waiting' ? 'Lobby' : 'Leaderboard';
             document.getElementById('hosted-room-players').innerHTML = rankedPlayers
@@ -6573,6 +6778,50 @@
             }
         }
 
+        reportButtonMarkup(type, id, name) {
+            if (!id) return '';
+            return `<button type="button" class="link-btn report-btn" data-action="report-content" data-report-type="${type}" data-id="${this.escapeHTML(id)}" data-name="${this.escapeHTML(name || '')}" title="Report this ${type === 'deck' ? 'set' : 'profile'} to moderators"><i class="fas fa-flag" aria-hidden="true"></i> Report</button>`;
+        }
+
+        openReportDialog(type, id, name) {
+            if (!window.StudBudCloud?.user) { window.alert('Sign in or continue as a guest to report content.'); return; }
+            document.getElementById('report-overlay')?.remove();
+            const overlay = document.createElement('div');
+            overlay.id = 'report-overlay';
+            overlay.className = 'user-profile-overlay report-overlay';
+            const reasons = [['inappropriate', 'Inappropriate or offensive'], ['wrong', 'Wrong or misleading answers'], ['spam', 'Spam or nonsense'], ['copyright', 'Copied from a test or copyrighted'], ['harassment', 'Bullying or harassment'], ['other', 'Something else']];
+            const label = type === 'deck' ? 'flashcard set' : 'profile';
+            overlay.innerHTML = `<form class="user-profile-modal glass-card report-modal" role="dialog" aria-modal="true" aria-labelledby="report-title">
+                <h3 id="report-title"><i class="fas fa-flag" aria-hidden="true"></i> Report ${this.escapeHTML(label)}</h3>
+                <p class="settings-hint">?${this.escapeHTML(name || 'Untitled')}? will be reviewed by a moderator. Your report is private.</p>
+                <fieldset class="report-reasons"><legend>What's wrong?</legend>${reasons.map(([value, text], index) => `<label><input type="radio" name="reason" value="${value}"${index === 0 ? ' checked' : ''}> ${text}</label>`).join('')}</fieldset>
+                <label>Details (optional)<textarea name="details" rows="3" maxlength="500" placeholder="Which card or what should a moderator look at?"></textarea></label>
+                <p class="report-status" role="status"></p>
+                <div class="admin-actions"><button type="submit" class="danger-btn">Send report</button><button type="button" class="secondary-btn" data-report-cancel>Cancel</button></div>
+            </form>`;
+            const form = overlay.firstElementChild;
+            const close = () => overlay.remove();
+            overlay.addEventListener('click', event => { if (event.target === overlay || event.target.closest('[data-report-cancel]')) close(); });
+            overlay.addEventListener('keydown', event => { if (event.key === 'Escape') close(); });
+            form.addEventListener('submit', async event => {
+                event.preventDefault();
+                const status = form.querySelector('.report-status');
+                const button = form.querySelector('[type="submit"]');
+                button.disabled = true;
+                status.textContent = 'Sending?';
+                try {
+                    await window.StudBudCommunityGames.reportContent(type, id, form.elements.reason.value, form.elements.details.value.trim());
+                    form.innerHTML = `<h3><i class="fas fa-circle-check" aria-hidden="true"></i> Thanks for reporting</h3><p>A moderator will review this ${this.escapeHTML(label)}. You don't need to do anything else.</p><div class="admin-actions"><button type="button" class="primary-btn" data-report-cancel>Done</button></div>`;
+                    form.querySelector('[data-report-cancel]')?.focus();
+                } catch (error) {
+                    status.textContent = this.friendlyErrorMessage(error, 'Could not send the report. Please try again.');
+                    button.disabled = false;
+                }
+            });
+            document.body.appendChild(overlay);
+            form.querySelector('input[name="reason"]')?.focus();
+        }
+
         async openUserProfile(userId) {
             let overlay = document.getElementById('user-profile-overlay');
             if (!overlay) {
@@ -6597,7 +6846,7 @@
                     <div class="friend-stats">${p.show_stats === false ? stat('Match wins', Number(p.wins) || 0) : `${stat('Studied today', this.formatStudyDuration(p.today_seconds))}${stat('This week', this.formatStudyDuration(p.week_seconds))}${stat('All time', this.formatStudyDuration(p.total_seconds))}${stat('Day streak', `${Number(p.streak_days) || 0} 🔥`)}${stat('Match wins', Number(p.wins) || 0)}`}</div>
                     <h4>Shared flashcard sets</h4>
                     <ul class="friend-list">${decks || '<li class="empty-state">No shared sets yet.</li>'}</ul>
-                    ${p.is_me ? `<div class="own-profile-actions"><button type="button" class="primary-btn" data-action="edit-public-profile"><i class="fas fa-pen" aria-hidden="true"></i> Edit public profile</button><button type="button" class="secondary-btn" data-action="open-my-shop"><i class="fas fa-store" aria-hidden="true"></i> Shop &amp; character</button></div>` : ''}`;
+                    ${p.is_me ? `<div class="own-profile-actions"><button type="button" class="primary-btn" data-action="edit-public-profile"><i class="fas fa-pen" aria-hidden="true"></i> Edit public profile</button><button type="button" class="secondary-btn" data-action="open-my-shop"><i class="fas fa-store" aria-hidden="true"></i> Shop &amp; character</button></div>` : `<div class="profile-report-row">${this.reportButtonMarkup('profile', userId, p.username)}</div>`}`;
             } catch (error) {
                 modal.innerHTML = `<p class="community-status error">${this.escapeHTML(error.message || 'Could not open that profile.')}</p><button type="button" class="secondary-btn" data-action="close-user-profile">Close</button>`;
             }
@@ -7597,10 +7846,11 @@
                 } else if (action === 'claim-daily-reward') {
                     await this.claimDailyReward();
                 } else if (action === 'guest-create-account') {
-                    await window.StudBudCloud?.connectOnline?.();
+                    await window.StudBudCloud?.connectOnline?.('signup');
                 } else if (action === 'guest-color') {
                     this.setGuestColor(target.dataset.color);
                 } else if (action === 'multiplayer-buy' || action === 'multiplayer-equip') {
+                    if (action === 'multiplayer-equip' && target.closest('.unbox-overlay')) this.closeUnboxing();
                     await this.updateMultiplayerShop(action, target.dataset.id);
                 } else if (action === 'multiplayer-unequip') {
                     await this.updateMultiplayerShop(action, target.dataset.slot);
@@ -7609,6 +7859,13 @@
                 } else if (target.matches('[data-shop-tab]')) {
                     this.shopTab = target.dataset.shopTab;
                     if (this.multiplayerProfile) this.renderMultiplayerShop(this.multiplayerProfile);
+                } else if (target.matches('[data-inventory-tab]')) {
+                    this.inventoryTab = target.dataset.inventoryTab;
+                    if (this.multiplayerProfile) this.renderInventory(this.multiplayerProfile);
+                } else if (action === 'unbox-skip') {
+                    if (this.unboxState) { this.unboxState.skipped = true; clearTimeout(this.unboxState.timer); this.unboxState.resolve?.(); }
+                } else if (action === 'unbox-close') {
+                    this.closeUnboxing();
                 } else if (action === 'hosted-kick-player') {
                     this.hostedGameRoom = await window.StudBudCommunityGames.kickPlayer(
                         this.hostedGameRoom.room_code, target.dataset.id
@@ -7688,15 +7945,23 @@
                     this.openAssignmentForm(null, '', '', '', 'quiz');
                 } else if (action === 'friend-accept' || action === 'friend-decline' || action === 'friend-remove') {
                     await this.friendAction(action, target.dataset.id, target.dataset.name);
+                } else if (action === 'assignment-status-filter') {
+                    const filter = document.getElementById('assignment-status-filter');
+                    if (filter) filter.value = filter.value === target.dataset.status ? 'all' : target.dataset.status;
+                    this.renderAssignments();
+                } else if (action === 'report-content') {
+                    this.openReportDialog(target.dataset.reportType, target.dataset.id, target.dataset.name);
                 } else if (action === 'view-profile') {
                     await this.openUserProfile(target.dataset.id);
                 } else if (action === 'view-my-profile') {
+                    Router.navigate('profile');
+                } else if (action === 'preview-public-profile') {
                     const myId = window.StudBudCloud?.user?.id;
-                    if (myId) await this.openUserProfile(myId);
-                    else Router.navigate('settings');
+                    if (myId && !window.StudBudCloud?.isGuest?.()) await this.openUserProfile(myId);
+                    else window.alert('Create a free account to get a public profile.');
                 } else if (action === 'edit-public-profile' || action === 'open-my-shop') {
                     document.getElementById('user-profile-overlay')?.classList.add('hidden');
-                    Router.navigate(action === 'open-my-shop' ? 'shop' : 'settings');
+                    Router.navigate(action === 'open-my-shop' ? 'shop' : 'profile');
                     if (action === 'edit-public-profile') {
                         setTimeout(() => {
                             const card = document.getElementById('public-profile-card');
@@ -8381,6 +8646,30 @@
                 `${catalogCourse.isWeighted ? 'Weighted' : 'Regular'} · ${weightedScale}`;
         }
 
+        assignmentState(item) {
+            if (this.isGradedItem(item)) return 'graded';
+            if (item.status === 'completed') return 'awaiting';
+            const due = String(item.dueDate || '').slice(0, 10);
+            return due && due < localDateKey(new Date()) ? 'overdue' : 'todo';
+        }
+
+        assignmentStatusControl(item) {
+            const id = this.escapeHTML(item.id);
+            const state = this.assignmentState(item);
+            const pills = {
+                graded: '<span class="status-pill is-graded"><i class="fas fa-circle-check" aria-hidden="true"></i> Graded</span>',
+                awaiting: '<span class="status-pill is-awaiting"><i class="fas fa-hourglass-half" aria-hidden="true"></i> Done ? awaiting grade</span>',
+                overdue: '<span class="status-pill is-overdue"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> Overdue</span>',
+                todo: '<span class="status-pill is-todo"><i class="fas fa-clock" aria-hidden="true"></i> To do</span>'
+            };
+            const name = this.escapeHTML(item.title || 'assignment');
+            const buttons = state === 'graded' ? ''
+                : state === 'awaiting'
+                    ? `<button type="button" class="primary-btn compact-btn" data-action="grade-assignment" data-id="${id}" aria-label="Add grade for ${name}"><i class="fas fa-pen" aria-hidden="true"></i> Add grade</button><button type="button" class="link-btn" data-action="toggle-assignment" data-id="${id}" aria-label="Mark ${name} as not done">Undo</button>`
+                    : `<button type="button" class="secondary-btn compact-btn" data-action="toggle-assignment" data-id="${id}" aria-label="Mark ${name} as done"><i class="fas fa-check" aria-hidden="true"></i> Mark done</button>`;
+            return `<div class="assignment-status-cell">${pills[state]}${buttons}</div>`;
+        }
+
         isGradedItem(item) {
             if (typeof item.graded === 'boolean') return item.graded;
             return item.status === 'completed' || Number(item.pointsEarned) > 0;
@@ -8393,16 +8682,23 @@
             document.getElementById('assignment-id').value = assignment ? assignment.id : '';
             document.getElementById('assignment-modal-title').textContent = assignment ? 'Edit Assignment' : 'Add Assignment';
             document.getElementById('assignment-name').value = assignment ? assignment.title : '';
-            document.getElementById('assignment-course').value = assignment ? assignment.courseCode : courseCode;
+            const onlyCourse = (AppState.get('courses') || []).length === 1 ? AppState.get('courses')[0].code : '';
+            document.getElementById('assignment-course').value = assignment ? assignment.courseCode : (courseCode || onlyCourse);
             document.getElementById('assignment-due-date').value = assignment ? (assignment.dueDate || '').slice(0, 10) : (dueDate || localDateKey(new Date()));
             document.getElementById('assignment-points').value = assignment ? Number(Number(assignment.pointsEarned ?? 0).toFixed(2)) : 0;
             document.getElementById('assignment-max-points').value = assignment ? Number(Number(assignment.maxPoints ?? 100).toFixed(2)) : 100;
             document.getElementById('assignment-kind').value = assignment ? assignment.kind || 'assignment' : (kind || 'assignment');
             document.getElementById('assignment-size').value = assignment ? assignment.estimatedMinutes || 30 : 30;
             document.getElementById('assignment-importance').value = assignment ? assignment.importance || 3 : 3;
-            form.querySelector(`input[name="assignment-state"][value="${graded ? 'graded' : 'todo'}"]`).checked = true;
-            // A class chosen from a category button is already known, so hide the picker
-            document.getElementById('assignment-course-group').classList.toggle('hidden', !assignment && Boolean(courseCode));
+            const formState = graded ? 'graded' : assignment?.status === 'completed' ? 'done' : 'todo';
+            form.querySelector(`input[name="assignment-state"][value="${formState}"]`).checked = true;
+            document.getElementById('assignment-course-group').classList.toggle('hidden', false);
+            if (!assignment && !(AppState.get('courses') || []).length && typeof document.getElementById('assignment-course')?.querySelectorAll === 'function') {
+                window.alert('Add a class first, then you can add assignments to it.');
+                Router.navigate('gpa');
+                this.openCourseForm();
+                return;
+            }
             document.getElementById('save-add-another-assignment-btn').classList.toggle('hidden', Boolean(assignment));
             this.updateAssignmentCategories(assignment ? assignment.categoryId : categoryId);
             this.syncAssignmentForm();
@@ -8507,7 +8803,8 @@
         saveAssignment() {
             const id = document.getElementById('assignment-id').value || `asgn_${Date.now()}`;
             const current = (AppState.get('assignments') || []).find(item => item.id === id);
-            const graded = document.querySelector('input[name="assignment-state"]:checked')?.value === 'graded';
+            const formState = document.querySelector('input[name="assignment-state"]:checked')?.value || 'todo';
+            const graded = formState === 'graded';
             const kind = document.getElementById('assignment-kind').value;
             const maxPoints = Math.round((Number(document.getElementById('assignment-max-points').value) || 100) * 100) / 100;
             const pointsEarned = graded ? Math.round(Math.max(0, Number(document.getElementById('assignment-points').value) || 0) * 100) / 100 : 0;
@@ -8524,7 +8821,7 @@
                 importance: Number(document.getElementById('assignment-importance').value) || 3,
                 priority: current ? current.priority : 'high',
                 graded,
-                status: graded ? 'completed' : (current?.status === 'completed' && !this.isGradedItem(current) ? 'completed' : 'pending'),
+                status: graded || formState === 'done' ? 'completed' : 'pending',
                 gradedAt: graded ? (current?.gradedAt || localDateKey(new Date())) : null
             };
             if (current) AppState.updateAssignment(id, assignment);
@@ -8658,6 +8955,16 @@
                 }
             }
             if (action === 'delete-assignment' && window.confirm('Delete this assignment and its saved grade?')) AppState.deleteAssignment(id);
+            if (action === 'grade-assignment') {
+                const assignment = assignments.find(item => item.id === id);
+                if (assignment) {
+                    this.openAssignmentForm(assignment);
+                    const graded = document.querySelector('input[name="assignment-state"][value="graded"]');
+                    if (graded) graded.checked = true;
+                    this.syncAssignmentForm();
+                    setTimeout(() => document.getElementById('assignment-points')?.select(), 80);
+                }
+            }
             if (action === 'toggle-assignment') {
                 const assignment = assignments.find(item => item.id === id);
                 if (assignment) {
@@ -9741,7 +10048,7 @@
         }
 
         pickDistractorCards(card, pool, count) {
-            return window.FlashcardTools.distractors(card, pool, count);
+            return window.FlashcardTools.distractors(card, pool, count, { vary: true });
         }
 
         cardAnswerMarkup(card) {

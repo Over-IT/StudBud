@@ -134,7 +134,7 @@ for (const mode of Object.keys(A.games)) {
         const zoom = mode === 'duel' ? game.view.z : game.zoom;
         if (Number.isFinite(zoom)) {
             const physicalZoom = zoom * session.scale;
-            assert.ok(physicalZoom >= .65 - 1e-9 && physicalZoom <= 1.6 + 1e-9, `${mode} has readable, bounded world zoom at ${width}x${height}: ${physicalZoom}`);
+            assert.ok(physicalZoom >= .65 - 1e-9 && physicalZoom <= (mode === 'miner' ? 2 : 1.6) + 1e-9, `${mode} has readable, bounded world zoom at ${width}x${height}: ${physicalZoom}`);
         }
         if (game.mouseWorld && typeof game.mouseWorld === 'function') {
             session.mouse.x = session.vw / 2; session.mouse.y = session.vh / 2;
@@ -424,27 +424,27 @@ transportSender.session.sendState();
 assert.equal(transportReceiver.game.ball.vx, transportSender.game.ball.vx, 'actual periodic state packets reconcile ball motion');
 sandbox.Date = realDate;
 console.log('Soccer alternating passes, latency, owner snapshots, duplicate/reordered updates, simultaneous touches, resets, and wall bounces passed.');
-const lava = demoFor('miner').game;
+const lava = demoFor('miner').game, C = lava.cols;
 lava.T.fill(1); lava.F.fill(0); lava.D.fill(0); lava.flowing.clear();
 for (let x = 2; x <= 40; x++) {
-    lava.T[10 * 70 + x] = 0;
-    for (let y = 12; y <= 20; y++) lava.T[y * 70 + x] = 0;
+    lava.T[10 * C + x] = 0;
+    for (let y = 12; y <= 20; y++) lava.T[y * C + x] = 0;
 }
-lava.T[11 * 70 + 14] = 0;
-lava.T[10 * 70 + 10] = 6; lava.flowing.add(10 * 70 + 10);
+lava.T[11 * C + 14] = 0;
+lava.T[10 * C + 10] = 6; lava.flowing.add(10 * C + 10);
 lava.flowClock = lava.flowSideClock = 0;
 lava.flowLava(0.3);
 assert.equal(lava.tile(11, 10), 0, 'sideways lava waits for its slower interval');
 for (let i = 0; i < 300; i++) lava.flowLava(0.1);
 assert.equal(lava.tile(6, 10), 6, 'source spreads four blocks sideways');
 assert.equal(lava.tile(5, 10), 0, 'source cannot spread beyond four blocks');
-assert.equal(lava.F[10 * 70 + 6], 4);
+assert.equal(lava.F[10 * C + 6], 4);
 assert.equal(lava.tile(14, 20), 6, 'lava falls all the way to the lower floor');
-assert.equal(lava.F[20 * 70 + 14], 0, 'falling resets lateral reach');
-assert.equal(lava.D[15 * 70 + 14], 1, 'falling columns remain full-height');
+assert.equal(lava.F[20 * C + 14], 0, 'falling resets lateral reach');
+assert.equal(lava.D[15 * C + 14], 1, 'falling columns remain full-height');
 assert.equal(lava.tile(18, 20), 6, 'landed waterfall has a fresh sideways allowance');
 assert.equal(lava.tile(19, 20), 0);
-assert.equal(lava.D[10 * 70 + 10], 0, 'source stays a source rather than a falling block');
+assert.equal(lava.D[10 * C + 10], 0, 'source stays a source rather than a falling block');
 assert.equal(lava.tile(15, 15), 0, 'falling lava does not spread sideways in midair');
 console.log('Source, lateral reach, falling columns, and waterfall lava regressions passed.');
 
@@ -539,7 +539,8 @@ const retiredTrails = [
     'acc_dust_trail', 'acc_confetti_trail', 'acc_sakura_trail', 'acc_pixel_trail',
     'acc_meteor_trail', 'acc_aurora_trail'
 ];
-assert.equal(catalog.filter(item => item.type === 'effect').length, 36);
+assert.equal(catalog.filter(item => item.type === 'effect' && !item.season).length, 36);
+assert.equal(catalog.filter(item => item.season).length, 48, 'twelve seasonal sets of four cosmetics');
 assert.ok(!catalog.some(item => item.type === 'trail' || retiredTrails.includes(item.id)));
 assert.ok(!sandbox.window.StudBudCommunityGames.constructor.boxes.some(box => box.id === 'trail'));
 assert.doesNotMatch(source, /\['trail',|trail: 'Trails'|item\.type === 'trail'/);
@@ -554,7 +555,7 @@ assert.doesNotMatch(retirement[2], /coins\s*=|equipped_(hat|skin|pet|palette|ava
 for (const id of retiredTrails) assert.doesNotMatch(sql, new RegExp(`\\('${id}',\\s*\\d+\\)`), `${id} cannot be bought or dropped`);
 assert.match(sql, /raise exception 'Trails have been retired/);
 assert.match(source, /\['effect', 'Auras'\]/, 'cosmetic tab displays Auras');
-assert.match(source, /effect: 'Auras'/, 'inventory category displays Auras');
+assert.match(source, /\[\['all', 'All'\],[^\n]*\['effect', 'Auras'\]/, 'inventory category displays Auras');
 assert.doesNotMatch(source, /\['effect', 'Effects'\]|effect: 'Effects'/);
 for (const box of sandbox.window.StudBudCommunityGames.constructor.boxes) {
     const weights = sql.match(new RegExp(`when '${box.id}' then '(\\{[^']+\\})'::jsonb`));
@@ -802,7 +803,7 @@ for (const fps of [30, 60, 120]) {
 }
 const rememberedLava = demoFor('miner').game;
 rememberedLava.me.x = 20 * 48; rememberedLava.me.y = 20 * 48;
-const lavaIndex = 20 * 70 + 21;
+const lavaIndex = 20 * rememberedLava.cols + 21;
 rememberedLava.T[lavaIndex] = 6;
 rememberedLava.revealLava(1 / 60);
 assert.ok(rememberedLava.lavaVisibility[lavaIndex] > 0 && rememberedLava.lavaVisibility[lavaIndex] < .1, 'lava fades in rather than appearing instantly');

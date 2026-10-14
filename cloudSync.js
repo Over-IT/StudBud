@@ -117,6 +117,7 @@
         async bootstrap() {
             this.bindAuthUI();
             this.showAuth();
+            if (this.authMode === 'signup') this.setAuthMode('signup');
             if (window.navigator?.onLine === false || localStorage.getItem('STUDBUD_LOCAL_MODE') === 'true') return this.startOffline();
             const config = window.STUDBUD_SUPABASE_CONFIG || {};
             if (!config.url || !config.anonKey) {
@@ -164,7 +165,8 @@
             document.getElementById('guest-game-form')?.addEventListener('submit', event => this.handleGuestJoin(event));
             document.getElementById('sign-out-btn')?.addEventListener('click', () => this.signOut());
             document.getElementById('offline-start-btn')?.addEventListener('click', () => this.startOffline().catch(error => this.reportAccountError(error)));
-            document.getElementById('offline-connect-btn')?.addEventListener('click', () => this.connectOnline().catch(error => this.reportAccountError(error)));
+            document.getElementById('offline-connect-btn')?.addEventListener('click', () => this.connectOnline(this.isGuest() ? 'signup' : 'login').catch(error => this.reportAccountError(error)));
+            document.getElementById('offline-signin-btn')?.addEventListener('click', () => this.connectOnline('login').catch(error => this.reportAccountError(error)));
             window.addEventListener('offline', () => {
                 this.offlineMode = true;
                 window.clearTimeout(this.syncTimer);
@@ -194,6 +196,7 @@
                 : 'Offline: changes stay on this device until you reconnect.';
             const connect = document.getElementById('offline-connect-btn');
             if (connect) connect.textContent = guest ? 'Create account' : 'Connect account';
+            document.getElementById('offline-signin-btn')?.classList.toggle('hidden', !guest);
             const signOut = document.getElementById('sign-out-btn');
             if (signOut) signOut.textContent = guest ? 'Sign in or create account' : this.offlineMode ? 'Connect account' : 'Sign out';
             document.body?.classList.toggle('guest-mode', guest);
@@ -301,7 +304,8 @@
             window.NexusApp?.refreshGuestFeatures?.();
         }
 
-        async connectOnline() {
+        async connectOnline(mode) {
+            if (mode === 'login' || mode === 'signup') this.authMode = mode;
             if (window.navigator?.onLine === false) {
                 this.setCloudStatus('Still offline. Your changes are saved on this device; connect to the internet to sync.', true);
                 return;
@@ -332,7 +336,10 @@
                 await window.NexusApp?.refreshPendingSharedDecks?.();
             } else {
                 this.showAuth();
-                this.setAuthStatus('Sign in to connect your saved device data. You can also continue offline.');
+                if (mode) this.setAuthMode(this.authMode);
+                this.setAuthStatus(this.authMode === 'signup'
+                    ? 'Create a free account. Your guest decks and progress on this device come with you.'
+                    : 'Sign in to connect your saved device data. You can also continue offline.');
             }
         }
 

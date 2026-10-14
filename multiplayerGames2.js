@@ -57,8 +57,8 @@
             return { x: this.camX + (s.mouse.x - s.vw / 2) / this.zoom, y: this.camY + (s.mouse.y - s.vh / 2) / this.zoom };
         }
 
-        begin(ctx, w, h, zoomBase = 820) {
-            this.zoom = A.util.sceneZoom(this.s, w, h, zoomBase);
+        begin(ctx, w, h, zoomBase = 820, zoomScale = 1) {
+            this.zoom = A.util.sceneZoom(this.s, w, h, zoomBase) * (this.s.preview ? 1 : zoomScale);
             const hw = w / this.zoom / 2, hh = h / this.zoom / 2;
             this.camX = this.W <= hw * 2 ? this.W / 2 : clamp(this.cam.x, hw, this.W - hw);
             this.camY = this.H <= hh * 2 ? this.H / 2 : clamp(this.cam.y, hh, this.H - hh);
@@ -109,7 +109,7 @@
     /* ------------------------------------------------------------------ */
     /* Crystal Cartel: dig for ore, avoid lava, bank your haul             */
     /* ------------------------------------------------------------------ */
-    const TS = 48, COLS = 70, ROWS = 46;
+    const TS = 48, COLS = 110, ROWS = 80, MID = Math.floor(COLS / 2);
     const DIG_TIME = [0, 0.28, 0.62, 0.4, 0.55, 0.7, 0, 0.5, 9999];
     const CRYSTALS = {
         3: { name: 'Quartz', value: 5, color: '#dbeafe' },
@@ -156,13 +156,15 @@
                     tiles[y * COLS + x] = type;
                 }
             }
-            for (let y = 4; y < 6; y++) for (let x = 34; x <= 36; x++) tiles[y * COLS + x] = 0;
-            tiles[6 * COLS + 35] = 0;
+            this.carveCaves(random);
+            for (let y = 4; y < 6; y++) for (let x = MID - 1; x <= MID + 1; x++) tiles[y * COLS + x] = 0;
+            tiles[6 * COLS + MID] = 0;
             for (let y = 0; y < ROWS; y++) { tiles[y * COLS] = 10; tiles[y * COLS + COLS - 1] = 10; }
             for (let x = 0; x < COLS; x++) tiles[(ROWS - 1) * COLS + x] = 10;
 
-            this.base = { x: 29 * TS, y: 2.2 * TS, w: 12 * TS, h: 1.75 * TS };
-            this.me = { x: 35 * TS - 13, y: 4 * TS - 40, w: 26, h: 40, vx: 0, vy: 0, face: 1, onGround: false };
+            this.cols = COLS; this.rows = ROWS; this.spawnCol = MID;
+            this.base = { x: (MID - 6) * TS, y: 2.2 * TS, w: 12 * TS, h: 1.75 * TS };
+            this.me = { x: MID * TS - 13, y: 4 * TS - 40, w: 26, h: 40, vx: 0, vy: 0, face: 1, onGround: false };
             this.cam.x = this.me.x + this.me.w / 2; this.cam.y = this.me.y + this.me.h / 2;
             this.carry = 0; this.items = 0; this.cap = 20; this.banked = 0; this.depthMax = 0;
             this.dig = { tx: -1, ty: -1, p: 0 }; this.digClock = 0;
@@ -176,6 +178,34 @@
         }
 
         tile(tx, ty) { return tx < 0 || ty < 0 || tx >= COLS || ty >= ROWS ? 10 : this.T[ty * COLS + tx]; }
+        carveCaves(random) {
+            // Winding worm caves: open pockets to explore, with crystals studding the walls.
+            const tiles = this.T, count = 15 + Math.floor(random() * 5);
+            const open = (x, y) => x > 1 && x < COLS - 2 && y > 9 && y < ROWS - 2 && Math.abs(x - MID) > 3;
+            for (let c = 0; c < count; c++) {
+                let x = 4 + random() * (COLS - 8), y = 12 + random() * (ROWS - 16), angle = random() * TAU;
+                const length = 22 + Math.floor(random() * 34);
+                for (let step = 0; step < length; step++) {
+                    const radius = 0.9 + random() * 1.25 + Math.sin(step * 0.45) * 0.35;
+                    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+                        const tx = Math.round(x + dx), ty = Math.round(y + dy);
+                        if (dx * dx + dy * dy * 1.6 <= radius * radius && open(tx, ty)) tiles[ty * COLS + tx] = 0;
+                    }
+                    angle += (random() - 0.5) * 0.9;
+                    x += Math.cos(angle) * 0.95; y += Math.sin(angle) * 0.55;
+                    if (x < 3 || x > COLS - 4) angle = Math.PI - angle;
+                    if (y < 11 || y > ROWS - 4) angle = -angle;
+                }
+            }
+            for (let y = 11; y < ROWS - 2; y++) for (let x = 2; x < COLS - 2; x++) {
+                const index = y * COLS + x, type = tiles[index];
+                if (type !== 1 && type !== 2) continue;
+                const air = (tiles[index - 1] === 0) + (tiles[index + 1] === 0) + (tiles[index - COLS] === 0) + (tiles[index + COLS] === 0);
+                if (!air || random() > 0.075) continue;
+                const depth = y - 4;
+                tiles[index] = depth < 15 ? 4 : depth < 30 ? (random() < 0.6 ? 5 : 7) : depth < 50 ? (random() < 0.55 ? 7 : 8) : (random() < 0.55 ? 8 : 9);
+            }
+        }
         revealLava(dt) {
             const cx = this.me.x + this.me.w / 2, cy = this.me.y + this.me.h / 2;
             const col = Math.floor(cx / TS), row = Math.floor(cy / TS), radius = TS * 5;
@@ -311,8 +341,12 @@
             A.util.moveBody(me, this.collisionSolids(), dt);
             me.x = clamp(me.x, TS + 1, this.W - TS - me.w - 1);
             me.y = clamp(me.y, 0, this.H - TS - me.h);
-            this.cam.x += (me.x + me.w / 2 - this.cam.x) * Math.min(1, dt * 5.5);
-            this.cam.y += (me.y + me.h / 2 - this.cam.y) * Math.min(1, dt * 5.5);
+            const touch = s.overlay?.classList?.contains('has-touch');
+            const look = !s.preview && s.mouse.active && (!touch || s.mouse.down) ? 0.34 : 0;
+            const lookX = clamp((s.mouse.x - s.vw / 2) / (this.zoom || 1) * look, -230, 230);
+            const lookY = clamp((s.mouse.y - s.vh / 2) / (this.zoom || 1) * look, -170, 170);
+            this.cam.x += (me.x + me.w / 2 + lookX - this.cam.x) * Math.min(1, dt * 5.5);
+            this.cam.y += (me.y + me.h / 2 + lookY - this.cam.y) * Math.min(1, dt * 5.5);
             this.moving = Math.abs(me.vx) > 20 || Math.abs(me.vy) > 25;
             this.particles.update(dt, 500);
 
@@ -412,7 +446,7 @@
         draw(ctx, w, h) {
             const s = this.s, me = this.me;
             ctx.fillStyle = '#080b12'; ctx.fillRect(0, 0, w, h);
-            this.begin(ctx, w, h, 820);
+            this.begin(ctx, w, h, 820, 1.4);
             const sky = ctx.createLinearGradient(0, 0, 0, 4 * TS);
             sky.addColorStop(0, '#38bdf8'); sky.addColorStop(0.72, '#bae6fd'); sky.addColorStop(1, '#e0f2fe');
             ctx.fillStyle = sky; ctx.fillRect(this.x0, 0, this.x1 - this.x0, 4 * TS);
@@ -580,10 +614,11 @@
             const depth = this.depthAt(me.y + me.h);
             const px = w / 2 + (me.x + me.w / 2 - this.camX) * this.zoom;
             const py = h / 2 + (me.y + me.h / 2 - this.camY) * this.zoom;
-            const darkness = clamp(depth / 66, 0.03, 0.72);
-            ctx.fillStyle = `rgba(2,5,14,${darkness})`; ctx.fillRect(0, 0, w, h);
-            const light = ctx.createRadialGradient(px, py, 36, px, py, Math.min(w, h) * 0.56);
-            light.addColorStop(0, 'rgba(255,239,190,.08)'); light.addColorStop(0.62, 'rgba(255,205,120,.035)'); light.addColorStop(1, 'rgba(0,0,0,.2)');
+            // Lantern fog: the deeper you go, the smaller the circle you can see.
+            const fog = s.preview ? clamp(depth / 66, 0.03, 0.5) : clamp(0.25 + depth / 14, 0.25, 0.95);
+            const inner = (s.preview ? 260 : clamp(230 - depth * 1.4, 150, 230)) * this.zoom;
+            const light = ctx.createRadialGradient(px, py, inner * 0.45, px, py, inner * 1.75);
+            light.addColorStop(0, 'rgba(255,224,160,.05)'); light.addColorStop(0.35, `rgba(2,5,14,${fog * 0.35})`); light.addColorStop(1, `rgba(2,5,14,${fog})`);
             ctx.fillStyle = light; ctx.fillRect(0, 0, w, h);
             if (s.preview) return;
             s.placeHud(ctx, 0, 0, 230, 34, 'top-center');
