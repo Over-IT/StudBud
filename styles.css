@@ -3488,3 +3488,35 @@ body.compact-ui .streak-flame b { bottom: 4px; font-size: .85rem; }
 .admin-tag-options { align-items: center; }
 .admin-tag-options label { display: inline-flex; align-items: center; gap: 5px; }
 .admin-tag-options input { width: auto; }
+
+/* Infinite Campus import */
+#ic-import-modal { max-width: 860px; }
+.ic-steps { display: grid; gap: 14px; margin: 12px 0; padding-left: 1.3rem; list-style: decimal; }
+.ic-steps li::marker { font-weight: 700; }
+.ic-steps li { display: grid; gap: 6px; }
+.ic-steps small, .ic-class-info small { color: var(--text-muted); }
+.ic-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ic-row input[type="url"] { flex: 1 1 260px; min-width: 0; }
+.ic-bookmarklet { cursor: grab; text-decoration: none; }
+.ic-file-label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.ic-import-status:empty { display: none; }
+.ic-import-status { padding: 10px 12px; border: 1px solid var(--border-glass); border-radius: var(--border-radius-sm); background: var(--bg-glass); }
+.ic-import-status[data-tone="ok"] { border-color: color-mix(in srgb, #2ecc71 55%, var(--border-glass)); }
+.ic-import-status[data-tone="warn"] { border-color: color-mix(in srgb, #f1c40f 60%, var(--border-glass)); }
+.ic-import-status[data-tone="error"] { border-color: color-mix(in srgb, #e74c3c 60%, var(--border-glass)); }
+.ic-import-preview { display: grid; gap: 12px; margin-top: 8px; }
+.ic-class-list { display: grid; gap: 8px; max-height: 46vh; overflow-y: auto; padding-right: 4px; }
+.ic-class-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(200px, 300px); align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border-glass); border-radius: var(--border-radius-sm); background: var(--bg-glass); }
+.ic-class-row.ic-skipped { opacity: .55; }
+.ic-class-info { display: grid; gap: 3px; min-width: 0; }
+.ic-class-row select { width: 100%; min-width: 0; }
+.ic-badge { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-size: .7rem; font-weight: 700; vertical-align: middle; }
+.ic-badge.ok { color: #1e8449; background: color-mix(in srgb, #2ecc71 22%, transparent); }
+.ic-badge.check { color: #9a7d0a; background: color-mix(in srgb, #f1c40f 24%, transparent); }
+.ic-options { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 10px 12px; border: 1px solid var(--border-glass); border-radius: var(--border-radius-sm); }
+.ic-options label { display: inline-flex; align-items: center; gap: 6px; }
+.ic-schedule-status { margin-top: 12px; }
+.calendar-day small.calendar-day-note { overflow: hidden; color: var(--accent-primary); text-overflow: ellipsis; white-space: nowrap; }
+.calendar-day.calendar-day-off { opacity: .7; }
+.calendar-day-note-text { color: var(--accent-primary); font-weight: 600; }
+@media (max-width: 640px) { .ic-class-row { grid-template-columns: 1fr; } }

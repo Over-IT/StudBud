@@ -260,6 +260,7 @@
                         <div class="actions">
                             <button id="add-course-btn" class="primary-btn"><i class="fas fa-plus"></i> Add Class</button>
                             <button id="open-target-gpa-btn" class="secondary-btn"><i class="fas fa-bullseye"></i> Target GPA Solver</button>
+                            <button class="secondary-btn open-ic-import-btn" type="button"><i class="fas fa-cloud-arrow-down"></i> Import from Infinite Campus</button>
                         </div>
                     </div>
                     <div id="cumulative-gpa-summary" class="gpa-summary-grid"></div>
@@ -430,7 +431,14 @@
                             <button type="submit" class="primary-btn"><i class="fas fa-save"></i> Save Schedule</button>
                         </div>
                     </form>
-                    <p class="settings-hint">PCHS dates shown are based on the built-in weekday rotation. Check school announcements for holidays or special schedule changes.</p>
+                    <div id="ic-schedule-status" class="glass-card ic-schedule-status hidden">
+                        <p id="ic-schedule-status-text"></p>
+                        <div class="settings-actions">
+                            <button class="secondary-btn open-ic-import-btn" type="button"><i class="fas fa-rotate"></i> Re-import from Infinite Campus</button>
+                            <button id="remove-ic-schedule-btn" class="danger-btn" type="button"><i class="fas fa-calendar-xmark"></i> Remove imported schedule</button>
+                        </div>
+                    </div>
+                    <p class="settings-hint">PCHS dates shown are based on the built-in weekday rotation unless you import your Infinite Campus schedule, which adds real class times, school days, and day notes. Check school announcements for special schedule changes.</p>
                 </section>
 
                 <!-- 4. Flashcard Studio View -->
@@ -1008,6 +1016,7 @@
                             <div class="settings-actions">
                                 <button id="sign-out-btn" class="secondary-btn"><i class="fas fa-right-from-bracket"></i> Sign out</button>
                                 <button id="open-backup-modal-btn" class="secondary-btn"><i class="fas fa-download"></i> Export / Import Backup</button>
+                                <button class="secondary-btn open-ic-import-btn" type="button"><i class="fas fa-cloud-arrow-down"></i> Import from Infinite Campus</button>
                             </div>
                             <div class="danger-zone">
                                 <h4>Danger Zone</h4>
@@ -1452,6 +1461,46 @@
                 </div>
             </div>
 
+            <!-- Infinite Campus Import Modal -->
+            <div id="ic-import-modal" class="glass-card modal-content hidden" aria-labelledby="ic-import-title">
+                <div class="modal-header">
+                    <h2 id="ic-import-title"><i class="fas fa-cloud-arrow-down"></i> Import from Infinite Campus</h2>
+                    <button class="close-modal-btn icon-btn" type="button" aria-label="Close"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body">
+                    <p class="settings-hint">StudBud never sees your Infinite Campus password. A small helper runs inside your own signed-in Campus tab, reads your classes, grades, assignments, categories, schedule, and school calendar for this school year, and sends them back here.</p>
+                    <ol class="ic-steps">
+                        <li>
+                            <strong>Open Infinite Campus and sign in.</strong>
+                            <div class="ic-row">
+                                <input id="ic-district-url" type="url" placeholder="https://yourdistrict.infinitecampus.org/campus/portal/students/..." aria-label="Infinite Campus address">
+                                <button id="ic-open-campus-btn" class="secondary-btn" type="button"><i class="fas fa-arrow-up-right-from-square"></i> Open Campus</button>
+                            </div>
+                            <small>Paste the address you use for the Campus Student portal. Opening it from here lets the helper send data straight back.</small>
+                        </li>
+                        <li>
+                            <strong>Run the StudBud helper on the Campus page.</strong>
+                            <div class="ic-row">
+                                <a id="ic-bookmarklet-link" class="primary-btn ic-bookmarklet" href="#" draggable="true" title="Drag me to your bookmarks bar"><i class="fas fa-bookmark"></i> StudBud Import</a>
+                                <button id="ic-copy-script-btn" class="secondary-btn" type="button"><i class="fas fa-copy"></i> Copy console script</button>
+                            </div>
+                            <small>Drag <em>StudBud Import</em> to your bookmarks bar, then click it while viewing Campus. Or press F12 on Campus, open Console, paste the copied script, and press Enter.</small>
+                        </li>
+                        <li>
+                            <strong>Review and import.</strong>
+                            <small>The preview opens automatically when the helper sends data. If it can't (some browsers block it), use <em>Copy data</em> or <em>Download .json</em> in the helper and add it here:</small>
+                            <textarea id="ic-import-textarea" rows="3" placeholder="Paste the copied Infinite Campus data here..."></textarea>
+                            <div class="ic-row">
+                                <label class="secondary-btn ic-file-label"><i class="fas fa-file-arrow-up"></i> Choose .json file<input id="ic-import-file" type="file" accept=".json,application/json" hidden></label>
+                                <button id="ic-preview-btn" class="secondary-btn" type="button"><i class="fas fa-eye"></i> Preview</button>
+                            </div>
+                        </li>
+                    </ol>
+                    <p id="ic-import-status" class="ic-import-status" role="status" aria-live="polite"></p>
+                    <div id="ic-import-preview" class="ic-import-preview hidden"></div>
+                </div>
+            </div>
+
         </div>
     </div>
 
@@ -1474,6 +1523,7 @@
     <script src="multiplayerGames.js" defer></script>
     <script src="multiplayerGames2.js" defer></script>
     <script src="multiplayerGames3.js" defer></script>
+    <script src="infiniteCampusImport.js" defer></script>
     <script src="app.js" defer></script>
     <script>
         let installPrompt = null;

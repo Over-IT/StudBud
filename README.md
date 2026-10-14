@@ -28,6 +28,19 @@ Run `node tests/academic-math.cjs` for points/category grade calculations, credi
 
 The game regression suite also checks nearby King of the Hill/Soccer action keys, new box price/rarity parity, animated particles in both character views, and account tags that cannot be claimed through a multiplayer nickname.
 
+Run `node tests/infinite-campus-import.cjs` for Infinite Campus course matching (course numbers and abbreviated names), current-year filtering, point multipliers, percent-based and excluded categories, S1/S2 merging, idempotent re-imports, match overrides, imported class times and school-calendar days.
+
+## Import from Infinite Campus
+
+Use **Classes → Import from Infinite Campus** (also in **Settings → Data Management**) to bring in this school year's classes, grade categories and weights, all graded and upcoming assignments, class periods and times, and the school calendar.
+
+1. Paste your Campus Student portal address and choose **Open Campus**, then sign in there.
+2. On the Campus page, run the helper: drag **StudBud Import** to your bookmarks bar and click it, or copy the console script and paste it into the browser console (F12).
+3. The helper reads your data in your own signed-in session (StudBud never sees your password) and sends it back to the StudBud tab. If the browser blocks that, use the helper's **Copy data** or **Download .json** and paste or choose the file in StudBud.
+4. Review the preview. Each class is matched to the closest PCHS catalog course (course number first, then name); change any match, keep the Campus name, or skip it. Then choose what to import.
+
+Importing again updates the same classes and assignments instead of duplicating them, and keeps your study estimates and priorities. Imported class times, school days off, and day notes appear on the dashboard schedule and calendar. Remove them from the Schedule page at any time; your class periods stay saved.
+
 ## Accounts and cloud sync
 
 New assignments default their due date to today in your local time zone. You can type in the date field or use its single built-in calendar icon. Adding from a calendar day keeps that selected day; editing an assignment preserves its saved date. Save & add another keeps your chosen date for quick batch entry.

@@ -1145,6 +1145,21 @@
             document.addEventListener('submit', event => this.handleSubmit(event));
             document.addEventListener('change', event => this.handleChange(event));
             this.bindFlashcardInteraction();
+            window.addEventListener('message', event => this.handleInfiniteCampusMessage(event));
+            document.addEventListener('click', event => {
+                // The bookmarklet only works from the bookmarks bar on the Campus page
+                if (!event.target.closest('#ic-bookmarklet-link')) return;
+                event.preventDefault();
+                this.setInfiniteCampusStatus('Drag “StudBud Import” to your bookmarks bar, then click it while you are on the signed-in Campus page.', 'warn');
+            });
+            document.addEventListener('change', event => {
+                if (event.target.id === 'ic-import-file' && event.target.files?.[0]) {
+                    this.previewInfiniteCampusFromInput().catch(error => this.setInfiniteCampusStatus(this.friendlyErrorMessage(error), 'error'));
+                }
+                if (event.target.matches('select[data-ic-class]')) {
+                    event.target.closest('.ic-class-row')?.classList.toggle('ic-skipped', event.target.value === 'skip');
+                }
+            });
             window.addEventListener('online', () => {
                 this.syncPendingStudyTime().catch(error => {
                     console.error('[NexusApp] Pending study time could not be synced:', error);
@@ -1774,6 +1789,7 @@
         }
 
         renderSchedulePage() {
+            this.renderImportedScheduleStatus();
             const container = document.getElementById('schedule-course-list');
             if (!container) return;
             const courses = AppState.get('courses') || [];
@@ -1803,17 +1819,278 @@
                 if (all[select.value]) throw new Error(`Two classes are set to period ${select.value}. Give each class its own period.`);
                 all[select.value] = select.dataset.course;
             });
-            AppState.set('schedule', { all, odd: {}, even: {} });
+            const current = AppState.get('schedule') || {};
+            AppState.set('schedule', { ...(current.ic ? { ic: current.ic } : {}), all, odd: {}, even: {} });
             this.renderDashboard();
             this.renderCalendar();
             window.alert('Class schedule saved.');
         }
 
+        renderImportedScheduleStatus() {
+            const card = document.getElementById('ic-schedule-status');
+            const text = document.getElementById('ic-schedule-status-text');
+            if (!card || !text) return;
+            const ic = (AppState.get('schedule') || {}).ic;
+            const imported = Boolean(window.StudBudIC?.hasImportedSchedule(ic));
+            card.classList.toggle('hidden', !imported);
+            if (!imported) return;
+            const when = new Date(ic.importedAt);
+            const days = Object.values(ic.calendars || {}).reduce((sum, list) => sum + Object.keys(list || {}).length, 0);
+            text.textContent = `Using your Infinite Campus schedule${Number.isFinite(when.getTime()) ? ` from ${when.toLocaleDateString()}` : ''}: ${(ic.sections || []).length} class periods with real times${days ? ` and ${days} school-calendar days` : ''}. The periods above still apply on days Campus doesn't cover.`;
+        }
+
+        removeImportedSchedule() {
+            const schedule = AppState.get('schedule') || {};
+            if (!schedule.ic) return;
+            if (!window.confirm('Remove the imported Infinite Campus times and school calendar? Your class periods above stay saved.')) return;
+            const { ic, ...rest } = schedule;
+            AppState.set('schedule', rest);
+            this.renderSchedulePage();
+            this.renderDashboard();
+            this.renderCalendar();
+        }
+
+        openInfiniteCampusImport() {
+            if (!window.StudBudIC) throw new Error('The Infinite Campus importer did not load. Refresh the page and try again.');
+            const link = document.getElementById('ic-bookmarklet-link');
+            const origin = /^https?:$/.test(window.location.protocol) ? window.location.origin : '';
+            if (link) link.setAttribute('href', window.StudBudIC.buildBookmarklet(origin));
+            const urlInput = document.getElementById('ic-district-url');
+            if (urlInput && !urlInput.value) urlInput.value = localStorage.getItem('studbud-ic-url') || '';
+            this.icAwaitingData = true;
+            this.setInfiniteCampusStatus('');
+            this.openModal('ic-import-modal');
+        }
+
+        setInfiniteCampusStatus(message, tone = '') {
+            const status = document.getElementById('ic-import-status');
+            if (!status) return;
+            status.textContent = message;
+            status.dataset.tone = tone;
+        }
+
+        openInfiniteCampusSite() {
+            const input = document.getElementById('ic-district-url');
+            let value = String(input?.value || '').trim();
+            if (!value) throw new Error('Paste your Infinite Campus address first (it usually ends in infinitecampus.org).');
+            if (!/^https?:\/\//i.test(value)) value = `https://${value}`;
+            let url;
+            try {
+                url = new URL(value);
+            } catch {
+                throw new Error('That Infinite Campus address does not look like a web address.');
+            }
+            if (url.protocol !== 'https:') throw new Error('Use the secure https:// Infinite Campus address.');
+            localStorage.setItem('studbud-ic-url', url.href);
+            this.icAllowedOrigin = url.origin;
+            this.icAwaitingData = true;
+            // Keep the opener link so the helper can hand data straight back to this tab
+            this.icWindow = window.open(url.href, 'studbud-ic');
+            this.setInfiniteCampusStatus(this.icWindow
+                ? 'Campus opened in a new tab. Sign in, then run the StudBud Import bookmark (or console script) there.'
+                : 'Your browser blocked the new tab. Open Campus yourself, then run the helper there.');
+        }
+
+        async copyInfiniteCampusScript() {
+            const origin = /^https?:$/.test(window.location.protocol) ? window.location.origin : '';
+            const script = window.StudBudIC.buildConsoleScript(origin);
+            try {
+                if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable.');
+                await navigator.clipboard.writeText(script);
+                this.setInfiniteCampusStatus('Console script copied. On the signed-in Campus page press F12, open Console, paste it, and press Enter.');
+            } catch {
+                const textarea = document.getElementById('ic-import-textarea');
+                textarea.value = script;
+                textarea.select();
+                this.setInfiniteCampusStatus('Copy blocked by the browser. The script is selected in the box below. Copy it with Ctrl+C, then clear the box.', 'warn');
+            }
+        }
+
+        isTrustedInfiniteCampusMessage(event) {
+            if (event.source && this.icWindow && event.source === this.icWindow) return true;
+            if (this.icAllowedOrigin && event.origin === this.icAllowedOrigin) return true;
+            const saved = localStorage.getItem('studbud-ic-url');
+            try {
+                if (saved && new URL(saved).origin === event.origin) return true;
+            } catch { /* ignore a bad saved address */ }
+            try {
+                const host = new URL(event.origin).hostname;
+                return new URL(event.origin).protocol === 'https:' && (host === 'infinitecampus.org' || host.endsWith('.infinitecampus.org') || host.endsWith('.infinitecampus.com'));
+            } catch {
+                return false;
+            }
+        }
+
+        handleInfiniteCampusMessage(event) {
+            const IC = window.StudBudIC;
+            const data = event.data;
+            if (!IC || !data || typeof data !== 'object' || data.format !== IC.FORMAT) return;
+            if (!this.icAwaitingData || !this.isTrustedInfiniteCampusMessage(event)) return;
+            try {
+                event.source?.postMessage({ format: IC.ACK_FORMAT }, event.origin);
+            } catch { /* the helper still offers copy and download */ }
+            if (document.getElementById('ic-import-modal')?.classList.contains('hidden')) this.openModal('ic-import-modal');
+            this.previewInfiniteCampusData(data);
+            window.focus();
+        }
+
+        async previewInfiniteCampusFromInput() {
+            const file = document.getElementById('ic-import-file')?.files?.[0];
+            const textarea = document.getElementById('ic-import-textarea');
+            const text = file ? await file.text() : String(textarea?.value || '').trim();
+            if (!text) throw new Error('Paste the copied Infinite Campus data or choose the downloaded .json file first.');
+            this.previewInfiniteCampusData(text);
+        }
+
+        previewInfiniteCampusData(input) {
+            const IC = window.StudBudIC;
+            let model;
+            try {
+                model = IC.parsePayload(input);
+            } catch (error) {
+                this.setInfiniteCampusStatus(error.message || 'That does not look like StudBud Infinite Campus data.', 'error');
+                return;
+            }
+            const school = this.currentSchool();
+            const catalog = window.PCHS_COURSE_CATALOG || [];
+            const plan = IC.buildImportPlan(model, { courses: AppState.get('courses') || [] }, { school, catalog });
+            this.icImport = { model, plan };
+            this.icAwaitingData = false;
+            this.renderInfiniteCampusPreview();
+            const warnings = model.warnings.length ? ` ${model.warnings.length} item(s) could not be read from Campus.` : '';
+            this.setInfiniteCampusStatus(`Found ${plan.counts.classes} classes, ${plan.counts.assignments} assignments (${plan.counts.graded} graded), and ${plan.counts.days} calendar days. Check the matches below, then import.${warnings}`, warnings ? 'warn' : 'ok');
+        }
+
+        renderInfiniteCampusPreview() {
+            const container = document.getElementById('ic-import-preview');
+            if (!container || !this.icImport) return;
+            const { plan, model } = this.icImport;
+            const esc = value => this.escapeHTML(value ?? '');
+            const pchs = plan.school === 'pchs';
+            const catalog = (window.PCHS_COURSE_CATALOG || []).filter(course => !course.legacy && course.code);
+            const byCategory = new Map();
+            catalog.forEach(course => {
+                const key = course.category || 'Other';
+                if (!byCategory.has(key)) byCategory.set(key, []);
+                byCategory.get(key).push(course);
+            });
+            const fullCatalog = [...byCategory.entries()].map(([category, courses]) =>
+                `<optgroup label="${esc(category)}">${courses.map(course => `<option value="${esc(course.code)}">${esc(course.title)}</option>`).join('')}</optgroup>`).join('');
+            const existingTitles = new Map((AppState.get('courses') || []).map(course => [course.code, course.title]));
+            const rows = plan.classes.map((entry, index) => {
+                const selected = entry.include ? (entry.match?.code || '') : 'skip';
+                const suggestionOptions = entry.suggestions.map(course => `<option value="${esc(course.code)}">${esc(course.title)}${entry.match?.code === course.code ? ' (best match)' : ''}</option>`).join('');
+                const select = `<select data-ic-class="${index}" aria-label="StudBud class for ${esc(entry.name)}">
+                    ${pchs && suggestionOptions ? `<optgroup label="Closest PCHS courses">${suggestionOptions}</optgroup>` : ''}
+                    <option value="">Use Campus name: ${esc(entry.name)}</option>
+                    <option value="skip">Don't import</option>
+                    ${pchs ? `<optgroup label="All PCHS courses">${fullCatalog}</optgroup>` : ''}
+                </select>`;
+                const confidence = entry.match ? Math.round(entry.match.confidence * 100) : 0;
+                const badge = !pchs ? ''
+                    : entry.match ? `<span class="ic-badge ${confidence >= 85 ? 'ok' : 'check'}">${entry.match.method === 'number' ? 'Course # match' : `${confidence}% name match`}</span>`
+                        : '<span class="ic-badge check">No catalog match</span>';
+                const grade = entry.grades.length ? entry.grades[entry.grades.length - 1] : null;
+                const details = [
+                    entry.courseNumbers.length ? `#${entry.courseNumbers.join(', ')}` : '',
+                    entry.periods.length ? `Period ${entry.periods.join(', ')}` : '',
+                    entry.times.join(', '),
+                    entry.teacher,
+                    entry.term,
+                    `${entry.assignmentCount} assignments`,
+                    entry.categoryCount ? `${entry.categoryCount} categories` : '',
+                    grade ? `${grade.task || grade.term}: ${grade.score || ''}${Number.isFinite(grade.percent) ? ` (${grade.percent}%)` : ''}` : '',
+                    entry.existingCode ? `updates “${existingTitles.get(entry.existingCode) || entry.existingCode}”` : 'new class',
+                    entry.dropped ? 'dropped' : ''
+                ].filter(Boolean).map(esc).join(' · ');
+                return `<div class="ic-class-row${entry.include ? '' : ' ic-skipped'}">
+                    <div class="ic-class-info"><div><strong>${esc(entry.name)}</strong> ${badge}</div><small>${details}</small></div>
+                    ${select}
+                </div>`;
+            }).join('');
+            container.innerHTML = `
+                <h3>${esc(model.studentName ? `${model.studentName}'s classes` : 'Classes found')}</h3>
+                ${pchs ? '<p class="settings-hint">Each Campus class is matched to the closest PCHS catalog course (course number first, then name). Change any match that looks wrong.</p>' : ''}
+                <div class="ic-class-list">${rows || '<p class="empty-state">No classes were found for this school year.</p>'}</div>
+                <fieldset class="ic-options">
+                    <legend>Also import</legend>
+                    <label><input type="checkbox" data-ic-option="categories" checked> Grade categories &amp; weights</label>
+                    <label><input type="checkbox" data-ic-option="graded" checked> Past graded work &amp; scores</label>
+                    <label><input type="checkbox" data-ic-option="upcoming" checked> Upcoming assignments</label>
+                    <label><input type="checkbox" data-ic-option="schedule" checked> Class periods &amp; times</label>
+                    <label><input type="checkbox" data-ic-option="calendar" checked> School calendar (days off, notes)</label>
+                </fieldset>
+                <p class="settings-hint">Importing again later updates the same classes and assignments instead of duplicating them. Your study estimates and priorities are kept.</p>
+                <div class="modal-footer"><button id="ic-apply-import-btn" class="primary-btn" type="button"><i class="fas fa-file-import"></i> Import into StudBud</button></div>`;
+            container.querySelectorAll('select[data-ic-class]').forEach(select => {
+                const entry = plan.classes[Number(select.dataset.icClass)];
+                select.value = entry.include ? (entry.match?.code || '') : 'skip';
+            });
+            container.classList.remove('hidden');
+        }
+
+        applyInfiniteCampusImport() {
+            if (!this.icImport) throw new Error('Preview your Infinite Campus data first.');
+            const IC = window.StudBudIC;
+            const { model, plan } = this.icImport;
+            const container = document.getElementById('ic-import-preview');
+            const overrides = {};
+            container.querySelectorAll('select[data-ic-class]').forEach(select => {
+                overrides[plan.classes[Number(select.dataset.icClass)].key] = select.value;
+            });
+            const options = { overrides, catalog: window.PCHS_COURSE_CATALOG || [] };
+            container.querySelectorAll('[data-ic-option]').forEach(box => { options[box.dataset.icOption] = box.checked; });
+            if (Object.values(overrides).every(value => value === 'skip')) throw new Error('Choose at least one class to import.');
+            const result = IC.applyImportPlan(model, plan, {
+                courses: AppState.get('courses') || [],
+                assignments: AppState.get('assignments') || [],
+                schedule: AppState.get('schedule') || {}
+            }, options);
+            AppState.set('courses', result.courses);
+            AppState.set('assignments', result.assignments);
+            AppState.set('schedule', result.schedule);
+            this.icImport = null;
+            this.renderUI();
+            if (Router.activeRoute === 'schedule') this.renderSchedulePage();
+            this.renderCalendar();
+            const s = result.summary;
+            const parts = [
+                s.coursesAdded ? `${s.coursesAdded} classes added` : '',
+                s.coursesUpdated ? `${s.coursesUpdated} classes updated` : '',
+                s.categories ? `${s.categories} categories` : '',
+                s.gradedAdded + s.gradedUpdated ? `${s.gradedAdded + s.gradedUpdated} graded assignments` : '',
+                s.upcomingAdded + s.upcomingUpdated ? `${s.upcomingAdded + s.upcomingUpdated} upcoming assignments` : '',
+                s.periods ? `${s.periods} class periods` : '',
+                s.days ? `${s.days} calendar days` : ''
+            ].filter(Boolean);
+            this.closeModal();
+            const preview = document.getElementById('ic-import-preview');
+            preview.innerHTML = '';
+            preview.classList.add('hidden');
+            document.getElementById('ic-import-textarea').value = '';
+            document.getElementById('ic-import-file').value = '';
+            window.alert(`Infinite Campus import complete: ${parts.join(', ') || 'nothing new to add'}.`);
+        }
+
         getScheduleEntries(date) {
             const pchsSchedule = this.getSchoolSchedule(date);
+            const courses = AppState.get('courses') || [];
+            // Imported Infinite Campus data knows real school days, day notes, and class times
+            const imported = window.StudBudIC?.scheduleForDate((AppState.get('schedule') || {}).ic, date, courses);
+            if (imported && imported.school === false) {
+                return { pchsSchedule: { title: imported.note || 'No school', classes: [] }, pattern: null, entries: [], note: imported.note || '', imported: true };
+            }
+            if (imported && imported.school && !imported.fallback) {
+                return {
+                    pchsSchedule: { title: pchsSchedule?.title || imported.psName || 'School day', classes: [] },
+                    pattern: 'ic',
+                    entries: imported.entries,
+                    note: imported.note || '',
+                    imported: true
+                };
+            }
             const pattern = this.getSchedulePattern(pchsSchedule);
             const periodMap = this.getPeriodMap();
-            const courses = AppState.get('courses') || [];
             const entries = (pchsSchedule?.classes || []).map(slot => {
                 const match = String(slot.period).match(/^\s*(\d+)/);
                 const period = match ? Number(match[1]) : null;
@@ -1821,19 +2098,21 @@
                 const course = courses.find(item => item.code === courseCode);
                 return { ...slot, periodNumber: period, course };
             });
-            return { pchsSchedule, pattern, entries };
+            return imported ? { pchsSchedule, pattern, entries, note: imported.note || '' } : { pchsSchedule, pattern, entries };
         }
 
         renderDailySchedule(date) {
             const list = document.getElementById('daily-schedule-list');
             const type = document.getElementById('daily-schedule-type');
             if (!list || !type) return;
-            const { pchsSchedule, pattern, entries } = this.getScheduleEntries(date);
+            const { pchsSchedule, pattern, entries, note } = this.getScheduleEntries(date);
             const courses = AppState.get('courses') || [];
-            const hasSchedule = Object.values(this.getPeriodMap()).some(code => courses.some(course => course.code === code));
+            const hasSchedule = Object.values(this.getPeriodMap()).some(code => courses.some(course => course.code === code))
+                || Boolean(window.StudBudIC?.hasImportedSchedule((AppState.get('schedule') || {}).ic));
             const edit = document.getElementById('daily-schedule-edit');
             if (edit) edit.textContent = hasSchedule ? 'Edit schedule' : 'Set schedule';
-            type.textContent = pchsSchedule ? `${pchsSchedule.title} · ${date.toLocaleDateString(undefined, { weekday: 'long' })}` : 'PCHS schedule unavailable';
+            const noteText = note && note !== pchsSchedule?.title ? ` · ${note}` : '';
+            type.textContent = pchsSchedule ? `${pchsSchedule.title} · ${date.toLocaleDateString(undefined, { weekday: 'long' })}${noteText}` : 'PCHS schedule unavailable';
             const todayKey = localDateKey(date);
             const work = (AppState.get('assignments') || []).filter(item => String(item.dueDate || '').slice(0, 10) === todayKey && item.status !== 'completed' && !this.isGradedItem(item));
             const workMarkup = items => items.length ? `<ul class="schedule-due-work">${items.map(item => `<li><span class="schedule-work-kind">${this.escapeHTML(item.kind || 'assignment')}</span><button type="button" class="schedule-work-link" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">${this.escapeHTML(item.title)}</button></li>`).join('')}</ul>` : '';
@@ -1859,7 +2138,7 @@
                 return;
             }
             list.innerHTML = entries.map(entry => entry.periodNumber
-                ? `<li class="daily-period-row"><span>${this.escapeHTML(entry.period)}<small>${this.escapeHTML(entry.time || '')}</small></span><div class="daily-period-class"><strong>${this.escapeHTML(entry.course?.title || 'No class assigned')}</strong>${workMarkup(work.filter(item => entry.course && item.courseCode === entry.course.code))}</div></li>`
+                ? `<li class="daily-period-row"><span>${this.escapeHTML(entry.period)}<small>${this.escapeHTML(entry.time || '')}${entry.room ? ` · Rm ${this.escapeHTML(entry.room)}` : ''}</small></span><div class="daily-period-class"><strong>${this.escapeHTML(entry.course?.title || 'No class assigned')}</strong>${workMarkup(work.filter(item => entry.course && item.courseCode === entry.course.code))}</div></li>`
                 : `<li class="daily-period-row"><span>PCHS block</span><strong>${this.escapeHTML(entry.period)}</strong></li>`
             ).join('') + otherMarkup;
         }
@@ -1892,16 +2171,18 @@
             for (let day = 1; day <= daysInMonth; day++) {
                 const dateKey = localDateKey(new Date(year, month, day));
                 const count = assignments.filter(item => item.dueDate === dateKey).length;
-                const { pattern, entries } = this.getScheduleEntries(new Date(year, month, day));
+                const { pattern, entries, note } = this.getScheduleEntries(new Date(year, month, day));
                 const classCount = pattern ? entries.filter(entry => entry.periodNumber && entry.course).length : 0;
                 const classes = ['calendar-day'];
                 if (dateKey === todayKey) classes.push('today');
                 if (dateKey === this.selectedCalendarDate) classes.push('selected');
+                if (note && !pattern) classes.push('calendar-day-off');
                 const indicators = [
+                    note ? `<small class="calendar-day-note" title="${this.escapeHTML(note)}">${this.escapeHTML(note.length > 18 ? `${note.slice(0, 17)}…` : note)}</small>` : '',
                     classCount ? `<small>${classCount} ${classCount === 1 ? 'class' : 'classes'}</small>` : '',
                     count ? `<small>${count} due</small>` : ''
                 ].join('');
-                cells += `<button class="${classes.join(' ')}" data-action="select-calendar-day" data-date="${dateKey}" aria-label="${dateKey}, ${classCount} classes, ${count} due items"><span>${day}</span>${indicators}</button>`;
+                cells += `<button class="${classes.join(' ')}" data-action="select-calendar-day" data-date="${dateKey}" aria-label="${dateKey}${note ? `, ${this.escapeHTML(note)}` : ''}, ${classCount} classes, ${count} due items"><span>${day}</span>${indicators}</button>`;
             }
             daysElement.innerHTML = cells;
             const selected = new Date(`${this.selectedCalendarDate}T00:00:00`);
@@ -1910,9 +2191,10 @@
             const agenda = document.getElementById('calendar-agenda-list');
             const events = assignments.filter(item => item.dueDate === this.selectedCalendarDate);
             const scheduleInfo = this.getScheduleEntries(selected);
+            const dayNote = scheduleInfo.note && scheduleInfo.note !== scheduleInfo.pchsSchedule?.title ? `<p class="calendar-day-note-text">${this.escapeHTML(scheduleInfo.note)}</p>` : '';
             const scheduleItems = scheduleInfo.pattern
-                ? `<section class="calendar-schedule"><h4>${this.escapeHTML(scheduleInfo.pchsSchedule.title)} · Classes</h4>${scheduleInfo.entries.filter(entry => entry.periodNumber).map(entry => `<p><strong>${this.escapeHTML(entry.period)}:</strong> ${this.escapeHTML(entry.course?.title || 'No class assigned')} <small>${this.escapeHTML(entry.time || '')}</small></p>`).join('') || '<p>No class periods listed.</p>'}</section>`
-                : `<section class="calendar-schedule"><h4>${this.escapeHTML(scheduleInfo.pchsSchedule?.title || 'Schedule')}</h4><p>No classes are scheduled.</p></section>`;
+                ? `<section class="calendar-schedule"><h4>${this.escapeHTML(scheduleInfo.pchsSchedule.title)} · Classes</h4>${dayNote}${scheduleInfo.entries.filter(entry => entry.periodNumber).map(entry => `<p><strong>${this.escapeHTML(entry.period)}:</strong> ${this.escapeHTML(entry.course?.title || 'No class assigned')} <small>${this.escapeHTML(entry.time || '')}${entry.room ? ` · Rm ${this.escapeHTML(entry.room)}` : ''}</small></p>`).join('') || '<p>No class periods listed.</p>'}</section>`
+                : `<section class="calendar-schedule"><h4>${this.escapeHTML(scheduleInfo.pchsSchedule?.title || 'Schedule')}</h4>${dayNote}<p>No classes are scheduled.</p></section>`;
             const eventItems = events.length ? events.map(item => {
                 const course = (AppState.get('courses') || []).find(entry => entry.code === item.courseCode);
                 const recommendation = this.getStudyRecommendations().find(entry => entry.id === item.id);
@@ -7103,6 +7385,18 @@
                     await this.saveOtherGradeScale();
                 } else if (id === 'open-backup-modal-btn') {
                     this.openModal('backup-modal');
+                } else if (target.matches('.open-ic-import-btn')) {
+                    this.openInfiniteCampusImport();
+                } else if (id === 'ic-open-campus-btn') {
+                    this.openInfiniteCampusSite();
+                } else if (id === 'ic-copy-script-btn') {
+                    await this.copyInfiniteCampusScript();
+                } else if (id === 'ic-preview-btn') {
+                    await this.previewInfiniteCampusFromInput();
+                } else if (id === 'ic-apply-import-btn') {
+                    this.applyInfiniteCampusImport();
+                } else if (id === 'remove-ic-schedule-btn') {
+                    this.removeImportedSchedule();
                 } else if (id === 'export-json-btn') {
                     await this.exportBackup();
                 } else if (id === 'import-json-btn') {
