@@ -34,10 +34,12 @@ Run `node tests/infinite-campus-import.cjs` for Infinite Campus course matching 
 
 Use **Classes → Import from Infinite Campus** (also in **Settings → Data Management**) to bring in this school year's classes, grade categories and weights, all graded and upcoming assignments, class periods and times, and the school calendar.
 
-1. Paste your Campus Student portal address and choose **Open Campus**, then sign in there.
-2. On the Campus page, run the helper: drag **StudBud Import** to your bookmarks bar and click it, or copy the console script and paste it into the browser console (F12).
-3. The helper reads your data in your own signed-in session (StudBud never sees your password) and sends it back to the StudBud tab. If the browser blocks that, use the helper's **Copy data** or **Download .json** and paste or choose the file in StudBud.
+1. Drag the **StudBud Import** button to your bookmarks bar (one time only; press Ctrl+Shift+B if the bar is hidden).
+2. Choose **Open Infinite Campus** and sign in. PCHS students get the Parkway Campus address automatically; anyone else can paste their own under **Different Campus address?**.
+3. On the Campus tab, click **StudBud Import** in your bookmarks bar (or copy the console script and paste it into the browser console). It reads your data in your own signed-in session (StudBud never sees your password) and sends it back to the StudBud tab. If the browser blocks that, the helper copies the data instead; choose **Paste data from Campus** in StudBud (or download the .json and choose the file).
 4. Review the preview. Each class is matched to the closest PCHS catalog course (course number first, then name); change any match, keep the Campus name, or skip it. Then choose what to import.
+
+The app tour includes this importer, and the About page lists it.
 
 Importing again updates the same classes and assignments instead of duplicating them, and keeps your study estimates and priorities. Imported class times, school days off, and day notes appear on the dashboard schedule and calendar. Remove them from the Schedule page at any time; your class periods stay saved.
 

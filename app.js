@@ -9,6 +9,8 @@
 (function (window) {
     'use strict';
 
+    const PARKWAY_CAMPUS_URL = 'https://parkwaymo.infinitecampus.org/campus/nav-wrapper/student/portal/student/home?appName=parkway';
+
     // ============================================================================
     // 1. EVENT BUS ENGINE
     // ============================================================================
@@ -1856,10 +1858,44 @@
             const origin = /^https?:$/.test(window.location.protocol) ? window.location.origin : '';
             if (link) link.setAttribute('href', window.StudBudIC.buildBookmarklet(origin));
             const urlInput = document.getElementById('ic-district-url');
-            if (urlInput && !urlInput.value) urlInput.value = localStorage.getItem('studbud-ic-url') || '';
-            this.icAwaitingData = true;
+            if (urlInput && !urlInput.value) urlInput.value = localStorage.getItem('studbud-ic-url') || (this.currentSchool() === 'pchs' ? PARKWAY_CAMPUS_URL : '');
+            const moreAddress = urlInput?.closest('details');
+            if (moreAddress && !urlInput.value) moreAddress.open = true;
             this.setInfiniteCampusStatus('');
+            this.showInfiniteCampusSteps(!this.icImport);
             this.openModal('ic-import-modal');
+        }
+
+        showInfiniteCampusSteps(show) {
+            document.getElementById('ic-import-modal')?.classList.toggle('ic-has-preview', !show);
+        }
+
+        restartInfiniteCampusImport() {
+            this.icImport = null;
+            const preview = document.getElementById('ic-import-preview');
+            if (preview) {
+                preview.innerHTML = '';
+                preview.classList.add('hidden');
+            }
+            this.setInfiniteCampusStatus('');
+            this.showInfiniteCampusSteps(true);
+        }
+
+        async pasteInfiniteCampusFromClipboard() {
+            let text = '';
+            try {
+                if (!navigator.clipboard?.readText) throw new Error('unavailable');
+                text = String(await navigator.clipboard.readText() || '').trim();
+            } catch {
+                const manual = document.getElementById('ic-import-textarea');
+                const details = manual?.closest('details');
+                if (details) details.open = true;
+                manual?.focus();
+                this.setInfiniteCampusStatus('Your browser blocked reading the clipboard. Click in the box below, press Ctrl+V (⌘+V on Mac), then choose Preview.', 'warn');
+                return;
+            }
+            if (!text) throw new Error('Your clipboard is empty. On the Campus tab, choose Copy data in the StudBud box first.');
+            this.previewInfiniteCampusData(text);
         }
 
         setInfiniteCampusStatus(message, tone = '') {
@@ -1872,7 +1908,7 @@
         openInfiniteCampusSite() {
             const input = document.getElementById('ic-district-url');
             let value = String(input?.value || '').trim();
-            if (!value) throw new Error('Paste your Infinite Campus address first (it usually ends in infinitecampus.org).');
+            if (!value) throw new Error('Open "Different Campus address?" and paste your Infinite Campus address first (it usually ends in infinitecampus.org).');
             if (!/^https?:\/\//i.test(value)) value = `https://${value}`;
             let url;
             try {
@@ -1883,11 +1919,10 @@
             if (url.protocol !== 'https:') throw new Error('Use the secure https:// Infinite Campus address.');
             localStorage.setItem('studbud-ic-url', url.href);
             this.icAllowedOrigin = url.origin;
-            this.icAwaitingData = true;
             // Keep the opener link so the helper can hand data straight back to this tab
             this.icWindow = window.open(url.href, 'studbud-ic');
             this.setInfiniteCampusStatus(this.icWindow
-                ? 'Campus opened in a new tab. Sign in, then run the StudBud Import bookmark (or console script) there.'
+                ? 'Campus opened in a new tab. Sign in, then click StudBud Import in your bookmarks bar there.'
                 : 'Your browser blocked the new tab. Open Campus yourself, then run the helper there.');
         }
 
@@ -1900,6 +1935,8 @@
                 this.setInfiniteCampusStatus('Console script copied. On the signed-in Campus page press F12, open Console, paste it, and press Enter.');
             } catch {
                 const textarea = document.getElementById('ic-import-textarea');
+                const details = textarea.closest('details');
+                if (details) details.open = true;
                 textarea.value = script;
                 textarea.select();
                 this.setInfiniteCampusStatus('Copy blocked by the browser. The script is selected in the box below. Copy it with Ctrl+C, then clear the box.', 'warn');
@@ -1925,7 +1962,8 @@
             const IC = window.StudBudIC;
             const data = event.data;
             if (!IC || !data || typeof data !== 'object' || data.format !== IC.FORMAT) return;
-            if (!this.icAwaitingData || !this.isTrustedInfiniteCampusMessage(event)) return;
+            // Data only opens a preview; nothing is saved until the student confirms the import
+            if (!this.isTrustedInfiniteCampusMessage(event)) return;
             try {
                 event.source?.postMessage({ format: IC.ACK_FORMAT }, event.origin);
             } catch { /* the helper still offers copy and download */ }
@@ -1955,7 +1993,6 @@
             const catalog = window.PCHS_COURSE_CATALOG || [];
             const plan = IC.buildImportPlan(model, { courses: AppState.get('courses') || [] }, { school, catalog });
             this.icImport = { model, plan };
-            this.icAwaitingData = false;
             this.renderInfiniteCampusPreview();
             const warnings = model.warnings.length ? ` ${model.warnings.length} item(s) could not be read from Campus.` : '';
             this.setInfiniteCampusStatus(`Found ${plan.counts.classes} classes, ${plan.counts.assignments} assignments (${plan.counts.graded} graded), and ${plan.counts.days} calendar days. Check the matches below, then import.${warnings}`, warnings ? 'warn' : 'ok');
@@ -2021,12 +2058,13 @@
                     <label><input type="checkbox" data-ic-option="calendar" checked> School calendar (days off, notes)</label>
                 </fieldset>
                 <p class="settings-hint">Importing again later updates the same classes and assignments instead of duplicating them. Your study estimates and priorities are kept.</p>
-                <div class="modal-footer"><button id="ic-apply-import-btn" class="primary-btn" type="button"><i class="fas fa-file-import"></i> Import into StudBud</button></div>`;
+                <div class="modal-footer"><button id="ic-restart-btn" class="secondary-btn" type="button"><i class="fas fa-rotate-left"></i> Start over</button><button id="ic-apply-import-btn" class="primary-btn" type="button"><i class="fas fa-file-import"></i> Import into StudBud</button></div>`;
             container.querySelectorAll('select[data-ic-class]').forEach(select => {
                 const entry = plan.classes[Number(select.dataset.icClass)];
                 select.value = entry.include ? (entry.match?.code || '') : 'skip';
             });
             container.classList.remove('hidden');
+            this.showInfiniteCampusSteps(false);
         }
 
         applyInfiniteCampusImport() {
@@ -2069,6 +2107,7 @@
             preview.classList.add('hidden');
             document.getElementById('ic-import-textarea').value = '';
             document.getElementById('ic-import-file').value = '';
+            this.showInfiniteCampusSteps(true);
             window.alert(`Infinite Campus import complete: ${parts.join(', ') || 'nothing new to add'}.`);
         }
 
@@ -6245,6 +6284,7 @@
                 { route: 'dashboard', sel: '#study-priority-list', title: 'Quizzes & tests', text: 'Add an upcoming quiz or test with the "Add quiz or test" button and StudBud suggests what to study today, how long, and the best way to do it.' },
                 { route: 'dashboard', sel: '.focus-sprint-widget', title: 'Focus sprint', text: 'Pick a quiz or test, choose anywhere from 5 to 90 minutes, and start a timer. Finished sprints are logged as study time.' },
                 { route: 'gpa', sel: '#add-course-btn', title: 'Classes & grades', text: 'Add your classes, set up grade categories and log assignment scores (decimals like 23.21/25 work). Your GPA updates automatically.' },
+                { route: 'gpa', sel: '#gpa-view .open-ic-import-btn', title: 'Import from Infinite Campus', text: 'Skip the typing: this button brings in your classes, grades, assignments, categories, class times and school calendar from Infinite Campus. Drag the StudBud Import button to your bookmarks bar once, open Campus and sign in, then click that bookmark. Check the class matches and press Import. Run it again any time to update.' },
                 { route: 'grade-scenarios', sel: nav('grade-scenarios'), title: 'Hypothetical Grades', text: 'Try out possible scores, or change an existing grade, to see how your class grade and GPA would change. Nothing here touches your real transcript.' },
                 { route: 'planner', sel: nav('planner'), title: 'Planner', text: 'Turns your due dates and study logs into a day-by-day plan.' },
                 { route: 'calendar', sel: nav('calendar'), title: 'Calendar', text: 'A month view of everything due. Click a day to add an event.' },
@@ -6263,7 +6303,7 @@
                 { route: 'settings', sel: nav('settings'), title: 'Settings', text: 'Set your graduation year and target GPA, change your username (once a week), back up or restore your data, and replay this tutorial any time.' },
                 { route: 'appearance', sel: '#appearance-view .settings-tabs', title: 'Appearance', text: 'Switch between light and dark, pick a color theme you have unlocked, and turn on compact mode. The sun/moon button in the top bar toggles light and dark quickly.' },
                 { route: 'sound', sel: '#sound-view .settings-tabs', title: 'Sound & music', text: 'Adjust the volume of interface sounds, game effects and music separately, or mute everything.' },
-                { route: 'dashboard', title: 'You are all set!', text: 'Start by adding a class, then an assignment or quiz. Have fun and happy studying!' }
+                { route: 'dashboard', title: 'You are all set!', text: 'Start by importing from Infinite Campus (or adding a class), then add an assignment or quiz. Have fun and happy studying!' }
             ];
         }
 
@@ -7391,6 +7431,10 @@
                     this.openInfiniteCampusSite();
                 } else if (id === 'ic-copy-script-btn') {
                     await this.copyInfiniteCampusScript();
+                } else if (id === 'ic-paste-clipboard-btn') {
+                    await this.pasteInfiniteCampusFromClipboard();
+                } else if (id === 'ic-restart-btn') {
+                    this.restartInfiniteCampusImport();
                 } else if (id === 'ic-preview-btn') {
                     await this.previewInfiniteCampusFromInput();
                 } else if (id === 'ic-apply-import-btn') {

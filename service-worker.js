@@ -1,4 +1,4 @@
-const CACHE_NAME = 'studbud-shell-v60';
+const CACHE_NAME = 'studbud-shell-v61';
 const APP_FILES = [
     './',
     './index.html',
@@ -68,8 +68,9 @@ self.addEventListener('fetch', event => {
         return;
     }
 
+    // Revalidate with the server so a fresh index.html never runs alongside stale scripts.
     event.respondWith(
-        fetch(request)
+        fetch(request, { cache: 'no-cache' })
             .then(response => {
                 if (response.ok) {
                     const copy = response.clone();

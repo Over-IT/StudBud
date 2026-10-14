@@ -899,6 +899,7 @@
                         <ul class="about-list">
                             <li><strong>Dashboard:</strong> see upcoming quizzes, study suggestions and your progress at a glance. Add a quiz or test to get a study plan.</li>
                             <li><strong>GPA &amp; Hypothetical Grades:</strong> enter classes and assignments (decimals like 23.21/25 work), then try possible scores without changing your actual grades.</li>
+                            <li><strong>Import from Infinite Campus:</strong> on the GPA page, bring in your classes, grades, assignments, categories, class times and school calendar in a few clicks.</li>
                             <li><strong>Planner, Calendar &amp; Schedule:</strong> track assignments, due dates and your school day.</li>
                             <li><strong>Flashcards &amp; Import Cards:</strong> create or import decks. Study reviews new and due cards with Anki-style scheduling; quizzes and games can use all your cards anytime.</li>
                             <li><strong>Practice:</strong> quiz yourself with flashcards or try multiplayer game modes solo with simulated players. Open Multiplayer to play with other students.</li>
@@ -1468,32 +1469,48 @@
                     <button class="close-modal-btn icon-btn" type="button" aria-label="Close"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="modal-body">
-                    <p class="settings-hint">StudBud never sees your Infinite Campus password. A small helper runs inside your own signed-in Campus tab, reads your classes, grades, assignments, categories, schedule, and school calendar for this school year, and sends them back here.</p>
+                    <p class="settings-hint">Bring in this year's classes, grades, assignments, categories, schedule and school calendar. StudBud never sees your Campus password.</p>
                     <ol class="ic-steps">
+                        <li>
+                            <strong>Get the StudBud Import button (one time only).</strong>
+                            <div class="ic-row">
+                                <a id="ic-bookmarklet-link" class="primary-btn ic-bookmarklet" href="#" draggable="true" title="Drag me to your bookmarks bar"><i class="fas fa-bookmark"></i> StudBud Import</a>
+                                <span class="ic-drag-hint"><i class="fas fa-arrow-up"></i> Drag this up to your bookmarks bar</span>
+                            </div>
+                            <small>Don't see a bookmarks bar? Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> (<kbd>⌘</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> on Mac). Already added it? Skip to step 2.</small>
+                        </li>
                         <li>
                             <strong>Open Infinite Campus and sign in.</strong>
                             <div class="ic-row">
-                                <input id="ic-district-url" type="url" placeholder="https://yourdistrict.infinitecampus.org/campus/portal/students/..." aria-label="Infinite Campus address">
-                                <button id="ic-open-campus-btn" class="secondary-btn" type="button"><i class="fas fa-arrow-up-right-from-square"></i> Open Campus</button>
+                                <button id="ic-open-campus-btn" class="primary-btn" type="button"><i class="fas fa-arrow-up-right-from-square"></i> Open Infinite Campus</button>
                             </div>
-                            <small>Paste the address you use for the Campus Student portal. Opening it from here lets the helper send data straight back.</small>
+                            <details class="ic-more">
+                                <summary>Different Campus address?</summary>
+                                <input id="ic-district-url" type="url" placeholder="https://yourdistrict.infinitecampus.org/campus/..." aria-label="Infinite Campus address">
+                                <small>Paste the address you use for the Campus Student portal.</small>
+                            </details>
                         </li>
                         <li>
-                            <strong>Run the StudBud helper on the Campus page.</strong>
-                            <div class="ic-row">
-                                <a id="ic-bookmarklet-link" class="primary-btn ic-bookmarklet" href="#" draggable="true" title="Drag me to your bookmarks bar"><i class="fas fa-bookmark"></i> StudBud Import</a>
-                                <button id="ic-copy-script-btn" class="secondary-btn" type="button"><i class="fas fa-copy"></i> Copy console script</button>
-                            </div>
-                            <small>Drag <em>StudBud Import</em> to your bookmarks bar, then click it while viewing Campus. Or press F12 on Campus, open Console, paste the copied script, and press Enter.</small>
+                            <strong>On the Campus tab, click <em>StudBud Import</em> in your bookmarks bar.</strong>
+                            <small>It gathers your data and sends it back here. Come back to this tab to check your classes and finish.</small>
+                            <details class="ic-more">
+                                <summary>Can't use bookmarks? Use the console instead</summary>
+                                <div class="ic-row"><button id="ic-copy-script-btn" class="secondary-btn" type="button"><i class="fas fa-copy"></i> Copy console script</button></div>
+                                <small>On the Campus tab press <kbd>F12</kbd>, open <em>Console</em>, paste the script and press <kbd>Enter</kbd>. If Chrome asks, type <em>allow pasting</em> first.</small>
+                            </details>
                         </li>
                         <li>
-                            <strong>Review and import.</strong>
-                            <small>The preview opens automatically when the helper sends data. If it can't (some browsers block it), use <em>Copy data</em> or <em>Download .json</em> in the helper and add it here:</small>
-                            <textarea id="ic-import-textarea" rows="3" placeholder="Paste the copied Infinite Campus data here..."></textarea>
+                            <strong>Nothing showed up here?</strong>
+                            <small>The helper copies your data when it can't send it. Click below to paste it.</small>
                             <div class="ic-row">
+                                <button id="ic-paste-clipboard-btn" class="secondary-btn" type="button"><i class="fas fa-paste"></i> Paste data from Campus</button>
                                 <label class="secondary-btn ic-file-label"><i class="fas fa-file-arrow-up"></i> Choose .json file<input id="ic-import-file" type="file" accept=".json,application/json" hidden></label>
-                                <button id="ic-preview-btn" class="secondary-btn" type="button"><i class="fas fa-eye"></i> Preview</button>
                             </div>
+                            <details class="ic-more">
+                                <summary>Paste it by hand</summary>
+                                <textarea id="ic-import-textarea" rows="3" placeholder="Paste the copied Infinite Campus data here..."></textarea>
+                                <div class="ic-row"><button id="ic-preview-btn" class="secondary-btn" type="button"><i class="fas fa-eye"></i> Preview</button></div>
+                            </details>
                         </li>
                     </ol>
                     <p id="ic-import-status" class="ic-import-status" role="status" aria-live="polite"></p>

@@ -202,27 +202,46 @@
                     return false;
                 }
             };
+            let acknowledged = false;
             window.addEventListener('message', event => {
                 if (event.origin === studbudOrigin && event.data && event.data.format === `${FORMAT_NAME}-ack`) {
-                    say(`StudBud received ${classCount} classes and ${workCount} assignments. Switch back to StudBud to review and finish the import.`);
+                    acknowledged = true;
+                    say(`StudBud received ${classCount} classes and ${workCount} assignments.\nSwitch back to the StudBud tab to check your classes and finish the import.`);
                 }
             });
             sent = send();
             const summary = `Found ${classCount} classes and ${workCount} assignments.${warnings.length ? `\n${warnings.length} item(s) could not be read; the rest is fine.` : ''}`;
-            say(sent ? `${summary}\nSending to StudBud…` : `${summary}\nCopy the data (or download it), then paste it into StudBud's Infinite Campus import window.`);
-            const copy = async () => {
+            const writeClipboard = async () => {
                 try {
                     await navigator.clipboard.writeText(json);
+                    return true;
                 } catch (error) {
                     const area = document.createElement('textarea');
                     area.value = json;
                     area.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
                     document.body.appendChild(area);
                     area.select();
-                    document.execCommand('copy');
+                    let copied = false;
+                    try { copied = document.execCommand('copy'); } catch (copyError) { copied = false; }
                     area.remove();
+                    return copied;
                 }
-                say(`${summary}\nCopied! Paste it into StudBud's Infinite Campus import window.`);
+            };
+            const fallBackToClipboard = async () => {
+                if (acknowledged) return;
+                const copied = await writeClipboard();
+                say(copied
+                    ? `${summary}\nYour data is copied. Go back to StudBud and click "Paste data from Campus".`
+                    : `${summary}\nClick "Copy data", then go back to StudBud and click "Paste data from Campus".`);
+            };
+            say(sent ? `${summary}\nSending to StudBud…` : summary);
+            if (sent) setTimeout(fallBackToClipboard, 2000);
+            else fallBackToClipboard();
+            const copy = async () => {
+                const copied = await writeClipboard();
+                say(copied
+                    ? `${summary}\nCopied! Go back to StudBud and click "Paste data from Campus".`
+                    : `${summary}\nYour browser blocked copying. Use "Download .json" and choose the file in StudBud instead.`);
             };
             button('Copy data', copy);
             button('Download .json', () => {

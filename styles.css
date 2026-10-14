@@ -3491,13 +3491,25 @@ body.compact-ui .streak-flame b { bottom: 4px; font-size: .85rem; }
 
 /* Infinite Campus import */
 #ic-import-modal { max-width: 860px; }
-.ic-steps { display: grid; gap: 14px; margin: 12px 0; padding-left: 1.3rem; list-style: decimal; }
-.ic-steps li::marker { font-weight: 700; }
+.ic-steps { display: grid; gap: 14px; margin: 12px 0; padding-left: 0; list-style: none; counter-reset: ic-step; }
+.ic-steps > li { position: relative; padding-left: 2.2rem; counter-increment: ic-step; }
+.ic-steps > li::before { content: counter(ic-step); position: absolute; left: 0; top: 0; width: 1.6rem; height: 1.6rem; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: .85rem; color: var(--accent-on-primary, #fff); background: var(--accent-primary); }
 .ic-steps li { display: grid; gap: 6px; }
 .ic-steps small, .ic-class-info small { color: var(--text-muted); }
 .ic-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .ic-row input[type="url"] { flex: 1 1 260px; min-width: 0; }
 .ic-bookmarklet { cursor: grab; text-decoration: none; }
+.ic-drag-hint { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: .9rem; }
+.ic-drag-hint i { animation: ic-nudge 1.4s ease-in-out infinite; }
+@keyframes ic-nudge { 50% { transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .ic-drag-hint i { animation: none; } }
+.ic-more { display: grid; gap: 6px; }
+.ic-more summary { cursor: pointer; color: var(--text-muted); font-size: .9rem; width: fit-content; }
+.ic-more[open] summary { margin-bottom: 6px; }
+.ic-more input[type="url"], .ic-more textarea { width: 100%; }
+.ic-steps kbd { padding: 0 5px; border: 1px solid var(--border-glass); border-radius: 4px; font: inherit; font-size: .85em; }
+#ic-import-modal.ic-has-preview .ic-steps, #ic-import-modal.ic-has-preview > .modal-body > .settings-hint { display: none; }
+#ic-import-preview .modal-footer { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .ic-file-label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .ic-import-status:empty { display: none; }
 .ic-import-status { padding: 10px 12px; border: 1px solid var(--border-glass); border-radius: var(--border-radius-sm); background: var(--bg-glass); }
