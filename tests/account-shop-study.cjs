@@ -49,6 +49,27 @@ async function run() {
     assert.equal(app.multiplayerDisplayName(), 'Ada Lovelace', 'in-app multiplayer names use the saved real name');
     state.state.profile.lastName = '';
     assert.equal(app.multiplayerDisplayName(), 'Ada', 'either saved name can be used without falling back to the username');
+    const accountTagMarkup = app.accountTagMarkup;
+    const applyAppearance = app.applyAppearance;
+    app.accountTagMarkup = username => `<span data-account="${app.escapeHTML(username)}"></span>`;
+    app.applyAppearance = () => {};
+    elements.set('account-name', {});
+    elements.set('multiplayer-header-name', {});
+    app.renderProfile();
+    assert.equal(elements.get('multiplayer-header-name').textContent, 'Ada');
+    assert.equal(elements.get('account-name').innerHTML, 'Ada <span data-account="student"></span>',
+        'account display uses the real name but tags still identify the username');
+    state.state.profile.firstName = '<Ada>';
+    app.renderProfile();
+    assert.ok(elements.get('account-name').innerHTML.startsWith('&lt;Ada&gt; '), 'account real names are escaped');
+    state.state.profile.firstName = '';
+    app.renderProfile();
+    assert.ok(elements.get('account-name').innerHTML.startsWith('student '), 'missing real names fall back to the username');
+    state.state.profile.firstName = 'Ada';
+    app.accountTagMarkup = accountTagMarkup;
+    app.applyAppearance = applyAppearance;
+    elements.delete('account-name');
+    elements.delete('multiplayer-header-name');
     delete window.StudBudCloud.user;
 
     for (const [id, value] of [

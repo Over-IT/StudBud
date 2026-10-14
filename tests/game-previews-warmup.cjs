@@ -963,6 +963,26 @@ async function checkCommunityAndAdminUi() {
         if (tag) assert.ok(profile.innerHTML.includes(`>${tag}</span>`), `${username} public profile shows its account tag`);
         else assert.ok(!profile.innerHTML.includes('account-tag'), 'ordinary profiles do not gain an account tag');
     }
+    const friendProfile = node();
+    friendProfile.scrollIntoView = () => {};
+    nodes.set('friend-profile', friendProfile);
+    for (const displayName of ['Ada <Lovelace>', null, '']) {
+        const payload = { username: 'student', display_name: displayName, is_me: true, show_stats: false, decks: shared };
+        sandbox.window.StudBudCommunityGames.getUserProfile = async () => payload;
+        sandbox.window.StudBudCommunityGames.friendCall = async () => payload;
+        await app.openUserProfile('author');
+        await app.showFriendProfile('author');
+        for (const markup of [profile.innerHTML, friendProfile.innerHTML]) {
+            assert.match(markup, /<h3>student /, 'public and bud profiles always lead with the username');
+            if (displayName) {
+                assert.match(markup, /<\/h3><small class="profile-real-name">Ada &lt;Lovelace&gt;<\/small>/,
+                    'the disclosed real name is escaped and displayed below the username');
+            } else {
+                assert.ok(!markup.includes('profile-real-name'), 'private or empty real names have no subtitle');
+            }
+        }
+        assert.match(profile.innerHTML, /class="you-badge">you<\/em>/, 'own profiles retain their badge');
+    }
     await app.importCommunityDeck('saved-set');
     await app.importCommunityDeck('owned-set');
     assert.equal(imports, 0, 'already-added and original published sets must not call the import RPC');

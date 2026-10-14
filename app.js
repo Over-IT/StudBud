@@ -3140,7 +3140,7 @@
                 const { data } = await cloud.client.auth.refreshSession();
                 if (data?.user) cloud.user = data.user;
                 const accountName = document.getElementById('account-name');
-                if (accountName) accountName.innerHTML = `${this.escapeHTML(username)} ${this.accountTagMarkup(username)}`;
+                if (accountName) accountName.innerHTML = `${this.escapeHTML(this.multiplayerDisplayName())} ${this.accountTagMarkup(username, this.userTags)}`;
                 statusEl.textContent = `Username changed to ${username}. Use it the next time you sign in.`;
                 document.getElementById('forced-username-modal')?.remove();
                 await this.refreshUsernameCard();
@@ -3179,7 +3179,7 @@
             // Show the tab to the admin accounts even if the server isn't set up yet, so the page can explain what is missing.
             const name = String(window.StudBudCloud?.user?.user_metadata?.username || '').toLowerCase();
             const accountName = document.getElementById('account-name');
-            if (accountName) accountName.innerHTML = `${this.escapeHTML(name)} ${this.accountTagMarkup(name)}`;
+            if (accountName) accountName.innerHTML = `${this.escapeHTML(this.multiplayerDisplayName())} ${this.accountTagMarkup(name)}`;
             this.isAdmin = ['overit', 'andy'].includes(name);
             try { if (await window.StudBudCommunityGames.isAdmin()) this.isAdmin = true; } catch (error) { /* keep the name check */ }
             try {
@@ -3191,7 +3191,7 @@
                 console.warn('[Profile] Could not load account tags:', error.message);
                 this.userTags = [];
             }
-            if (accountName) accountName.innerHTML = `${this.escapeHTML(name)} ${this.accountTagMarkup(name, this.userTags)}`;
+            if (accountName) accountName.innerHTML = `${this.escapeHTML(this.multiplayerDisplayName())} ${this.accountTagMarkup(name, this.userTags)}`;
             this.canModerateFlashcards = this.isAdmin || this.userTags.includes('moderator');
             this.canTestGames = this.isAdmin || this.userTags.includes('tester');
             this.canAccessStaff = this.canModerateFlashcards || this.canTestGames;
@@ -6042,6 +6042,8 @@
             const displayName = this.multiplayerDisplayName();
             const headerName = document.getElementById('multiplayer-header-name');
             if (headerName) headerName.textContent = displayName;
+            const accountName = document.getElementById('account-name');
+            if (accountName) accountName.innerHTML = `${this.escapeHTML(displayName)} ${this.accountTagMarkup(window.StudBudCloud?.user?.user_metadata?.username, this.userTags)}`;
             const grade = document.getElementById('header-grade-level');
             if (grade) grade.textContent = `Class of ${classYear}`;
             const selectedTerm = profile.currentTerm === 'S1' || profile.currentTerm === 'S2'
@@ -6273,7 +6275,7 @@
                 const stat = (label, value) => `<div class="friend-stat"><strong>${value}</strong><small>${label}</small></div>`;
                 const facts = [p.grade_level && `🎓 ${p.grade_level}`, p.favorite_subject && `⭐ ${p.favorite_subject}`, p.study_goal && `🎯 ${p.study_goal}`].filter(Boolean).map(f => `<span class="friend-chip">${this.escapeHTML(f)}</span>`).join('');
                 const decks = (p.decks || []).map(d => `<li class="friend-row"><div><strong>${this.escapeHTML(d.title)}</strong>${d.course ? ` <span class="deck-chip"><i class="fas fa-book"></i> ${this.escapeHTML(d.course)}</span>` : ''}<br><small>${Number(d.card_count)} cards · studied by ${Number(d.study_count)}</small></div>${p.is_me && !this.findCommunityDeck(d.id) ? '' : this.communityDeckActionMarkup(d.id)}</li>`).join('');
-                modal.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.display_name || p.username)} ${this.accountTagMarkup(p.username, p.tags)}${p.is_me ? ' <em class="you-badge">you</em>' : ''}</h3></div><button type="button" class="icon-btn profile-close" data-action="close-user-profile" aria-label="Close profile"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
+                modal.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.username)} ${this.accountTagMarkup(p.username, p.tags)}${p.is_me ? ' <em class="you-badge">you</em>' : ''}</h3>${p.display_name ? `<small class="profile-real-name">${this.escapeHTML(p.display_name)}</small>` : ''}</div><button type="button" class="icon-btn profile-close" data-action="close-user-profile" aria-label="Close profile"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
                     ${p.bio ? `<p class="friend-bio">${this.escapeHTML(p.bio)}</p>` : ''}${facts ? `<div class="friend-chips">${facts}</div>` : ''}
                     <div class="friend-stats">${p.show_stats === false ? stat('Match wins', Number(p.wins) || 0) : `${stat('Studied today', this.formatStudyDuration(p.today_seconds))}${stat('This week', this.formatStudyDuration(p.week_seconds))}${stat('All time', this.formatStudyDuration(p.total_seconds))}${stat('Day streak', `${Number(p.streak_days) || 0} 🔥`)}${stat('Match wins', Number(p.wins) || 0)}`}</div>
                     <h4>Shared flashcard sets</h4>
@@ -6292,7 +6294,7 @@
                 const avatar = this.multiplayerAvatarMarkup({ skin: p.skin, hat: p.hat, acc: p.accessory }, true);
                 const stat = (label, value) => `<div class="friend-stat"><strong>${value}</strong><small>${label}</small></div>`;
                 const facts = [p.grade_level && `🎓 ${p.grade_level}`, p.favorite_subject && `⭐ ${p.favorite_subject}`, p.study_goal && `🎯 ${p.study_goal}`].filter(Boolean).map(f => `<span class="friend-chip">${this.escapeHTML(f)}</span>`).join('');
-                panel.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.display_name || p.username)} ${this.accountTagMarkup(p.username, p.tags)}</h3>                <small>Bud</small></div><button type="button" class="icon-btn profile-close" data-action="friend-profile-close" aria-label="Close profile"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
+                panel.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.username)} ${this.accountTagMarkup(p.username, p.tags)}</h3>${p.display_name ? `<small class="profile-real-name">${this.escapeHTML(p.display_name)}</small>` : ''}<small>Bud</small></div><button type="button" class="icon-btn profile-close" data-action="friend-profile-close" aria-label="Close profile"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
                     ${p.bio ? `<p class="friend-bio">${this.escapeHTML(p.bio)}</p>` : ''}${facts ? `<div class="friend-chips">${facts}</div>` : ''}
                     <div class="friend-stats">${p.show_stats === false ? stat('Match wins', Number(p.wins) || 0) : `${stat('Studied today', this.formatStudyDuration(p.today_seconds))}${stat('This week', this.formatStudyDuration(p.week_seconds))}${stat('All time', this.formatStudyDuration(p.total_seconds))}${stat('Day streak', `${Number(p.streak_days) || 0} 🔥`)}${stat('Match wins', Number(p.wins) || 0)}`}</div>`;
                 panel.classList.remove('hidden');

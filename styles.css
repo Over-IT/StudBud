@@ -3085,6 +3085,7 @@ body.tutorial-active { overscroll-behavior: contain; }
 .friend-profile-head { display: flex; align-items: center; gap: 14px; }
 .friend-profile-head > div { flex: 1; min-width: 0; }
 .friend-profile-head h3 { margin: 0; overflow-wrap: anywhere; }
+.profile-real-name { display: block; margin-top: 3px; font-size: .85rem; color: var(--text-secondary); overflow-wrap: anywhere; }
 .friend-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
 .friend-stat { display: grid; gap: 2px; padding: 10px; border-radius: 12px; background: var(--bg-glass-hover); border: 1px solid var(--border-glass); text-align: center; }
 .friend-stat small { color: var(--text-secondary); }

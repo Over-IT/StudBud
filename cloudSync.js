@@ -338,7 +338,7 @@
             localStorage.setItem('STUDBUD_CLOUD_ACCOUNT_ID', user.id);
             const username = user.user_metadata?.username || user.email;
             const accountName = document.getElementById('account-name');
-            if (accountName) accountName.textContent = username;
+            if (accountName) accountName.textContent = window.NexusApp?.multiplayerDisplayName?.() || username;
             this.bindStateEvents();
             await window.NexusApp.recoverOwnedCommunityDecks();
             if (version !== this.accountVersion) return;
