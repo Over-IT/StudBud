@@ -751,7 +751,7 @@
     }
 
     function buildImportPlan(model, state = {}, options = {}) {
-        const school = options.school === 'other' ? 'other' : 'pchs';
+        const school = ['pchs', 'pnhs', 'pshs', 'pwhs', 'other'].includes(options.school) ? options.school : 'pchs';
         const catalog = list(options.catalog);
         const courses = list(state.courses);
         const termsById = new Map(model.terms.map(term => [term.id, term]));
@@ -763,7 +763,7 @@
 
         const groups = new Map();
         model.sections.forEach(section => {
-            const match = school === 'pchs' ? matchCourse(section.courseNumber, section.name, catalog) : { course: null, confidence: 0, method: 'none', suggestions: [] };
+            const match = school !== 'other' ? matchCourse(section.courseNumber, section.name, catalog) : { course: null, confidence: 0, method: 'none', suggestions: [] };
             const nameKey = titleTokens(section.name).join(' ') || section.id;
             const key = match.course && match.confidence >= 0.55 ? `catalog:${match.course.code}` : `name:${nameKey}`;
             if (!groups.has(key)) groups.set(key, { key, sections: [], match, assignmentCount: 0 });
@@ -872,7 +872,7 @@
                 return;
             }
             const catalogCode = override === undefined ? entry.match?.code || '' : override;
-            const catalogCourse = school === 'pchs' && catalogCode ? catalog.find(course => course.code === catalogCode) : null;
+            const catalogCourse = school !== 'other' && catalogCode ? catalog.find(course => course.code === catalogCode) : null;
             let course = entry.existingCode ? courses.find(item => item.code === entry.existingCode) : null;
             const isNew = !course;
             if (isNew) {
@@ -1023,7 +1023,7 @@
             };
             summary.days = Object.values(schedule.ic.calendars).reduce((sum, days) => sum + Object.keys(days).length, 0);
 
-            if (include.schedule && school === 'pchs') {
+            if (include.schedule && school !== 'other') {
                 // Fill the period picker too; a class whose term covers today wins a shared period
                 const all = { ...(schedule.all || {}) };
                 Object.keys(all).forEach(period => { if (touchedCodes.includes(all[period])) delete all[period]; });

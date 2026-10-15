@@ -206,6 +206,17 @@
 
     const NexusDB = new NexusDBManager();
 
+    // Study activity from the beta test was reset. Sessions before this moment and older XP/levels are dropped
+    // everywhere they can come from (this device, cloud backups, other devices that sync later).
+    const ACTIVITY_RESET_ID = 'beta-end-2026-10-15';
+    const ACTIVITY_RESET_AT = Date.parse('2026-10-15T05:00:00Z');
+    const freshGameMetrics = () => ({ level: 1, xp: 0, streakDays: 0, lastStudyDate: null, resetId: ACTIVITY_RESET_ID });
+    const isCurrentStudySession = session => {
+        const time = Date.parse(session?.timestamp || '');
+        return Number.isFinite(time) && time >= ACTIVITY_RESET_AT;
+    };
+    const currentGameMetrics = metrics => metrics && metrics.resetId === ACTIVITY_RESET_ID ? metrics : freshGameMetrics();
+
     // ============================================================================
     // 3. REACTIVE STATE ENGINE
     // ============================================================================
@@ -225,10 +236,10 @@
                 selectedGradeScenarioId: null,
                 flashcards: [],
                 studyHistory: [],
-                gameMetrics: { level: 1, xp: 0, streakDays: 0, lastStudyDate: null },
+                gameMetrics: freshGameMetrics(),
                 settings: {
                     theme: "dark",
-                    colorScheme: "monochrome",
+                    colorScheme: "studbud",
                     audioVolume: 0.70,
                     audioLevels: { lofi: 0.5, rain: 0.5, white: 0.3, binaural: 0.6 },
                     soundscapePreset: "off",
@@ -265,9 +276,12 @@
                 const metrics = await NexusDB.get('gameMetrics', 'user_metrics');
 
                 this.state.flashcards = flashcards;
-                this.state.studyHistory = studyHistory;
-                if (metrics) this.state.gameMetrics = metrics;
-                else await NexusDB.put('gameMetrics', { id: 'user_metrics', ...this.state.gameMetrics });
+                this.state.studyHistory = studyHistory.filter(isCurrentStudySession);
+                const staleSessions = studyHistory.filter(session => !isCurrentStudySession(session));
+                await Promise.all(staleSessions.map(session => NexusDB.delete('studyHistory', session.id)));
+                const { id: _metricsId, ...storedMetrics } = metrics || {};
+                this.state.gameMetrics = currentGameMetrics(metrics ? storedMetrics : null);
+                if (!metrics || this.state.gameMetrics !== storedMetrics) await NexusDB.put('gameMetrics', { id: 'user_metrics', ...this.state.gameMetrics });
                 this.saveToLocalStorage();
 
                 EventBus.emit('state:initialized', this.state);
@@ -448,9 +462,11 @@
                     throw new Error("Invalid backup format.");
                 }
 
+                const studyHistory = (parsed.studyHistory || []).filter(isCurrentStudySession);
+                const gameMetrics = currentGameMetrics(parsed.state.gameMetrics);
                 await NexusDB.replaceStores({
-                    flashcards: parsed.flashcards || [], studyHistory: parsed.studyHistory || [],
-                    gameMetrics: [{ id: 'user_metrics', ...(parsed.state.gameMetrics || this.state.gameMetrics) }]
+                    flashcards: parsed.flashcards || [], studyHistory,
+                    gameMetrics: [{ id: 'user_metrics', ...gameMetrics }]
                 });
 
                 this.state.profile = parsed.state.profile || this.state.profile;
@@ -458,11 +474,11 @@
                 this.state.assignments = parsed.state.assignments || [];
                 this.state.gradeScenarios = Array.isArray(parsed.state.gradeScenarios) ? parsed.state.gradeScenarios : [];
                 this.state.selectedGradeScenarioId = parsed.state.selectedGradeScenarioId || null;
-                this.state.gameMetrics = parsed.state.gameMetrics || this.state.gameMetrics;
+                this.state.gameMetrics = gameMetrics;
                 this.state.settings = parsed.state.settings || this.state.settings;
                 this.state.schedule = parsed.state.schedule || { all: {}, odd: {}, even: {} };
                 this.state.flashcards = parsed.flashcards || [];
-                this.state.studyHistory = parsed.studyHistory || [];
+                this.state.studyHistory = studyHistory;
 
                 this.saveToLocalStorage();
 
@@ -517,14 +533,15 @@
         appearance: ['Appearance & performance', 'Colors, spacing and game detail.'],
         sound: ['Sound & music', 'Interface sounds, effects and music.'],
         about: ['Help & about', 'How StudBud works.'],
-        admin: ['Staff tools', 'Tools for testers, moderators and admins.']
+        admin: ['Staff tools', 'Tools for testers, moderators and admins.'],
+        classes: ['Classes', 'Join your teachers’ classes and study their flashcard sets.']
     };
 
     class RouterEngine {
         constructor() {
             this.routes = [
                 "dashboard", "gpa", "grade-scenarios", "planner", "calendar", "schedule", "flashcard",
-                "analytics", "leaderboard", "exam-arcade", "multiplayer", "profile", "shop", "inventory", "importer", "settings", "appearance", "sound", "admin", "about", "friends"
+                "analytics", "leaderboard", "exam-arcade", "multiplayer", "profile", "shop", "inventory", "importer", "settings", "appearance", "sound", "admin", "about", "friends", "classes"
             ];
             this.activeRoute = "dashboard";
         }
@@ -556,6 +573,7 @@
         navigate(route, updateHash = true) {
             if (route !== 'class' && !this.routes.includes(route)) route = "dashboard";
             if (route === 'admin' && (!window.NexusApp?.canAccessStaff || window.StudBudCloud?.offlineMode)) route = "dashboard";
+            if (route === 'classes' && window.NexusApp?.classrooms && !window.NexusApp.classrooms.available()) route = "dashboard";
 
             this.activeRoute = route;
             AppState.set('currentView', route);
@@ -1214,6 +1232,12 @@
                 if (event.target.matches('select[data-ic-class]')) {
                     event.target.closest('.ic-class-row')?.classList.toggle('ic-skipped', event.target.value === 'skip');
                 }
+                if (event.target.id === 'study-type-toggle') {
+                    localStorage.setItem('studbud-type-answer', event.target.checked ? '1' : '0');
+                    const revealed = !document.getElementById('sm2-controls').classList.contains('hidden');
+                    document.getElementById('study-type-form').classList.toggle('hidden', !event.target.checked || revealed);
+                    if (event.target.checked && !revealed) document.getElementById('study-type-input').focus({ preventScroll: true });
+                }
             });
             window.addEventListener('online', () => {
                 this.syncPendingStudyTime().catch(error => {
@@ -1250,7 +1274,7 @@
                 }
                 if (event.target.matches('#course-search')) {
                     document.getElementById('course-name').value = '';
-                    document.getElementById('course-selection-hint').textContent = 'Choose a PCHS course from the matches.';
+                    document.getElementById('course-selection-hint').textContent = `Choose a ${this.schoolShortName()} course from the matches.`;
                     this.filterCourseCatalog(event.target.value);
                 }
                 if (event.target.matches('#join-game-code')) {
@@ -1299,6 +1323,7 @@
                 if (route === 'friends') this.loadFriends();
                 if (route === 'about') this.loadAnnouncementHistory();
                 if (route === 'admin') this.loadAdminList();
+                if (route === 'classes') this.classrooms?.render();
                 if (route === 'multiplayer') {
                     this.renderHostedGameDecks();
                     this.renderMultiplayerProfile(true);
@@ -1667,7 +1692,7 @@
                 ).join('');
                 if (courses.some(course => course.code === selected)) options.value = selected;
             }
-            if (!catalog.length) console.error('[StudBud] PCHS course catalog did not load.');
+            if (!catalog.length) console.error('[StudBud] Parkway course catalog did not load.');
         }
 
         termLabel(term) {
@@ -1900,7 +1925,7 @@
             const mobileInstructions = document.getElementById('ic-mobile-instructions');
             if (mobileInstructions && window.matchMedia('(pointer: coarse), (max-width: 680px)').matches) mobileInstructions.open = true;
             const urlInput = document.getElementById('ic-district-url');
-            if (urlInput && !urlInput.value) urlInput.value = localStorage.getItem('studbud-ic-url') || (this.currentSchool() === 'pchs' ? PARKWAY_CAMPUS_URL : '');
+            if (urlInput && !urlInput.value) urlInput.value = localStorage.getItem('studbud-ic-url') || (this.isParkwaySchool() ? PARKWAY_CAMPUS_URL : '');
             const moreAddress = urlInput?.closest('details');
             if (moreAddress && !urlInput.value) moreAddress.open = true;
             this.setInfiniteCampusStatus('');
@@ -2049,7 +2074,7 @@
                 return;
             }
             const school = this.currentSchool();
-            const catalog = window.PCHS_COURSE_CATALOG || [];
+            const catalog = this.schoolCatalog(school);
             const plan = IC.buildImportPlan(model, { courses: AppState.get('courses') || [] }, { school, catalog });
             this.icImport = { model, plan };
             this.renderInfiniteCampusPreview();
@@ -2062,8 +2087,9 @@
             if (!container || !this.icImport) return;
             const { plan, model } = this.icImport;
             const esc = value => this.escapeHTML(value ?? '');
-            const pchs = plan.school === 'pchs';
-            const catalog = (window.PCHS_COURSE_CATALOG || []).filter(course => !course.legacy && course.code);
+            const pchs = this.isParkwaySchool(plan.school);
+            const schoolTag = this.schoolShortName(plan.school);
+            const catalog = this.schoolCatalog(plan.school).filter(course => course.code);
             const byCategory = new Map();
             catalog.forEach(course => {
                 const key = course.category || 'Other';
@@ -2077,10 +2103,10 @@
                 const selected = entry.include ? (entry.match?.code || '') : 'skip';
                 const suggestionOptions = entry.suggestions.map(course => `<option value="${esc(course.code)}">${esc(course.title)}${entry.match?.code === course.code ? ' (best match)' : ''}</option>`).join('');
                 const select = `<select data-ic-class="${index}" aria-label="StudBud class for ${esc(entry.name)}">
-                    ${pchs && suggestionOptions ? `<optgroup label="Closest PCHS courses">${suggestionOptions}</optgroup>` : ''}
+                    ${pchs && suggestionOptions ? `<optgroup label="Closest ${esc(schoolTag)} courses">${suggestionOptions}</optgroup>` : ''}
                     <option value="">Use Campus name: ${esc(entry.name)}</option>
                     <option value="skip">Don't import</option>
-                    ${pchs ? `<optgroup label="All PCHS courses">${fullCatalog}</optgroup>` : ''}
+                    ${pchs ? `<optgroup label="All ${esc(schoolTag)} courses">${fullCatalog}</optgroup>` : ''}
                 </select>`;
                 const confidence = entry.match ? Math.round(entry.match.confidence * 100) : 0;
                 const badge = !pchs ? ''
@@ -2106,7 +2132,7 @@
             }).join('');
             container.innerHTML = `
                 <h3>${esc(model.studentName ? `${model.studentName}'s classes` : 'Classes found')}</h3>
-                ${pchs ? '<p class="settings-hint">Each Campus class is matched to the closest PCHS catalog course (course number first, then name). Change any match that looks wrong.</p>' : ''}
+                ${pchs ? `<p class="settings-hint">Each Campus class is matched to the closest ${esc(schoolTag)} catalog course (course number first, then name). Change any match that looks wrong.</p>` : ''}
                 <div class="ic-class-list">${rows || '<p class="empty-state">No classes were found for this school year.</p>'}</div>
                 <fieldset class="ic-options">
                     <legend>Also import</legend>
@@ -2135,7 +2161,7 @@
             container.querySelectorAll('select[data-ic-class]').forEach(select => {
                 overrides[plan.classes[Number(select.dataset.icClass)].key] = select.value;
             });
-            const options = { overrides, catalog: window.PCHS_COURSE_CATALOG || [] };
+            const options = { overrides, catalog: window.PCHS_COURSE_CATALOG || [] }; // full catalog so previously saved codes still resolve
             container.querySelectorAll('[data-ic-option]').forEach(box => { options[box.dataset.icOption] = box.checked; });
             if (Object.values(overrides).every(value => value === 'skip')) throw new Error('Choose at least one class to import.');
             const result = IC.applyImportPlan(model, plan, {
@@ -2210,7 +2236,7 @@
             const edit = document.getElementById('daily-schedule-edit');
             if (edit) edit.textContent = hasSchedule ? 'Edit schedule' : 'Set schedule';
             const noteText = note && note !== pchsSchedule?.title ? ` · ${note}` : '';
-            type.textContent = pchsSchedule ? `${pchsSchedule.title} · ${date.toLocaleDateString(undefined, { weekday: 'long' })}${noteText}` : 'PCHS schedule unavailable';
+            type.textContent = pchsSchedule ? `${pchsSchedule.title} · ${date.toLocaleDateString(undefined, { weekday: 'long' })}${noteText}` : 'School schedule unavailable';
             const todayKey = localDateKey(date);
             const work = (AppState.get('assignments') || []).filter(item => String(item.dueDate || '').slice(0, 10) === todayKey && item.status !== 'completed' && !this.isGradedItem(item));
             const workMarkup = items => items.length ? `<ul class="schedule-due-work">${items.map(item => `<li><span class="schedule-work-kind">${this.escapeHTML(item.kind || 'assignment')}</span><button type="button" class="schedule-work-link" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">${this.escapeHTML(item.title)}</button></li>`).join('')}</ul>` : '';
@@ -2237,7 +2263,7 @@
             }
             list.innerHTML = entries.map(entry => entry.periodNumber
                 ? `<li class="daily-period-row"><span>${this.escapeHTML(entry.period)}<small>${this.escapeHTML(entry.time || '')}${entry.room ? ` · Rm ${this.escapeHTML(entry.room)}` : ''}</small></span><div class="daily-period-class"><strong>${this.escapeHTML(entry.course?.title || 'No class assigned')}</strong>${workMarkup(work.filter(item => entry.course && item.courseCode === entry.course.code))}</div></li>`
-                : `<li class="daily-period-row"><span>PCHS block</span><strong>${this.escapeHTML(entry.period)}</strong></li>`
+                : `<li class="daily-period-row"><span>${this.escapeHTML(this.schoolTag() || 'School')} block</span><strong>${this.escapeHTML(entry.period)}</strong></li>`
             ).join('') + otherMarkup;
         }
 
@@ -2640,9 +2666,14 @@
             const myId = window.StudBudCloud?.user?.id;
             grid.innerHTML = decks.length ? decks.map(deck => {
                 const studyCount = this.deckStudyCount(deck);
+                const id = this.escapeHTML(deck.id);
+                const cardCount = (deck.cards || []).length;
+                const mastery = this.deckMastery(deck);
                 // Sets added from the community belong to their author: credit them and don't allow reposting.
-                const borrowed = Boolean(deck.communitySourceId && deck.communitySourceOwnerId && deck.communitySourceOwnerId !== myId);
-                const author = borrowed
+                const borrowed = Boolean((deck.communitySourceId && deck.communitySourceOwnerId && deck.communitySourceOwnerId !== myId) || deck.classDeckId);
+                const author = deck.classDeckId
+                    ? `<small class="deck-author teacher-set"><i class="fas fa-chalkboard-user"></i> Class set from ${this.escapeHTML(deck.communitySourceAuthor || 'your teacher')}</small>`
+                    : borrowed
                     ? `<small class="deck-author">by <button type="button" class="link-btn" data-action="view-profile" data-id="${this.escapeHTML(deck.communitySourceOwnerId)}">${this.escapeHTML(deck.communitySourceAuthor || 'another student')}</button> ${this.accountTagMarkup(deck.communitySourceAuthor)}</small>`
                     : deck.communityPublished ? '<small class="deck-author">by you · shared</small>' : '';
                 const share = borrowed
@@ -2663,19 +2694,37 @@
                     </details>`;
                 return `
                 <article class="glass-card deck-card">
-                    <h3>${this.escapeHTML(deck.title)}</h3>
-                    ${author}
-                    ${tags}
-                    <p>${(deck.cards || []).length} cards · ${studyCount} scheduled today</p>
-                    ${linkEditor}
-                    <div class="actions">
-                        <button class="primary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}" ${studyCount ? '' : 'disabled'}>${studyCount ? 'Study' : 'Nothing scheduled'}</button>
-                        <button class="secondary-btn" data-action="add-card" data-id="${this.escapeHTML(deck.id)}">Add Card</button>
-                        <button class="secondary-btn" data-action="edit-deck" data-id="${this.escapeHTML(deck.id)}">Edit set</button>
-                        ${share}
-
-                        <button class="danger-btn" data-action="delete-deck" data-id="${this.escapeHTML(deck.id)}">Delete</button>
+                    <div class="deck-card-top">
+                        <div class="deck-ring" style="--p:${mastery.pct}" title="${mastery.pct}% mastered"><span>${mastery.pct}%</span></div>
+                        <div class="deck-card-title">
+                            <h3>${this.escapeHTML(deck.title)}</h3>
+                            ${author}
+                        </div>
                     </div>
+                    ${tags}
+                    <div class="deck-stats">
+                        <span><i class="fas fa-clone"></i> ${cardCount} cards</span>
+                        <span class="${studyCount ? 'is-due' : ''}"><i class="fas fa-clock"></i> ${studyCount} due</span>
+                        ${mastery.starred ? `<span class="is-star"><i class="fas fa-star"></i> ${mastery.starred}</span>` : ''}
+                        ${mastery.weak ? `<span class="is-weak" title="Cards under 75% accuracy"><i class="fas fa-triangle-exclamation"></i> ${mastery.weak} weak</span>` : ''}
+                    </div>
+                    <div class="actions deck-main-actions">
+                        ${studyCount
+                            ? `<button class="primary-btn" data-action="study-deck" data-id="${id}"><i class="fas fa-play"></i> Study ${studyCount}</button>`
+                            : `<button class="primary-btn" data-action="cram-deck" data-id="${id}" ${cardCount ? '' : 'disabled'} title="Nothing due. Go through every card without changing your schedule"><i class="fas fa-bolt"></i> Cram</button>`}
+                        ${studyCount ? `<button class="secondary-btn" data-action="cram-deck" data-id="${id}" title="Go through every card without changing your schedule"><i class="fas fa-bolt"></i> Cram</button>` : ''}
+                        ${mastery.starred ? `<button class="secondary-btn" data-action="cram-starred" data-id="${id}" title="Study only starred cards" aria-label="Study starred cards"><i class="fas fa-star"></i></button>` : ''}
+                        <button class="secondary-btn" data-action="add-card" data-id="${id}" title="Add a card" aria-label="Add a card"><i class="fas fa-plus"></i></button>
+                        <button class="secondary-btn" data-action="edit-deck" data-id="${id}" title="Edit set" aria-label="Edit set"><i class="fas fa-pen"></i></button>
+                    </div>
+                    <details class="deck-more">
+                        <summary><i class="fas fa-ellipsis"></i> More</summary>
+                        ${linkEditor}
+                        <div class="actions">
+                            ${share}
+                            <button class="danger-btn" data-action="delete-deck" data-id="${id}"><i class="fas fa-trash"></i> Delete</button>
+                        </div>
+                    </details>
                 </article>`;
             }).join('') : `<div class="empty-state glass-card full-width">${search ? 'No decks match your search. Try a different title or class.' : 'No decks yet. Create a deck, import flashcards, or browse community decks above.'}</div>`;
             const missingAuthors = decks.filter(deck => deck.communitySourceOwnerId && !deck.communitySourceAuthor);
@@ -2691,6 +2740,19 @@
             }
             this.syncDeckLinkSelects(document.getElementById('import-deck-course'), document.getElementById('import-deck-assessment'), false);
             this.renderDeckRecommendations();
+        }
+
+        deckMastery(deck) {
+            const cards = (deck.cards || []).filter(Boolean);
+            let mastered = 0, starred = 0, weak = 0;
+            for (const card of cards) {
+                if (Number(card.interval) >= 21 || Number(card.repetitions) >= 4) mastered += 1;
+                else if (Number(card.repetitions) >= 1) mastered += .5;
+                if (card.starred) starred += 1;
+                const stats = card.practiceStats;
+                if (stats?.attempts > 1 && stats.correct / stats.attempts < .75) weak += 1;
+            }
+            return { pct: cards.length ? Math.round(mastered / cards.length * 100) : 0, starred, weak };
         }
 
         renderDeckRecommendations() {
@@ -2925,7 +2987,7 @@
                 && (filter === 'all' || (filter === 'images' && window.FlashcardTools.imageSource(card.answerImage))
                     || (filter === 'attachments' && (card.attachments || []).some(item => window.FlashcardTools.attachmentSource(item)))
                     || (filter === 'keywords' && card.answerMode === 'keywords')
-                    || (filter === 'paused' && card.suspended) || (filter === 'weak' && card.practiceStats?.attempts > 0 && card.practiceStats.correct / card.practiceStats.attempts < .75)));
+                    || (filter === 'paused' && card.suspended) || (filter === 'starred' && card.starred) || (filter === 'weak' && card.practiceStats?.attempts > 0 && card.practiceStats.correct / card.practiceStats.attempts < .75)));
             document.getElementById('deck-editor-undo')?.classList.toggle('hidden', !this.deckEditorUndo?.length);
             document.getElementById('deck-editor-count').textContent = `${cards.length} of ${draft.cards.length} cards`;
             document.getElementById('deck-editor-cards').innerHTML = cards.map(card => `
@@ -2935,6 +2997,7 @@
                     <small>${card.practiceStats?.attempts > 0 ? `${Math.round(card.practiceStats.correct / card.practiceStats.attempts * 100)}% accuracy · ${Number(card.practiceStats.attempts)} attempts` : 'Not practiced yet'}${card.suspended ? ' · Paused scheduled study' : ''}${window.FlashcardTools.imageSource(card.answerImage) ? ' · Private image' : ''}</small>
                     <small>${card.answerMode === 'keywords' ? 'Definition keywords' : card.answerMode === 'vocabulary' ? 'Vocabulary / translation' : card.answerMode === 'exact' ? 'Exact answer' : 'Test grading default'}${card.acceptedAnswers?.length ? ` · ${card.acceptedAnswers.length} alternative answers` : ''}${card.attachments?.length ? ` · ${card.attachments.length} private attachments` : ''}</small>
                     <div class="actions">
+                        <button type="button" class="secondary-btn star-toggle${card.starred ? ' is-on' : ''}" data-action="editor-star-card" data-id="${this.escapeHTML(card.id)}" aria-pressed="${card.starred ? 'true' : 'false'}" aria-label="${card.starred ? 'Unstar' : 'Star'} card"><i class="${card.starred ? 'fas' : 'far'} fa-star"></i></button>
                         <button type="button" class="secondary-btn" data-action="editor-edit-card" data-id="${this.escapeHTML(card.id)}">Edit card</button>
                         <button type="button" class="secondary-btn" data-action="editor-copy-card" data-id="${this.escapeHTML(card.id)}">Duplicate</button>
                         <button type="button" class="secondary-btn" data-action="editor-reverse-card" data-id="${this.escapeHTML(card.id)}">Reverse copy</button>
@@ -2960,6 +3023,21 @@
             input.value = '';
             this.renderDeckEditorCards();
             document.getElementById('deck-editor-count').textContent += ` · Added ${added.length}; skipped ${parsed.length - added.length} duplicates. Save changes to keep them.`;
+        }
+
+        quickAddEditorCard() {
+            if (!this.deckEditorDraft) throw new Error('Open a set before adding cards.');
+            const front = document.getElementById('deck-quick-front');
+            const back = document.getElementById('deck-quick-back');
+            const term = front.value.trim(), answer = back.value.trim();
+            if (!term) { front.focus(); return; }
+            if (!answer) { back.focus(); return; }
+            this.deckEditorDraft.cards.push({ id: `card_${window.crypto.randomUUID()}`, front: term, back: answer, tags: [], repetitions: 0, interval: 0, easeFactor: 2.5 });
+            front.value = '';
+            back.value = '';
+            this.renderDeckEditorCards();
+            document.getElementById('deck-editor-count').textContent += ' · Added. Save changes to keep it.';
+            front.focus();
         }
 
         copyEditorCard(cardId, reverse = false) {
@@ -2992,7 +3070,7 @@
                 if (current && original && !latest) throw new Error('A card was removed while you were editing. Reopen the editor.');
                 if (!latest) return card;
                 const next = { ...latest };
-                for (const field of ['front', 'back', 'tags', 'answerImage', 'distractors', 'suspended', 'answerMode', 'acceptedAnswers', 'keywords', 'attachments']) {
+                for (const field of ['front', 'back', 'tags', 'answerImage', 'distractors', 'suspended', 'starred', 'answerMode', 'acceptedAnswers', 'keywords', 'attachments']) {
                     const before = JSON.stringify(original?.[field]);
                     const edited = JSON.stringify(card[field]);
                     const saved = JSON.stringify(field === 'tags' ? latest.tags || [] : latest[field]);
@@ -3124,6 +3202,23 @@
             return `<div class="season-set-preview">${items.map(item => `<span class="season-set-item rarity-${item.rarity}${owned.includes(item.id) ? ' owned' : ''}" title="${this.escapeHTML(`${item.name} (${item.rarity})${owned.includes(item.id) ? ' · owned' : ''}`)}">${this.shopItemPreview(profile, item)}<small>${this.escapeHTML(item.name)}</small></span>`).join('')}</div>`;
         }
 
+        // Flat, front-facing open box: lid knocked off to the side and the best reward peeking over the rim.
+        openBoxArt(profile, box, all = window.StudBudCommunityGames.boxPool(box), owned = profile?.owned_items || [], extraClass = '') {
+            const order = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
+            const rank = item => order.indexOf(item.rarity);
+            const pool = all.filter(item => !owned.includes(item.id));
+            const peek = (pool.length ? pool : all).slice().sort((a, b) => rank(b) - rank(a))[0];
+            const preview = peek ? this.shopItemPreview(profile, peek) : `<i class="fas ${box.icon}"></i>`;
+            return `<span class="shop-preview open-box${extraClass ? ` ${extraClass}` : ''}${peek ? ` peek-${peek.rarity}` : ''}" aria-hidden="true">
+                <span class="ob-glow"></span>
+                <span class="ob-back"></span>
+                <span class="ob-peek">${preview}</span>
+                <span class="ob-front"><span class="ob-band"></span><span class="ob-emblem"><i class="fas ${box.icon}"></i></span></span>
+                <span class="ob-lid"><span class="ob-band"></span></span>
+                <span class="ob-spark s1"></span><span class="ob-spark s2"></span><span class="ob-spark s3"></span>
+            </span>`;
+        }
+
         shopBoxCard(profile, box, featured = false) {
             const games = window.StudBudCommunityGames;
             const owned = profile.owned_items || [];
@@ -3133,19 +3228,7 @@
             const order = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
             const inside = order.filter(rarity => all.some(item => item.rarity === rarity)).map(rarity =>
                 `<li class="rarity-${rarity}"><b>${rarity}</b> ${all.filter(item => item.rarity === rarity).map(item => `<span class="${owned.includes(item.id) ? 'owned' : ''}">${owned.includes(item.id) ? '<i class="fas fa-check" aria-hidden="true"></i> ' : ''}${this.escapeHTML(item.name)}</span>`).join('')}</li>`).join('');
-            const capsule = `<span class="shop-preview mystery-capsule" aria-hidden="true">
-                            <svg viewBox="0 0 160 140" focusable="false">
-                                <ellipse cx="80" cy="126" rx="56" ry="8" fill="currentColor" opacity=".12"/>
-                                <path d="M24 54 80 31 136 54 136 106 80 130 24 106Z" fill="currentColor"/>
-                                <path d="M80 78 136 54 136 106 80 130Z" fill="#101a17" opacity=".28"/>
-                                <path d="M24 54 80 78 80 130 24 106Z" fill="#101a17" opacity=".12"/>
-                                <path d="M20 44 80 20 140 44 140 61 80 85 20 61Z" fill="currentColor"/>
-                                <path d="M20 44 80 68 140 44M80 68V85M80 85V130" fill="none" stroke="#f0f7f2" stroke-opacity=".45" stroke-width="2" stroke-linejoin="round"/>
-                                <path d="M63 27 122 51 122 67 107 73 107 57 48 33Z" fill="#f0f7f2" opacity=".35"/>
-                                <path d="m32 23 3-9 3 9 9 3-9 3-3 9-3-9-9-3Zm91 1 2-6 2 6 6 2-6 2-2 6-2-6-6-2Z" fill="currentColor" opacity=".7"/>
-                            </svg>
-                            <i class="fas ${box.icon}"></i>
-                        </span>`;
+            const capsule = this.openBoxArt(profile, box, all, owned);
             const style = box.seasonal ? ` style="--box-accent: ${box.season.colors[0]}; --box-accent-2: ${box.season.colors[1]}"` : '';
             const now = new Date();
             const daysLeft = Math.max(1, Math.ceil((Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1) - now) / 86400000));
@@ -3265,7 +3348,7 @@
                 <div class="unbox-stage">
                     <p class="unbox-title">${this.escapeHTML(box.name)}</p>
                     <div class="unbox-rays" aria-hidden="true"></div>
-                    <div class="unbox-box" aria-hidden="true"><span class="unbox-lid"></span><span class="unbox-body"><i class="fas ${box.icon}"></i></span></div>
+                    <div class="unbox-box" aria-hidden="true">${this.openBoxArt(this.multiplayerProfile, box, undefined, [], 'open-box-lg mystery-peek')}</div>
                     <div class="unbox-reel" aria-hidden="true"><div class="unbox-strip"></div><span class="unbox-marker"></span></div>
                     <div class="unbox-result" aria-live="polite"></div>
                     <div class="unbox-confetti" aria-hidden="true"></div>
@@ -3564,6 +3647,8 @@
             window.NexusApp.isAdmin = this.isAdmin;
             window.NexusApp.canAccessStaff = this.canAccessStaff;
             document.getElementById('admin-nav-item')?.classList.toggle('hidden', !this.canAccessStaff);
+            this.classrooms?.refreshNav();
+            if (this.classrooms?.available() && /^#\/?classes$/i.test(window.location.hash) && Router.activeRoute !== 'classes') Router.handleHashChange();
             document.querySelectorAll('#admin-view [data-admin-tab]').forEach(button => {
                 const allowed = this.isAdmin || (['decks', 'reports', 'users'].includes(button.dataset.adminTab) && this.canModerateFlashcards)
                     || (button.dataset.adminTab === 'games' && this.canTestGames);
@@ -3586,7 +3671,7 @@
                 document.getElementById('public-show-school').checked = p.show_school === true;
                 document.getElementById('public-show-stats').checked = p.show_stats !== false;
                 const profile = AppState.get('profile') || {};
-                const school = ['pchs', 'other'].includes(p.school) ? p.school : 'pchs';
+                const school = this.isKnownSchool(p.school) ? p.school : 'pchs';
                 if (profile.school !== school) AppState.set('profile', { ...profile, school });
                 document.getElementById('settings-school').value = school;
                 this.updateCourseSchoolFields();
@@ -3818,7 +3903,7 @@
                         </div></details>` : '';
                         return `<article class="admin-row">
                         <div><strong>${esc(user.username)} ${this.accountTagMarkup(user.username, tags)}</strong>${user.banned ? ' <span class="admin-badge">banned</span>' : ''}${user.force_change ? ' <span class="admin-badge">rename required</span>' : ''}
-                        <small>${Number(user.coins)} coins · ${Number(user.wins)} wins · ${Number(user.decks)} public decks · School: ${esc(user.school === 'pchs' ? 'PCHS' : 'Other')} · joined ${esc(new Date(user.created_at).toLocaleDateString())}</small></div>${roleControl}
+                        <small>${Number(user.coins)} coins · ${Number(user.wins)} wins · ${Number(user.decks)} public decks · School: ${esc(this.schoolTag(user.school) || 'Other')} · joined ${esc(new Date(user.created_at).toLocaleDateString())}</small></div>${roleControl}
                         <details class="admin-tools"><summary>Manage user</summary><div class="admin-actions">
                             <button type="button" class="secondary-btn" data-admin-action="profile" data-id="${esc(user.id)}">Public profile</button>
                             ${this.isAdmin ? `<button type="button" class="secondary-btn" data-admin-action="coins" data-id="${esc(user.id)}" data-name="${esc(user.username)}">Coins</button>` : ''}
@@ -4014,14 +4099,14 @@
                 if (note) note.textContent = unlocked ? 'Unlocked · select to apply' : 'Unlock in multiplayer shop';
                 button.setAttribute('aria-label', `${button.dataset.colorScheme} color scheme${unlocked ? ', unlocked' : ', locked; unlock in multiplayer shop'}`);
             });
-            const current = AppState.get('settings')?.colorScheme || 'monochrome';
+            const current = AppState.get('settings')?.colorScheme || 'studbud';
             const activePremiumScheme = Array.from(document.querySelectorAll('.scheme-option[data-shop-item]'))
                 .find(button => button.dataset.colorScheme === current);
             if (activePremiumScheme && !owned.includes(activePremiumScheme.dataset.shopItem)) {
-                AppState.set('settings', { ...AppState.get('settings'), colorScheme: 'monochrome' });
+                AppState.set('settings', { ...AppState.get('settings'), colorScheme: 'studbud' });
                 this.applyAppearance();
             }
-            const selectedScheme = activePremiumScheme && !owned.includes(activePremiumScheme.dataset.shopItem) ? 'monochrome' : current;
+            const selectedScheme = activePremiumScheme && !owned.includes(activePremiumScheme.dataset.shopItem) ? 'studbud' : current;
             document.querySelectorAll('.scheme-option').forEach(button =>
                 button.classList.toggle('selected', button.dataset.colorScheme === selectedScheme)
             );
@@ -6663,7 +6748,7 @@
             const picker = document.querySelector('.scheme-picker');
             const catalog = window.StudBudCommunityGames?.catalog;
             if (!picker || !catalog) return;
-            const mono = picker.querySelector('[data-color-scheme="monochrome"]');
+            const mono = picker.querySelector('[data-color-scheme="studbud"]');
             catalog.filter(item => item.type === 'palette').forEach(item => {
                 if (picker.querySelector(`[data-color-scheme="${item.color}"]`)) return;
                 const button = document.createElement('button');
@@ -6681,9 +6766,11 @@
             const settings = AppState.get('settings') || {};
             if (settings.gameAudio) window.StudBudSfx?.update(settings.gameAudio);
             const theme = settings.theme === 'light' ? 'light' : 'dark';
-            const knownSchemes = ['forest', 'ocean', 'violet', 'sunset', 'monochrome', 'aurora', 'coral', 'midnight',
+            const knownSchemes = ['studbud', 'forest', 'ocean', 'violet', 'sunset', 'monochrome', 'aurora', 'coral', 'midnight',
                 ...(window.StudBudCommunityGames?.catalog || []).filter(item => item.type === 'palette').map(item => item.color)];
-            const colorScheme = knownSchemes.includes(settings.colorScheme) ? settings.colorScheme : 'monochrome';
+            // The old black-and-white default moves to the new StudBud palette once; picking a scheme afterwards sticks.
+            const migrated = settings.colorScheme === 'monochrome' && !settings.schemePicked;
+            const colorScheme = !migrated && knownSchemes.includes(settings.colorScheme) ? settings.colorScheme : 'studbud';
             document.body.classList.toggle('dark-theme', theme === 'dark');
             document.body.classList.toggle('light-theme', theme === 'light');
             document.body.classList.toggle('compact-ui', Boolean(settings.compactUi));
@@ -6956,19 +7043,20 @@
         tutorialSteps() {
             const nav = view => `.nav-item:not(.workspace-child)[data-target="${view}-view"], .nav-item:not(.workspace-child)[data-also~="${view}-view"]`;
             return [
-                { title: 'Start with one class and one task', text: 'This short tour follows a real workflow: bring in classes, add work, make a study set and practice. Use the topic menu to jump ahead. You can replay the tour in Settings.' },
-                { route: 'dashboard', sel: '#sidebar', title: 'Your menu', text: 'Six workspaces keep the menu short: Home, School, Plan, Study, Play and Settings. Related tools appear as tabs above the page. On a phone, swipe the menu or tabs sideways.' },
-                { route: 'gpa', sel: '#gpa-view .open-ic-import-btn', title: 'Import from Infinite Campus', text: 'Start here to skip the typing: import your classes, grades, assignments, categories, class times and school calendar before setting up your dashboard. On a computer, drag StudBud Import to your bookmarks bar. On a phone, follow the phone/tablet instructions to save the import bookmark. Run it on the signed-in Campus website, then check the class matches and press Import. Re-import any time to update.' },
-                { route: 'gpa', sel: '#workspace-tabs', title: 'Read grades or try a scenario', text: 'Classes & grades stores your real scores. What-if grades is a safe sandbox. Study insights shows trends. These tools share the School workspace, but scenarios never replace your transcript.' },
-                { route: 'planner', sel: '#workspace-tabs', title: 'Plan the next deadline', text: 'Tasks is your work list. Calendar shows the same due dates by month. Class schedule controls which classes appear on Home. Add a quiz or test to get a suggested study plan.' },
-                { route: 'dashboard', sel: '.focus-sprint-widget', title: 'Choose what to do today', text: 'Home brings together today’s classes and urgent work. Pick a quiz or test in Focus sprint, then start a timer. Finished focus time is logged automatically.' },
-                { route: 'flashcard', sel: '#create-deck-btn', title: 'Make a study set', text: 'Select New study set, give it a name and link it to a class or test. Add cards individually or paste many rows in the editor. Save changes commits the set; Cancel discards only your unsaved draft.' },
-                { route: 'flashcard', sel: '#deck-grid', title: 'Choose how to study', text: 'Study schedules due cards and asks you to rate recall. Edit changes card content. In the card editor, written answers can use exact wording, vocabulary spelling tolerance or required keyword groups. Answer images, PDFs, text and audio stay private.' },
-                { route: 'exam-arcade', sel: '#workspace-tabs', title: 'Test yourself without pressure', text: 'Practice uses your saved sets. Practice Test supports typing, choices and matching: study feedback explains each answer; exam feedback waits until the end. Retry missed cards to work on weaker answers.' },
-                { route: 'multiplayer', sel: '#workspace-tabs', title: 'Play, connect and customize', text: 'Games hosts or joins a room. Buds manages friends; Leaderboards compares progress; Shop equips your character. For solo games, use Study → Practice. Question Chess replaces normal turns with question-earned moves.' },
-                { route: 'settings', sel: '#public-profile-card', title: 'Keep private data private', text: 'Your real name is used inside the app. Public profiles show your username; your real name and school appear only if you choose to share them. Profile & backups also lets you export your saved data.' },
-                { route: 'appearance', sel: '#game-quality', title: 'Offline access and faster games', text: 'Open StudBud once online to cache it. Continue offline uses this device’s saved data; Connect account resumes sync. Game performance lowers visual detail rather than capping gameplay to 30 FPS. Sound controls are in the next tab.' },
-                { route: 'dashboard', title: 'Your first three steps', text: 'Import classes from Infinite Campus, add an upcoming quiz or assignment, then create a study set for it. Return to Home to decide what to work on next.' }
+                { title: 'Welcome to StudBud!', text: 'This quick tour follows a real week: bring in your classes, plan the next deadline, build a study set and practice it. Use the topic menu to jump around, and replay the tour any time from Settings.' },
+                { route: 'dashboard', sel: '#sidebar', title: 'Your menu', text: 'Six workspaces keep things simple: Home, School, Plan, Study, Play and Settings. Related tools show up as pill tabs above each page. On a phone, swipe the menu or the tabs sideways.' },
+                { route: 'gpa', sel: '#gpa-view .open-ic-import-btn', title: 'Import from Infinite Campus', text: 'Skip the typing: import your classes, grades, assignments, categories, class times and school calendar. On a computer, drag StudBud Import to your bookmarks bar. On a phone, follow the phone/tablet instructions to save the import bookmark. Run it on the signed-in Campus website, check the class matches and press Import. Re-import any time to update.' },
+                { route: 'gpa', sel: '#workspace-tabs', title: 'Your school, your course list', text: 'Pick Parkway Central, North, South or West in Settings and the class search only shows that school\u2019s course catalog. Choose Other to type your classes yourself or import them from Infinite Campus. What-if grades is a safe sandbox that never touches your real scores.' },
+                { route: 'planner', sel: '#workspace-tabs', title: 'Plan the next deadline', text: 'Tasks is your work list, Calendar shows the same due dates by month and Class schedule controls which classes appear on Home. Add a quiz or test to get a suggested study plan.' },
+                { route: 'dashboard', sel: '.focus-sprint-widget', title: 'Choose what to do today', text: 'Home brings together today\u2019s classes and urgent work. Pick a quiz or test in Focus sprint, then start a timer. Finished focus time is logged automatically and keeps your streak alive.' },
+                { route: 'flashcard', sel: '#create-deck-btn', title: 'Make a study set in seconds', text: 'Select New study set, name it and link it to a class or test. In the editor, Quick add lets you type a term, press Tab, type the definition and press Enter, over and over. Paste a whole list with bulk import, or star the tricky cards.' },
+                { route: 'flashcard', sel: '#deck-grid', title: 'Study, cram or drill stars', text: 'Each set shows a mastery ring and what is due. Study runs spaced review in a distraction-free focus mode: press Space to flip, 1\u20134 to rate, S to star and T to type your answer. Cram goes through every card without changing your schedule, and the star button drills only starred cards.' },
+                { route: 'exam-arcade', sel: '#workspace-tabs', title: 'Practice games', text: 'Practice turns your sets into quick games: Streak Builder, Lightning Round, Survival, True or False and Memory Match. Answer with the 1\u20134 keys (T or F in True or False), build combos for bonus points and earn up to three stars. Practice Test mixes typing, choices and matching.' },
+                { route: 'multiplayer', sel: '#workspace-tabs', title: 'Play, connect and customize', text: 'Games hosts or joins a room with friends. Buds manages friends, Leaderboards compares progress, and the Shop has boxes you can open with coins to collect characters, hats and auras for your Locker.' },
+                { route: 'dashboard', sel: '#classes-nav-item:not(.hidden)', title: 'Classes for students and teachers', text: 'At a Parkway school there is nothing to join: when your teacher is on StudBud, their class and flashcard sets show up automatically for every course in your list. Teachers pick the courses they teach, then see each student\u2019s grades, missing work and study time, and publish flashcard sets the whole class can study.' },
+                { route: 'settings', sel: '#public-profile-card', title: 'Keep private data private', text: 'Your real name stays inside the app. Public profiles show your username; your real name and school appear only if you choose to share them. Profile & backups also lets you export your saved data.' },
+                { route: 'appearance', sel: '#game-quality', title: 'Make it yours, keep it fast', text: 'Pick a color scheme and theme in Appearance. On a Chromebook or older laptop, choose a lower game performance setting: StudBud switches off heavy effects so everything stays smooth. Open StudBud once online and it keeps working offline.' },
+                { route: 'dashboard', title: 'Your first three steps', text: 'Import classes from Infinite Campus, add an upcoming quiz or assignment, then create a study set for it. Come back to Home each day to see what to work on next. Good luck!' }
             ];
         }
 
@@ -7750,6 +7838,24 @@
             if (this.gradeProgressChart) this.gradeProgressChart.destroy();
             this.gradeProgressChart = null;
             if (!hasHistory) return;
+            // Line/area charts zoom to the range the grades actually cover (e.g. 85-100%) instead of 0-100.
+            const plotted = datasets.flatMap(dataset => dataset.data).filter(value => Number.isFinite(value));
+            let yMin = metric === 'class' ? 0 : 0;
+            let yMax = metric === 'class' ? 100 : 5;
+            if (chartType !== 'bar' && plotted.length) {
+                const low = Math.min(...plotted);
+                const high = Math.max(...plotted);
+                const unit = metric === 'class' ? 1 : 0.1;
+                const pad = Math.max(metric === 'class' ? 1.5 : 0.08, (high - low) * 0.12);
+                yMin = Math.max(0, Math.floor((low - pad) / unit) * unit);
+                yMax = Math.ceil((high + pad) / unit) * unit;
+                if (metric === 'class' && high <= 100) yMax = Math.min(100, yMax);
+                if (yMax - yMin < unit * 4) yMax = yMin + unit * 4;
+                yMin = Number(yMin.toFixed(2));
+                yMax = Number(yMax.toFixed(2));
+                datasets.forEach(dataset => { dataset.clip = 8; });
+            }
+            const yTick = value => metric === 'class' ? `${Number.isInteger(value) ? value : Number(value).toFixed(1)}%` : Number(value).toFixed(2);
             this.gradeProgressChart = new window.Chart(canvas, {
                 type: chartType === 'area' ? 'line' : chartType,
                 data: { labels, datasets },
@@ -7796,12 +7902,12 @@
                         },
                         y: {
                             beginAtZero: false,
-                            min: metric === 'class' ? 0 : 0,
-                            suggestedMax: metric === 'class' ? 100 : 5,
+                            min: yMin,
+                            max: yMax,
                             border: { display: false },
                             grid: { color: gridColor, drawTicks: false },
                             title: { display: false },
-                            ticks: { color: textColor, maxTicksLimit: 6, padding: 12, font: { family: 'system-ui', size: 11 }, callback: value => metric === 'class' ? `${value}%` : Number(value).toFixed(2) }
+                            ticks: { color: textColor, maxTicksLimit: 6, padding: 12, font: { family: 'system-ui', size: 11 }, callback: yTick }
                         }
                     }
                 }
@@ -8022,7 +8128,7 @@
                     if (shopItem) {
                         await this.updateMultiplayerShop('multiplayer-equip', shopItem);
                     }
-                    AppState.set('settings', { ...AppState.get('settings'), colorScheme: scheme });
+                    AppState.set('settings', { ...AppState.get('settings'), colorScheme: scheme, schemePicked: true });
                     this.applyAppearance();
                 } else if (action === 'add-quiz') {
                     this.openAssignmentForm(null, '', '', '', 'quiz');
@@ -8118,6 +8224,8 @@
                     this.renderCalendar();
                 } else if (id === 'calendar-add-event-btn') {
                     this.openAssignmentForm(null, '', this.selectedCalendarDate);
+                } else if (id === 'study-star-btn') {
+                    await this.toggleStudyStar();
                 } else if (id === 'reveal-card-btn') {
                     this.revealCard();
                 } else if (target.matches('.sm2-btn[data-q]')) {
@@ -8179,6 +8287,8 @@
                     await this.answerArcade(Number(target.dataset.index));
                 } else if (action === 'arcade-next') {
                     this.renderArcadeQuestion();
+                } else if (action === 'arcade-exit') {
+                    this.closeArcade();
                 } else if (action === 'practice-retry-missed') {
                     this.retryMissedPracticeCards();
                 } else if (action === 'arcade-restart') {
@@ -8190,12 +8300,9 @@
                         this.showPracticeTestSetup();
                         return;
                     }
-                    this.arcadeQuestionIndex = 0;
-                    this.arcadeScore = 0;
-                    this.arcadeStreak = 0;
-                    this.arcadeTimeLeft = 60;
-                    this.arcadeLives = 3;
-                    this.renderArcadeQuestion();
+                    // Restarting through startArcade also restarts the lightning timer and reshuffles the queue.
+                    this.finishArcadeStudySession();
+                    this.startArcade(this.arcadeMode);
                 } else if (action === 'memory-pick') {
                     this.pickMemoryCard(Number(target.dataset.index));
                 } else if (target.matches('.close-modal-btn, .cancel-modal-btn')) {
@@ -8211,6 +8318,8 @@
 
         handleKeydown(event) {
             if (document.body.classList.contains('mpg-active')) return;
+            if (document.getElementById('arcade-game-content')?.offsetParent) this.handleArcadeKey(event);
+            if (event.defaultPrevented) return;
             if (['assignment-points', 'assignment-max-points'].includes(event.target.id) && ['ArrowUp', 'ArrowDown'].includes(event.key)) {
                 event.preventDefault();
                 this.adjustAssignmentScore(event.target, event.key === 'ArrowUp' ? 1 : -1);
@@ -8274,11 +8383,24 @@
             const navItem = event.target.closest('.nav-item[data-target]');
             const studyArea = document.getElementById('active-study-area');
             if (Router.activeRoute === 'flashcard' && !modalActive && studyArea && !studyArea.classList.contains('hidden')
-                && !event.target.closest('input, textarea, select, button, summary') && !this.studyKeyBusy) {
+                && !event.target.closest('input, textarea, select, summary, label') && !this.studyKeyBusy && !event.ctrlKey && !event.metaKey && !event.altKey) {
                 const revealed = !document.getElementById('sm2-controls').classList.contains('hidden');
-                if (event.key === ' ' || (event.key === 'Enter' && !revealed)) {
+                const onButton = Boolean(event.target.closest('button'));
+                if (!onButton && (event.key === ' ' || (event.key === 'Enter' && !revealed))) {
                     event.preventDefault();
                     this.revealCard();
+                    return;
+                }
+                if (event.key === 's' || event.key === 'S') {
+                    event.preventDefault();
+                    this.toggleStudyStar().catch(error => console.error('[NexusApp] Star failed:', error));
+                    return;
+                }
+                if ((event.key === 't' || event.key === 'T') && !revealed) {
+                    const toggle = document.getElementById('study-type-toggle');
+                    event.preventDefault();
+                    toggle.checked = !toggle.checked;
+                    toggle.dispatchEvent(new Event('change', { bubbles: true }));
                     return;
                 }
                 const quality = { 1: 1, 2: 3, 3: 4, 4: 5 }[event.key];
@@ -8315,6 +8437,16 @@
             if (form.id === 'admin-search-form') {
                 event.preventDefault();
                 await this.loadAdminList();
+                return;
+            }
+            if (form.id === 'study-type-form') {
+                event.preventDefault();
+                this.checkTypedAnswer();
+                return;
+            }
+            if (form.id === 'deck-quick-add-form') {
+                event.preventDefault();
+                this.quickAddEditorCard();
                 return;
             }
             if (form.id === 'community-deck-search-form') {
@@ -8587,11 +8719,11 @@
             document.getElementById('course-id').value = course ? course.code : '';
             document.getElementById('course-modal-title').textContent = course ? 'Edit Course' : 'Add Course';
             const search = document.getElementById('course-search');
-            const selectedCatalogCourse = course && course.school !== 'other'
+            const selectedCatalogCourse = course && this.isParkwaySchool(course.school || this.currentSchool())
                 && (window.PCHS_COURSE_CATALOG || []).find(item => item.code === (course.catalogCode || course.code));
             search.value = selectedCatalogCourse ? `${selectedCatalogCourse.title} (${selectedCatalogCourse.code})` : '';
             document.getElementById('course-name').value = selectedCatalogCourse?.code || '';
-            document.getElementById('course-selection-hint').textContent = selectedCatalogCourse ? 'PCHS catalog course selected.' : 'Choose a PCHS course from the matches.';
+            document.getElementById('course-selection-hint').textContent = selectedCatalogCourse ? 'Catalog course selected.' : `Choose a ${this.schoolShortName()} course from the matches.`;
             this.hideCourseSuggestions();
             document.getElementById('course-subject-category').value = course ? course.category || 'Electives' : 'Electives';
             document.getElementById('course-term').value = course ? (course.term || 'FY') : 'FY';
@@ -8610,27 +8742,53 @@
 
         currentSchool() {
             const selected = document.getElementById('settings-school')?.value;
-            if (['pchs', 'other'].includes(selected)) return selected;
+            if (this.isKnownSchool(selected)) return selected;
             const profile = AppState.get('profile') || {};
-            return profile.school || window.StudBudCloud?.user?.user_metadata?.school || 'pchs';
+            const stored = profile.school || window.StudBudCloud?.user?.user_metadata?.school;
+            return this.isKnownSchool(stored) ? stored : 'pchs';
+        }
+
+        isKnownSchool(id) {
+            return window.STUDBUD_SCHOOLS ? window.STUDBUD_SCHOOLS.isKnown(id) : ['pchs', 'other'].includes(id);
+        }
+
+        isParkwaySchool(id = this.currentSchool()) {
+            return window.STUDBUD_SCHOOLS ? window.STUDBUD_SCHOOLS.isParkway(id) : id === 'pchs';
+        }
+
+        schoolTag(id = this.currentSchool()) {
+            return window.STUDBUD_SCHOOLS?.tag(id) || (id === 'pchs' ? 'PCHS' : 'Other');
+        }
+
+        schoolShortName(id = this.currentSchool()) {
+            return window.STUDBUD_SCHOOLS?.shortName(id) || 'Other';
+        }
+
+        schoolCatalog(id = this.currentSchool()) {
+            if (window.STUDBUD_SCHOOLS) return window.STUDBUD_SCHOOLS.catalog(id);
+            return (window.PCHS_COURSE_CATALOG || []).filter(course => !course.legacy);
         }
 
         updatePublicSchoolOption() {
             const checkbox = document.getElementById('public-show-school');
             if (!checkbox) return;
-            checkbox.disabled = this.currentSchool() !== 'pchs';
+            checkbox.disabled = !this.isParkwaySchool();
             if (checkbox.disabled) checkbox.checked = false;
         }
 
         updateCourseSchoolFields(school = this.currentSchool()) {
-            const other = school === 'other';
+            const other = !this.isParkwaySchool(school);
             document.getElementById('course-catalog-fields')?.classList.toggle('hidden', other);
             document.getElementById('course-manual-fields')?.classList.toggle('hidden', !other);
             document.getElementById('course-manual-title')?.toggleAttribute('required', other);
             const credits = document.getElementById('course-credits');
             if (credits) credits.readOnly = !other;
             const scaleLabel = document.getElementById('course-scale-label');
-            if (scaleLabel) scaleLabel.textContent = other ? 'School grade scale' : 'PCHS grade scale';
+            if (scaleLabel) scaleLabel.textContent = other ? 'School grade scale' : 'Parkway grade scale';
+            const searchLabel = document.getElementById('course-search-label');
+            if (searchLabel && !other) searchLabel.textContent = `Search ${this.schoolShortName(school)} courses`;
+            const search = document.getElementById('course-search');
+            if (search && !other) search.placeholder = `Course name or number at ${window.STUDBUD_SCHOOLS?.name(school) || 'your school'}`;
             const weightLabel = document.getElementById('course-weight-label');
             if (weightLabel && other) weightLabel.textContent = 'Select whether this class is weighted.';
         }
@@ -8660,18 +8818,25 @@
             const list = document.getElementById('course-suggestions');
             if (!list) return;
             const normalized = String(query || '').trim().toLowerCase();
-            const catalog = window.PCHS_COURSE_CATALOG || [];
+            const catalog = this.schoolCatalog();
             if (!normalized) {
                 this.hideCourseSuggestions();
                 return;
             }
-            const matches = catalog.filter(course => !course.legacy &&
-                `${course.code} ${course.title} ${course.category}`.toLowerCase().includes(normalized)
-            ).slice(0, 12);
+            const terms = normalized.split(/\s+/).filter(Boolean);
+            const scored = [];
+            for (const course of catalog) {
+                const title = course.title.toLowerCase();
+                const haystack = `${course.code} ${title} ${course.category}`.toLowerCase();
+                if (!terms.every(term => haystack.includes(term))) continue;
+                const score = (course.code.toLowerCase().startsWith(normalized) ? 0 : title.startsWith(normalized) ? 1 : title.includes(normalized) ? 2 : 3) * 1000 + title.length;
+                scored.push([score, course]);
+            }
+            const matches = scored.sort((a, b) => a[0] - b[0]).slice(0, 12).map(entry => entry[1]);
             this.courseSuggestionIndex = -1;
             list.innerHTML = matches.length ? matches.map(course =>
-                `<button type="button" id="course-option-${this.escapeHTML(course.code)}" role="option" aria-selected="false" class="course-suggestion" data-action="select-course" data-id="${this.escapeHTML(course.code)}"><strong>${this.escapeHTML(course.title)}</strong><span>${this.escapeHTML(course.code)} · ${this.escapeHTML(course.category)}</span></button>`
-            ).join('') : '<p class="course-suggestion-empty">No matching PCHS courses.</p>';
+                `<button type="button" id="course-option-${this.escapeHTML(course.code)}" role="option" aria-selected="false" class="course-suggestion" data-action="select-course" data-id="${this.escapeHTML(course.code)}"><strong>${this.escapeHTML(course.title)}${course.isWeighted ? ' <em class="course-weighted-pill">Weighted</em>' : ''}</strong><span>${this.escapeHTML(course.code)} · ${this.escapeHTML(course.category)} · ${Number(course.credits)} cr</span></button>`
+            ).join('') : `<p class="course-suggestion-empty">No matching ${this.escapeHTML(this.schoolShortName())} courses.</p>`;
             list.classList.remove('hidden');
             document.getElementById('course-search').setAttribute('aria-expanded', 'true');
             document.getElementById('course-search').removeAttribute('aria-activedescendant');
@@ -8698,10 +8863,10 @@
 
         selectCatalogCourse(courseCode) {
             const course = (window.PCHS_COURSE_CATALOG || []).find(item => item.code === courseCode);
-            if (!course) throw new Error('That course is not in the PCHS catalog.');
+            if (!course) throw new Error('That course is not in the Parkway catalog.');
             document.getElementById('course-name').value = course.code;
             document.getElementById('course-search').value = `${course.title} (${course.code})`;
-            document.getElementById('course-selection-hint').textContent = 'PCHS catalog course selected.';
+            document.getElementById('course-selection-hint').textContent = 'Catalog course selected.';
             this.hideCourseSuggestions();
             this.populateCourseFromCatalog();
         }
@@ -8839,9 +9004,9 @@
             const term = document.getElementById('course-term').value;
             const existingCourse = (AppState.get('courses') || []).find(item => item.code === oldCode);
             const school = existingCourse?.school || this.currentSchool();
-            const otherSchool = school === 'other';
+            const otherSchool = !this.isParkwaySchool(school);
             const catalogCourse = otherSchool ? null : (window.PCHS_COURSE_CATALOG || []).find(item => item.code === catalogCode);
-            if (!otherSchool && !catalogCourse) throw new Error('Select a course from the PCHS catalog.');
+            if (!otherSchool && !catalogCourse) throw new Error(`Select a course from the ${this.schoolShortName(school)} catalog.`);
             let code, title, credits, isWeighted;
             if (otherSchool) {
                 title = document.getElementById('course-manual-title').value.trim();
@@ -9114,6 +9279,12 @@
             if (action === 'editor-edit-card') this.openCardForm(this.deckEditorDraft?.id, id, true);
             if (action === 'editor-bulk-add') this.addBulkEditorCards();
             if (action === 'editor-copy-card' || action === 'editor-reverse-card') this.copyEditorCard(id, action === 'editor-reverse-card');
+            if (action === 'editor-star-card') {
+                const card = this.deckEditorDraft?.cards.find(item => item.id === id);
+                if (!card) throw new Error('This card is no longer in the editor.');
+                card.starred = !card.starred;
+                this.renderDeckEditorCards();
+            }
             if (action === 'editor-pause-card') {
                 const card = this.deckEditorDraft?.cards.find(item => item.id === id);
                 if (!card) throw new Error('This card is no longer in the editor.');
@@ -9135,52 +9306,79 @@
                     this.renderDeckEditorCards();
                 }
             }
-            if (action === 'study-deck') this.startStudy(id, false);
+            if (action === 'study-deck') this.startStudy(id);
+            if (action === 'cram-deck') this.startStudy(id, 'cram');
+            if (action === 'cram-starred') this.startStudy(id, 'starred');
+            if (action === 'study-missed') this.studyMissedCards();
+            if (action === 'close-study') this.closeStudy();
         }
 
-        startStudy(deckId) {
+        startStudy(deckId, mode = 'scheduled') {
             const deck = (AppState.get('flashcards') || []).find(item => item.id === deckId);
             if (!deck) throw new Error('The selected deck no longer exists.');
-            const cards = (deck.cards || []).filter(card => card && !card.suspended);
+            const active = (deck.cards || []).filter(card => card && !card.suspended);
+            const cards = mode === 'starred' ? (deck.cards || []).filter(card => card && card.starred) : mode === 'cram' ? (deck.cards || []).filter(Boolean) : active;
             if (!cards.length) {
-                window.alert('This deck has no cards yet.');
+                window.alert(mode === 'starred' ? 'Star some cards first (press S while studying, or use the set editor).' : 'This deck has no cards yet.');
                 return;
             }
             if (window.SM2Engine?.migrateDeck?.(deck)) AppState.saveFlashcardDeck(deck).catch(error => console.error('[NexusApp] Deck migration could not be saved:', error));
             this.activeDeckId = deckId;
-            this.cramMode = false;
+            this.cramMode = mode !== 'scheduled';
+            this.studyMode = mode;
             this.studySession = null;
-            if (!window.SM2Engine?.createSession) throw new Error('The spaced-repetition scheduler did not load. Reload before studying.');
-            const session = window.SM2Engine.createSession(cards, { deck });
-            if (session && session.remaining) {
-                this.studySession = session;
-                this.studyCards = [];
+            this.studyCards = [];
+            if (this.cramMode) {
+                // Cram walks every card once (missed cards come back later) without touching the review schedule.
+                this.studyCards = window.FlashcardTools.adaptiveOrder ? window.FlashcardTools.adaptiveOrder([...cards]) : [...cards].sort(() => Math.random() - .5);
             } else {
-                window.alert('You have finished the cards scheduled for today. Come back when your next review is due.');
-                this.studySession = null;
-                return;
+                if (!window.SM2Engine?.createSession) throw new Error('The spaced-repetition scheduler did not load. Reload before studying.');
+                const session = window.SM2Engine.createSession(cards, { deck });
+                if (!session || !session.remaining) {
+                    if (window.confirm('You have finished the cards scheduled for today. Cram the whole set instead? Cramming does not change your review schedule.')) this.startStudy(deckId, 'cram');
+                    return;
+                }
+                this.studySession = session;
             }
             this.activeCardIndex = 0;
             this.currentStudyCard = null;
             this.activeStudyStartedAt = Date.now();
             this.activeStudyCardsSeen = 0;
-            document.getElementById('active-study-area').classList.remove('hidden');
+            this.studyStats = { total: this.studySession ? this.studySession.remaining : this.studyCards.length, done: 0, ratings: { 1: 0, 3: 0, 4: 0, 5: 0 }, combo: 0, bestCombo: 0, typed: 0, typedRight: 0, missed: new Set() };
+            const area = document.getElementById('active-study-area');
+            area.classList.remove('hidden');
+            area.classList.toggle('is-cram', this.cramMode);
+            document.getElementById('study-summary').classList.add('hidden');
+            area.classList.remove('show-summary');
+            document.body.classList.add('studying');
+            const toggle = document.getElementById('study-type-toggle');
+            if (toggle) toggle.checked = localStorage.getItem('studbud-type-answer') === '1';
             this.renderStudyCard();
+        }
+
+        studyDeck() {
+            return (AppState.get('flashcards') || []).find(deck => deck.id === this.activeDeckId) || null;
         }
 
         renderStudyCard() {
             const card = this.studySession ? this.studySession.next() : this.studyCards[this.activeCardIndex];
             this.currentStudyCard = card || null;
-            if (!card) return this.closeStudy();
-            document.getElementById('study-deck-title').textContent =
-                (AppState.get('flashcards') || []).find(deck => deck.id === this.activeDeckId)?.title || 'Flashcards';
+            if (!card) return this.showStudySummary();
+            const deck = this.studyDeck();
+            document.getElementById('study-deck-title').textContent = `${deck?.title || 'Flashcards'}${this.studyMode === 'starred' ? ' · Starred' : this.cramMode ? ' · Cram' : ''}`;
             const progress = document.getElementById('study-progress');
+            let remaining;
             if (this.studySession) {
                 const n = this.studySession.counts();
+                remaining = this.studySession.remaining;
                 progress.innerHTML = `<span class="anki-count anki-new" title="New cards">${n.new} new</span> <span class="anki-count anki-learn" title="Cards in learning steps">${n.learning} learning</span> <span class="anki-count anki-review" title="Cards to review">${n.review} review</span>`;
             } else {
-                progress.textContent = `${this.studyCards.length - this.activeCardIndex} left`;
+                remaining = this.studyCards.length - this.activeCardIndex;
+                progress.textContent = `${remaining} left`;
             }
+            const stats = this.studyStats;
+            const fill = document.getElementById('study-progress-fill');
+            if (fill && stats) fill.style.transform = `scaleX(${Math.min(1, stats.done / Math.max(1, stats.done + remaining))})`;
             const cardEl = document.getElementById('current-flashcard');
             const backEl = document.getElementById('card-back-content');
             document.getElementById('card-front-content').textContent = card.front || '';
@@ -9192,10 +9390,60 @@
             else backEl.innerHTML = this.cardAnswerMarkup(card);
             document.getElementById('reveal-card-btn').classList.remove('hidden');
             document.getElementById('sm2-controls').classList.add('hidden');
+            document.querySelectorAll('#sm2-controls .sm2-btn').forEach(button => button.classList.remove('suggested'));
+            this.syncStudyStar(card);
+            const typing = document.getElementById('study-type-toggle')?.checked;
+            const form = document.getElementById('study-type-form');
+            const input = document.getElementById('study-type-input');
+            const result = document.getElementById('study-type-result');
+            form.classList.toggle('hidden', !typing);
+            result.classList.add('hidden');
+            result.className = 'study-type-result hidden';
+            input.value = '';
+            input.disabled = false;
+            if (typing) input.focus({ preventScroll: true });
+        }
+
+        syncStudyStar(card = this.currentStudyCard) {
+            const button = document.getElementById('study-star-btn');
+            if (!button) return;
+            const on = Boolean(card?.starred);
+            button.setAttribute('aria-pressed', String(on));
+            button.classList.toggle('is-on', on);
+            button.innerHTML = `<i class="${on ? 'fas' : 'far'} fa-star"></i> <span>${on ? 'Starred' : 'Star'}</span>`;
+        }
+
+        async toggleStudyStar() {
+            const deck = this.studyDeck();
+            const card = this.currentStudyCard;
+            if (!deck || !card) return;
+            const saved = (deck.cards || []).find(item => item.id === card.id) || card;
+            saved.starred = !saved.starred;
+            card.starred = saved.starred;
+            this.syncStudyStar(card);
+            await AppState.saveFlashcardDeck(deck);
+        }
+
+        checkTypedAnswer() {
+            const card = this.currentStudyCard;
+            const input = document.getElementById('study-type-input');
+            if (!card || input.disabled) return;
+            const given = input.value.trim();
+            const right = Boolean(given) && window.FlashcardTools.gradeCard(given, card, false);
+            input.disabled = true;
+            this.studyStats.typed += 1;
+            if (right) this.studyStats.typedRight += 1;
+            const result = document.getElementById('study-type-result');
+            result.className = `study-type-result ${right ? 'is-right' : 'is-wrong'}`;
+            result.innerHTML = right ? '<i class="fas fa-circle-check"></i> Nailed it!'
+                : `<i class="fas fa-circle-xmark"></i> ${given ? `You wrote “${this.escapeHTML(given)}”.` : 'Skipped.'} Compare with the answer.`;
+            this.revealCard();
+            const suggested = document.querySelector(`#sm2-controls .sm2-btn[data-q="${right ? 4 : 1}"]`);
+            if (suggested) { suggested.classList.add('suggested'); suggested.focus({ preventScroll: true }); }
         }
 
         formatReviewInterval(card, quality) {
-            if (this.cramMode) return quality < 3 ? 'again' : 'done';
+            if (this.cramMode) return quality < 3 ? 'again soon' : 'got it';
             return window.SM2Engine.getIntervalLabel(card, quality);
         }
         revealCard() {
@@ -9211,6 +9459,7 @@
             document.getElementById('card-back-content').innerHTML = this.cardAnswerMarkup(card);
             cardEl.classList.add('is-flipped');
             document.getElementById('reveal-card-btn').classList.add('hidden');
+            document.getElementById('study-type-form').classList.add('hidden');
             document.getElementById('sm2-controls').classList.remove('hidden');
             if (card && window.SM2Engine) {
                 document.querySelectorAll('#sm2-controls .sm2-btn').forEach(button => {
@@ -9221,7 +9470,7 @@
         }
 
         async rateCurrentCard(quality) {
-            const deck = (AppState.get('flashcards') || []).find(item => item.id === this.activeDeckId);
+            const deck = this.studyDeck();
             if (!deck) throw new Error('The selected deck no longer exists.');
             const card = this.currentStudyCard;
             if (!card) return;
@@ -9232,9 +9481,25 @@
             } else if (quality < 3) {
                 this.studyCards.push(card);
             }
+            const stats = this.studyStats;
+            if (stats) {
+                stats.done += 1;
+                stats.ratings[quality] = (stats.ratings[quality] || 0) + 1;
+                stats.combo = quality >= 3 ? stats.combo + 1 : 0;
+                stats.bestCombo = Math.max(stats.bestCombo, stats.combo);
+                if (quality < 3) stats.missed.add(card.id);
+                const combo = document.getElementById('study-combo');
+                if (combo) {
+                    combo.classList.toggle('hidden', stats.combo < 3);
+                    combo.innerHTML = `<i class="fas fa-fire"></i> ${stats.combo} in a row`;
+                }
+            }
             deck.studiedAt = deck.studiedAt || new Date().toISOString();
-            window.FlashcardTools.recordAnswer(card, quality >= 3);
+            const saved = (deck.cards || []).find(item => item.id === card.id) || card;
+            window.FlashcardTools.recordAnswer(saved, quality >= 3);
             deck.studiedCount = Number(deck.studiedCount || 0) + 1;
+            if (!this.studySession) this.activeCardIndex += 1;
+            this.renderStudyCard();
             await AppState.saveFlashcardDeck(deck);
             if (deck.communitySourceId && window.StudBudCommunityGames?.hasAccount?.() && deck.communitySourceOwnerId !== window.StudBudCloud.user.id && !deck.communityStudyRecorded) {
                 try {
@@ -9245,41 +9510,106 @@
                     AppState.setSaveStatus(`Card progress saved, but the community study count could not sync. ${this.friendlyErrorMessage(error)}`, 'error');
                 }
             }
-            if (!this.studySession) this.activeCardIndex += 1;
+        }
+
+        showStudySummary() {
+            const stats = this.studyStats;
+            const area = document.getElementById('active-study-area');
+            const summary = document.getElementById('study-summary');
+            if (!stats || !stats.done || !summary) return this.closeStudy();
+            area.classList.add('show-summary');
+            const seconds = Math.max(1, Math.round((Date.now() - (this.activeStudyStartedAt || Date.now())) / 1000));
+            const good = stats.ratings[3] + stats.ratings[4] + stats.ratings[5];
+            const accuracy = Math.round(good / Math.max(1, stats.done) * 100);
+            const cheer = accuracy >= 90 ? 'Outstanding!' : accuracy >= 70 ? 'Great session!' : accuracy >= 50 ? 'Nice work, keep going!' : 'Every rep counts!';
+            const deck = this.studyDeck();
+            const starred = (deck?.cards || []).filter(card => card.starred).length;
+            summary.innerHTML = `
+                <div class="study-summary-burst" aria-hidden="true"><i class="fas fa-trophy"></i></div>
+                <h3>${cheer}</h3>
+                <p>${this.cramMode ? 'Cram round complete' : 'All scheduled cards done for now'} · ${this.escapeHTML(deck?.title || 'Flashcards')}</p>
+                <div class="study-summary-stats">
+                    <div><strong>${stats.done}</strong><span>cards</span></div>
+                    <div><strong>${accuracy}%</strong><span>recalled</span></div>
+                    <div><strong>${stats.bestCombo}</strong><span>best streak</span></div>
+                    <div><strong>${this.formatStudyDuration(seconds)}</strong><span>time</span></div>
+                </div>
+                <div class="study-summary-bars" aria-label="Rating breakdown">
+                    ${[[1, 'Again'], [3, 'Hard'], [4, 'Good'], [5, 'Easy']].map(([q, label]) => `<div class="ssb ssb-q${q}"><span>${label}</span><i style="--w:${Math.round((stats.ratings[q] || 0) / stats.done * 100)}%"></i><b>${stats.ratings[q] || 0}</b></div>`).join('')}
+                </div>
+                ${stats.typed ? `<p class="settings-hint">Typed answers: ${stats.typedRight} of ${stats.typed} right.</p>` : ''}
+                <div class="actions">
+                    ${stats.missed.size ? '<button type="button" class="secondary-btn" data-action="study-missed"><i class="fas fa-rotate-right"></i> Review missed cards</button>' : ''}
+                    <button type="button" class="secondary-btn" data-action="cram-deck" data-id="${this.escapeHTML(this.activeDeckId || '')}"><i class="fas fa-bolt"></i> Cram whole set</button>
+                    ${starred ? `<button type="button" class="secondary-btn" data-action="cram-starred" data-id="${this.escapeHTML(this.activeDeckId || '')}"><i class="fas fa-star"></i> Starred (${starred})</button>` : ''}
+                    <button type="button" class="primary-btn" data-action="close-study"><i class="fas fa-check"></i> Done</button>
+                </div>`;
+            summary.classList.remove('hidden');
+            document.getElementById('study-combo')?.classList.add('hidden');
+            const fill = document.getElementById('study-progress-fill');
+            if (fill) fill.style.transform = 'scaleX(1)';
+            summary.querySelector('.primary-btn')?.focus({ preventScroll: true });
+        }
+
+        studyMissedCards() {
+            const deck = this.studyDeck();
+            const missed = this.studyStats?.missed;
+            if (!deck || !missed?.size) return;
+            const ids = new Set(missed);
+            this.recordFlashcardTime();
+            this.studyMode = 'cram';
+            this.cramMode = true;
+            this.studySession = null;
+            this.studyCards = (deck.cards || []).filter(card => ids.has(card.id)).sort(() => Math.random() - .5);
+            this.activeCardIndex = 0;
+            this.activeStudyStartedAt = Date.now();
+            this.studyStats = { total: this.studyCards.length, done: 0, ratings: { 1: 0, 3: 0, 4: 0, 5: 0 }, combo: 0, bestCombo: 0, typed: 0, typedRight: 0, missed: new Set() };
+            const area = document.getElementById('active-study-area');
+            area.classList.add('is-cram');
+            document.getElementById('study-summary').classList.add('hidden');
+            area.classList.remove('show-summary');
             this.renderStudyCard();
+        }
+
+        recordFlashcardTime() {
+            const startedAt = this.activeStudyStartedAt;
+            this.activeStudyStartedAt = null;
+            if (!startedAt) return;
+            const durationSec = Math.min(21600, Math.floor((Date.now() - startedAt) / 1000));
+            if (durationSec <= 0) return;
+            const studiedDeck = this.studyDeck();
+            const link = studiedDeck ? this.deckLinkInfo(studiedDeck) : {};
+            const target = link.assessment && link.assessment.status !== 'completed' ? link.assessment : null;
+            AppState.recordStudySession({
+                id: `flashcards_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                title: target ? `Flashcards: ${studiedDeck.title} → ${target.title}` : `Flashcards: ${studiedDeck?.title || 'study'}`,
+                assignmentId: target ? target.id : undefined,
+                courseCode: target?.courseCode || link.courseCode || undefined,
+                durationSec,
+                method: 'flashcards',
+                methodLabel: 'Flashcards / spaced review',
+                source: 'flashcards'
+            }).catch(error => {
+                console.error('[NexusApp] Flashcard study time could not be saved:', error);
+                AppState.setSaveStatus(`Flashcard progress is saved, but study time could not be recorded. ${this.friendlyErrorMessage(error)}`, 'error');
+            });
         }
 
         closeStudy() {
             this.stopFocusTimer();
             document.getElementById('active-study-area').classList.add('hidden');
-            const startedAt = this.activeStudyStartedAt;
-            this.activeStudyStartedAt = null;
-            if (startedAt) {
-                const durationSec = Math.min(21600, Math.floor((Date.now() - startedAt) / 1000));
-                if (durationSec > 0) {
-                    const studiedDeck = (AppState.get('flashcards') || []).find(item => item.id === this.activeDeckId);
-                    const link = studiedDeck ? this.deckLinkInfo(studiedDeck) : {};
-                    const target = link.assessment && link.assessment.status !== 'completed' ? link.assessment : null;
-                    AppState.recordStudySession({
-                        id: `flashcards_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-                        title: target ? `Flashcards: ${studiedDeck.title} → ${target.title}` : `Flashcards: ${studiedDeck?.title || 'study'}`,
-                        assignmentId: target ? target.id : undefined,
-                        courseCode: target?.courseCode || link.courseCode || undefined,
-                        durationSec,
-                        method: 'flashcards',
-                        methodLabel: 'Flashcards / spaced review',
-                        source: 'flashcards'
-                    }).catch(error => {
-                        console.error('[NexusApp] Flashcard study time could not be saved:', error);
-                        AppState.setSaveStatus(`Flashcard progress is saved, but study time could not be recorded. ${this.friendlyErrorMessage(error)}`, 'error');
-                    });
-                }
-            }
+            document.getElementById('study-summary')?.classList.add('hidden');
+            document.getElementById('study-combo')?.classList.add('hidden');
+            document.body.classList.remove('studying');
+            this.recordFlashcardTime();
             this.activeDeckId = null;
             this.studyCards = [];
             this.studySession = null;
             this.currentStudyCard = null;
+            this.studyStats = null;
+            this.cramMode = false;
             this.renderDashboard();
+            this.renderDecks();
         }
 
         solveTargetGPA() {
@@ -9335,7 +9665,7 @@
             if (!Number.isInteger(graduationYear) || graduationYear < 2026 || graduationYear > 2030) {
                 throw new Error('Graduation year must be between 2026 and 2030.');
             }
-            if (!['pchs', 'other'].includes(school)) throw new Error('Choose PCHS or Other for your school.');
+            if (!this.isKnownSchool(school)) throw new Error('Choose your school from the list.');
             const profile = {
                 ...AppState.get('profile'),
                 school,
@@ -9362,6 +9692,7 @@
             this.updateCourseSchoolFields();
             this.renderOtherGradeScaleEditor();
             this.updatePublicSchoolOption();
+            this.classrooms?.refreshNav();
             this.renderUI();
             window.alert('Profile saved.');
         }
@@ -9626,6 +9957,9 @@
             this.arcadeQuestionIndex = 0;
             this.arcadeScore = 0;
             this.arcadeStreak = 0;
+            this.arcadeBestStreak = 0;
+            this.arcadePoints = 0;
+            this.arcadeAnswered = 0;
             this.arcadeMode = game;
             this.arcadeLives = 3;
             this.arcadeTimeLeft = 60;
@@ -9634,7 +9968,7 @@
             const container = document.getElementById('arcade-canvas-container');
             if (menu) menu.classList.add('hidden');
             if (container) container.classList.remove('hidden');
-            document.getElementById('arcade-game-title').textContent = `${title} - Practice Round`;
+            document.getElementById('arcade-game-title').textContent = title;
             const canvas = document.getElementById('game-canvas');
             canvas.classList.add('hidden');
             let content = document.getElementById('arcade-game-content');
@@ -9654,6 +9988,9 @@
                     this.arcadeTimeLeft -= 1;
                     const timer = document.getElementById('arcade-time-left');
                     if (timer) timer.textContent = `${this.arcadeTimeLeft}s`;
+                    const fill = document.getElementById('arcade-time-fill');
+                    if (fill) fill.style.width = `${Math.max(0, this.arcadeTimeLeft / 60 * 100)}%`;
+                    if (this.arcadeTimeLeft <= 10) document.getElementById('arcade-time-chip')?.classList.add('low');
                     if (this.arcadeTimeLeft <= 0) {
                         clearInterval(this.arcadeTimer);
                         this.arcadeTimer = null;
@@ -9977,6 +10314,8 @@
             this.memoryMatched = new Set();
             this.memoryLock = false;
             this.arcadeScore = 0;
+            this.memoryMoves = 0;
+            this.memoryStartedAt = Date.now();
             this.renderMemoryGame();
         }
 
@@ -9985,19 +10324,18 @@
             if (!content) return;
             if (this.memoryMatched.size === this.memoryCards.length / 2) {
                 this.finishArcadeStudySession();
-                content.innerHTML = '';
-                const result = document.createElement('p');
-                result.textContent = `Tower cleared! You matched all ${this.arcadeScore} pairs.`;
-                const replay = document.createElement('button');
-                replay.className = 'primary-btn';
-                replay.dataset.action = 'arcade-restart';
-                replay.textContent = 'Play Again';
-                content.append(result, replay);
+                const pairs = this.memoryCards.length / 2;
+                const seconds = Math.max(1, Math.round((Date.now() - (this.memoryStartedAt || Date.now())) / 1000));
+                // Accuracy here is efficiency: a perfect memory needs one move per pair.
+                content.innerHTML = this.arcadeResultsMarkup({ heading: 'Tower cleared!', correct: pairs, total: Math.max(pairs, this.memoryMoves || pairs),
+                    extra: [[`${seconds}s`, 'Time']] }).replace('<span>Correct</span>', '<span>Pairs / moves</span>').replace('<span>Accuracy</span>', '<span>Efficiency</span>');
+                window.StudBudSfx?.play?.('win');
                 return;
             }
             content.innerHTML = '';
-            const progress = document.createElement('p');
-            progress.textContent = `Matched ${this.arcadeScore} of ${this.memoryCards.length / 2} pairs`;
+            const progress = document.createElement('div');
+            progress.className = 'arcade-hud';
+            progress.innerHTML = `<span class="arcade-count">${this.arcadeScore} / ${this.memoryCards.length / 2} pairs</span><span class="arcade-chip"><i class="fas fa-shoe-prints" aria-hidden="true"></i> ${this.memoryMoves || 0} moves</span>`;
             const grid = document.createElement('div');
             grid.className = 'memory-card-grid';
             this.memoryCards.forEach((card, index) => {
@@ -10026,7 +10364,9 @@
             }
 
             const [firstIndex, secondIndex] = this.memoryRevealed;
+            this.memoryMoves = (this.memoryMoves || 0) + 1;
             if (this.memoryCards[firstIndex].pair === this.memoryCards[secondIndex].pair) {
+                window.StudBudSfx?.play?.('correct');
                 this.memoryMatched.add(card.pair);
                 this.arcadeScore = this.memoryMatched.size;
                 this.memoryRevealed = [];
@@ -10044,77 +10384,77 @@
             }, 700);
         }
 
+        arcadeResultsMarkup({ heading, correct, total, extra = [] }) {
+            const pct = total ? Math.round(correct / total * 100) : 0;
+            const stars = pct >= 90 ? 3 : pct >= 70 ? 2 : pct >= 40 ? 1 : 0;
+            const line = stars === 3 ? 'Flawless. You know this cold.' : stars === 2 ? 'Great run! A little more and it is locked in.' : stars === 1 ? 'Nice start. Run it back to level up.' : 'Every miss is a card you will remember next time.';
+            const stats = [[`${correct}/${total}`, 'Correct'], [`${pct}%`, 'Accuracy'], ...extra];
+            return `<div class="arcade-results">
+                <div class="arcade-stars" aria-label="${stars} of 3 stars">${[1, 2, 3].map(n => `<i class="fas fa-star${n <= stars ? ' earned' : ''}" style="--i:${n}" aria-hidden="true"></i>`).join('')}</div>
+                <h4>${this.escapeHTML(heading)}</h4>
+                <p class="arcade-results-line">${line}</p>
+                <div class="arcade-results-stats">${stats.map(([value, label]) => `<div><strong>${this.escapeHTML(String(value))}</strong><span>${this.escapeHTML(label)}</span></div>`).join('')}</div>
+                <div class="arcade-results-actions"><button type="button" class="primary-btn" data-action="arcade-restart"><i class="fas fa-rotate-right" aria-hidden="true"></i> Play again</button><button type="button" class="secondary-btn" data-action="arcade-exit"><i class="fas fa-grip" aria-hidden="true"></i> All games</button></div>
+            </div>`;
+        }
+
+        arcadeHudMarkup(afterAnswer = false) {
+            const total = this.arcadeCards.length;
+            const done = Math.min(this.arcadeQuestionIndex, total);
+            const chips = [`<span class="arcade-chip"><i class="fas fa-bolt" aria-hidden="true"></i> <b id="arcade-points">${this.arcadePoints || 0}</b></span>`];
+            if (this.arcadeStreak >= 2) chips.push(`<span class="arcade-chip streak${this.arcadeStreak >= 5 ? ' hot' : ''}"><i class="fas fa-fire" aria-hidden="true"></i> ${this.arcadeStreak}</span>`);
+            if (this.arcadeMode === 'survival') chips.push(`<span class="arcade-chip lives" aria-label="${this.arcadeLives} lives left">${[0, 1, 2].map(n => `<i class="fas fa-heart${n < this.arcadeLives ? '' : ' lost'}" aria-hidden="true"></i>`).join('')}</span>`);
+            if (this.arcadeMode === 'lightning') chips.push(`<span class="arcade-chip timer${this.arcadeTimeLeft <= 10 ? ' low' : ''}" id="arcade-time-chip"><i class="fas fa-stopwatch" aria-hidden="true"></i> <b id="arcade-time-left">${this.arcadeTimeLeft}s</b></span>`);
+            const bar = this.arcadeMode === 'lightning'
+                ? `<div class="arcade-track lightning"><span id="arcade-time-fill" style="width:${Math.max(0, this.arcadeTimeLeft / 60 * 100)}%"></span></div>`
+                : `<div class="arcade-track"><span style="width:${total ? done / total * 100 : 0}%"></span></div>`;
+            return `<div class="arcade-hud"><span class="arcade-count">${this.arcadeMode === 'lightning' ? `${this.arcadeScore} correct` : `${Math.min(afterAnswer ? done : done + 1, total)} / ${total}`}</span>${chips.join('')}</div>${bar}`;
+        }
+
         renderArcadeQuestion() {
             const content = document.getElementById('arcade-game-content');
             if (!content) return;
+            clearTimeout(this.arcadeAdvanceTimer);
             if (this.arcadeQuestionIndex >= this.arcadeCards.length || (this.arcadeMode === 'survival' && this.arcadeLives <= 0)) {
                 this.finishArcadeStudySession();
-                content.innerHTML = '';
-                const result = document.createElement('p');
-                result.textContent = this.arcadeMode === 'survival' && this.arcadeLives <= 0
-                    ? `Game over! You got ${this.arcadeScore} of ${this.arcadeCards.length} correct.`
-                    : `Round complete: ${this.arcadeScore} of ${this.arcadeCards.length} correct.`;
-                const replay = document.createElement('button');
-                replay.className = 'primary-btn';
-                replay.dataset.action = 'arcade-restart';
-                replay.textContent = 'Play Again';
-                content.append(result, replay);
+                if (this.arcadeTimer) { clearInterval(this.arcadeTimer); this.arcadeTimer = null; }
+                const answered = this.arcadeMode === 'lightning' ? Math.max(this.arcadeAnswered || 0, 1) : this.arcadeCards.length;
+                const heading = this.arcadeMode === 'survival' && this.arcadeLives <= 0 ? 'Out of lives!'
+                    : this.arcadeMode === 'lightning' ? (this.arcadeTimeLeft <= 0 ? 'Time!' : 'Deck cleared!') : 'Round complete!';
+                content.innerHTML = this.arcadeResultsMarkup({ heading, correct: this.arcadeScore, total: this.arcadeMode === 'survival' ? (this.arcadeAnswered || 0) : answered,
+                    extra: [[this.arcadePoints || 0, 'Points'], [this.arcadeBestStreak || 0, 'Best streak']] });
+                window.StudBudSfx?.play?.(this.arcadeScore >= answered * .7 ? 'win' : 'success');
+                content.querySelector('[data-action="arcade-restart"]')?.focus();
                 return;
             }
 
             const card = this.arcadeCards[this.arcadeQuestionIndex];
-            content.innerHTML = '';
-
-            const progress = document.createElement('p');
-            const mode = document.getElementById('arcade-game-title').textContent;
-            progress.textContent = `Question ${this.arcadeQuestionIndex + 1} of ${this.arcadeCards.length} · Score: ${this.arcadeScore}${this.arcadeMode === 'streak' ? ` · Streak: ${this.arcadeStreak}` : ''}${this.arcadeMode === 'survival' ? ` · Lives: ${'♥'.repeat(this.arcadeLives)}${'♡'.repeat(3 - this.arcadeLives)}` : ''}`;
-            if (mode.includes('Lightning')) {
-                const timerLabel = document.createElement('span');
-                timerLabel.id = 'arcade-time-left';
-                timerLabel.textContent = ` · ${this.arcadeTimeLeft}s`;
-                progress.append(timerLabel);
-            }
-            const question = document.createElement('h4');
-            question.textContent = card.front;
-            const choicesContainer = document.createElement('div');
-            choicesContainer.className = 'arcade-answer-options';
+            let options;
+            let statement = '';
             if (this.arcadeMode === 'truefalse') {
-                const isTrue = Math.random() < 0.5;
                 const distractor = this.pickDistractorCards(card, this.arcadeCards, 1)[0];
                 // Without a different answer to show, the statement can only be the real one
-                const showTrue = isTrue || !distractor;
+                const showTrue = Math.random() < 0.5 || !distractor;
                 this.arcadeCurrentIsTrue = showTrue;
                 this.arcadeOptions = [true, false];
-                const statement = document.createElement('p');
-                statement.className = 'true-false-statement';
-                statement.textContent = showTrue ? card.back : distractor.back;
-                this.arcadeOptions.forEach((value, index) => {
-                    const button = document.createElement('button');
-                    button.className = 'secondary-btn';
-                    button.dataset.action = 'arcade-answer';
-                    button.dataset.index = String(index);
-                    button.textContent = value ? 'True' : 'False';
-                    choicesContainer.append(button);
-                });
-                const feedback = document.createElement('p');
-                feedback.id = 'arcade-feedback';
-                content.append(progress, question, statement, choicesContainer, feedback);
-                return;
+                statement = `<p class="true-false-statement">${this.escapeHTML(showTrue ? card.back : distractor.back)}</p>`;
+                options = [['T', '<i class="fas fa-check" aria-hidden="true"></i> True', 'tf-true'], ['F', '<i class="fas fa-xmark" aria-hidden="true"></i> False', 'tf-false']];
+            } else {
+                this.arcadeOptions = this.shuffleCards([card, ...this.pickDistractorCards(card, this.arcadeCards, 3)]);
+                options = this.arcadeOptions.map((option, index) => [String(index + 1), this.escapeHTML(option.back), `opt-${index}`]);
             }
-            const choices = [card];
-            const distractors = this.pickDistractorCards(card, this.arcadeCards, 3);
-            this.arcadeOptions = this.shuffleCards([...choices, ...distractors]);
-            this.arcadeOptions.forEach((option, index) => {
-                const button = document.createElement('button');
-                button.className = 'secondary-btn';
-                button.dataset.action = 'arcade-answer';
-                button.dataset.index = String(index);
-                button.textContent = option.back;
-                choicesContainer.append(button);
-            });
-            const feedback = document.createElement('p');
-            feedback.id = 'arcade-feedback';
-            content.append(progress, question, choicesContainer, feedback);
+            const image = window.FlashcardTools.imageSource(card.questionImage || card.image);
+            content.innerHTML = `<div class="arcade-play arcade-mode-${this.arcadeMode}">
+                ${this.arcadeHudMarkup()}
+                <div class="arcade-question-card">
+                    <span class="arcade-question-label">${this.arcadeMode === 'truefalse' ? 'Does this match?' : 'Pick the answer'}</span>
+                    <h4>${this.escapeHTML(card.front)}</h4>${image ? `<img class="flashcard-answer-image" src="${image}" alt="">` : ''}
+                    ${statement}
+                </div>
+                <div class="arcade-answer-options${this.arcadeMode === 'truefalse' ? ' tf' : ''}">${options.map(([key, label, cls], index) =>
+                    `<button type="button" class="arcade-option ${cls}" data-action="arcade-answer" data-index="${index}"><kbd>${key}</kbd><span>${label}</span></button>`).join('')}</div>
+                <div id="arcade-feedback" class="arcade-feedback" aria-live="polite"></div>
+            </div>`;
         }
 
         shuffleCards(cards) {
@@ -10178,7 +10518,9 @@
         }
 
         async answerArcade(index) {
-            if (this.arcadeAnswerPending) return;
+            if (this.arcadeAnswerPending || !this.arcadeOptions || index < 0 || index >= this.arcadeOptions.length) return;
+            const content = document.getElementById('arcade-game-content');
+            if (content?.querySelector('[data-action="arcade-answer"]:disabled')) return;
             const correctCard = this.arcadeCards[this.arcadeQuestionIndex];
             const correct = this.arcadeMode === 'truefalse'
                 ? this.arcadeOptions[index] === this.arcadeCurrentIsTrue
@@ -10186,24 +10528,64 @@
             this.arcadeAnswerPending = true;
             try { await this.updateCardSchedule(correctCard, correct); }
             finally { this.arcadeAnswerPending = false; }
+            this.arcadeAnswered = (this.arcadeAnswered || 0) + 1;
             if (correct) this.arcadeScore += 1;
             this.arcadeStreak = correct ? this.arcadeStreak + 1 : 0;
+            this.arcadeBestStreak = Math.max(this.arcadeBestStreak || 0, this.arcadeStreak);
+            const gained = correct ? 100 + Math.min(this.arcadeStreak - 1, 10) * 20 + (this.arcadeMode === 'lightning' ? 30 : 0) : 0;
+            this.arcadePoints = (this.arcadePoints || 0) + gained;
             if (this.arcadeMode === 'survival' && !correct) this.arcadeLives -= 1;
             document.querySelectorAll('#arcade-game-content [data-action="arcade-answer"]').forEach(button => {
                 button.disabled = true;
-                const answer = this.arcadeOptions[Number(button.dataset.index)];
-                if (this.arcadeMode === 'truefalse' ? answer === this.arcadeCurrentIsTrue : answer === correctCard) button.classList.add('correct');
+                const value = this.arcadeOptions[Number(button.dataset.index)];
+                const isRight = this.arcadeMode === 'truefalse' ? value === this.arcadeCurrentIsTrue : value === correctCard;
+                if (isRight) button.classList.add('correct');
+                else if (Number(button.dataset.index) === index) button.classList.add('wrong');
             });
-            const feedback = document.getElementById('arcade-feedback');
-            if (feedback) feedback.innerHTML = `${correct ? 'Correct!' : 'Not quite.'}<div>${this.cardAnswerMarkup(correctCard)}</div>`;
-            const next = document.createElement('button');
-            next.className = 'primary-btn';
-            next.dataset.action = 'arcade-next';
-            next.textContent = this.arcadeQuestionIndex + 1 === this.arcadeCards.length
-                || (this.arcadeMode === 'survival' && this.arcadeLives <= 0)
-                ? 'See Results' : 'Next Question';
-            document.getElementById('arcade-game-content').append(next);
+            window.StudBudSfx?.play?.(correct ? 'correct' : 'wrong');
+            const play = content?.querySelector('.arcade-play');
+            const hud = play?.querySelector('.arcade-hud');
+            const last = this.arcadeQuestionIndex + 1 === this.arcadeCards.length || (this.arcadeMode === 'survival' && this.arcadeLives <= 0);
             this.arcadeQuestionIndex += 1;
+            if (hud) {
+                const wrapper = document.createElement('div');
+                wrapper.innerHTML = this.arcadeHudMarkup(true);
+                hud.nextElementSibling?.remove();
+                hud.replaceWith(...wrapper.children);
+            }
+            const praise = ['Correct!', 'Nice!', 'Nailed it!', 'Boom!', 'On fire!'];
+            const feedback = document.getElementById('arcade-feedback');
+            if (feedback) {
+                feedback.className = `arcade-feedback ${correct ? 'good' : 'bad'}`;
+                feedback.innerHTML = `<div class="arcade-feedback-head"><strong>${correct ? praise[Math.min(this.arcadeStreak - 1, praise.length - 1)] : 'Not quite'}</strong>${gained ? `<span class="arcade-gain">+${gained}</span>` : ''}</div>
+                    ${correct && this.arcadeMode !== 'truefalse' ? '' : `<div class="arcade-feedback-answer"><span>${this.escapeHTML(correctCard.front)}</span> <i class="fas fa-arrow-right" aria-hidden="true"></i> ${this.cardAnswerMarkup(correctCard)}</div>`}
+                    <button type="button" class="primary-btn" data-action="arcade-next">${last ? 'See results' : 'Next'} <kbd>Enter</kbd></button>`;
+                const next = feedback.querySelector('[data-action="arcade-next"]');
+                next?.focus({ preventScroll: true });
+            }
+            // Lightning keeps momentum: correct answers move on by themselves.
+            if (this.arcadeMode === 'lightning' && correct && !last) this.arcadeAdvanceTimer = setTimeout(() => this.renderArcadeQuestion(), 650);
+        }
+
+        handleArcadeKey(event) {
+            const content = document.getElementById('arcade-game-content');
+            const container = document.getElementById('arcade-canvas-container');
+            if (!content || !container || container.classList.contains('hidden') || !content.querySelector('.arcade-play, .arcade-results')) return;
+            if (event.ctrlKey || event.metaKey || event.altKey || event.target.closest?.('input, textarea, select')) return;
+            const key = event.key.toLowerCase();
+            const options = [...content.querySelectorAll('[data-action="arcade-answer"]:not(:disabled)')];
+            let index = -1;
+            if (options.length && this.arcadeMode === 'truefalse') index = key === 't' ? 0 : key === 'f' ? 1 : ['1', '2'].includes(key) ? Number(key) - 1 : -1;
+            else if (options.length && /^[1-4]$/.test(key)) index = Number(key) - 1;
+            if (index >= 0) {
+                event.preventDefault();
+                this.answerArcade(index);
+                return;
+            }
+            if (key === 'enter' && event.target.tagName !== 'BUTTON') {
+                const next = content.querySelector('[data-action="arcade-next"], [data-action="arcade-restart"]');
+                if (next) { event.preventDefault(); next.click(); }
+            }
         }
 
         async awardSoloCoins() {
@@ -10249,6 +10631,7 @@
 
         closeArcade() {
             this.finishArcadeStudySession();
+            clearTimeout(this.arcadeAdvanceTimer);
             if (this.arcadeTimer) {
                 clearInterval(this.arcadeTimer);
                 this.arcadeTimer = null;
@@ -10264,6 +10647,7 @@
     }
 
     window.NexusApp = new AppOrchestrator();
+    window.StudBudClassrooms?.attach(window.NexusApp);
 
     const start = () => window.StudBudCloud.bootstrap().catch(error => {
         console.error('[NexusApp] Startup failed:', error);

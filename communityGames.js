@@ -585,6 +585,15 @@
             return data;
         }
 
+        // Classroom RPCs (teacher classes, student joins, class flashcard sets, progress snapshots).
+        async classCall(fn, args = {}) {
+            if (!/^studbud_(teacher_\w+|my_classes|sync_class_stats)$/.test(fn)) throw new Error('Unknown class action.');
+            const { data, error } = await this.getClient().rpc(fn, args);
+            if (error) throw new Error(error.message.includes('Could not find the function')
+                ? 'Classes are not set up yet. Re-run supabase-setup.sql in Supabase.' : error.message);
+            return data;
+        }
+
         async awardSoloCoins(correct, total) {
             const { data, error } = await this.getClient().rpc('studbud_award_solo_coins', { p_correct: correct, p_total: total });
             if (error) throw new Error(`Could not award coins: ${error.message}`);

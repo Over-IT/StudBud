@@ -111,7 +111,8 @@ async function run() {
     await installation;
     installing = false;
     fetches = 0;
-    assert.equal(installed.filter(url => url.endsWith('.woff2')).length, 3, 'icon fonts are precached before the first offline reload');
+    assert.equal(installed.filter(url => url.endsWith('.woff2') && !url.includes('nunito')).length, 3, 'icon fonts are precached before the first offline reload');
+    assert.ok(installed.includes('./assets/fonts/nunito-latin.woff2'), 'the app font is precached');
     assert.ok(installed.includes('./chessGame.js'));
     handlers.get('fetch')({ request: { method: 'GET', url: 'https://cdn.jsdelivr.net/npm/chart.js' }, respondWith: promise => { response = promise; } });
     assert.equal(await response, cached, 'public libraries are available from the offline cache');

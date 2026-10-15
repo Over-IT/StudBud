@@ -14,7 +14,7 @@
     <!-- Main Stylesheet -->
     <link rel="stylesheet" href="styles.css">
 </head>
-<body class="dark-theme" data-color-scheme="monochrome">
+<body class="dark-theme" data-color-scheme="studbud">
     <section id="auth-screen" class="auth-screen hidden" aria-labelledby="auth-title">
         <div class="glass-card auth-card">
             <div class="logo-container">
@@ -36,7 +36,7 @@
                 <label>Username (3–24 letters, numbers, or underscores)<input id="signup-username" type="text" autocomplete="username" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" title="Use 3–24 letters, numbers, or underscores." required></label>
                 <label>Password (at least 8 characters)<input id="signup-password" type="password" autocomplete="new-password" minlength="8" required></label>
                 <label>Confirm password<input id="signup-password-confirm" type="password" autocomplete="new-password" minlength="8" required></label>
-                <label>School<select id="signup-school" required><option value="">Choose your school…</option><option value="pchs">Parkway Central High School (PCHS)</option><option value="other">Other / not listed</option></select></label>
+                <label>School<select id="signup-school" required><option value="">Choose your school…</option><option value="pchs">Parkway Central High School</option><option value="pnhs">Parkway North High School</option><option value="pshs">Parkway South High School</option><option value="pwhs">Parkway West High School</option><option value="other">Other / not listed</option></select></label>
                 <button class="primary-btn full-width" type="submit">Create account</button>
             </form>
             <p id="auth-status" class="auth-message" role="status" aria-live="polite"></p>
@@ -115,6 +115,9 @@
                     </li>
                     <li class="nav-item workspace-child" data-target="importer-view" role="button" tabindex="0">
                         <i class="fas fa-file-import"></i> <span>Import Cards</span>
+                    </li>
+                    <li id="classes-nav-item" class="nav-item hidden" data-target="classes-view" role="button" tabindex="0">
+                        <i class="fas fa-school"></i> <span>Classes</span>
                     </li>
                     <li id="admin-nav-item" class="nav-item hidden" data-target="admin-view" role="button" tabindex="0">
                         <i class="fas fa-user-shield"></i> <span>Staff tools</span>
@@ -219,7 +222,7 @@
                         </section>
                         <div class="glass-card widget schedule-widget">
                             <div class="view-header">
-                                <div><h3 id="daily-schedule-title">Today's PCHS Schedule</h3><p id="daily-schedule-type" class="schedule-day-type"></p></div>
+                                <div><h3 id="daily-schedule-title">Today's Schedule</h3><p id="daily-schedule-type" class="schedule-day-type"></p></div>
                                 <button id="daily-schedule-edit" class="secondary-btn" data-target="schedule-view">Set Schedule</button>
                             </div>
                             <ul id="daily-schedule-list" class="empty-list"></ul>
@@ -467,7 +470,7 @@
                             <button id="remove-ic-schedule-btn" class="danger-btn" type="button"><i class="fas fa-calendar-xmark"></i> Remove imported schedule</button>
                         </div>
                     </div>
-                    <p class="settings-hint">Uses the PCHS weekday rotation until you import Infinite Campus. Special schedules may differ.</p>
+                    <p class="settings-hint">Uses the Parkway weekday rotation until you import Infinite Campus. Special schedules may differ.</p>
                 </section>
 
                 <!-- 4. Flashcard Studio View -->
@@ -517,12 +520,25 @@
                             </div>
                             <button id="exit-study-btn" class="icon-btn" aria-label="Close study session"><i class="fas fa-times"></i></button>
                         </div>
+                        <div class="study-progress-track" aria-hidden="true"><span id="study-progress-fill"></span></div>
+                        <div class="study-toolbar">
+                            <button id="study-star-btn" type="button" class="chip-btn" aria-pressed="false" title="Star this card (S)"><i class="far fa-star"></i> <span>Star</span></button>
+                            <label class="chip-toggle" title="Type your answer before revealing (T)"><input id="study-type-toggle" type="checkbox"> <i class="fas fa-keyboard"></i> Type answer</label>
+                            <span id="study-combo" class="study-combo hidden" aria-live="polite"></span>
+                            <span class="study-keys" aria-hidden="true"><kbd>Space</kbd> flip · <kbd>1</kbd>–<kbd>4</kbd> rate · <kbd>S</kbd> star</span>
+                        </div>
                         <div class="flashcard-container" id="current-flashcard">
                             <div class="flashcard-inner">
                                 <div class="flashcard-front" id="card-front-content">Front Content</div>
                                 <div class="flashcard-back" id="card-back-content">Back Content</div>
                             </div>
                         </div>
+                        <form id="study-type-form" class="study-type-form hidden" autocomplete="off">
+                            <label for="study-type-input" class="sr-only">Your answer</label>
+                            <input id="study-type-input" type="text" maxlength="500" placeholder="Type your answer, then press Enter">
+                            <button type="submit" class="primary-btn">Check</button>
+                        </form>
+                        <p id="study-type-result" class="study-type-result hidden" role="status"></p>
                         <div class="study-controls">
                             <button id="reveal-card-btn" class="primary-btn full-width">Reveal Answer</button>
                             <div id="sm2-controls" class="hidden">
@@ -535,6 +551,7 @@
                                 </div>
                             </div>
                         </div>
+                        <div id="study-summary" class="study-summary hidden" role="status"></div>
                     </div>
                 </section>
 
@@ -810,6 +827,11 @@
                     </div>
                 </section>
 
+                <!-- Classes: teacher dashboard or student class list (classrooms.js) -->
+                <section id="classes-view" class="view hidden">
+                    <div id="classes-root" class="classes-root"></div>
+                </section>
+
                 <!-- Staff tools (role-appropriate tabs) -->
                 <section id="admin-view" class="view hidden">
                     <div class="glass-card admin-panel">
@@ -857,8 +879,8 @@
                             </div>
                             <div class="form-group"><label for="public-goal">Study goal</label><input type="text" id="public-goal" maxlength="80" autocomplete="off" placeholder="e.g. Get an A in Chemistry"></div>
                             <label class="settings-check"><input type="checkbox" id="public-show-real-name"> Show my first and last name on my public profile</label>
-                            <label class="settings-check"><input type="checkbox" id="public-show-school"> Show my PCHS tag on my public profile</label>
-                            <small class="settings-hint">Only PCHS has a public school tag. Other schools are never shown publicly.</small>
+                            <label class="settings-check"><input type="checkbox" id="public-show-school"> Show my school tag on my public profile</label>
+                            <small class="settings-hint">Only Parkway high schools have a public school tag. Other schools are never shown publicly.</small>
                             <label class="settings-check"><input type="checkbox" id="public-show-stats" checked> Show my study time, streak and match wins</label>
                             <p id="public-profile-status" class="community-status" role="status" aria-live="polite"></p>
                             <button id="save-public-profile-btn" class="primary-btn" type="button">Save public profile</button>
@@ -1006,7 +1028,7 @@
                             <h2>Student Profile</h2>
                             <div class="form-group">
                                 <label for="settings-school">School</label>
-                                <select id="settings-school"><option value="pchs">Parkway Central High School (PCHS)</option><option value="other">Other / not listed</option></select>
+                                <select id="settings-school"><option value="pchs">Parkway Central High School</option><option value="pnhs">Parkway North High School</option><option value="pshs">Parkway South High School</option><option value="pwhs">Parkway West High School</option><option value="other">Other / not listed</option></select>
                                 <small class="settings-hint">Your school is private unless you enable its public-profile tag.</small>
                             </div>
                             <div class="form-group">
@@ -1089,6 +1111,7 @@
                             <h3>Color scheme</h3>
                             <p>Choose a palette for the full interface, including backgrounds. Every palette supports light and dark appearance.</p>
                             <div class="scheme-picker" role="group" aria-label="Color scheme">
+                                <button type="button" class="scheme-option" data-color-scheme="studbud"><span class="scheme-swatch studbud-swatch"></span><span>StudBud</span><small class="scheme-lock-note">Default</small></button>
                                 <button type="button" class="scheme-option" data-color-scheme="forest"><span class="scheme-swatch forest-swatch"></span><span>Forest</span></button>
                                 <button type="button" class="scheme-option" data-color-scheme="ocean" data-shop-item="palette_ocean"><span class="scheme-swatch ocean-swatch"></span><span>Ocean</span><small class="scheme-lock-note">Unlock in multiplayer shop</small></button>
                                 <button type="button" class="scheme-option" data-color-scheme="violet" data-shop-item="palette_violet"><span class="scheme-swatch violet-swatch"></span><span>Violet</span><small class="scheme-lock-note">Unlock in multiplayer shop</small></button>
@@ -1096,7 +1119,7 @@
                                 <button type="button" class="scheme-option" data-color-scheme="aurora" data-shop-item="palette_aurora"><span class="scheme-swatch aurora-swatch"></span><span>Aurora Drift</span><small class="scheme-lock-note">Unlock in multiplayer shop</small></button>
                                 <button type="button" class="scheme-option" data-color-scheme="coral" data-shop-item="palette_coral"><span class="scheme-swatch coral-swatch"></span><span>Coral Reef</span><small class="scheme-lock-note">Unlock in multiplayer shop</small></button>
                                 <button type="button" class="scheme-option" data-color-scheme="midnight" data-shop-item="palette_midnight"><span class="scheme-swatch midnight-swatch"></span><span>Midnight</span><small class="scheme-lock-note">Unlock in multiplayer shop</small></button>
-                                <button type="button" class="scheme-option" data-color-scheme="monochrome"><span class="scheme-swatch monochrome-swatch"></span><span>Black &amp; White</span><small class="scheme-lock-note">Default</small></button>
+                                <button type="button" class="scheme-option" data-color-scheme="monochrome"><span class="scheme-swatch monochrome-swatch"></span><span>Black &amp; White</span></button>
                             </div>
                         </section>
                         <section class="glass-card">
@@ -1248,13 +1271,13 @@
                     <form id="course-form">
                         <input type="hidden" id="course-id">
                         <div class="form-group" id="course-catalog-fields">
-                            <label for="course-search">Class</label>
+                            <label for="course-search" id="course-search-label">Class</label>
                             <div class="course-autocomplete">
                                 <input type="search" id="course-search" placeholder="Type a class name or code…" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="course-suggestions" aria-expanded="false">
                                 <input type="hidden" id="course-name">
-                                <div id="course-suggestions" class="course-suggestions hidden" role="listbox" aria-label="PCHS course matches"></div>
+                                <div id="course-suggestions" class="course-suggestions hidden" role="listbox" aria-label="Course matches"></div>
                             </div>
-                            <small id="course-selection-hint" class="form-hint">Choose a PCHS course from the matches.</small>
+                            <small id="course-selection-hint" class="form-hint">Choose a course from the matches.</small>
                         </div>
                         <div id="course-manual-fields" class="hidden">
                             <div class="form-group"><label for="course-manual-title">Class name</label><input id="course-manual-title" maxlength="100" autocomplete="off" placeholder="e.g. Biology II" required></div>
@@ -1292,7 +1315,7 @@
                         </div>
                         <div class="form-group row-group">
                             <div class="half-width">
-                                <span class="form-label" id="course-scale-label">PCHS grade scale</span>
+                                <span class="form-label" id="course-scale-label">Parkway grade scale</span>
                                 <output id="course-weight-label" class="course-weight-label">Select a catalog course</output>
                             </div>
                             <div class="half-width"><span class="form-label">Grade</span><span>Calculated from assignment scores</span></div>
@@ -1420,10 +1443,18 @@
                     <div class="deck-editor-toolbar">
                         <label for="deck-editor-search">Find a card</label>
                         <input id="deck-editor-search" type="search" placeholder="Search terms, answers or tags">
-                        <select id="deck-editor-filter" aria-label="Filter cards"><option value="all">All cards</option><option value="weak">Accuracy below 75%</option><option value="images">With answer images</option><option value="attachments">With private attachments</option><option value="keywords">Definition keyword answers</option><option value="paused">Paused scheduled study</option></select>
+                        <select id="deck-editor-filter" aria-label="Filter cards"><option value="all">All cards</option><option value="weak">Accuracy below 75%</option><option value="images">With answer images</option><option value="attachments">With private attachments</option><option value="keywords">Definition keyword answers</option><option value="paused">Paused scheduled study</option><option value="starred">Starred</option></select>
                         <button type="button" class="secondary-btn" data-action="editor-add-card">Add card</button>
                         <button id="deck-editor-undo" type="button" class="secondary-btn hidden" data-action="editor-undo-delete">Undo deletion</button>
                     </div>
+                    <form id="deck-quick-add-form" class="deck-quick-add" autocomplete="off">
+                        <span class="deck-quick-add-label"><i class="fas fa-bolt"></i> Quick add</span>
+                        <label for="deck-quick-front" class="sr-only">Term</label>
+                        <input id="deck-quick-front" type="text" maxlength="5000" placeholder="Term or question">
+                        <label for="deck-quick-back" class="sr-only">Definition</label>
+                        <input id="deck-quick-back" type="text" maxlength="5000" placeholder="Definition or answer (Enter adds)">
+                        <button type="submit" class="primary-btn compact-btn"><i class="fas fa-plus"></i> Add</button>
+                    </form>
                     <details class="deck-editor-bulk-panel"><summary>Paste many cards</summary>
                         <p class="settings-hint">Paste spreadsheet rows or type Question :: Answer :: tags (up to 300). Duplicates are skipped.</p>
                         <label for="deck-editor-bulk">Cards to add</label>
@@ -1641,6 +1672,7 @@
     <script src="multiplayerGames3.js" defer></script>
     <script src="chessGame.js" defer></script>
     <script src="infiniteCampusImport.js" defer></script>
+    <script src="classrooms.js" defer></script>
     <script src="app.js" defer></script>
     <script>
         let installPrompt = null;

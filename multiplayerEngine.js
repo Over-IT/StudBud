@@ -31,7 +31,7 @@
         const markup = [];
         if (name === 'overit') markup.push('<span class="account-tag account-tag-owner">Owner</span>');
         else if (name === 'andy') markup.push('<span class="account-tag account-tag-co-owner">Co-owner</span>');
-        const labels = { teacher: ['Teacher', 'teacher'], tester: ['Tester', 'tester'], moderator: ['Moderator', 'moderator'], pchs: ['PCHS', 'school'] };
+        const labels = { teacher: ['Teacher', 'teacher'], tester: ['Tester', 'tester'], moderator: ['Moderator', 'moderator'], pchs: ['PCHS', 'school'], pnhs: ['PNHS', 'school'], pshs: ['PSHS', 'school'], pwhs: ['PWHS', 'school'] };
         for (const tag of [...new Set(Array.isArray(tags) ? tags : [])]) {
             const item = labels[tag];
             if (item) markup.push(`<span class="account-tag account-tag-${item[1]}">${item[0]}</span>`);

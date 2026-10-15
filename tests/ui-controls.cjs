@@ -96,8 +96,8 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 assert.match(html, /id="settings-first-name"/);
 assert.match(html, /id="settings-last-name"/);
 assert.match(html, /id="public-show-real-name"/);
-assert.match(html, /<body class="dark-theme" data-color-scheme="monochrome">/,
-    'the initial page paint uses the non-green default before app startup');
+assert.match(html, /<body class="dark-theme" data-color-scheme="studbud">/,
+    'the initial page paint uses the StudBud default before app startup');
 assert.match(html, /<span>Hypothetical Grades<\/span>/);
 assert.match(html, /<span>Practice<\/span>/);
 assert.match(html, /id="practice-multiplayer-form"/);

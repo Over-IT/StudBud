@@ -135,6 +135,10 @@ begin
     if p_study_date is null or p_study_date > timezone('utc', now())::date then
         raise exception 'Study dates cannot be in the future.';
     end if;
+    -- Beta-test study time was reset on 2026-10-15; older sessions still queued on devices are ignored.
+    if p_study_date < date '2026-10-15' then
+        return jsonb_build_object('recorded', false);
+    end if;
 
     insert into public.studbud_study_time_entries (user_id, entry_id, study_date, seconds)
     values (v_user_id, btrim(p_entry_id), p_study_date, p_seconds)
@@ -2535,7 +2539,7 @@ create table if not exists public.studbud_public_profiles (
     first_name text not null default '',
     last_name text not null default '',
     show_real_name boolean not null default false,
-    school text not null default 'pchs' check (school in ('pchs', 'other')),
+    school text not null default 'pchs' check (school in ('pchs', 'pnhs', 'pshs', 'pwhs', 'other')),
     show_school boolean not null default false,
     show_stats boolean not null default true,
     updated_at timestamptz not null default now()
@@ -2545,6 +2549,9 @@ alter table public.studbud_public_profiles add column if not exists last_name te
 alter table public.studbud_public_profiles add column if not exists show_real_name boolean not null default false;
 alter table public.studbud_public_profiles add column if not exists school text not null default 'pchs';
 alter table public.studbud_public_profiles add column if not exists show_school boolean not null default false;
+-- Parkway Central (pchs), North (pnhs), South (pshs) and West (pwhs) each have their own school tag.
+alter table public.studbud_public_profiles drop constraint if exists studbud_public_profiles_school_check;
+alter table public.studbud_public_profiles add constraint studbud_public_profiles_school_check check (school in ('pchs', 'pnhs', 'pshs', 'pwhs', 'other'));
 alter table public.studbud_public_profiles enable row level security;
 revoke all on table public.studbud_public_profiles from anon, authenticated;
 
@@ -2560,9 +2567,9 @@ as $$
         select role.tag, case role.tag when 'teacher' then 1 when 'tester' then 2 else 3 end as position
         from public.studbud_user_tags role where role.user_id = p_user_id
         union all
-        select 'pchs', 4
+        select profile.school, 4
         from public.studbud_public_profiles profile
-        where profile.user_id = p_user_id and profile.school = 'pchs' and profile.show_school
+        where profile.user_id = p_user_id and profile.school in ('pchs', 'pnhs', 'pshs', 'pwhs') and profile.show_school
     ) tags;
 $$;
 
@@ -2613,10 +2620,8 @@ begin
         'study_goal', coalesce(v_pub.study_goal, ''),
         'show_stats', v_show,
         'tags', to_jsonb(public.studbud_user_tags_for(p_user_id)),
-        'school', case when coalesce(v_pub.school, (select a.raw_user_meta_data ->> 'school' from auth.users a where a.id = p_user_id), 'pchs') = 'pchs'
-                            and coalesce(v_pub.show_school, false) then 'pchs' end,
-        'show_school', coalesce(v_pub.show_school, false)
-            and coalesce(v_pub.school, (select a.raw_user_meta_data ->> 'school' from auth.users a where a.id = p_user_id), 'pchs') = 'pchs',
+        'school', case when coalesce(v_pub.show_school, false) and v_pub.school in ('pchs', 'pnhs', 'pshs', 'pwhs') then v_pub.school end,
+        'show_school', coalesce(v_pub.show_school, false) and coalesce(v_pub.school, 'other') in ('pchs', 'pnhs', 'pshs', 'pwhs'),
         'wins', coalesce(v_prof.wins, 0),
         'skin', coalesce(v_prof.equipped_skin, ''),
         'hat', coalesce(v_prof.equipped_hat, ''),
@@ -2695,7 +2700,7 @@ as $$
 begin
     if public.studbud_is_guest() then raise exception 'Create a free account to use this. Your guest data comes with you.'; end if;
     if auth.uid() is null then raise exception 'Sign in first.'; end if;
-    if p_school is null or p_school not in ('pchs', 'other') then raise exception 'Choose PCHS or Other for your school.'; end if;
+    if p_school is null or p_school not in ('pchs', 'pnhs', 'pshs', 'pwhs', 'other') then raise exception 'Choose your school from the list.'; end if;
     insert into public.studbud_public_profiles (user_id, school, updated_at)
     values (auth.uid(), p_school, now())
     on conflict (user_id) do update set school = excluded.school, updated_at = now();
@@ -2853,10 +2858,8 @@ begin
         'study_goal', coalesce(v_pub.study_goal, ''),
         'show_stats', v_show,
         'tags', to_jsonb(public.studbud_user_tags_for(p_user_id)),
-        'school', case when coalesce(v_pub.school, (select a.raw_user_meta_data ->> 'school' from auth.users a where a.id = p_user_id), 'pchs') = 'pchs'
-                            and coalesce(v_pub.show_school, false) then 'pchs' end,
-        'show_school', coalesce(v_pub.show_school, false)
-            and coalesce(v_pub.school, (select a.raw_user_meta_data ->> 'school' from auth.users a where a.id = p_user_id), 'pchs') = 'pchs',
+        'school', case when coalesce(v_pub.show_school, false) and v_pub.school in ('pchs', 'pnhs', 'pshs', 'pwhs') then v_pub.school end,
+        'show_school', coalesce(v_pub.show_school, false) and coalesce(v_pub.school, 'other') in ('pchs', 'pnhs', 'pshs', 'pwhs'),
         'wins', coalesce(v_prof.wins, 0),
         'skin', coalesce(v_prof.equipped_skin, ''),
         'hat', coalesce(v_prof.equipped_hat, ''),
@@ -3161,5 +3164,413 @@ end;
 $$;
 revoke all on function public.studbud_admin_resolve_reports(text, uuid, text) from public, anon;
 grant execute on function public.studbud_admin_resolve_reports(text, uuid, text) to authenticated;
+
+-- ==========================================================================
+-- CLASSROOMS: teachers (accounts with the "teacher" tag at a Parkway school) pick the courses they teach
+-- from their school's catalog. Students at the same school who have that course get access automatically
+-- (no join codes), share a small progress snapshot with the teacher, and see the teacher's flashcard sets.
+-- ==========================================================================
+create table if not exists public.studbud_classes (
+    id uuid primary key default gen_random_uuid(),
+    teacher_id uuid not null references auth.users (id) on delete cascade,
+    school text not null check (school in ('pchs', 'pnhs', 'pshs', 'pwhs')),
+    course_code text not null check (char_length(course_code) between 1 and 40),
+    title text not null check (char_length(title) between 1 and 100),
+    section text not null default '' check (char_length(section) <= 40),
+    join_code text not null unique check (join_code ~ '^[A-HJ-NP-Z2-9]{6}$'),
+    created_at timestamptz not null default now()
+);
+create index if not exists studbud_classes_teacher_idx on public.studbud_classes (teacher_id);
+create index if not exists studbud_classes_course_idx on public.studbud_classes (school, course_code);
+alter table public.studbud_classes enable row level security;
+revoke all on table public.studbud_classes from public, anon, authenticated;
+
+create table if not exists public.studbud_class_members (
+    class_id uuid not null references public.studbud_classes (id) on delete cascade,
+    user_id uuid not null references auth.users (id) on delete cascade,
+    joined_at timestamptz not null default now(),
+    snapshot jsonb not null default '{}'::jsonb check (jsonb_typeof(snapshot) = 'object' and octet_length(snapshot::text) <= 6000),
+    snapshot_at timestamptz,
+    primary key (class_id, user_id)
+);
+alter table public.studbud_class_members add column if not exists removed boolean not null default false;
+create index if not exists studbud_class_members_user_idx on public.studbud_class_members (user_id);
+alter table public.studbud_class_members enable row level security;
+revoke all on table public.studbud_class_members from public, anon, authenticated;
+
+create table if not exists public.studbud_class_decks (
+    id uuid primary key default gen_random_uuid(),
+    class_id uuid not null references public.studbud_classes (id) on delete cascade,
+    title text not null check (char_length(title) between 1 and 100),
+    description text not null default '' check (char_length(description) <= 300),
+    cards jsonb not null default '[]'::jsonb check (jsonb_typeof(cards) = 'array' and jsonb_array_length(cards) <= 500 and octet_length(cards::text) <= 250000),
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+create index if not exists studbud_class_decks_class_idx on public.studbud_class_decks (class_id);
+alter table public.studbud_class_decks enable row level security;
+revoke all on table public.studbud_class_decks from public, anon, authenticated;
+
+create or replace function public.studbud_require_teacher()
+returns text
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_school text;
+begin
+    if public.studbud_is_guest() or auth.uid() is null then raise exception 'Sign in with a teacher account first.'; end if;
+    if not exists (select 1 from public.studbud_user_tags where user_id = auth.uid() and tag = 'teacher') then
+        raise exception 'Only teacher accounts can manage classes.';
+    end if;
+    select coalesce(pp.school, a.raw_user_meta_data ->> 'school', 'pchs') into v_school
+    from auth.users a left join public.studbud_public_profiles pp on pp.user_id = a.id
+    where a.id = auth.uid();
+    if v_school not in ('pchs', 'pnhs', 'pshs', 'pwhs') then
+        raise exception 'Classes are available for Parkway high schools. Pick your school in Settings first.';
+    end if;
+    return v_school;
+end;
+$$;
+revoke all on function public.studbud_require_teacher() from public, anon, authenticated;
+
+create or replace function public.studbud_class_person(p_user_id uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+    select jsonb_build_object(
+        'user_id', a.id,
+        'username', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student'),
+        'first_name', coalesce(pp.first_name, ''),
+        'last_name', coalesce(pp.last_name, '')
+    )
+    from auth.users a left join public.studbud_public_profiles pp on pp.user_id = a.id
+    where a.id = p_user_id;
+$$;
+revoke all on function public.studbud_class_person(uuid) from public, anon, authenticated;
+
+create or replace function public.studbud_class_summary(p_class public.studbud_classes)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+    select jsonb_build_object(
+        'id', p_class.id, 'school', p_class.school, 'course_code', p_class.course_code,
+        'title', p_class.title, 'section', p_class.section, 'created_at', p_class.created_at,
+        'teacher', public.studbud_class_person(p_class.teacher_id),
+        'student_count', (select count(*) from public.studbud_class_members m where m.class_id = p_class.id and not m.removed),
+        'deck_count', (select count(*) from public.studbud_class_decks d where d.class_id = p_class.id)
+    );
+$$;
+revoke all on function public.studbud_class_summary(public.studbud_classes) from public, anon, authenticated;
+
+create or replace function public.studbud_teacher_create_class(p_course_code text, p_title text, p_section text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_school text := public.studbud_require_teacher();
+    v_code text;
+    v_class public.studbud_classes;
+    v_alphabet constant text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+begin
+    if p_course_code is null or char_length(btrim(p_course_code)) not between 1 and 40 then raise exception 'Pick a course from your school catalog.'; end if;
+    if p_title is null or char_length(btrim(p_title)) not between 1 and 100 then raise exception 'Class names must be 1-100 characters.'; end if;
+    if char_length(coalesce(p_section, '')) > 40 then raise exception 'Keep the period or section label under 40 characters.'; end if;
+    if (select count(*) from public.studbud_classes where teacher_id = auth.uid()) >= 20 then raise exception 'You can have up to 20 classes.'; end if;
+    if exists (select 1 from public.studbud_classes where teacher_id = auth.uid() and course_code = btrim(p_course_code)) then
+        raise exception 'You already added this course.';
+    end if;
+    loop
+        select string_agg(substr(v_alphabet, 1 + floor(random() * 32)::integer, 1), '') into v_code from generate_series(1, 6);
+        exit when not exists (select 1 from public.studbud_classes where join_code = v_code);
+    end loop;
+    insert into public.studbud_classes (teacher_id, school, course_code, title, section, join_code)
+    values (auth.uid(), v_school, btrim(p_course_code), btrim(p_title), btrim(coalesce(p_section, '')), v_code)
+    returning * into v_class;
+    return public.studbud_class_summary(v_class) || jsonb_build_object('join_code', v_class.join_code);
+end;
+$$;
+
+create or replace function public.studbud_teacher_update_class(p_class_id uuid, p_title text, p_section text, p_new_code boolean default false)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_class public.studbud_classes;
+    v_code text;
+    v_alphabet constant text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+begin
+    perform public.studbud_require_teacher();
+    if p_title is null or char_length(btrim(p_title)) not between 1 and 100 then raise exception 'Class names must be 1-100 characters.'; end if;
+    if char_length(coalesce(p_section, '')) > 40 then raise exception 'Keep the period or section label under 40 characters.'; end if;
+    select * into v_class from public.studbud_classes where id = p_class_id and teacher_id = auth.uid();
+    if v_class.id is null then raise exception 'Class not found.'; end if;
+    v_code := v_class.join_code;
+    if coalesce(p_new_code, false) then
+        loop
+            select string_agg(substr(v_alphabet, 1 + floor(random() * 32)::integer, 1), '') into v_code from generate_series(1, 6);
+            exit when not exists (select 1 from public.studbud_classes where join_code = v_code);
+        end loop;
+    end if;
+    update public.studbud_classes set title = btrim(p_title), section = btrim(coalesce(p_section, '')), join_code = v_code
+    where id = p_class_id returning * into v_class;
+    return public.studbud_class_summary(v_class) || jsonb_build_object('join_code', v_class.join_code);
+end;
+$$;
+
+create or replace function public.studbud_teacher_delete_class(p_class_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    perform public.studbud_require_teacher();
+    delete from public.studbud_classes where id = p_class_id and teacher_id = auth.uid();
+    if not found then raise exception 'Class not found.'; end if;
+end;
+$$;
+
+create or replace function public.studbud_teacher_classes()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_school text := public.studbud_require_teacher();
+begin
+    return jsonb_build_object('school', v_school, 'classes', coalesce((
+        select jsonb_agg(public.studbud_class_summary(c) || jsonb_build_object(
+            'join_code', c.join_code,
+            'average_grade', (select round(avg((m.snapshot ->> 'grade_pct')::numeric), 1) from public.studbud_class_members m
+                where m.class_id = c.id and not m.removed and m.snapshot ->> 'grade_pct' ~ '^-?[0-9]+(\.[0-9]+)?$'),
+            'missing_total', (select coalesce(sum((m.snapshot ->> 'missing')::integer), 0) from public.studbud_class_members m
+                where m.class_id = c.id and not m.removed and m.snapshot ->> 'missing' ~ '^[0-9]{1,4}$')
+        ) order by c.section, c.title)
+        from public.studbud_classes c where c.teacher_id = auth.uid()
+    ), '[]'::jsonb));
+end;
+$$;
+
+create or replace function public.studbud_teacher_class_detail(p_class_id uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_class public.studbud_classes;
+    v_today date := timezone('utc', now())::date;
+begin
+    perform public.studbud_require_teacher();
+    select * into v_class from public.studbud_classes where id = p_class_id and teacher_id = auth.uid();
+    if v_class.id is null then raise exception 'Class not found.'; end if;
+    return public.studbud_class_summary(v_class) || jsonb_build_object(
+        'join_code', v_class.join_code,
+        'students', coalesce((
+            select jsonb_agg(public.studbud_class_person(m.user_id) || jsonb_build_object(
+                'joined_at', m.joined_at,
+                'snapshot', m.snapshot,
+                'snapshot_at', m.snapshot_at,
+                'today_seconds', (select coalesce(sum(e.seconds), 0) from public.studbud_study_time_entries e where e.user_id = m.user_id and e.study_date = v_today),
+                'week_seconds', (select coalesce(sum(e.seconds), 0) from public.studbud_study_time_entries e where e.user_id = m.user_id and e.study_date > v_today - 7),
+                'streak', public.studbud_current_streak(m.user_id),
+                'last_active', greatest(m.snapshot_at, (select max(e.created_at) from public.studbud_study_time_entries e where e.user_id = m.user_id))
+            ) order by m.joined_at)
+            from public.studbud_class_members m where m.class_id = v_class.id and not m.removed
+        ), '[]'::jsonb),
+        'removed', coalesce((
+            select jsonb_agg(public.studbud_class_person(m.user_id) order by m.joined_at)
+            from public.studbud_class_members m where m.class_id = v_class.id and m.removed
+        ), '[]'::jsonb),
+        'decks', coalesce((
+            select jsonb_agg(jsonb_build_object('id', d.id, 'title', d.title, 'description', d.description, 'cards', d.cards, 'updated_at', d.updated_at) order by d.updated_at desc)
+            from public.studbud_class_decks d where d.class_id = v_class.id
+        ), '[]'::jsonb)
+    );
+end;
+$$;
+
+create or replace function public.studbud_teacher_remove_student(p_class_id uuid, p_user_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    perform public.studbud_require_teacher();
+    if not exists (select 1 from public.studbud_classes where id = p_class_id and teacher_id = auth.uid()) then raise exception 'Class not found.'; end if;
+    update public.studbud_class_members set removed = true, snapshot = '{}'::jsonb, snapshot_at = null
+    where class_id = p_class_id and user_id = p_user_id;
+end;
+$$;
+
+create or replace function public.studbud_teacher_restore_student(p_class_id uuid, p_user_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    perform public.studbud_require_teacher();
+    if not exists (select 1 from public.studbud_classes where id = p_class_id and teacher_id = auth.uid()) then raise exception 'Class not found.'; end if;
+    update public.studbud_class_members set removed = false where class_id = p_class_id and user_id = p_user_id;
+end;
+$$;
+
+create or replace function public.studbud_teacher_save_deck(p_class_id uuid, p_deck_id uuid, p_title text, p_description text, p_cards jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_cards jsonb;
+    v_id uuid;
+begin
+    perform public.studbud_require_teacher();
+    if not exists (select 1 from public.studbud_classes where id = p_class_id and teacher_id = auth.uid()) then raise exception 'Class not found.'; end if;
+    if p_title is null or char_length(btrim(p_title)) not between 1 and 100 then raise exception 'Set titles must be 1-100 characters.'; end if;
+    if char_length(coalesce(p_description, '')) > 300 then raise exception 'Keep the description under 300 characters.'; end if;
+    if p_cards is null or jsonb_typeof(p_cards) <> 'array' then raise exception 'Add at least one card.'; end if;
+    select coalesce(jsonb_agg(jsonb_build_object('front', left(btrim(card ->> 'front'), 1000), 'back', left(btrim(card ->> 'back'), 1000))), '[]'::jsonb)
+    into v_cards
+    from jsonb_array_elements(p_cards) card
+    where jsonb_typeof(card) = 'object' and char_length(btrim(coalesce(card ->> 'front', ''))) > 0 and char_length(btrim(coalesce(card ->> 'back', ''))) > 0;
+    if jsonb_array_length(v_cards) = 0 then raise exception 'Add at least one card with a term and a definition.'; end if;
+    if jsonb_array_length(v_cards) > 500 then raise exception 'Class sets can have up to 500 cards.'; end if;
+    if p_deck_id is null then
+        if (select count(*) from public.studbud_class_decks where class_id = p_class_id) >= 50 then raise exception 'A class can have up to 50 sets.'; end if;
+        insert into public.studbud_class_decks (class_id, title, description, cards)
+        values (p_class_id, btrim(p_title), btrim(coalesce(p_description, '')), v_cards) returning id into v_id;
+    else
+        update public.studbud_class_decks set title = btrim(p_title), description = btrim(coalesce(p_description, '')), cards = v_cards, updated_at = now()
+        where id = p_deck_id and class_id = p_class_id returning id into v_id;
+        if v_id is null then raise exception 'Set not found.'; end if;
+    end if;
+    return jsonb_build_object('id', v_id, 'card_count', jsonb_array_length(v_cards));
+end;
+$$;
+
+create or replace function public.studbud_teacher_delete_deck(p_deck_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    perform public.studbud_require_teacher();
+    delete from public.studbud_class_decks d using public.studbud_classes c
+    where d.id = p_deck_id and c.id = d.class_id and c.teacher_id = auth.uid();
+    if not found then raise exception 'Set not found.'; end if;
+end;
+$$;
+
+-- Access is automatic: a student is in every class at their own school whose course is in their course list.
+-- Classes for courses they no longer take (or at another school) are dropped; teacher removals stick.
+drop function if exists public.studbud_join_class(text, uuid);
+drop function if exists public.studbud_leave_class(uuid);
+drop function if exists public.studbud_my_classes(text[]);
+
+create or replace function public.studbud_my_classes(p_course_codes text[] default array[]::text[])
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_school text;
+    v_codes text[];
+begin
+    if public.studbud_is_guest() or auth.uid() is null then return jsonb_build_object('classes', '[]'::jsonb); end if;
+    select coalesce(pp.school, a.raw_user_meta_data ->> 'school', 'pchs') into v_school
+    from auth.users a left join public.studbud_public_profiles pp on pp.user_id = a.id where a.id = auth.uid();
+    select coalesce(array_agg(distinct left(btrim(code), 40)), array[]::text[]) into v_codes
+    from unnest(coalesce(p_course_codes, array[]::text[])) with ordinality as t(code, n)
+    where n <= 40 and char_length(btrim(coalesce(code, ''))) > 0;
+
+    delete from public.studbud_class_members m using public.studbud_classes c
+    where m.class_id = c.id and m.user_id = auth.uid() and not m.removed
+      and (c.school <> v_school or not (c.course_code = any(v_codes)));
+
+    insert into public.studbud_class_members (class_id, user_id)
+    select c.id, auth.uid() from public.studbud_classes c
+    where c.school = v_school and c.course_code = any(v_codes) and c.teacher_id <> auth.uid()
+    on conflict do nothing;
+
+    return jsonb_build_object(
+        'school', v_school,
+        'classes', coalesce((
+            select jsonb_agg(public.studbud_class_summary(c) || jsonb_build_object(
+                'decks', coalesce((select jsonb_agg(jsonb_build_object('id', d.id, 'title', d.title, 'description', d.description, 'cards', d.cards, 'updated_at', d.updated_at) order by d.updated_at desc)
+                    from public.studbud_class_decks d where d.class_id = c.id), '[]'::jsonb)
+            ) order by c.title)
+            from public.studbud_classes c join public.studbud_class_members m on m.class_id = c.id and m.user_id = auth.uid() and not m.removed
+        ), '[]'::jsonb)
+    );
+end;
+$$;
+
+-- The student app pushes a small per-class snapshot (grade, missing and upcoming work) so the teacher roster stays current.
+create or replace function public.studbud_sync_class_stats(p_snapshots jsonb)
+returns integer
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_item jsonb;
+    v_count integer := 0;
+begin
+    if public.studbud_is_guest() or auth.uid() is null then return 0; end if;
+    if p_snapshots is null or jsonb_typeof(p_snapshots) <> 'array' or jsonb_array_length(p_snapshots) > 20 then raise exception 'Invalid class progress.'; end if;
+    for v_item in select value from jsonb_array_elements(p_snapshots) loop
+        continue when coalesce(jsonb_typeof(v_item -> 'snapshot'), '') <> 'object' or octet_length((v_item -> 'snapshot')::text) > 6000;
+        continue when coalesce(v_item ->> 'class_id', '') !~ '^[0-9a-f-]{36}$';
+        update public.studbud_class_members set snapshot = v_item -> 'snapshot', snapshot_at = now()
+        where class_id = (v_item ->> 'class_id')::uuid and user_id = auth.uid() and not removed;
+        if found then v_count := v_count + 1; end if;
+    end loop;
+    return v_count;
+end;
+$$;
+
+revoke all on function public.studbud_teacher_create_class(text, text, text) from public, anon;
+grant execute on function public.studbud_teacher_create_class(text, text, text) to authenticated;
+revoke all on function public.studbud_teacher_update_class(uuid, text, text, boolean) from public, anon;
+grant execute on function public.studbud_teacher_update_class(uuid, text, text, boolean) to authenticated;
+revoke all on function public.studbud_teacher_delete_class(uuid) from public, anon;
+grant execute on function public.studbud_teacher_delete_class(uuid) to authenticated;
+revoke all on function public.studbud_teacher_classes() from public, anon;
+grant execute on function public.studbud_teacher_classes() to authenticated;
+revoke all on function public.studbud_teacher_class_detail(uuid) from public, anon;
+grant execute on function public.studbud_teacher_class_detail(uuid) to authenticated;
+revoke all on function public.studbud_teacher_remove_student(uuid, uuid) from public, anon;
+grant execute on function public.studbud_teacher_remove_student(uuid, uuid) to authenticated;
+revoke all on function public.studbud_teacher_save_deck(uuid, uuid, text, text, jsonb) from public, anon;
+grant execute on function public.studbud_teacher_save_deck(uuid, uuid, text, text, jsonb) to authenticated;
+revoke all on function public.studbud_teacher_delete_deck(uuid) from public, anon;
+grant execute on function public.studbud_teacher_delete_deck(uuid) to authenticated;
+revoke all on function public.studbud_teacher_restore_student(uuid, uuid) from public, anon;
+grant execute on function public.studbud_teacher_restore_student(uuid, uuid) to authenticated;
+revoke all on function public.studbud_my_classes(text[]) from public, anon;
+grant execute on function public.studbud_my_classes(text[]) to authenticated;
+revoke all on function public.studbud_sync_class_stats(jsonb) from public, anon;
+grant execute on function public.studbud_sync_class_stats(jsonb) to authenticated;
 
 notify pgrst, 'reload schema';

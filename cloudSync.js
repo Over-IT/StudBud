@@ -23,6 +23,10 @@
 
         static mergeData(base, local, remote, field = 'account') {
             const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+            if (field === 'account.state.gameMetrics' && local && remote && (local.resetId || '') !== (remote.resetId || '')) {
+                // Progress from before an activity reset never merges into progress after it.
+                return (local.resetId || '') > (remote.resetId || '') ? local : remote;
+            }
             if (field === 'account.state.gameMetrics' && local && remote && !equal(local, base) && !equal(remote, base)) {
                 let xp = equal(local.xp, base?.xp) ? remote.xp : equal(remote.xp, base?.xp) ? local.xp
                     : Number(local.xp) + Number(remote.xp) - Number(base?.xp || 0);
@@ -99,7 +103,8 @@
                     const value = this.mergeData(base?.[key], local[key], remote[key], `${field}.${key}`);
                     if (value !== undefined) merged[key] = value;
                 }
-                if (field === 'account' && local.state?.gameMetrics?.xp !== base?.state?.gameMetrics?.xp
+                if (field === 'account' && (local.state?.gameMetrics?.resetId || '') === (remote.state?.gameMetrics?.resetId || '')
+                    && local.state?.gameMetrics?.xp !== base?.state?.gameMetrics?.xp
                     && remote.state?.gameMetrics?.xp !== base?.state?.gameMetrics?.xp) {
                     const previous = new Set((base?.studyHistory || []).map(session => session.id));
                     const remoteIds = new Set((remote.studyHistory || []).map(session => session.id));
@@ -422,7 +427,7 @@
                 this.setAuthStatus('The passwords do not match.', true);
                 return;
             }
-            if (!['pchs', 'other'].includes(school)) {
+            if (!['pchs', 'pnhs', 'pshs', 'pwhs', 'other'].includes(school)) {
                 this.setAuthStatus('Choose your school to create an account.', true);
                 return;
             }

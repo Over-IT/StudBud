@@ -29,7 +29,7 @@ const sandbox = {
 const context = vm.createContext(sandbox);
 for (const file of ['communityGames.js', 'cloudSync.js', 'flashcardEngine.js', 'pchsData.js']) vm.runInContext(source(file), context, { filename: file });
 const appSource = source('app.js');
-vm.runInContext(appSource.slice(appSource.indexOf('    class AppStateEngine'), appSource.indexOf('    const AppState =')), context);
+vm.runInContext(appSource.slice(appSource.indexOf('    const ACTIVITY_RESET_ID'), appSource.indexOf('    const AppState =')), context);
 vm.runInContext('globalThis.AppState = new AppStateEngine();', context);
 vm.runInContext(appSource.slice(appSource.indexOf('    class AppOrchestrator'), appSource.indexOf('    window.NexusApp =')), context);
 const app = vm.runInContext('Object.create(AppOrchestrator.prototype)', context);
@@ -42,7 +42,7 @@ const Cloud = window.StudBudCloud.constructor;
 const normal = value => clone(value);
 
 async function run() {
-    assert.equal(state.state.settings.colorScheme, 'monochrome', 'new accounts start with a non-green palette');
+    assert.equal(state.state.settings.colorScheme, 'studbud', 'new accounts start with the StudBud palette');
     window.StudBudCloud.user = { user_metadata: { username: 'student' } };
     state.state.profile.firstName = 'Ada';
     state.state.profile.lastName = 'Lovelace';
@@ -205,9 +205,10 @@ async function run() {
     assert.match(sql, /grant execute on function public\.studbud_set_public_profile\(text, text, text, text, text, text, boolean, boolean, boolean\) to authenticated;/);
     assert.match(sql, /tag text not null check \(tag in \('teacher', 'tester', 'moderator'\)\)/);
     assert.match(sql, /revoke all on function public\.studbud_has_user_tag\(uuid, text\) from public, anon, authenticated/);
-    assert.match(sql, /profile\.user_id = p_user_id and profile\.school = 'pchs' and profile\.show_school/);
-    assert.match(sql, /'school', case when coalesce\(v_pub\.school,[\s\S]*?and coalesce\(v_pub\.show_school, false\) then 'pchs' end/,
-        'public profile payloads include PCHS only when opted in and never expose Other schools');
+    assert.match(sql, /profile\.user_id = p_user_id and profile\.school in \('pchs', 'pnhs', 'pshs', 'pwhs'\) and profile\.show_school/);
+    assert.match(sql, /'school', case when coalesce\(v_pub\.show_school, false\) and v_pub\.school in \('pchs', 'pnhs', 'pshs', 'pwhs'\) then v_pub\.school end/,
+        'public profile payloads include a Parkway school tag only when opted in and never expose Other schools');
+    assert.match(sql, /add constraint studbud_public_profiles_school_check check \(school in \('pchs', 'pnhs', 'pshs', 'pwhs', 'other'\)\)/);
     assert.ok(sql.includes("s.rarity = v_rarity") && sql.includes("jsonb_each_text(v_chances)"));
     assert.ok(!sql.includes('abs(rank - target)'));
     assert.doesNotMatch(sql, /v_today_seconds\s*<\s*900|v_today_seconds\s*>=\s*900/, 'daily SQL goal is not fifteen minutes');
@@ -334,6 +335,20 @@ async function run() {
     removed.state.courses = [];
     assert.equal(Cloud.mergeData(base, removed, remote).state.courses.length, 0);
     assert.throws(() => Cloud.mergeData(base, removed, conflict), /both devices/i);
+    const staleDevice = clone(local);
+    const resetCloud = clone(remote);
+    resetCloud.state.gameMetrics = { level: 1, xp: 0, streakDays: 0, lastStudyDate: null, resetId: 'beta-end-2026-10-15' };
+    const afterReset = Cloud.mergeData(base, staleDevice, resetCloud);
+    assert.equal(afterReset.state.gameMetrics.xp, 0, 'beta XP from an old device never merges back after the reset');
+    assert.equal(afterReset.state.gameMetrics.resetId, 'beta-end-2026-10-15');
+    const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+    assert.match(appSource, /ACTIVITY_RESET_AT = Date\.parse\('2026-10-15T05:00:00Z'\)/);
+    assert.match(appSource, /this\.state\.studyHistory = studyHistory\.filter\(isCurrentStudySession\)/, 'old study sessions are dropped on load');
+    const resetSql = fs.readFileSync(path.join(root, 'beta-reset.sql'), 'utf8');
+    for (const part of ['delete from public.studbud_study_time_entries', 'coins = 100', "owned_items = array['avatar_default', 'palette_default']", 'on conflict do nothing']) {
+        assert.ok(resetSql.includes(part), `beta reset covers: ${part}`);
+    }
+    assert.match(fs.readFileSync(path.join(root, 'supabase-setup.sql'), 'utf8'), /p_study_date < date '2026-10-15'/, 'beta-dated study time is ignored by the server');
 
     const cloud = window.StudBudCloud;
     cloud.accountReady = true;

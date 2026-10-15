@@ -1,6 +1,6 @@
 # StudBud
 
-StudBud is a student hub with three parts: **Plan** (classes, assignments, grades, calendar), **Study** (flashcards scheduled with Anki's SM-2 spaced-repetition algorithm, focus sessions, study streaks and leaderboards) and **Play** (live multiplayer games and arcade modes powered by your own flashcards, with a coin shop for characters, hats and accessories). Flashcard study shuffles due reviews and new cards within daily limits; future reviews wait until their scheduled day. Decks show how many cards are scheduled today and disable Study when nothing is scheduled. Learning/relearning steps, Again/Hard/Good/Easy interval adjustments and leech detection remain active. Quiz and game questions are randomized independently.
+StudBud is a student hub with three parts: **Plan** (classes, assignments, grades, calendar), **Study** (flashcards scheduled with Anki's SM-2 spaced-repetition algorithm, focus sessions, study streaks and leaderboards) and **Play** (live multiplayer games and arcade modes powered by your own flashcards, with a coin shop for characters, hats and accessories). Flashcard study shuffles due reviews and new cards within daily limits; future reviews wait until their scheduled day. Decks show how many cards are scheduled today; when nothing is due, Study offers a Cram run instead. Learning/relearning steps, Again/Hard/Good/Easy interval adjustments and leech detection remain active. Quiz and game questions are randomized independently.
 
 ## Open StudBud
 
@@ -96,6 +96,7 @@ StudBud uses Supabase Auth for username/password accounts and stores each accoun
 To connect the deployed static site to a Supabase project:
 
 1. Create a Supabase project and run [`supabase-setup.sql`](./supabase-setup.sql) in the Supabase SQL editor.
+   **End of beta:** on the existing project, also run [`beta-reset.sql`](./beta-reset.sql) once, after the setup script. It resets every account's study time, streaks, XP and level, coins (back to 100), cosmetics and daily rewards. Accounts, courses, grades, flashcard decks, friends, classes and game wins are kept. Rerunning it does nothing. The app also drops study sessions from before 2026-10-15 on every device.
 2. Set the project's minimum password length to 8 in its Auth password/security settings.
 3. Copy the project URL and **publishable/anon key** into `url` and `anonKey` in [`supabase-config.js`](./supabase-config.js). These are public browser credentials; never put a service-role key in this file.
 4. In Supabase **Authentication → Sign In / Providers → Email**, enable email/password authentication and turn **off Confirm email**. Supabase's Email provider remains enabled, but StudBud internally maps each username to a non-deliverable `@accounts.studbud.invalid` identifier. Users do not enter an email and no confirmation email is sent.
@@ -119,6 +120,34 @@ Choose **Continue as guest** on the sign-in screen to use StudBud without an acc
 Edits and study history stay in local storage/IndexedDB. Cached accounts reconnect against the last sync baseline; first-time account connections merge local-only records rather than discarding offline decks. Same-field conflicts still require the existing explicit cloud/device/backup resolution. Shared-set edits made offline are queued and retried after account connection; later edits or deletion during publication cannot be overwritten by its acknowledgement. The service worker caches public shell/library assets only, never Supabase account/API responses. A fresh device needs an initial online load; `file:` URLs do not support service-worker offline installation.
 
 Navigation now has six primary workspaces: **Home, School, Plan, Study, Play and Settings**. Tabs group related grades/analytics, tasks/calendar/schedule, sets/practice/import, games/buds/leaderboards/shop, and settings tools. Existing routes, class links and tutorial steps remain available.
+
+### Look and feel
+
+StudBud has its own rounded, chunky style: the default **StudBud** color scheme, the self-hosted **Nunito** typeface, pill-style workspace tabs and pressable 3D buttons. Older saved schemes still work and can be changed in **Settings → Appearance**. When the game performance setting is lowered (or the device is detected as low-end, such as many Chromebooks), `body.low-effects` turns off blur, glow and idle animations across the whole app, not just in games.
+
+### Parkway schools and course catalogs
+
+Sign-up and **Settings** offer **Parkway Central, North, South and West High School** plus **Other / not listed**. Each Parkway school has its own public school tag, and the class search only suggests courses from that school's SchooLinks catalog (`pchsData.js`). Choosing **Other** replaces the search with a free-text class name; Infinite Campus import works for every school.
+
+### Classes for teachers and students
+
+Accounts with the **teacher** tag (assigned in Staff tools) at a Parkway school see a **Classes** workspace. Teachers pick the courses they teach from their school's catalog. There are no join codes: any student at the same school who has that course in their course list (added by hand or imported from Infinite Campus) is added automatically and sees the teacher's flashcard sets, and students who drop the course drop out of the class. Teachers see every student's grades, missing work and study time, can remove someone who isn't really in their class (and restore them later), and publish flashcard sets to the class. Teacher classes are not available for **Other** schools. **Deployment:** rerun the updated [`supabase-setup.sql`](./supabase-setup.sql) to create the classroom tables and policies.
+
+### Flashcard tools
+
+- **Focus mode:** Study opens a full-screen session with a progress bar, combo counter and keyboard shortcuts: Space flips, 1–4 rate, **S** stars the card and **T** switches to typing the answer (graded with the card's answer rules).
+- **Cram and starred drills:** Cram goes through every card in an adaptive order without changing the spaced-repetition schedule; the star button drills only starred cards.
+- **Session summary:** cards, accuracy, best streak, time and a rating breakdown, with one-tap **Review missed**.
+- **Deck cards:** a mastery ring plus counts for cards, due, starred and weak cards. Class/test links, Share and Delete live under **More**.
+- **Editor:** **Quick add** (term, Tab, definition, Enter), per-card stars and a Starred filter.
+
+### Practice games
+
+Streak Builder, Lightning Round, Survival, True or False and Memory Match use large answer tiles with 1–4 keyboard shortcuts (T/F in True or False), combo points, a streak flame, hearts in Survival and a draining timer bar in Lightning Round, where correct answers advance automatically. Every round ends on a results card with up to three stars, accuracy, points and best streak.
+
+### Shop boxes
+
+Boxes are flat 2D open boxes: the lid is knocked off and the rarest reward you have not collected yet peeks over the rim.
 
 ### Profile hub, seasonal boxes and reporting
 
