@@ -7780,7 +7780,14 @@
                 if (summary) summary.innerHTML = `
                     <article><span>${selectedCourse ? 'Current class grade' : 'Classes with grades'}</span><strong>${selectedCourse ? (currentGrades[0] ? `${currentGrades[0].grade.toFixed(2)}%` : '—') : `${currentGrades.length} / ${courses.length}`}</strong></article>
                     <article><span>Scored assignments</span><strong>${scoredCount}</strong></article>
-                    <article><span>Grade target</span><strong>${selectedCourse?.targetPct ? `${Number(selectedCourse.targetPct).toFixed(2)}%` : 'Optional'}</strong></article>`;
+                    <article><span>${selectedCourse ? 'Grade target' : 'GPA goal'}</span><strong>${(() => {
+                        if (!selectedCourse) {
+                            const goal = Number((AppState.get('profile') || {}).targetGpa);
+                            return goal > 0 ? goal.toFixed(2) : 'Not set';
+                        }
+                        const target = this.effectiveCourseTarget(selectedCourse);
+                        return Number.isFinite(target) ? `${target.toFixed(2)}%` : 'Not set';
+                    })()}</strong>${selectedCourse && !this.hasCourseTarget(selectedCourse) && Number.isFinite(this.effectiveCourseTarget(selectedCourse)) ? '<small>Needed for your GPA goal</small>' : ''}</article>`;
             } else {
                 datasets = [{
                     label: metric === 'weighted' ? 'Weighted GPA' : 'Unweighted GPA',
