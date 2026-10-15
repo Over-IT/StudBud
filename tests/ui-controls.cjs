@@ -135,6 +135,7 @@ function controlsFor(mode) {
     session.layoutHud = () => {};
     session.resize = () => {};
     session.game = Object.create(A.games[mode].prototype);
+    session.game.s = session;
     session.game.res = { label: 'Energy' };
     const overlay = new Element();
     const pad = new Element();
@@ -250,7 +251,7 @@ for (const collapsed of [true, false, true]) {
     session.setHudCollapsed(collapsed);
     assert.equal(session.overlay.classList.contains('hud-collapsed'), collapsed);
     assert.equal(details.hidden, collapsed);
-    assert.equal(hint.hidden, collapsed);
+    assert.equal(hint.hidden, undefined, 'Controls help is independently opened, not tied to the HUD toggle');
     assert.equal(board.hidden, collapsed, 'HUD also controls standings');
     assert.equal(toggle.attributes['aria-expanded'], String(!collapsed));
     assert.equal(toggle.attributes['aria-label'], collapsed ? 'Show match details and standings' : 'Hide match details and standings');
@@ -258,10 +259,16 @@ for (const collapsed of [true, false, true]) {
 }
 const engineSource = fs.readFileSync(path.join(__dirname, '..', 'multiplayerEngine.js'), 'utf8');
 assert.doesNotMatch(engineSource, /mpg-menu-toggle|mpg-menu-panel|mpg-board-toggle|board-open/);
-assert.match(engineSource, /aria-controls="mpg-match-details mpg-controls-hint mpg-match-standings"/);
+assert.match(engineSource, /aria-controls="mpg-match-details mpg-match-standings"/);
+assert.match(engineSource, /mpg-controls-help/);
+assert.match(engineSource, /content\.hidden = !panel\.open/);
+assert.match(engineSource, /panels\.appendChild\(content\)/, 'help and tools occupy their own HUD row');
+const styleSource = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+assert.match(styleSource, /\.workspace-tabs \{[^}]*padding: 12px var\(--spacing-xl\)/, 'all workspace tab rows use the same desktop gutter as page content');
+assert.match(styleSource, /\.workspace-tabs \{[^}]*padding-left: max\(var\(--spacing-sm\), env\(safe-area-inset-left\)\); padding-right: max\(var\(--spacing-sm\), env\(safe-area-inset-right\)\)/, 'mobile tabs match content gutters and device safe areas');
 const duelButtons = controlsFor('duel').buttons.children;
 assert.equal(duelButtons.find(button => button.textContent === 'Guard').dataset.k, 'KeyS');
-assert.equal(duelButtons.find(button => button.textContent === 'Heavy').dataset.k, 'KeyR');
+assert.equal(duelButtons.find(button => button.textContent === 'Special').dataset.k, 'KeyR');
 assert.equal(duelButtons.find(button => button.textContent === 'Dodge').dataset.k, 'ShiftLeft');
 const soccerButtons = controlsFor('sports').buttons.children;
 assert.equal(soccerButtons.find(button => button.textContent === 'Sprint').dataset.k, 'ShiftLeft');
@@ -340,6 +347,11 @@ async function checkPracticeGrading() {
         session.reportScore = session.closeQuestion = session.renderResults = session.sfx = () => {};
         session.onLeave = () => left++;
         session.bind();
+        session.mode = 'skyline';
+        session.game = { cp: { id: 2 }, testTeleport: index => { session.destination = index; } };
+        const teleport = new Element(); teleport.dataset.testAction = 'checkpoint';
+        session.overlay.handlers.click[0]({ target: { closest: () => teleport } });
+        assert.equal(session.destination, testing ? 2 : undefined, 'checkpoint tools are gated to staff sessions');
         const leave = new Element();
         leave.classList.add('mpg-leave');
         session.overlay.handlers.click[0]({ target: { closest: () => leave } });

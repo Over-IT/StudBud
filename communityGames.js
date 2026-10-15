@@ -711,6 +711,11 @@
             if (error) throw new Error(`Could not save the chess board: ${error.message}`);
         }
 
+        async saveDefenseState(roomCode, state) {
+            const { error } = await (await this.gameClient()).rpc('studbud_save_defense_state', { p_code: roomCode, p_state: state });
+            if (error) throw new Error(`Could not save the Tower Defense battle: ${error.message}`);
+        }
+
         async reportScore(roomCode, score, answered, correct = 0) {
             const { error } = await (await this.gameClient()).rpc('studbud_report_game_score', {
                 p_code: roomCode,

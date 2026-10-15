@@ -380,7 +380,7 @@ create table if not exists public.studbud_game_rooms (
         jsonb_typeof(cards) = 'array'
         and jsonb_array_length(cards) >= 1
     ),
-    mode text not null check (mode in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'sports', 'fishing', 'hack', 'chess')),
+    mode text not null check (mode in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'sports', 'fishing', 'hack', 'chess', 'defense')),
     status text not null default 'waiting' check (status in ('waiting', 'playing', 'finished')),
     state jsonb not null default '{"players":[],"question_index":-1,"question":null}'::jsonb,
     goal_type text not null default 'points',
@@ -406,7 +406,7 @@ alter table public.studbud_game_rooms
 alter table public.studbud_game_rooms drop constraint if exists studbud_game_rooms_mode_check;
 alter table public.studbud_game_rooms
     add constraint studbud_game_rooms_mode_check
-    check (mode in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'sports', 'fishing', 'hack', 'chess'));
+    check (mode in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'sports', 'fishing', 'hack', 'chess', 'defense'));
 alter table public.studbud_game_rooms drop constraint if exists studbud_game_rooms_goal_type_check;
 alter table public.studbud_game_rooms
     add constraint studbud_game_rooms_goal_type_check check (goal_type in ('points', 'time'));
@@ -415,7 +415,7 @@ alter table public.studbud_game_rooms
     add constraint studbud_game_rooms_point_limit_check check (point_limit > 0);
 alter table public.studbud_game_rooms drop constraint if exists studbud_game_rooms_time_limit_seconds_check;
 alter table public.studbud_game_rooms
-    add constraint studbud_game_rooms_time_limit_seconds_check check (time_limit_seconds between 60 and 3600 or (mode = 'chess' and time_limit_seconds = 0));
+    add constraint studbud_game_rooms_time_limit_seconds_check check (time_limit_seconds between 60 and 3600 or (mode in ('chess', 'defense') and time_limit_seconds = 0));
 
 alter table public.studbud_game_rooms enable row level security;
 revoke all on table public.studbud_game_rooms from anon, authenticated;
@@ -978,7 +978,9 @@ begin
             v_rewards := jsonb_set(v_rewards, array[v_player ->> 'id'], '0'::jsonb, true);
             continue;
         end if;
-        v_is_winner := case when v_room.mode = 'chess' then coalesce(v_player ->> 'id' = v_chess_winner, false)
+        v_is_winner := case when v_room.mode = 'defense' then coalesce(
+                v_room.state -> 'defense' -> 'teams' ->> (v_player ->> 'id') = v_room.state -> 'defense' ->> 'winner', false)
+            when v_room.mode = 'chess' then coalesce(v_player ->> 'id' = v_chess_winner, false)
             else (v_player ->> 'score')::integer = v_high_score and v_high_score > 0 end;
         v_reward := least(250, coalesce((v_player ->> 'correct_count')::integer, 0) * 6)
             + case when v_is_winner then 25 else 0 end;
@@ -1127,10 +1129,11 @@ begin
     if char_length(v_nickname) not between 2 and 20 or v_nickname !~ '^[A-Za-z0-9 _-]+$' then
         raise exception 'Nickname must be 2–20 letters, numbers, spaces, underscores, or hyphens.';
     end if;
-    if coalesce(p_mode, '') not in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'sports', 'fishing', 'hack', 'chess') then raise exception 'Choose a valid game mode.'; end if;
+    if coalesce(p_mode, '') not in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'sports', 'fishing', 'hack', 'chess', 'defense') then raise exception 'Choose a valid game mode.'; end if;
     if v_goal_type not in ('points', 'time') then raise exception 'Choose a valid match goal.'; end if;
     if p_mode = 'chess' then v_goal_type := 'points'; v_time_limit := 0; v_reward := 1; end if;
-    if p_mode <> 'chess' and v_time_limit not between 60 and 3600 then
+    if p_mode = 'defense' then v_goal_type := 'points'; v_time_limit := 0; end if;
+    if p_mode not in ('chess', 'defense') and v_time_limit not between 60 and 3600 then
         raise exception 'Choose a time limit between 1 minute and 1 hour.';
     end if;
     if p_mode <> 'chess' and (v_reward not between 5 and 100 or v_reward % 5 <> 0) then raise exception 'Choose resources per answer from 5 to 100 in increments of 5.'; end if;
@@ -1356,8 +1359,15 @@ begin
         updated_at = now()
     where id = v_room.id
     returning * into v_room;
-    if v_room.mode = 'chess' then
+    if v_room.mode in ('chess', 'defense') then
         update public.studbud_game_rooms set expires_at = 'infinity'::timestamptz where id = v_room.id returning * into v_room;
+    end if;
+    if v_room.mode = 'defense' then
+        update public.studbud_game_rooms
+        set state = jsonb_set(state, '{defense_teams}', (
+            select jsonb_object_agg(player ->> 'id', (n - 1) % 2)
+            from jsonb_array_elements(v_players) with ordinality c(player, n)
+        )) where id = v_room.id returning * into v_room;
     end if;
     return public.studbud_game_room_view(v_room);
 end;
@@ -1845,6 +1855,114 @@ end;
 $$;
 revoke all on function public.studbud_save_chess_state(text, jsonb) from public, anon;
 grant execute on function public.studbud_save_chess_state(text, jsonb) to authenticated;
+
+create or replace function public.studbud_save_defense_state(p_code text, p_state jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_room public.studbud_game_rooms%rowtype;
+    v_players jsonb;
+    v_serial integer;
+    v_winner text := p_state ->> 'winner';
+begin
+    select * into v_room from public.studbud_game_rooms
+    where room_code = upper(btrim(p_code)) and expires_at > now() for update;
+    if not found or v_room.host_id is distinct from auth.uid() or v_room.mode <> 'defense' then
+        raise exception 'Only the Tower Defense host can save this battle.';
+    end if;
+    if v_room.status <> 'playing' then raise exception 'This battle is not playing.'; end if;
+    if p_state is null or length(p_state::text) > 100000
+        or coalesce(p_state ->> 'serial', '') !~ '^[0-9]{1,9}$'
+        or coalesce(p_state ->> 'nextId', '') !~ '^[0-9]{1,9}$'
+        or jsonb_typeof(p_state -> 'teams') is distinct from 'object'
+        or jsonb_typeof(p_state -> 'answers') is distinct from 'object'
+        or jsonb_typeof(p_state -> 'lastSeq') is distinct from 'object'
+        or jsonb_typeof(p_state -> 'health') is distinct from 'array'
+        or jsonb_typeof(p_state -> 'wallets') is distinct from 'array'
+        or jsonb_typeof(p_state -> 'damage') is distinct from 'array'
+        or jsonb_typeof(p_state -> 'troops') is distinct from 'array'
+        or jsonb_typeof(p_state -> 'enemies') is distinct from 'array'
+        or (v_winner is not null and v_winner not in ('0', '1')) then
+        raise exception 'Invalid Tower Defense battle state.';
+    end if;
+    if jsonb_array_length(p_state -> 'health') <> 2
+        or jsonb_array_length(p_state -> 'wallets') <> 2
+        or jsonb_array_length(p_state -> 'damage') <> 2
+        or jsonb_array_length(p_state -> 'troops') > 12 * (select count(*) from jsonb_object_keys(p_state -> 'teams'))
+        or jsonb_array_length(p_state -> 'enemies') > 120
+        or exists (select 1 from jsonb_array_elements_text((p_state -> 'health') || (p_state -> 'wallets') || (p_state -> 'damage')) c(value)
+            where value is null or value !~ '^[0-9]{1,9}$')
+        or exists (select 1 from jsonb_each_text((p_state -> 'answers') || (p_state -> 'lastSeq')) c(key, value)
+            where value is null or value !~ '^[0-9]{1,9}$')
+        or p_state -> 'teams' is distinct from v_room.state -> 'defense_teams' then
+        raise exception 'Invalid team economy or roster.';
+    end if;
+    if (p_state -> 'health' ->> 0)::integer > 100 or (p_state -> 'health' ->> 1)::integer > 100
+        or (v_winner = '0' and (p_state -> 'health' ->> 1)::integer <> 0)
+        or (v_winner = '1' and (p_state -> 'health' ->> 0)::integer <> 0) then
+        raise exception 'Invalid base health or winner.';
+    end if;
+    if exists (select 1 from jsonb_array_elements((p_state -> 'troops') || (p_state -> 'enemies')) c(unit)
+        where coalesce(unit ->> 'team', '') not in ('0', '1')
+            or coalesce(unit ->> 'type', '') not in ('0', '1', '2', '3', '4', '5')
+            or coalesce(unit ->> 'id', '') !~ '^[0-9]{1,9}$')
+        or exists (select 1 from jsonb_array_elements(p_state -> 'troops') c(unit)
+            where coalesce(unit ->> 'level', '') not in ('1', '2', '3')
+                or jsonb_typeof(unit -> 'owner') is distinct from 'string'
+                or not ((p_state -> 'teams') ? (unit ->> 'owner'))
+                or (p_state -> 'teams' ->> (unit ->> 'owner')) is distinct from (unit ->> 'team')
+                or coalesce(unit ->> 'x', '') !~ '^[0-9]{1,4}$'
+                or coalesce(unit ->> 'y', '') !~ '^[0-9]{1,4}$'
+                or jsonb_typeof(unit -> 'cd') is distinct from 'number')
+        or exists (select 1 from jsonb_array_elements(p_state -> 'enemies') c(unit)
+            where coalesce(unit ->> 'segment', '') not in ('0', '1', '2', '3', '4', '5', '6')
+                or jsonb_typeof(unit -> 'hp') is distinct from 'number'
+                or jsonb_typeof(unit -> 'progress') is distinct from 'number'
+                or jsonb_typeof(unit -> 'slow') is distinct from 'number'
+                or (unit ? 'poisonT' and jsonb_typeof(unit -> 'poisonT') is distinct from 'number')
+                or (unit ? 'poisonD' and jsonb_typeof(unit -> 'poisonD') is distinct from 'number')) then
+        raise exception 'Invalid troops or enemies.';
+    end if;
+    if exists (select 1 from jsonb_array_elements(p_state -> 'troops') c(unit)
+        group by unit ->> 'owner' having count(*) > 12)
+        or exists (select 1 from jsonb_array_elements(p_state -> 'troops') c(unit)
+            group by unit ->> 'x', unit ->> 'y' having count(*) > 1) then
+        raise exception 'Invalid per-player tower limits or occupied grid cells.';
+    end if;
+    if exists (select 1 from jsonb_array_elements(p_state -> 'troops') c(unit)
+        where (unit ->> 'x')::numeric < 0 or (unit ->> 'x')::numeric > 2200
+            or (unit ->> 'y')::numeric < 0 or (unit ->> 'y')::numeric > 1500
+            or mod((unit ->> 'x')::numeric - (unit ->> 'team')::integer * 1100 - 95, 70) <> 0
+            or mod((unit ->> 'y')::numeric - 85, 70) <> 0
+            or (unit ->> 'x')::numeric < (unit ->> 'team')::integer * 1100 + 95
+            or (unit ->> 'x')::numeric > (unit ->> 'team')::integer * 1100 + 1005
+            or (unit ->> 'y')::numeric < 85 or (unit ->> 'y')::numeric > 1415
+            or (unit ->> 'cd')::numeric < 0 or (unit ->> 'cd')::numeric > 2.2)
+        or exists (select 1 from jsonb_array_elements(p_state -> 'enemies') c(unit)
+            where (unit ->> 'hp')::numeric <= 0
+                or (unit ->> 'hp')::numeric > (array[65, 90, 330, 32, 550, 135])[(unit ->> 'type')::integer + 1]
+                or (unit ->> 'progress')::numeric < 0 or (unit ->> 'progress')::numeric > 740
+                or (unit ->> 'slow')::numeric < 0 or (unit ->> 'slow')::numeric > 1.5
+                or (unit ->> 'poisonT')::numeric < 0 or (unit ->> 'poisonT')::numeric > 3
+                or (unit ->> 'poisonD')::numeric < 0 or (unit ->> 'poisonD')::numeric > 21) then
+        raise exception 'Invalid unit positions, health or cooldowns.';
+    end if;
+    v_serial := (p_state ->> 'serial')::integer;
+    if v_serial <= coalesce((v_room.state -> 'defense' ->> 'serial')::integer, -1) then return; end if;
+    select jsonb_agg(player || jsonb_build_object('score',
+        (p_state -> 'damage' ->> (p_state -> 'teams' ->> (player ->> 'id'))::integer)::integer
+        + case when v_winner = p_state -> 'teams' ->> (player ->> 'id') then 10000 else 0 end) order by n)
+    into v_players from jsonb_array_elements(v_room.state -> 'players') with ordinality c(player, n);
+    update public.studbud_game_rooms
+    set state = jsonb_set(jsonb_set(state, '{defense}', p_state), '{players}', v_players), updated_at = now()
+    where id = v_room.id;
+end;
+$$;
+revoke all on function public.studbud_save_defense_state(text, jsonb) from public, anon;
+grant execute on function public.studbud_save_defense_state(text, jsonb) to authenticated;
 
 revoke all on function public.studbud_report_game_score(text, integer, integer, integer) from public, anon;
 grant execute on function public.studbud_report_game_score(text, integer, integer, integer) to authenticated;

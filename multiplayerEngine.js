@@ -10,6 +10,7 @@
         miner: 'Mine crystals and return them to base',
         sports: 'Score in the opposing team goal',
         chess: 'Checkmate the opposing king',
+        defense: 'Defend your team base and send enemies until the rival base reaches 0 HP',
         crypto: 'Grow your portfolio by trading and mining',
         frenzy: 'Score by answering quickly and accurately',
         fishing: 'Catch fish to build the most valuable haul',
@@ -99,8 +100,19 @@
 
     // Slope solids: slope: 1 rises to the right, -1 rises to the left; the box is x/y/w/h and the surface runs corner to corner.
     function slopeY(s, cx) {
-        const t = clamp((cx - s.x) / s.w, 0, 1);
-        return s.slope > 0 ? s.y + s.h - t * s.h : s.y + t * s.h;
+        const position = clamp((cx - s.x) / s.w, 0, 1);
+        const t = clamp((position - (s.curveStart || 0)) / ((s.curveEnd ?? 1) - (s.curveStart || 0)), 0, 1);
+        if (s.curve === 'arch') return s.y + s.h * (1 - Math.sin(t * Math.PI));
+        const u = s.curve === 'ease' ? t * t * (3 - 2 * t) : t;
+        return s.slope > 0 ? s.y + s.h - u * s.h : s.y + u * s.h;
+    }
+
+    function slopeSurface(s, x, w) {
+        const left = clamp(x, s.x, s.x + s.w), right = clamp(x + w, s.x, s.x + s.w);
+        let top = Math.min(slopeY(s, left), slopeY(s, right));
+        const peak = s.x + s.w * ((s.curveStart || 0) + (s.curveEnd ?? 1)) / 2;
+        if (s.curve === 'arch' && left <= peak && right >= peak) top = s.y;
+        return top;
     }
 
     class VerticalIndex {
@@ -139,24 +151,52 @@
     }
 
     // Axis-aligned body vs. rectangles. Solids may carry dx/dy (moving platforms) and `oneway`/`off` flags.
+    const STEP_UP = 10, CORNER_NUDGE = 8;
+    const clearAt = (x, y, b, solids, ignore) => {
+        for (const s of solids) if (s !== ignore && !s.oneway && !s.off && x < s.x + s.w && x + b.w > s.x && y < s.y + s.h && y + b.h > s.y) return false;
+        return true;
+    };
     function moveBody(b, solids, dt) {
+        const steps = Math.ceil(Math.max(Math.abs(b.vx), Math.abs(b.vy)) * dt / 12);
+        if (steps > 1) {
+            let wall = 0;
+            for (let i = 0; i < steps; i++) { moveBody(b, solids, dt / steps); wall = b.wall || wall; }
+            b.wall = b.wall || wall;
+            return;
+        }
         if (solids.spatialIndex?.items === solids) {
             solids = solids.spatialIndex.query(Math.min(b.y, b.y + b.vy * dt) - 256, Math.max(b.y + b.h, b.y + b.h + b.vy * dt) + 256);
         }
+        const prevX = b.x, prevY = b.y, prevGround = b.ground;
         b.onGround = false;
         b.wall = 0;
         b.ground = null;
         b.x += b.vx * dt;
+        if (prevGround?.slope && !prevGround.off && b.vy >= 0 && b.x + b.w > prevGround.x && b.x < prevGround.x + prevGround.w) {
+            b.y = slopeSurface(prevGround, b.x, b.w) - b.h;
+        }
         for (const s of solids) {
             if (s.oneway || s.off || s.slope || !overlap(b, s)) continue;
+            // walking into a lip a few pixels tall steps onto it instead of stopping dead, and a platform that rose into
+            // your feet this frame lifts you rather than shoving you sideways off its end
+            const lip = b.y + b.h - s.y;
+            // feet sitting a rounding error inside the deck are standing on it, not inside it
+            if (lip <= .01) continue;
+            const rose = (s.mover || s.dy) && lip <= Math.max(0, -(s.dy || 0)) + 2;
+            if (lip > 0 && (rose || (prevGround && b.vy >= 0 && b.vx !== 0 && lip <= STEP_UP)) && clearAt(b.x, s.y - b.h, b, solids, s)) {
+                b.y = s.y - b.h; if (b.vy > 0) b.vy = 0;
+                if (rose && b.vy === 0) { b.onGround = true; b.ground = s; }
+                continue;
+            }
             if (b.vx > 0 || (b.vx === 0 && b.x + b.w / 2 < s.x + s.w / 2)) { b.x = s.x - b.w; b.wall = 1; }
             else { b.x = s.x + s.w; b.wall = -1; }
             b.vx = 0;
         }
         for (const s of solids) {
-            if (!s.slope || !overlap(b, s)) continue;
-            const ratio = s.h / s.w, sy = slopeY(s, b.x + b.w / 2);
-            if (b.y + b.h > sy + ratio * Math.abs(b.vx) * dt + 12) {
+            if (!s.slope || s.off || !overlap(b, s)) continue;
+            const oldSurface = slopeSurface(s, prevX, b.w);
+            const surface = slopeSurface(s, b.x, b.w);
+            if (b.y + b.h > surface + 2 && prevGround !== s && prevY + b.h > oldSurface + 2) {
                 if (b.vx > 0 || (b.vx === 0 && b.x + b.w / 2 < s.x + s.w / 2)) { b.x = s.x - b.w; b.wall = 1; }
                 else { b.x = s.x + s.w; b.wall = -1; }
                 b.vx = 0;
@@ -166,15 +206,14 @@
         b.y += b.vy * dt;
         for (const s of solids) {
             if (s.slope && !s.off) {
-                const cx = b.x + b.w / 2;
-                if (cx >= s.x && cx <= s.x + s.w && b.vy < 0 && b.y < s.y + s.h && prevBottom - b.h >= s.y + s.h - 1) {
+                if (b.x + b.w <= s.x || b.x >= s.x + s.w) continue;
+                if (b.vy < 0 && b.y < s.y + s.h && prevY >= s.y + s.h - 1) {
                     b.y = s.y + s.h; b.vy = 0;
                     continue;
                 }
-                if (cx < s.x || cx > s.x + s.w || b.vy < 0) continue;
-                const sy = slopeY(s, cx), ratio = s.h / s.w, bottom = b.y + b.h;
-                const reach = ratio * Math.abs(b.vx) * dt + 3;
-                if ((bottom >= sy && prevBottom <= sy + reach + 12 + b.vy * dt) || (bottom < sy && sy - bottom <= reach && b.vy < 400 && prevBottom >= sy - reach - 2)) {
+                if (b.vy < 0) continue;
+                const sy = slopeSurface(s, b.x, b.w), oldSurface = slopeSurface(s, prevX, b.w);
+                if ((b.y + b.h >= sy && prevBottom <= oldSurface + 2) || prevGround === s) {
                     b.y = sy - b.h; b.vy = 0; b.onGround = true; b.ground = s;
                 }
                 continue;
@@ -185,10 +224,19 @@
             } else if (b.vy >= 0 && prevBottom <= s.y + 12 + Math.abs(b.vy) * dt) {
                 b.y = s.y - b.h; b.vy = 0; b.onGround = true; b.ground = s;
             } else if (b.vy < 0) {
+                // a jump that only clips a ceiling corner slides past it instead of bonking
+                const fromLeft = b.x + b.w - s.x, fromRight = s.x + s.w - b.x;
+                const nudge = fromLeft <= CORNER_NUDGE ? -fromLeft : fromRight <= CORNER_NUDGE ? fromRight : 0;
+                if (nudge && clearAt(b.x + nudge, b.y, b, solids)) { b.x += nudge; continue; }
                 b.y = s.y + s.h; b.vy = 0;
             } else {
                 b.y = s.y - b.h; b.vy = 0; b.onGround = true; b.ground = s;
             }
+        }
+        if (!b.onGround && b.vy === 0 && prevGround && !prevGround.off && solids.includes(prevGround)
+            && b.x + b.w > prevGround.x && b.x < prevGround.x + prevGround.w
+            && Math.abs(b.y + b.h - (prevGround.slope ? slopeSurface(prevGround, b.x, b.w) : prevGround.y)) < .01) {
+            b.onGround = true; b.ground = prevGround;
         }
     }
 
@@ -378,7 +426,7 @@
             this.done = false;
             this.lastReport = { score: -1, answered: -1, at: 0 };
             this.startedAt = Date.parse(this.room.started_at) || Date.now();
-            this.deadline = this.mode === 'chess' ? Infinity : this.practice
+            this.deadline = ['chess', 'defense'].includes(this.mode) ? Infinity : this.practice
                 ? Number(options.timeLimitSeconds) > 0 ? this.startedAt + Number(options.timeLimitSeconds) * 1000 : Infinity
                 : this.room.goal_type === 'time'
                     ? this.startedAt + Number(this.room.time_limit_seconds) * 1000
@@ -389,7 +437,7 @@
             const Game = (window.StudBudArcade.games[this.mode]) || window.StudBudArcade.games.skyline;
             this.buildDom();
             this.game = new Game(this);
-            if (this.mode === 'chess') this.overlay.querySelector('.mpg-timer').classList.add('hidden');
+            if (['chess', 'defense'].includes(this.mode)) this.overlay.querySelector('.mpg-timer').classList.add('hidden');
             if (!this.preview) window.StudBudSfx?.startMusic(this.mode);
             else this.overlay.querySelectorAll('.mpg-hud, .mpg-hint, .mpg-touch, .mpg-countdown').forEach(element => element.classList.add('hidden'));
             this.bind();
@@ -529,6 +577,7 @@
                     d: isMe ? this.done : Boolean(r?.done)
                 });
             }
+            if (this.game?.standingValues) for (const row of rows) Object.assign(row, this.game.standingValues(row.id));
             return rows.sort((a, b) => (this.metric(b) - this.metric(a)) || (b.s - a.s));
         }
 
@@ -550,7 +599,7 @@
             const rows = this.standings();
             const limit = Number(this.room.point_limit);
             let end = Boolean(this.game.finished) || now >= this.deadline;
-            if (this.mode !== 'chess' && this.room.goal_type !== 'time' && !this.game.race && rows.some(row => this.metric(row) >= limit)) end = true;
+            if (!['chess', 'defense'].includes(this.mode) && this.room.goal_type !== 'time' && !this.game.race && rows.some(row => this.metric(row) >= limit)) end = true;
             if (this.game.race) {
                 if (rows.length && rows.every(row => row.d)) end = true;
                 const first = this.done && !this.firstDone ? now : this.firstDone;
@@ -602,7 +651,8 @@
                 this.toast('Your match summary could not be saved. Check your connection and export a backup.', '#f87171');
             });
             window.StudBudSfx?.stopMusic();
-            this.sfx(me === 0 ? 'win' : 'lose');
+            const won = this.game?.isWinner ? this.game.isWinner(this.standingsCache, this.user.id) : me === 0;
+            this.sfx(won ? 'win' : 'lose');
         }
 
         // ---------- questions ----------
@@ -782,7 +832,7 @@
                         return;
                     }
                     if (e.code === 'Tab') {
-                        const targets = [this.canvas, ...this.overlay.querySelectorAll('.mpg-hud button, .mpg-hud summary, .mpg-hud input, .mpg-touch button, .chess-panel button, .chess-panel summary')].filter(el => el.offsetWidth && el.offsetHeight);
+                        const targets = [this.canvas, ...this.overlay.querySelectorAll('.mpg-hud button, .mpg-hud summary, .mpg-hud input, .mpg-hud select, .mpg-touch button, .chess-panel button, .chess-panel summary')].filter(el => el.offsetWidth && el.offsetHeight);
                         const index = targets.indexOf(document.activeElement);
                         targets[(index + (e.shiftKey ? -1 : 1) + targets.length) % targets.length]?.focus();
                         e.preventDefault(); return;
@@ -856,6 +906,13 @@
                     }
                 }
                 else if (target.classList.contains('mpg-test-restart') && this.testing) this.onRestart?.();
+                else if (target.dataset.testAction && this.testing && this.mode === 'skyline') {
+                    const index = target.dataset.testAction === 'checkpoint' ? this.game.cp.id
+                        : Number(this.overlay.querySelector('[data-test-biome]').value);
+                    this.game.testTeleport(index);
+                    this.keys.clear(); this.justPressed.clear(); this.resetTouchStick?.();
+                    this.mouse.down = false; this.mouse.pressed = false;
+                }
                 else if (target.classList.contains('mpg-leave') && this.practice && !this.testing && !this.over) this.finish();
                 else if (target.classList.contains('mpg-leave') || target.classList.contains('mpg-exit')) this.onLeave?.();
                 else if (target.classList.contains('mpg-end')) this.hostEnd();
@@ -872,14 +929,22 @@
                     <div class="mpg-chip"><strong class="mpg-name"></strong><span class="mpg-goal"></span>${this.testing ? '<small class="mpg-practice-indicator">Staff testing · infinite resources</small>' : this.practice ? '<small class="mpg-practice-indicator">Practice · no coins</small>' : ''}</div>
                     <div class="mpg-timer"></div>
                     <div class="mpg-actions">
-                        <button type="button" class="mpg-hud-toggle" aria-expanded="true" aria-controls="mpg-match-details mpg-controls-hint mpg-match-standings" aria-label="Hide match details and standings">HUD</button>
+                        <button type="button" class="mpg-hud-toggle" aria-expanded="true" aria-controls="mpg-match-details mpg-match-standings" aria-label="Hide match details and standings">HUD</button>
+                        <details class="mpg-controls-help"><summary>Controls</summary><div class="mpg-help-panel"><div class="mpg-hint" id="mpg-controls-hint"></div></div></details>
                         <details class="mpg-audio-settings"><summary>Settings</summary><div class="mpg-audio-panel">
                             <label>Game volume <input type="range" min="0" max="100" value="${Math.round((window.StudBudSfx?.settings.volume ?? .7) * 100)}" data-audio="volume"></label>
                             <label>Music volume <input type="range" min="0" max="100" value="${Math.round((window.StudBudSfx?.settings.musicVolume ?? .5) * 100)}" data-audio="musicVolume"></label>
                             <label><input type="checkbox" data-audio="game" ${window.StudBudSfx?.settings.game !== false ? 'checked' : ''}> Game sounds</label>
                             <label><input type="checkbox" data-audio="music" ${window.StudBudSfx?.settings.music !== false ? 'checked' : ''}> Music</label>
                         </div></details>
-                        ${this.testing ? `<details class="mpg-test-tools"><summary>Tools</summary><div class="mpg-test-panel"><div><button type="button" class="mpg-test-pause">Pause</button>${this.onRestart ? '<button type="button" class="mpg-test-restart">Restart</button>' : ''}</div><pre class="mpg-test-stats"></pre></div></details>` : ''}
+                        ${this.testing ? `<details class="mpg-test-tools"><summary>Tools</summary><div class="mpg-test-panel"><div><button type="button" class="mpg-test-pause">Pause</button>${this.onRestart ? '<button type="button" class="mpg-test-restart">Restart</button>' : ''}</div>${this.mode === 'skyline' ? `
+                            <label><input type="checkbox" data-test-cheat="flight"> Flight (W/S or Up/Down; Shift = fast)</label>
+                            <label class="mpg-test-range">Fly speed <output data-test-speed-label aria-label="Selected fly speed">600 units/s</output><input type="range" min="100" max="3000" step="100" value="600" data-test-speed aria-label="Fly speed"></label>
+                            <label><input type="checkbox" data-test-cheat="invincible"> Invincibility</label>
+                            <label><input type="checkbox" data-test-cheat="freeze"> Freeze machinery and moving platforms</label>
+                            <label><input type="checkbox" data-test-cheat="tide"> Disable rising tide</label>
+                            <label>Biome <select data-test-biome aria-label="Test biome">${window.StudBudArcade.games.skyline.testDestinations.map(place => `<option value="${place.id}">${esc(place.name)}</option>`).join('')}</select></label>
+                            <div class="mpg-test-teleport"><button type="button" data-test-action="teleport">Teleport</button><button type="button" data-test-action="checkpoint">Reset checkpoint</button></div>` : ''}<pre class="mpg-test-stats"></pre></div></details>` : ''}
                         <button type="button" class="mpg-end ${this.isHost && !this.practice ? '' : 'hidden'}">End match</button>
                         <button type="button" class="mpg-leave">${this.testing ? 'Close test' : this.practice ? 'End game' : 'Leave'}</button>
                     </div>
@@ -889,7 +954,6 @@
                 <div class="mpg-meter hidden">
                     <div class="mpg-meter-head"><span class="mpg-meter-label"></span><b class="mpg-meter-value"></b></div>
                 </div>
-                <div class="mpg-hint" id="mpg-controls-hint"></div>
                 <div class="mpg-stick-zone" aria-hidden="true"></div>
                 <div class="mpg-touch" aria-label="Touch controls">
                     <div class="mpg-stick" role="application" aria-label="Movement joystick"><i class="mpg-knob"></i></div>
@@ -925,33 +989,58 @@
             const status = document.createElement('div');
             status.className = 'mpg-status';
             for (const selector of ['.mpg-score', '.mpg-meter']) status.appendChild(overlay.querySelector(selector));
-            hud.append(overlay.querySelector('.mpg-top'), status, overlay.querySelector('.mpg-board'), overlay.querySelector('.mpg-hint'), overlay.querySelector('.mpg-toasts'));
+            const panels = document.createElement('div');
+            panels.className = 'mpg-panels';
+            hud.append(overlay.querySelector('.mpg-top'), status, overlay.querySelector('.mpg-board'), panels, overlay.querySelector('.mpg-toasts'));
             overlay.appendChild(hud);
             this.bindTouch(overlay);
             overlay.addEventListener('input', event => {
+                const cheat = event.target.dataset.testCheat;
+                const cheatKeys = { flight: 'testFlight', invincible: 'testInvincible', freeze: 'testFreezeHazards', tide: 'testNoTide' };
+                if (this.testing && this.mode === 'skyline' && Object.hasOwn(cheatKeys, cheat)) {
+                    this[cheatKeys[cheat]] = event.target.checked;
+                    if (this.testFlight || this.testInvincible) this.game.dead = 0;
+                    this.game.me.vx = 0; this.game.me.vy = 0;
+                    this.game.me.ground = null; this.game.me.onGround = false;
+                    return;
+                }
+                if (this.testing && this.mode === 'skyline' && event.target.dataset.testSpeed !== undefined) {
+                    const speed = Number(event.target.value);
+                    if (!Number.isFinite(speed) || speed < 100 || speed > 3000) {
+                        this.toast('Fly speed must be between 100 and 3000 units/s', '#fbbf24');
+                        return;
+                    }
+                    this.testFlySpeed = speed;
+                    overlay.querySelector('[data-test-speed-label]').textContent = `${speed} units/s`;
+                    return;
+                }
                 const key = event.target.dataset.audio;
                 if (!key) return;
                 const value = event.target.type === 'checkbox' ? event.target.checked : Number(event.target.value) / 100;
                 window.NexusApp.updateGameAudio({ [key]: value });
             });
-            for (const panel of overlay.querySelectorAll('.mpg-audio-settings, .mpg-test-tools')) {
+            const menus = overlay.querySelectorAll('.mpg-audio-settings, .mpg-test-tools, .mpg-controls-help');
+            for (const panel of menus) {
+                const content = panel.querySelector('.mpg-audio-panel, .mpg-test-panel, .mpg-help-panel');
+                content.hidden = true;
+                panels.appendChild(content);
                 panel.addEventListener('toggle', () => {
-                    if (panel.open) overlay.querySelectorAll('.mpg-audio-settings, .mpg-test-tools').forEach(other => {
-                        if (other !== panel) other.open = false;
+                    content.hidden = !panel.open;
+                    if (panel.open) menus.forEach(other => {
+                        if (other !== panel) {
+                            other.open = false;
+                        }
                     });
+                    this.layoutHud();
                 });
             }
             const compactHud = this.defaultHudCollapsed();
             this.setHudCollapsed(compactHud);
             overlay.addEventListener('keydown', event => {
                 if (event.key !== 'Escape' || this.question) return;
-                const tools = overlay.querySelector('.mpg-test-tools');
-                if (tools?.open) {
-                    tools.open = false;
-                    tools.querySelector('summary').focus();
+                for (const menu of menus) {
+                    if (menu.open) { menu.open = false; menu.querySelector('summary').focus(); }
                 }
-                const audio = overlay.querySelector('.mpg-audio-settings');
-                if (audio?.open) { audio.open = false; audio.querySelector('summary').focus(); }
             });
             this.hudObserver = new ResizeObserver(() => this.layoutHud());
             for (const el of [hud, overlay.querySelector('.mpg-touch'), overlay.querySelector('.mpg-hint'), overlay.querySelector('.mpg-board')]) this.hudObserver.observe(el);
@@ -964,7 +1053,6 @@
         setHudCollapsed(collapsed) {
             this.overlay.classList.toggle('hud-collapsed', collapsed);
             this.overlay.querySelector('.mpg-match-details').hidden = collapsed;
-            this.overlay.querySelector('.mpg-hint').hidden = collapsed;
             this.overlay.querySelector('.mpg-board').hidden = collapsed;
             const toggle = this.overlay.querySelector('.mpg-hud-toggle');
             toggle.setAttribute('aria-expanded', String(!collapsed));
@@ -1252,7 +1340,7 @@
             if (diagnostics) {
                 const me = this.game.me;
                 const position = me ? `${Math.round(me.x)}, ${Math.round(me.y)}` : 'Not applicable';
-                diagnostics.textContent = `Mode: ${this.mode}\nSeed: ${this.seed}\nTime: ${this.t.toFixed(1)}s\nPlayers: ${this.roster.size}\nPosition: ${position}\nResources: infinite\nScore: ${Math.round(this.score)}\nObjective: ${Math.round(this.goal)}`;
+                diagnostics.textContent = `Mode: ${this.mode}\nSeed: ${this.seed}\nTime: ${this.t.toFixed(1)}s\nPlayers: ${this.roster.size}\nPosition: ${position}\nResources: infinite\nScore: ${Math.round(this.score)}\nObjective: ${Math.round(this.goal)}${this.mode === 'skyline' ? `\nFly speed: ${this.testFlySpeed || 600} units/s\nCheckpoint: ${this.game.cp.id + 1}/${this.game.checkpoints.length}\nSolids: ${this.game.solids.length}\nMachines: ${this.game.drills.length}` : ''}`;
             }
             const boardMarkup = this.standings().slice(0, 6).map((row, i) =>
                 `<li class="${row.id === this.user.id ? 'me' : ''}">${avatarMarkup(row, 'mpg-player-avatar')}<span>${i + 1}. ${esc(row.n)} ${accountTagMarkup(row.username, row.tags)}</span><b>${this.valueText(row)}</b></li>`).join('');
@@ -1291,7 +1379,7 @@
             const rows = this.standingsCache || this.standings();
             const winner = rows[0];
             const tied = winner && rows.filter(row => this.metric(row) === this.metric(winner)).length > 1;
-            const title = this.game.teamsOn && this.game.teamTd
+            const title = this.game.resultTitle ? this.game.resultTitle(rows) : this.game.teamsOn && this.game.teamTd
                 ? this.game.teamTd[0] === this.game.teamTd[1] ? 'Teams tied!' : `${this.game.teamTd[0] > this.game.teamTd[1] ? 'Blue' : 'Red'} team wins!`
                 : this.mode === 'chess' && this.game.state.winner === -2 ? 'Draw!'
                     : winner ? tied ? 'First-place tie!' : `${winner.n} wins!` : 'Game over';
@@ -1380,8 +1468,10 @@
                     const scale = this.resolutionScale || 1;
                     const struggling = this.frameCost > 12 || this.frameInterval > 26;
                     const recovered = this.frameCost < 5 && this.frameInterval < 19;
+                    this.strugglingWindows = struggling ? (this.strugglingWindows || 0) + 1 : 0;
                     const next = struggling ? Math.max(.5, scale - .15) : recovered ? Math.min(1, scale + .05) : scale;
-                    const low = struggling || (this.adaptiveLow && !(recovered && next >= .95));
+                    // Low detail needs sustained slowness and then latches, so scenes don't flicker between detail modes.
+                    const low = this.strugglingWindows >= 3 || this.adaptiveLow;
                     if (this.canvas && (Math.abs(next - scale) > .01 || !!low !== !!this.adaptiveLow)) {
                         this.resolutionScale = next;
                         this.adaptiveLow = !!low;
@@ -2425,6 +2515,6 @@
     window.StudBudArcade = {
         graphicsProfile,
         Session, BaseGame, Particles, Resource, games: {},
-        util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, VerticalIndex, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, accountTagMarkup, who, playerCosmetics, avatarUrl, avatarMarkup, animatedCosmetics, drawAvatar, observeAvatars, drawHat, drawFigureSide, drawFigureTop, sceneZoom, questionHistoryMarkup, defaultPlayerColors }
+        util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, VerticalIndex, slopeY, slopeSurface, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, accountTagMarkup, who, playerCosmetics, avatarUrl, avatarMarkup, animatedCosmetics, drawAvatar, observeAvatars, drawHat, drawFigureSide, drawFigureTop, sceneZoom, questionHistoryMarkup, defaultPlayerColors }
     };
 })(window);

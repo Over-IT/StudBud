@@ -3768,6 +3768,7 @@
                     <div class="admin-test-settings">
                         <label>Game to test<select id="admin-game-test-mode">
                             <option value="skyline">City Escape</option><option value="river">River Fishing</option>
+                            <option value="defense">Team Tower Defense</option>
                             <option value="market">Package Delivery</option><option value="miner">Crystal Mining</option>
                             <option value="duel">King of the Hill</option><option value="shooter">Arena Shooter</option>
                             <option value="sports">Soccer</option>
@@ -4033,8 +4034,8 @@
         }
 
         questionRewardInfo(mode) {
-            const resource = ({ miner: 'Fuel', river: 'Bait', frenzy: 'Bait', fishing: 'Bait', shooter: 'Ammo', crypto: 'Research cash', hack: 'Crypto' })[mode] || 'Energy';
-            const multiplier = mode === 'crypto' ? 8 : mode === 'hack' ? 3 : 1;
+            const resource = ({ miner: 'Fuel', river: 'Bait', frenzy: 'Bait', fishing: 'Bait', shooter: 'Ammo', crypto: 'Research cash', hack: 'Crypto', defense: 'Shared team cash' })[mode] || 'Energy';
+            const multiplier = mode === 'crypto' ? 8 : ['hack', 'defense'].includes(mode) ? 3 : 1;
             return { resource, multiplier };
         }
 
@@ -4048,6 +4049,7 @@
             const recommendations = {
                 skyline: [25, 45, 'About 4-7 basic jumps or 1 dash, before movement costs.'],
                 duel: [20, 35, 'About 2-4 attacks or 1-2 seconds of shielding.'],
+                defense: [20, 40, 'Pays $60-120 into your shared team wallet; troops, enemies and upgrades all cost cash.'],
                 miner: [25, 45, 'About 2-4 seconds of jetpack use or 9-16 seconds of mining.'],
                 river: [20, 40, 'About 2-4 net casts.'],
                 frenzy: [20, 40, 'About 2-4 net casts.'],
@@ -4091,14 +4093,17 @@
                 document.getElementById('solo-game-reward')?.closest('.question-reward-control')
             ];
             for (const control of controls.filter(Boolean)) {
-                control.classList.toggle('hidden', chess);
-                control.querySelectorAll('input, select, button').forEach(input => { input.disabled = chess; });
+                const hidden = chess || (mode === 'defense' && (control === controls[0] || control === controls[2]));
+                control.classList.toggle('hidden', hidden);
+                control.querySelectorAll('input, select, button').forEach(input => { input.disabled = hidden; });
             }
             document.getElementById('chess-setup-note')?.classList.toggle('hidden', !chess);
             const soloNote = document.querySelector('#solo-game-settings > small');
             if (soloNote) soloNote.textContent = chess ? 'One correct answer earns one move. No time limit. Checkmate wins; only the checked player can move while escaping check. Practice awards no multiplayer coins.'
+                : mode === 'defense' ? 'Shared team cash comes from correct answers and enemy kills. No time limit: reduce the opposing base to 0 HP. Practice awards no multiplayer coins.'
                 : 'Correct answers give the resource shown above. End game opens your summary. Practice awards no multiplayer coins.';
             const labels = {
+                defense: ['Team Tower Defense', 'Red vs blue, 1v1 or teams. Share cash, build and upgrade troops, send enemies to the rival path. First base to 0 HP loses; no time limit.'],
                 skyline: ['City Escape', 'Climb a rooftop obstacle course before the tide.'],
                 river: ['River Fishing', 'Steer a boat, dodge obstacles and catch fish.'],
                 market: ['Package Delivery', 'Deliver packages across town and dodge cars.'],
@@ -4569,6 +4574,12 @@
             } else if (mode === 'shooter') {
                 bots.forEach((b, i) => { b.r = 16; b.strafe = i % 2 ? -1 : 1; this.placeShooterBot(game, b, i); });
                 game.hitBot = bullet => this.hitShooterBot(demo, bullet);
+                demo.onEmit = ev => {
+                    const attacker = bots.find(b => b.id === ev.by);
+                    if (!attacker) return;
+                    if (ev.k === 'hit') attacker.score += 4;
+                    else if (ev.k === 'ko') { attacker.score += 100; attacker.playerKills = (attacker.playerKills || 0) + 1; }
+                };
             } else if (mode === 'sports') {
                 bots.forEach((b, i) => {
                     b.team = game.teamOf(b.id); b.dir = b.team === 0 ? 1 : -1; b.r = 15; b.kickCd = 0; b.turbo = 0; b.stun = 0;
@@ -4785,7 +4796,7 @@
                 bot.respawn = 2;
                 game.particles.burst(bot.x, bot.y, bot.color, 30, 380, 0.8, 6);
                 if (attacker === demo.meId) game.onEvent({ k: 'ko', by: demo.meId }, bot);
-                else if (shooter) shooter.score = (shooter.score || 0) + 100;
+                else if (shooter) { shooter.score = (shooter.score || 0) + 100; shooter.playerKills = (shooter.playerKills || 0) + 1; }
             }
             return true;
         }
@@ -4886,8 +4897,18 @@
             const flags = new Map(), cpNode = [0];
             flags.set(0, cps[0].x + 20);
             let last = list[0];
-            for (const p of game.solids) {
-                if (p.wall || p.wallJ || p.ground || p.slope || p.prop || p.w < 50 || p.y > last.y + 8) continue;
+            const node = solid => solid.navX !== undefined ? {
+                    x: solid.navX - 35, y: solid.y, w: 70, h: 14, surface: solid
+                } : solid.slope ? {
+                    x: solid.curve === 'arch' ? solid.x + solid.w / 2 - 35 : solid.slope > 0 ? solid.x + solid.w - 70 : solid.x,
+                    y: solid.y, w: 70, h: 14, surface: solid
+                } : solid;
+            // The city runs sideways (and sometimes down) across rooftops, so it follows the generator's ordered path.
+            const cityPath = game.cityPath || [];
+            for (const solid of cityPath) { list.push(node(solid)); last = list[list.length - 1]; }
+            for (const solid of game.solids) {
+                if (solid.city || cityPath.includes(solid) || solid.wall || solid.wallJ || solid.ground || (solid.slope && !solid.route) || solid.prop || solid.w < 50 || solid.y > last.y + 8) continue;
+                const p = node(solid);
                 list.push(p); last = p;
                 cps.forEach((c, k) => {
                     if (k > 0 && cpNode[k] === undefined && Math.abs(p.y - c.y) < 1 && c.x + 20 >= p.x && c.x + 20 <= p.x + p.w) { cpNode[k] = list.length - 1; flags.set(list.length - 1, c.x + 20); }
@@ -4936,7 +4957,7 @@
                 b.vx *= Math.max(0, 1 - 8 * dt);
             } else {
                 ai.energy = Math.max(0, ai.energy - (b.onGround ? 2 : 1.2) * dt);
-                const groundIndex = b.onGround ? R.list.indexOf(b.ground) : -1;
+                const groundIndex = b.onGround ? R.list.findIndex(p => p === b.ground || p.surface === b.ground) : -1;
                 if (groundIndex > st.i) { st.i = groundIndex; st.progressAt = demo.clock; st.flagDone = !R.flags.has(groundIndex); st.jump = null; }
                 if (st.wait > 0) st.wait -= dt;
 
@@ -5064,7 +5085,8 @@
                     const low = walls.reduce((a, w) => (w.y + w.h > a.y + a.h ? w : a), walls[0]);
                     const lowSide = Math.sign(low.x + low.w / 2 - gx) || exitDir;
                     S.shaft = { gx, top: Math.min(...walls.map(w => w.y)), exitDir, side: lowSide, best: feet };
-                    if (Math.abs(cx - gx) > 18) { hold.add(gx > cx ? 'KeyD' : 'KeyA'); return; }
+                    const standX = Math.max(n.x + 12, Math.min(n.x + n.w - 12, gx));
+                    if (Math.abs(cx - standX) > 18) { hold.add(standX > cx ? 'KeyD' : 'KeyA'); return; }
                     hold.add(lowSide > 0 ? 'KeyD' : 'KeyA'); hold.add('Space'); tap.add('Space');
                     S.jump = { t: c, v: { dbl: 0.2, dash: null }, dbl: false, dash: false };
                     return;
@@ -5212,6 +5234,13 @@
             }
             if (mode === 'sports') {
                 this.stepSportsBots(demo, dt); this.driveSports(demo, hold, tap); return;
+            }
+            if (mode === 'defense') {
+                this.stepDefenseBots(demo, dt);
+                const target = game.paths[game.myTeam][3];
+                if (Math.abs(target.x - me.x) > 35) press(target.x > me.x ? 'KeyD' : 'KeyA');
+                if (Math.abs(target.y - me.y) > 35) press(target.y > me.y ? 'KeyS' : 'KeyW');
+                return;
             }
             if (mode === 'miner') {
                 const carry = Number(game.items || 0), lowFuel = Number(game.res?.value || 0) < 35;
@@ -5366,7 +5395,7 @@
             const setTarget = (target, duration = 2.2) => { ai.target = target; ai.targetUntil = clock + duration; };
             let target = ai.target;
             if (mode === 'market' && game.shops?.length && game.houses?.length) {
-                const arrived = target && Math.hypot(bot.x - target.x, bot.y - target.y) < 44;
+                const arrived = target && Math.hypot(bot.x - target.x, bot.y - target.y) < (ai.carrying ? 56 : 60);
                 if (!target || arrived) {
                     if (arrived && ai.carrying) {
                         bot.deliveries = (bot.deliveries || 0) + 1;
@@ -5385,11 +5414,15 @@
                 }
                 while (ai.path?.length > 1 && Math.hypot(bot.x - ai.path[0].x, bot.y - ai.path[0].y) < 30) ai.path.shift();
                 const waypoint = ai.path?.[0] || target;
+                const dx = waypoint.x - bot.x, dy = waypoint.y - bot.y, length = Math.hypot(dx, dy) || 1;
+                const future = { x: bot.x + dx / length * Math.min(length, speed * .3) - 14, y: bot.y + dy / length * Math.min(length, speed * .3) - 14, w: 28, h: 28 };
+                const traffic = game.cars.some(car => U.overlap(future, game.carHitRect(car, clock + .3)));
+                ai.waitingTraffic = traffic;
                 if (clock < (ai.recoverUntil || 0)) this.moveNavigatingBot(bot, waypoint.x, waypoint.y, speed, dt, game.walls, game);
-                else this.moveBotToward(bot, waypoint.x - bot.x, waypoint.y - bot.y, speed, dt);
+                else this.moveBotToward(bot, dx, dy, traffic ? 0 : speed, dt);
                 for (const wall of game.walls) U.pushCircleOutOfRect(bot, wall);
                 ai.hitCd = Math.max(0, (ai.hitCd || 0) - dt);
-                if (ai.hitCd <= 0 && game.cars.some(car => U.overlap({ x: bot.x - 12, y: bot.y - 12, w: 24, h: 24 }, game.carRect(car, clock)))) {
+                if (ai.hitCd <= 0 && game.cars.some(car => U.overlap({ x: bot.x - 12, y: bot.y - 12, w: 24, h: 24 }, game.carHitRect(car, clock)))) {
                     ai.hitCd = 1.35; bot.cash = Math.max(0, (bot.cash || 0) - Math.max(12, Math.round((bot.cash || 0) * 0.12)));
                     if (ai.carrying) { ai.target = null; ai.path = null; }
                     ai.carrying = false;
@@ -5603,7 +5636,7 @@
                 bot.ex = {};
             }
             const moved = Math.hypot(bot.x - ai.lastX, bot.y - ai.lastY);
-            ai.stuck = ready && moved < 1.4 ? ai.stuck + dt : 0; ai.lastX = bot.x; ai.lastY = bot.y;
+            ai.stuck = ready && !ai.waitingTraffic && moved < 1.4 ? ai.stuck + dt : 0; ai.lastX = bot.x; ai.lastY = bot.y;
             if (ai.stuck > 1.1) {
                 if (mode === 'market') { ai.recoverUntil = clock + 4; ai.navPath = null; }
                 else { ai.target = null; ai.targetUntil = 0; }
@@ -6102,7 +6135,7 @@
             const options = {
                 goal_type: form.elements.mode.value === 'chess' ? 'points' : 'time',
                 point_limit: 1000,
-                time_limit_seconds: form.elements.mode.value === 'chess' ? 0 : Math.min(60, Math.max(1, Number(form.elements.timeLimit.value) || 5)) * 60,
+                time_limit_seconds: ['chess', 'defense'].includes(form.elements.mode.value) ? 0 : Math.min(60, Math.max(1, Number(form.elements.timeLimit.value) || 5)) * 60,
                 question_reward: form.elements.mode.value === 'chess' ? 1 : this.questionRewardValue(form.elements.questionReward.value)
             };
             let room;
@@ -6193,6 +6226,7 @@
             const players = Array.isArray(state.players) ? state.players : [];
             const me = players.find(player => player.id === this.gameUser().id);
             const modeNames = {
+                defense: 'Team Tower Defense',
                 classic: 'Classic', rush: 'Rush', survival: 'Survival',
                 skyline: 'City Escape', river: 'River Fishing', market: 'Package Delivery',
                 miner: 'Crystal Mining', duel: 'King of the Hill',
@@ -6202,7 +6236,7 @@
             const remainingSeconds = room.goal_type === 'time' && room.started_at
                 ? Math.max(0, Math.ceil((new Date(room.started_at).getTime() + Number(room.time_limit_seconds) * 1000 - Date.now()) / 1000))
                 : null;
-            const goalLabel = room.mode === 'chess' ? 'Checkmate · one move per answer · no time limit' : room.goal_type === 'time'
+            const goalLabel = room.mode === 'defense' ? 'Red vs blue · first base to 0 HP loses · no time limit' : room.mode === 'chess' ? 'Checkmate · one move per answer · no time limit' : room.goal_type === 'time'
                 ? remainingSeconds === null
                     ? `${Math.round(Number(room.time_limit_seconds) / 60)} minute limit`
                     : `Time left · ${Math.floor(remainingSeconds / 60)}:${String(remainingSeconds % 60).padStart(2, '0')}`
@@ -6233,12 +6267,13 @@
                                             : room.mode === 'crypto' ? `${Number(player.loot || 0)} chips · ${player.last_action || 'ready'}`
                                                 : room.mode === 'duel' ? `${Number(player.score || 0)} pts`
                                                     : `${Number(player.score || 0)} points · ${Number(player.streak || 0)} streak`;
-                    const unit = { sports: 'goals', shooter: 'kill pts', skyline: 'm', river: 'fish pts', market: 'deliveries', miner: 'crystals', duel: 'sec on hill' }[room.mode];
+                    const unit = { defense: 'team pts', sports: 'goals', shooter: 'kill pts', skyline: 'm', river: 'fish pts', market: 'deliveries', miner: 'crystals', duel: 'sec on hill' }[room.mode];
                     const valueLabel = room.mode === 'crypto' ? `$${Number(player.score || 0).toLocaleString()}` : `${Number(player.score || 0).toLocaleString()} ${unit || 'score'}`;
                     const profileBtn = `<button class="host-kick-btn" type="button" data-action="view-profile" data-id="${this.escapeHTML(player.id)}">Profile</button>`;
                     return `<li class="leaderboard-player${isSelf ? ' is-self' : ''}">${avatarFor(player)}<span class="leaderboard-name">${index + 1}. ${this.escapeHTML(player.nickname)} ${this.accountTagMarkup(player.username, player.tags)}${isSelf ? ' · you' : ''}</span><span class="leaderboard-stat"><strong>${this.escapeHTML(valueLabel)}</strong><small>${this.escapeHTML(progress)}</small></span>${profileBtn}${kick}</li>`;
                 }).join('');
             const sceneNames = {
+                defense: 'Team Tower Defense',
                 skyline: 'City Escape', river: 'River Fishing', market: 'Package Delivery',
                 miner: 'Crystal Mining', duel: 'King of the Hill',
                 crypto: 'Crypto Trading', shooter: 'Arena Shooter', sports: 'Soccer', chess: 'Question Chess',
@@ -6254,11 +6289,12 @@
             document.getElementById('multiplayer-arena').classList.toggle('hidden', inLobby);
             if (inLobby) {
                 const info = {
+                    defense: ['Red vs blue: shared cash from correct answers and kills. Build troops on your side, send enemies to the other path, and reduce the rival base to 0 HP.', 'WASD walk anywhere · Click to build/select · Buttons send/upgrade · Q/E earn cash'],
                     skyline: ['Climb to the summit past moving platforms, spikes, saws and wind. A rising tide chases you.', 'A/D run · Space jump (twice) · Shift dash'],
                     river: ['Steer a boat, dodge obstacles and catch fish.', 'WASD steer · click cast · Q recharge'],
                     market: ['Deliver packages across town and dodge cars.', 'WASD move · Shift sprint · Q recharge'],
                     miner: ['Dig through the cavern, haul ore back to base and avoid lava.', 'WASD move · hold click dig · Q recharge'],
-                    duel: ['Hold the glowing hill alone to score. Knock rivals off the stage.', 'A/D move · Space jump · S guard · E/click swing · R heavy · Shift dodge · Q recharge'],
+                    duel: ['Hold the glowing hill alone to score. Charge Thunder Hammer by holding the hill or landing attacks.', 'A/D move · Space jump · S guard · E/click swing · R charged Special (12s cooldown) · Shift dodge · Q recharge'],
                     crypto: ['Trade six assets, react to market news and build mining rigs.', '1-6 pick · B buy · S sell'],
                     shooter: ['Eliminate other players to score. Solo runs without opponents use drones. Follow the edge arrows or minimap to find opponents.', 'WASD move · mouse aim · F/click fire · Space/E blast · Shift dash · Q reload'],
                     sports: ['Dribble the ball into the rival goal. Players are split into blue and red teams; sprinting and power kicks use energy.', 'WASD dribble · Shift sprint · E/click pass · hold Space, release for power kick · Q recharge'],
@@ -6307,7 +6343,7 @@
                     : 'Game over · final scores and multiplayer coin rewards are shown below.';
                 const rewards = state.coin_rewards || {};
                 document.getElementById('hosted-podium').classList.remove('hidden');
-                const podiumUnit = { sports: 'goals', shooter: 'kill pts', skyline: 'm', river: 'fish pts', market: 'deliveries', miner: 'crystals', duel: 'sec on hill', crypto: '', chess: 'chess pts' }[room.mode] ?? 'points';
+                const podiumUnit = { defense: 'team pts', sports: 'goals', shooter: 'kill pts', skyline: 'm', river: 'fish pts', market: 'deliveries', miner: 'crystals', duel: 'sec on hill', crypto: '', chess: 'chess pts' }[room.mode] ?? 'points';
                 document.getElementById('hosted-podium').innerHTML = rankedPlayers.slice(0, 3).map((player, index) =>
                     `<div class="podium-place place-${index + 1}"><span class="podium-rank">0${index + 1}</span><strong>${avatarFor(player)} ${this.escapeHTML(player.nickname)} ${this.accountTagMarkup(player.username, player.tags)}</strong><small>${room.mode === 'crypto' ? '$' : ''}${Number(player.score || 0).toLocaleString()} ${podiumUnit} · +${Number(rewards[player.id] || 0)} coins <button class="host-kick-btn" type="button" data-action="view-profile" data-id="${this.escapeHTML(player.id)}">Profile</button></small></div>`
                 ).join('');
@@ -6396,7 +6432,7 @@
         startMultiplayerPractice() {
             const mode = document.getElementById('practice-multiplayer-mode')?.value;
             const deckId = document.getElementById('practice-multiplayer-deck')?.value;
-            const timeLimitSeconds = mode === 'chess' ? 0 : Number(document.getElementById('practice-multiplayer-time')?.value);
+            const timeLimitSeconds = ['chess', 'defense'].includes(mode) ? 0 : Number(document.getElementById('practice-multiplayer-time')?.value);
             if (!mode || !deckId || !Number.isFinite(timeLimitSeconds) || timeLimitSeconds < 0) {
                 throw new Error('Choose a game mode, flashcard set, and practice time.');
             }
@@ -6477,6 +6513,48 @@
             }
         }
 
+        stepDefenseBots(demo, dt) {
+            const { game, session, bots } = demo;
+            if (game.finished || !game.authority) return;
+            const pilots = session.preview ? [...bots, demo.defensePilot ||= { id: session.user.id, ai: { rng: window.StudBudArcade.util.mulberry32(825) } }] : bots;
+            for (const [i, bot] of pilots.entries()) {
+                if (!Object.hasOwn(game.teams, bot.id)) game.teams[bot.id] = (i + 1) % 2;
+                const team = game.teamOf(bot.id), ai = bot.ai, rng = ai.rng;
+                ai.defenseThink = (ai.defenseThink || 0) - dt;
+                ai.defenseAnswer = (ai.defenseAnswer || 0) - dt;
+                const order = (action, data = {}) => game.command({ seq: (game.lastSeq[bot.id] || 0) + 1, action, ...data }, bot.id);
+                if (ai.defenseAnswer <= 0) {
+                    ai.defenseAnswer = 7 + rng() * 5;
+                    order('answer', { count: (game.answers[bot.id] || 0) + 1 });
+                }
+                const targetX = team * 1100 + 500, targetY = 650 + Math.sin(demo.clock + i) * 130;
+                if (bot !== demo.defensePilot) {
+                    bot.x += (targetX - bot.x) * Math.min(1, dt * .7);
+                    bot.y += (targetY - bot.y) * Math.min(1, dt * .7);
+                    bot.tx = bot.x; bot.ty = bot.y; bot.ex.team = team;
+                }
+                if (ai.defenseThink > 0) continue;
+                ai.defenseThink = 2.5 + rng() * 2;
+                const troops = game.troops.filter(t => t.team === team);
+                if (game.troopCount(bot.id) < game.playerTroopLimit && game.canAfford(team, 60) && rng() < .55) {
+                    for (let attempt = 0; attempt < 16; attempt++) {
+                        const { x, y } = game.gridPoint(team * 1100 + 100 + rng() * 850, 230 + rng() * 900, team);
+                        if (game.validPlacement(x, y, team) && game.distanceToPath(x, y, team) < 210) {
+                            const affordable = game.troopTypes.map((type, index) => ({ type, index })).filter(({ type }) => game.canAfford(team, type.cost));
+                            if (affordable.length) order('build', { type: affordable[Math.floor(rng() * affordable.length)].index, x, y });
+                            break;
+                        }
+                    }
+                } else if (rng() < .2 && troops.some(t => t.level < 3)) {
+                    const troop = troops.find(t => t.level < 3);
+                    if (game.canAfford(team, game.upgradeCost(troop))) order('upgrade', { id: troop.id });
+                } else {
+                    const affordable = game.enemyTypes.map((type, index) => ({ type, index })).filter(({ type }) => game.canAfford(team, type.cost));
+                    if (affordable.length) order('send', { type: affordable[Math.floor(rng() * affordable.length)].index });
+                }
+            }
+        }
+
         tickPracticeBots(demo, dt) {
             if (demo.mode === 'chess') {
                 demo.game.updateScore();
@@ -6490,6 +6568,7 @@
             demo.clock += dt;
             const c = demo.clock;
             if (mode === 'duel') this.stepDuelBots(demo, dt);
+            else if (mode === 'defense') this.stepDefenseBots(demo, dt);
             else if (mode === 'shooter') this.stepShooterBots(demo, dt);
             else if (mode === 'sports') this.stepSportsBots(demo, dt);
             else if (mode === 'skyline') bots.forEach((bot, i) => this.stepSkylineBot(demo, bot, i, dt));
@@ -6504,6 +6583,10 @@
                 } else if (mode === 'sports') {
                     bot.goal = Number(game.teamTd?.[bot.team]) || 0;
                     bot.score = bot.goal * 100;
+                } else if (mode === 'defense') {
+                    bot.goal = bot.score = game.teamValue(game.teamOf(bot.id));
+                } else if (mode === 'shooter') {
+                    bot.goal = (bot.playerKills || 0) * 3;
                 } else if (mode === 'market') {
                     bot.goal = bot.deliveries || 0;
                     bot.score = bot.goal;

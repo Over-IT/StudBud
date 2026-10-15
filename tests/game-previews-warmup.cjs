@@ -162,6 +162,7 @@ for (const [code, expected] of [['KeyS', 'guard'], ['KeyE', 'swing'], ['KeyR', '
     session.mouse.pressed = false;
     game.swingCd = game.swingT = game.dodge = game.dodgeCd = game.stun = game.hitlag = game.respawn = 0;
     game.orb.t = 100;
+    game.specialCharge = 100;
     hold.add(code); tap.add(code);
     game.update(1 / 60);
     if (expected === 'guard') assert.equal(game.guard, true, 'S guards');
@@ -209,20 +210,27 @@ console.log('Nearby King of the Hill actions and Soccer pass/charged power-kick 
     session.emit = event => { if (event.k === 'sw') swings.push(event); };
     let spent = 0;
     session.spend = amount => { spent += amount; return true; };
+    game.specialCharge = 0;
     tap.add('KeyR'); game.update(0);
-    assert.equal(swings[0].p, 2, 'heavy attacks have twice the normal power');
-    assert.equal(game.heavyCd, 3, 'heavy attacks start a separate three-second cooldown');
+    assert.equal(swings.length, 0, 'uncharged specials are blocked');
+    assert.equal(spent, 0, 'uncharged specials consume no energy');
+    game.specialCharge = 100;
+    tap.add('KeyR'); game.update(0);
+    assert.equal(swings[0].p, 3, 'charged specials have three times normal power');
+    assert.equal(game.heavyCd, 12, 'specials start a separate twelve-second cooldown');
+    assert.equal(game.specialCharge, 0, 'special consumes its charge');
     game.swingCd = 0; game.update(0);
     assert.equal(swings.length, 1, 'a second heavy is blocked during cooldown');
-    assert.equal(spent, 8, 'blocked heavies consume no energy');
+    assert.equal(spent, 24, 'blocked specials consume no energy');
     tap.clear(); tap.add('KeyE'); game.update(0);
     assert.equal(swings.length, 2, 'light attacks still work during heavy cooldown');
     assert.equal(swings[1].p, 1);
-    game.hitlag = 4; game.update(2.99);
+    game.hitlag = 20; game.update(11.99);
     assert.ok(game.heavyCd > 0);
     game.update(.01); game.hitlag = game.swingCd = 0;
+    game.specialCharge = 100;
     tap.clear(); tap.add('KeyR'); game.update(0);
-    assert.equal(swings.length, 3, 'heavy becomes usable at exactly three seconds');
+    assert.equal(swings.length, 3, 'charged special becomes usable at exactly twelve seconds');
     const light = game.hitImpact({ p: 1 }, 0), heavy = game.hitImpact({ p: 2 }, 0);
     assert.equal(light.damage, 9);
     assert.equal(heavy.damage, 18);
@@ -238,7 +246,7 @@ console.log('Nearby King of the Hill actions and Soccer pass/charged power-kick 
     assert.equal(game.attackHits(ev, fighter(-60, -28)), false, 'attacks do not hit wholly behind the attacker');
     assert.equal(game.attackHits(ev, fighter(111, -28)), false, 'light attacks do not hit beyond their visible reach');
     assert.equal(game.attackHits({ ...ev, h: 1 }, fighter(125, -28)), true, 'heavy attacks have their visible longer reach');
-    assert.equal(game.attackHits({ ...ev, h: 1 }, fighter(137, -28)), false, 'heavy attacks do not hit beyond their visible reach');
+    assert.equal(game.attackHits({ ...ev, h: 1 }, fighter(181, -28)), false, 'specials do not hit beyond their visible reach');
     assert.equal(game.attackHits({ ...ev, a: Math.PI }, fighter(-139, -28)), true, 'left-facing sweeps use the same geometry');
     assert.equal(game.attackHits({ ...ev, a: Math.PI / 2 }, fighter(-17, 105)), true, 'vertical aiming uses fighter bounds too');
     const bot = { ...fighter(75, -28), id: 'victim', dmg: 0, stun: 0, respawn: 0, invuln: 0 };
@@ -322,7 +330,7 @@ for (const fps of [30, 60, 120]) {
     hold.delete('Space'); nearBall(); game.update(0);
     assert.equal(game.heavyCd, 3);
 }
-console.log('Three-second independent heavy cooldowns, double-power hill hits, fighter-bound hitboxes and cumulative sole-control hill time passed.');
+console.log('Charged twelve-second specials, triple-power hill swings, fighter-bound hitboxes and cumulative sole-control hill time passed.');
 const realDate = sandbox.Date;
 let ballNow = 100000;
 sandbox.Date = class extends Date { static now() { return ballNow; } };
@@ -705,6 +713,26 @@ soloResource.session.testing = true;
 assert.equal(app.botResourceReady(soloResource, resourceBot, 0.1), true);
 assert.equal(resourceBot.ai.energy, 100, 'infinite energy belongs to testing');
 console.log('Shooter collision substeps and solo/test bot resources passed.');
+{
+    const demo = demoFor('shooter'), attacker = demo.bots[0], victim = demo.bots[1];
+    Object.assign(victim, { x: 1800, y: 850, hp: 25, invuln: 0, respawn: 0 });
+    const bullet = { x: victim.x, y: victim.y, by: attacker.id, own: false, dmg: 10, life: 1 };
+    demo.game.hitBot(bullet);
+    app.tickPracticeBots(demo, 0);
+    assert.equal(attacker.score, 4);
+    assert.equal(attacker.goal, 0, 'hitting a bot does not count as an elimination');
+    demo.game.hitBot({ ...bullet, dmg: 30, life: 1 });
+    app.tickPracticeBots(demo, 0);
+    assert.equal(attacker.playerKills, 1);
+    assert.equal(attacker.goal, 3, 'bot-vs-bot elimination matches the player objective weighting');
+    demo.game.hitBot({ ...bullet, dmg: 30, life: 1 });
+    assert.equal(attacker.playerKills, 1, 'respawning victims cannot be credited twice');
+    demo.onEmit({ k: 'ko', by: attacker.id });
+    app.tickPracticeBots(demo, 0);
+    assert.equal(attacker.goal, 6, 'local-player eliminations use the same leaderboard metric');
+    assert.equal(attacker.goal, attacker.playerKills * 3);
+    console.log('Shooter bot leaderboard counts actual eliminations rather than raw hit/KO points.');
+}
 
 let questionNow = 0;
 const originalPerformance = sandbox.performance;
@@ -799,7 +827,8 @@ for (const fps of [30, 60, 120]) {
     app.stepDuelBots(demo, 1 / fps);
     assert.ok(bot.respawn > 0, `${fps} FPS bot under the stage is recovered, not trapped there`);
     app.stepDuelBots(demo, 2);
-    assert.ok(bot.y + bot.h < demo.game.stage.y && bot.x >= demo.game.stage.x);
+    assert.ok(bot.y + bot.h <= demo.game.stage.y && bot.x >= demo.game.stage.x);
+    assert.ok(bot.onGround && bot.ground && bot.x >= bot.ground.x && bot.x + bot.w <= bot.ground.x + bot.ground.w, 'respawn places the full bot body directly on a map platform');
 }
 const rememberedLava = demoFor('miner').game;
 rememberedLava.me.x = 20 * 48; rememberedLava.me.y = 20 * 48;
@@ -884,6 +913,11 @@ for (const mode of Object.keys(A.games)) {
         }
         console.log(`${mode} ${testing ? 'testing' : 'solo'} three-minute bot objectives: ${demo.bots.map(bot => bot.goal).join(', ')}`);
         if (mode === 'market') assert.ok(demo.bots.every(bot => bot.deliveries > 0), `every market bot must complete real deliveries over a full run: ${JSON.stringify(demo.bots.filter(bot => !bot.deliveries))}`);
+        if (mode === 'defense') {
+            assert.ok(demo.game.wallets.every(Number.isFinite), 'shared defense wallets remain finite in previews and practice');
+            assert.ok(demo.bots.every(bot => demo.game.answers[bot.id] > 0), 'every defense bot earns cash through simulated correct answers');
+            assert.ok(demo.game.troops.length > 0 && demo.game.nextId > 10, 'defense bots build troops and send real enemies');
+        }
         if (mode === 'miner') assert.ok(demo.bots.every(bot => bot.goal > 0), 'every mining bot must bank real crystals');
         if (mode === 'sports') assert.ok(demo.bots.some(bot => bot.goal > 0), 'soccer bots must score team goals');
         if (mode === 'frenzy' || mode === 'fishing' || mode === 'river' || mode === 'hack') {

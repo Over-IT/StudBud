@@ -218,6 +218,6 @@ assert.match(sql, /set expires_at = 'infinity'::timestamptz/);
 assert.match(sql, /status = case when mode = 'chess' and status = 'playing' and jsonb_array_length\(v_players\) < jsonb_array_length\(v_room.state -> 'players'\) then 'finished'/);
 assert.ok((sql.match(/expires_at = case when mode = 'chess'/g) || []).length >= 3, 'king-capture, host-leave and guest-leave endings restore cleanup expiry');
 const engineSource = fs.readFileSync(path.join(__dirname, '..', 'multiplayerEngine.js'), 'utf8');
-assert.match(engineSource, /this.deadline = this.mode === 'chess' \? Infinity/);
+assert.match(engineSource, /this.deadline = \['chess', 'defense'\]\.includes\(this.mode\) \? Infinity/);
 assert.match(engineSource, /if \(this.mode === 'chess'\) this.reward = 1/);
 console.log('Chess special moves, safe kings, checkmate/stalemate, answer-earned moves, host authority, stale/retried requests, reconnects, drag and solo opponents passed.');

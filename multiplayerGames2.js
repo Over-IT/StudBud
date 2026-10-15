@@ -24,6 +24,11 @@
             this.baseSpeed = 250; this.speedMul = 1; this.moving = false; this.stun = 0;
         }
 
+        carHitRect(c, now) {
+            const rect = this.carRect(c, now);
+            return { x: rect.x - 5, y: rect.y - 5, w: rect.w + 10, h: rect.h + 10 };
+        }
+
         step(dt, accel = 2400) {
             const s = this.s, me = this.me;
             this.anim += dt;
@@ -44,7 +49,7 @@
             if (this.moving && !this.aimLocked) me.aim = Math.atan2(me.vy, me.vx);
             const k = Math.min(1, dt * 6);
             const touch = s.overlay?.classList?.contains('has-touch');
-            const look = !s.preview && s.mouse.active && (!touch || s.mouse.down) ? .2 : 0;
+            const look = this.pointerLook !== false && !s.preview && s.mouse.active && (!touch || s.mouse.down) ? .2 : 0;
             const lookX = clamp((s.mouse.x - s.vw / 2) / (this.zoom || 1) * look, -140, 140);
             const lookY = clamp((s.mouse.y - s.vh / 2) / (this.zoom || 1) * look, -100, 100);
             this.cam.x += (me.x + lookX - this.cam.x) * k;
@@ -152,11 +157,14 @@
                         else if (ore < 0.108) type = 8;
                         else if (ore < 0.123) type = 9;
                     }
-                    if (depth > 15 && random() < 0.014 + Math.min(0.012, (depth - 15) * 0.00035)) type = 6;
+                    if (depth > 15 && random() < 0.005) type = 6;
                     tiles[y * COLS + x] = type;
                 }
             }
+            this.naturalCaves = new Uint8Array(tiles.length);
             this.carveCaves(random);
+            this.tileHashes = new Uint32Array(tiles.length);
+            for (let i = 0; i < tiles.length; i++) this.tileHashes[i] = A.util.hashStr(`${this.seed}:${i}`);
             for (let y = 4; y < 6; y++) for (let x = MID - 1; x <= MID + 1; x++) tiles[y * COLS + x] = 0;
             tiles[6 * COLS + MID] = 0;
             for (let y = 0; y < ROWS; y++) { tiles[y * COLS] = 10; tiles[y * COLS + COLS - 1] = 10; }
@@ -184,12 +192,27 @@
             const open = (x, y) => x > 1 && x < COLS - 2 && y > 9 && y < ROWS - 2 && Math.abs(x - MID) > 3;
             for (let c = 0; c < count; c++) {
                 let x = 4 + random() * (COLS - 8), y = 12 + random() * (ROWS - 16), angle = random() * TAU;
+                const volcanic = c % 5 === 0;
                 const length = 22 + Math.floor(random() * 34);
                 for (let step = 0; step < length; step++) {
                     const radius = 0.9 + random() * 1.25 + Math.sin(step * 0.45) * 0.35;
                     for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
                         const tx = Math.round(x + dx), ty = Math.round(y + dy);
-                        if (dx * dx + dy * dy * 1.6 <= radius * radius && open(tx, ty)) tiles[ty * COLS + tx] = 0;
+                        if (dx * dx + dy * dy * 1.6 <= radius * radius && open(tx, ty)) {
+                            const index = ty * COLS + tx;
+                            tiles[index] = volcanic && dy === 1 && step % 8 === 0 ? 6 : 0;
+                            this.naturalCaves[index] = volcanic ? 2 : 1;
+                        }
+                    }
+                    // Keep random lava pockets away from dry caves; mining can still expose isolated sources.
+                    for (let y = 10; y < ROWS - 2; y++) for (let x = 2; x < COLS - 2; x++) {
+                        const index = y * COLS + x;
+                        if (tiles[index] !== 6 || this.naturalCaves[index] === 2) continue;
+                        let dry = false;
+                        for (let dy = -2; dy <= 2 && !dry; dy++) for (let dx = -2; dx <= 2; dx++) {
+                            if (this.naturalCaves[(y + dy) * COLS + x + dx] === 1) { dry = true; break; }
+                        }
+                        if (dry) tiles[index] = 1;
                     }
                     angle += (random() - 0.5) * 0.9;
                     x += Math.cos(angle) * 0.95; y += Math.sin(angle) * 0.55;
@@ -246,8 +269,12 @@
                         if (y + 1 < ROWS - 1 && (this.T[below] === 0 || (this.T[below] === 6 && this.F[below] > 0))) this.addLavaFlow(below, 0, true, changed);
                         continue;
                     }
-                    if (!this.solid(this.tile(x, y + 1))) continue;
-                    if (reach >= LAVA_SIDE_REACH) continue;
+                    const canImprove = (next, allowance) => this.T[next] === 0 || (this.T[next] === 6 && this.F[next] > allowance);
+                    const canFall = y + 1 < ROWS - 1 && canImprove(below, 0);
+                    const canSpread = this.solid(this.tile(x, y + 1)) && reach < LAVA_SIDE_REACH
+                        && [x - 1, x + 1].some(nx => nx > 0 && nx < COLS - 1 && canImprove(y * COLS + nx, reach + 1));
+                    if (!canFall && !canSpread) this.flowing.delete(idx);
+                    if (!canSpread) continue;
                     for (const nx of [x - 1, x + 1]) {
                         if (nx <= 0 || nx >= COLS - 1) continue;
                         const next = y * COLS + nx;
@@ -273,7 +300,7 @@
             this.flowing.add(index);
             const x = index % COLS, y = Math.floor(index / COLS);
             changed.push({ x, y, d: distance, f: falling ? 1 : 0 });
-            this.particles.burst(x * TS + TS / 2, y * TS + TS / 2, '#fb642f', 3, 75, 0.35, 3);
+            if (this.seen(x * TS, y * TS)) this.particles.burst(x * TS + TS / 2, y * TS + TS / 2, '#fb642f', 3, 75, 0.35, 3);
         }
 
         collisionSolids(body = this.me) {
@@ -388,6 +415,7 @@
                     this.digClock += dt;
                     if (this.digClock > 0.16) {
                         this.digClock = 0;
+                        s.sfx('mine', 140);
                         const color = type === 2 ? '#94a3b8' : '#a16207';
                         this.particles.burst(tx * TS + TS / 2, ty * TS + TS / 2, color, 2, 75, 0.3, 3);
                     }
@@ -399,6 +427,7 @@
                 const banked = this.carry;
                 s.addScore(banked); this.banked += banked; this.carry = 0; this.items = 0;
                 s.toast(`Deposited ${banked} crystal points!`, '#fbbf24');
+                s.sfx('coin');
                 this.particles.burst(centerX, me.y + me.h, '#fbbf24', 22, 245, 0.65, 4);
             }
             s.setGoal(this.banked);
@@ -414,6 +443,7 @@
             this.s.emit({ k: 'dg', x: tx, y: ty, t: type });
             this.dig = { tx: -1, ty: -1, p: 0 };
             const crystal = CRYSTALS[type];
+            this.s.sfx(crystal ? 'crystal' : 'rockBreak', 80);
             if (crystal) {
                 if (this.items >= this.cap) this.s.toast('Satchel full - return to the surface depot!', '#fbbf24');
                 else { this.carry += crystal.value; this.items++; this.s.toast(`+${crystal.value} carried - ${crystal.name}`, crystal.color); }
@@ -435,9 +465,29 @@
 
         net() {
             const me = this.me;
-            return { x: Math.round(me.x), y: Math.round(me.y), vx: Math.round(me.vx), vy: Math.round(me.vy), f: me.face, a: me.onGround ? 1 : 0, ex: { c: this.carry, n: this.items } };
+            return { x: Math.round(me.x), y: Math.round(me.y), vx: Math.round(me.vx), vy: Math.round(me.vy), f: me.face, a: me.onGround ? 1 : 0, ex: { c: this.carry, n: this.items, digging: this.dig.p > 0, aim: this.aimAngle || 0 } };
         }
 
+        drawPickaxe(ctx, x, y, angle, swinging, phase) {
+            const side = Math.cos(angle) < 0 ? -1 : 1;
+            ctx.save(); ctx.translate(x + side * 9, y + 4); ctx.scale(side, 1);
+            ctx.rotate((side < 0 ? Math.PI - angle : angle) + (swinging ? Math.sin(phase * 18) * .7 - .25 : -.65));
+            ctx.fillStyle = '#805538'; roundRect(ctx, -3, -1.5, 25, 3, 1.5); ctx.fill();
+            ctx.fillStyle = '#b98a56'; ctx.fillRect(5, -1.5, 13, 1);
+            ctx.fillStyle = '#334155'; roundRect(ctx, -3, -2, 9, 4, 1); ctx.fill();
+            ctx.fillStyle = '#94a3b8'; ctx.beginPath();
+            ctx.moveTo(15, -9); ctx.lineTo(21, -11); ctx.quadraticCurveTo(29, -2, 25, 11);
+            ctx.lineTo(22, 4); ctx.lineTo(21, -3); ctx.lineTo(16, -5); ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1.5; ctx.beginPath();
+            ctx.moveTo(21, -10); ctx.quadraticCurveTo(27, -2, 25, 9); ctx.stroke();
+            ctx.fillStyle = '#475569'; ctx.fillRect(18, -3, 5, 6);
+            ctx.fillStyle = '#f4c7a1'; ctx.beginPath(); ctx.ellipse(1, 0, 3, 2.5, 0, 0, TAU); ctx.fill();
+            if (swinging) {
+                ctx.strokeStyle = 'rgba(226,232,240,.25)'; ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.arc(0, 0, 25, -.6, .6); ctx.stroke();
+            }
+            ctx.restore();
+        }
         goalText() { return `Banked ${this.banked} · Carried ${this.items}/${this.cap} (${this.carry} pts)`; }
         touchLayout() { return { stick: true, stickZone: 'local', platform: true, buttons: [{ k: 'Space', label: 'Jetpack', cls: 'main' }] }; }
         hint() { return 'A/D move · W/Space jetpack · S/↓ dig down · hold mouse button to mine in that direction · depot banks crystals · Q recharges fuel'; }
@@ -459,16 +509,13 @@
             const c0 = Math.max(0, Math.floor(this.x0 / TS)), c1 = Math.min(COLS - 1, Math.ceil(this.x1 / TS));
             const r0 = Math.max(0, Math.floor(this.y0 / TS)), r1 = Math.min(ROWS - 1, Math.ceil(this.y1 / TS));
             const strata = ['#30221c', '#33231a', '#35231b', '#38241d', '#38231d', '#39231d'];
-            const oreColor = Object.fromEntries(Object.entries(CRYSTALS).map(([type, crystal]) => [type, crystal.color]));
             for (let ty = Math.max(4, r0); ty <= r1; ty++) for (let tx = c0; tx <= c1; tx++) {
                 const idx = ty * COLS + tx, type = this.T[idx], x = tx * TS, y = ty * TS;
                 const color = strata[Math.min(strata.length - 1, Math.floor((ty - 4) / 8))];
                 if (type === 0) {
-                    const caveHash = A.util.hashStr(`${this.seed}:${idx}:cave`);
-                    ctx.fillStyle = '#100e11'; ctx.fillRect(x, y, TS, TS);
-                    const recess = ctx.createLinearGradient(x, y, x + TS, y + TS);
-                    recess.addColorStop(0, '#211a1b'); recess.addColorStop(0.5, '#100e12'); recess.addColorStop(1, '#07090d');
-                    ctx.fillStyle = recess; ctx.fillRect(x + 2, y + 2, TS - 4, TS - 4);
+                    const caveHash = this.tileHashes[idx], natural = this.naturalCaves[idx];
+                    ctx.fillStyle = natural ? '#10252b' : '#211a1b'; ctx.fillRect(x, y, TS, TS);
+                    ctx.fillStyle = natural ? '#112d32' : '#100e12'; ctx.fillRect(x + 2, y + 2, TS - 4, TS - 4);
                     ctx.fillStyle = 'rgba(173,145,126,.12)';
                     for (let k = 0; k < 3; k++) {
                         const px = x + 7 + ((caveHash >>> (k * 7)) & 31), py = y + 7 + ((caveHash >>> (k * 5 + 11)) & 29);
@@ -483,9 +530,13 @@
                         ctx.save();
                         ctx.lineCap = 'square'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(5,5,7,.82)';
                         ctx.beginPath(); for (const [x1, y1, x2, y2] of seam) { ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); } ctx.stroke();
-                        ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(197,145,93,.7)';
+                        ctx.lineWidth = natural ? 3 : 1.5; ctx.strokeStyle = natural ? '#67b5ba' : 'rgba(197,145,93,.7)';
                         ctx.beginPath(); for (const [x1, y1, x2, y2] of seam) { ctx.moveTo(x1 + (x1 === x + 1 ? 2 : -2), y1 + (y1 === y + 1 ? 2 : -2)); ctx.lineTo(x2 + (x2 === x + 1 ? 2 : -2), y2 + (y2 === y + 1 ? 2 : -2)); } ctx.stroke();
                         ctx.restore();
+                    }
+                    if (natural && this.solid(this.tile(tx, ty - 1))) {
+                        ctx.fillStyle = '#67b5ba'; ctx.beginPath(); ctx.moveTo(x + 12, y + 3);
+                        ctx.lineTo(x + 17, y + 14); ctx.lineTo(x + 21, y + 3); ctx.fill();
                     }
                     continue;
                 }
@@ -515,7 +566,7 @@
                 }
                 const rockColor = type === 10 ? '#111827' : type === 2 ? '#475569' : color;
                 ctx.fillStyle = rockColor; ctx.fillRect(x, y, TS, TS);
-                const hash = A.util.hashStr(`${this.seed}:${idx}`);
+                const hash = this.tileHashes[idx];
                 ctx.fillStyle = type === 2 ? 'rgba(226,232,240,.13)' : 'rgba(255,211,153,.09)';
                 for (let k = 0; k < 4; k++) {
                     const px = x + 5 + ((hash >>> (k * 5)) & 31), py = y + 5 + ((hash >>> (k * 4 + 9)) & 31);
@@ -523,8 +574,8 @@
                 }
                 ctx.strokeStyle = 'rgba(0,0,0,.34)'; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, TS - 1, TS - 1);
                 ctx.strokeStyle = 'rgba(255,240,220,.15)'; ctx.beginPath(); ctx.moveTo(x + 2, y + 2); ctx.lineTo(x + TS - 2, y + 2); ctx.moveTo(x + 2, y + 2); ctx.lineTo(x + 2, y + TS - 2); ctx.stroke();
-                if (oreColor[type]) {
-                    const cc = oreColor[type], cx = x + 24, cy = y + 24, shimmer = 0.85 + Math.sin(this.anim * 3 + idx) * 0.12;
+                if (CRYSTALS[type]) {
+                    const cc = CRYSTALS[type].color, cx = x + 24, cy = y + 24, shimmer = 0.85 + Math.sin(this.anim * 3 + idx) * 0.12;
                     const halo = ctx.createRadialGradient(cx, cy, 1, cx, cy, 27);
                     halo.addColorStop(0, cc); halo.addColorStop(1, 'rgba(255,255,255,0)');
                     ctx.globalAlpha = 0.32 * shimmer; ctx.fillStyle = halo; ctx.fillRect(x - 3, y - 3, TS + 6, TS + 6); ctx.globalAlpha = 1;
@@ -593,12 +644,16 @@
                     const tx = dig.x * TS, ty = dig.y * TS, type = this.tile(dig.x, dig.y);
                     if (this.solid(type) && type !== 10) this.drawMineProgress(ctx, tx, ty, dig.progress / this.digDuration(type, dig.y));
                 }
+                const digging = Boolean(r.ex?.digging || dig?.progress > 0);
+                const angle = digging && Number.isFinite(r.ex?.aim) ? r.ex.aim : digging && dig ? Math.atan2(dig.y * TS + TS / 2 - r.y - 20, dig.x * TS + TS / 2 - r.x - 13) : r.f < 0 ? Math.PI : 0;
+                this.drawPickaxe(ctx, r.x + 13, r.y + 22, angle, digging, this.anim);
                 const carried = r.ex && Number.isFinite(r.ex.c) ? r.ex.c : 0;
                 if (carried && !s.preview) { ctx.fillStyle = '#fbbf24'; ctx.font = '800 11px system-ui'; ctx.textAlign = 'center'; ctx.fillText(`◆ ${carried}`, r.x + 13, r.y + 53); }
                 if (!this.s.preview) A.util.nameTag(ctx, r.name || '', r.x + 13, r.y - 12, r.color);
             }
             if (this.dig.tx >= 0 && this.dig.ty >= 0) this.drawMineProgress(ctx, this.dig.tx * TS, this.dig.ty * TS, this.dig.p / this.digDuration(this.tile(this.dig.tx, this.dig.ty), this.dig.ty));
             A.util.drawFigureSide(ctx, s.local, me.x, me.y, me.w, me.h, me.face, this.anim, me.onGround, this.stun > 0 ? 0.72 : 1);
+            this.drawPickaxe(ctx, me.x + me.w / 2, me.y + 22, this.dig.p > 0 ? this.aimAngle || 0 : me.face < 0 ? Math.PI : 0, this.dig.p > 0, this.anim);
             if (this.carry > 0) {
                 ctx.fillStyle = '#fef3c7'; ctx.font = '900 11px system-ui'; ctx.textAlign = 'center';
                 ctx.fillText(`◆ ${this.carry}`, me.x + me.w / 2, me.y - 4);
@@ -663,17 +718,18 @@
                 this.fish.push({ i, type, y0: 300 + r() * (this.H - 600), amp: 20 + r() * 80, fq: 0.4 + r() * 0.8, ph: r() * TAU, x0: r() * this.W, spd: (type === 3 ? 140 : 40 + r() * 80) * (r() < 0.5 ? 1 : -1) });
             }
             this.logs = [];
-            for (let i = 0; i < 19; i++) this.logs.push({ y: 360 + r() * (this.H - 720), x0: r() * this.W, spd: 105 + r() * 115, phase: r() * TAU, fq: 0.35 + r() * 0.55 });
+            for (let i = 0; i < 19; i++) this.logs.push({ y: 360 + r() * (this.H - 720), x0: r() * this.W, spd: 105 + r() * 115, phase: r() * TAU, fq: 0.35 + r() * 0.55, brokenLap: -1 });
             this.rocks = [];
-            for (let i = 0; i < 38; i++) this.rocks.push({ x: 600 + r() * (this.W - 900), y: 380 + r() * (this.H - 760), r: 32 + r() * 25 });
+            for (let i = 0; i < 18; i++) this.rocks.push({ x: 600 + r() * (this.W - 900), y: 380 + r() * (this.H - 760), r: 32 + r() * 25 });
             this.pools = [];
             for (let i = 0; i < 3; i++) this.pools.push({ x: 900 + i * 1050 + r() * 300, y: 450 + r() * (this.H - 900), r: 130, phase: r() * TAU, ampX: 60 + r() * 45, ampY: 40 + r() * 35 });
-            this.poolHitCd = 0;
+            this.poolHitCd = 0; this.whirlpool = null; this.ejectT = 0;
             this.chests = [];
             for (let i = 0; i < 10; i++) this.chests.push({ i, x: 700 + r() * (this.W - 1000), y: 330 + r() * (this.H - 660), until: 0 });
             this.away = new Map();
             this.duelCd = new Map(); this.duel = null;
             this.cast = null; this.castCd = 0; this.hurt = 0; this.haul = 0; this.catches = 0; this.combo = 0; this.comboT = 0;
+            this.surgePush = 0; this.lastSurge = -1;
             this.wake = [];
             this.res = new A.Resource('Bait', '#7dd3fc', 100, 50, 2);
         }
@@ -687,13 +743,60 @@
             return { x: mod(log.x0 + log.spd * rampDistance(now, 82.5, 0.55), this.W), y: log.y + Math.sin(now * log.fq + log.phase) * 28 };
         }
 
+        logLap(log, now) { return Math.floor((log.x0 + log.spd * rampDistance(now, 82.5, 0.55)) / this.W); }
+
+        logBreakX(log, lap) {
+            if (log.breakLap === lap) return log.breakX;
+            log.breakLap = lap; log.breakX = Infinity;
+            for (let x = lap === 0 ? log.x0 : 0; x < this.W; x += 12) {
+                const travel = Math.max(0, (lap * this.W + x - log.x0) / log.spd), cap = 82.5, gain = .55;
+                const time = travel <= cap * (1 + gain / 2)
+                    ? cap / gain * (Math.sqrt(1 + 2 * gain * travel / cap) - 1)
+                    : cap + (travel - cap * (1 + gain / 2)) / (1 + gain);
+                const y = log.y + Math.sin(time * log.fq + log.phase) * 28;
+                if (this.rocks.some(rock => dist(clamp(rock.x, x - 70, x + 70), clamp(rock.y, y - 18, y + 18), rock.x, rock.y) < rock.r)) {
+                    log.breakX = x; break;
+                }
+            }
+            return log.breakX;
+        }
+
+        updateLogs(now) {
+            for (const log of this.logs) {
+                const lap = this.logLap(log, now), pos = this.logPos(log, now);
+                if (log.brokenLap === lap) continue;
+                if (pos.x >= this.logBreakX(log, lap)) {
+                    log.brokenLap = lap;
+                    if (this.seen(pos.x, pos.y, 180)) this.particles.burst(pos.x, pos.y, '#d6a56a', 18, 240, .7, 5);
+                }
+            }
+        }
+
         poolPos(pool, now) {
             return { x: pool.x + Math.sin(now * 0.24 + pool.phase) * pool.ampX, y: pool.y + Math.sin(now * 0.31 + pool.phase * 1.7) * pool.ampY };
         }
 
         update(dt) {
             const s = this.s, me = this.me, now = clock(s);
-            this.step(dt, 1800);
+            this.ejectT = Math.max(0, this.ejectT - dt);
+            this.aimLocked = Boolean(this.whirlpool) || this.ejectT > 0;
+            this.speedMul = this.whirlpool ? .22 : 1;
+            this.step(dt, this.ejectT > 0 || this.surgePush > 0 ? 240 : 1800);
+            this.surgePush = Math.max(0, this.surgePush - dt);
+            const surge = this.surgeAt(now);
+            if (surge.warning && this.lastSurge !== surge.cycle) {
+                this.lastSurge = surge.cycle; s.toast('Tsunami incoming! Shelter near a bank', '#7dd3fc'); s.sfx('wave', 1000);
+            }
+            if (surge.active && !this.whirlpool && me.y > this.bank + 75 && me.y < this.H - this.bank - 75) {
+                const separation = Math.abs(me.x - surge.x);
+                if (separation < 180) {
+                    const force = (1 - separation / 180) * 900;
+                    me.vx += force * dt; me.vy += Math.sin(now * 5) * force * .2 * dt;
+                    this.surgePush = .4;
+                    this.particles.burst(me.x - 20, me.y, '#e0f2fe', 1, 60, .3, 3);
+                }
+            }
+            this.updateLogs(now);
             this.castCd -= dt; this.hurt = Math.max(0, this.hurt - dt); this.comboT -= dt; this.poolHitCd = Math.max(0, this.poolHitCd - dt);
             if (this.comboT <= 0) this.combo = 0;
             const nearBank = me.y < this.bank + 80 || me.y > this.H - this.bank - 80;
@@ -710,13 +813,32 @@
                 }
             }
             for (const lg of this.logs) {
+                if (lg.brokenLap === this.logLap(lg, now)) continue;
                 const pos = this.logPos(lg, now);
                 const rect = { x: pos.x - 70, y: pos.y - 18, w: 140, h: 36 };
                 if (pushCircleOutOfRect(me, rect) && this.hurt <= 0) { this.hurt = 1; me.vx = 160; this.loseFish(); this.particles.burst(me.x, me.y, '#a16207', 10, 160, 0.4, 3); }
             }
             this.duelCheck(now);
+            if (this.whirlpool) {
+                const spin = this.whirlpool, pos = this.poolPos(spin.pool, now);
+                spin.t += dt; spin.angle += dt * (5 + spin.t * 3);
+                const radius = Math.max(24, spin.radius * (1 - spin.t / 1.4));
+                const axis = s.axis();
+                me.x = pos.x + Math.cos(spin.angle) * radius + axis.x * 7;
+                me.y = pos.y + Math.sin(spin.angle) * radius + axis.y * 7;
+                me.aim = spin.angle + Math.PI / 2;
+                me.vx = me.vy = 0;
+                if (spin.t >= 1.4) {
+                    me.x = pos.x + Math.cos(spin.angle) * (spin.pool.r * 1.8 + me.r);
+                    me.y = clamp(pos.y + Math.sin(spin.angle) * (spin.pool.r * 1.8 + me.r), this.bank + me.r, this.H - this.bank - me.r);
+                    me.vx = Math.cos(spin.angle) * 760; me.vy = Math.sin(spin.angle) * 760;
+                    this.whirlpool = null; this.ejectT = .65; this.poolHitCd = 2.5;
+                    s.sfx('splash');
+                    this.particles.burst(me.x, me.y, '#e0f2fe', 24, 300, .6, 4);
+                }
+            }
             for (const pool of this.pools) {
-                if (nearBank) continue;
+                if (nearBank || this.whirlpool || this.poolHitCd > 0) continue;
                 const pos = this.poolPos(pool, now), dx = pos.x - me.x, dy = pos.y - me.y;
                 const d = Math.hypot(dx, dy) || 1, pullRadius = pool.r * 1.7;
                 if (d < pullRadius) {
@@ -724,14 +846,12 @@
                     me.vx += (dx / d - dy / d * 0.85) * strength;
                     me.vy += (dy / d + dx / d * 0.85) * strength;
                 }
-                if (d < 38 + me.r && this.poolHitCd <= 0) {
-                    this.poolHitCd = 1.6;
-                    this.stun = Math.max(this.stun, 0.75);
-                    me.vx += -dy / d * 260 + dx / d * 110;
-                    me.vy += dx / d * 260 + dy / d * 110;
+                if (d < pool.r * .85) {
+                    this.whirlpool = { pool, t: 0, radius: d, angle: Math.atan2(me.y - pos.y, me.x - pos.x) };
+                    s.sfx('whirlpool', 1200);
                     const lost = Math.min(this.haul, Math.ceil(this.haul * 0.12));
                     if (lost) { this.haul -= lost; s.addScore(-lost); this.catches = Math.max(0, this.catches - 1); }
-                    s.toast(lost ? `Whirlpool! Spun out — lost ${lost} fish pts` : 'Whirlpool! Spun around and stunned', '#a5f3fc');
+                    s.toast(lost ? `Whirlpool! Hold on — lost ${lost} fish pts` : 'Whirlpool! Hold on for the launch', '#a5f3fc');
                     this.particles.burst(me.x, me.y, '#67e8f9', 16, 220, 0.55, 4);
                 }
             }
@@ -744,11 +864,12 @@
             if (s.mouse.pressed && this.castCd <= 0 && !this.cast && s.spend(10)) {
                 const ang = Math.atan2(m.y - me.y, m.x - me.x);
                 const d = Math.min(320, dist(m.x, m.y, me.x, me.y));
-                this.cast = { x: me.x + Math.cos(ang) * d, y: me.y + Math.sin(ang) * d, t: 0 };
-                this.castCd = 1.1; s.sfx('splash');
+                this.cast = { x: me.x + Math.cos(ang) * d, y: me.y + Math.sin(ang) * d, fromX: me.x, fromY: me.y, t: 0 };
+                this.castCd = 1.1; s.sfx('cast');
             }
             if (this.cast) {
                 this.cast.t += dt;
+                if (this.cast.t >= .24 && !this.cast.landed) { this.cast.landed = true; s.sfx('splash'); this.particles.burst(this.cast.x, this.cast.y, '#e0f2fe', 10, 90, .4, 3); }
                 if (this.cast.t >= 0.6) {
                     const n = this.cast; this.cast = null;
                     let got = 0;
@@ -766,6 +887,7 @@
                         this.combo = Math.min(5, this.combo + 1); this.comboT = 6;
                         const bonus = Math.round(got * (1 + (this.combo - 1) * 0.15));
                         s.addScore(bonus); this.haul += bonus;
+                        s.sfx('catch');
                         s.toast(`+${bonus} fish${this.combo > 1 ? ` · x${this.combo} combo` : ''}`, '#7dd3fc');
                     } else { this.combo = 0; this.particles.burst(n.x, n.y, '#e0f2fe', 10, 120, 0.4, 3); }
                 }
@@ -859,6 +981,11 @@
         }
 
         goalText() { return `Haul ${this.haul} · ${this.catches} fish${this.combo > 1 ? ` · combo x${this.combo}` : ''}`; }
+        surgeAt(time) {
+            const phase = ((time % 38) + 38) % 38;
+            return { cycle: Math.floor(time / 38), warning: phase >= 25 && phase < 28, active: phase >= 28 && phase < 36,
+                x: (phase - 28) / 8 * (this.W + 500) - 250 };
+        }
         touchLayout() { return { stick: true, buttons: [] }; }
         hint() { return 'WASD steer · click to cast net · dodge obstacles · Q = restock bait'; }
         ex() { return { n: this.cast ? 1 : 0 }; }
@@ -890,8 +1017,27 @@
             for (const [top, y0] of [[true, 0], [false, this.H - this.bank]]) {
                 ctx.fillStyle = '#365314'; ctx.fillRect(this.x0, y0, this.x1 - this.x0, this.bank);
                 ctx.fillStyle = '#4d7c0f'; ctx.fillRect(this.x0, top ? this.bank - 36 : y0, this.x1 - this.x0, 36);
-                ctx.fillStyle = '#166534';
-                for (let x = Math.floor(this.x0 / 120) * 120; x < this.x1; x += 120) { const ty = top ? this.bank - 90 - ((x / 120) % 3) * 30 : y0 + 80 + ((x / 120) % 3) * 30; ctx.beginPath(); ctx.arc(x + 30, ty, 36, 0, TAU); ctx.fill(); }
+                for (let x = Math.floor(this.x0 / 28) * 28; x < this.x1; x += 28) {
+                    const seed = A.util.hashStr(`bank:${x}:${top}`), gy = top ? this.bank - 18 - seed % 110 : y0 + 18 + seed % 110;
+                    ctx.strokeStyle = ['#65a30d', '#84cc16', '#3f6212'][seed % 3]; ctx.lineWidth = 2; ctx.beginPath();
+                    for (let i = -1; i <= 1; i++) {
+                        ctx.moveTo(x + i * 4, gy + 8); ctx.quadraticCurveTo(x + i * 5 + Math.sin(t * 1.5 + x) * 3, gy - 4, x + i * 8, gy - 9 - (seed % 9));
+                    }
+                    ctx.stroke();
+                    if (seed % 11 === 0) { ctx.fillStyle = '#fef08a'; ctx.beginPath(); ctx.arc(x, gy - 8, 3, 0, TAU); ctx.fill(); }
+                }
+            }
+            const surge = this.surgeAt(now);
+            if (surge.active && this.seen(surge.x, this.H / 2, this.H)) {
+                const gradient = ctx.createLinearGradient(surge.x - 140, 0, surge.x + 80, 0);
+                gradient.addColorStop(0, 'rgba(14,116,144,0)'); gradient.addColorStop(.7, 'rgba(125,211,252,.6)'); gradient.addColorStop(1, 'rgba(255,255,255,.9)');
+                ctx.fillStyle = gradient; ctx.fillRect(surge.x - 140, this.bank + 65, 220, this.H - this.bank * 2 - 130);
+                ctx.strokeStyle = '#e0f2fe'; ctx.lineWidth = 8; ctx.beginPath();
+                for (let y = this.bank + 65; y <= this.H - this.bank - 65; y += 16) {
+                    const x = surge.x + Math.sin(y * .025 + t * 5) * 20;
+                    if (y === this.bank + 65) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
             }
             for (const p of this.pools) {
                 const pos = this.poolPos(p, now);
@@ -916,33 +1062,64 @@
                 ctx.beginPath(); ctx.ellipse(0, 0, kind.r * 1.4, kind.r * 0.8, 0, 0, TAU); ctx.fill();
                 ctx.beginPath(); ctx.moveTo(-kind.r * 1.2, 0); ctx.lineTo(-kind.r * 2.1, -kind.r * 0.8 + Math.sin(t * 9 + f.i) * 4); ctx.lineTo(-kind.r * 2.1, kind.r * 0.8 + Math.sin(t * 9 + f.i) * 4); ctx.fill();
                 ctx.fillStyle = '#0f172a'; ctx.beginPath(); ctx.arc(kind.r * 0.7, -kind.r * 0.15, 2.5, 0, TAU); ctx.fill();
+                ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.beginPath(); ctx.ellipse(2, -kind.r * .28, kind.r * .8, kind.r * .22, 0, 0, TAU); ctx.fill();
+                ctx.fillStyle = kind.color; ctx.beginPath(); ctx.moveTo(-4, -kind.r * .5); ctx.lineTo(-10, -kind.r * 1.3); ctx.lineTo(7, -kind.r * .5); ctx.fill();
+                ctx.strokeStyle = 'rgba(15,23,42,.45)'; ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.arc(kind.r * .45, 0, kind.r * .4, Math.PI * .55, Math.PI * 1.45); ctx.stroke();
+                for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(-kind.r * .6 + i * kind.r * .4, 1, kind.r * .2, -.9, .9); ctx.stroke(); }
                 ctx.restore();
             }
             for (const rock of this.rocks) {
                 if (!this.seen(rock.x, rock.y)) continue;
-                ctx.fillStyle = '#475569'; ctx.beginPath(); ctx.arc(rock.x, rock.y, rock.r, 0, TAU); ctx.fill();
-                ctx.fillStyle = '#64748b'; ctx.beginPath(); ctx.arc(rock.x - rock.r * 0.25, rock.y - rock.r * 0.25, rock.r * 0.55, 0, TAU); ctx.fill();
+                ctx.strokeStyle = 'rgba(224,242,254,.45)'; ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.ellipse(rock.x - 3, rock.y + 8, rock.r + 10, rock.r * .8, 0, 0, TAU); ctx.stroke();
+                ctx.fillStyle = '#475569'; ctx.beginPath();
+                for (let i = 0; i < 7; i++) {
+                    const a = i * TAU / 7, radius = rock.r * (i % 2 ? .91 : 1);
+                    const x = rock.x + Math.cos(a) * radius, y = rock.y + Math.sin(a) * radius;
+                    if (!i) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                }
+                ctx.closePath(); ctx.fill();
+                ctx.fillStyle = '#94a3b8'; ctx.beginPath(); ctx.ellipse(rock.x - rock.r * .18, rock.y - rock.r * .25, rock.r * .6, rock.r * .35, -.3, 0, TAU); ctx.fill();
             }
             for (const lg of this.logs) {
+                if (lg.brokenLap === this.logLap(lg, now)) continue;
                 const pos = this.logPos(lg, now), x = pos.x, y = pos.y;
                 if (!this.seen(x, y, 120)) continue;
                 ctx.fillStyle = '#78350f'; roundRect(ctx, x - 70, y - 18, 140, 36, 16); ctx.fill();
                 ctx.fillStyle = '#a16207'; ctx.beginPath(); ctx.ellipse(x + 66, y, 7, 14, 0, 0, TAU); ctx.fill();
+                ctx.strokeStyle = '#d6a56a'; ctx.lineWidth = 2;
+                for (const offset of [-8, 6]) { ctx.beginPath(); ctx.moveTo(x - 56, y + offset); ctx.quadraticCurveTo(x, y + offset - 4, x + 50, y + offset); ctx.stroke(); }
+                ctx.strokeStyle = '#713f12'; ctx.beginPath(); ctx.ellipse(x + 66, y, 3, 8, 0, 0, TAU); ctx.stroke();
             }
             for (const c of this.chests) {
                 if (c.until > now || !this.seen(c.x, c.y)) continue;
                 this.qMark(ctx, c.x, c.y + Math.sin(t * 2 + c.i) * 4, '#7c3aed', t);
             }
             if (this.cast) {
-                const k = this.cast.t / 0.6;
+                const k = clamp((this.cast.t - .24) / .36, 0, 1), flight = clamp(this.cast.t / .24, 0, 1);
+                const bx = this.cast.fromX + (this.cast.x - this.cast.fromX) * flight;
+                const by = this.cast.fromY + (this.cast.y - this.cast.fromY) * flight - Math.sin(flight * Math.PI) * 65;
+                ctx.strokeStyle = '#e8bd82'; ctx.lineWidth = 2; ctx.beginPath();
+                ctx.moveTo(me.x, me.y); ctx.quadraticCurveTo((me.x + bx) / 2, Math.min(me.y, by) - 20, bx, by); ctx.stroke();
+                ctx.fillStyle = '#fb923c'; ctx.beginPath(); ctx.arc(bx, by, 5, 0, TAU); ctx.fill();
+                if (flight === 1) {
                 ctx.strokeStyle = 'rgba(254,243,199,.9)'; ctx.lineWidth = 3; ctx.setLineDash([8, 6]);
                 ctx.beginPath(); ctx.arc(this.cast.x, this.cast.y, 78 * Math.min(1, k * 1.2), 0, TAU); ctx.stroke(); ctx.setLineDash([]);
-                ctx.strokeStyle = 'rgba(254,243,199,.4)'; ctx.beginPath(); ctx.moveTo(me.x, me.y); ctx.lineTo(this.cast.x, this.cast.y); ctx.stroke();
+                for (let i = 0; i < 8; i++) {
+                    const angle = i * TAU / 8; ctx.beginPath(); ctx.moveTo(this.cast.x, this.cast.y);
+                    ctx.lineTo(this.cast.x + Math.cos(angle) * 78 * k, this.cast.y + Math.sin(angle) * 78 * k); ctx.stroke();
+                }
+                }
             }
             const boat = (x, y, aim) => {
                 ctx.save(); ctx.translate(x, y); ctx.rotate(aim);
-                ctx.fillStyle = '#92400e'; ctx.beginPath(); ctx.ellipse(0, 0, 32, 18, 0, 0, TAU); ctx.fill();
-                ctx.fillStyle = '#b45309'; ctx.beginPath(); ctx.ellipse(0, 0, 24, 12, 0, 0, TAU); ctx.fill();
+                ctx.fillStyle = '#713f12'; ctx.beginPath(); ctx.moveTo(36, 0);
+                ctx.quadraticCurveTo(12, -23, -29, -15); ctx.quadraticCurveTo(-39, 0, -29, 15);
+                ctx.quadraticCurveTo(12, 23, 36, 0); ctx.fill();
+                ctx.strokeStyle = '#e8bd82'; ctx.lineWidth = 3; ctx.stroke();
+                ctx.fillStyle = '#b77942'; ctx.beginPath(); ctx.ellipse(-2, 0, 24, 11, 0, 0, TAU); ctx.fill();
+                ctx.fillStyle = '#e8bd82'; ctx.fillRect(-16, -12, 5, 24); ctx.fillRect(14, -10, 5, 20);
                 ctx.restore();
             };
             for (const r of s.remoteList()) { if (this.seen(r.x, r.y)) boat(r.x, r.y, r.f || 0); }
@@ -976,13 +1153,14 @@
                 const b = { x, y, w: BW, h: BH, shop, color: shop ? '#f59e0b' : ['#64748b', '#7c6f64', '#6b7280', '#78716c'][Math.floor(r() * 4)], roof: shop ? '#dc2626' : ['#475569', '#9a3412', '#1d4ed8', '#166534'][Math.floor(r() * 4)] };
                 b.door = { x: x + BW / 2, y: y + BH + 24 };
                 this.blocks.push(b);
-                this.walls.push({ x: x + 80, y, w: BW - 80, h: BH }, { x, y: y + 80, w: 80, h: BH - 80 });
+                this.walls.push({ x: x + 80, y, w: BW - 160, h: BH },
+                    { x, y: y + 80, w: 80, h: BH - 160 }, { x: x + BW - 80, y: y + 80, w: 80, h: BH - 160 });
             }
             this.shops = this.blocks.filter(b => b.shop);
             this.houses = this.blocks.filter(b => !b.shop);
             this.cars = [];
-            for (let k = 0; k < BR + 1; k++) for (let j = 0; j < 5; j++) this.cars.push({ horiz: true, c: ROAD / 2 + k * (BH + ROAD), p0: r() * this.W, spd: (165 + r() * 95) * (j % 2 ? -1 : 1), lane: (j % 2 ? -1 : 1) * (20 + Math.floor(j / 2) * 22), phase: r() * TAU, color: ['#ef4444', '#3b82f6', '#22c55e', '#a855f7', '#f97316'][Math.floor(r() * 5)] });
-            for (let k = 0; k < BC + 1; k++) for (let j = 0; j < 5; j++) this.cars.push({ horiz: false, c: ROAD / 2 + k * (BW + ROAD), p0: r() * this.H, spd: (165 + r() * 95) * (j % 2 ? -1 : 1), lane: (j % 2 ? -1 : 1) * (20 + Math.floor(j / 2) * 22), phase: r() * TAU, color: ['#ef4444', '#3b82f6', '#22c55e', '#a855f7', '#f97316'][Math.floor(r() * 5)] });
+            for (let k = 0; k < BR + 1; k++) for (let j = 0; j < 4; j++) this.cars.push({ horiz: true, c: ROAD / 2 + k * (BH + ROAD), p0: r() * this.W, spd: (165 + r() * 95) * (j % 2 ? -1 : 1), lane: (j % 2 ? -1 : 1) * (36 + Math.floor(j / 2) * 20), phase: r() * TAU, color: ['#ef4444', '#3b82f6', '#22c55e', '#a855f7', '#f97316'][Math.floor(r() * 5)] });
+            for (let k = 0; k < BC + 1; k++) for (let j = 0; j < 4; j++) this.cars.push({ horiz: false, c: ROAD / 2 + k * (BW + ROAD), p0: r() * this.H, spd: (165 + r() * 95) * (j % 2 ? -1 : 1), lane: (j % 2 ? -1 : 1) * (36 + Math.floor(j / 2) * 20), phase: r() * TAU, color: ['#ef4444', '#3b82f6', '#22c55e', '#a855f7', '#f97316'][Math.floor(r() * 5)] });
             this.vending = this.blocks.map((b, i) => ({ i, x: b.x + 40, y: b.y + 40, until: 0 }));
             this.roadsX = Array.from({ length: BC + 1 }, (_, i) => ROAD / 2 + i * (BW + ROAD));
             this.roadsY = Array.from({ length: BR + 1 }, (_, i) => ROAD / 2 + i * (BH + ROAD));
@@ -1024,11 +1202,11 @@
                 }
             }
             this.blocks.forEach((b, index) => {
-                c.fillStyle = '#737d85'; c.fillRect(b.x - 26, b.y - 26, b.w + 52, b.h + 52);
-                c.fillStyle = '#b4bbc1'; c.fillRect(b.x - 23, b.y - 23, b.w + 46, b.h + 46);
+                c.fillStyle = '#737d85'; c.fillRect(b.x - 12, b.y - 12, b.w + 24, b.h + 24);
+                c.fillStyle = '#b4bbc1'; c.fillRect(b.x - 9, b.y - 9, b.w + 18, b.h + 18);
                 c.strokeStyle = '#939da6'; c.lineWidth = 1;
-                for (let x = b.x - 22; x < b.x + b.w + 22; x += 22) { c.beginPath(); c.moveTo(x, b.y - 22); c.lineTo(x, b.y + b.h + 22); c.stroke(); }
-                for (let y = b.y - 22; y < b.y + b.h + 22; y += 22) { c.beginPath(); c.moveTo(b.x - 22, y); c.lineTo(b.x + b.w + 22, y); c.stroke(); }
+                for (let x = b.x - 8; x < b.x + b.w + 8; x += 22) { c.beginPath(); c.moveTo(x, b.y - 8); c.lineTo(x, b.y + b.h + 8); c.stroke(); }
+                for (let y = b.y - 8; y < b.y + b.h + 8; y += 22) { c.beginPath(); c.moveTo(b.x - 8, y); c.lineTo(b.x + b.w + 8, y); c.stroke(); }
                 c.fillStyle = 'rgba(0,0,0,.3)'; c.fillRect(b.x + 12, b.y + 16, b.w, b.h);
                 c.fillStyle = b.color; c.fillRect(b.x, b.y, b.w, b.h);
                 c.fillStyle = b.roof; c.fillRect(b.x + 12, b.y + 12, b.w - 24, b.h - 48);
@@ -1071,7 +1249,8 @@
                 c.fillStyle = '#36634b'; c.fillRect(b.x + b.w - 15, b.y + b.h + 4, 28, 12);
                 c.fillStyle = '#e596a6'; for (let j = 0; j < 4; j++) { c.beginPath(); c.arc(b.x + b.w - 12 + j * 7, b.y + b.h + 8, 3, 0, TAU); c.fill(); }
             });
-            for (const b of this.blocks) {
+            for (const b of this.blocks) for (const [ox, oy] of [[0, 0], [b.w - 80, 0], [0, b.h - 80], [b.w - 80, b.h - 80]]) {
+                c.save(); c.translate(ox, oy);
                 c.fillStyle = '#aeb9b3'; c.fillRect(b.x, b.y, 80, 80);
                 c.strokeStyle = '#87958e'; c.lineWidth = 1;
                 for (let i = 20; i < 80; i += 20) {
@@ -1082,6 +1261,7 @@
                 c.fillStyle = '#4b9566'; c.fillRect(b.x + 62, b.y + 10, 8, 58);
                 c.fillStyle = '#79593f'; c.fillRect(b.x + 8, b.y + 63, 44, 8);
                 c.fillStyle = '#d7b187'; c.fillRect(b.x + 8, b.y + 61, 44, 3);
+                c.restore();
             }
             for (const tree of this.trees) {
                 c.fillStyle = '#757e79'; c.fillRect(tree.x - 12, tree.y - 10, 24, 24);
@@ -1096,7 +1276,7 @@
         }
         carRect(c, now) {
             const along = mod(c.p0 + c.spd * rampDistance(now, 72, 0.45), c.horiz ? this.W : this.H);
-            const lane = c.lane + Math.sin(now * 0.7 + c.phase) * 10;
+            const lane = c.lane;
             return c.horiz ? { x: along - 38, y: c.c + lane - 17, w: 76, h: 34 } : { x: c.c + lane - 17, y: along - 38, w: 34, h: 76 };
         }
 
@@ -1116,7 +1296,7 @@
             const hit = { x: me.x - 12, y: me.y - 12, w: 24, h: 24 };
             if (this.hitCd <= 0 && this.stun <= 0) {
                 for (const c of this.cars) {
-                    const rect = this.carRect(c, now);
+                    const rect = this.carHitRect(c, now);
                     if (!overlap(hit, rect)) continue;
                     const sign = Math.sign(c.spd) || 1;
                     me.vx = c.horiz ? sign * 500 : (me.x < rect.x + rect.w / 2 ? -460 : 460);

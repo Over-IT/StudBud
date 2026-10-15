@@ -20,9 +20,9 @@
             const m = this.s.mouse;
             return Boolean(r && r.on && m.x >= r.x && m.x <= r.x + r.w && m.y >= r.y && m.y <= r.y + r.h);
         }
-        hit() {
+        hit(rects = this.prev) {
             if (!this.s.mouse.pressed) return null;
-            for (let i = this.prev.length - 1; i >= 0; i--) if (this.inside(this.prev[i])) return this.prev[i].id;
+            for (let i = rects.length - 1; i >= 0; i--) if (this.inside(rects[i])) return rects[i].id;
             return null;
         }
         button(ctx, id, x, y, w, h, label, on = true, color = '#6366f1', sub = '') {
@@ -105,11 +105,13 @@
                 if (n < 1) { this.s.toast('Not enough cash', '#f87171'); return; }
                 this.cash -= n * price; this.units[i] += n;
                 this.pop(`+${n} ${ASSETS[i].sym}`, ASSETS[i].color);
+                this.s.sfx('buy');
             } else {
                 const n = Math.min(this.units[i], -qty);
                 if (n < 1) { this.s.toast(`You don't own any ${ASSETS[i].sym}`, '#f87171'); return; }
                 this.cash += n * price; this.units[i] -= n;
                 this.pop(`Sold ${n} · ${money(n * price)}`, '#4ade80');
+                this.s.sfx('coin');
             }
         }
 
@@ -352,7 +354,7 @@
             const space = s.pressed('Space');
             const act = click || space;
             if (this.st === 0) {
-                if (act && s.spend(10)) { this.st = 1; this.power = 0; this.dir = 1; s.sfx('shoot'); }
+                if (act && s.spend(10)) { this.st = 1; this.power = 0; this.dir = 1; s.sfx('cast'); }
             } else if (this.st === 1) {
                 this.power += this.dir * dt * 1.4;
                 if (this.power >= 1) { this.power = 1; this.dir = -1; } else if (this.power <= 0) { this.power = 0; this.dir = 1; }
@@ -360,11 +362,12 @@
                     this.depth = 0.12 + this.power * 0.88;
                     this.st = 2; this.timer = 1.1 + Math.random() * 2.2 + this.depth * 0.8;
                     this.splash.push({ t: 0 });
+                    s.sfx('splash');
                 }
             } else if (this.st === 2) {
                 this.timer -= dt;
                 if (act) { this.st = 0; this.say('Reeled in too early'); }
-                else if (this.timer <= 0) { this.st = 3; this.timer = 0.85; }
+                else if (this.timer <= 0) { this.st = 3; this.timer = 0.85; s.sfx('tick'); }
             } else if (this.st === 3) {
                 this.timer -= dt;
                 if (act) {
@@ -387,6 +390,7 @@
                     this.combo++; this.caught++;
                     const pts = this.catchPoints(this.targetType, this.combo);
                     s.addScore(pts);
+                    s.sfx('catch');
                     this.say(`${this.target.name}! +${pts}${this.combo > 1 ? ` · combo x${this.combo}` : ''}`, this.target.color);
                     this.bag.unshift(this.target); this.bag.length = Math.min(this.bag.length, 6);
                     if (Math.random() < 0.14 + this.targetType * 0.06) { this.chests++; s.toast('Treasure chest found! Press C to open it.', '#fbbf24'); }
@@ -578,6 +582,7 @@
         }
 
         accessGranted(g) {
+            this.s.sfx('confirm');
             const list = this.s.remoteList();
             if (!list.length) { this.crypto += 80; this.pop('+80 crypto', '#fbbf24'); g.phase = 'done'; this.endHack(900); return; }
             g.phase = 'target';
@@ -600,9 +605,11 @@
                 if (this.shield <= 0) { loss = Math.min(Math.round(this.crypto), Math.max(0, ev.amt)); this.crypto -= loss; this.shield = 6; }
                 s.toast(loss ? `${from.name} hacked you! −${loss}` : `${from.name} tried to hack you, but your firewall held.`, '#f87171');
                 s.emit({ k: 'lo', to: from.id, amt: loss });
+                s.sfx(loss ? 'danger' : 'deny');
             } else if (ev.k === 'lo' && ev.to === s.user.id) {
                 this.crypto += ev.amt; this.stolen += ev.amt;
                 this.pop(`+${ev.amt} stolen`, '#f87171');
+                s.sfx(ev.amt ? 'coin' : 'deny');
                 s.toast(ev.amt ? `Hack success! Stole ${ev.amt} crypto from ${from.name}` : `${from.name} was shielded.`, ev.amt ? '#4ade80' : '#fbbf24');
             }
         }
@@ -680,5 +687,562 @@
         }
     }
 
-    Object.assign(A.games, { crypto: Crypto, frenzy: Fishing, fishing: Fishing, hack: Hack });
+    const DEFENSE_TROOPS = [
+        { name: 'Archer', cost: 60, range: 220, damage: 14, rate: .65, color: '#fde68a', desc: 'Fast single-target arrows' },
+        { name: 'Cannon', cost: 110, range: 260, damage: 35, rate: 1.7, splash: 65, color: '#fb923c', desc: 'Explosive shells hit nearby enemies' },
+        { name: 'Frost', cost: 90, range: 200, damage: 8, rate: .8, slow: true, color: '#67e8f9', desc: 'Slows targets for 1.5 seconds' },
+        { name: 'Ballista', cost: 145, range: 340, damage: 80, rate: 2.2, pierce: true, color: '#fcd34d', desc: 'Long-range bolts ignore armor' },
+        { name: 'Tesla', cost: 160, range: 230, damage: 22, rate: 1.1, chain: 3, color: '#c4b5fd', desc: 'Lightning chains to three enemies' },
+        { name: 'Venom', cost: 125, range: 240, damage: 10, rate: .9, poison: 9, color: '#a3e635', desc: 'Poison: 9 damage/sec for 3 seconds' }
+    ];
+    const DEFENSE_ENEMIES = [
+        { name: 'Scout', cost: 30, hp: 65, speed: 95, damage: 8, reward: 14, color: '#a3e635', desc: 'Balanced and inexpensive' },
+        { name: 'Runner', cost: 50, hp: 90, speed: 145, damage: 12, reward: 22, color: '#facc15', desc: 'Fast flanking runner' },
+        { name: 'Brute', cost: 100, hp: 330, speed: 65, damage: 25, reward: 40, color: '#c084fc', desc: 'Durable siege monster' },
+        { name: 'Swarm', cost: 15, hp: 32, speed: 120, damage: 4, reward: 7, color: '#bef264', desc: 'Cheap beetles overwhelm slow towers' },
+        { name: 'Sentinel', cost: 145, hp: 550, speed: 55, armor: .3, damage: 32, reward: 58, color: '#cbd5e1', desc: 'Armor reduces normal hits by 30%' },
+        { name: 'Wisp', cost: 80, hp: 135, speed: 175, damage: 16, reward: 32, color: '#f0abfc', desc: 'Very fast, fragile spirit' }
+    ];
+    const DEFENSE_COLORS = ['#60a5fa', '#f87171'];
+
+    class Defense extends A.Arena {
+        constructor(s) {
+            super(s, 2200, 1500);
+            this.title = 'Team Tower Defense';
+            this.scoreGoal = false; this.goalUnit = 'team pts'; this.goalLabel = 'Team';
+            this.health = [100, 100]; this.wallets = [180, 180]; this.teamDamage = [0, 0];
+            const ids = [...s.roster.keys()];
+            if (!ids.includes(s.user.id)) ids.unshift(s.user.id);
+            this.teams = Object.fromEntries(ids.map((id, i) => [id, i % 2]));
+            if (s.room?.state?.defense_teams) this.teams = { ...s.room.state.defense_teams };
+            this.myTeam = this.teams[s.user.id];
+            this.me.x = this.myTeam ? 1690 : 510; this.me.y = 1250;
+            this.cam.x = this.me.x; this.cam.y = this.me.y;
+            this.paths = [0, 1].map(team => {
+                const offset = team * 1100;
+                return [{ x: offset + 110, y: 160 }, { x: offset + 850, y: 160 }, { x: offset + 850, y: 500 },
+                    { x: offset + 250, y: 500 }, { x: offset + 250, y: 900 }, { x: offset + 850, y: 900 }, { x: offset + 850, y: 1310 }];
+            });
+            this.troops = []; this.enemies = []; this.shots = []; this.nextId = 1;
+            this.lastSeq = {}; this.answers = {}; this.pending = []; this.sequence = 0; this.retryT = 0;
+            this.answerCount = 0;
+            this.ui = new Ui(s); this.buildType = 0; this.selected = null;
+            this.catalogPage = 0; this.previewPoint = null; this.battleSounds = 0;
+            this.pointerLook = false;
+            this.anim = 0; this.serial = 0; this.receivedSerial = -1; this.saveT = 0;
+            this.res = new A.Resource('Team cash', DEFENSE_COLORS[this.myTeam], 180, 0, 0);
+            if (s.room?.state?.defense) this.applySnapshot(s.room.state.defense);
+        }
+
+        get authority() { return Boolean(this.s.isHost || this.s.practice || this.s.preview); }
+        get troopTypes() { return DEFENSE_TROOPS; }
+        get enemyTypes() { return DEFENSE_ENEMIES; }
+        answerCash() { return this.s.rewardAmount() * 3; }
+        canAfford(team, cost) { return this.s.testing === true || this.wallets[team] >= cost; }
+        upgradeCost(troop) { return DEFENSE_TROOPS[troop.type].cost * troop.level; }
+        troopStats(type, level = 1) {
+            const spec = DEFENSE_TROOPS[type];
+            return { range: spec.range + (level - 1) * 35, damage: spec.damage * (1 + (level - 1) * .65),
+                rate: spec.rate / (1 + (level - 1) * .2), poison: (spec.poison || 0) * (1 + (level - 1) * .65) };
+        }
+        teamOf(id) { return this.teams[id]; }
+        get gridSize() { return 70; }
+        get playerTroopLimit() { return 12; }
+        troopCount(id) { return this.troops.filter(t => t.owner === id).length; }
+        gridPoint(x, y, team = this.myTeam) {
+            const originX = team * 1100 + 60, originY = 50, size = this.gridSize;
+            return { x: originX + (Math.floor((x - originX) / size) + .5) * size,
+                y: originY + (Math.floor((y - originY) / size) + .5) * size };
+        }
+        pointOnPath(enemy) {
+            const path = this.paths[enemy.team], a = path[enemy.segment], b = path[enemy.segment + 1] || a;
+            const length = dist(a.x, a.y, b.x, b.y) || 1, t = clamp(enemy.progress / length, 0, 1);
+            return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+        }
+        distanceToPath(x, y, team) {
+            let nearest = Infinity;
+            const path = this.paths[team];
+            for (let i = 1; i < path.length; i++) {
+                const a = path[i - 1], b = path[i], dx = b.x - a.x, dy = b.y - a.y;
+                const t = clamp(((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy), 0, 1);
+                nearest = Math.min(nearest, dist(x, y, a.x + dx * t, a.y + dy * t));
+            }
+            return nearest;
+        }
+        validPlacement(x, y, team) {
+            const snapped = this.gridPoint(x, y, team);
+            return Number.isFinite(x) && Number.isFinite(y) && x === snapped.x && y === snapped.y
+                && x >= team * 1100 + 95 && x <= team * 1100 + 1005 && y >= 85 && y <= 1415
+                && this.distanceToPath(x, y, team) > 68
+                && !this.troops.some(t => dist(t.x, t.y, x, y) < 62);
+        }
+        request(action, data = {}) {
+            if (this.finished || this.pending.length >= 8) {
+                this.s.toast(this.finished ? 'The battle has ended' : 'Waiting for the host to process your orders', '#fbbf24');
+                return false;
+            }
+            if (action === 'build') data = { ...data, ...this.gridPoint(data.x, data.y) };
+            const command = { k: 'td-order', seq: ++this.sequence, action, ...data };
+            if (this.authority) this.command(command, this.s.user.id);
+            else { this.pending.push(command); this.s.emit(command); }
+            return true;
+        }
+        reject(id, message) {
+            if (id === this.s.user.id) this.s.toast(message, '#fbbf24');
+            else this.s.emit({ k: 'td-error', to: id, message });
+        }
+        command(order, id) {
+            if (!this.authority || this.finished || !Object.hasOwn(this.teams, id)) return;
+            if (!this.s.preview && !this.s.practice && !this.s.roster.has(id)) return;
+            if (!Number.isInteger(order.seq) || order.seq !== (this.lastSeq[id] || 0) + 1) return;
+            this.lastSeq[id] = order.seq;
+            const team = this.teamOf(id), type = order.type;
+            let cost = 0, execute;
+            if (order.action === 'answer') {
+                if (!Number.isInteger(order.count) || order.count !== (this.answers[id] || 0) + 1) return this.reject(id, 'Answer credit was not accepted; try the next question');
+                this.answers[id] = order.count;
+                this.wallets[team] += this.answerCash();
+                return;
+            }
+            if (order.action === 'build' && Number.isInteger(type) && DEFENSE_TROOPS[type]) {
+                if (this.troopCount(id) >= this.playerTroopLimit) return this.reject(id, 'You have reached your 12-tower limit');
+                if (!this.validPlacement(order.x, order.y, team)) return this.reject(id, 'Choose an empty grid cell on your own side, away from the path');
+                cost = DEFENSE_TROOPS[type].cost;
+                execute = () => this.troops.push({ id: this.nextId++, owner: id, team, type, x: Math.round(order.x), y: Math.round(order.y), level: 1, cd: 0 });
+            } else if (order.action === 'send' && Number.isInteger(type) && DEFENSE_ENEMIES[type]) {
+                if (this.enemies.filter(e => e.team === 1 - team).length >= 60) return this.reject(id, 'The enemy path is full; wait for space');
+                cost = DEFENSE_ENEMIES[type].cost;
+                execute = () => this.enemies.push({ id: this.nextId++, team: 1 - team, type, hp: DEFENSE_ENEMIES[type].hp, segment: 0, progress: 0, slow: 0 });
+            } else if (order.action === 'upgrade') {
+                const troop = this.troops.find(t => t.id === order.id && t.team === team);
+                if (!troop || troop.level >= 3) return this.reject(id, 'Select a friendly troop below level 3');
+                cost = this.upgradeCost(troop);
+                execute = () => { troop.level++; };
+            } else return this.reject(id, 'Unknown defense order');
+            if (!this.canAfford(team, cost)) return this.reject(id, 'Not enough team cash - answer a flashcard or defeat enemies');
+            if (this.s.testing !== true) this.wallets[team] -= cost;
+            execute();
+            this.s.sfx(order.action === 'send' ? 'enemySend' : order.action === 'upgrade' ? 'towerUpgrade' : 'towerBuild', 80);
+        }
+        recharge() {
+            if (this.s.over || this.finished || this.s.question || this.s.paused || this.s.countdown > 0) return;
+            if (this.pending.length >= 8) {
+                this.s.toast('Waiting for the host before another flashcard can earn cash', '#fbbf24');
+                return;
+            }
+            this.s.ask(correct => {
+                if (correct) {
+                    const count = Math.max(this.answerCount, this.answers[this.s.user.id] || 0) + 1;
+                    if (this.request('answer', { count })) this.answerCount = count;
+                }
+                else if (correct === false) this.s.toast('Wrong answer - no team cash', '#f87171');
+            }, `Correct answer: +$${this.answerCash()} shared team cash`, true);
+        }
+        simulate(dt) {
+            for (const enemy of this.enemies) {
+                if (enemy.hp <= 0) continue;
+                const spec = DEFENSE_ENEMIES[enemy.type];
+                enemy.slow = Math.max(0, enemy.slow - dt);
+                if (enemy.poisonT > 0) {
+                    const poisoned = Math.min(dt, enemy.poisonT);
+                    enemy.hp -= enemy.poisonD * poisoned; enemy.poisonT -= poisoned;
+                    if (enemy.hp <= 0) { this.wallets[enemy.team] += spec.reward; continue; }
+                }
+                enemy.progress += spec.speed * (enemy.slow > 0 ? .5 : 1) * dt;
+                const path = this.paths[enemy.team];
+                while (enemy.segment < path.length - 1) {
+                    const a = path[enemy.segment], b = path[enemy.segment + 1], length = dist(a.x, a.y, b.x, b.y);
+                    if (enemy.progress < length) break;
+                    enemy.progress -= length; enemy.segment++;
+                }
+                if (enemy.segment === path.length - 1) {
+                    this.health[enemy.team] = Math.max(0, this.health[enemy.team] - spec.damage);
+                    this.teamDamage[1 - enemy.team] += spec.damage; enemy.hp = 0;
+                    this.s.sfx('baseHit', 240);
+                    if (this.health[enemy.team] === 0) { this.winner = 1 - enemy.team; this.finished = true; break; }
+                }
+            }
+            if (!this.finished) for (const troop of this.troops) {
+                troop.cd = Math.max(0, troop.cd - dt);
+                if (troop.cd > 0) continue;
+                const spec = DEFENSE_TROOPS[troop.type], stats = this.troopStats(troop.type, troop.level), range = stats.range;
+                const target = this.enemies.find(e => e.hp > 0 && e.team === troop.team
+                    && dist(troop.x, troop.y, this.pointOnPath(e).x, this.pointOnPath(e).y) <= range);
+                if (!target) continue;
+                const p = this.pointOnPath(target);
+                troop.cd = stats.rate;
+                this.shots.push({ x: troop.x, y: troop.y, tx: p.x, ty: p.y, color: spec.color, t: .16 });
+                let chainLeft = (spec.chain || 1) - 1;
+                for (const enemy of this.enemies) {
+                    if (enemy.hp <= 0 || enemy.team !== troop.team) continue;
+                    const ep = this.pointOnPath(enemy);
+                    if (enemy !== target) {
+                        if (spec.chain && chainLeft > 0 && dist(ep.x, ep.y, p.x, p.y) <= 130) {
+                            chainLeft--; this.shots.push({ x: p.x, y: p.y, tx: ep.x, ty: ep.y, color: spec.color, t: .16 });
+                        } else if (!spec.splash || dist(ep.x, ep.y, p.x, p.y) > spec.splash) continue;
+                    }
+                    enemy.hp -= stats.damage * (spec.pierce ? 1 : 1 - (DEFENSE_ENEMIES[enemy.type].armor || 0));
+                    if (spec.slow) enemy.slow = 1.5;
+                    if (spec.poison) { enemy.poisonT = 3; enemy.poisonD = stats.poison; }
+                    if (enemy.hp <= 0) this.wallets[troop.team] += DEFENSE_ENEMIES[enemy.type].reward;
+                }
+                this.battleSounds++; this.s.sfx(spec.splash ? 'cannon' : spec.chain ? 'zap' : 'towerShot', 160);
+            }
+            if (this.shots.length > 60) this.shots.splice(0, this.shots.length - 60);
+            this.enemies = this.enemies.filter(e => e.hp > 0);
+        }
+        snapshot() {
+            return { serial: ++this.serial, health: [...this.health], wallets: [...this.wallets], damage: [...this.teamDamage],
+                teams: { ...this.teams }, lastSeq: { ...this.lastSeq }, answers: { ...this.answers }, nextId: this.nextId,
+                troops: this.troops.map(t => ({ ...t })), enemies: this.enemies.map(e => ({ ...e })),
+                shots: this.shots.map(shot => ({ ...shot })), battleSounds: this.battleSounds, winner: this.winner ?? null };
+        }
+        applySnapshot(state) {
+            const pair = values => Array.isArray(values) && values.length === 2 && values.every(v => Number.isFinite(v) && v >= 0);
+            const object = value => value && typeof value === 'object' && !Array.isArray(value);
+            if (!state || !Number.isInteger(state.serial) || !pair(state.health) || state.health.some(v => v > 100)
+                || !pair(state.wallets) || !pair(state.damage) || !object(state.teams) || !object(state.lastSeq) || !object(state.answers)
+                || ![0, 1].includes(state.teams[this.s.user.id]) || !Number.isInteger(state.nextId)
+                || !Array.isArray(state.troops) || state.troops.length > Object.keys(state.teams).length * this.playerTroopLimit
+                || !Array.isArray(state.enemies) || state.enemies.length > 120
+                || ![null, 0, 1].includes(state.winner)
+                || state.troops.some(t => !t || !Number.isInteger(t.id) || ![0, 1].includes(t.team)
+                    || typeof t.owner !== 'string' || !Object.hasOwn(state.teams, t.owner) || state.teams[t.owner] !== t.team
+                    || !Number.isInteger(t.type) || !DEFENSE_TROOPS[t.type]
+                    || ![1, 2, 3].includes(t.level) || !Number.isFinite(t.x) || !Number.isFinite(t.y) || !Number.isFinite(t.cd)
+                    || t.cd < 0 || t.cd > DEFENSE_TROOPS[t.type].rate
+                    || t.x !== this.gridPoint(t.x, t.y, t.team).x || t.y !== this.gridPoint(t.x, t.y, t.team).y
+                    || t.x < t.team * 1100 + 95 || t.x > t.team * 1100 + 1005 || t.y < 85 || t.y > 1415
+                    || this.distanceToPath(t.x, t.y, t.team) <= 68)
+                || state.enemies.some(e => !e || !Number.isInteger(e.id) || ![0, 1].includes(e.team) || !Number.isInteger(e.type) || !DEFENSE_ENEMIES[e.type]
+                    || !Number.isInteger(e.segment) || e.segment < 0 || e.segment > 6 || !Number.isFinite(e.progress) || !Number.isFinite(e.hp) || !Number.isFinite(e.slow)
+                    || e.hp <= 0 || e.hp > DEFENSE_ENEMIES[e.type].hp || e.progress < 0 || e.progress > 740 || e.slow < 0 || e.slow > 1.5
+                    || (e.poisonT !== undefined && (!Number.isFinite(e.poisonT) || e.poisonT < 0 || e.poisonT > 3))
+                    || (e.poisonD !== undefined && (!Number.isFinite(e.poisonD) || e.poisonD < 0 || e.poisonD > 21)))) {
+                console.error('[Tower Defense] Invalid battle snapshot');
+                this.s.toast('Tower Defense received an invalid battle state. Reload or rejoin the room.', '#f87171');
+                return;
+            }
+            const counts = new Map(), cells = new Set();
+            for (const troop of state.troops) {
+                const count = (counts.get(troop.owner) || 0) + 1, cell = `${troop.x}:${troop.y}`;
+                counts.set(troop.owner, count);
+                if (count > this.playerTroopLimit || cells.has(cell)) {
+                    console.error('[Tower Defense] Invalid tower ownership limits or occupied grid cells');
+                    this.s.toast('Tower Defense received invalid tower placements. Reload or rejoin the room.', '#f87171');
+                    return;
+                }
+                cells.add(cell);
+            }
+            if (state.serial <= this.receivedSerial) return;
+            if (!this.authority && this.receivedSerial >= 0) {
+                if (state.health.some((v, i) => v < this.health[i])) this.s.sfx('baseHit', 240);
+                else if (Number.isInteger(state.battleSounds) && state.battleSounds > this.battleSounds) this.s.sfx('towerShot', 160);
+                if (state.troops.length > this.troops.length) this.s.sfx('towerBuild', 150);
+                else if (state.troops.some(t => t.level > (this.troops.find(old => old.id === t.id)?.level || t.level))) this.s.sfx('towerUpgrade', 150);
+            }
+            this.battleSounds = state.battleSounds || 0;
+            this.receivedSerial = state.serial; this.serial = state.serial;
+            this.health = [...state.health]; this.wallets = [...state.wallets]; this.teamDamage = [...state.damage];
+            this.teams = { ...state.teams }; this.lastSeq = { ...state.lastSeq }; this.answers = { ...state.answers };
+            this.nextId = state.nextId; this.troops = state.troops.map(t => ({ ...t })); this.enemies = state.enemies.map(e => ({ ...e }));
+            this.shots = (state.shots || []).map(shot => ({ ...shot })); this.winner = state.winner;
+            this.finished = state.winner === 0 || state.winner === 1;
+            this.myTeam = this.teams[this.s.user.id] ?? this.myTeam;
+            this.sequence = Math.max(this.sequence, this.lastSeq[this.s.user.id] || 0);
+            this.pending = this.pending.filter(p => p.seq > (this.lastSeq[this.s.user.id] || 0));
+            this.res.value = this.wallets[this.myTeam];
+            this.s.score = this.teamValue(this.myTeam);
+            this.s.setGoal(this.s.score);
+        }
+        onEvent(event, from) {
+            if (event.k === 'td-order') this.command(event, from.id);
+            else if (event.k === 'td-error' && from.id === this.s.room?.host_id && event.to === this.s.user.id) this.s.toast(event.message, '#fbbf24');
+        }
+        onState(ex, from) {
+            if (!this.authority && from.id === this.s.room?.host_id && ex.td) this.applySnapshot(ex.td);
+        }
+        onRoom(room) {
+            const state = room.state?.defense;
+            if (state && state.serial > this.serial) this.applySnapshot(state);
+        }
+        net() {
+            const net = super.net();
+            net.ex = { team: this.myTeam, ...(this.authority ? { td: this.snapshot() } : {}) };
+            return net;
+        }
+        persist() {
+            if (!this.s.isHost || this.s.practice || this.s.preview || !this.s.api?.saveDefenseState) return;
+            const snapshot = this.snapshot();
+            const save = () => this.s.api.saveDefenseState(this.s.code, snapshot);
+            this.persistPromise = (this.persistPromise || Promise.resolve()).then(save, save);
+            this.persistPromise.catch(error => {
+                console.error('[Tower Defense] Could not save battle:', error);
+                this.s.toast('Could not save Tower Defense. Check your connection.', '#f87171');
+            });
+        }
+        update(dt) {
+            if (this.finished) return;
+            this.step(dt);
+            this.shots = this.shots.filter(shot => (shot.t -= dt) > 0);
+            const rects = this.ui.rects.length ? this.ui.rects : this.ui.prev;
+            const action = this.ui.hit(rects);
+            const overHud = rects.some(r => this.ui.inside({ ...r, on: true }));
+            const pointer = this.mouseWorld();
+            this.previewPoint = this.s.mouse.active && !overHud && !this.s.question && !this.selected ? this.gridPoint(pointer.x, pointer.y) : null;
+            if (action?.startsWith('build:')) { this.buildType = Number(action.split(':')[1]); this.selected = null; }
+            else if (this.s.pressed('Escape')) { this.selected = null; }
+            else if (action === 'catalog') { this.catalogPage = 1 - this.catalogPage; }
+            else if (action?.startsWith('send:')) this.request('send', { type: Number(action.split(':')[1]) });
+            else if (action === 'upgrade') this.request('upgrade', { id: this.selected });
+            else if (action === 'earn' || this.s.pressed('KeyE')) this.recharge();
+            else if (!action && this.s.mouse.pressed && !overHud) {
+                const p = this.mouseWorld(), troop = this.troops.find(t => {
+                    const cell = this.gridPoint(p.x, p.y, t.team);
+                    return t.x === cell.x && t.y === cell.y;
+                });
+                if (troop) {
+                    if (troop.team === this.myTeam) this.selected = troop.id;
+                    else this.s.toast('Enemy troops cannot be upgraded', '#fbbf24');
+                } else if (this.selected !== null) this.selected = null;
+                else this.request('build', { type: this.buildType, x: p.x, y: p.y });
+            }
+            if (this.authority) {
+                this.simulate(dt);
+                this.saveT += dt;
+                if (this.saveT >= 5 || this.finished) { this.saveT = 0; this.persist(); }
+            } else if (this.pending.length) {
+                this.retryT -= dt;
+                if (this.retryT <= 0) { this.retryT = .6; for (const order of this.pending) this.s.emit(order); }
+            }
+            this.res.value = this.wallets[this.myTeam];
+            const value = this.teamValue(this.myTeam);
+            this.s.score = value; this.s.setGoal(value);
+        }
+        teamValue(team) { return (this.finished && this.winner === team ? 10000 : 0) + this.teamDamage[team]; }
+        standingValues(id) { const value = this.teamValue(this.teamOf(id) ?? this.myTeam); return { s: value, g: value }; }
+        rankMetric(row) { return row.g; }
+        resultTitle(rows) {
+            return rows[0]?.g >= 10000 ? `${this.teamOf(rows[0].id) ? 'Red' : 'Blue'} team wins!` : 'Battle ended';
+        }
+        isWinner(rows, id) { return rows[0]?.g >= 10000 && this.teamOf(rows[0].id) === this.teamOf(id); }
+        goalText() { return `${this.myTeam ? 'Red' : 'Blue'} team · Base ${this.health[this.myTeam]} HP · Towers ${this.troopCount(this.s.user.id)}/12 · ${this.s.testing === true ? 'unlimited test cash' : `$${this.wallets[this.myTeam]} shared`}`; }
+        hint() { return 'WASD walk on either side · Choose a troop, click an empty grid cell on your side to build (12 towers per player) · Click friendly troops to upgrade · Send enemies to the rival path · Q/E answer for shared cash · First base to 0 HP loses'; }
+        touchHint() { return 'Joystick to walk · Select troop, tap an empty grid cell to build (12 per player) · Tap friendly troops to upgrade · Send enemies with the buttons · Answer for team cash'; }
+        touchLayout() { return { stick: true, buttons: [{ k: 'KeyE', label: 'Earn cash', cls: 'main' }] }; }
+        drawTroop(ctx, troop, angle = -.6) {
+            const spec = DEFENSE_TROOPS[troop.type];
+            ctx.save(); ctx.translate(troop.x, troop.y);
+            ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(3, 23, 31, 13, 0, 0, TAU); ctx.fill();
+            ctx.fillStyle = '#475569'; roundRect(ctx, -26, -24, 52, 48, 8); ctx.fill();
+            ctx.fillStyle = '#cbd5e1'; roundRect(ctx, -21, -21, 42, 37, 5); ctx.fill();
+            ctx.fillStyle = DEFENSE_COLORS[troop.team]; ctx.fillRect(-22, 17, 44, 6);
+            for (let i = 0; i < troop.level; i++) { ctx.fillStyle = '#fff'; ctx.fillRect(-13 + i * 10, 18, 5, 3); }
+            ctx.rotate(angle);
+            ctx.fillStyle = '#334155'; ctx.beginPath(); ctx.arc(0, 0, 16, 0, TAU); ctx.fill();
+            if (troop.type === 0 || troop.type === 3) {
+                ctx.strokeStyle = '#92400e'; ctx.lineWidth = troop.type === 3 ? 6 : 4;
+                ctx.beginPath(); ctx.moveTo(8, -22); ctx.quadraticCurveTo(-7, 0, 8, 22); ctx.stroke();
+                ctx.strokeStyle = '#fef3c7'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(8, -22); ctx.lineTo(-6, 0); ctx.lineTo(8, 22); ctx.stroke();
+                ctx.fillStyle = '#a16207'; ctx.fillRect(-12, -4, 34, 8);
+                ctx.fillStyle = spec.color; ctx.beginPath(); ctx.moveTo(30, 0); ctx.lineTo(19, -5); ctx.lineTo(19, 5); ctx.fill();
+                if (troop.type === 3) { ctx.fillStyle = '#64748b'; ctx.fillRect(-19, -17, 8, 34); }
+            } else if (troop.type === 1) {
+                ctx.fillStyle = '#1e293b'; roundRect(ctx, -8, -11, 39, 22, 4); ctx.fill();
+                ctx.fillStyle = '#94a3b8'; ctx.fillRect(19, -13, 7, 26);
+                ctx.fillStyle = '#0f172a'; ctx.beginPath(); ctx.ellipse(31, 0, 5, 10, 0, 0, TAU); ctx.fill();
+                ctx.fillStyle = '#fb923c'; ctx.fillRect(-8, -7, 8, 14);
+            } else if (troop.type === 2) {
+                ctx.fillStyle = '#67e8f9'; ctx.beginPath();
+                ctx.moveTo(26, 0); ctx.lineTo(3, -16); ctx.lineTo(-10, 0); ctx.lineTo(3, 16); ctx.closePath(); ctx.fill();
+                ctx.strokeStyle = '#e0f2fe'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-6, 0); ctx.lineTo(21, 0); ctx.moveTo(3, -12); ctx.lineTo(3, 12); ctx.stroke();
+            } else if (troop.type === 4) {
+                ctx.fillStyle = '#6d28d9'; ctx.fillRect(-6, -8, 27, 16);
+                ctx.strokeStyle = '#c4b5fd'; ctx.lineWidth = 3;
+                for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.ellipse(i * 6, 0, 4, 12, 0, 0, TAU); ctx.stroke(); }
+                ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(24, 0, 5 + Math.sin(this.anim * 6), 0, TAU); ctx.fill();
+            } else {
+                ctx.fillStyle = '#365314'; roundRect(ctx, -14, -12, 29, 24, 7); ctx.fill();
+                ctx.fillStyle = '#a3e635'; ctx.beginPath(); ctx.arc(-4, 0, 9, 0, TAU); ctx.fill();
+                ctx.fillStyle = '#64748b'; ctx.fillRect(8, -5, 22, 10);
+                ctx.fillStyle = '#d9f99d'; ctx.fillRect(25, -7, 5, 14);
+            }
+            ctx.restore();
+        }
+        drawEnemy(ctx, enemy, x, y) {
+            const spec = DEFENSE_ENEMIES[enemy.type], big = enemy.type === 2 || enemy.type === 4, r = big ? 22 : enemy.type === 3 ? 10 : 14;
+            const path = this.paths[enemy.team], a = path[enemy.segment], b = path[enemy.segment + 1] || a;
+            ctx.save(); ctx.translate(x, y);
+            ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(0, r * .8, r + 4, r * .45, 0, 0, TAU); ctx.fill();
+            ctx.rotate(Math.atan2(b.y - a.y, b.x - a.x));
+            if (enemy.type === 5) {
+                ctx.fillStyle = 'rgba(240,171,252,.22)'; ctx.beginPath(); ctx.arc(0, 0, 24, 0, TAU); ctx.fill();
+                ctx.fillStyle = spec.color; ctx.beginPath(); ctx.moveTo(-30, Math.sin(this.anim * 10) * 8);
+                ctx.quadraticCurveTo(-10, -20, 12, -9); ctx.quadraticCurveTo(28, 0, 12, 9); ctx.quadraticCurveTo(-10, 20, -30, 0); ctx.fill();
+            } else {
+                ctx.strokeStyle = enemy.type === 4 ? '#475569' : '#422006'; ctx.lineWidth = big ? 6 : 3; ctx.beginPath();
+                for (let i = -1; i <= 1; i++) for (const side of [-1, 1]) {
+                    const sway = Math.sin(this.anim * 14 + i + side) * 4;
+                    ctx.moveTo(i * r * .5, side * r * .5); ctx.lineTo(i * r * .5 - 7 + sway, side * (r + 6));
+                }
+                ctx.stroke(); ctx.fillStyle = spec.color; ctx.beginPath(); ctx.ellipse(0, 0, r * 1.1, r * .8, 0, 0, TAU); ctx.fill();
+                if (enemy.type === 4) {
+                    ctx.fillStyle = '#64748b'; for (let i = -1; i <= 1; i++) roundRect(ctx, i * 10 - 6, -18, 11, 36, 3), ctx.fill();
+                } else if (enemy.type === 2) {
+                    ctx.fillStyle = '#7e22ce'; ctx.beginPath(); ctx.moveTo(0, -r); ctx.lineTo(-8, -r - 9); ctx.lineTo(12, -r + 4); ctx.fill();
+                    ctx.beginPath(); ctx.moveTo(0, r); ctx.lineTo(-8, r + 9); ctx.lineTo(12, r - 4); ctx.fill();
+                } else {
+                    ctx.strokeStyle = '#365314'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-r, 0); ctx.lineTo(r * .6, 0); ctx.stroke();
+                }
+            }
+            ctx.fillStyle = '#0f172a'; ctx.beginPath(); ctx.arc(r * .65, -4, 3, 0, TAU); ctx.arc(r * .65, 4, 3, 0, TAU); ctx.fill();
+            ctx.strokeStyle = DEFENSE_COLORS[1 - enemy.team]; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, r + 6, -.5, .5); ctx.stroke();
+            if (enemy.slow > 0 || enemy.poisonT > 0) { ctx.strokeStyle = enemy.poisonT > 0 ? '#a3e635' : '#67e8f9'; ctx.beginPath(); ctx.arc(0, 0, r + 9, 0, TAU); ctx.stroke(); }
+            ctx.restore();
+        }
+        draw(ctx, w, h) {
+            ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, w, h);
+            this.begin(ctx, w, h, 1100);
+            const rects = this.ui.rects.length ? this.ui.rects : this.ui.prev;
+            const overHud = rects.some(r => this.ui.inside({ ...r, on: true }));
+            const pointer = this.mouseWorld();
+            this.previewPoint = this.s.mouse.active && !overHud && !this.s.question && !this.selected ? this.gridPoint(pointer.x, pointer.y) : null;
+            for (const team of [0, 1]) {
+                const color = DEFENSE_COLORS[team], path = this.paths[team];
+                ctx.fillStyle = team ? '#3f4934' : '#354c43'; ctx.fillRect(team * 1100, 0, 1100, this.H);
+                for (let y = Math.floor(this.y0 / 100) * 100; y < Math.min(this.H, this.y1); y += 100) {
+                    for (let x = Math.max(team * 1100, Math.floor(this.x0 / 100) * 100); x < Math.min((team + 1) * 1100, this.x1); x += 100) {
+                        const seed = hashStr(`${x}:${y}`), px = x + 20 + seed % 40, py = y + 30;
+                        ctx.fillStyle = 'rgba(163,230,53,.08)'; ctx.fillRect(x, y, 96, 96);
+                        if (this.distanceToPath(px, py, team) < 95) continue;
+                        ctx.strokeStyle = '#6b8e4e'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(px - 7, py + 8); ctx.lineTo(px - 11, py - 2);
+                        ctx.moveTo(px, py + 9); ctx.lineTo(px + 3, py - 6); ctx.moveTo(px + 7, py + 8); ctx.lineTo(px + 13, py); ctx.stroke();
+                        if (seed % 7 === 0) { ctx.fillStyle = '#64746b'; ctx.beginPath(); ctx.ellipse(px + 30, py + 30, 12, 8, -.4, 0, TAU); ctx.fill(); }
+                    }
+                }
+                ctx.strokeStyle = '#293c35'; ctx.lineWidth = 98; ctx.lineJoin = 'round';
+                ctx.beginPath(); path.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke();
+                ctx.strokeStyle = '#988366'; ctx.lineWidth = 82; ctx.stroke();
+                ctx.strokeStyle = '#bba581'; ctx.lineWidth = 62; ctx.stroke();
+                ctx.strokeStyle = 'rgba(70,53,33,.22)'; ctx.lineWidth = 3; ctx.setLineDash([3, 28]); ctx.stroke(); ctx.setLineDash([]);
+                for (let row = 0; row < 20; row++) for (let col = 0; col < 14; col++) {
+                    const x = team * 1100 + 95 + col * this.gridSize, y = 85 + row * this.gridSize;
+                    if (!this.seen(x, y, this.gridSize) || this.distanceToPath(x, y, team) <= 68) continue;
+                    ctx.strokeStyle = team === this.myTeam ? 'rgba(226,232,240,.16)' : 'rgba(248,113,113,.1)';
+                    ctx.lineWidth = 1; ctx.strokeRect(x - 35, y - 35, this.gridSize, this.gridSize);
+                }
+                for (let i = 1; i < path.length; i++) {
+                    const a = path[i - 1], b = path[i], angle = Math.atan2(b.y - a.y, b.x - a.x);
+                    ctx.save(); ctx.translate((a.x + b.x) / 2, (a.y + b.y) / 2); ctx.rotate(angle);
+                    ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(12, 0); ctx.lineTo(-8, -9); ctx.lineTo(-8, 9); ctx.fill(); ctx.restore();
+                }
+                const start = path[0], base = path.at(-1);
+                this.ring(ctx, start.x, start.y, 44, color, 5);
+                ctx.fillStyle = '#334155'; ctx.fillRect(start.x - 44, start.y - 36, 16, 72); ctx.fillRect(start.x + 28, start.y - 36, 16, 72);
+                ctx.fillStyle = color; ctx.fillRect(start.x - 44, start.y - 40, 88, 12);
+                ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(base.x, base.y + 38, 85, 28, 0, 0, TAU); ctx.fill();
+                ctx.fillStyle = '#94a3b8'; roundRect(ctx, base.x - 66, base.y - 44, 132, 90, 6); ctx.fill();
+                ctx.fillStyle = '#475569'; ctx.fillRect(base.x - 57, base.y - 29, 114, 65);
+                for (const side of [-1, 1]) {
+                    ctx.fillStyle = '#cbd5e1'; ctx.fillRect(base.x + side * 59 - 14, base.y - 66, 28, 98);
+                    ctx.fillStyle = color; ctx.fillRect(base.x + side * 59 - 14, base.y - 73, 28, 20);
+                    ctx.fillStyle = '#334155'; ctx.fillRect(base.x + side * 59 - 3, base.y - 44, 6, 18);
+                }
+                ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(base.x, base.y - 68); ctx.lineTo(base.x + 39, base.y - 43); ctx.lineTo(base.x - 39, base.y - 43); ctx.fill();
+                ctx.fillStyle = '#0f172a'; roundRect(ctx, base.x - 20, base.y - 15, 40, 50, 15); ctx.fill();
+                ctx.fillStyle = '#fff'; ctx.font = '900 18px system-ui'; ctx.textAlign = 'center';
+                ctx.fillText(`${team ? 'RED' : 'BLUE'} ${this.health[team]} HP`, base.x, base.y + 65);
+                if (!this.s.preview) ctx.fillText('ENTRY', start.x, start.y - 55);
+            }
+            ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 4; ctx.setLineDash([20, 15]);
+            ctx.beginPath(); ctx.moveTo(1100, 0); ctx.lineTo(1100, this.H); ctx.stroke(); ctx.setLineDash([]);
+            for (const troop of this.troops) {
+                if (!this.seen(troop.x, troop.y)) continue;
+                const spec = DEFENSE_TROOPS[troop.type];
+                if (troop.id === this.selected) this.ring(ctx, troop.x, troop.y, spec.range + (troop.level - 1) * 35, spec.color + '88', 2);
+                const shot = this.shots.find(p => p.x === troop.x && p.y === troop.y);
+                this.drawTroop(ctx, troop, shot ? Math.atan2(shot.ty - troop.y, shot.tx - troop.x) : -.6);
+            }
+            for (const enemy of this.enemies) {
+                const p = this.pointOnPath(enemy), spec = DEFENSE_ENEMIES[enemy.type];
+                if (!this.seen(p.x, p.y)) continue;
+                this.drawEnemy(ctx, enemy, p.x, p.y);
+                ctx.fillStyle = '#0f172a'; ctx.fillRect(p.x - 20, p.y - 32, 40, 5);
+                ctx.fillStyle = '#4ade80'; ctx.fillRect(p.x - 20, p.y - 32, 40 * enemy.hp / spec.hp, 5);
+            }
+            if (this.previewPoint && !this.s.preview) {
+                const p = this.previewPoint, spec = DEFENSE_TROOPS[this.buildType];
+                const atLimit = this.troopCount(this.s.user.id) >= this.playerTroopLimit;
+                const valid = this.validPlacement(p.x, p.y, this.myTeam) && this.canAfford(this.myTeam, spec.cost) && !atLimit;
+                const color = valid ? '#86efac' : '#f87171';
+                ctx.fillStyle = valid ? 'rgba(134,239,172,.25)' : 'rgba(248,113,113,.25)';
+                ctx.fillRect(p.x - 35, p.y - 35, this.gridSize, this.gridSize);
+                ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.strokeRect(p.x - 35, p.y - 35, this.gridSize, this.gridSize);
+                ctx.fillStyle = valid ? 'rgba(134,239,172,.08)' : 'rgba(248,113,113,.08)'; ctx.beginPath(); ctx.arc(p.x, p.y, spec.range, 0, TAU); ctx.fill();
+                this.ring(ctx, p.x, p.y, spec.range, color, 2);
+                ctx.globalAlpha = .65; this.drawTroop(ctx, { x: p.x, y: p.y, type: this.buildType, team: this.myTeam, level: 1 }); ctx.globalAlpha = 1;
+                ctx.fillStyle = color; ctx.font = '700 14px system-ui'; ctx.textAlign = 'center';
+                ctx.fillText(`${spec.name} $${spec.cost} · ${atLimit ? '12/12 tower limit' : valid ? `Range ${spec.range}` : 'Cannot place here'}`, p.x, p.y + 51);
+            }
+            for (const shot of this.shots) {
+                if (!this.seen(shot.x, shot.y, 300)) continue;
+                ctx.strokeStyle = shot.color; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(shot.x, shot.y); ctx.lineTo(shot.tx, shot.ty); ctx.stroke();
+            }
+            this.drawPlayers(ctx, (c, x, y, player) => this.ring(c, x, y, 22, DEFENSE_COLORS[this.teamOf(player?.id || this.s.user.id) ?? 0], 3));
+            this.end(ctx);
+            this.ui.begin();
+            if (this.s.preview) return;
+            this.ui.transform = this.s.placeHud(ctx, 0, 0, 320, 306, 'top-right');
+            ctx.fillStyle = 'rgba(15,23,42,.95)'; roundRect(ctx, 0, 0, 320, 306, 10); ctx.fill();
+            this.ui.addRect({ id: 'panel', x: 0, y: 0, w: 320, h: 306, on: false });
+            ctx.fillStyle = '#fff'; ctx.font = '800 14px system-ui'; ctx.textAlign = 'center';
+            ctx.fillText(`BLUE ${this.health[0]} HP  |  RED ${this.health[1]} HP`, 160, 20);
+            ctx.fillStyle = DEFENSE_COLORS[this.myTeam]; ctx.fillText(`${this.myTeam ? 'RED' : 'BLUE'} TEAM CASH: ${this.s.testing === true ? 'UNLIMITED (TEST)' : `$${this.wallets[this.myTeam]}`}`, 160, 42);
+            this.ui.button(ctx, 'catalog', 8, 50, 304, 24, `Catalog ${this.catalogPage + 1}/2 · click for more`, true, '#334155');
+            DEFENSE_TROOPS.slice(this.catalogPage * 3, this.catalogPage * 3 + 3).forEach((type, slot) => {
+                const i = this.catalogPage * 3 + slot;
+                this.ui.button(ctx, `build:${i}`, 8 + slot * 103, 80, 98, 42, type.name, this.troopCount(this.s.user.id) < this.playerTroopLimit,
+                    i === this.buildType ? '#2563eb' : '#475569', `$${type.cost} · build`);
+            });
+            DEFENSE_ENEMIES.slice(this.catalogPage * 3, this.catalogPage * 3 + 3).forEach((type, slot) => {
+                const i = this.catalogPage * 3 + slot;
+                this.ui.button(ctx, `send:${i}`, 8 + slot * 103, 128, 98, 42, type.name,
+                    this.canAfford(this.myTeam, type.cost), '#be123c', `$${type.cost} · send`);
+            });
+            const selected = this.troops.find(t => t.id === this.selected);
+            const hover = this.ui.rects.find(r => this.ui.inside({ ...r, on: true }) && /^(build|send):/.test(r.id));
+            const enemyInfo = hover?.id.startsWith('send:');
+            const typeIndex = hover ? Number(hover.id.split(':')[1]) : selected?.type ?? this.buildType;
+            const info = enemyInfo ? DEFENSE_ENEMIES[typeIndex] : DEFENSE_TROOPS[typeIndex];
+            ctx.textAlign = 'left'; ctx.fillStyle = info.color; ctx.font = '800 13px system-ui';
+            ctx.fillText(`${info.name}${selected && !hover ? ` · Level ${selected.level}` : ''} · Your towers ${this.troopCount(this.s.user.id)}/12`, 12, 190);
+            ctx.fillStyle = '#cbd5e1'; ctx.font = '600 11px system-ui'; ctx.fillText(info.desc, 12, 208);
+            if (enemyInfo) ctx.fillText(`HP ${info.hp} · Speed ${info.speed} · Base hit ${info.damage}`, 12, 225);
+            else {
+                const stats = this.troopStats(typeIndex, selected && !hover ? selected.level : 1);
+                ctx.fillText(`Damage ${stats.damage.toFixed(1)} · Range ${stats.range} · Fires ${stats.rate.toFixed(2)}s`, 12, 225);
+                if (selected && !hover && selected.level < 3) {
+                    const next = this.troopStats(selected.type, selected.level + 1);
+                    ctx.fillText(`Upgrade: +${(next.damage - stats.damage).toFixed(1)} dmg · +35 range · ${next.rate.toFixed(2)}s fire`, 12, 242);
+                } else ctx.fillText('Hover/tap a choice for stats · Click a tower to upgrade', 12, 242);
+            }
+            this.ui.button(ctx, 'upgrade', 8, 251, 148, 48, selected ? `Upgrade L${selected.level}` : 'Select troop',
+                Boolean(selected && selected.level < 3 && this.canAfford(this.myTeam, this.upgradeCost(selected))), '#7c3aed',
+                selected ? selected.level >= 3 ? 'MAX LEVEL' : `$${this.upgradeCost(selected)}` : 'Tap a friendly troop');
+            this.ui.button(ctx, 'earn', 164, 251, 148, 48, 'Answer for cash', !this.s.question, '#15803d', `+$${this.answerCash()} to team`);
+            ctx.restore();
+            const mw = 160, mh = mw * this.H / this.W;
+            this.ui.transform = this.s.placeHud(ctx, 0, 0, mw, mh, 'bottom-right');
+            this.ui.addRect({ id: 'minimap', x: 0, y: 0, w: mw, h: mh, on: false });
+            ctx.fillStyle = '#1c3042'; ctx.fillRect(0, 0, mw / 2, mh);
+            ctx.fillStyle = '#30252c'; ctx.fillRect(mw / 2, 0, mw / 2, mh);
+            for (const team of [0, 1]) {
+                ctx.strokeStyle = DEFENSE_COLORS[team]; ctx.lineWidth = 2; ctx.beginPath();
+                this.paths[team].forEach((p, i) => i ? ctx.lineTo(p.x / this.W * mw, p.y / this.H * mh) : ctx.moveTo(p.x / this.W * mw, p.y / this.H * mh)); ctx.stroke();
+            }
+            ctx.fillStyle = '#fff'; ctx.fillRect(this.me.x / this.W * mw - 2, this.me.y / this.H * mh - 2, 4, 4); ctx.restore();
+        }
+    }
+
+    Object.assign(A.games, { crypto: Crypto, frenzy: Fishing, fishing: Fishing, hack: Hack, defense: Defense });
 })(window);

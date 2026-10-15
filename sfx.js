@@ -13,8 +13,14 @@
         battle: { name: 'Battle Drive', bpm: 140, chords: [[52, 1], [52, 1], [55, 0], [50, 0]], bass: '1011101110111011', lead: '1000100110001001', arp: [0, 2, 3, 2, 3, 1], leadWave: 'sawtooth', bassWave: 'sawtooth', kick: '1001100110011001', snare: '0000100000001000', hat: '1111111111111111' },
         neon: { name: 'Neon Exchange', bpm: 108, chords: [[57, 1], [55, 0], [53, 0], [52, 0]], bass: '1100110011001100', lead: '1010101010101010', arp: [0, 1, 2, 3, 3, 2, 1, 0], leadWave: 'square', bassWave: 'square', kick: '1000100010001000', snare: '0000100000001000', hat: '0101010101010101' }
     };
-    const MODE_STYLE = { skyline: 'summit', river: 'lagoon', market: 'bazaar', miner: 'cavern', duel: 'battle', shooter: 'orbit', sports: 'stadium', crypto: 'neon' };
+    const MODE_STYLE = { skyline: 'summit', river: 'lagoon', market: 'bazaar', miner: 'cavern', duel: 'battle', shooter: 'orbit',
+        sports: 'stadium', crypto: 'neon', defense: 'fortress', chess: 'zen', hack: 'midnight', frenzy: 'tropic', fishing: 'tropic',
+        classic: 'sunrise', rush: 'pixel', survival: 'battle' };
     Object.assign(MUSIC, {
+        fortress: { name: 'Twin Citadels', bpm: 104, chords: [[50, 1], [46, 0], [53, 0], [48, 0]],
+            bass: '1001000010010010', lead: '1010001010100010', arp: [0, 2, 1, 3, 2, 1, 0, 2],
+            melody: [0, 7, 12, 10, 7, 3, 5, 7], leadWave: 'triangle', bassWave: 'triangle',
+            kick: '1000000010000010', snare: '0000100000001000', hat: '0010001000100010' },
         sunrise: { name: 'Sunrise Run', bpm: 128, chords: [[60, 0], [67, 0], [57, 1], [65, 0]], bass: '1010101010101010', lead: '1011011010110110', arp: [0, 1, 2, 3, 2, 1], leadWave: 'triangle', bassWave: 'sawtooth', kick: '1000100010001000', snare: '0000100000001000', hat: '0010001000100010', openHat: '0010001000100010' },
         midnight: { name: 'Midnight Drive', bpm: 100, swing: 0.16, chords: [[57, 1], [53, 0], [60, 0], [55, 0]], bass: '1001001010010010', lead: '1001010010010100', arp: [0, 2, 1, 3, 2, 3, 1, 2], leadWave: 'sawtooth', bassWave: 'sawtooth', kick: '1000000110000010', snare: '0000100000001000', hat: '1010101010101010' },
         pixel: { name: 'Pixel Quest', bpm: 150, chords: [[60, 0], [57, 1], [53, 0], [55, 0]], bass: '1011101110111011', lead: '1111101111101011', arp: [0, 1, 2, 3, 2, 1, 3, 2], leadWave: 'square', bassWave: 'square', kick: '1000100010001000', snare: '0000100000001000', hat: '0101010101010101' },
@@ -61,6 +67,22 @@
         score: c => { [659, 784, 988, 1319].forEach((f, i) => c.chime(f, 0.18, 0.15, i * 0.06)); c.tone('triangle', 330, 660, 0.3, 0.08); },
         whoosh: c => { c.noise(0.3, 0.1, 900); c.tone('sine', 200, 900, 0.28, 0.05); }
     };
+    Object.assign(RECIPES, {
+        mine: c => { c.noise(.06, .08, 2600); c.tone('triangle', 630, 210, .09, .06); },
+        rockBreak: c => { c.noise(.18, .12, 900); c.tone('triangle', 180, 65, .14, .08); },
+        crystal: c => { [1175, 1568, 2093].forEach((f, i) => c.chime(f, .25, .07, i * .04)); },
+        cast: c => { c.noise(.16, .06, 3400); c.tone('sine', 440, 880, .18, .04); },
+        catch: c => { c.noise(.12, .07, 1700); c.chime(784, .12, .1); c.chime(1175, .24, .1, .08); },
+        wave: c => { c.noise(1.1, .14, 600); c.tone('sine', 100, 65, .8, .12); },
+        whirlpool: c => { c.noise(.7, .1, 1100); c.tone('sine', 330, 100, .65, .09); },
+        towerBuild: c => { c.noise(.12, .1, 1500); c.tone('triangle', 180, 440, .2, .08); },
+        towerUpgrade: c => { [440, 660, 880].forEach((f, i) => c.chime(f, .24, .1, i * .07)); },
+        towerShot: c => { c.noise(.09, .07, 2300); c.tone('triangle', 500, 140, .1, .05); },
+        cannon: c => { c.noise(.3, .13, 650); c.tone('sine', 130, 40, .26, .15); },
+        zap: c => { c.noise(.12, .06, 4500); c.tone('sawtooth', 1100, 250, .15, .07); },
+        enemySend: c => { c.tone('triangle', 130, 390, .22, .09); c.noise(.18, .07, 1200); },
+        baseHit: c => { c.noise(.4, .15, 550); c.tone('sine', 90, 35, .35, .18); c.chime(220, .12, .09); }
+    });
     // Jingles and alerts keep their exact pitch
     const NO_PITCH_SHIFT = new Set(['success', 'win', 'lose', 'go', 'countdown', 'score', 'error']);
     // Extra variants for sounds that play over and over
@@ -255,16 +277,18 @@
                 this.musicTone(hz(root - 24 + hop), spb * 1.8, 0.3, T.bassWave, t, 600);
                 this.musicTone(hz(root - 36 + hop), spb * 1.8, 0.2, 'sine', t, 300);
             }
-            if (T.lead[s] === '1') {
-                const up = barIndex % 8 >= 4 ? 12 : 0;
-                const note = hz(tones[T.arp[step % T.arp.length]] + 12 + up);
-                this.musicTone(note, spb * 1.4, 0.085, T.leadWave, t, 3200, { detune: 6, send: 0.45, echo: 0.35 });
+            const section = Math.floor(barIndex / 4) % 4;
+            if (T.lead[s] === '1' && (section !== 2 || s % 4 === 0)) {
+                const up = section === 3 ? 12 : 0;
+                const note = hz((T.melody ? root + T.melody[(Math.floor(step / 2) + barIndex) % T.melody.length]
+                    : tones[T.arp[(step + barIndex * 2) % T.arp.length]]) + 12 + up);
+                this.musicTone(note, spb * (section === 2 ? 2.5 : 1.4), section === 0 ? .065 : .085, T.leadWave, t, section === 2 ? 1800 : 3200, { detune: 6, send: .45, echo: .35 });
             }
-            if (T.kick[s] === '1') this.musicKick(t);
-            const fill = barIndex % 4 === 3 && s >= 12;
+            if (T.kick[s] === '1' && (section !== 2 || s === 0)) this.musicKick(t);
+            const fill = section !== 2 && T.snare !== '0000000000000000' && barIndex % 4 === 3 && s >= 12;
             if (T.snare[s] === '1' || fill) this.musicNoise(t, 0.14, fill ? 0.12 : 0.16, 1800, 'highpass');
             if (T.snare[s] === '1' && T.snare !== '0000000000000000') this.musicTone(190, 0.09, 0.08, 'triangle', t, 1200);
-            if (T.hat[s] === '1') this.musicNoise(t, 0.04, 0.05, 7000, 'highpass');
+            if (T.hat[s] === '1' && section !== 2) this.musicNoise(t, 0.04, s % 4 === 0 ? .05 : .035, 7000, 'highpass');
             if (T.openHat && T.openHat[s] === '1' && s % 4 === 2) this.musicNoise(t, 0.16, 0.04, 8000, 'highpass');
         }
 
