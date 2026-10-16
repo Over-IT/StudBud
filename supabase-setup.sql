@@ -2572,6 +2572,101 @@ $$;
 revoke all on function public.studbud_friend_open_rooms() from public, anon;
 grant execute on function public.studbud_friend_open_rooms() to authenticated;
 
+-- Bud presence: a lightweight heartbeat marks signed-in players online, and solo games share their mode.
+alter table public.studbud_multiplayer_profiles
+    add column if not exists last_seen_at timestamptz,
+    add column if not exists presence_activity text not null default '';
+alter table public.studbud_multiplayer_profiles drop constraint if exists studbud_multiplayer_profiles_presence_activity_check;
+alter table public.studbud_multiplayer_profiles
+    add constraint studbud_multiplayer_profiles_presence_activity_check
+    check (presence_activity = '' or presence_activity ~ '^solo:[a-z]{2,16}$');
+
+create or replace function public.studbud_presence_ping(p_activity text default '')
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_uid uuid := auth.uid();
+    v_activity text := coalesce(p_activity, '');
+begin
+    if v_uid is null or public.studbud_is_guest() then return; end if;
+    if v_activity !~ '^solo:[a-z]{2,16}$' then v_activity := ''; end if;
+    insert into public.studbud_multiplayer_profiles (user_id, last_seen_at, presence_activity)
+    values (v_uid, now(), v_activity)
+    on conflict (user_id) do update set last_seen_at = now(), presence_activity = v_activity;
+end;
+$$;
+revoke all on function public.studbud_presence_ping(text) from public, anon;
+grant execute on function public.studbud_presence_ping(text) to authenticated;
+
+-- Status for each accepted bud: hosting (joinable code when the lobby has room), in a match, solo game, online or offline.
+create or replace function public.studbud_friend_presence()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_uid uuid := auth.uid();
+    v_can_test boolean;
+begin
+    if v_uid is null or public.studbud_is_guest() or public.studbud_is_hidden_user(v_uid) then return '[]'::jsonb; end if;
+    v_can_test := public.studbud_is_admin() or public.studbud_has_user_tag(v_uid, 'tester');
+    return coalesce((
+        select jsonb_agg(jsonb_build_object(
+            'user_id', bud.id,
+            'online', bud.online,
+            'last_seen_at', bud.last_seen_at,
+            'status', case
+                when hosted.room_code is not null then 'hosting'
+                when joined.mode is not null then 'in_game'
+                when bud.online and bud.presence_activity like 'solo:%' then 'solo'
+                when bud.online then 'online'
+                else 'offline' end,
+            'mode', coalesce(hosted.mode, joined.mode, case when bud.online and bud.presence_activity like 'solo:%' then substr(bud.presence_activity, 6) end),
+            'room_status', coalesce(hosted.status, joined.status),
+            'room_code', case when hosted.joinable then hosted.room_code end,
+            'staff_test', coalesce(hosted.staff_test, false)
+        ))
+        from (
+            select a.id, mp.last_seen_at, coalesce(mp.presence_activity, '') as presence_activity,
+                coalesce(mp.last_seen_at > now() - interval '2 minutes', false) as online
+            from public.studbud_friendships f
+            join auth.users a on a.id = case when f.requester_id = v_uid then f.addressee_id else f.requester_id end
+            left join public.studbud_multiplayer_profiles mp on mp.user_id = a.id
+            where f.status = 'accepted' and v_uid in (f.requester_id, f.addressee_id)
+                and not public.studbud_is_hidden_user(a.id)
+        ) bud
+        left join lateral (
+            select r.room_code, r.mode, r.status,
+                coalesce((r.state ->> 'staff_test')::boolean, false) as staff_test,
+                r.status = 'waiting'
+                    and jsonb_array_length(coalesce(r.state -> 'players', '[]'::jsonb))
+                        < case when r.mode = 'chess' then 2 when r.mode = 'duel' then 8 else 16 end
+                    and (not coalesce((r.state ->> 'staff_test')::boolean, false) or v_can_test) as joinable
+            from public.studbud_game_rooms r
+            where r.host_id = bud.id and r.status in ('waiting', 'playing') and r.expires_at > now()
+                and (bud.online or r.updated_at > now() - interval '5 minutes')
+                and (not coalesce((r.state ->> 'staff_test')::boolean, false) or v_can_test)
+            order by r.created_at desc limit 1
+        ) hosted on true
+        left join lateral (
+            select r.mode, r.status
+            from public.studbud_game_rooms r
+            where r.host_id <> bud.id and r.status in ('waiting', 'playing') and r.expires_at > now()
+                and (bud.online or r.updated_at > now() - interval '5 minutes')
+                and coalesce(r.state -> 'players', '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('id', bud.id::text))
+            order by r.created_at desc limit 1
+        ) joined on true
+    ), '[]'::jsonb);
+end;
+$$;
+revoke all on function public.studbud_friend_presence() from public, anon;
+grant execute on function public.studbud_friend_presence() to authenticated;
+
 create or replace function public.studbud_friend_request(p_username text)
 returns jsonb
 language plpgsql

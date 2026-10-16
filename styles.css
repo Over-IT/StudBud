@@ -3081,8 +3081,19 @@ body.tutorial-active { overscroll-behavior: contain; }
 .friend-add-form input { flex: 1 1 200px; min-width: 0; }
 #friend-status.error { color: #f87171; }
 .friend-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.friend-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 10px; border-radius: 12px; background: var(--bg-glass-hover); border: 1px solid var(--border-glass); }
-.friend-row strong { flex: 1 1 100px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.friend-row { display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; padding: 10px 14px; border-radius: 12px; background: var(--bg-glass-hover); border: 1px solid var(--border-glass); }
+.friend-row > strong { flex: 1 1 100px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.friend-identity { flex: 1 1 140px; min-width: 0; display: grid; gap: 3px; }
+.friend-identity strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.friend-presence { display: inline-flex; align-items: center; gap: 6px; font-size: .82rem; font-weight: 700; color: var(--text-secondary); min-width: 0; }
+.friend-presence i { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; background: #64748b; }
+.friend-presence.is-online { color: #4ade80; }
+.friend-presence.is-online i { background: #22c55e; box-shadow: 0 0 0 3px rgba(34, 197, 94, .2); }
+.friend-presence.is-playing { color: #c4b5fd; }
+.friend-presence.is-playing i { background: #a78bfa; box-shadow: 0 0 0 3px rgba(167, 139, 250, .22); }
+.light-theme .friend-presence.is-online { color: #15803d; }
+.light-theme .friend-presence.is-playing { color: #6d28d9; }
+@media (max-width: 520px) { .friend-actions { width: 100%; justify-content: flex-end; } }
 .friend-initial { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; color: #fff; font-weight: 800; background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary)); flex: 0 0 auto; }
 .friend-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .friend-game-status { font-size: .85rem; color: var(--text-secondary); }
@@ -3385,10 +3396,12 @@ body.compact-ui .streak-flame b { bottom: 4px; font-size: .85rem; }
     .deck-recommendation { flex-direction: column; align-items: stretch; }
 }
 .multiplayer-shop .shop-grid > .shop-rarity-title { justify-content: flex-start; margin-top: 10px; padding-bottom: 4px; color: var(--rarity, var(--text-secondary)); border-bottom: 1px solid color-mix(in srgb, var(--rarity, #94a3b8) 40%, transparent); }
-.shop-search { grid-column: 1 / -1; display: flex; align-items: center; gap: 9px; min-width: 0; padding: 8px 11px; border: 1px solid var(--border-glass); border-radius: 11px; background: var(--bg-glass); color: var(--text-secondary); }
+.shop-search { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 6px 14px; border: 2px solid var(--border-glass); border-radius: 12px; background: var(--bg-glass); color: var(--text-secondary); }
 .shop-search:focus-within { border-color: var(--accent-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 18%, transparent); }
-.shop-search input { width: 100%; min-width: 0; padding: 4px 0; border: 0; outline: 0; background: transparent; color: var(--text-primary); box-shadow: none; }
-.shop-search input:focus { border: 0; box-shadow: none; }
+/* Beat the global input restyle so the field blends into its pill instead of drawing a second box. */
+.shop-search input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) { width: 100%; min-width: 0; min-height: 0; padding: 6px 2px; border: 0; border-radius: 0; outline: 0; background: transparent; color: var(--text-primary); box-shadow: none; }
+.shop-search input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus { border: 0; box-shadow: none; }
+.light-theme .shop-search input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) { background: transparent; }
 .shop-grid [hidden] { display: none !important; }
 .shop-grid .shop-search-empty { grid-column: 1 / -1; margin: 0; padding: 20px; color: var(--text-secondary); text-align: center; }
 .multiplayer-shop .shop-grid > .shop-search { grid-column: 1 / -1; }

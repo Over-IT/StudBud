@@ -30,6 +30,19 @@
             return Array.isArray(data) ? data : [];
         }
 
+        async getFriendPresence() {
+            if (!this.user || this.user.is_anonymous || this.offlineMode || !this.client) return null;
+            const { data, error } = await this.client.rpc('studbud_friend_presence');
+            if (error) throw new Error(error.message || 'Could not load buds’ status.');
+            return Array.isArray(data) ? data : [];
+        }
+
+        async pingPresence(activity = '') {
+            if (!this.user || this.user.is_anonymous || this.offlineMode || !this.client) return;
+            const { error } = await this.client.rpc('studbud_presence_ping', { p_activity: activity || '' });
+            if (error) throw new Error(error.message || 'Could not update your status.');
+        }
+
         static mergeData(base, local, remote, field = 'account') {
             const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
             if (field === 'account.state.gameMetrics' && local && remote && (local.resetId || '') !== (remote.resetId || '')) {

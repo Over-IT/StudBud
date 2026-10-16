@@ -1,4 +1,4 @@
-﻿const assert = require('node:assert/strict');
+const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
@@ -69,13 +69,55 @@ async function run() {
 
     games.friendCall = async () => ({ friends: [{ user_id: 'bud', username: 'My bud' }], incoming: [], outgoing: [] });
     cloud.getFriendRooms = async () => [{ host_id: 'bud', room_code: 'ABCDEF', mode: 'skyline', staff_test: true }];
+    cloud.getFriendPresence = async () => { throw Error('Presence RPC not deployed'); };
     await app.loadFriends();
-    assert.match(node('friend-list').innerHTML, /Hosting skyline · staff test/);
+    assert.match(node('friend-list').innerHTML, /Hosting Escape to Space · staff test/, 'older databases fall back to hosted rooms');
     assert.match(node('friend-list').innerHTML, /data-action="friend-join-game" data-code="ABCDEF">Join/);
     cloud.getFriendRooms = async () => { throw Error('RPC not deployed'); };
     await app.loadFriends();
     assert.match(node('friend-list').innerHTML, /My bud/);
     assert.doesNotMatch(node('friend-list').innerHTML, /friend-join-game/);
+
+    games.friendCall = async () => ({ friends: ['off', 'on', 'solo', 'match', 'host', 'busy'].map(id => ({ user_id: id, username: `Bud ${id}` })), incoming: [], outgoing: [] });
+    let roomLookups = 0;
+    cloud.getFriendRooms = async () => { roomLookups++; return []; };
+    cloud.getFriendPresence = async () => [
+        { user_id: 'off', status: 'offline', online: false, last_seen_at: new Date(Date.now() - 3 * 3600000).toISOString() },
+        { user_id: 'on', status: 'online', online: true },
+        { user_id: 'solo', status: 'solo', online: true, mode: 'miner' },
+        { user_id: 'match', status: 'in_game', online: true, mode: 'duel', room_status: 'playing' },
+        { user_id: 'host', status: 'hosting', online: true, mode: 'river', room_status: 'waiting', room_code: 'RIVERS' },
+        { user_id: 'busy', status: 'hosting', online: true, mode: 'shooter', room_status: 'playing', room_code: null }
+    ];
+    await app.loadFriends();
+    const budList = node('friend-list').innerHTML;
+    assert.equal(roomLookups, 0, 'presence replaces the separate hosted-room lookup');
+    assert.match(budList, /is-playing[^>]*><i aria-hidden="true"><\/i>Hosting River Fishing</);
+    assert.match(budList, /Hosting Arena Shooter · in progress/);
+    assert.match(budList, /In a King of the Hill match/);
+    assert.match(budList, /Playing Crystal Mining solo/);
+    assert.match(budList, /is-online[^>]*><i aria-hidden="true"><\/i>Online</);
+    assert.match(budList, /Offline · seen 3h ago/);
+    assert.equal((budList.match(/friend-join-game/g) || []).length, 1, 'only joinable hosted lobbies get a Join button');
+    assert.match(budList, /data-code="RIVERS">Join/);
+    const order = ['host', 'busy', 'match', 'solo', 'on', 'off'].map(id => budList.indexOf(`Bud ${id}`));
+    assert.deepEqual(order, [...order].sort((a, b) => a - b), 'active buds are listed first');
+    delete cloud.getFriendPresence;
+
+    const pings = [];
+    cloud.pingPresence = async activity => { pings.push(activity); };
+    app.lastPresencePing = 0;
+    app.practiceSession = { mode: 'miner', testing: false, destroyed: false };
+    app.pingPresence(true);
+    app.practiceSession = { mode: 'miner', testing: true, destroyed: false };
+    app.pingPresence(true);
+    app.practiceSession = null;
+    app.pingPresence();
+    app.pingPresence(true);
+    assert.deepEqual(pings, ['solo:miner', '', ''], 'solo games are shared; staff tests are not; unchanged pings are throttled');
+    cloud.user.is_anonymous = true; app.pingPresence(true); delete cloud.user.is_anonymous;
+    assert.equal(pings.length, 3, 'guests never send presence');
+    delete cloud.pingPresence;
     let joined;
     games.joinRoom = async (code, name) => { joined = { code, name }; return room([host, bud]); };
     await app.joinFriendGame('ABCDEF');
@@ -137,6 +179,14 @@ async function run() {
     sync.offlineMode = true; await sync.getFriendRooms(); assert.equal(queries, 1);
     sync.offlineMode = false; sync.user.is_anonymous = true;
     await sync.getFriendRooms(); assert.equal(queries, 1);
+    const presenceCalls = [];
+    sync.user = { id: 'host' }; sync.client = { rpc: async (fn, args) => { presenceCalls.push([fn, args]); return { data: [] }; } };
+    assert.deepEqual([...await sync.getFriendPresence()], []);
+    await sync.pingPresence('solo:miner');
+    assert.deepEqual(JSON.parse(JSON.stringify(presenceCalls)), [['studbud_friend_presence', null], ['studbud_presence_ping', { p_activity: 'solo:miner' }]]);
+    sync.user.is_anonymous = true;
+    assert.equal(await sync.getFriendPresence(), null); await sync.pingPresence('');
+    assert.equal(presenceCalls.length, 2, 'guests never query or publish presence');
 
     vm.runInContext(source('multiplayerEngine.js'), sandbox);
     const Session = sandbox.window.StudBudArcade.Session;
@@ -181,6 +231,48 @@ async function run() {
     assert.match(discovery, /when r.mode = 'chess' then 2 when r.mode = 'duel' then 8 else 16/);
     assert.match(discovery, /studbud_is_guest\(\)/);
     assert.match(sql, /revoke all on function public.studbud_friend_open_rooms\(\) from public, anon/);
+    const presenceSql = fn('studbud_friend_presence(');
+    assert.match(presenceSql, /f.status = 'accepted'/, 'presence is limited to accepted buds');
+    assert.match(presenceSql, /studbud_is_hidden_user\(a.id\)/);
+    assert.match(presenceSql, /interval '2 minutes'/);
+    assert.match(presenceSql, /when hosted.joinable then hosted.room_code/, 'only joinable lobbies expose a code');
+    assert.match(presenceSql, /@> jsonb_build_array\(jsonb_build_object\('id', bud.id::text\)\)/);
+    assert.match(fn('studbud_presence_ping('), /studbud_is_guest\(\) then return/);
+    assert.match(fn('studbud_presence_ping('), /\^solo:\[a-z\]\{2,16\}\$/);
+    assert.match(sql, /revoke all on function public.studbud_friend_presence\(\) from public, anon/);
+    assert.match(sql, /revoke all on function public.studbud_presence_ping\(text\) from public, anon/);
+
+    // Solo practice pays coins for correct answers via the server-capped solo reward; tests and guests never do.
+    const coinCalls = [];
+    const practiceSession = extra => {
+        const session = Object.create(Session.prototype);
+        Object.assign(session, { practice: true, testing: false, preview: false, user: { id: 'me' }, correct: 7, answered: 9,
+            api: { awardSoloCoins: async (correct, total) => { coinCalls.push([correct, total]); return { coins: 250, coins_awarded: 14 }; } },
+            renderResults() { this.rendered = (this.rendered || 0) + 1; } }, extra);
+        return session;
+    };
+    const priorApp = sandbox.window.NexusApp;
+    const profileApp = sandbox.window.NexusApp = { renderMultiplayerProfile() {} };
+    const paid = practiceSession();
+    await paid.awardPracticeCoins(); await paid.awardPracticeCoins();
+    assert.deepEqual(coinCalls, [[7, 9]], 'practice coins are requested once per game');
+    assert.equal(paid.rewards.me, 14);
+    assert.match(paid.practiceResultText(), /earned 14 coins/);
+    assert.equal(profileApp.multiplayerProfile.coins, 250, 'wallet updates immediately');
+    const capped = practiceSession({ correct: 400, answered: 500 });
+    await capped.awardPracticeCoins();
+    assert.deepEqual(coinCalls.at(-1), [100, 100], 'results stay within the RPC limits');
+    for (const extra of [{ testing: true }, { user: { id: 'guest', is_anonymous: true } }, { user: { id: 'local-practice' } }, { preview: true }]) {
+        const session = practiceSession(extra);
+        await session.awardPracticeCoins();
+        assert.equal(session.rewards, undefined);
+    }
+    const none = practiceSession({ correct: 0 });
+    await none.awardPracticeCoins();
+    assert.equal(coinCalls.length, 2, 'no request without correct answers');
+    assert.match(none.practiceResultText(), /Answer questions correctly/);
+    sandbox.window.NexusApp = priorApp;
+    assert.match(fn('studbud_award_solo_coins('), /least\(p_correct \* 2, 30\), 150 - v_used/, 'server caps solo coins per game and per day');
     console.log('Multiplayer social tests passed (staff modes, no bots/rewards/progress, buds discovery/join, live lobby/session roster, guests/offline).');
 }
 run().catch(error => { console.error(error); process.exitCode = 1; });

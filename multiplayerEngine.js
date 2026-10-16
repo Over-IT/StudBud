@@ -802,6 +802,7 @@
             this.reportScore(true);
             this.closeQuestion(true);
             this.renderResults();
+            this.awardPracticeCoins();
             const me = this.standingsCache.findIndex(row => row.id === this.user.id);
             window.NexusApp?.saveGameSummary?.(this).catch(error => {
                 console.error('[Game] Could not save match summary:', error);
@@ -810,6 +811,34 @@
             window.StudBudSfx?.stopMusic();
             const won = this.game?.isWinner ? this.game.isWinner(this.standingsCache, this.user.id) : me === 0;
             this.sfx(won ? 'win' : 'lose');
+        }
+
+        // Solo practice pays coins for correct answers through the server-capped solo reward.
+        practiceCoinsEligible() {
+            return Boolean(this.practice && !this.testing && !this.preview && this.user && !this.user.is_anonymous
+                && this.user.id !== 'local-practice' && this.api?.awardSoloCoins
+                && !window.StudBudCloud?.offlineMode && window.navigator?.onLine !== false);
+        }
+
+        async awardPracticeCoins() {
+            if (this.practiceCoinsRequested || !this.practiceCoinsEligible()) return;
+            this.practiceCoinsRequested = true;
+            const total = Math.min(100, Math.max(0, Math.floor(this.answered || 0)));
+            const correct = Math.min(total, Math.max(0, Math.floor(this.correct || 0)));
+            if (!correct) { this.rewards = { [this.user.id]: 0 }; this.renderResults(); return; }
+            try {
+                const profile = await this.api.awardSoloCoins(correct, total);
+                const earned = Number(profile?.coins_awarded || 0);
+                this.rewards = { [this.user.id]: earned };
+                this.practiceCoinLimit = !earned;
+                const app = window.NexusApp;
+                if (app && profile) { app.multiplayerProfile = profile; app.renderMultiplayerProfile?.(true); }
+            } catch (error) {
+                console.error('[Arcade] Practice coins could not be awarded:', error);
+                this.rewards = { [this.user.id]: 0 };
+                this.practiceCoinError = true;
+            }
+            if (!this.destroyed) this.renderResults();
         }
 
         // ---------- questions ----------
@@ -1534,6 +1563,16 @@
             this.meterState = { hidden, value, low, label };
         }
 
+        practiceResultText() {
+            if (!this.practiceCoinsEligible()) return 'Sign in and stay online to earn coins from solo games.';
+            if (!this.rewards) return 'Adding up your coins…';
+            const earned = Number(this.rewards[this.user.id] || 0);
+            if (this.practiceCoinError) return 'Coins could not be added right now. Check your connection.';
+            if (earned) return `You earned ${earned} coins for your correct answers.`;
+            if (this.practiceCoinLimit) return 'Daily game coin limit reached. Come back tomorrow!';
+            return 'Answer questions correctly to earn coins.';
+        }
+
         renderResults() {
             if (this.preview) return;
             const panel = this.overlay.querySelector('.mpg-results');
@@ -1551,14 +1590,14 @@
             panel.innerHTML = `<div class="mpg-results-card">
                 <small>${this.testing ? 'Test finished' : this.practice ? 'Practice complete' : 'Match over'}</small>
                 <h2>${esc(title)}</h2>
-                <ol>${rows.map(row => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${rows.findIndex(other => this.metric(other) === this.metric(row)) + 1}</span>${avatarMarkup(row, 'mpg-player-avatar')}<strong>${esc(row.n)} ${accountTagMarkup(row.username, row.tags)}</strong><b>${this.valueText(row)}</b><em>${!this.user.is_anonymous && this.rewards ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
+                <ol>${rows.map(row => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${rows.findIndex(other => this.metric(other) === this.metric(row)) + 1}</span>${avatarMarkup(row, 'mpg-player-avatar')}<strong>${esc(row.n)} ${accountTagMarkup(row.username, row.tags)}</strong><b>${this.valueText(row)}</b><em>${!this.user.is_anonymous && this.rewards && (!this.practice || row.id === this.user.id) ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
                 <p class="mpg-accuracy">${this.answered ? `${Math.round(this.correct / this.answered * 100)}% correct` : 'No answers submitted'} · ${this.correct} correct · ${Math.max(0, this.answered - this.correct)} incorrect · ${this.answered} answered</p>
                 <details class="mpg-summary"><summary>Full game summary</summary>
                     <p>${Math.round(this.t)} seconds played · ${(this.questionHistory || []).filter(answer => answer.correct === null).length} skipped</p>
                     ${questionHistoryMarkup(this.questionHistory)}
                     ${window.NexusApp?.studySetMarkup?.(this.studySet) || ''}
                 </details>
-                <p>${this.testing ? 'Staff tests do not award coins or save study progress.' : this.user.is_anonymous ? 'Guest match complete. Guest sessions do not save account progress or earn coins.' : this.practice ? 'Local results only. Practice games and staff tests do not award coins.' : this.rewards ? 'Coins have been added to your multiplayer wallet.' : 'Tallying coin rewards…'}</p>
+                <p>${this.testing ? 'Staff tests do not award coins or save study progress.' : this.user.is_anonymous ? 'Guest match complete. Guest sessions do not save account progress or earn coins.' : this.practice ? this.practiceResultText() : this.rewards ? 'Coins have been added to your multiplayer wallet.' : 'Tallying coin rewards…'}</p>
                 <button type="button" class="mpg-exit">${this.practice ? 'Back to game setup' : 'Back to lobby'}</button>
             </div>`;
             panel.querySelector('.mpg-summary').open = Boolean(summaryOpen);

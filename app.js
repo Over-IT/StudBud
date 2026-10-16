@@ -1265,6 +1265,7 @@
                     if (event.target.checked && !revealed) document.getElementById('study-type-input').focus({ preventScroll: true });
                 }
             });
+            this.startPresence();
             window.addEventListener('online', () => {
                 this.syncPendingStudyTime().catch(error => {
                     console.error('[NexusApp] Pending study time could not be synced:', error);
@@ -3616,7 +3617,7 @@
                 const wins = document.getElementById('multiplayer-wins');
                 if (wins) wins.textContent = Number(profile.wins).toLocaleString();
                 this.renderMultiplayerShop(profile);
-                shopStatus.textContent = 'Earn coins from flashcard quizzes, multiplayer matches and your daily reward. Multiplayer practice games do not award coins.';
+                shopStatus.textContent = 'Earn coins from flashcard quizzes, solo and multiplayer games, and your daily reward. Staff test games do not award coins.';
                 this.renderDailyReward(profile);
                 const best = document.getElementById('waiting-runner-best');
                 if (best) {
@@ -6839,6 +6840,7 @@
             if (this.practiceSession) this.practiceSession.destroy();
             this.practiceSession = null;
             if (!this.arcadeSession) document.body.classList.remove('mpg-active');
+            this.pingPresence?.(true);
         }
 
         startMultiplayerPractice() {
@@ -6905,6 +6907,7 @@
                 onRestart: config.testing ? () => { this.closePractice(); this.startPractice(room.mode, config); } : undefined
             });
             document.body.classList.add('mpg-active');
+            this.pingPresence(true);
             try {
                 const demo = { mode: room.mode, session: s, game: s.game, meId: user.id, clock: 0 };
                 demo.bots = this.initPreviewBots(demo, room.mode, s.game).slice(0, botCount);
@@ -7240,9 +7243,71 @@
             }
         }
 
-        friendRoomMarkup(room) {
-            if (!room) return '';
-            return `<span class="friend-game-status">Hosting ${this.escapeHTML(room.mode)}${room.staff_test ? ' · staff test' : ''}</span><button type="button" class="primary-btn" data-action="friend-join-game" data-code="${this.escapeHTML(room.room_code)}">Join</button>`;
+        gameModeLabel(mode) {
+            const names = {
+                skyline: 'Escape to Space', river: 'River Fishing', market: 'Package Delivery', miner: 'Crystal Mining',
+                duel: 'King of the Hill', shooter: 'Arena Shooter', defense: 'Team Tower Defense', chess: 'Question Chess',
+                crypto: 'Crypto Trading', fishing: 'Fishing Frenzy', hack: 'Crypto Hack', frenzy: 'Fishing Frenzy',
+                classic: 'Flashcard Face-off', rush: 'Rapid Recall', survival: 'Last Learner Standing', sports: 'Soccer'
+            };
+            const key = String(mode || '');
+            return names[key] || (key ? key[0].toUpperCase() + key.slice(1) : 'a game');
+        }
+
+        presenceActivity() {
+            const session = this.practiceSession;
+            if (!session || session.destroyed || session.testing || session.over) return '';
+            const mode = String(session.mode || '').toLowerCase();
+            return /^[a-z]{2,16}$/.test(mode) ? `solo:${mode}` : '';
+        }
+
+        // Lets buds see you as online (and which solo game you're playing) while the app is open.
+        pingPresence(force = false) {
+            const cloud = window.StudBudCloud;
+            if (!cloud?.pingPresence || !cloud.user || cloud.user.is_anonymous || cloud.offlineMode) return;
+            if (document.hidden || window.navigator?.onLine === false) return;
+            const activity = this.presenceActivity();
+            const now = Date.now();
+            if (!force && activity === this.lastPresenceActivity && now - (this.lastPresencePing || 0) < 40000) return;
+            this.lastPresencePing = now;
+            this.lastPresenceActivity = activity;
+            cloud.pingPresence(activity).catch(() => { this.lastPresencePing = 0; });
+        }
+
+        startPresence() {
+            if (this.presenceTimer) return;
+            this.presenceTimer = setInterval(() => this.pingPresence(), 45000);
+            document.addEventListener('visibilitychange', () => { if (!document.hidden) this.pingPresence(true); });
+            window.addEventListener('online', () => this.pingPresence(true));
+            setTimeout(() => this.pingPresence(true), 1500);
+        }
+
+        friendPresenceMarkup(presence, fallbackRoom) {
+            const status = presence?.status || (fallbackRoom ? 'hosting' : '');
+            const mode = presence?.mode || fallbackRoom?.mode;
+            const code = presence ? presence.room_code : fallbackRoom?.room_code;
+            const label = status === 'hosting'
+                ? `Hosting ${this.gameModeLabel(mode)}${presence?.room_status === 'playing' ? ' · in progress' : ''}${(presence || fallbackRoom)?.staff_test ? ' · staff test' : ''}`
+                : status === 'in_game' ? `In a ${this.gameModeLabel(mode)} match`
+                    : status === 'solo' ? `Playing ${this.gameModeLabel(mode)} solo`
+                        : status === 'online' ? 'Online'
+                            : status === 'offline' ? this.lastSeenLabel(presence.last_seen_at) : '';
+            const cls = ['hosting', 'in_game', 'solo'].includes(status) ? 'is-playing' : status === 'online' ? 'is-online' : 'is-offline';
+            const pill = label ? `<span class="friend-presence ${cls}"><i aria-hidden="true"></i>${this.escapeHTML(label)}</span>` : '';
+            const join = status === 'hosting' && code
+                ? `<button type="button" class="primary-btn" data-action="friend-join-game" data-code="${this.escapeHTML(code)}">Join</button>` : '';
+            return { pill, join };
+        }
+
+        lastSeenLabel(value) {
+            const time = value ? new Date(value).getTime() : NaN;
+            if (!Number.isFinite(time)) return 'Offline';
+            const minutes = Math.max(1, Math.round((Date.now() - time) / 60000));
+            if (minutes < 60) return `Offline · seen ${minutes}m ago`;
+            const hours = Math.round(minutes / 60);
+            if (hours < 24) return `Offline · seen ${hours}h ago`;
+            const days = Math.round(hours / 24);
+            return days < 30 ? `Offline · seen ${days}d ago` : 'Offline';
         }
 
         async joinFriendGame(code) {
@@ -7280,14 +7345,23 @@
             this.friendLoadBusy = true;
             try {
                 const data = await games.friendCall('studbud_friend_overview');
-                const rooms = await cloud.getFriendRooms?.().catch(() => []) || [];
+                // Presence needs the latest SQL; older databases fall back to the hosted-room lookup.
+                const presenceList = await cloud.getFriendPresence?.().catch(() => null) ?? null;
+                const rooms = presenceList ? [] : await cloud.getFriendRooms?.().catch(() => []) || [];
                 if (cloud.user?.id !== userId || cloud.offlineMode) return;
                 const hosted = new Map(rooms.map(room => [room.host_id, room]));
+                const presence = new Map((presenceList || []).map(item => [item.user_id, item]));
                 this.friendOverview = data;
-                const person = (row, buttons) => `<li class="friend-row">${this.multiplayerAvatarMarkup(this.profileCosmetics(row), false, 'friend-avatar')}<strong>${this.escapeHTML(row.username)} ${this.accountTagMarkup(row.username, row.tags)}</strong><span class="friend-actions">${buttons}</span></li>`;
+                const person = (row, buttons, status = '') => `<li class="friend-row">${this.multiplayerAvatarMarkup(this.profileCosmetics(row), false, 'friend-avatar')}<span class="friend-identity"><strong>${this.escapeHTML(row.username)} ${this.accountTagMarkup(row.username, row.tags)}</strong>${status}</span><span class="friend-actions">${buttons}</span></li>`;
                 const attrs = row => `data-id="${this.escapeHTML(row.friendship_id)}" data-name="${this.escapeHTML(row.username)}"`;
-                lists.friends.innerHTML = data.friends.length
-                    ? data.friends.map(row => person(row, `${this.friendRoomMarkup(hosted.get(row.user_id))}<button type="button" class="secondary-btn" data-action="friend-view" data-id="${this.escapeHTML(row.user_id)}">Profile</button><button type="button" class="ghost-btn" data-action="friend-remove" ${attrs(row)}>Remove</button>`)).join('')
+                const rank = { hosting: 0, in_game: 1, solo: 2, online: 3, offline: 4 };
+                const friendRank = row => rank[presence.get(row.user_id)?.status || (hosted.has(row.user_id) ? 'hosting' : 'offline')] ?? 4;
+                const friends = data.friends.slice().sort((a, b) => friendRank(a) - friendRank(b));
+                lists.friends.innerHTML = friends.length
+                    ? friends.map(row => {
+                        const { pill, join } = this.friendPresenceMarkup(presence.get(row.user_id), hosted.get(row.user_id));
+                        return person(row, `${join}<button type="button" class="secondary-btn" data-action="friend-view" data-id="${this.escapeHTML(row.user_id)}">Profile</button><button type="button" class="ghost-btn" data-action="friend-remove" ${attrs(row)}>Remove</button>`, pill);
+                    }).join('')
                     : '<li class="empty-state">No buds yet. Send a request using a username above.</li>';
                 lists.incoming.innerHTML = data.incoming.length
                     ? data.incoming.map(row => person(row, `<button type="button" class="primary-btn" data-action="friend-accept" ${attrs(row)}>Accept</button><button type="button" class="ghost-btn" data-action="friend-decline" ${attrs(row)}>Decline</button>`)).join('')
