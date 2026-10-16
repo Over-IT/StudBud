@@ -501,9 +501,7 @@
             const s = this.s, me = this.me;
             ctx.fillStyle = '#080b12'; ctx.fillRect(0, 0, w, h);
             this.begin(ctx, w, h, 820, 1.4);
-            const sky = ctx.createLinearGradient(0, 0, 0, 4 * TS);
-            sky.addColorStop(0, '#38bdf8'); sky.addColorStop(0.72, '#bae6fd'); sky.addColorStop(1, '#e0f2fe');
-            ctx.fillStyle = sky; ctx.fillRect(this.x0, 0, this.x1 - this.x0, 4 * TS);
+            if (this.y0 < 4 * TS) A.util.bandGradient(ctx, this.x0, 0, this.x1 - this.x0, 4 * TS, [[0, '#38bdf8'], [0.72, '#bae6fd'], [1, '#e0f2fe']]);
             ctx.fillStyle = 'rgba(255,255,255,.72)';
             if (this.y0 < 150 && this.y1 > 20) for (let i = Math.floor(this.x0 / 260) - 1; i < this.x1 / 260 + 1; i++) {
                 const hx = A.util.hashStr(`cloud:${i}`), cx = i * 260 + (hx % 130), cy = 42 + ((hx >>> 8) % 74);
@@ -679,9 +677,9 @@
             // Lantern fog: the deeper you go, the smaller the circle you can see.
             const fog = s.preview ? clamp(depth / 66, 0.03, 0.5) : clamp(0.25 + depth / 14, 0.25, 0.95);
             const inner = (s.preview ? 260 : clamp(230 - depth * 1.4, 150, 230)) * this.zoom;
-            const light = ctx.createRadialGradient(px, py, inner * 0.45, px, py, inner * 1.75);
-            light.addColorStop(0, 'rgba(255,224,160,.05)'); light.addColorStop(0.35, `rgba(2,5,14,${fog * 0.35})`); light.addColorStop(1, `rgba(2,5,14,${fog})`);
-            ctx.fillStyle = light; ctx.fillRect(0, 0, w, h);
+            const fogA = Math.round(fog * 100) / 100, r = Math.round(inner);
+            A.util.radialOverlay(this, 'fogLayer', ctx, px, py, r * 0.45, r * 1.75,
+                [[0, 'rgba(255,224,160,.05)'], [0.35, `rgba(2,5,14,${(fogA * 0.35).toFixed(3)})`], [1, `rgba(2,5,14,${fogA})`]], w, h);
             if (s.preview) return;
             s.placeHud(ctx, 0, 0, 230, 34, 'top-center');
             ctx.fillStyle = this.lowFuel ? 'rgba(127,29,29,.9)' : 'rgba(8,12,24,.76)'; A.util.roundRect(ctx, 0, 0, 230, 34, 10); ctx.fill();
@@ -1021,9 +1019,7 @@
             const s = this.s, me = this.me, now = clock(s), t = this.anim;
             ctx.fillStyle = '#0c4a6e'; ctx.fillRect(0, 0, w, h);
             this.begin(ctx, w, h);
-            const g = ctx.createLinearGradient(0, this.bank, 0, this.H - this.bank);
-            g.addColorStop(0, '#0e7490'); g.addColorStop(0.5, '#0891b2'); g.addColorStop(1, '#0e7490');
-            ctx.fillStyle = g; ctx.fillRect(this.x0, this.bank, this.x1 - this.x0, this.H - this.bank * 2);
+            A.util.bandGradient(ctx, this.x0, this.bank, this.x1 - this.x0, this.H - this.bank * 2, [[0, '#0e7490'], [0.5, '#0891b2'], [1, '#0e7490']]);
             ctx.fillStyle = '#49b4b9';
             ctx.fillRect(this.x0, this.bank, this.x1 - this.x0, 80);
             ctx.fillRect(this.x0, this.H - this.bank - 80, this.x1 - this.x0, 80);

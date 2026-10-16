@@ -316,6 +316,130 @@
             y1: y + Math.max(0, dy) + Math.max(0, ey) + margin };
     }
 
+    const rgbCache = new Map();
+    function parseRgb(color) {
+        let rgb = rgbCache.get(color);
+        if (rgb) return rgb;
+        const text = String(color).trim();
+        if (text[0] === '#') {
+            const hex = text.length === 4 ? text.slice(1).split('').map(c => c + c).join('') : text.slice(1, 7);
+            const n = parseInt(hex, 16);
+            rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+        } else {
+            const parts = text.match(/[\d.]+/g) || [0, 0, 0];
+            rgb = [+parts[0] || 0, +parts[1] || 0, +parts[2] || 0];
+        }
+        if (rgbCache.size > 512) rgbCache.clear();
+        rgbCache.set(color, rgb);
+        return rgb;
+    }
+
+    // Opaque linear gradient painted as thin solid bands. Software-rasterized canvases (common on low-end
+    // devices) fill solid rectangles several times faster than gradients; bands stay ~4 device pixels wide,
+    // which is visually identical to the 8-bit gradient. Only bands inside the visible view are drawn.
+    function bandGradient(ctx, x, y, w, h, stops, horizontal = false) {
+        if (!(w > 0 && h > 0) || !stops?.length) return;
+        const m = ctx.getTransform?.();
+        const view = canvasView(ctx);
+        if (!m || !view || typeof m.a !== 'number') {
+            const g = ctx.createLinearGradient(x, y, horizontal ? x + w : x, horizontal ? y : y + h);
+            for (const [offset, color] of stops) g.addColorStop(offset, color);
+            ctx.fillStyle = g; ctx.fillRect(x, y, w, h);
+            return;
+        }
+        const span = horizontal ? w : h;
+        const pixelScale = horizontal ? Math.hypot(m.a, m.b) : Math.hypot(m.c, m.d);
+        const step = Math.max(span / 1024, 4 / Math.max(pixelScale, 1e-6));
+        const lo = Math.max(0, (horizontal ? view.x0 - x : view.y0 - y));
+        const hi = Math.min(span, (horizontal ? view.x1 - x : view.y1 - y));
+        if (hi <= lo) return;
+        const colors = stops.map(([offset, color]) => [offset, parseRgb(color)]);
+        const colorAt = t => {
+            if (t <= colors[0][0]) return colors[0][1];
+            for (let i = 1; i < colors.length; i++) {
+                const [o1, c1] = colors[i];
+                if (t <= o1) {
+                    const [o0, c0] = colors[i - 1], k = o1 > o0 ? (t - o0) / (o1 - o0) : 1;
+                    return [c0[0] + (c1[0] - c0[0]) * k, c0[1] + (c1[1] - c0[1]) * k, c0[2] + (c1[2] - c0[2]) * k];
+                }
+            }
+            return colors[colors.length - 1][1];
+        };
+        let last = '';
+        for (let a = Math.floor(lo / step) * step; a < hi; a += step) {
+            const b = Math.min(span, a + step), c = colorAt((a + b) / 2 / span);
+            const style = `rgb(${c[0] + .5 | 0},${c[1] + .5 | 0},${c[2] + .5 | 0})`;
+            if (style !== last) { ctx.fillStyle = style; last = style; }
+            // Slight overlap hides anti-aliased seams between neighbouring bands.
+            if (horizontal) ctx.fillRect(x + a, y, b - a + step * .5, h);
+            else ctx.fillRect(x, y + a, w, b - a + step * .5);
+        }
+    }
+
+    // Screen-space art that only changes with its signature (vignettes, static backdrops) is rendered once at
+    // device resolution and then copied 1:1, which avoids per-frame gradient and scaled-image rasterization.
+    function screenLayer(owner, slot, signature, ctx, paint) {
+        const m = ctx.getTransform?.(), canvas = ctx.canvas;
+        const doc = typeof document !== 'undefined' ? document : null;
+        if (!m || typeof m.a !== 'number' || m.b || m.c || !canvas?.width || !canvas?.height || !doc?.createElement) { paint(ctx); return; }
+        const key = `${signature}|${canvas.width}x${canvas.height}|${m.a},${m.d},${m.e},${m.f}`;
+        let layer = owner[slot];
+        if (!layer || layer.key !== key) {
+            const surface = layer?.canvas || doc.createElement('canvas');
+            surface.width = canvas.width; surface.height = canvas.height;
+            const paintCtx = surface.getContext?.('2d');
+            if (!paintCtx) { paint(ctx); return; }
+            paintCtx.setTransform(m.a, 0, 0, m.d, m.e, m.f);
+            paint(paintCtx);
+            layer = owner[slot] = { key, canvas: surface };
+        }
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.drawImage(layer.canvas, 0, 0);
+        ctx.restore();
+    }
+
+    // Full-screen radial overlay (e.g. a lantern/fog circle) cached as one device-resolution disc; the area
+    // beyond the outer radius is the final stop colour, so it is covered with four cheap solid rectangles.
+    function radialOverlay(owner, slot, ctx, cx, cy, r0, r1, stops, w, h) {
+        const m = ctx.getTransform?.(), canvas = ctx.canvas;
+        const doc = typeof document !== 'undefined' ? document : null;
+        const fallback = () => {
+            const g = ctx.createRadialGradient(cx, cy, r0, cx, cy, r1);
+            for (const [offset, color] of stops) g.addColorStop(offset, color);
+            ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+        };
+        if (!m || typeof m.a !== 'number' || m.b || m.c || Math.abs(m.a - m.d) > 1e-6 || !canvas?.width || !doc?.createElement) return fallback();
+        const R = Math.ceil(r1 * m.a), size = R * 2;
+        if (size <= 0 || size > 4096) return fallback();
+        const key = `${JSON.stringify(stops)}|${Math.round(r0 * m.a)}|${R}`;
+        let layer = owner[slot];
+        if (!layer || layer.key !== key) {
+            const surface = layer?.canvas || doc.createElement('canvas');
+            surface.width = surface.height = size;
+            const paint = surface.getContext?.('2d');
+            if (!paint) return fallback();
+            const g = paint.createRadialGradient(R, R, r0 * m.a, R, R, R);
+            for (const [offset, color] of stops) g.addColorStop(offset, color);
+            paint.fillStyle = g; paint.fillRect(0, 0, size, size);
+            layer = owner[slot] = { key, canvas: surface };
+        }
+        const ox = Math.round(cx * m.a + m.e - R), oy = Math.round(cy * m.d + m.f - R);
+        const W = canvas.width, H = canvas.height;
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.drawImage(layer.canvas, ox, oy);
+        ctx.fillStyle = stops[stops.length - 1][1];
+        if (oy > 0) ctx.fillRect(0, 0, W, oy);
+        if (oy + size < H) ctx.fillRect(0, oy + size, W, H - oy - size);
+        const top = Math.max(0, oy), bottom = Math.min(H, oy + size);
+        if (bottom > top) {
+            if (ox > 0) ctx.fillRect(0, top, ox, bottom - top);
+            if (ox + size < W) ctx.fillRect(ox + size, top, W - ox - size, bottom - top);
+        }
+        ctx.restore();
+    }
+
     class Particles {
         constructor(session) { this.items = []; this.session = session; }
         burst(x, y, color, count = 10, speed = 160, life = 0.5, size = 4) {
@@ -2619,6 +2743,6 @@
     window.StudBudArcade = {
         graphicsProfile,
         Session, BaseGame, Particles, Resource, ENERGY_COSTS, games: {},
-        util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, VerticalIndex, slopeY, slopeSurface, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, accountTagMarkup, who, playerCosmetics, avatarUrl, avatarMarkup, animatedCosmetics, drawAvatar, observeAvatars, drawHat, drawFigureSide, drawFigureTop, sceneZoom, canvasView, questionHistoryMarkup, defaultPlayerColors }
+        util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, VerticalIndex, slopeY, slopeSurface, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, accountTagMarkup, who, playerCosmetics, avatarUrl, avatarMarkup, animatedCosmetics, drawAvatar, observeAvatars, drawHat, drawFigureSide, drawFigureTop, sceneZoom, canvasView, bandGradient, screenLayer, radialOverlay, parseRgb, questionHistoryMarkup, defaultPlayerColors }
     };
 })(window);

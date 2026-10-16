@@ -12,30 +12,14 @@
 
     function duelBackdrop(ctx, w, h, game) {
         const low = !!game.s.graphics?.low;
-        let layer = game.backdropLayer;
-        if (!layer || layer.w !== w || layer.h !== h || layer.low !== low) {
-            const canvas = document.createElement?.('canvas');
-            if (canvas) {
-                canvas.width = Math.ceil(w); canvas.height = Math.ceil(h);
-                const paint = canvas.getContext('2d');
-                if (paint) {
-                    if (low) paint.fillStyle = '#0b1230';
-                    else {
-                        const gradient = paint.createLinearGradient(0, 0, 0, h);
-                        gradient.addColorStop(0, '#0b1230'); gradient.addColorStop(1, '#3b1a5c');
-                        paint.fillStyle = gradient;
-                    }
-                    paint.fillRect(0, 0, w, h);
-                    for (let i = 0; i < (low ? 16 : 70); i++) {
-                        paint.fillStyle = `rgba(255,255,255,${0.2 + (i % 5) * 0.12})`;
-                        paint.fillRect((hashStr(`st${i}`) % 1000) / 1000 * w, (hashStr(`sy${i}`) % 600) / 600 * h * 0.8, 2, 2);
-                    }
-                    layer = game.backdropLayer = { canvas, w, h, low };
-                }
+        A.util.screenLayer(game, 'backdropLayer', `duel:${low}:${w}:${h}`, ctx, paint => {
+            if (low) { paint.fillStyle = '#0b1230'; paint.fillRect(0, 0, w, h); }
+            else A.util.bandGradient(paint, 0, 0, w, h, [[0, '#0b1230'], [1, '#3b1a5c']]);
+            for (let i = 0; i < (low ? 16 : 70); i++) {
+                paint.fillStyle = `rgba(255,255,255,${0.2 + (i % 5) * 0.12})`;
+                paint.fillRect((hashStr(`st${i}`) % 1000) / 1000 * w, (hashStr(`sy${i}`) % 600) / 600 * h * 0.8, 2, 2);
             }
-        }
-        if (layer) ctx.drawImage(layer.canvas, 0, 0, w, h);
-        else { ctx.fillStyle = '#0b1230'; ctx.fillRect(0, 0, w, h); }
+        });
     }
 
     function drawRunner(ctx, x, y, w, h, who, face, time, state, alpha = 1) {
@@ -44,11 +28,7 @@
     A.util.drawRunner = drawRunner;
 
     function skyBackdrop(ctx, w, h, camX, top, bottom, accent) {
-        const g = ctx.createLinearGradient(0, 0, 0, h);
-        g.addColorStop(0, top);
-        g.addColorStop(1, bottom);
-        ctx.fillStyle = g;
-        ctx.fillRect(0, 0, w, h);
+        A.util.bandGradient(ctx, 0, 0, w, h, [[0, top], [1, bottom]]);
         ctx.fillStyle = accent;
         ctx.beginPath();
         ctx.arc(w * 0.78, h * 0.28, 70, 0, TAU);
@@ -129,10 +109,7 @@
 
     function climbBackdrop(ctx, w, h, cam, camStart, blend, anim, low = false) {
         const { from: i, to: j, amount: t } = blend;
-        const g = ctx.createLinearGradient(0, 0, 0, h);
-        g.addColorStop(0, mixHex(SKY_BIOMES[i].top, SKY_BIOMES[j].top, t));
-        g.addColorStop(1, mixHex(SKY_BIOMES[i].bottom, SKY_BIOMES[j].bottom, t));
-        ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+        A.util.bandGradient(ctx, 0, 0, w, h, [[0, mixHex(SKY_BIOMES[i].top, SKY_BIOMES[j].top, t)], [1, mixHex(SKY_BIOMES[i].bottom, SKY_BIOMES[j].bottom, t)]]);
         const down = camStart - cam.y;
         const weight = biome => (i === biome ? 1 - t : 0) + (j === biome ? t : 0);
         const cA = weight(0);
@@ -1726,9 +1703,8 @@
             const colors = [['#475569', '#334155', '#cbd5e1'], ['#785448', '#503b37', '#d6b599'], ['#52646a', '#33454b', '#a5c4cc']];
             const material = colors[p.style || 0];
             const body = mixHex(B.body, material[0], .2), shade = mixHex(B.body, '#0f172a', .3), trim = B.edge;
-            const gradient = ctx.createLinearGradient(p.x, 0, p.x + p.w, 0);
-            gradient.addColorStop(0, shade); gradient.addColorStop(.55, body); gradient.addColorStop(1, shade);
-            ctx.fillStyle = low ? body : gradient; ctx.fillRect(p.x, p.y, p.w, p.h);
+            if (low) { ctx.fillStyle = body; ctx.fillRect(p.x, p.y, p.w, p.h); }
+            else A.util.bandGradient(ctx, p.x, p.y, p.w, p.h, [[0, shade], [.55, body], [1, shade]], true);
             ctx.fillStyle = trim; ctx.fillRect(p.x, p.y, p.w, 8);
             ctx.fillStyle = shade; ctx.fillRect(p.x, p.y + 8, p.w, 6);
             const edge = p.x === 0 ? p.x + p.w - 18 : p.x + 10;
@@ -3230,16 +3206,14 @@
             ctx.restore();
             // foreground: soft vignette and drifting haze for depth
             if (!s.graphics?.low) {
-                const transformScale = (s.dpr || 1) * (s.scale || 1);
-                if (!this.foreground || this.foreground.w !== w || this.foreground.h !== h || this.foreground.scale !== transformScale) {
-                    const vg = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.45, w / 2, h / 2, Math.max(w, h) * 0.8);
+                A.util.screenLayer(this, 'foregroundLayer', `${w}:${h}`, ctx, paint => {
+                    const vg = paint.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.45, w / 2, h / 2, Math.max(w, h) * 0.8);
                     vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(2,6,23,.38)');
-                    const hz = ctx.createLinearGradient(0, h * 0.8, 0, h);
+                    const hz = paint.createLinearGradient(0, h * 0.8, 0, h);
                     hz.addColorStop(0, 'rgba(148,163,184,0)'); hz.addColorStop(1, 'rgba(148,163,184,.14)');
-                    this.foreground = { w, h, scale: transformScale, vg, hz };
-                }
-                ctx.fillStyle = this.foreground.vg; ctx.fillRect(0, 0, w, h);
-                ctx.fillStyle = this.foreground.hz; ctx.fillRect(0, h * 0.8, w, h * 0.2);
+                    paint.fillStyle = vg; paint.fillRect(0, 0, w, h);
+                    paint.fillStyle = hz; paint.fillRect(0, h * 0.8, w, h * 0.2);
+                });
             }
         }
     }
@@ -4062,21 +4036,28 @@
             const x0 = this.cam.x - w / zoom / 2, y0 = this.cam.y - h / zoom / 2;
             const x1 = x0 + w / zoom, y1 = y0 + h / zoom;
             const visible = (x, y, pad = 70) => x >= x0 - pad && x <= x1 + pad && y >= y0 - pad && y <= y1 + pad;
-            if (!this.floorPattern && ctx.createPattern && !s.preview) {
-                const tile = document.createElement('canvas');
-                tile.width = tile.height = 160;
-                const paint = tile.getContext('2d');
-                paint.fillStyle = '#0d1428'; paint.fillRect(0, 0, 160, 160);
-                for (let y = 0; y < 160; y += 80) for (let x = 0; x < 160; x += 80) {
-                    paint.fillStyle = (x + y) % 160 ? '#111c31' : '#0e182b';
-                    paint.fillRect(x + 2, y + 2, 76, 76);
-                    paint.fillStyle = 'rgba(148,163,184,.08)'; paint.fillRect(x + 9, y + 11, 20, 2); paint.fillRect(x + 67, y + 67, 3, 3);
-                    paint.strokeStyle = 'rgba(99,102,241,.14)';
-                    paint.strokeRect(x, y, 80, 80);
+            {
+                // Floor tiles as batched solid rects (a scaled pattern fill is far slower to rasterize).
+                const fx0 = Math.max(0, x0), fy0 = Math.max(0, y0), fx1 = Math.min(this.W, x1), fy1 = Math.min(this.H, y1);
+                if (fx1 > fx0 && fy1 > fy0) {
+                    ctx.fillStyle = '#0d1428'; ctx.fillRect(fx0, fy0, fx1 - fx0, fy1 - fy0);
+                    if (!s.preview) {
+                        const c0 = Math.floor(fx0 / 80), c1 = Math.ceil(fx1 / 80), r0 = Math.floor(fy0 / 80), r1 = Math.ceil(fy1 / 80);
+                        for (const parity of [0, 1]) {
+                            ctx.fillStyle = parity ? '#111c31' : '#0e182b'; ctx.beginPath();
+                            for (let r = r0; r < r1; r++) for (let c = c0; c < c1; c++) if (((r + c) & 1) === parity) ctx.rect(c * 80 + 2, r * 80 + 2, 76, 76);
+                            ctx.fill();
+                        }
+                        ctx.fillStyle = 'rgba(148,163,184,.08)'; ctx.beginPath();
+                        for (let r = r0; r < r1; r++) for (let c = c0; c < c1; c++) { ctx.rect(c * 80 + 9, r * 80 + 11, 20, 2); ctx.rect(c * 80 + 67, r * 80 + 67, 3, 3); }
+                        ctx.fill();
+                        ctx.strokeStyle = 'rgba(99,102,241,.14)'; ctx.lineWidth = 1; ctx.beginPath();
+                        for (let c = c0; c <= c1; c++) { ctx.moveTo(c * 80, fy0); ctx.lineTo(c * 80, fy1); }
+                        for (let r = r0; r <= r1; r++) { ctx.moveTo(fx0, r * 80); ctx.lineTo(fx1, r * 80); }
+                        ctx.stroke();
+                    } else { ctx.fillStyle = '#0e182b'; ctx.fillRect(fx0, fy0, fx1 - fx0, fy1 - fy0); }
                 }
-                this.floorPattern = ctx.createPattern(tile, 'repeat');
             }
-            ctx.fillStyle = this.floorPattern || '#0e182b'; ctx.fillRect(Math.max(0, x0), Math.max(0, y0), Math.max(0, Math.min(this.W, x1) - Math.max(0, x0)), Math.max(0, Math.min(this.H, y1) - Math.max(0, y0)));
             for (const wl of this.walls) {
                 if (wl.x > x0 + w / zoom + 50 || wl.x + wl.w < x0 - 50 || wl.y > y0 + h / zoom + 50 || wl.y + wl.h < y0 - 50) continue;
                 ctx.fillStyle = 'rgba(0,0,0,.38)'; ctx.fillRect(wl.x + 10, wl.y + 13, wl.w, wl.h);

@@ -108,6 +108,74 @@ const uiSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8
 assert.ok(!uiSource.includes('id="game-quality"'), 'obsolete quality selector is absent');
 assert.ok(!fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8').includes('low-effects'), 'quality CSS cannot silently suppress effects');
 console.log('Full-quality rendering, legacy preference compatibility, viewport particle culling and unchanged simulation passed.');
+{
+    const recorder = (transform, width = 200, height = 100) => {
+        const log = { rects: [], gradients: 0, images: [], styles: [] };
+        let m = { ...transform };
+        const stack = [];
+        const ctx = {
+            canvas: { width, height }, log,
+            getTransform: () => ({ ...m }),
+            setTransform(a, b, c, d, e, f) { m = { a, b, c, d, e, f }; },
+            save() { stack.push({ ...m }); }, restore() { m = stack.pop(); },
+            createLinearGradient() { log.gradients++; return { addColorStop() {} }; },
+            createRadialGradient() { log.gradients++; return { addColorStop() {} }; },
+            fillRect(x, y, w, h) { log.rects.push({ x, y, w, h, m: { ...m }, style: ctx.fillStyle }); },
+            drawImage(image, x, y) { log.images.push({ image, x, y, m: { ...m } }); }
+        };
+        return ctx;
+    };
+    const banded = recorder({ a: 2, b: 0, c: 0, d: 2, e: 0, f: 0 });
+    A.util.bandGradient(banded, 0, -100, 100, 400, [[0, '#000000'], [1, '#ffffff']]);
+    assert.equal(banded.log.gradients, 0, 'band gradients use solid fills instead of gradient rasterization');
+    assert.ok(banded.log.rects.length > 0 && banded.log.rects.length <= 40, 'only bands inside the 50px-tall view are drawn');
+    assert.ok(banded.log.rects.every(r => r.y + r.h >= 0 && r.y <= 50), 'off-screen bands are culled');
+    assert.ok(banded.log.rects.every(r => r.h <= 400 / 1024 * 3 + 2 * 1.5 + 1e-9), 'bands stay a few device pixels tall');
+    const shades = banded.log.rects.map(r => +r.style.match(/\d+/)[0]);
+    assert.ok(shades.every((v, i) => !i || v >= shades[i - 1]) && shades[0] > 50 && shades.at(-1) < 100, 'band colours follow the gradient at its visible position');
+    const plain = { fillRect() {}, createLinearGradient() { plain.made = true; return { addColorStop() {} }; } };
+    A.util.bandGradient(plain, 0, 0, 10, 10, [[0, '#000'], [1, '#fff']]);
+    assert.ok(plain.made, 'band gradients fall back to a real gradient on lightweight contexts');
+    assert.deepEqual([...A.util.parseRgb('#0e7490')], [14, 116, 144]);
+    assert.deepEqual([...A.util.parseRgb('#fff')], [255, 255, 255]);
+    assert.deepEqual([...A.util.parseRgb('rgb(1, 2, 3)')], [1, 2, 3]);
+
+    const oldCreate = sandbox.document.createElement;
+    const surfaces = [];
+    sandbox.document.createElement = () => { const surface = { width: 0, height: 0 }; surface.getContext = () => (surface.ctx ||= recorder({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }, 0, 0)); surfaces.push(surface); return surface; };
+    try {
+        const screen = recorder({ a: 3, b: 0, c: 0, d: 3, e: 0, f: 0 }, 300, 150), owner = {};
+        let paints = 0;
+        const painter = p => { paints++; p.fillRect(0, 0, 100, 50); };
+        for (let i = 0; i < 5; i++) A.util.screenLayer(owner, 'layer', 'a', screen, painter);
+        assert.equal(paints, 1, 'static screen layers are painted once and reused');
+        assert.equal(screen.log.images.length, 5, 'cached layers are blitted every frame');
+        assert.ok(screen.log.images.every(img => img.m.a === 1 && img.m.d === 1 && img.x === 0 && img.y === 0), 'layers are copied 1:1 at device resolution');
+        assert.deepEqual({ ...screen.getTransform() }, { a: 3, b: 0, c: 0, d: 3, e: 0, f: 0 }, 'caller transform is restored');
+        assert.equal(surfaces[0].width, 300, 'layer matches device pixels');
+        A.util.screenLayer(owner, 'layer', 'b', screen, painter);
+        assert.equal(paints, 2, 'changed signatures repaint the layer');
+        let direct = 0;
+        A.util.screenLayer({}, 'layer', 'a', { fillRect() {} }, () => direct++);
+        assert.equal(direct, 1, 'contexts without transforms paint directly');
+
+        const fogCtx = recorder({ a: 2, b: 0, c: 0, d: 2, e: 0, f: 0 }, 1000, 600), fogOwner = {};
+        const fogStops = [[0, 'rgba(255,224,160,.05)'], [1, 'rgba(2,5,14,.5)']];
+        for (let i = 0; i < 4; i++) A.util.radialOverlay(fogOwner, 'fog', fogCtx, 250, 150, 20, 100, fogStops, 500, 300);
+        assert.equal(fogCtx.log.gradients, 0, 'fog gradient is never rasterized full-screen on the main canvas');
+        assert.equal(fogCtx.log.images.length, 4, 'cached fog disc is blitted each frame');
+        assert.equal(fogCtx.log.images[0].x, 300, 'fog disc is centred on the light in device pixels');
+        const surround = fogCtx.log.rects.slice(0, 4);
+        assert.equal(surround.length, 4, 'area beyond the fog radius is covered with solid rectangles');
+        assert.ok(surround.every(r => r.style === 'rgba(2,5,14,.5)'), 'surrounding fog uses the outer stop colour');
+        assert.equal(surround.reduce((sum, r) => sum + r.w * r.h, 0) + 400 * 400, 1000 * 600, 'disc plus surrounding rectangles cover the screen exactly once');
+    } finally { sandbox.document.createElement = oldCreate; }
+    for (const [file, banned] of [['multiplayerGames.js', ['floorPattern', 'createPattern']], ['multiplayerGames2.js', ['ctx.createRadialGradient(px, py']]]) {
+        const source = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+        for (const text of banned) assert.ok(!source.includes(text), `${file} avoids slow full-screen ${text}`);
+    }
+    console.log('Banded gradients, cached screen layers and fog overlays passed.');
+}
 vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'multiplayerGames2.js'), 'utf8'), sandbox);
 const arenaView = { x0: 500, x1: 800, y0: 400, y1: 600 };
 assert.equal(A.Arena.prototype.seenRect.call(arenaView, 0, 450, 600, 20, 0), true, 'large rectangles crossing the view are retained');
