@@ -877,6 +877,7 @@
             };
             // The opening: a short fire escape lifts you off the alley floor onto a low first roof, and the parkour starts there.
             const T0 = tower(160, -1950, 900), T1 = tower(1400, -495, 880);
+            this.alleyEnd = T1.x;
             this.checkpoints[0].x = 1080;
             const opening = this.fireEscapes = [fireEscape(1060, 1400, 0, 3, 165)];
             Object.assign(this.checkpoints[0], { x: opening[0][1].x + 20, y: opening[0][1].y });
@@ -983,6 +984,7 @@
                         planks.push(cityPut({ x, y: yy, w, h: 14, jt: true, cityKit: 'scaffold', frame, below, tier: i }));
                         below = yy;
                     }
+                    planks[n - 1].last = true;
                     return { B: tower(gapX + gap, yy - Math.round(70 + r() * 35), towerWidth()), pieces: planks };
                 }
                 if (kind === 'billboard') {
@@ -1007,7 +1009,12 @@
                 if (kind === 'poles') {
                     // a wide street crossed on the caps of three utility poles at staggered heights: small, precise landings
                     const gap = Math.round(620 + r() * 60), tops = [A.y - 30 - r() * 30, A.y - 100 - r() * 30, A.y - 60 - r() * 40], poles = [];
-                    [.2, .5, .8].forEach((u, i) => poles.push(cityPut({ x: Math.round(gapX + gap * u - 32), y: Math.round(tops[i]), w: 64, h: 14, cityKit: 'pole', tier: i })));
+                    [.2, .5, .8].forEach((u, i) => {
+                        const x = Math.round(gapX + gap * u - 32), y = Math.round(tops[i]);
+                        // telescoping caps sag under your weight and spring back once you jump off
+                        const pole = cityPut({ x, y, w: 64, h: 14, cityKit: 'pole', tier: i, mover: true, sinker: true, depth: 16, sunk: 0, sinkRate: 90, riseRate: 45, bx: x, by: y, amp: 0, dx: 0, dy: 0 });
+                        this.movers.push(pole); poles.push(pole);
+                    });
                     return { B: tower(gapX + gap, Math.round(poles[2].y - 90 - r() * 30), towerWidth()), pieces: poles };
                 }
                 if (kind === 'signs') {
@@ -1434,7 +1441,7 @@
                 if (m.sinker) {
                     // rain clouds sag while someone stands on them and slowly float back up once they leave
                     const loaded = me.onGround && me.ground === m;
-                    m.sunk = loaded ? Math.min(m.depth, m.sunk + 60 * dt) : Math.max(0, m.sunk - 35 * dt);
+                    m.sunk = loaded ? Math.min(m.depth, m.sunk + (m.sinkRate || 60) * dt) : Math.max(0, m.sunk - (m.riseRate || 35) * dt);
                     const ny = m.by + m.sunk;
                     m.dx = 0; m.dy = ny - m.y; m.y = ny;
                     continue;
@@ -1511,9 +1518,13 @@
                 const idle = s.game.res.value >= 0.5 && this.stuckT > 5 && !me.ground?.mover && !me.ground?.belt;
                 if (idle && !this.stuckHinted) { this.stuckHinted = true; s.toast('Stuck? Press R to return to your checkpoint', '#fbbf24'); }
                 if (this.stuckT < 5) this.stuckHinted = false;
-                const stranded = me.onGround && me.ground?.ground && me.y + me.h > this.cp.y + 100;
-                this.strandedT = stranded ? (this.strandedT || 0) + dt : 0;
-                if (this.strandedT > 1 || (idle && this.stuckT > 9)) {
+                const street = this.street || (this.street = this.solids.find(p => p.ground));
+                const feet = me.y + me.h, inAlley = this.alleyEnd !== undefined && me.x + me.w <= this.alleyEnd + 1;
+                // once you touch the street (outside the starting alley) hopping around down there can't delay the respawn
+                const onStreet = me.onGround && me.ground?.ground && feet > this.cp.y + 100 && !inAlley;
+                const nearStreet = !!street && feet > street.y - 170 && this.strandedT > 0 && !inAlley;
+                this.strandedT = onStreet || nearStreet ? (this.strandedT || 0) + dt : 0;
+                if (this.strandedT > .3 || (idle && this.stuckT > 9)) {
                     s.toast('No way out? Returning to your checkpoint', '#fbbf24');
                     this.stuckT = 0; this.strandedT = 0; this.hurt(true); return;
                 }
@@ -1642,12 +1653,13 @@
                 }
                 if (me.y > this.cp.y + 800) this.hurt();
                 if (this.dead <= 0 && this.trapChecks !== false && !(s.testing === true && s.testInvincible === true)) {
-                    this.trapT = me.onGround && this.isDeadEnd(me.ground) ? (this.trapT || 0) + dt : 0;
+                    // jumping around on a dead-end ledge keeps the timer running; only reaching real ground clears it
+                    this.trapT = me.onGround ? (this.isDeadEnd(me.ground) ? (this.trapT || 0) + dt : 0) : (this.trapT || 0);
                     this.voidCheck = (this.voidCheck || 0) - dt;
                     if (me.onGround || me.vy <= 0 || this.dash > 0) this.voidT = 0;
                     else if (this.voidCheck <= 0) { this.voidCheck = .1; this.voidT = this.hasCatchBelow(me) ? 0 : (this.voidT || 0) + .1; }
-                    if (this.trapT > 1 || this.voidT > .25) {
-                        s.toast(this.trapT > 1 ? 'No way back up from here — returning to your checkpoint' : 'Nothing below to catch you — returning to your checkpoint', '#fbbf24');
+                    if (this.trapT > .6 || this.voidT > .25) {
+                        s.toast(this.trapT > .6 ? 'No way back up from here — returning to your checkpoint' : 'Nothing below to catch you — returning to your checkpoint', '#fbbf24');
                         this.trapT = 0; this.voidT = 0; this.hurt(true);
                     }
                 }
@@ -1827,8 +1839,8 @@
         }
 
         drawBounds(p) {
-            if (p.cityKit === 'scaffold') return { y: p.y - 45, h: (p.below || 0) - p.y + 50 };
-            if (p.cityKit === 'pole') return { y: p.y - 30, h: -p.y + 30 };
+            if (p.cityKit === 'scaffold') return { y: p.y - 55, h: (p.below || 0) - p.y + 60 };
+            if (p.cityKit === 'pole') return { y: Math.min(p.y, p.by ?? p.y) - 30, h: -Math.min(p.y, p.by ?? p.y) + 30 };
             if (p.cityKit === 'catwalk') return p.board.panel ? { y: p.y - 165, h: 190 } : { y: p.y - 35, h: 50 };
             if (p.cityKit === 'beam') return { y: p.jibY - 30, h: p.y - p.jibY + 50 };
             if (p.lane) return { y: p.lane.y - 20, h: p.h + 40 };
@@ -2038,29 +2050,48 @@
         drawCityKit(ctx, p) {
             if (p.cityKit === 'pole') {
                 // utility pole down to the street, with a crossarm, insulators and a warning band
-                const cx = p.x + p.w / 2;
-                ctx.fillStyle = '#3f3f46'; ctx.fillRect(cx - 7, p.y + p.h, 14, -p.y - p.h);
-                ctx.fillStyle = '#52525b'; ctx.fillRect(cx - 7, p.y + p.h, 4, -p.y - p.h);
+                // the cap rides a chrome inner pole that slides into the fixed outer sleeve as it is weighed down
+                const cx = p.x + p.w / 2, rest = p.by ?? p.y, sleeve = rest + p.h + 22, load = p.depth ? (p.sunk || 0) / p.depth : 0;
+                ctx.fillStyle = '#3f3f46'; ctx.fillRect(cx - 8, sleeve, 16, -sleeve);
+                ctx.fillStyle = '#52525b'; ctx.fillRect(cx - 8, sleeve, 4, -sleeve);
+                ctx.fillStyle = '#facc15'; ctx.fillRect(cx - 8, sleeve + 34, 16, 6);
+                ctx.fillStyle = '#94a3b8'; ctx.fillRect(cx - 5, p.y + p.h, 10, sleeve - p.y - p.h);
+                ctx.fillStyle = '#e2e8f0'; ctx.fillRect(cx - 5, p.y + p.h, 3, sleeve - p.y - p.h);
+                ctx.fillStyle = '#27272a'; ctx.fillRect(cx - 10, sleeve - 3, 20, 6);
                 ctx.fillStyle = '#57534e'; ctx.fillRect(p.x, p.y, p.w, p.h);
                 ctx.fillStyle = '#a8a29e'; ctx.fillRect(p.x, p.y, p.w, 3);
-                ctx.fillStyle = '#22d3ee'; ctx.fillRect(p.x + 4, p.y - 8, 6, 8); ctx.fillRect(p.x + p.w - 10, p.y - 8, 6, 8);
-                ctx.fillStyle = '#facc15'; ctx.fillRect(cx - 5, p.y + 40, 10, 6);
+                ctx.fillStyle = '#44403c'; ctx.fillRect(cx - 18, p.y + p.h, 36, 4);
+                ctx.fillStyle = load > .05 ? '#f59e0b' : '#22d3ee'; ctx.fillRect(p.x + 4, p.y - 8, 6, 8); ctx.fillRect(p.x + p.w - 10, p.y - 8, 6, 8);
                 return;
             }
             if (p.cityKit === 'scaffold') {
-                const [f0, f1] = p.frame, base = p.below || 0, poles = [f0, f1];
+                // one bay of a tube-and-coupler scaffold: uprights, a ledger the deck rests on, and a single brace down to the bay below
+                const [f0, f1] = p.frame, base = p.below || 0, ledger = p.y + p.h, span = base - ledger, top = p.last ? p.y - 44 : p.y;
                 ctx.fillStyle = '#64748b';
-                for (const x of poles) ctx.fillRect(x - 3, p.y - 40, 6, base - p.y + 40);
-                ctx.strokeStyle = 'rgba(148,163,184,.55)'; ctx.lineWidth = 2; ctx.beginPath();
-                const span = base - p.y;
-                if (span > 30 && span < 400) { ctx.moveTo(f0, p.y); ctx.lineTo(f1, base); ctx.moveTo(f1, p.y); ctx.lineTo(f0, base); }
-                ctx.moveTo(f0, p.y - 34); ctx.lineTo(f1, p.y - 34);
-                ctx.stroke();
+                for (const x of [f0, f1]) ctx.fillRect(x - 4, top, 8, base - top);
+                ctx.fillStyle = '#94a3b8';
+                for (const x of [f0, f1]) ctx.fillRect(x - 4, top, 3, base - top);
+                if (span > 30 && span < 400) {
+                    ctx.strokeStyle = '#7c8ba1'; ctx.lineWidth = 3; ctx.beginPath();
+                    const [a, b] = p.tier % 2 ? [f1, f0] : [f0, f1];
+                    ctx.moveTo(a, base - 4); ctx.lineTo(b, ledger + 6);
+                    ctx.stroke();
+                }
+                ctx.fillStyle = '#475569'; ctx.fillRect(f0, ledger, f1 - f0, 6);
+                ctx.fillStyle = '#cbd5e1'; ctx.fillRect(f0, ledger, f1 - f0, 2);
+                ctx.fillStyle = '#334155';
+                for (const x of [f0, f1]) ctx.fillRect(x - 7, ledger - 2, 14, 10);
+                if (p.last) { ctx.fillStyle = '#facc15'; for (const x of [f0, f1]) ctx.fillRect(x - 5, top - 6, 10, 6); }
+                ctx.fillStyle = 'rgba(15,23,42,.35)'; ctx.fillRect(p.x + 3, ledger + 6, p.w - 6, 4);
                 ctx.fillStyle = '#a16207'; ctx.fillRect(p.x, p.y, p.w, p.h);
                 ctx.fillStyle = '#ca8a04'; ctx.fillRect(p.x, p.y, p.w, 4);
                 ctx.fillStyle = 'rgba(66,32,6,.45)'; for (let x = p.x + 30; x < p.x + p.w; x += 30) ctx.fillRect(x, p.y + 2, 2, p.h - 2);
-                ctx.fillStyle = '#475569'; ctx.fillRect(p.x - 4, p.y + p.h - 2, 8, 8); ctx.fillRect(p.x + p.w - 4, p.y + p.h - 2, 8, 8);
-                if (p.tier === 0) { ctx.fillStyle = '#f97316'; ctx.fillRect(f0 - 8, -40, f1 - f0 + 16, 8); }
+                ctx.fillStyle = '#1e293b'; ctx.fillRect(p.x + 6, ledger - 3, 8, 9); ctx.fillRect(p.x + p.w - 14, ledger - 3, 8, 9);
+                if (p.tier === 0) {
+                    ctx.fillStyle = '#334155'; for (const x of [f0, f1]) ctx.fillRect(x - 12, -6, 24, 6);
+                    ctx.fillStyle = '#f97316'; ctx.fillRect(f0 - 8, -40, f1 - f0 + 16, 8);
+                    ctx.fillStyle = '#fff7ed'; for (let x = f0; x < f1; x += 40) ctx.fillRect(x, -40, 16, 8);
+                }
                 return;
             }
             if (p.cityKit === 'catwalk') {

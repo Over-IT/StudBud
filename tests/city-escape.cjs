@@ -76,7 +76,7 @@ for (const seed of SEEDS) {
     assert.ok(game.solids.some(p => p.motif === 'sorting-bay') && game.solids.some(p => p.motif === 'cooling-grate')
         && game.solids.some(p => p.motif === 'cargo-unload'), 'the former composite sections now have their own layouts');
     assert.equal(game.solids.filter(p => p.piece === 'piston-steps' && p.piston).length, 2, 'piston climb is a short transfer, not a long staircase');
-    assert.ok(!game.solids.some(p => p.bi === 2 || p.cloud || p.sinker || p.prop === 'cloudbank'), 'removed Sky generates no cloud platforms');
+    assert.ok(!game.solids.some(p => p.bi === 2 || p.cloud || (p.sinker && p.cityKit !== 'pole') || p.prop === 'cloudbank'), 'removed Sky generates no cloud platforms');
     assert.ok(!game.saws.some(s => s.bi === 0), 'city rooftops do not use saw blades');
 
     // ---- space: asteroids cross once from off screen on fixed lanes, and some lanes are the route itself ----
@@ -369,7 +369,7 @@ console.log('Scale shafts are climbable with real wall-jumps at 30/60/120 FPS.')
         s.testing = true; s.testInvincible = true; s.startedAt = Date.now(); s.t = 0;
         s.game = { res: { value: 100, drain() {} } }; s.spend = () => true; s.toast = () => {}; s.sfx = () => {}; s.setGoal = () => {};
         s.axis = () => ({ x: 0, y: 0 }); s.down = () => false; s.pressed = () => false;
-        for (const m of [...g.movers.filter(m => m.vert && !m.meteor && m.w >= 100).slice(0, 6), ...g.movers.filter(m => m.sinker).slice(0, 4)]) {
+        for (const m of [...g.movers.filter(m => m.vert && !m.meteor && m.w >= 100).slice(0, 6), ...g.movers.filter(m => m.sinker && !m.city).slice(0, 4)]) {
             g.update(1 / fps);
             g.me.x = m.x + m.w / 2 - 13; g.me.y = m.y - 44; g.me.vx = 0; g.me.vy = 0; g.me.ground = m; g.me.onGround = true; g.dead = 0;
             const offset = g.me.x - m.x;
@@ -574,3 +574,46 @@ console.log('Every conveyor has timed machinery; crusher/drill strikes and steam
     }
 }
 console.log('Every generated surface leads back to the summit, and dead-end pits always respawn you.');
+{
+    // Landing on the street between towers respawns you almost immediately, even if you keep hopping around down there.
+    const setup = () => {
+        const game = makeGame(42);
+        game.retirePassedAreas = () => {};
+        let jump = false;
+        Object.assign(game.s, { game, t: 0, startedAt: Date.now(), axis: () => ({ x: 1, y: 0 }), down: (...k) => jump && k.includes('Space'), pressed: (...k) => jump && k.includes('Space'),
+            spend: n => game.res.spend(n), toast() {}, sfx() {}, setGoal() {} });
+        game.cp = game.checkpoints[0]; game.tideY = 1e6;
+        return { game, setJump: v => { jump = v; } };
+    };
+    const street = makeGame(42).solids.find(p => p.ground);
+    for (const hop of [false, true]) {
+        const { game, setJump } = setup();
+        const x = game.towers[3].x - 120;
+        Object.assign(game.me, { x, y: street.y - game.me.h, vx: 0, vy: 0, onGround: true, ground: street });
+        let frames = 0;
+        for (; frames < 120 && game.dead <= 0; frames++) { setJump(hop && frames % 20 < 3); game.updatePlayer(1 / 60); }
+        assert.ok(game.dead > 0, `street landing respawns you${hop ? ' while hopping' : ''}`);
+        assert.ok(frames <= 40, `street respawn is quick (${frames} frames${hop ? ', hopping' : ''})`);
+    }
+    const { game } = setup();
+    Object.assign(game.me, { x: game.alleyEnd - 200, y: street.y - game.me.h, vx: 0, vy: 0, onGround: true, ground: street });
+    for (let i = 0; i < 90 && game.dead <= 0; i++) game.updatePlayer(1 / 60);
+    assert.equal(game.dead <= 0, true, 'the opening alley floor is not a death zone: its fire escape leads out');
+
+    // Utility pole caps sag under your weight and spring back.
+    const g = makeGame(42), pole = g.movers.find(m => m.cityKit === 'pole');
+    assert.ok(pole && pole.sinker && g.solids.includes(pole), 'pole caps are sinking platforms');
+    Object.assign(g.s, { game: g, t: 0, startedAt: Date.now(), axis: () => ({ x: 0, y: 0 }), down: () => false, pressed: () => false,
+        spend: () => true, toast() {}, sfx() {}, setGoal() {} });
+    g.retirePassedAreas = () => {}; g.trapChecks = false; g.tideY = 1e6;
+    Object.assign(g.me, { x: pole.x + 20, y: pole.y - g.me.h, vx: 0, vy: 0, onGround: true, ground: pole });
+    for (let i = 0; i < 60; i++) g.update(1 / 60);
+    assert.equal(pole.sunk, pole.depth, 'standing on a pole pushes it down');
+    assert.ok(g.me.ground === pole && Math.abs(g.me.y + g.me.h - pole.y) < 1, 'you ride the pole down');
+    Object.assign(g.me, { y: pole.y - 600, onGround: false, ground: null });
+    pole.sunk = pole.depth;
+    let n = 0; for (; n < 120 && pole.sunk > 0; n++) { g.me.y = pole.y - 600; g.me.vy = 0; g.update(1 / 60); }
+    assert.equal(pole.sunk, 0, 'poles rise back once you leave');
+    for (const p of g.solids.filter(p => p.cityKit === 'scaffold')) assert.ok(p.frame[0] < p.x && p.frame[1] > p.x + p.w, 'scaffold decks sit within their frame ledger');
+}
+console.log('Street falls respawn quickly even while hopping, pole caps sink under weight, scaffold decks rest on ledgers.');
