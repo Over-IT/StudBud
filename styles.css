@@ -3887,6 +3887,9 @@ body.guest-mode [data-study-leaderboard-scope="friends"] { display: none !import
     --c-settings: #8d99ae;
 }
 
+/* Several components use --bg-secondary, so give it a solid value in every scheme. */
+body { --bg-secondary: var(--bg-surface, var(--bg-glass, #1e293b)); }
+
 /* Default palette: a violet primary with a mint secondary. */
 body[data-color-scheme="studbud"].dark-theme {
     --bg-base: #12142a;
@@ -4429,25 +4432,48 @@ body.studying { overflow: hidden; }
 @media (max-width: 520px) { .study-summary-stats { grid-template-columns: repeat(2, 1fr); } }
 
 /* ===== Deck cards ===== */
-.deck-card { cursor: default; text-align: left; display: flex; flex-direction: column; gap: 10px; }
+.deck-card { cursor: default; text-align: left; display: flex; flex-direction: column; gap: 12px; position: relative; }
+.deck-card:has(.deck-menu[open]) { z-index: 30; content-visibility: visible; contain: none; }
 .deck-card i { font-size: inherit; color: inherit; margin: 0; }
-.deck-card-top { display: flex; gap: 12px; align-items: center; }
-.deck-card-title { min-width: 0; display: grid; gap: 2px; }
-.deck-card-title h3 { margin: 0; font-size: 1.1rem; overflow-wrap: anywhere; }
+.deck-card-top { display: flex; gap: 12px; align-items: flex-start; }
+.deck-card-title { min-width: 0; flex: 1 1 auto; display: grid; gap: 4px; align-self: center; }
+.deck-card-title h3 { margin: 0; font-size: 1.08rem; line-height: 1.25; overflow-wrap: anywhere; }
+.deck-card-title .deck-author { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; line-height: 1.3; }
 .deck-ring { --p: 0; flex: 0 0 auto; width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; background: conic-gradient(var(--accent-secondary) calc(var(--p) * 1%), var(--bg-glass-hover) 0); }
 .deck-ring span { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--bg-secondary); font-size: .72rem; font-weight: 900; }
-.deck-stats { display: flex; flex-wrap: wrap; gap: 6px; }
+.deck-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.deck-meta .deck-tags { display: contents; }
+.deck-stats { display: contents; }
 .deck-stats span { display: inline-flex; gap: 5px; align-items: center; padding: 3px 9px; border-radius: 999px; background: var(--bg-glass); border: 1px solid var(--border-glass); font-size: .78rem; font-weight: 800; color: var(--text-secondary); }
 .deck-stats .is-due { color: var(--accent-primary); border-color: color-mix(in srgb, var(--accent-primary) 50%, transparent); }
 .deck-stats .is-star { color: #f59e0b; }
 .deck-stats .is-weak { color: #f87171; }
-.deck-main-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; }
-.deck-main-actions .primary-btn { flex: 1 1 auto; }
-.deck-main-actions .secondary-btn { min-width: 44px; padding-inline: 12px; }
-.deck-more summary { cursor: pointer; font-weight: 800; font-size: .85rem; color: var(--text-secondary); list-style: none; }
-.deck-more summary::-webkit-details-marker { display: none; }
-.deck-more[open] { display: grid; gap: 8px; }
-.deck-more .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.deck-main-actions { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 46px; gap: 8px; margin-top: auto; }
+.deck-main-actions > button { min-width: 0; margin: 0; padding-inline: 10px; justify-content: center; white-space: nowrap; }
+.deck-main-actions .deck-edit-btn { padding-inline: 0; }
+.deck-menu { position: relative; flex: 0 0 auto; margin: -4px -6px 0 0; }
+.deck-menu-btn { list-style: none; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 12px; cursor: pointer; color: var(--text-secondary); border: 2px solid transparent; transition: background var(--transition-fast), color var(--transition-fast); }
+.deck-menu-btn::-webkit-details-marker { display: none; }
+.deck-menu-btn:hover, .deck-menu[open] .deck-menu-btn { background: var(--bg-glass-hover); color: var(--text-primary); border-color: var(--border-glass); }
+.deck-menu-btn:focus-visible { outline: 3px solid var(--accent-primary); outline-offset: 2px; }
+.deck-menu-panel { position: absolute; top: calc(100% + 6px); right: 0; z-index: 40; width: min(260px, calc(100vw - 32px)); display: grid; gap: 2px; padding: 6px; border-radius: 14px; background: var(--bg-surface, #1a1d38); border: 2px solid var(--border-glass); box-shadow: 0 14px 34px rgba(0, 0, 0, .35); }
+.deck-menu.opens-up .deck-menu-panel { top: auto; bottom: calc(100% + 6px); }
+.deck-menu-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 8px 10px; border: 0; border-radius: 10px; background: transparent; color: var(--text-primary); font: inherit; font-weight: 700; font-size: .9rem; text-align: left; cursor: pointer; box-shadow: none; }
+.deck-menu-item i { width: 18px; text-align: center; color: var(--text-secondary); }
+.deck-menu-item:hover:not(:disabled), .deck-menu-item:focus-visible { background: var(--bg-glass-hover); }
+.deck-menu-item:disabled { opacity: .55; cursor: not-allowed; }
+.deck-menu-item.is-danger, .deck-menu-item.is-danger i { color: #f87171; }
+.deck-menu-panel .deck-link-edit { margin: 0; border-top: 1px solid var(--border-glass); border-bottom: 1px solid var(--border-glass); padding: 2px 0; }
+.deck-menu-panel .deck-link-edit summary { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 8px 10px; border-radius: 10px; font-weight: 700; font-size: .9rem; color: var(--text-primary); }
+.deck-menu-panel .deck-link-edit summary:hover { background: var(--bg-glass-hover); }
+.deck-menu-panel .deck-link-edit summary i { width: 18px !important; text-align: center; color: var(--text-secondary); font-size: .9rem !important; }
+.deck-menu-panel .deck-link-fields { padding: 4px 8px 8px; grid-template-columns: 1fr; }
+@media (max-width: 420px) {
+    .deck-main-actions { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px; gap: 6px; }
+    .deck-ring { width: 46px; height: 46px; }
+    .deck-ring span { width: 36px; height: 36px; }
+}
+.light-theme .deck-menu-panel { background: #fff; box-shadow: 0 14px 34px rgba(15, 23, 42, .18); }
 .star-toggle.is-on { color: #f59e0b; border-color: #f59e0b; }
 .deck-quick-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px; margin: 10px 0; border-radius: 14px; border: 2px dashed color-mix(in srgb, var(--accent-primary) 45%, var(--border-glass)); background: color-mix(in srgb, var(--accent-primary) 6%, transparent); }
 .deck-quick-add input { flex: 1 1 180px; min-width: 0; }
@@ -4641,3 +4667,20 @@ img, svg, canvas, a { -webkit-user-drag: none; user-drag: none; }
 input, textarea, select, [contenteditable]:not([contenteditable="false"]), code, pre, .selectable { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 input[type="button"], input[type="submit"], input[type="checkbox"], input[type="radio"], input[type="range"], input[type="color"], input[type="file"] { -webkit-user-select: none; user-select: none; }
 :focus:not(:focus-visible) { outline: none; }
+
+/* River duel: both players race the same question. */
+.mpg-q-duel { display: flex; align-items: center; justify-content: center; gap: 10px; margin: -6px -6px 12px; padding: 12px 14px; border-radius: 14px; background: linear-gradient(90deg, #dc2626, #f97316); color: #fff; text-align: center; animation: mpg-duel-in .35s ease-out; }
+.mpg-q-duel.hidden { display: none; }
+.mpg-q-duel i { font-size: 1.5rem; }
+.mpg-q-duel strong { font-size: clamp(1.3rem, 4.5vw, 2rem); font-weight: 900; letter-spacing: .06em; }
+.mpg-q-duel span { font-size: .8rem; font-weight: 700; opacity: .9; }
+.mpg-q-timer { height: 8px; margin: 8px 0 10px; border-radius: 99px; background: rgba(255,255,255,.12); overflow: hidden; }
+.mpg-q-timer.hidden { display: none; }
+.mpg-q-timer i { display: block; height: 100%; width: 100%; transform-origin: left; transform: scaleX(var(--left, 1)); background: linear-gradient(90deg, #f97316, #facc15); border-radius: inherit; }
+.mpg-overlay .mpg-question.is-duel { background: rgba(60, 6, 6, .55); }
+.mpg-overlay .mpg-question.is-duel .mpg-q-card { width: min(720px, 100%); border-color: #f97316; box-shadow: 0 0 0 4px rgba(249,115,22,.25), 0 24px 70px rgba(0,0,0,.65); }
+.mpg-overlay .mpg-question.is-duel .mpg-q-prompt { font-size: clamp(1.25rem, 3.6vw, 1.8rem); }
+.mpg-overlay .mpg-question.is-duel .mpg-q-options button { min-height: 58px; font-size: 1.02rem; }
+.mpg-overlay .mpg-question.is-duel .mpg-q-skip { display: none; }
+@keyframes mpg-duel-in { from { transform: scale(.85); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .mpg-q-duel { animation: none; } }

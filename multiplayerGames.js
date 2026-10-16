@@ -4047,7 +4047,7 @@
             if (type === 'shotgun') { ctx.fillStyle = '#0f172a'; ctx.fillRect(12, -1, length, 2); }
             ctx.restore();
             ctx.restore();
-            A.util.drawFigureTop(ctx, who, x, y, 16, aim, this.anim || 0, alpha);
+            A.util.drawFigureTop(ctx, who, x, y, 16, aim, this.anim || 0, alpha, you ? this.moving : Boolean(who.a));
             if (!this.s.preview && hp !== undefined) {
                 ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(x - 22, y + 24, 44, 5);
                 ctx.fillStyle = hp > 40 ? '#4ade80' : '#f87171'; ctx.fillRect(x - 22, y + 24, 44 * clamp(hp / 100, 0, 1), 5);

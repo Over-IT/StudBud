@@ -681,10 +681,14 @@
 
         sendState() {
             if (this.over || this.countdown > 0) return;
-            this.send({
-                t: 's', id: this.user.id, s: Math.round(this.score), g: Math.round(this.goal), q: this.answered,
-                d: this.done ? 1 : 0, ft: this.finishMs, ...this.game.net(), sentAt: Date.now(), ev: this.outbox.splice(0, 40)
-            });
+            const ev = this.outbox.splice(0, 40);
+            const body = { t: 's', id: this.user.id, s: Math.round(this.score), g: Math.round(this.goal), q: this.answered,
+                d: this.done ? 1 : 0, ft: this.finishMs, ...this.game.net() };
+            // Idle players (nothing changed, no events) drop to a heartbeat, cutting realtime traffic for parked or answering players.
+            const sig = JSON.stringify(body), nowMs = Date.now();
+            if (!ev.length && sig === this.lastSentSig && nowMs - (this.lastSentAt || 0) < 500) return;
+            this.lastSentSig = sig; this.lastSentAt = nowMs;
+            this.send({ ...body, sentAt: nowMs, ev });
         }
 
         receive(p) {
@@ -896,9 +900,12 @@
             this.lastCard = index;
             this.lastCardIndex = index;
             const card = this.cards[index];
-            const options = window.FlashcardTools.distractors(card, this.cards, 3, { vary: true }).map(item => item.back).concat(card.back);
-            for (let i = options.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [options[i], options[j]] = [options[j], options[i]]; }
-            this.question = { card, options, callback, locked: false, onAnswer: opts?.onAnswer };
+            // A shared seed (duels) gives every player the identical choices in the identical order.
+            const seeded = Number.isFinite(opts?.seed), random = seeded ? mulberry32(opts.seed >>> 0) : Math.random;
+            const options = window.FlashcardTools.distractors(card, this.cards, 3, { vary: !seeded }).map(item => item.back).concat(card.back);
+            for (let i = options.length - 1; i > 0; i--) { const j = Math.floor(random() * (i + 1)); [options[i], options[j]] = [options[j], options[i]]; }
+            const seconds = Number(opts?.seconds) || 0;
+            this.question = { card, options, callback, locked: false, onAnswer: opts?.onAnswer, duel: opts?.duel || null, seconds, deadline: seconds ? performance.now() + seconds * 1000 : 0 };
             return this.showQuestion(card, options, note);
         }
 
@@ -914,6 +921,13 @@
             box.querySelector('.mpg-q-result').textContent = '';
             const res = this.game.res;
             box.querySelector('small').textContent = note || (res ? `Correct answer: +${this.rewardAmount()} ${res.label}` : 'Question');
+            const duel = this.question?.duel, banner = box.querySelector('.mpg-q-duel');
+            box.classList.toggle('is-duel', Boolean(duel));
+            banner.classList.toggle('hidden', !duel);
+            if (duel) banner.querySelector('strong').textContent = `DUEL vs ${duel}`;
+            const bar = box.querySelector('.mpg-q-timer');
+            bar.classList.toggle('hidden', !this.question?.deadline);
+            bar.style.setProperty('--left', '1');
             box.classList.remove('hidden');
             box.querySelector('[data-q]')?.focus({ preventScroll: true });
             this.sfx('question');
@@ -943,7 +957,7 @@
                 if (this.question !== q) return;
                 this.closeQuestion(true);
                 try { q.callback?.(correct); } catch (error) { console.error(error); }
-            }, correct ? 650 : 1400);
+            }, q.duel ? (correct ? 300 : 900) : correct ? 650 : 1400);
         }
 
         skipQuestion() {
@@ -1160,7 +1174,9 @@
                 <div class="mpg-countdown"></div>
                 <div class="mpg-question hidden" role="dialog" aria-modal="true" aria-label="Question">
                     <div class="mpg-q-card">
+                        <div class="mpg-q-duel hidden" aria-live="assertive"><i class="fas fa-bolt"></i><strong>DUEL</strong><span>First correct answer wins</span></div>
                         <small>Question</small>
+                        <div class="mpg-q-timer hidden" aria-hidden="true"><i></i></div>
                         <h3 class="mpg-q-prompt"></h3>
                         <div class="mpg-q-options"></div>
                         <p class="mpg-q-result" role="status"></p>
@@ -1647,6 +1663,14 @@
                     r.x += (tx - r.x) * k;
                     r.y += (ty - r.y) * k;
                 }
+            }
+            const q = this.question;
+            if (q?.deadline && !q.locked) {
+                const left = Math.max(0, (q.deadline - performance.now()) / (q.seconds * 1000));
+                const bar = this.overlay.querySelector('.mpg-q-timer');
+                const value = left.toFixed(2);
+                if (bar.style.getPropertyValue('--left') !== value) bar.style.setProperty('--left', value);
+                if (left <= 0) this.skipQuestion();
             }
             this.updateMeter();
             this.justPressed.clear();
@@ -2693,17 +2717,79 @@
         ctx.restore();
     }
 
+    const ORBIT_SHAPE = { gate: 'rune', blackhole: 'meteor', spiral: 'star', vortex: 'diamond', ribbon: 'spark', firefly: 'dust', jellyfish: 'bubble', comet: 'comet' };
+
+    // Overhead auras live on the ground plane: a soft glow and ring under the body, orbiters around it.
+    function drawTopAura(ctx, c, r, time, layer) {
+        const def = COSMETIC_PARTICLES[c.effect], mythic = c.skin?.mythic;
+        if (!def && !mythic) return;
+        const colors = def?.colors || mythic, base = ctx.globalAlpha, shape = def?.shape || 'mythic';
+        ctx.save();
+        if (layer === 'under') {
+            const R = r * (mythic ? 1.95 : 1.75) * (1 + Math.sin(time * 3) * .05);
+            // Stacked translucent discs fake a soft radial glow without allocating a gradient every frame.
+            if (shape === 'blackhole') { ctx.fillStyle = '#080b18'; ctx.beginPath(); ctx.arc(0, 0, r * 1.3, 0, TAU); ctx.fill(); }
+            for (const [k, color] of [[1, colors[1] || colors[0]], [.78, colors[0]], [.56, colors[0]]]) {
+                ctx.globalAlpha = base * (shape === 'blackhole' ? .3 : .16);
+                ctx.fillStyle = color; ctx.beginPath(); ctx.arc(0, 0, R * k, 0, TAU); ctx.fill();
+            }
+            ctx.strokeStyle = colors[1] || colors[0]; ctx.lineWidth = Math.max(1, r * .09);
+            ctx.globalAlpha = base * .7;
+            ctx.setLineDash([r * .45, r * .3]); ctx.lineDashOffset = -time * r * 1.6;
+            ctx.beginPath(); ctx.arc(0, 0, R * .82, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+            if (shape === 'storm') {
+                ctx.strokeStyle = '#7dd3fc'; ctx.lineWidth = Math.max(.8, r * .06);
+                for (let i = 0; i < 5; i++) {
+                    const phase = (time * .9 + i * .37) % 1, angle = i * 2.4 + Math.floor(time * .9 + i * .37) * 1.3;
+                    ctx.globalAlpha = base * (1 - phase);
+                    ctx.beginPath(); ctx.arc(Math.cos(angle) * r * 1.3, Math.sin(angle) * r * 1.3, r * .1 + phase * r * .35, 0, TAU); ctx.stroke();
+                }
+            }
+            if (shape === 'vortex' || shape === 'spiral' || shape === 'ribbon' || shape === 'blackhole') {
+                for (let arm = 0; arm < 3; arm++) {
+                    ctx.strokeStyle = colors[arm % colors.length]; ctx.globalAlpha = base * .55; ctx.lineWidth = Math.max(1, r * .1);
+                    ctx.beginPath(); ctx.arc(0, 0, R * (.62 + arm * .1), time * (arm % 2 ? -1.4 : 1.4) + arm * 2.1, time * (arm % 2 ? -1.4 : 1.4) + arm * 2.1 + 1.6); ctx.stroke();
+                }
+            }
+        } else {
+            // Each item hashes to its own orbit, so auras sharing a particle shape still move and space differently.
+            const h = hashStr(c.effect || 'mythic'), spin = (h % 2 ? 1 : -1) * (.75 + (h >>> 3) % 5 * .1);
+            const R = r * (mythic ? 1.75 : 1.45 + (h >>> 7) % 4 * .06), count = mythic ? 5 : 5 + (h >>> 11) % 3, offset = (h >>> 13) % 360 / 360 * TAU;
+            const drift = ['petal', 'blossom', 'confetti', 'snowflake', 'flame', 'bubble', 'leaf', 'heart', 'note', 'bat'].includes(shape);
+            for (let i = 0; i < count; i++) {
+                const angle = time * (drift ? .35 : .9) * spin + i * TAU / count + offset;
+                const phase = (time * .3 + i / count) % 1;
+                const radius = drift ? R * (.7 + phase * .55) : R * (1 + Math.sin(time * 3 + i) * .06);
+                ctx.save(); ctx.translate(Math.cos(angle) * radius, Math.sin(angle) * radius);
+                ctx.rotate(angle + Math.PI / 2);
+                ctx.globalAlpha = base * (drift ? 1 - phase * .8 : .65 + Math.sin(time * 4 + i) * .25);
+                ctx.fillStyle = ctx.strokeStyle = colors[i % colors.length]; ctx.lineWidth = Math.max(1, r * .07);
+                if (shape === 'mythic') { ctx.beginPath(); ctx.arc(0, 0, Math.max(1.4, r * .13), 0, TAU); ctx.fill(); }
+                else if (shape !== 'storm') drawCosmeticParticle(ctx, ORBIT_SHAPE[shape] || shape, Math.max(1.6, r * .2));
+                ctx.restore();
+            }
+            if (shape === 'storm') {
+                ctx.globalAlpha = base * .62; ctx.fillStyle = '#475569';
+                const sway = Math.sin(time * .8) * r * .2;
+                ctx.beginPath(); ctx.arc(sway - r * .45, -r * .2, r * .55, 0, TAU); ctx.arc(sway + r * .1, -r * .45, r * .65, 0, TAU); ctx.arc(sway + r * .6, -r * .1, r * .5, 0, TAU); ctx.fill();
+                if (time % 4 < .18) { ctx.globalAlpha = base; ctx.save(); ctx.translate(sway + r * .3, r * .5); ctx.fillStyle = '#fef08a'; drawCosmeticParticle(ctx, 'bolt', r * .5); ctx.restore(); }
+            }
+        }
+        ctx.restore();
+    }
+
     // Top-down character; the body faces `aim` and hats are drawn upright on top.
-    function drawFigureTop(ctx, p, x, y, r, aim, time, alpha = 1) {
+    function drawFigureTop(ctx, p, x, y, r, aim, time, alpha = 1, moving = false) {
         const c = who(p);
         const body = c.skin?.body || c.color;
+        const head = c.skin?.head || '#fde7c8';
         ctx.save();
         ctx.globalAlpha = alpha * (c.skin?.alpha || 1);
         ctx.translate(x, y);
+        drawTopAura(ctx, c, r, time, 'under');
         ctx.fillStyle = 'rgba(0,0,0,.3)';
         ctx.beginPath(); ctx.ellipse(2, 4, r, r * 0.8, 0, 0, TAU); ctx.fill();
-        if (c.skin?.mythic) drawMythicAura(ctx, 0, 0, r * 1.7, c.skin.mythic, time);
-        drawCosmeticParticles(ctx, c.effect, 0, 0, r * 1.45, r * 1.45, time, c.hat ? r * .7 : 0);
+        drawTopAura(ctx, c, r, time, 'over');
         ctx.save();
         ctx.rotate(aim);
         if (c.acc === 'acc_cape') { ctx.fillStyle = '#dc2626'; ctx.beginPath(); ctx.moveTo(-r * 0.2, -r * 0.9); ctx.lineTo(-r * 1.7, 0); ctx.lineTo(-r * 0.2, r * 0.9); ctx.fill(); }
@@ -2713,14 +2799,20 @@
         if (c.acc === 'acc_jetpack') { ctx.fillStyle = '#64748b'; roundRect(ctx, -r * 1.3, -r * 0.5, r * 0.7, r, 3); ctx.fill(); ctx.fillStyle = '#f97316'; ctx.fillRect(-r * 1.6 - Math.sin(time * 30) * 2, -r * 0.25, r * 0.4, r * 0.5); }
         if (c.acc === 'acc_tail') { ctx.fillStyle = '#f97316'; ctx.beginPath(); ctx.ellipse(-r * 1.3, Math.sin(time * 6) * r * 0.3, r * 0.6, r * 0.28, 0, 0, TAU); ctx.fill(); }
         if (c.acc === 'acc_fairy' || c.acc === 'acc_phoenix') { ctx.fillStyle = c.acc === 'acc_fairy' ? 'rgba(244,114,182,.7)' : 'rgba(249,115,22,.85)'; const f = Math.sin(time * 10) * 0.12; ctx.beginPath(); ctx.ellipse(-r * 0.3, -r * 1.15, r * 0.35, r * (1 + f), 0.4, 0, TAU); ctx.ellipse(-r * 0.3, r * 1.15, r * 0.35, r * (1 + f), -0.4, 0, TAU); ctx.fill(); }
+        // Shoulders are wider than they are deep and hands sit at the sides, so facing reads clearly from above.
+        const swing = moving ? Math.sin(time * 10) * r * .2 : 0, outline = 'rgba(15,23,42,.45)';
+        ctx.lineWidth = Math.max(1, r * .09); ctx.strokeStyle = outline;
+        ctx.fillStyle = head;
+        for (const side of [-1, 1]) { ctx.beginPath(); ctx.arc(r * .3 + swing * side, side * r * .9, r * .22, 0, TAU); ctx.fill(); ctx.stroke(); }
         ctx.fillStyle = body;
-        ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
-        ctx.fillStyle = c.skin?.trim || 'rgba(0,0,0,.25)';
-        ctx.beginPath(); ctx.arc(0, 0, r, -0.9, 0.9); ctx.lineTo(0, 0); ctx.fill();
-        drawSkinSignature(ctx, c, 0, 0, r * .75, time);
-        if (c.acc === 'acc_scarf') { ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(0, 0, r * 0.95, 0.6, 2.6); ctx.stroke(); }
-        ctx.fillStyle = c.skin?.head || '#fde7c8';
-        ctx.beginPath(); ctx.arc(r * 0.1, 0, r * 0.62, 0, TAU); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(-r * .05, 0, r * .74, r * .98, 0, 0, TAU); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = c.skin?.trim || 'rgba(0,0,0,.22)';
+        ctx.beginPath(); ctx.ellipse(-r * .05, 0, r * .74, r * .98, 0, -0.9, 0.9); ctx.lineTo(-r * .05, 0); ctx.fill();
+        drawSkinSignature(ctx, c, 0, 0, r * .7, time);
+        if (c.acc === 'acc_scarf') { ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(0, 0, r * 0.8, 0.6, 2.6); ctx.stroke(); }
+        ctx.fillStyle = head; ctx.strokeStyle = outline; ctx.lineWidth = Math.max(1, r * .08);
+        ctx.beginPath(); ctx.arc(r * 0.1, 0, r * 0.6, 0, TAU); ctx.fill(); ctx.stroke();
+        if (!c.hat && !c.skin) { ctx.fillStyle = body; ctx.beginPath(); ctx.arc(r * 0.1, 0, r * 0.6, Math.PI * .55, Math.PI * 1.45); ctx.fill(); }
         if (c.hat) {
             ctx.save(); ctx.rotate(-aim);
             drawHat(ctx, c.hat, Math.cos(aim) * r * 0.1, Math.sin(aim) * r * 0.1 - r * 0.62, r * 0.62, 0, time);

@@ -149,6 +149,7 @@
             });
             window.addEventListener?.('online', () => { this.refreshNav(); this.refreshVisible(); });
             this.pollTimer = setInterval(() => {
+                if (document.hidden) return;
                 if (this.visible()) this.refreshVisible();
                 else this.scheduleSync(0);
             }, REFRESH_EVERY_MS);

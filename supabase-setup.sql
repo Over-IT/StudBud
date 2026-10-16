@@ -2658,7 +2658,7 @@ begin
             from public.studbud_game_rooms r
             where r.host_id <> bud.id and r.status in ('waiting', 'playing') and r.expires_at > now()
                 and (bud.online or r.updated_at > now() - interval '5 minutes')
-                and coalesce(r.state -> 'players', '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('id', bud.id::text))
+                and r.state -> 'players' @> jsonb_build_array(jsonb_build_object('id', bud.id::text))
             order by r.created_at desc limit 1
         ) joined on true
     ), '[]'::jsonb);
@@ -2666,6 +2666,16 @@ end;
 $$;
 revoke all on function public.studbud_friend_presence() from public, anon;
 grant execute on function public.studbud_friend_presence() to authenticated;
+-- Performance: indexes for the hottest lookups (bud presence, friend lists, live rooms, community search).
+create index if not exists studbud_friendships_requester_idx on public.studbud_friendships (requester_id, status);
+create index if not exists studbud_friendships_addressee_idx on public.studbud_friendships (addressee_id, status);
+create index if not exists studbud_game_rooms_live_host_idx on public.studbud_game_rooms (host_id, created_at desc)
+    where status in ('waiting', 'playing');
+create index if not exists studbud_game_rooms_live_players_idx on public.studbud_game_rooms using gin ((state -> 'players') jsonb_path_ops)
+    where status in ('waiting', 'playing');
+create index if not exists studbud_game_rooms_expires_idx on public.studbud_game_rooms (expires_at);
+create index if not exists studbud_community_decks_popular_idx on public.studbud_community_decks (study_count desc, updated_at desc);
+create index if not exists studbud_community_decks_owner_idx on public.studbud_community_decks (owner_id);
 
 create or replace function public.studbud_friend_request(p_username text)
 returns jsonb

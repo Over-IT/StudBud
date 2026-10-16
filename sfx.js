@@ -260,36 +260,77 @@
             while (m.next < now + 0.7) { this.musicStep(T, m.step, m.next, spb); m.next += spb; m.step++; }
         }
 
+        // Each style gets a seeded two-bar pentatonic motif so leads sing a hook instead of cycling chord tones.
+        motifFor(T) {
+            if (T._motif) return T._motif;
+            let h = 2166136261;
+            for (const ch of T.name) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
+            const rand = () => { h = Math.imul(h ^ (h >>> 15), 2246822507) >>> 0; h ^= h >>> 13; return (h >>> 0) / 4294967296; };
+            const moves = [-1, 1, 1, -2, 2, 0, -1, 3];
+            let deg = 2 + Math.floor(rand() * 3);
+            T._motif = Array.from({ length: 32 }, (_, i) => {
+                if (T.lead[i % 16] !== '1') return null;
+                deg = Math.max(0, Math.min(8, deg + moves[Math.floor(rand() * moves.length)]));
+                return deg;
+            });
+            return T._motif;
+        }
+
         musicStep(T, step, t0, spb) {
             const s = step % 16, barIndex = Math.floor(step / 16), [root, minor] = T.chords[barIndex % T.chords.length];
+            const [nextRoot] = T.chords[(barIndex + 1) % T.chords.length];
             // Swing delays every other sixteenth for a looser feel
             const t = T.swing && s % 2 === 1 ? t0 + spb * T.swing : t0;
-            const tones = [root, root + (minor ? 3 : 4), root + 7, root + 12];
             const hz = n => 440 * Math.pow(2, (n - 69) / 12);
+            const section = Math.floor(barIndex / 4) % 4, phraseBar = barIndex % 4;
             if (s === 0) {
-                tones.slice(0, 3).forEach(n => {
-                    this.musicTone(hz(n), spb * 15, 0.045, 'sawtooth', t, 1100, { detune: 9, attack: 0.12, send: 0.7 });
-                    this.musicTone(hz(n), spb * 15, 0.05, 'triangle', t, 2200, { attack: 0.06, send: 0.4 });
+                // Voice-lead the pad into one octave so chord changes glide instead of jumping.
+                const fold = n => { while (n < 55) n += 12; while (n > 67) n -= 12; return n; };
+                const pad = [root, root + (minor ? 3 : 4), root + 7].map(fold);
+                if (section % 2 === 1) pad.push(fold(root + (minor ? 10 : 11)));
+                pad.forEach((n, i) => {
+                    this.musicTone(hz(n), spb * 15, i === 3 ? 0.03 : 0.042, 'sawtooth', t, 1100, { detune: 9, attack: 0.12, send: 0.7 });
+                    if (i < 3) this.musicTone(hz(n), spb * 15, 0.045, 'triangle', t, 2200, { attack: 0.06, send: 0.4 });
                 });
             }
             if (T.bass[s] === '1') {
-                const hop = barIndex % 4 === 3 && s >= 8 ? 12 : 0;
+                const hop = phraseBar === 3 && s >= 8 ? 12 : 0;
                 this.musicTone(hz(root - 24 + hop), spb * 1.8, 0.3, T.bassWave, t, 600);
                 this.musicTone(hz(root - 36 + hop), spb * 1.8, 0.2, 'sine', t, 300);
+            } else if (s === 15 && nextRoot !== root) {
+                // Approach note leads the ear into the next chord.
+                this.musicTone(hz(nextRoot - 24 + (nextRoot > root ? -1 : 1)), spb * .9, 0.2, T.bassWave, t, 600);
             }
-            const section = Math.floor(barIndex / 4) % 4;
-            if (T.lead[s] === '1' && (section !== 2 || s % 4 === 0)) {
+            const intro = barIndex < 2;
+            if (T.lead[s] === '1' && !intro && (section !== 2 || s % 4 === 0)) {
                 const up = section === 3 ? 12 : 0;
-                const note = hz((T.melody ? root + T.melody[(Math.floor(step / 2) + barIndex) % T.melody.length]
-                    : tones[T.arp[(step + barIndex * 2) % T.arp.length]]) + 12 + up);
-                this.musicTone(note, spb * (section === 2 ? 2.5 : 1.4), section === 0 ? .065 : .085, T.leadWave, t, section === 2 ? 1800 : 3200, { detune: 6, send: .45, echo: .35 });
+                let n;
+                if (T.melody) n = root + T.melody[(Math.floor(step / 2) + barIndex) % T.melody.length];
+                else {
+                    const scale = minor ? [0, 3, 5, 7, 10] : [0, 2, 4, 7, 9];
+                    const motif = this.motifFor(T);
+                    let deg = motif[(phraseBar % 2) * 16 + s];
+                    if (phraseBar === 2 && deg != null) deg = Math.min(8, deg + 1);
+                    // The fourth bar of each phrase answers with a held resolution instead of more notes.
+                    if (phraseBar === 3 && s >= 8) deg = s === 8 ? 5 : null;
+                    n = deg == null ? null : root + scale[deg % 5] + 12 * Math.floor(deg / 5);
+                    if (n != null && section === 3) {
+                        const hd = (deg ?? 0) + 2;
+                        this.musicTone(hz(root + scale[hd % 5] + 12 * Math.floor(hd / 5) + 12 + up), spb * 1.4, .04, 'triangle', t, 2600, { send: .5 });
+                    }
+                }
+                if (n != null) {
+                    const held = phraseBar === 3 && s === 8 ? 6 : section === 2 ? 2.5 : 1.4;
+                    this.musicTone(hz(n + 12 + up), spb * held, section === 0 ? .065 : .085, T.leadWave, t, section === 2 ? 1800 : 3200, { detune: 6, send: .45, echo: .35 });
+                }
             }
             if (T.kick[s] === '1' && (section !== 2 || s === 0)) this.musicKick(t);
-            const fill = section !== 2 && T.snare !== '0000000000000000' && barIndex % 4 === 3 && s >= 12;
+            const fill = section !== 2 && T.snare !== '0000000000000000' && phraseBar === 3 && s >= 12;
             if (T.snare[s] === '1' || fill) this.musicNoise(t, 0.14, fill ? 0.12 : 0.16, 1800, 'highpass');
             if (T.snare[s] === '1' && T.snare !== '0000000000000000') this.musicTone(190, 0.09, 0.08, 'triangle', t, 1200);
             if (T.hat[s] === '1' && section !== 2) this.musicNoise(t, 0.04, s % 4 === 0 ? .05 : .035, 7000, 'highpass');
             if (T.openHat && T.openHat[s] === '1' && s % 4 === 2) this.musicNoise(t, 0.16, 0.04, 8000, 'highpass');
+            if (s === 0 && phraseBar === 0 && barIndex > 0) this.musicNoise(t, 0.9, 0.05, 5000, 'highpass');
         }
 
         musicTone(freq, dur, vol, type, t, cutoff = 5000, opts = {}) {

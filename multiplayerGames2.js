@@ -86,12 +86,12 @@
             const s = this.s, me = this.me;
             for (const r of s.remoteList()) {
                 if (!this.seen(r.x, r.y)) continue;
-                drawFigureTop(ctx, r, r.x, r.y, 15, r.f || 0, this.anim + r.x * 0.01, 0.95);
+                drawFigureTop(ctx, r, r.x, r.y, this.figureR || 15, r.f || 0, this.anim + r.x * 0.01, 0.95, !this.seated && Boolean(r.a));
                 if (extra) extra(ctx, r.x, r.y, r);
                 if (!this.s.preview) nameTag(ctx, r.name || '', r.x, r.y - 30, r.color);
             }
             const alpha = this.stun > 0 ? 0.5 + Math.sin(this.anim * 30) * 0.3 : 1;
-            drawFigureTop(ctx, s.local, me.x, me.y, 15, me.aim, this.anim, alpha);
+            drawFigureTop(ctx, s.local, me.x, me.y, this.figureR || 15, me.aim, this.anim, alpha, !this.seated && this.moving);
             if (extra) extra(ctx, me.x, me.y, null);
             if (!this.s.preview) nameTag(ctx, 'You', me.x, me.y - 30, '#fff');
         }
@@ -707,6 +707,8 @@
         { v: 40, r: 18, color: '#c084fc', name: 'Salmon' }, { v: 100, r: 17, color: '#fbbf24', name: 'Golden carp' }
     ];
 
+    const DUEL_SECONDS = 8, SURGE_CYCLE = 38, SURGE_ACTIVE = 9, WAVE_SPEED = (3600 + 500) / SURGE_ACTIVE, SURF_POINTS = 6;
+    const POOL_SPIN = 1.1, POOL_LAUNCH = .3, POOL_SPEED = 760;
     class River extends Arena {
         constructor(s) {
             super(s, 3600, 1800);
@@ -734,7 +736,8 @@
             this.away = new Map();
             this.duelCd = new Map(); this.duel = null;
             this.cast = null; this.castCd = 0; this.hurt = 0; this.haul = 0; this.catches = 0; this.combo = 0; this.comboT = 0;
-            this.surgePush = 0; this.lastSurge = -1;
+            this.surgePush = 0; this.lastSurge = -1; this.surfT = 0; this.riding = false;
+            this.figureR = 13; this.seated = true;
             this.wake = [];
             this.res = new A.Resource('Energy', '#7dd3fc', 100, 30, 2);
         }
@@ -781,23 +784,42 @@
             return { x: pool.x + Math.sin(now * 0.24 + pool.phase) * pool.ampX, y: pool.y + Math.sin(now * 0.31 + pool.phase * 1.7) * pool.ampY };
         }
 
+        launchDir(spin, pos) {
+            const axis = this.s.axis();
+            let dir = Math.hypot(axis.x, axis.y) > 0 ? Math.atan2(axis.y, axis.x) : spin.angle + Math.PI / 2;
+            const room = 260, dy = Math.sin(dir);
+            if ((dy < 0 && pos.y - this.bank < room) || (dy > 0 && this.H - this.bank - pos.y < room)) dir = -dir;
+            return dir;
+        }
+
         update(dt) {
             const s = this.s, me = this.me, now = clock(s);
             this.ejectT = Math.max(0, this.ejectT - dt);
             this.aimLocked = Boolean(this.whirlpool) || this.ejectT > 0;
             const axis = s.axis(), steering = this.stun <= 0 && !this.whirlpool && Math.hypot(axis.x, axis.y) > 0;
-            const canMove = !steering || s.spend(A.ENERGY_COSTS.river.walk * dt);
+            // Surfing a wave face is free: the wave does the work.
+            const canMove = !steering || this.riding || s.spend(A.ENERGY_COSTS.river.walk * dt);
             this.speedMul = this.whirlpool ? .22 : canMove ? 1 : .08;
             const surge = this.surgeAt(now), shelter = this.bankShelter(me.y);
             if (surge.warning && this.lastSurge !== surge.cycle) {
-                this.lastSurge = surge.cycle; s.toast('Wave incoming! Shelter in the pale shallows', '#7dd3fc'); s.sfx('wave', 1000);
+                this.lastSurge = surge.cycle; s.toast('Wave incoming! Ride the crest or shelter in the pale shallows', '#7dd3fc'); s.sfx('wave', 1000);
             }
-            // The same curved crest and footprint drive both the visible wave and its current.
-            const separation = (me.x - (this.waveCrest(me.y, now, surge) - 30)) / 110;
-            const push = surge.active && !this.whirlpool && Math.abs(separation) < 1
-                ? Math.pow(1 - separation * separation, 2) * 280 * shelter : 0;
+            // The same curved crest drives the visible wave and its current. A boat on the face just behind the
+            // crest is carried at nearly the wave's speed; steering forward keeps you surfing, easing off drops you.
+            const separation = (me.x - (this.waveCrest(me.y, now, surge) - 40)) / 120;
+            const face = separation < 0 ? Math.max(0, 1 + separation / 1.6) : Math.max(0, 1 - separation * .9);
+            const push = surge.active && !this.whirlpool ? face * face * (3 - 2 * face) * WAVE_SPEED * shelter : 0;
             this.surgePush = lerp(this.surgePush, push, 1 - Math.exp(-dt * 8));
             if (!shelter || this.whirlpool) this.surgePush = 0;
+            this.riding = push > 0 && face > .2 && shelter > .5;
+            if (this.riding) {
+                this.surfT += dt;
+                if (Math.random() < dt * 30) this.particles.burst(me.x + 30, me.y + (Math.random() - .5) * 50, '#e0f2fe', 2, 120, .35, 3);
+            } else if (this.surfT > 0) {
+                const bonus = this.surfT >= 1 ? Math.round(this.surfT * SURF_POINTS) : 0;
+                if (bonus) { this.haul += bonus; s.addScore(bonus); s.toast(`Rode the wave ${this.surfT.toFixed(1)}s: +${bonus} fish pts`, '#7dd3fc'); }
+                this.surfT = 0;
+            }
             const drift = { x: 24 * shelter + this.surgePush, y: 0 };
             this.step(dt, this.ejectT > 0 ? 240 : 1800, drift);
             this.updateLogs(now);
@@ -822,18 +844,29 @@
             }
             this.duelCheck(now);
             if (this.whirlpool) {
+                // Spin inward, then lock a launch direction (your steering, or the spin tangent) and glide out along
+                // it before release, so the exit is a clean straight shot with no teleport.
                 const spin = this.whirlpool, pos = this.poolPos(spin.pool, now);
-                spin.t += dt; spin.angle += dt * (5 + spin.t * 3);
-                const radius = Math.max(24, spin.radius * (1 - spin.t / 1.4));
-                const axis = s.axis();
-                me.x = pos.x + Math.cos(spin.angle) * radius + axis.x * 7;
-                me.y = pos.y + Math.sin(spin.angle) * radius + axis.y * 7;
-                me.aim = spin.angle + Math.PI / 2;
+                spin.t += dt;
+                if (spin.t < POOL_SPIN) {
+                    spin.angle += dt * (5 + spin.t * 3);
+                    const radius = Math.max(24, spin.radius * (1 - spin.t / POOL_SPIN * .8));
+                    me.x = pos.x + Math.cos(spin.angle) * radius;
+                    me.y = pos.y + Math.sin(spin.angle) * radius;
+                    me.aim = spin.angle + Math.PI / 2;
+                    spin.dir = this.launchDir(spin, pos);
+                } else {
+                    if (!spin.from) { spin.dir = this.launchDir(spin, pos); spin.from = { x: me.x - pos.x, y: me.y - pos.y }; }
+                    const k = clamp((spin.t - POOL_SPIN) / POOL_LAUNCH, 0, 1), ease = k * k;
+                    const reach = spin.pool.r * 1.35 + me.r;
+                    me.x = pos.x + spin.from.x * (1 - ease) + Math.cos(spin.dir) * reach * ease;
+                    me.y = pos.y + spin.from.y * (1 - ease) + Math.sin(spin.dir) * reach * ease;
+                    me.aim = spin.dir;
+                }
                 me.vx = me.vy = 0;
-                if (spin.t >= 1.4) {
-                    me.x = pos.x + Math.cos(spin.angle) * (spin.pool.r * 1.8 + me.r);
-                    me.y = clamp(pos.y + Math.sin(spin.angle) * (spin.pool.r * 1.8 + me.r), this.bank + me.r, this.H - this.bank - me.r);
-                    me.vx = Math.cos(spin.angle) * 760; me.vy = Math.sin(spin.angle) * 760;
+                if (spin.t >= POOL_SPIN + POOL_LAUNCH) {
+                    me.y = clamp(me.y, this.bank + me.r, this.H - this.bank - me.r);
+                    me.vx = Math.cos(spin.dir) * POOL_SPEED; me.vy = Math.sin(spin.dir) * POOL_SPEED;
                     this.whirlpool = null; this.ejectT = .65; this.poolHitCd = 2.5;
                     s.sfx('splash');
                     this.particles.burst(me.x, me.y, '#e0f2fe', 24, 300, .6, 4);
@@ -949,7 +982,7 @@
             if (s.question || s.countdown > 0 || s.paused) return;
             for (const r of s.remoteList()) {
                 if (s.user.id > r.id || r.done || (this.duelCd.get(r.id) || 0) > now) continue;
-                if (dist(me.x, me.y, r.x, r.y) > 40 || !s.cards.length) continue;
+                if (dist(me.x, me.y, r.x, r.y) > me.r * 2.2 || !s.cards.length) continue;
                 const ci = Math.floor(Math.random() * s.cards.length);
                 const token = Math.floor(now * 1000);
                 s.emit({ k: 'dq', to: r.id, ci, i: token });
@@ -965,8 +998,8 @@
             this.duel = { opp: oppId, token, resolved: false, won: null };
             const name = s.roster.get(oppId)?.nickname || 'a rival';
             this.hurt = Math.max(this.hurt, 0.5);
-            s.ask(() => { }, `Duel with ${name}! First correct answer steals 25% of their fish`, true, {
-                cardIndex: ci, force: true,
+            s.ask(() => { }, `First correct answer steals 25% of ${name}'s fish`, true, {
+                cardIndex: ci, force: true, seed: (token ^ (ci * 2654435761)) >>> 0, duel: name, seconds: DUEL_SECONDS,
                 onAnswer: correct => { if (correct) this.duelWin(oppId, token); }
             });
         }
@@ -1007,40 +1040,54 @@
         }
         waveCrest(y, time, surge = this.surgeAt(time)) { return surge.x + Math.sin(y * .025 + time * 5) * 20; }
         surgeAt(time) {
-            const phase = ((time % 38) + 38) % 38;
-            return { cycle: Math.floor(time / 38), warning: phase >= 25 && phase < 28, active: phase >= 28 && phase < 36,
-                x: (phase - 28) / 8 * (this.W + 500) - 250 };
+            const phase = ((time % SURGE_CYCLE) + SURGE_CYCLE) % SURGE_CYCLE;
+            return { cycle: Math.floor(time / SURGE_CYCLE), warning: phase >= 25 && phase < 28, active: phase >= 28 && phase < 28 + SURGE_ACTIVE,
+                x: (phase - 28) / SURGE_ACTIVE * (this.W + 500) - 250 };
         }
         touchLayout() { return { stick: true, buttons: [] }; }
-        hint() { return 'WASD steer (2 Energy/s) \u00b7 click to cast (4 Energy) \u00b7 pale shallows shelter from waves \u00b7 Q recharge'; }
+        hint() { return 'WASD steer (2 Energy/s) \u00b7 click to cast (4 Energy) \u00b7 ride wave crests for free speed and points \u00b7 Q recharge'; }
         ex() { return { n: this.cast ? 1 : 0 }; }
 
         draw(ctx, w, h) {
             const s = this.s, me = this.me, now = clock(s), t = this.anim;
             ctx.fillStyle = '#0c4a6e'; ctx.fillRect(0, 0, w, h);
             this.begin(ctx, w, h);
-            A.util.bandGradient(ctx, this.x0, this.bank, this.x1 - this.x0, this.H - this.bank * 2, [[0, '#0e7490'], [0.5, '#0891b2'], [1, '#0e7490']]);
-            ctx.fillStyle = '#49b4b9';
-            ctx.fillRect(this.x0, this.bank, this.x1 - this.x0, 80);
-            ctx.fillRect(this.x0, this.H - this.bank - 80, this.x1 - this.x0, 80);
+            A.util.bandGradient(ctx, this.x0, this.bank, this.x1 - this.x0, this.H - this.bank * 2, [[0, '#0e7490'], [0.12, '#0891b2'], [0.5, '#0b6f8f'], [0.88, '#0891b2'], [1, '#0e7490']]);
+            // Pale shallows fade into the channel so the shelter zone reads clearly.
+            A.util.bandGradient(ctx, this.x0, this.bank, this.x1 - this.x0, 90, [[0, 'rgba(94,234,212,.55)'], [1, 'rgba(94,234,212,0)']]);
+            A.util.bandGradient(ctx, this.x0, this.H - this.bank - 90, this.x1 - this.x0, 90, [[0, 'rgba(94,234,212,0)'], [1, 'rgba(94,234,212,.55)']]);
             for (let x = Math.floor(this.x0 / 520) * 520; x < this.x1; x += 520) {
                 for (const y of [this.bank + 18, this.H - this.bank - 56]) {
+                    ctx.fillStyle = 'rgba(15,23,42,.25)'; ctx.fillRect(x + 44, y + 6, 90, 38);
                     ctx.fillStyle = '#946947'; ctx.fillRect(x + 40, y, 90, 38);
                     ctx.fillStyle = '#c59a70';
                     for (let i = 0; i < 5; i++) ctx.fillRect(x + 42 + i * 18, y + 2, 14, 34);
                 }
             }
-            ctx.strokeStyle = 'rgba(224,242,254,.22)'; ctx.lineWidth = 2;
-            for (let y = Math.ceil((this.y0 - 0) / 70) * 70; y < this.y1; y += 70) {
-                if (y < this.bank || y > this.H - this.bank) continue;
-                ctx.beginPath();
-                for (let x = this.x0; x <= this.x1; x += 40) { const yy = y + Math.sin((x - now * 24) / 60 + y) * 6; if (x === this.x0) ctx.moveTo(x, yy); else ctx.lineTo(x, yy); }
-                ctx.stroke();
+            // Current streaks drift downstream instead of static sine lines.
+            ctx.strokeStyle = 'rgba(224,242,254,.2)'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.beginPath();
+            const span = 260;
+            for (let y = Math.ceil(this.y0 / 55) * 55; y < this.y1; y += 55) {
+                if (y < this.bank + 30 || y > this.H - this.bank - 30) continue;
+                const off = (now * (40 + (y % 3) * 14) + (y * 7.3) % span) % span;
+                for (let x = Math.floor(this.x0 / span) * span - span + off; x < this.x1; x += span) {
+                    const yy = y + Math.sin(x * .01 + y) * 8;
+                    ctx.moveTo(x, yy); ctx.lineTo(x + 46, yy + 2);
+                }
             }
+            ctx.stroke(); ctx.lineCap = 'butt';
             for (const [top, y0] of [[true, 0], [false, this.H - this.bank]]) {
                 if (!this.seenRect(this.x0, y0 - 20, this.x1 - this.x0, this.bank + 40, 0)) continue;
                 ctx.fillStyle = '#365314'; ctx.fillRect(this.x0, y0, this.x1 - this.x0, this.bank);
                 ctx.fillStyle = '#4d7c0f'; ctx.fillRect(this.x0, top ? this.bank - 36 : y0, this.x1 - this.x0, 36);
+                ctx.fillStyle = '#d6b98a'; ctx.fillRect(this.x0, top ? this.bank - 12 : y0, this.x1 - this.x0, 12);
+                ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 3; ctx.beginPath();
+                const edge = top ? this.bank : y0;
+                for (let x = Math.floor(this.x0 / 30) * 30; x <= this.x1 + 30; x += 30) {
+                    const yy = edge + (top ? 4 : -4) + Math.sin(x * .05 + t * 2) * 3;
+                    if (x === Math.floor(this.x0 / 30) * 30) ctx.moveTo(x, yy); else ctx.lineTo(x, yy);
+                }
+                ctx.stroke();
                 for (let x = Math.floor(this.x0 / 28) * 28; x < this.x1; x += 28) {
                     const seed = A.util.hashStr(`bank:${x}:${top}`), gy = top ? this.bank - 18 - seed % 110 : y0 + 18 + seed % 110;
                     ctx.strokeStyle = ['#65a30d', '#84cc16', '#3f6212'][seed % 3]; ctx.lineWidth = 2; ctx.beginPath();
@@ -1086,6 +1133,7 @@
                 if (!this.seen(p.x, p.y)) continue;
                 const kind = FISH[f.type];
                 const dir = Math.sign(f.spd);
+                ctx.fillStyle = 'rgba(8,47,73,.3)'; ctx.beginPath(); ctx.ellipse(p.x + 5, p.y + 9, kind.r * 1.6, kind.r * .7, 0, 0, TAU); ctx.fill();
                 ctx.save(); ctx.translate(p.x, p.y); ctx.scale(dir, 1);
                 ctx.globalAlpha = 0.9;
                 if (f.type === 3) { ctx.fillStyle = 'rgba(251,191,36,.25)'; ctx.beginPath(); ctx.arc(0, 0, 30 + Math.sin(t * 5) * 4, 0, TAU); ctx.fill(); }
@@ -1143,18 +1191,39 @@
                 }
                 }
             }
-            const boat = (x, y, aim) => {
+            const boat = (x, y, aim, surfing) => {
                 ctx.save(); ctx.translate(x, y); ctx.rotate(aim);
+                ctx.fillStyle = 'rgba(8,47,73,.35)'; ctx.beginPath(); ctx.ellipse(-2, 6, 40, 20, 0, 0, TAU); ctx.fill();
+                if (surfing) {
+                    ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.lineWidth = 4; ctx.beginPath();
+                    ctx.moveTo(-30, -14); ctx.quadraticCurveTo(-60, -26, -92, -34 - Math.sin(t * 9) * 4);
+                    ctx.moveTo(-30, 14); ctx.quadraticCurveTo(-60, 26, -92, 34 + Math.sin(t * 9) * 4); ctx.stroke();
+                }
                 ctx.fillStyle = '#713f12'; ctx.beginPath(); ctx.moveTo(36, 0);
                 ctx.quadraticCurveTo(12, -23, -29, -15); ctx.quadraticCurveTo(-39, 0, -29, 15);
                 ctx.quadraticCurveTo(12, 23, 36, 0); ctx.fill();
                 ctx.strokeStyle = '#e8bd82'; ctx.lineWidth = 3; ctx.stroke();
                 ctx.fillStyle = '#b77942'; ctx.beginPath(); ctx.ellipse(-2, 0, 24, 11, 0, 0, TAU); ctx.fill();
-                ctx.fillStyle = '#e8bd82'; ctx.fillRect(-16, -12, 5, 24); ctx.fillRect(14, -10, 5, 20);
+                ctx.fillStyle = '#e8bd82'; ctx.fillRect(-20, -12, 5, 24); ctx.fillRect(18, -10, 5, 20);
+                // Oars dip in rhythm so the rower reads as seated and paddling.
+                const stroke = Math.sin(t * 6 + x * .01) * .35;
+                ctx.strokeStyle = '#c59a70'; ctx.lineWidth = 3; ctx.beginPath();
+                ctx.moveTo(0, -10); ctx.lineTo(-10 + stroke * 20, -34);
+                ctx.moveTo(0, 10); ctx.lineTo(-10 + stroke * 20, 34); ctx.stroke();
                 ctx.restore();
             };
-            for (const r of s.remoteList()) { if (this.seen(r.x, r.y)) boat(r.x, r.y, r.f || 0); }
-            boat(me.x, me.y, me.aim);
+            if (this.whirlpool && this.whirlpool.dir != null) {
+                const spin = this.whirlpool, pos = this.poolPos(spin.pool, now), len = spin.pool.r * 1.6;
+                const ex = pos.x + Math.cos(spin.dir) * len, ey = pos.y + Math.sin(spin.dir) * len;
+                ctx.strokeStyle = 'rgba(254,243,199,.85)'; ctx.lineWidth = 5; ctx.setLineDash([14, 10]);
+                ctx.beginPath(); ctx.moveTo(pos.x, pos.y); ctx.lineTo(ex, ey); ctx.stroke(); ctx.setLineDash([]);
+                ctx.fillStyle = 'rgba(254,243,199,.95)'; ctx.beginPath();
+                ctx.moveTo(ex + Math.cos(spin.dir) * 20, ey + Math.sin(spin.dir) * 20);
+                ctx.lineTo(ex + Math.cos(spin.dir + 2.4) * 18, ey + Math.sin(spin.dir + 2.4) * 18);
+                ctx.lineTo(ex + Math.cos(spin.dir - 2.4) * 18, ey + Math.sin(spin.dir - 2.4) * 18); ctx.fill();
+            }
+            for (const r of s.remoteList()) { if (this.seen(r.x, r.y)) boat(r.x, r.y, r.f || 0, false); }
+            boat(me.x, me.y, me.aim, this.riding);
             this.drawPlayers(ctx);
             const mw = this.mouseWorld();
             if (!s.preview && !s.question) {
@@ -1197,7 +1266,7 @@
             this.roadsY = Array.from({ length: BR + 1 }, (_, i) => ROAD / 2 + i * (BH + ROAD));
             this.trees = [];
             for (const b of this.blocks) for (let k = 0; k < 4; k++) this.trees.push({ x: b.x + (k % 2 ? b.w + 30 : -30), y: b.y + (k < 2 ? 20 : b.h - 20) + r() * 40, r: 12 + r() * 6 });
-            this.scoreGoal = false; this.goalUnit = 'deliveries'; this.goalLabel = 'Deliveries';
+            this.scoreGoal = false; this.goalUnit = 'cash'; this.goalLabel = 'Cash earned'; this.formatValue = v => `$${Math.round(Number(v) || 0).toLocaleString()}`;
             this.me.x = this.W / 2; this.me.y = ROAD / 2 + BH + ROAD; this.cam.x = this.me.x; this.cam.y = this.me.y;
             this.baseSpeed = 245; this.boost = 0;
             this.res = new A.Resource('Energy', '#38bdf8', 100, 40, 2);
@@ -1375,7 +1444,7 @@
                 });
                 if (opened) v.until = now + 1;
             }
-            s.setGoal(this.deliveries);
+            s.setGoal(this.earned);
         }
 
         ex() { return { p: this.pkg ? 1 : 0 }; }

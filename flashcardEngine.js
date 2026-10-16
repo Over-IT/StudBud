@@ -1095,7 +1095,7 @@
             const words = text => new Set(this.answerKey(text).match(/[\p{L}\p{N}]+/gu) || []);
             const target = words(card.back), prompt = words(card.front);
             const number = text => /^[+-]?\d+(?:\.\d+)?$/.test(this.answerKey(text));
-            const candidates = (pool || []).filter(item => item && item !== card).map(item => {
+            const candidates = (pool || []).filter(item => item && item !== card).map((item, index) => {
                 const terms = words(item.back), front = words(item.front);
                 const shared = [...terms].filter(word => target.has(word)).length;
                 const sameTag = (card.tags || []).some(tag => (item.tags || []).includes(tag));
@@ -1104,7 +1104,7 @@
                     + [...front].filter(word => prompt.has(word)).length / Math.max(1, prompt.size)
                     + (number(card.back) === number(item.back) ? 1 : 0)
                     + 1 / (1 + Math.abs(String(card.back).length - String(item.back).length))
-                    + (vary ? Math.random() * 1.5 : 0), tie: Math.random() };
+                    + (vary ? Math.random() * 1.5 : 0), tie: vary ? Math.random() : index };
             }).sort((a, b) => b.rank - a.rank || a.tie - b.tie);
             for (const { item } of candidates) {
                 const key = this.answerKey(item.back);

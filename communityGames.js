@@ -393,9 +393,14 @@
         async getAuthorNames(ids) {
             const list = [...new Set((ids || []).filter(Boolean))];
             if (!list.length) return {};
-            const { data, error } = await (await this.publicClient()).rpc('studbud_community_authors', { p_ids: list });
-            if (error) throw new Error(error.message);
-            return data || {};
+            this.authorCache ||= new Map();
+            const fresh = Date.now() - 300000, missing = list.filter(id => !(this.authorCache.get(id)?.at > fresh));
+            if (missing.length) {
+                const { data, error } = await (await this.publicClient()).rpc('studbud_community_authors', { p_ids: missing });
+                if (error) throw new Error(error.message);
+                for (const id of missing) this.authorCache.set(id, { at: Date.now(), name: data?.[id] });
+            }
+            return Object.fromEntries(list.filter(id => this.authorCache.get(id)?.name != null).map(id => [id, this.authorCache.get(id).name]));
         }
 
         async getUserProfile(userId) {
@@ -507,10 +512,22 @@
                 p_study_date: studiedDate.toISOString().slice(0, 10)
             });
             if (error) throw new Error(`Could not sync study time: ${error.message}`);
+            this.boardCache?.clear();
             return data;
         }
 
+        // Boards change slowly; a short cache stops tab switches and re-renders from refetching the same ranking.
         async getStudyLeaderboard(period = 'daily', scope = 'global') {
+            const key = `${period}:${scope}:${window.StudBudCloud?.user?.id || ''}`;
+            this.boardCache ||= new Map();
+            const hit = this.boardCache.get(key);
+            if (hit && Date.now() - hit.at < 30000) return hit.data;
+            const data = await this.fetchStudyLeaderboard(period, scope);
+            this.boardCache.set(key, { at: Date.now(), data });
+            return data;
+        }
+
+        async fetchStudyLeaderboard(period, scope) {
             const client = (await this.publicClient());
             let { data, error } = await client.rpc('studbud_get_study_leaderboard', { p_period: period, p_scope: scope });
             // Older databases only know the one-argument daily/weekly version; keep the board working until setup is re-run.
