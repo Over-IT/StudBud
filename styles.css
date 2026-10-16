@@ -3084,7 +3084,9 @@ body.tutorial-active { overscroll-behavior: contain; }
 .friend-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 10px; border-radius: 12px; background: var(--bg-glass-hover); border: 1px solid var(--border-glass); }
 .friend-row strong { flex: 1 1 100px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .friend-initial { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; color: #fff; font-weight: 800; background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary)); flex: 0 0 auto; }
-.friend-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.friend-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.friend-game-status { font-size: .85rem; color: var(--text-secondary); }
+.lobby-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 100000; max-width: min(92vw, 480px); padding: 12px 18px; border-radius: 12px; color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border-glass); box-shadow: 0 8px 32px #0006; }
 .friend-profile-head { display: flex; align-items: center; gap: 14px; }
 .friend-profile-head > div { flex: 1; min-width: 0; }
 .friend-profile-head h3 { margin: 0; overflow-wrap: anywhere; }
@@ -4373,6 +4375,9 @@ body.studying { overflow: hidden; }
 .chip-btn.is-on { color: #f59e0b; border-color: #f59e0b; background: color-mix(in srgb, #f59e0b 14%, transparent); }
 .chip-toggle input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent-primary); }
 .chip-toggle:has(input:checked) { color: var(--accent-primary); border-color: var(--accent-primary); }
+.chip-select { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 2px 4px 2px 12px; border-radius: 999px; border: 2px solid var(--border-glass); background: var(--bg-glass); color: var(--text-secondary); font-weight: 800; font-size: .85rem; }
+.chip-select select { min-height: 30px; padding: 2px 8px; border: 0; border-radius: 999px; background: transparent; color: var(--text-primary); font: inherit; cursor: pointer; }
+.chip-select select:focus-visible { outline: 2px solid var(--accent-primary); }
 .study-combo { font-weight: 900; color: #f97316; animation: sbPop .3s ease; }
 .study-keys { margin-left: auto; font-size: .75rem; color: var(--text-secondary); }
 .study-keys kbd { font: inherit; font-weight: 800; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--border-glass); border-bottom-width: 3px; background: var(--bg-glass); }
@@ -4615,3 +4620,11 @@ body.tutorial-active .ad-slot, body.studying .ad-slot { display: none !important
 @media (max-width: 480px) {
     .mpg-overlay .mpg-hud .mpg-actions > button, .mpg-overlay .mpg-hud .mpg-actions > details > summary { min-height: 36px; padding: 5px 8px; font-size: .68rem; }
 }
+/* Prevent accidental text highlighting, tap flashes, long-press callouts and image drags app-wide; typing surfaces stay selectable. */
+html, body { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
+body { touch-action: manipulation; }
+img, svg, canvas, a { -webkit-user-drag: none; user-drag: none; }
+[draggable="true"] { -webkit-user-drag: element; user-drag: element; }
+input, textarea, select, [contenteditable]:not([contenteditable="false"]), code, pre, .selectable { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+input[type="button"], input[type="submit"], input[type="checkbox"], input[type="radio"], input[type="range"], input[type="color"], input[type="file"] { -webkit-user-select: none; user-select: none; }
+:focus:not(:focus-visible) { outline: none; }

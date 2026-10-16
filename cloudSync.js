@@ -23,6 +23,13 @@
             this.mfaSetupFactor = null;
         }
 
+        async getFriendRooms() {
+            if (!this.user || this.user.is_anonymous || this.offlineMode || !this.client) return [];
+            const { data, error } = await this.client.rpc('studbud_friend_open_rooms');
+            if (error) throw new Error(error.message || 'Could not load buds’ games.');
+            return Array.isArray(data) ? data : [];
+        }
+
         static mergeData(base, local, remote, field = 'account') {
             const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
             if (field === 'account.state.gameMetrics' && local && remote && (local.resetId || '') !== (remote.resetId || '')) {

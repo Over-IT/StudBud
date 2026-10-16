@@ -76,7 +76,7 @@ for (const fps of [30, 60, 120]) {
     assert.ok(Math.hypot(g.me.x - 1200, g.me.y - 850) > 200);
 }
 const market = session('market').game;
-assert.equal(market.cars.length, 40, 'traffic is reduced by 20%');
+assert.equal(market.cars.length, 25, 'traffic is reduced by 37.5%');
 for (const block of market.blocks) for (const [ox, oy] of [[40, 40], [block.w - 40, 40], [40, block.h - 40], [block.w - 40, block.h - 40]]) {
     const body = { x: block.x + ox - 15, y: block.y + oy - 15, w: 30, h: 30 };
     assert.ok(!market.walls.some(w => A.util.overlap(body, w)), 'all four safe corners are walkable');
@@ -296,6 +296,37 @@ console.log('Admin Tower Defense builds, upgrades and sends honor infinite test 
 }
 console.log('Grid placement, authenticated tower ownership, independent 12-player caps, expanded team capacity and snapshot restoration passed.');
 {
+    const idle = session('defense'), g = idle.game;
+    assert.equal(g.waveNumber, 0); assert.equal(g.enemies.length, 0);
+    for (let elapsed = 0; elapsed < 25.2; elapsed += .05) g.simulate(.05);
+    assert.equal(g.waveNumber, 1, 'the first wave starts on its timer without player orders');
+    assert.ok(g.enemies.length > 0, 'automatic waves spawn enemies without player action');
+    assert.match(g.waveStatusText(), /WAVE 1 · DEPLOYING/);
+    texts.length = 0; g.draw(ctx, 1280, 720);
+    assert.ok(texts.includes(g.waveStatusText()), 'HUD visibly shows wave deployment/countdown');
+    assert.ok(g.waveEnemyHealth(0, 6) > g.waveEnemyHealth(0, 1), 'enemy health increases with wave number');
+    assert.ok(g.waveEnemySpeed({ type: 0, wave: 6 }) > g.waveEnemySpeed({ type: 0, wave: 1 }), 'enemy speed increases with wave number');
+    g.waveNumber = 8;
+    assert.equal(g.waveEnemyType(0), 4, 'late waves include armored Sentinels');
+    assert.equal(g.waveEnemyType(1), 5, 'late waves include fast Wisps');
+    const idleBattle = session('defense').game;
+    let elapsed = 0;
+    while (!idleBattle.finished && elapsed < 180) { idleBattle.simulate(.05); elapsed += .05; }
+    assert.ok(idleBattle.finished, `an idle battle ends automatically (${elapsed.toFixed(1)} seconds)`);
+    assert.ok(elapsed >= 120 && elapsed <= 180, `idle teams lose in roughly two to three minutes (${elapsed.toFixed(1)}s)`);
+    assert.ok(idleBattle.teamValue(idleBattle.winner) >= 1000000, 'the wave-driven finish records a winning result score');
+    const restored = session('defense', 'guest').game;
+    const state = idle.game.snapshot(); restored.applySnapshot(state);
+    assert.equal(restored.waveNumber, idle.game.waveNumber);
+    assert.equal(restored.waveSpawnRemaining, idle.game.waveSpawnRemaining, 'host snapshots synchronize wave progress');
+    const serial = restored.receivedSerial, originalError = sandbox.console.error;
+    sandbox.console.error = noop;
+    try {
+        restored.applySnapshot({ ...state, serial: state.serial + 1, waveNumber: -1 });
+        assert.equal(restored.receivedSerial, serial, 'invalid wave snapshots are rejected');
+    } finally { sandbox.console.error = originalError; }
+}
+console.log('Automatic waves, wave scaling, host-synchronized progress and idle match completion passed.');{
     const s = session('defense'), g = s.game;
     assert.equal(g.troopTypes.length, 6); assert.equal(g.enemyTypes.length, 6);
     s.testing = true;

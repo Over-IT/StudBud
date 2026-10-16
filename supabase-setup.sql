@@ -726,6 +726,12 @@ declare
 begin
     if public.studbud_is_guest() then raise exception 'Create a free account to use this. Your guest data comes with you.'; end if;
     if v_user_id is null then raise exception 'Sign in to open a mystery box.'; end if;
+    if p_box like 'season:%' then
+        if p_box <> ('season:' || extract(month from now() at time zone 'utc')::integer::text) then
+            raise exception 'The seasonal box has changed. Refresh the shop to see the current rewards.';
+        end if;
+        p_box := 'season';
+    end if;
     if p_box = 'basic' then
         v_cost := 80;
     elsif p_box = 'rare' then
@@ -1010,6 +1016,12 @@ declare
 begin
     select * into v_room from public.studbud_game_rooms where id = p_room_id for update;
     if not found or v_room.status <> 'finished' or v_room.rewards_paid then return; end if;
+    if coalesce((v_room.state ->> 'staff_test')::boolean, false) then
+        update public.studbud_game_rooms
+        set rewards_paid = true, state = jsonb_set(state, '{coin_rewards}', '{}'::jsonb, true), updated_at = now()
+        where id = p_room_id;
+        return;
+    end if;
     select coalesce(max((player ->> 'score')::integer), 0)
     into v_high_score
     from jsonb_array_elements(v_room.state -> 'players') as item(player);
@@ -1166,9 +1178,17 @@ declare
     v_point_limit integer := 1000;
     v_time_limit integer := coalesce((p_options ->> 'time_limit_seconds')::integer, 300);
     v_reward integer := coalesce((p_options ->> 'question_reward')::integer, 20);
+    v_staff_test boolean := coalesce((p_options ->> 'staff_test')::boolean, false);
     v_cosmetics jsonb;
 begin
     if v_user_id is null then raise exception 'Sign in to host a game.'; end if;
+    if v_staff_test and (public.studbud_is_guest() or not (
+        public.studbud_is_admin() or public.studbud_has_user_tag(v_user_id, 'tester')
+    )) then raise exception 'Only testers and administrators can host staff test rooms.'; end if;
+    if v_staff_test and p_options ->> 'seed' is not null and (
+        (p_options ->> 'seed')::numeric < 0 or (p_options ->> 'seed')::numeric > 4294967295
+        or trunc((p_options ->> 'seed')::numeric) <> (p_options ->> 'seed')::numeric
+    ) then raise exception 'Map seed must be a whole number from 0 to 4294967295.'; end if;
     if public.studbud_is_guest() and (select count(*) from public.studbud_game_rooms where host_id = v_user_id and expires_at > now() and status <> 'finished') >= 3 then
         raise exception 'Guests can host up to 3 open games at once. Finish one first.';
     end if;
@@ -1176,7 +1196,7 @@ begin
     if char_length(v_nickname) not between 2 and 20 or v_nickname !~ '^[A-Za-z0-9 _-]+$' then
         raise exception 'Nickname must be 2–20 letters, numbers, spaces, underscores, or hyphens.';
     end if;
-    if coalesce(p_mode, '') not in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'sports', 'fishing', 'hack', 'chess', 'defense') then raise exception 'Choose a valid game mode.'; end if;
+    if coalesce(p_mode, '') not in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'fishing', 'hack', 'chess', 'defense') then raise exception 'Choose a valid game mode.'; end if;
     if v_goal_type not in ('points', 'time') then raise exception 'Choose a valid match goal.'; end if;
     if p_mode = 'chess' then v_goal_type := 'points'; v_time_limit := 0; v_reward := 1; end if;
     if p_mode = 'defense' then v_goal_type := 'points'; v_time_limit := 0; end if;
@@ -1210,6 +1230,8 @@ begin
         jsonb_build_object(
             'public_deck_id', (select d.id from public.studbud_community_decks d where d.id::text = p_options ->> 'public_deck_id'),
             'source_deck_id', left(p_options ->> 'source_deck_id', 100),
+            'staff_test', v_staff_test,
+            'seed', case when v_staff_test then (p_options ->> 'seed')::bigint else null end,
             'players', jsonb_build_array(jsonb_build_object(
                 'id', v_user_id::text, 'nickname', v_nickname, 'score', 0,
                 'streak', 0, 'lives', 3, 'answered', false, 'answered_count', 0, 'eliminated', false,
@@ -1276,6 +1298,9 @@ begin
     for update;
     if not found then raise exception 'Room not found or expired. Check the code and try again.'; end if;
     if v_room.status <> 'waiting' then raise exception 'This game has already started.'; end if;
+    if coalesce((v_room.state ->> 'staff_test')::boolean, false) and (
+        public.studbud_is_guest() or not (public.studbud_is_admin() or public.studbud_has_user_tag(v_user_id, 'tester'))
+    ) then raise exception 'Only testers and administrators can join staff test rooms.'; end if;
 
     v_players := v_room.state -> 'players';
     if exists (
@@ -1399,6 +1424,8 @@ begin
             'players', v_players,
             'public_deck_id', v_room.state -> 'public_deck_id',
             'source_deck_id', v_room.state -> 'source_deck_id',
+            'staff_test', coalesce((v_room.state ->> 'staff_test')::boolean, false),
+            'seed', v_room.state -> 'seed',
             'question_index', 0,
             'question_reward', coalesce((v_room.state ->> 'question_reward')::integer, 20),
             'question', public.studbud_game_make_question(cards, 0)
@@ -1681,7 +1708,7 @@ begin
         ), '[]'::jsonb) into v_players;
 
         update public.studbud_game_rooms
-        set state = jsonb_build_object(
+        set state = state || jsonb_build_object(
                 'players', v_players,
                 'question_index', v_index,
                 'question', public.studbud_game_make_question(cards, v_index)
@@ -2507,6 +2534,43 @@ begin
     );
 end;
 $$;
+
+-- Room discovery exposes only accepted buds' waiting rooms, never cards or other players.
+create or replace function public.studbud_friend_open_rooms()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_uid uuid := auth.uid();
+begin
+    if v_uid is null or public.studbud_is_guest() or public.studbud_is_hidden_user(v_uid) then return '[]'::jsonb; end if;
+    return coalesce((
+        select jsonb_agg(jsonb_build_object(
+            'host_id', room.host_id, 'room_code', room.room_code, 'mode', room.mode,
+            'staff_test', coalesce((room.state ->> 'staff_test')::boolean, false)
+        )) from (
+            select distinct on (r.host_id) r.host_id, r.room_code, r.mode, r.state
+            from public.studbud_game_rooms r
+            join public.studbud_friendships f on f.status = 'accepted' and (
+                (f.requester_id = v_uid and f.addressee_id = r.host_id)
+                or (f.addressee_id = v_uid and f.requester_id = r.host_id)
+            )
+            where r.status = 'waiting' and r.expires_at > now()
+                and not public.studbud_is_hidden_user(r.host_id)
+                and jsonb_array_length(coalesce(r.state -> 'players', '[]'::jsonb))
+                    < case when r.mode = 'chess' then 2 when r.mode = 'duel' then 8 else 16 end
+                and (not coalesce((r.state ->> 'staff_test')::boolean, false)
+                    or public.studbud_is_admin() or public.studbud_has_user_tag(v_uid, 'tester'))
+            order by r.host_id, r.created_at desc
+        ) room
+    ), '[]'::jsonb);
+end;
+$$;
+revoke all on function public.studbud_friend_open_rooms() from public, anon;
+grant execute on function public.studbud_friend_open_rooms() to authenticated;
 
 create or replace function public.studbud_friend_request(p_username text)
 returns jsonb

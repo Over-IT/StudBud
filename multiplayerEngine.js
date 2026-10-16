@@ -8,7 +8,6 @@
         river: 'Catch valuable fish and avoid river hazards',
         market: 'Deliver packages to marked destinations',
         miner: 'Mine crystals and return them to base',
-        sports: 'Score in the opposing team goal',
         chess: 'Checkmate the opposing king',
         defense: 'Defend your team base and send enemies until the rival base reaches 0 HP',
         crypto: 'Grow your portfolio by trading and mining',
@@ -372,10 +371,9 @@
         skyline: Object.freeze({ run: 0.5, air: 0.3, jump: 2, wallJump: 3, airJump: 3, dash: 8 }),
         duel: Object.freeze({ swing: 3, special: 10, guard: 5 }),
         miner: Object.freeze({ jet: 9, dig: 2.8 }),
-        river: Object.freeze({ cast: 6 }),
+        river: Object.freeze({ walk: 2, cast: 4 }),
         fishing: Object.freeze({ cast: 10 }),
         market: Object.freeze({ walk: 2.5, sprint: 10 }),
-        sports: Object.freeze({ walk: 2.5, sprint: 10, kickMin: 3, kickMax: 10 }),
         shooter: Object.freeze({ nova: 30 })
     });
 
@@ -406,8 +404,7 @@
                 duel: 'Joystick to move · Hold steeply up to jump on landing · Jump button for an air jump · Tap to swing · Heavy, Guard or Dodge',
                 shooter: 'Joystick to move · Hold the arena to aim and fire · Dash between cover · Recharge behind cover',
                 market: 'Joystick to move · Hold Sprint for speed · Pick up and deliver packages · Building recesses are away from traffic',
-                river: 'Joystick to steer · Tap the water to cast · Shallow banks are calm places to recharge',
-                sports: 'Joystick to dribble · Tap toward the goal to pass · Hold and release Power kick · Hold Sprint to run faster',
+                river: 'Joystick to steer (2 Energy/s) · Tap water to cast (4 Energy) · Pale shallows shelter from waves · Recharge to answer',
                 crypto: 'Tap an asset to select it · Buy low and sell high · Recharge to keep trading',
                 hack: 'Joystick to move · Use nearby terminals · Recharge between hacks'
             }[this.s.mode] || 'Use the on-screen controls · Recharge opens a flashcard';
@@ -424,7 +421,7 @@
             this.onRestart = options.onRestart;
             this.finishRoom = options.finishRoom;
             this.practice = Boolean(options.practice);
-            this.testing = Boolean(options.testing);
+            this.testing = Boolean(options.testing || this.room.state?.staff_test);
             this.preview = Boolean(options.preview);
             this.graphics = graphicsProfile();
             this.returnFocus = document.activeElement;
@@ -433,7 +430,8 @@
             this.mode = this.room.mode;
             if (this.mode === 'chess') this.reward = 1;
             this.code = this.room.room_code;
-            this.seed = Number.isInteger(options.seed) ? options.seed >>> 0 : hashStr(`${this.code}:${this.mode}`);
+            const seed = options.seed ?? this.room.state?.seed;
+            this.seed = Number.isInteger(seed) ? seed >>> 0 : hashStr(`${this.code}:${this.mode}`);
             this.roster = new Map();
             this.remotes = new Map();
             this.keys = new Set();
@@ -1436,7 +1434,7 @@
                     ${questionHistoryMarkup(this.questionHistory)}
                     ${window.NexusApp?.studySetMarkup?.(this.studySet) || ''}
                 </details>
-                <p>${this.user.is_anonymous ? 'Guest match complete. Guest sessions do not save account progress or earn coins.' : this.practice ? 'Local results only. Practice games and staff tests do not award coins.' : this.rewards ? 'Coins have been added to your multiplayer wallet.' : 'Tallying coin rewards…'}</p>
+                <p>${this.testing ? 'Staff tests do not award coins or save study progress.' : this.user.is_anonymous ? 'Guest match complete. Guest sessions do not save account progress or earn coins.' : this.practice ? 'Local results only. Practice games and staff tests do not award coins.' : this.rewards ? 'Coins have been added to your multiplayer wallet.' : 'Tallying coin rewards…'}</p>
                 <button type="button" class="mpg-exit">${this.practice ? 'Back to game setup' : 'Back to lobby'}</button>
             </div>`;
             panel.querySelector('.mpg-summary').open = Boolean(summaryOpen);
@@ -1480,10 +1478,9 @@
             if (!this.paused) {
                 for (const r of this.remotes.values()) {
                     if (now - r.seen > 5000) { this.remotes.delete(r.id); continue; }
-                    const age = this.mode === 'sports' && r.networked ? Math.min(.15, (now - r.seen) / 1000 + (r.networkAge || 0)) : 0;
-                    const tx = r.tx + r.vx * age, ty = r.ty + r.vy * age;
+                    const tx = r.tx, ty = r.ty;
                     const gap = dist(r.x, r.y, tx, ty);
-                    const k = gap > 500 ? 1 : 1 - Math.exp(-dt * (this.mode === 'sports' ? 24 : 14));
+                    const k = gap > 500 ? 1 : 1 - Math.exp(-dt * 14);
                     r.x += (tx - r.x) * k;
                     r.y += (ty - r.y) * k;
                 }

@@ -162,7 +162,7 @@ function controlsFor(mode) {
 }
 
 {
-    const { session, stick } = controlsFor('sports');
+    const { session, stick } = controlsFor('market');
     stick.setPointerCapture = () => { throw new Error('Pointer capture unavailable'); };
     stick.emit('pointerdown', 50, 50);
     assert.ok(windowHandlers.get('pointermove').has(session.stickHandlers.move));
@@ -235,7 +235,7 @@ for (const mode of ['skyline', 'duel']) {
     assert.equal(session.justPressed.has('Space'), false, 'cancel discards unconsumed action edges');
 }
 
-for (const mode of ['miner', 'shooter', 'sports', 'market', 'river']) {
+for (const mode of ['miner', 'shooter', 'market', 'river']) {
     const { session, stick } = controlsFor(mode);
     assert.equal(session.stickGroundJump, false, `${mode} retains vertical movement`);
     stick.emit('pointerdown', 50, 0);
@@ -270,9 +270,7 @@ const duelButtons = controlsFor('duel').buttons.children;
 assert.equal(duelButtons.find(button => button.textContent === 'Guard').dataset.k, 'KeyS');
 assert.equal(duelButtons.find(button => button.textContent === 'Special').dataset.k, 'KeyR');
 assert.equal(duelButtons.find(button => button.textContent === 'Dodge').dataset.k, 'ShiftLeft');
-const soccerButtons = controlsFor('sports').buttons.children;
-assert.equal(soccerButtons.find(button => button.textContent === 'Sprint').dataset.k, 'ShiftLeft');
-assert.equal(soccerButtons.find(button => button.textContent === 'Power kick').dataset.k, 'Space');
+assert.equal(A.games.sports, undefined, 'Soccer has been retired');
 
 {
     const session = Object.create(A.Session.prototype);

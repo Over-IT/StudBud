@@ -8,6 +8,11 @@ vm.createContext(sandbox);
 for (const file of ['communityGames.js', 'multiplayerEngine.js']) vm.runInContext(read(file), sandbox);
 const games = sandbox.window.StudBudCommunityGames;
 const seasons = games.constructor.seasons;
+for (const [time, month] of [['2026-10-01T00:30:00+14:00', 9], ['2026-09-30T23:30:00-12:00', 10], ['2027-01-01T00:00:00Z', 1]]) {
+    assert.equal(games.constructor.currentSeason(new Date(time)).month, month, 'season selection uses UTC, including local month/year boundaries');
+}
+assert.match(read('supabase-setup.sql'), /if p_box like 'season:%' then[\s\S]*?p_box <> \('season:' \|\| extract\(month from now\(\) at time zone 'utc'\)[\s\S]*?raise exception 'The seasonal box has changed/,
+    'server rejects a stale requested month before selecting rewards or deducting coins');
 const items = games.catalog.filter(item => item.season);
 assert.equal(items.length, 96);
 assert.equal(new Set(items.map(item => item.id)).size, items.length, 'seasonal IDs are unique');

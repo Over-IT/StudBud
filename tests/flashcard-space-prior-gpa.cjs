@@ -59,4 +59,40 @@ const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
     assert.ok(keyup.includes("#active-study-area button") && keyup.includes('preventDefault'), 'Space keyup cannot click a focused study button');
 }
 
-console.log('Prior-credit GPA blending, settings persistence and consistent flashcard Space flipping passed.');
+// The optional study direction asks with the definition and grades/reveals the term instead.
+{
+    const start = app.indexOf('        studyDirection() {');
+    const end = app.indexOf('        renderStudyFaces(card, delayBack)');
+    assert.ok(start > 0 && end > start, 'study direction helpers exist in app.js');
+    const store = new Map();
+    const sandbox = vm.createContext({
+        localStorage: { getItem: key => store.get(key) ?? null },
+        Math,
+        window: { FlashcardTools: { imageSource: value => value || '' } }
+    });
+    const Study = vm.runInContext(`(class { escapeHTML(v) { return String(v); } cardAnswerMarkup(c) { return 'A:' + c.back; } cardAttachmentMarkup() { return ''; } ${app.slice(start, end)} })`, sandbox);
+    const study = new Study();
+    const card = { front: 'Term', back: 'Definition' };
+    assert.equal(study.studyDirection(), 'front', 'term-first remains the default');
+    assert.deepEqual(JSON.parse(JSON.stringify(study.studyFaces(card, false))), { question: 'Term', answer: 'A:Definition' });
+    store.set('studbud-study-direction', 'back');
+    assert.equal(study.pickStudyReversed(), true, 'Definition mode always reverses');
+    assert.deepEqual(JSON.parse(JSON.stringify(study.studyFaces(card, true))), { question: 'Definition', answer: 'Term' });
+    store.set('studbud-study-direction', 'nonsense');
+    assert.equal(study.pickStudyReversed(), false, 'invalid saved values fall back to term-first');
+    store.set('studbud-study-direction', 'mixed');
+    const picks = new Set(Array.from({ length: 60 }, () => study.pickStudyReversed()));
+    assert.equal(picks.size, 2, 'Mixed mode asks with both sides');
+    assert.ok(/gradeAnswer\(given, card\.front \|\| '', false\)/.test(app), 'reversed typed answers are graded against the term');
+    assert.ok(fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8').includes('id="study-direction"'), 'Ask with selector is in the study toolbar');
+}
+
+// Stray clicks, drags and long-presses cannot highlight app text, while typing fields stay selectable.
+{
+    const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+    assert.match(css, /html, body \{[^}]*user-select: none[^}]*-webkit-tap-highlight-color: transparent[^}]*-webkit-touch-callout: none/);
+    assert.match(css, /input, textarea, select, \[contenteditable\][^{]*\{[^}]*user-select: text/);
+    assert.ok(app.includes("document.addEventListener('selectstart'") && app.includes("document.addEventListener('dragstart'"), 'selection/drag guards are installed');
+}
+
+console.log('Prior-credit GPA blending, settings persistence, consistent flashcard Space flipping, Ask-with direction and no-accidental-selection passed.');

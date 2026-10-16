@@ -46,7 +46,7 @@ async function verifyReel({ scale, width, gap, padding, seasonal, duplicate, ski
     const nodes = { '.unbox-strip': strip, '.unbox-marker': marker, '.unbox-confetti': {}, '.unbox-result': result,
         '.unbox-reel': {}, '.unbox-skip': { remove() {} }, '.unbox-actions .primary-btn': { focus() {} } };
     const overlay = { classList: { replace() {}, remove() {}, add() {} }, querySelector: selector => nodes[selector] };
-    app.unboxState = { overlay, box: { id: seasonal ? 'seasonal' : 'basic', seasonal, price: 100 }, skipped, startedAt: clock };
+    app.unboxState = { overlay, box: { id: seasonal ? 'season' : 'basic', seasonal, season: seasonal ? { month: 10 } : undefined, price: 100 }, skipped, startedAt: clock };
     const profile = { unlocked_item: reward.id, owned_items: [reward.id], coins: 200, duplicate, refund: duplicate ? 45 : 0 };
     await app.revealUnboxing(reward, profile);
     const markerRect = marker.getBoundingClientRect();
@@ -89,5 +89,19 @@ async function verifyReel({ scale, width, gap, padding, seasonal, duplicate, ski
     }
     sandbox.window.matchMedia = () => ({ matches: false });
     await verifyReel({ scale: 1, width: 375, gap: 7, padding: 21, seasonal: true, duplicate: false, skipped: false });
+    const communitySandbox = { window: {}, console, Math, Date };
+    vm.createContext(communitySandbox);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'communityGames.js'), 'utf8'), communitySandbox);
+    const community = communitySandbox.window.StudBudCommunityGames;
+    let requested;
+    community.getClient = () => ({ rpc: async (_name, args) => { requested = args; return { data: { coins: 650 } }; } });
+    await community.buyMysteryItem('season', 10);
+    assert.equal(requested.p_box, 'season:10', 'seasonal request pins the month shown in the shop');
+    await community.buyMysteryItem('season');
+    assert.equal(requested.p_box, 'season:' + community.constructor.currentSeason().month);
+    community.getClient = () => ({ rpc: async () => ({ error: { message: 'Unknown mystery box.' } }) });
+    await assert.rejects(community.buyMysteryItem('season', 10), /latest supabase-setup.sql/, 'outdated servers give an actionable migration message rather than opening the wrong set');
+    community.getClient = () => ({ rpc: async () => ({ error: { message: 'The seasonal box has changed. Refresh the shop to see the current rewards.' } }) });
+    await assert.rejects(community.buyMysteryItem('season', 9), /seasonal box has changed/);
     console.log('Mystery box regression checks passed (standard/seasonal, responsive/scaled geometry, skip, reduced motion, duplicates/refunds).');
 })().catch(error => { console.error(error); process.exitCode = 1; });

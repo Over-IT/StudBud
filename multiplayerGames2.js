@@ -29,15 +29,15 @@
             return { x: rect.x - 5, y: rect.y - 5, w: rect.w + 10, h: rect.h + 10 };
         }
 
-        step(dt, accel = 2400) {
+        step(dt, accel = 2400, drift = { x: 0, y: 0 }) {
             const s = this.s, me = this.me;
             this.anim += dt;
             this.stun = Math.max(0, this.stun - dt);
             const a = this.stun > 0 ? { x: 0, y: 0 } : s.axis();
             const len = Math.hypot(a.x, a.y) || 1;
             const sp = this.baseSpeed * this.speedMul;
-            const tx = a.x || a.y ? (a.x / len) * sp : 0;
-            const ty = a.x || a.y ? (a.y / len) * sp : 0;
+            const tx = (a.x || a.y ? (a.x / len) * sp : 0) + drift.x;
+            const ty = (a.x || a.y ? (a.y / len) * sp : 0) + drift.y;
             const acc = accel * dt;
             me.vx += clamp(tx - me.vx, -acc, acc);
             me.vy += clamp(ty - me.vy, -acc, acc);
@@ -181,7 +181,7 @@
             this.carry = 0; this.items = 0; this.cap = 20; this.banked = 0; this.depthMax = 0;
             this.dig = { tx: -1, ty: -1, p: 0 }; this.digClock = 0;
             this.baseSpeed = 280; this.stun = 0; this.lavaCd = 0; this.jetting = false;
-            this.res = new A.Resource('Fuel', '#facc15', 100, 78, 2);
+            this.res = new A.Resource('Fuel', '#facc15', 100, 40, 2);
             this.F = new Uint8Array(COLS * ROWS);
             this.D = new Uint8Array(COLS * ROWS);
             this.lavaVisibility = new Float32Array(COLS * ROWS);
@@ -549,61 +549,22 @@
                     const visibility = s.preview ? 1 : this.lavaVisibility[idx];
                     if (visibility <= 0) continue;
                     ctx.save(); ctx.globalAlpha = visibility;
-                    ctx.fillStyle = '#1a0d09'; ctx.fillRect(x, y, TS, TS);
-                    const t = this.anim, h = this.tileHashes[idx] || idx * 2654435761;
+                    ctx.fillStyle = '#21140f'; ctx.fillRect(x, y, TS, TS);
+                    const pulse = 0.76 + Math.sin(this.anim * 4 + idx) * 0.12;
+                    const glow = ctx.createRadialGradient(x + 24, y + 24, 3, x + 24, y + 24, 38);
+                    glow.addColorStop(0, `rgba(255,196,55,${pulse})`); glow.addColorStop(0.55, 'rgba(249,115,22,.86)'); glow.addColorStop(1, 'rgba(220,38,38,0)');
+                    ctx.fillStyle = glow; ctx.fillRect(x - 8, y - 8, TS + 16, TS + 16);
                     const level = Math.min(LAVA_SIDE_REACH, this.F[idx]);
                     const surfaceHeight = this.D[idx] || level === 0 ? TS : TS * (1 - level / (LAVA_SIDE_REACH + 1));
                     const surfaceY = y + TS - surfaceHeight;
-                    const exposed = !this.D[idx] && this.tile(tx, ty - 1) !== 6;
-                    // heat bloom bleeding into the surrounding rock
-                    const pulse = 0.5 + Math.sin(t * 2.2 + idx * 0.7) * 0.12;
-                    const glow = ctx.createRadialGradient(x + TS / 2, surfaceY + 6, 2, x + TS / 2, surfaceY + 6, TS);
-                    glow.addColorStop(0, `rgba(255,170,60,${pulse})`); glow.addColorStop(1, 'rgba(255,80,20,0)');
-                    ctx.fillStyle = glow; ctx.fillRect(x - 10, y - 10, TS + 20, TS + 20);
-                    // molten body: deep red at the bottom, bright orange near the surface
-                    const body = ctx.createLinearGradient(0, surfaceY, 0, y + TS);
-                    body.addColorStop(0, '#ffb02e'); body.addColorStop(0.25, '#ff6a13'); body.addColorStop(1, '#a3180d');
-                    ctx.fillStyle = body;
-                    ctx.beginPath();
-                    ctx.moveTo(x, y + TS);
-                    if (exposed) {
-                        for (let k = 0; k <= 6; k++) {
-                            const wx = x + k * TS / 6;
-                            ctx.lineTo(wx, surfaceY + 2 + Math.sin(t * 3 + (tx * TS + wx) * 0.09) * 2.2);
-                        }
-                    } else { ctx.lineTo(x, surfaceY); ctx.lineTo(x + TS, surfaceY); }
-                    ctx.lineTo(x + TS, y + TS); ctx.closePath(); ctx.fill();
-                    // slowly drifting dark crust plates with glowing seams between them
-                    ctx.save(); ctx.beginPath(); ctx.rect(x, surfaceY + 4, TS, surfaceHeight - 4); ctx.clip();
-                    const drift = (t * 6 + (h & 63)) % TS;
-                    ctx.fillStyle = 'rgba(60,14,6,.55)';
-                    for (let k = 0; k < 3; k++) {
-                        const px = x - TS + ((((h >>> (k * 6)) & 47) + drift + k * 19) % (TS * 2)), py = surfaceY + 8 + (((h >>> (k * 5 + 3)) & 15) / 15) * Math.max(4, surfaceHeight - 20);
-                        ctx.beginPath(); ctx.ellipse(px, py, 9 + (k & 1) * 4, 4 + (k % 3), 0.3 * k, 0, TAU); ctx.fill();
-                    }
-                    ctx.strokeStyle = `rgba(255,236,150,${0.45 + Math.sin(t * 4 + idx) * 0.2})`; ctx.lineWidth = 1.2; ctx.beginPath();
-                    const cy0 = surfaceY + 10 + (h & 7);
-                    ctx.moveTo(x + ((h >>> 3) & 15), cy0); ctx.lineTo(x + 18 + ((h >>> 7) & 7), cy0 + 6); ctx.lineTo(x + 34, cy0 + 2 + ((h >>> 11) & 7));
-                    ctx.stroke(); ctx.restore();
-                    if (exposed) {
-                        // bright skin on the surface and rising, popping bubbles
-                        ctx.strokeStyle = 'rgba(255,240,170,.85)'; ctx.lineWidth = 2; ctx.beginPath();
-                        for (let k = 0; k <= 6; k++) {
-                            const wx = x + k * TS / 6, wy = surfaceY + 2 + Math.sin(t * 3 + (tx * TS + wx) * 0.09) * 2.2;
-                            if (k) ctx.lineTo(wx, wy); else ctx.moveTo(wx, wy);
-                        }
-                        ctx.stroke();
-                        for (let k = 0; k < 2; k++) {
-                            const life = (t * (0.55 + k * 0.2) + ((h >>> (k * 9)) & 255) / 255) % 1;
-                            const bx = x + 8 + (((h >>> (k * 4 + 2)) & 31) / 31) * (TS - 16);
-                            const by = surfaceY + 4 - life * 6, r = 1.5 + life * 3.5;
-                            ctx.globalAlpha = visibility * (1 - life);
-                            ctx.fillStyle = '#ffe08a'; ctx.beginPath(); ctx.arc(bx, by, r, 0, TAU); ctx.fill();
-                            ctx.fillStyle = '#ff7a18'; ctx.beginPath(); ctx.arc(bx, by + r * 0.3, r * 0.55, 0, TAU); ctx.fill();
-                            if (life > 0.7) { ctx.fillStyle = '#ffd36b'; ctx.fillRect(bx - 4, by - 8 - (life - 0.7) * 30, 2, 2); ctx.fillRect(bx + 3, by - 6 - (life - 0.7) * 24, 2, 2); }
-                        }
-                        ctx.globalAlpha = visibility;
-                    }
+                    ctx.fillStyle = '#d9481b'; ctx.fillRect(x + 2, surfaceY, TS - 4, surfaceHeight - 2);
+                    ctx.fillStyle = '#ff7a18'; ctx.beginPath();
+                    ctx.moveTo(x + 3, y + TS - 3);
+                    ctx.lineTo(x + 12, surfaceY + 9 + Math.sin(this.anim * 4 + tx) * 2);
+                    ctx.lineTo(x + 21, y + TS - 3); ctx.lineTo(x + 32, surfaceY + 5);
+                    ctx.lineTo(x + 44, y + TS - 3); ctx.closePath(); ctx.fill();
+                    ctx.fillStyle = 'rgba(255,218,95,.56)';
+                    ctx.fillRect(x + 4, surfaceY + 3, TS - 8, 2);
                     ctx.restore();
                     continue;
                 }
@@ -755,7 +716,7 @@
             this.scoreGoal = false; this.goalUnit = 'fish pts'; this.goalLabel = 'Haul';
             const r = mulberry32(s.seed);
             this.bank = 210;
-            this.me.x = 400; this.me.y = this.H / 2; this.baseSpeed = 235;
+            this.me.x = 400; this.me.y = this.H / 2; this.me.r = 38; this.baseSpeed = 235;
             this.cam.x = this.me.x; this.cam.y = this.me.y;
             this.fish = [];
             for (let i = 0; i < 48; i++) {
@@ -777,7 +738,7 @@
             this.cast = null; this.castCd = 0; this.hurt = 0; this.haul = 0; this.catches = 0; this.combo = 0; this.comboT = 0;
             this.surgePush = 0; this.lastSurge = -1;
             this.wake = [];
-            this.res = new A.Resource('Bait', '#7dd3fc', 100, 50, 2);
+            this.res = new A.Resource('Energy', '#7dd3fc', 100, 30, 2);
         }
 
         fishPos(f, now) {
@@ -826,31 +787,28 @@
             const s = this.s, me = this.me, now = clock(s);
             this.ejectT = Math.max(0, this.ejectT - dt);
             this.aimLocked = Boolean(this.whirlpool) || this.ejectT > 0;
-            this.speedMul = this.whirlpool ? .22 : 1;
-            this.step(dt, this.ejectT > 0 || this.surgePush > 0 ? 240 : 1800);
-            this.surgePush = Math.max(0, this.surgePush - dt);
-            const surge = this.surgeAt(now);
+            const axis = s.axis(), steering = this.stun <= 0 && !this.whirlpool && Math.hypot(axis.x, axis.y) > 0;
+            const canMove = !steering || s.spend(A.ENERGY_COSTS.river.walk * dt);
+            this.speedMul = this.whirlpool ? .22 : canMove ? 1 : .08;
+            const surge = this.surgeAt(now), shelter = this.bankShelter(me.y);
             if (surge.warning && this.lastSurge !== surge.cycle) {
-                this.lastSurge = surge.cycle; s.toast('Tsunami incoming! Shelter near a bank', '#7dd3fc'); s.sfx('wave', 1000);
+                this.lastSurge = surge.cycle; s.toast('Wave incoming! Shelter in the pale shallows', '#7dd3fc'); s.sfx('wave', 1000);
             }
-            if (surge.active && !this.whirlpool && me.y > this.bank + 75 && me.y < this.H - this.bank - 75) {
-                const separation = Math.abs(me.x - surge.x);
-                if (separation < 180) {
-                    const force = (1 - separation / 180) * 900;
-                    me.vx += force * dt; me.vy += Math.sin(now * 5) * force * .2 * dt;
-                    this.surgePush = .4;
-                    this.particles.burst(me.x - 20, me.y, '#e0f2fe', 1, 60, .3, 3);
-                }
-            }
+            // The same curved crest and footprint drive both the visible wave and its current.
+            const separation = (me.x - (this.waveCrest(me.y, now, surge) - 30)) / 110;
+            const push = surge.active && !this.whirlpool && Math.abs(separation) < 1
+                ? Math.pow(1 - separation * separation, 2) * 280 * shelter : 0;
+            this.surgePush = lerp(this.surgePush, push, 1 - Math.exp(-dt * 8));
+            if (!shelter || this.whirlpool) this.surgePush = 0;
+            const drift = { x: 24 * shelter + this.surgePush, y: 0 };
+            this.step(dt, this.ejectT > 0 ? 240 : 1800, drift);
             this.updateLogs(now);
             this.castCd -= dt; this.hurt = Math.max(0, this.hurt - dt); this.comboT -= dt; this.poolHitCd = Math.max(0, this.poolHitCd - dt);
             if (this.comboT <= 0) this.combo = 0;
             const nearBank = me.y < this.bank + 80 || me.y > this.H - this.bank - 80;
-            if (!nearBank) me.vx += 42 * dt;
             // banks
             if (me.y < this.bank + me.r) { me.y = this.bank + me.r; me.vy = Math.max(0, me.vy); }
             if (me.y > this.H - this.bank - me.r) { me.y = this.H - this.bank - me.r; me.vy = Math.min(0, me.vy); }
-            if (me.x > this.W - 60) me.x = 120;
             for (const rock of this.rocks) {
                 const d = dist(me.x, me.y, rock.x, rock.y) || 1;
                 if (d < rock.r + me.r) {
@@ -900,6 +858,24 @@
                     s.toast(lost ? `Whirlpool! Hold on — lost ${lost} fish pts` : 'Whirlpool! Hold on for the launch', '#a5f3fc');
                     this.particles.burst(me.x, me.y, '#67e8f9', 16, 220, 0.55, 4);
                 }
+            }
+            // Whirlpool launches and collision corrections must also keep the entire hull in water.
+            for (let pass = 0; pass < 3; pass++) {
+                for (const rock of this.rocks) {
+                    const dx = me.x - rock.x, dy = me.y - rock.y, d = Math.hypot(dx, dy);
+                    if (d < rock.r + me.r) {
+                        const radius = rock.r + me.r;
+                        me.x = rock.x + (d ? dx / d : 1) * radius;
+                        me.y = rock.y + (d ? dy / d : 0) * radius;
+                    }
+                }
+                for (const log of this.logs) {
+                    if (log.brokenLap === this.logLap(log, now)) continue;
+                    const pos = this.logPos(log, now);
+                    pushCircleOutOfRect(me, { x: pos.x - 70, y: pos.y - 18, w: 140, h: 36 });
+                }
+                me.x = clamp(me.x, me.r, this.W - me.r);
+                me.y = clamp(me.y, this.bank + me.r, this.H - this.bank - me.r);
             }
             if (this.moving && Math.random() < dt * 14) this.wake.push({ x: me.x - Math.cos(me.aim) * 16, y: me.y - Math.sin(me.aim) * 16, t: 0 });
             for (const w of this.wake) w.t += dt;
@@ -1027,13 +1003,18 @@
         }
 
         goalText() { return `Haul ${this.haul} · ${this.catches} fish${this.combo > 1 ? ` · combo x${this.combo}` : ''}`; }
+        bankShelter(y) {
+            const k = clamp((Math.min(y - this.bank, this.H - this.bank - y) - 80) / 100, 0, 1);
+            return k * k * (3 - 2 * k);
+        }
+        waveCrest(y, time, surge = this.surgeAt(time)) { return surge.x + Math.sin(y * .025 + time * 5) * 20; }
         surgeAt(time) {
             const phase = ((time % 38) + 38) % 38;
             return { cycle: Math.floor(time / 38), warning: phase >= 25 && phase < 28, active: phase >= 28 && phase < 36,
                 x: (phase - 28) / 8 * (this.W + 500) - 250 };
         }
         touchLayout() { return { stick: true, buttons: [] }; }
-        hint() { return 'WASD steer · click to cast net · dodge obstacles · Q = restock bait'; }
+        hint() { return 'WASD steer (2 Energy/s) \u00b7 click to cast (4 Energy) \u00b7 pale shallows shelter from waves \u00b7 Q recharge'; }
         ex() { return { n: this.cast ? 1 : 0 }; }
 
         draw(ctx, w, h) {
@@ -1057,7 +1038,7 @@
             for (let y = Math.ceil((this.y0 - 0) / 70) * 70; y < this.y1; y += 70) {
                 if (y < this.bank || y > this.H - this.bank) continue;
                 ctx.beginPath();
-                for (let x = this.x0; x <= this.x1; x += 40) { const yy = y + Math.sin((x + t * 90) / 60 + y) * 6; if (x === this.x0) ctx.moveTo(x, yy); else ctx.lineTo(x, yy); }
+                for (let x = this.x0; x <= this.x1; x += 40) { const yy = y + Math.sin((x - now * 24) / 60 + y) * 6; if (x === this.x0) ctx.moveTo(x, yy); else ctx.lineTo(x, yy); }
                 ctx.stroke();
             }
             for (const [top, y0] of [[true, 0], [false, this.H - this.bank]]) {
@@ -1076,13 +1057,20 @@
             }
             const surge = this.surgeAt(now);
             if (surge.active && this.seen(surge.x, this.H / 2, this.H)) {
-                const gradient = ctx.createLinearGradient(surge.x - 140, 0, surge.x + 80, 0);
-                gradient.addColorStop(0, 'rgba(14,116,144,0)'); gradient.addColorStop(.7, 'rgba(125,211,252,.6)'); gradient.addColorStop(1, 'rgba(255,255,255,.9)');
-                ctx.fillStyle = gradient; ctx.fillRect(surge.x - 140, this.bank + 65, 220, this.H - this.bank * 2 - 130);
-                ctx.strokeStyle = '#e0f2fe'; ctx.lineWidth = 8; ctx.beginPath();
-                for (let y = this.bank + 65; y <= this.H - this.bank - 65; y += 16) {
-                    const x = surge.x + Math.sin(y * .025 + t * 5) * 20;
-                    if (y === this.bank + 65) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                const gradient = ctx.createLinearGradient(surge.x - 160, 0, surge.x + 100, 0);
+                gradient.addColorStop(0, 'rgba(14,116,144,0)'); gradient.addColorStop(.6, 'rgba(125,211,252,.5)'); gradient.addColorStop(1, 'rgba(224,242,254,.15)');
+                const top = this.bank + 80, bottom = this.H - this.bank - 80;
+                ctx.fillStyle = gradient; ctx.beginPath();
+                for (let y = top; y <= bottom; y += 10) {
+                    const x = this.waveCrest(y, now, surge) - 140 * this.bankShelter(y);
+                    if (y === top) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                }
+                for (let y = bottom; y >= top; y -= 10) ctx.lineTo(this.waveCrest(y, now, surge) + 80 * this.bankShelter(y), y);
+                ctx.closePath(); ctx.fill();
+                ctx.strokeStyle = '#e0f2fe'; ctx.lineWidth = 5; ctx.beginPath();
+                for (let y = top; y <= bottom; y += 10) {
+                    const x = this.waveCrest(y, now, surge);
+                    if (y === top) ctx.moveTo(x, y); else ctx.lineTo(x, y);
                 }
                 ctx.stroke();
             }
@@ -1198,7 +1186,7 @@
                 const x = ROAD + col * (BW + ROAD), y = ROAD + row * (BH + ROAD);
                 const shop = (row === 1 && (col === 1 || col === 3));
                 const b = { x, y, w: BW, h: BH, shop, color: shop ? '#f59e0b' : ['#64748b', '#7c6f64', '#6b7280', '#78716c'][Math.floor(r() * 4)], roof: shop ? '#dc2626' : ['#475569', '#9a3412', '#1d4ed8', '#166534'][Math.floor(r() * 4)] };
-                b.door = { x: x + BW / 2, y: y + BH + 24 };
+                b.door = { x: x + 50, y: y + BH - 50 };
                 this.blocks.push(b);
                 this.walls.push({ x: x + 80, y, w: BW - 160, h: BH },
                     { x, y: y + 80, w: 80, h: BH - 160 }, { x: x + BW - 80, y: y + 80, w: 80, h: BH - 160 });
@@ -1206,9 +1194,9 @@
             this.shops = this.blocks.filter(b => b.shop);
             this.houses = this.blocks.filter(b => !b.shop);
             this.cars = [];
-            for (let k = 0; k < BR + 1; k++) for (let j = 0; j < 4; j++) this.cars.push({ horiz: true, c: ROAD / 2 + k * (BH + ROAD), p0: r() * this.W, spd: (165 + r() * 95) * (j % 2 ? -1 : 1), lane: (j % 2 ? -1 : 1) * (36 + Math.floor(j / 2) * 20), phase: r() * TAU, color: ['#ef4444', '#3b82f6', '#22c55e', '#a855f7', '#f97316'][Math.floor(r() * 5)] });
-            for (let k = 0; k < BC + 1; k++) for (let j = 0; j < 4; j++) this.cars.push({ horiz: false, c: ROAD / 2 + k * (BW + ROAD), p0: r() * this.H, spd: (165 + r() * 95) * (j % 2 ? -1 : 1), lane: (j % 2 ? -1 : 1) * (36 + Math.floor(j / 2) * 20), phase: r() * TAU, color: ['#ef4444', '#3b82f6', '#22c55e', '#a855f7', '#f97316'][Math.floor(r() * 5)] });
-            this.vending = this.blocks.map((b, i) => ({ i, x: b.x + 40, y: b.y + 40, until: 0 }));
+            for (let k = 0; k < BR + 1; k++) for (let j = 0; j < 2 + k % 2; j++) this.cars.push({ horiz: true, c: ROAD / 2 + k * (BH + ROAD), p0: r() * this.W, spd: (165 + r() * 95) * (j % 2 ? -1 : 1), lane: (j % 2 ? -1 : 1) * (36 + Math.floor(j / 2) * 20), phase: r() * TAU, color: ['#ef4444', '#3b82f6', '#22c55e', '#a855f7', '#f97316'][Math.floor(r() * 5)] });
+            for (let k = 0; k < BC + 1; k++) for (let j = 0; j < 2 + k % 2; j++) this.cars.push({ horiz: false, c: ROAD / 2 + k * (BW + ROAD), p0: r() * this.H, spd: (165 + r() * 95) * (j % 2 ? -1 : 1), lane: (j % 2 ? -1 : 1) * (36 + Math.floor(j / 2) * 20), phase: r() * TAU, color: ['#ef4444', '#3b82f6', '#22c55e', '#a855f7', '#f97316'][Math.floor(r() * 5)] });
+            this.vending = this.blocks.map((b, i) => ({ i, x: b.x + 50, y: b.y + 50, until: 0 }));
             this.roadsX = Array.from({ length: BC + 1 }, (_, i) => ROAD / 2 + i * (BW + ROAD));
             this.roadsY = Array.from({ length: BR + 1 }, (_, i) => ROAD / 2 + i * (BH + ROAD));
             this.trees = [];
@@ -1216,7 +1204,7 @@
             this.scoreGoal = false; this.goalUnit = 'deliveries'; this.goalLabel = 'Deliveries';
             this.me.x = this.W / 2; this.me.y = ROAD / 2 + BH + ROAD; this.cam.x = this.me.x; this.cam.y = this.me.y;
             this.baseSpeed = 245; this.boost = 0;
-            this.res = new A.Resource('Energy', '#38bdf8', 100, 60, 2);
+            this.res = new A.Resource('Energy', '#38bdf8', 100, 40, 2);
             this.pkg = null; this.deliveries = 0; this.streak = 0; this.earned = 0; this.cash = 0; this.hitCd = 0;
         }
 
@@ -1278,15 +1266,15 @@
                     c.fillStyle = index % 2 ? '#c2dbe4' : '#e6cf91'; c.fillRect(x + 3, b.y + b.h - 27, 28, 17);
                     c.fillStyle = '#6d7c87'; c.fillRect(x + 16, b.y + b.h - 27, 2, 17);
                 }
-                c.fillStyle = '#172a3a'; c.fillRect(b.door.x - 15, b.y + b.h - 26, 30, 26);
-                c.fillStyle = '#e4c38b'; c.fillRect(b.door.x + 8, b.y + b.h - 12, 3, 3);
+                c.fillStyle = '#172a3a'; c.fillRect((b.x + b.w / 2) - 15, b.y + b.h - 26, 30, 26);
+                c.fillStyle = '#e4c38b'; c.fillRect((b.x + b.w / 2) + 8, b.y + b.h - 12, 3, 3);
                 c.fillStyle = b.shop ? '#78350f' : '#334155';
-                roundRect(c, b.door.x - 66, b.y + b.h - 65, 132, 23, 4); c.fill();
+                roundRect(c, (b.x + b.w / 2) - 66, b.y + b.h - 65, 132, 23, 4); c.fill();
                 c.font = '900 13px system-ui'; c.textAlign = 'center'; c.fillStyle = '#fff4cd';
-                c.fillText(b.shop ? 'PARCEL & PANTRY' : `No. ${index + 12}`, b.door.x, b.y + b.h - 49);
+                c.fillText(b.shop ? 'PARCEL & PANTRY' : `No. ${index + 12}`, (b.x + b.w / 2), b.y + b.h - 49);
                 if (b.shop) for (let j = 0; j < 8; j++) {
-                    c.fillStyle = j % 2 ? '#fff4df' : '#e05252'; c.fillRect(b.door.x - 64 + j * 16, b.y + b.h - 35, 16, 17);
-                    c.fillStyle = j % 2 ? '#ddd1be' : '#b53636'; c.fillRect(b.door.x - 64 + j * 16, b.y + b.h - 18, 16, 6);
+                    c.fillStyle = j % 2 ? '#fff4df' : '#e05252'; c.fillRect((b.x + b.w / 2) - 64 + j * 16, b.y + b.h - 35, 16, 17);
+                    c.fillStyle = j % 2 ? '#ddd1be' : '#b53636'; c.fillRect((b.x + b.w / 2) - 64 + j * 16, b.y + b.h - 18, 16, 6);
                 }
                 const benchX = b.x + 42, benchY = b.y - 16;
                 c.fillStyle = '#384552'; c.fillRect(benchX - 4, benchY - 6, 5, 19); c.fillRect(benchX + 42, benchY - 6, 5, 19);
@@ -1329,12 +1317,15 @@
 
         update(dt) {
             const s = this.s, me = this.me, now = clock(s);
-            const wantsSprint = s.down('ShiftLeft', 'ShiftRight') && this.moving;
-            const winded = this.moving && !this.res.has(1);
-            const sprint = wantsSprint && this.res.has(1);
-            if (this.moving) {
+            const axis = s.axis(), active = this.stun <= 0 && Math.hypot(axis.x, axis.y) > 0;
+            const wantsSprint = s.down('ShiftLeft', 'ShiftRight') && active;
+            const cost = (wantsSprint ? A.ENERGY_COSTS.market.sprint : A.ENERGY_COSTS.market.walk) * dt;
+            const unlimited = s.preview || s.testing;
+            const winded = active && !unlimited && !this.res.has(cost);
+            const sprint = wantsSprint && !winded;
+            if (active && !unlimited) {
+                this.res.drain(cost);
                 if (winded) s.spend(1);
-                else this.res.drain((sprint ? A.ENERGY_COSTS.market.sprint : A.ENERGY_COSTS.market.walk) * dt);
             }
             this.boost = Math.max(0, this.boost - dt);
             this.hitCd = Math.max(0, this.hitCd - dt);
@@ -1360,7 +1351,7 @@
             }
             if (!this.pkg) {
                 for (const shop of this.shops) {
-                    if (dist(me.x, me.y, shop.door.x, shop.door.y) < 60) {
+                    if (dist(me.x, me.y, shop.door.x, shop.door.y) < 24) {
                         const to = this.houses[Math.floor(Math.random() * this.houses.length)];
                         this.pkg = { to, from: shop, t: 0 };
                         s.toast('Package picked up — deliver it to the marked house!', '#fbbf24');
@@ -1370,7 +1361,7 @@
             } else {
                 this.pkg.t += dt;
                 const d = this.pkg.to.door;
-                if (dist(me.x, me.y, d.x, d.y) < 56) {
+                if (dist(me.x, me.y, d.x, d.y) < 24) {
                     const far = dist(this.pkg.from.door.x, this.pkg.from.door.y, d.x, d.y);
                     this.streak++;
                     const pay = Math.round(30 + far / 35 + Math.min(this.streak, 8) * 6 + Math.max(0, 25 - this.pkg.t) * 1.5);
@@ -1381,7 +1372,7 @@
                 }
             }
             for (const v of this.vending) {
-                if (v.until > now || dist(me.x, me.y, v.x, v.y) > 44) continue;
+                if (v.until > now || dist(me.x, me.y, v.x, v.y) > 24) continue;
                 const opened = s.ask(correct => {
                     if (correct) { s.addScore(40); this.cash += 40; this.earned += 40; this.boost = 8; s.refill(); s.toast('Snack break: +$40 and a speed boost!', '#38bdf8'); }
                     else if (correct === false) s.toast('Machine ate your coin.', '#f87171');
@@ -1406,12 +1397,12 @@
             if (cw > 0 && ch > 0) ctx.drawImage(this.cityLayer, cx, cy, cw, ch, cx, cy, cw, ch);
             for (const shop of this.shops) {
                 if (this.pkg || !this.seen(shop.door.x, shop.door.y)) continue;
-                this.ring(ctx, shop.door.x, shop.door.y, 42 + Math.sin(t * 5) * 4, '#fde047', 4);
+                this.ring(ctx, shop.door.x, shop.door.y, 24 + Math.sin(t * 5) * 2, '#fde047', 4);
                 ctx.fillStyle = '#fde047'; ctx.font = '800 15px system-ui'; ctx.textAlign = 'center'; if (!s.preview) ctx.fillText('PICK UP', shop.door.x, shop.door.y + 5);
             }
             if (this.pkg) {
                 const d = this.pkg.to.door;
-                this.ring(ctx, d.x, d.y, 44 + Math.sin(t * 6) * 5, '#4ade80', 5);
+                this.ring(ctx, d.x, d.y, 24 + Math.sin(t * 6) * 2, '#4ade80', 5);
                 ctx.fillStyle = '#4ade80'; ctx.font = '800 15px system-ui'; ctx.textAlign = 'center'; if (!s.preview) ctx.fillText('DELIVER', d.x, d.y + 5);
             }
             for (const v of this.vending) {
@@ -1463,423 +1454,6 @@
         }
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Soccer: two teams, one ball, energy for sprinting and power kicks    */
-    /* ------------------------------------------------------------------ */
-    class Sports extends Arena {
-        constructor(s) {
-            super(s, 2400, 1100);
-            this.title = 'Soccer';
-            this.touchMain = 'Sprint';
-            this.kickCharge = 0; this.kickHeld = false; this.kickAim = null; this.ballSpin = 0;
-            this.keeper = { x: this.W - 64, y: this.H / 2, r: 20, cd: 0 };
-            this.scoreGoal = false; this.goalUnit = 'goals'; this.goalLabel = 'Team goals';
-            this.dir = 1; this.td = 0; this.yards = 0;
-            this.me.y = this.H / 2; this.baseSpeed = 250;
-            this.res = new A.Resource('Energy', '#38bdf8', 100, 60, 2);
-            this.kickCd = 0; this.heavyCd = 0; this.contactCd = 0; this.pinchCd = 0; this.turbo = 0; this.freeze = 0; this.msg = '';
-            this.ballRevision = 0; this.ballOwner = ''; this.ballSequence = 0;
-            this.ballVisualOffset = { x: 0, y: 0 };
-            this.goalH = 340; this.netD = 70;
-            this.ball = { x: this.W / 2, y: this.H / 2, vx: 0, vy: 0, r: 13 };
-            this.lastTouch = null; this.unclaimed = null;
-            // Everyone is split into two teams (blue vs red) that attack opposite goals
-            this.teamIds = [...s.roster.keys()].sort();
-            this.teamsOn = this.teamIds.length >= 2;
-            this.myTeam = this.teamsOn ? this.teamIds.indexOf(s.user.id) % 2 : -1;
-            if (this.teamsOn && this.myTeam === 1) this.dir = -1;
-            this.teamTd = [0, 0];
-            this.pads = [];
-            this.kickoff();
-            this.cam.x = this.me.x; this.cam.y = this.me.y;
-        }
-
-        teamOf(id) { return this.teamsOn ? this.teamIds.indexOf(id) % 2 : -1; }
-
-        spawnY() {
-            if (!this.teamsOn) return this.H / 2;
-            const mates = this.teamIds.filter(id => this.teamOf(id) === this.myTeam);
-            const slot = Math.max(0, mates.indexOf(this.s.user.id));
-            return this.H * (slot + 1) / (mates.length + 1);
-        }
-
-        // Puts the ball back on the centre spot, sends everyone home and respawns the power-up pads
-        kickoff() {
-            const me = this.me, r = Math.random;
-            Object.assign(this.ball, { x: this.W / 2, y: this.H / 2, vx: 0, vy: 0 });
-            this.ballOwner = '';
-            this.ballVisualOffset.x = this.ballVisualOffset.y = 0;
-            this.kickCharge = 0; this.kickHeld = false;
-            this.keeper.y = this.H / 2; this.keeper.cd = .8;
-            me.x = this.W * (this.dir > 0 ? 0.3 : 0.7); me.y = this.spawnY(); me.vx = me.vy = 0;
-            this.pads = [];
-            for (let i = 0; i < 3; i++) this.pads.push({ x: 500 + r() * (this.W - 1000), y: 140 + r() * (this.H - 280), used: false });
-        }
-
-        inMouth(y, pad = 0) { return Math.abs(y - this.H / 2) < this.goalH / 2 - pad; }
-
-        // Moves the ball in sub-steps (so fast shots can't tunnel); returns the team that scored if it reached a goal.
-        stepBall(dt) {
-            const b = this.ball;
-            const speed = Math.hypot(b.vx, b.vy);
-            if (speed > 1250) { b.vx *= 1250 / speed; b.vy *= 1250 / speed; }
-            const steps = clamp(Math.ceil(Math.min(speed, 1250) * dt / (b.r * 0.6)), 1, 10);
-            const h = dt / steps;
-            for (let i = 0; i < steps; i++) {
-                const scored = this.subStepBall(h);
-                if (scored >= 0) return scored;
-            }
-            // rolling resistance plus air drag
-            const drag = Math.exp(-0.55 * dt);
-            b.vx *= drag; b.vy *= drag;
-            const sp = Math.hypot(b.vx, b.vy);
-            if (sp < 8) b.vx = b.vy = 0;
-            else { const k = Math.max(0, sp - 40 * dt) / sp; b.vx *= k; b.vy *= k; }
-            return -1;
-        }
-
-        subStepBall(dt) {
-            const b = this.ball, W = this.W, H = this.H, r = b.r, bounce = 0.78;
-            b.x += b.vx * dt; b.y += b.vy * dt;
-            this.ballSpin += Math.hypot(b.vx, b.vy) * dt / b.r * (b.vx < 0 ? -1 : 1);
-            if (b.y < r) { b.y = r; b.vy = Math.abs(b.vy) * bounce; b.vx *= 0.97; }
-            if (b.y > H - r) { b.y = H - r; b.vy = -Math.abs(b.vy) * bounce; b.vx *= 0.97; }
-            // goal posts are solid circles
-            const gy0 = H / 2 - this.goalH / 2;
-            for (const px of [4, W - 4]) for (const py of [gy0, gy0 + this.goalH]) {
-                const dx = b.x - px, dy = b.y - py, d = Math.hypot(dx, dy), min = r + 9;
-                if (d < min) {
-                    const nx = dx / (d || 1), ny = dy / (d || 1);
-                    b.x = px + nx * min; b.y = py + ny * min;
-                    const vn = b.vx * nx + b.vy * ny;
-                    if (vn < 0) { b.vx -= (1 + 0.8) * vn * nx; b.vy -= (1 + 0.8) * vn * ny; }
-                }
-            }
-            if (b.x < r) {
-                if (this.teamsOn && this.inMouth(b.y, r)) { if (b.x < 40) return 1; }
-                else { b.x = r; b.vx = Math.abs(b.vx) * bounce; b.vy *= 0.97; }
-            }
-            if (b.x > W - r) {
-                if (this.inMouth(b.y, r)) { if (b.x > W - 40) return 0; }
-                else { b.x = W - r; b.vx = -Math.abs(b.vx) * bounce; b.vy *= 0.97; }
-            }
-            return -1;
-        }
-
-        goalScored(team) {
-            const s = this.s, b = this.ball;
-            this.freeze = 1.8;
-            this.particles.burst(b.x, b.y, team === 0 ? '#60a5fa' : '#f87171', 50, 420, 1, 6);
-            const mine = this.lastTouch === s.user.id;
-            if (this.teamsOn) {
-                if (mine) {
-                    this.teamTd[team]++;
-                    s.emit({ k: 'gl', team });
-                    if (team === this.myTeam) { this.td++; s.addScore(100); s.toast(`GOAL! (${this.td})`, '#fde047'); s.sfx('score'); }
-                    else s.toast(`Own goal! It counts for ${team === 0 ? 'Blue' : 'Red'}`, '#f87171');
-                } else if (s.practice || s.preview) {
-                    this.teamTd[team]++;
-                    s.toast(`${team === 0 ? 'Blue' : 'Red'} scored!`, team === 0 ? '#60a5fa' : '#f87171');
-                } else this.unclaimed = team;
-            } else if (mine) {
-                this.td++; s.addScore(100); s.toast(`GOAL! (${this.td})`, '#fde047'); s.sfx('score');
-            }
-            this.kickoff();
-            this.stun = 0.5;
-        }
-
-        onEvent(ev, from) {
-            if (ev.k === 'kick' && this.freeze <= 0) {
-                this.receiveBall(ev, from);
-            } else if (ev.k === 'gl' && this.teamsOn) {
-                if (this.unclaimed === ev.team || this.freeze <= 0) {
-                    this.teamTd[ev.team]++;
-                    this.freeze = 1.8;
-                    const b = this.ball;
-                    this.particles.burst(b.x, b.y, ev.team === 0 ? '#60a5fa' : '#f87171', 40, 380, 0.9, 5);
-                    this.kickoff();
-                    if (from) this.s.toast(`${from.name} scored for ${ev.team === 0 ? 'Blue' : 'Red'}!`, ev.team === 0 ? '#60a5fa' : '#f87171');
-                }
-                this.unclaimed = null;
-            }
-        }
-
-        onState(state, from) {
-            if (state.ball) this.receiveBall(state.ball, from);
-        }
-
-        ballState() {
-            const b = this.ball;
-            return {
-                x: b.x, y: b.y, vx: b.vx, vy: b.vy, spin: this.ballSpin, at: Date.now(),
-                revision: this.ballRevision, sequence: ++this.ballSequence, touch: this.lastTouch
-            };
-        }
-
-        receiveBall(state, from) {
-            if (this.freeze > 0 || !from || ![state.x, state.y, state.vx, state.vy, state.at].every(Number.isFinite)
-                || !Number.isSafeInteger(state.revision) || state.revision < 1
-                || !Number.isSafeInteger(state.sequence) || state.sequence < 1) return;
-            // A contact transfers authority; revisions plus sender IDs order simultaneous touches.
-            if (state.revision < this.ballRevision
-                || (state.revision === this.ballRevision && !this.ballOwner)
-                || (state.revision === this.ballRevision && from.id < this.ballOwner)
-                || (state.revision === this.ballRevision && from.id === this.ballOwner && state.sequence <= this.ballSequence)) return;
-            const b = this.ball, offset = this.ballVisualOffset;
-            const shownX = b.x + offset.x, shownY = b.y + offset.y;
-            const newContact = state.revision > this.ballRevision;
-            this.ballRevision = state.revision; this.ballOwner = from.id; this.ballSequence = state.sequence;
-            Object.assign(b, { x: clamp(state.x, -this.netD, this.W + this.netD), y: clamp(state.y, b.r, this.H - b.r), vx: state.vx, vy: state.vy });
-            if (Number.isFinite(state.spin)) this.ballSpin = state.spin;
-            this.lastTouch = state.touch === null ? null : from.id;
-            // Advance the sender's state through the same collisions and drag, not back to an old kick point.
-            let age = clamp((Date.now() - state.at) / 1000, 0, .35);
-            while (age > 0) {
-                const dt = Math.min(age, 1 / 120);
-                const scored = this.stepBall(dt);
-                age -= dt;
-                if (scored >= 0) break;
-            }
-            const gap = Math.hypot(shownX - b.x, shownY - b.y);
-            offset.x = !newContact && gap < 120 ? shownX - b.x : 0;
-            offset.y = !newContact && gap < 120 ? shownY - b.y : 0;
-        }
-
-        stepKeeper(dt) {
-            const keeper = this.keeper, ball = this.ball;
-            keeper.cd = Math.max(0, keeper.cd - dt);
-            const target = ball.x > this.W * .65 ? ball.y : this.H / 2;
-            keeper.y += clamp(target - keeper.y, -210 * dt, 210 * dt);
-            keeper.y = clamp(keeper.y, this.H / 2 - this.goalH / 2 + 26, this.H / 2 + this.goalH / 2 - 26);
-            const dx = ball.x - keeper.x, dy = ball.y - keeper.y, distance = Math.hypot(dx, dy);
-            if (keeper.cd <= 0 && distance < keeper.r + ball.r + 6) {
-                ball.x = keeper.x - keeper.r - ball.r - 2;
-                ball.vx = -Math.max(380, Math.abs(ball.vx) * .8);
-                ball.vy = clamp(dy * 14, -320, 320);
-                keeper.cd = .55; this.lastTouch = null;
-                this.sendKick();
-                this.particles.burst(keeper.x, keeper.y, '#fbbf24', 10, 150, .4, 3);
-            }
-        }
-
-        sendKick() {
-            this.ballRevision++;
-            this.ballOwner = this.s.user.id; this.ballSequence = 0;
-            this.ballVisualOffset.x = this.ballVisualOffset.y = 0;
-            this.s.emit({ k: 'kick', ...this.ballState() });
-            this.s.sendState?.();
-        }
-
-        update(dt) {
-            const s = this.s, me = this.me, b = this.ball;
-            const blend = Math.exp(-20 * dt);
-            this.ballVisualOffset.x *= blend; this.ballVisualOffset.y *= blend;
-            this.kickCd -= dt; this.contactCd = Math.max(0, this.contactCd - dt); this.pinchCd = Math.max(0, this.pinchCd - dt); this.turbo = Math.max(0, this.turbo - dt);
-            this.heavyCd = Math.max(0, this.heavyCd - dt);
-            const wasFrozen = this.freeze > 0;
-            this.freeze = Math.max(0, this.freeze - dt);
-            const wantsSprint = s.down('ShiftLeft', 'ShiftRight') && this.moving;
-            const free = this.turbo > 0;
-            const winded = this.moving && !free && !this.res.has(1);
-            const sprint = wantsSprint && (free || this.res.has(1));
-            if (this.moving && !free) {
-                if (winded) s.spend(1);
-                else this.res.drain((sprint ? A.ENERGY_COSTS.sports.sprint : A.ENERGY_COSTS.sports.walk) * dt);
-            }
-            this.speedMul = (winded ? 0.5 : sprint ? 1.4 : 1) * (free ? 1.15 : 1);
-            this.step(dt, 3000);
-
-            if (this.freeze <= 0) {
-                if (wasFrozen) { this.lastTouch = null; this.kickHeld = false; }
-                const dx = b.x - me.x, dy = b.y - me.y, d = Math.hypot(dx, dy), min = me.r + b.r;
-                if (this.stun <= 0) {
-                    const pre = { vx: b.vx, vy: b.vy };
-                    // Separate circles first, then reflect only the inward normal velocity in the player's frame.
-                    if (d < min) {
-                        const nx = d > 0.001 ? dx / d : Math.cos(me.aim), ny = d > 0.001 ? dy / d : Math.sin(me.aim);
-                        b.x = me.x + nx * (min + 0.5); b.y = me.y + ny * (min + 0.5);
-                        const relN = (b.vx - me.vx) * nx + (b.vy - me.vy) * ny;
-                        if (relN < -8) {
-                            const impulse = -(1 + 0.58) * relN;
-                            b.vx += nx * impulse; b.vy += ny * impulse;
-                            this.lastTouch = s.user.id;
-                        }
-                        const remote = s.remoteList().find(p => dist(b.x, b.y, p.x, p.y) < min + 5);
-                        if (remote && this.pinchCd <= 0) {
-                            const ax = remote.x - me.x, ay = remote.y - me.y, ad = Math.hypot(ax, ay) || 1;
-                            let nxp = -ay / ad, nyp = ax / ad;
-                            if (b.vx * nxp + b.vy * nyp < 0) { nxp = -nxp; nyp = -nyp; }
-                            const midX = (me.x + remote.x) / 2, midY = (me.y + remote.y) / 2;
-                            b.x = midX + nxp * (min + 2); b.y = midY + nyp * (min + 2);
-                            b.vx += nxp * 220; b.vy += nyp * 220;
-                            this.pinchCd = 0.35; this.lastTouch = s.user.id;
-                        }
-                        const speed = Math.hypot(b.vx, b.vy);
-                        if (speed > 1250) { b.vx *= 1250 / speed; b.vy *= 1250 / speed; }
-                        if (this.contactCd <= 0) {
-                            this.contactCd = 0.16; this.sendKick();
-                            if (Math.abs(b.vx - pre.vx) + Math.abs(b.vy - pre.vy) > 12) s.sfx('act', 90);
-                        }
-                    }
-                    const held = s.down('Space') && this.heavyCd <= 0, mousePass = s.mouse.pressed;
-                    const tapped = mousePass || s.pressed('KeyE');
-                    if (mousePass) this.kickAim = this.mouseWorld();
-                    if (held && !this.kickHeld) this.kickCharge = 0;
-                    if (held) this.kickCharge = Math.min(1, this.kickCharge + dt / .8);
-                    const released = this.kickHeld && !held;
-                    this.kickHeld = held;
-                    if ((tapped || (released && this.heavyCd <= 0)) && this.kickCd <= 0 && d < 78) {
-                        const charge = tapped ? .12 : this.kickCharge;
-                        const cost = Math.round(A.ENERGY_COSTS.sports.kickMin + charge * (A.ENERGY_COSTS.sports.kickMax - A.ENERGY_COSTS.sports.kickMin));
-                        if (s.spend(cost)) {
-                            const aim = mousePass || (!tapped && !this.moving && this.kickAim) ? this.kickAim : null;
-                            const angle = aim ? Math.atan2(aim.y - me.y, aim.x - me.x) : me.aim;
-                            const power = 480 + charge * 650;
-                            b.vx = Math.cos(angle) * power; b.vy = Math.sin(angle) * power;
-                            this.kickCd = .25 + charge * .2; this.contactCd = Math.max(this.contactCd, .2); this.lastTouch = s.user.id;
-                            if (!tapped) this.heavyCd = 3;
-                            this.sendKick(); s.sfx('shoot');
-                            this.particles.burst(b.x, b.y, '#fde68a', 12, 220, .35, 3);
-                        }
-                    }
-                    if (!held) this.kickCharge = 0;
-                }
-                if (!this.teamsOn) this.stepKeeper(dt);
-                const scored = this.stepBall(dt);
-                if (scored >= 0) this.goalScored(scored);
-            }
-
-            for (const p of this.pads) {
-                if (p.used || dist(me.x, me.y, p.x, p.y) > 40) continue;
-                const opened = s.ask(correct => {
-                    p.used = false;
-                    if (correct) { this.turbo = 10; s.refill(); s.addScore(40); s.toast('TURBO! Free sprint and extra speed', '#fde047'); }
-                    else if (correct === false) s.toast('Missed the play call.', '#f87171');
-                });
-                if (opened) p.used = true;
-            }
-            this.yards = this.td;
-            s.setGoal(this.teamsOn ? this.teamTd[this.myTeam] : this.td);
-        }
-
-        ex() {
-            return {
-                t: this.turbo > 0 ? 1 : 0,
-                ...(this.freeze <= 0 && this.ballOwner === this.s.user.id ? { ball: this.ballState() } : {})
-            };
-        }
-        goalText() {
-            return this.teamsOn ? `Blue ${this.teamTd[0]} – ${this.teamTd[1]} Red · You ${this.td} goal${this.td === 1 ? '' : 's'}` : `${this.td} goal${this.td === 1 ? '' : 's'}`;
-        }
-        touchLayout() { return { stick: true, buttons: [{ k: 'ShiftLeft', label: 'Sprint' }, { k: 'Space', label: 'Power kick', cls: 'main' }] }; }
-        hint() { return `${this.teamsOn ? `${this.myTeam === 0 ? 'Blue' : 'Red'} team · ` : ''}WASD dribble · Shift sprint · E or click pass · hold Space, release for a power kick (3–10 energy, 3s cooldown) · Q recharge`; }
-        touchHint() { return 'Joystick to dribble · Tap toward a pass · Hold Power kick, release to shoot (3s cooldown) · Sprint to steal'; }
-
-        draw(ctx, w, h) {
-            const me = this.me, t = this.anim, b = { ...this.ball, x: this.ball.x + this.ballVisualOffset.x, y: this.ball.y + this.ballVisualOffset.y }, W = this.W, H = this.H, gy0 = H / 2 - this.goalH / 2;
-            ctx.fillStyle = '#14532d'; ctx.fillRect(0, 0, w, h);
-            this.begin(ctx, w, h, w < 600 ? 650 : 800);
-            ctx.fillStyle = '#273744'; ctx.fillRect(-90, -80, W + 180, H + 160);
-            if (this.y0 < 0 || this.y1 > H) for (let row = 0; row < 3; row++) for (let x = -40 + Math.max(0, Math.ceil((this.x0 - 10 + 40) / 24)) * 24; x < Math.min(W + 40, this.x1 + 10); x += 24) {
-                ctx.fillStyle = ['#df6b68', '#79abd4', '#edcc79', '#b4c5ce'][mod(Math.floor(x / 24) + row * 7, 4)];
-                ctx.beginPath(); ctx.arc(x, -20 - row * 20, 5, 0, TAU); ctx.arc(x, H + 20 + row * 20, 5, 0, TAU); ctx.fill();
-            }
-            for (let i = Math.max(0, Math.floor(this.x0 / 100)); i < Math.min(24, Math.ceil(this.x1 / 100)); i++) { ctx.fillStyle = i % 2 ? '#15803d' : '#16a34a'; ctx.fillRect(i * 100, 0, 100, H); }
-            ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 5;
-            ctx.strokeStyle = 'rgba(224,255,208,.09)'; ctx.lineWidth = 1; ctx.beginPath();
-            for (let y = 12 + Math.max(0, Math.ceil((this.y0 - 20 - 12) / 21)) * 21; y < Math.min(H, this.y1 + 20); y += 21) for (let x = mod(y, 33) + Math.max(0, Math.ceil((this.x0 - 20 - mod(y, 33)) / 31)) * 31; x < Math.min(W, this.x1 + 20); x += 31) {
-                if (!this.seen(x, y, 20)) continue;
-                ctx.moveTo(x, y); ctx.lineTo(x + 2, y - 4); ctx.moveTo(x + 4, y); ctx.lineTo(x + 5, y - 3);
-            }
-            ctx.stroke(); ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 5;
-            ctx.strokeRect(3, 3, W - 6, H - 6);
-            ctx.beginPath(); ctx.moveTo(W / 2, 0); ctx.lineTo(W / 2, H); ctx.stroke();
-            ctx.beginPath(); ctx.arc(W / 2, H / 2, 130, 0, TAU); ctx.stroke();
-            ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.beginPath(); ctx.arc(W / 2, H / 2, 6, 0, TAU); ctx.fill();
-            for (const side of [0, 1]) {
-                if (!this.seenRect(side ? W - 400 : -100, -80, 500, H + 160)) continue;
-                const bx = side ? W - 260 : 0;
-                ctx.strokeRect(bx, H / 2 - 260, 260, 520);
-                ctx.beginPath(); ctx.arc(side ? W - 190 : 190, H / 2, 7, 0, TAU); ctx.fillStyle = '#ecf7e9'; ctx.fill();
-                ctx.beginPath(); ctx.arc(side ? W - 190 : 190, H / 2, 112, side ? Math.PI * .64 : -Math.PI * .36, side ? Math.PI * 1.36 : Math.PI * .36); ctx.stroke();
-                ctx.strokeRect(side ? W - 110 : 0, H / 2 - 150, 110, 300);
-                const nx = side ? W - this.netD : 0;
-                ctx.fillStyle = side ? 'rgba(248,113,113,.22)' : (this.teamsOn ? 'rgba(96,165,250,.22)' : 'rgba(255,255,255,.1)');
-                ctx.fillRect(nx, gy0, this.netD, this.goalH);
-                ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 2; ctx.beginPath();
-                for (let k = 0; k <= this.goalH; k += 20) { ctx.moveTo(nx, gy0 + k); ctx.lineTo(nx + this.netD, gy0 + k); }
-                for (let k = 0; k <= this.netD; k += 20) { ctx.moveTo(nx + k, gy0); ctx.lineTo(nx + k, gy0 + this.goalH); }
-                ctx.stroke();
-                ctx.strokeStyle = 'rgba(15,23,42,.4)'; ctx.lineWidth = 7;
-                ctx.strokeRect(nx + (side ? -4 : 4), gy0 + 6, this.netD, this.goalH);
-                ctx.strokeStyle = '#dce9ee'; ctx.lineWidth = 4; ctx.strokeRect(nx, gy0, this.netD, this.goalH);
-                ctx.fillStyle = '#f8fafc'; ctx.fillRect(side ? W - 6 : 0, gy0 - 6, 6, this.goalH + 12);
-                ctx.beginPath(); ctx.arc(side ? W - 4 : 4, gy0, 9, 0, TAU); ctx.arc(side ? W - 4 : 4, gy0 + this.goalH, 9, 0, TAU); ctx.fill();
-                ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 5;
-            }
-            for (const p of this.pads) { if (!p.used) this.qMark(ctx, p.x, p.y, '#7c3aed', t); }
-            // ball: shadow, white body with dark patches; glows when a power kick is in reach
-            if (this.seen(b.x, b.y, 60)) {
-                const near = dist(me.x, me.y, b.x, b.y) < 64 && this.kickCd <= 0;
-                ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(b.x + 3, b.y + 6, b.r, b.r * 0.6, 0, 0, TAU); ctx.fill();
-                if (near) this.ring(ctx, b.x, b.y, b.r + 9, 'rgba(253,224,71,.85)', 3);
-                ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, TAU); ctx.fill();
-                ctx.fillStyle = '#1e293b';
-                const spin = this.ballSpin;
-                for (let k = 0; k < 5; k++) { const a = spin + k * TAU / 5; ctx.beginPath(); ctx.arc(b.x + Math.cos(a) * b.r * 0.58, b.y + Math.sin(a) * b.r * 0.58, 3, 0, TAU); ctx.fill(); }
-                ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, TAU); ctx.fill();
-            }
-            if (!this.teamsOn && this.seen(this.keeper.x, this.keeper.y)) {
-                const keeper = this.keeper;
-                drawFigureTop(ctx, { color: '#fbbf24' }, keeper.x, keeper.y, keeper.r, Math.PI, t, 1);
-                if (!this.s.preview) nameTag(ctx, 'Keeper', keeper.x, keeper.y - 34, '#fbbf24');
-            }
-            this.drawPlayers(ctx, (c, x, y, r) => {
-                const owner = r ? r.id : this.s.user.id;
-                if (this.lastTouch === owner && dist(x, y, b.x, b.y) < 100) {
-                    this.ring(c, x, y, 25, '#fff2a0', 2);
-                    c.fillStyle = '#fff2a0'; c.beginPath(); c.moveTo(x, y - 42); c.lineTo(x - 5, y - 50); c.lineTo(x + 5, y - 50); c.fill();
-                }
-                if (this.teamsOn) this.ring(c, x, y, 21, this.teamOf(r ? r.id : this.s.user.id) === 0 ? '#60a5fa' : '#f87171', 3);
-                if (r ? r.ex?.t : this.turbo > 0) { this.ring(c, x, y, 26, 'rgba(253,224,71,.8)', 3); }
-            });
-            this.particles.draw(ctx);
-            if (this.kickHeld && this.freeze <= 0) {
-                this.ring(ctx, me.x, me.y, 33, 'rgba(15,23,42,.65)', 6);
-                ctx.strokeStyle = '#fde047'; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(me.x, me.y, 33, -Math.PI / 2, -Math.PI / 2 + TAU * this.kickCharge); ctx.stroke();
-                const angle = this.moving || !this.kickAim ? me.aim : Math.atan2(this.kickAim.y - me.y, this.kickAim.x - me.x);
-                ctx.strokeStyle = 'rgba(253,224,71,.65)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(me.x + Math.cos(angle) * 42, me.y + Math.sin(angle) * 42); ctx.lineTo(me.x + Math.cos(angle) * 110, me.y + Math.sin(angle) * 110); ctx.stroke();
-            }
-            if (!this.seen(b.x, b.y, -25)) {
-                const angle = Math.atan2(b.y - me.y, b.x - me.x);
-                ctx.save(); ctx.translate(me.x + Math.cos(angle) * 80, me.y + Math.sin(angle) * 80); ctx.rotate(angle);
-                ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(12, 0); ctx.lineTo(-7, -8); ctx.lineTo(-7, 8); ctx.fill(); ctx.restore();
-            }
-            this.end(ctx);
-            if (this.s.preview) return;
-            if ((this.kickHeld || this.heavyCd > 0) && !this.freeze) {
-                this.s.placeHud(ctx, 0, 0, 172, 31, 'top-center');
-                ctx.fillStyle = 'rgba(15,23,42,.8)'; roundRect(ctx, 0, 0, 172, 31, 9); ctx.fill();
-                ctx.fillStyle = '#253d51'; ctx.fillRect(11, 19, 150, 4);
-                ctx.fillStyle = '#38bdf8'; ctx.fillRect(11, 19, 150 * (this.heavyCd > 0 ? 1 - this.heavyCd / 3 : this.kickCharge), 4);
-                ctx.font = '700 10px system-ui'; ctx.textAlign = 'center'; ctx.fillStyle = '#e5eff9'; ctx.fillText(this.heavyCd > 0 ? `POWER KICK ${this.heavyCd.toFixed(1)}s` : `SHOT ${Math.round(this.kickCharge * 100)}%`, 86, 13); ctx.restore();
-            }
-            if (this.freeze > 0) {
-                ctx.fillStyle = `rgba(255,244,179,${Math.min(.3, this.freeze * .12)})`; ctx.fillRect(0, 0, w, h);
-                for (let i = 0; i < 65; i++) {
-                    const elapsed = 1.8 - this.freeze;
-                    ctx.fillStyle = ['#60a5fa', '#f87171', '#fde047', '#fff'][i % 4];
-                    ctx.save(); ctx.translate(mod(i * 83 + Math.sin(i) * elapsed * 90, w), mod(i * 47 + elapsed * (90 + i * 3), h)); ctx.rotate(i + elapsed * 4); ctx.fillRect(-3, -4, 6, 9); ctx.restore();
-                }
-                this.s.placeHud(ctx, w / 2 - 145, h / 2 - 117, 290, 95, 'center');
-                ctx.fillStyle = 'rgba(15,23,42,.78)'; roundRect(ctx, w / 2 - 145, h / 2 - 117, 290, 95, 18); ctx.fill();
-                ctx.fillStyle = '#fde047'; ctx.font = `900 ${Math.min(54, w * .12)}px system-ui`; ctx.textAlign = 'center';
-                ctx.fillText('GOAL!', w / 2, h / 2 - 60);
-                ctx.font = '700 14px system-ui'; ctx.fillStyle = '#fff'; ctx.fillText('Kickoff at the centre spot', w / 2, h / 2 - 36); ctx.textAlign = 'left'; ctx.restore();
-            }
-        }
-    }
-
-    Object.assign(A.games, { miner: Miner, river: River, market: Market, sports: Sports });
+    Object.assign(A.games, { miner: Miner, river: River, market: Market });
     A.Arena = Arena;
 })(window);

@@ -93,76 +93,38 @@
     };
 
     // One unit of climb progress per biome; scenery stays anchored to world cells.
+    // Classic shaded planets (bands or craters, some ringed, most with a small moon); every catalog entry is a different world.
     const SPACE_BODIES = [
-        { kind: 'ringed', x: 380, y: 300, r: 120, base: '#92400e', light: '#fde68a', ring: '#fcd34d', moon: true },
-        { kind: 'earth', x: 1250, y: 520, r: 85, base: '#1e40af', light: '#93c5fd' },
-        { kind: 'lava', x: 2050, y: 260, r: 70, base: '#450a0a', light: '#fb923c' },
-        { kind: 'ocean', x: 1800, y: 900, r: 95, base: '#115e59', light: '#5eead4' },
-        { kind: 'galaxy', x: 1050, y: 1100, r: 130 },
-        { kind: 'ice', x: 2280, y: 1300, r: 100, base: '#0e7490', light: '#e0f2fe', ring: '#bae6fd' },
-        { kind: 'banded', x: 650, y: 1550, r: 140, base: '#581c87', light: '#e9d5ff' },
-        { kind: 'moon', x: 1550, y: 1750, r: 55, base: '#475569', light: '#e2e8f0' },
-        { kind: 'comet', x: 2050, y: 2080, r: 22 },
-        { kind: 'mars', x: 250, y: 2150, r: 65, base: '#7f1d1d', light: '#fca5a5' }
+        { x: 380, y: 300, r: 120, base: '#0e7490', light: '#67e8f9', ring: true, bands: true, moon: [1.9, -.8] },
+        { x: 1250, y: 520, r: 80, base: '#7c2d12', light: '#fdba74', moon: [-1.7, .6] },
+        { x: 2050, y: 280, r: 65, base: '#581c87', light: '#d8b4fe', bands: true, moon: [1.6, .9] },
+        { x: 1800, y: 920, r: 100, base: '#1e3a8a', light: '#93c5fd', ring: true, moon: [-1.9, -.7] },
+        { x: 900, y: 1150, r: 70, base: '#14532d', light: '#86efac', bands: true },
+        { x: 2280, y: 1350, r: 110, base: '#9f1239', light: '#fda4af', moon: [1.8, -.9] },
+        { x: 600, y: 1650, r: 135, base: '#78350f', light: '#fde68a', ring: true, bands: true },
+        { x: 1550, y: 1800, r: 58, base: '#334155', light: '#e2e8f0', moon: [1.7, .7] },
+        { x: 250, y: 2150, r: 90, base: '#134e4a', light: '#5eead4', moon: [-1.8, -.9] }
     ];
-    function drawSpaceBody(ctx, P, x, y, anim) {
+    function drawSpaceBody(ctx, P, x, y) {
         const r = P.r;
-        if (P.kind === 'galaxy') {
-            ctx.save(); ctx.translate(x, y); ctx.rotate(-.5);
-            const core = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
-            core.addColorStop(0, 'rgba(254,243,199,.9)'); core.addColorStop(.25, 'rgba(196,181,253,.45)'); core.addColorStop(1, 'rgba(76,29,149,0)');
-            ctx.fillStyle = core; ctx.scale(1, .42); ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
-            ctx.strokeStyle = 'rgba(221,214,254,.35)'; ctx.lineWidth = 6;
-            for (const turn of [0, Math.PI]) { ctx.beginPath(); for (let k = 0; k <= 24; k++) { const a = turn + k * .22, d = 12 + k * 4.4; if (k) ctx.lineTo(Math.cos(a) * d, Math.sin(a) * d); else ctx.moveTo(Math.cos(a) * d, Math.sin(a) * d); } ctx.stroke(); }
-            ctx.restore();
-            return;
-        }
-        if (P.kind === 'comet') {
-            const tail = ctx.createLinearGradient(x, y, x + 260, y - 110);
-            tail.addColorStop(0, 'rgba(186,230,253,.75)'); tail.addColorStop(1, 'rgba(186,230,253,0)');
-            ctx.fillStyle = tail; ctx.beginPath(); ctx.moveTo(x, y - r * .8); ctx.lineTo(x + 260, y - 110); ctx.lineTo(x + 6, y + r * .8); ctx.closePath(); ctx.fill();
-            ctx.fillStyle = '#f0f9ff'; ctx.beginPath(); ctx.arc(x, y, r * .55, 0, TAU); ctx.fill();
-            return;
-        }
-        if (P.ring) { ctx.strokeStyle = P.ring + '99'; ctx.lineWidth = P.kind === 'ice' ? 4 : 7; ctx.beginPath(); ctx.ellipse(x, y, r * 1.65, r * .3, -.3, Math.PI, TAU); ctx.stroke(); }
+        if (P.ring) { ctx.strokeStyle = P.light + '99'; ctx.lineWidth = 7; ctx.beginPath(); ctx.ellipse(x, y, r * 1.65, r * .3, -.3, Math.PI, TAU); ctx.stroke(); }
         const body = ctx.createRadialGradient(x - r * .35, y - r * .4, 5, x, y, r);
         body.addColorStop(0, P.light); body.addColorStop(.55, P.base); body.addColorStop(1, '#020617');
         ctx.fillStyle = body; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
         ctx.save(); ctx.beginPath(); ctx.arc(x, y, r - 2, 0, TAU); ctx.clip();
-        if (P.kind === 'ringed' || P.kind === 'banded') {
-            ctx.strokeStyle = P.light + (P.kind === 'banded' ? '55' : '66'); ctx.lineWidth = P.kind === 'banded' ? 12 : 9;
+        if (P.bands) {
+            ctx.strokeStyle = P.light + '66'; ctx.lineWidth = 9;
             for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.ellipse(x, y + i * r * .28, r, r * .13, -.25, 0, TAU); ctx.stroke(); }
-            if (P.kind === 'banded') { ctx.fillStyle = 'rgba(251,113,133,.55)'; ctx.beginPath(); ctx.ellipse(x + r * .3, y + r * .25, r * .2, r * .1, -.25, 0, TAU); ctx.fill(); }
-        } else if (P.kind === 'earth') {
-            ctx.fillStyle = 'rgba(74,222,128,.75)';
-            for (const [dx, dy, s] of [[-.35, -.2, .38], [.25, .3, .3], [.45, -.35, .2], [-.1, .55, .18]]) { ctx.beginPath(); ctx.ellipse(x + dx * r, y + dy * r, s * r, s * r * .7, .6, 0, TAU); ctx.fill(); }
-            ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 5;
-            for (const dy of [-.5, .1, .6]) { ctx.beginPath(); ctx.ellipse(x + Math.sin(anim * .05 + dy) * r * .2, y + dy * r, r * .55, r * .06, 0, 0, TAU); ctx.stroke(); }
-        } else if (P.kind === 'lava') {
-            ctx.strokeStyle = `rgba(251,146,60,${.55 + Math.sin(anim * 1.5) * .2})`; ctx.lineWidth = 3; ctx.beginPath();
-            for (const [a, b, c, d] of [[-.7, -.2, .1, .3], [.1, .3, .6, -.1], [-.3, -.6, .2, -.3], [-.2, .7, .4, .5]]) { ctx.moveTo(x + a * r, y + b * r); ctx.lineTo(x + c * r, y + d * r); }
-            ctx.stroke();
-        } else if (P.kind === 'ocean') {
-            ctx.strokeStyle = 'rgba(240,253,250,.6)'; ctx.lineWidth = 4;
-            ctx.beginPath(); ctx.arc(x + r * .25, y + r * .1, r * .22, anim * .3, anim * .3 + 4.5); ctx.stroke();
-            ctx.beginPath(); ctx.arc(x + r * .25, y + r * .1, r * .1, anim * .3 + 2, anim * .3 + 6); ctx.stroke();
-        } else if (P.kind === 'ice') {
-            ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 3; ctx.beginPath();
-            for (const [a, b, c, d] of [[-.6, -.4, .5, .2], [-.2, .5, .6, -.5], [-.7, .2, -.1, .7]]) { ctx.moveTo(x + a * r, y + b * r); ctx.lineTo(x + c * r, y + d * r); }
-            ctx.stroke();
-        } else if (P.kind === 'mars') {
-            ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.beginPath(); ctx.ellipse(x, y - r * .92, r * .45, r * .16, 0, 0, TAU); ctx.fill();
-            ctx.fillStyle = 'rgba(69,10,10,.35)'; ctx.beginPath(); ctx.ellipse(x - r * .2, y + r * .15, r * .5, r * .12, -.2, 0, TAU); ctx.fill();
         } else {
             ctx.fillStyle = 'rgba(15,23,42,.3)';
             for (let i = 0; i < 6; i++) {
-                const angle = i * 2.4 + 1, d = r * (.25 + (i % 3) * .2);
+                const angle = i * 2.4 + r, d = r * (.25 + (i % 3) * .2);
                 ctx.beginPath(); ctx.arc(x + Math.cos(angle) * d, y + Math.sin(angle) * d, r * (.08 + (i % 2) * .05), 0, TAU); ctx.fill();
             }
         }
         ctx.restore();
-        if (P.ring) { ctx.strokeStyle = P.ring + '99'; ctx.lineWidth = P.kind === 'ice' ? 4 : 7; ctx.beginPath(); ctx.ellipse(x, y, r * 1.65, r * .3, -.3, 0, Math.PI); ctx.stroke(); }
-        if (P.moon) { ctx.fillStyle = '#94a3b8'; ctx.beginPath(); ctx.arc(x + r * 1.9, y - r * .8, r * .14, 0, TAU); ctx.fill(); }
+        if (P.ring) { ctx.strokeStyle = P.light + '99'; ctx.lineWidth = 7; ctx.beginPath(); ctx.ellipse(x, y, r * 1.65, r * .3, -.3, 0, Math.PI); ctx.stroke(); }
+        if (P.moon) { ctx.fillStyle = '#94a3b8'; ctx.beginPath(); ctx.arc(x + r * P.moon[0], y + r * P.moon[1], r * .14, 0, TAU); ctx.fill(); }
     }
 
     function climbBackdrop(ctx, w, h, cam, camStart, blend, anim, low = false) {
@@ -275,7 +237,7 @@
             for (const P of SPACE_BODIES) {
                 const x = ((P.x - ox + 300) % 2600 + 2600) % 2600 - 300, y = ((P.y - oy + 300) % 2400 + 2400) % 2400 - 300, reach = P.r * 2.2;
                 if (x < -reach || x > w + reach || y < -reach || y > h + reach) continue;
-                drawSpaceBody(ctx, P, x, y, anim);
+                drawSpaceBody(ctx, P, x, y);
             }
             cells(.14, 640, (hh, px, py) => {
                 if (hh % 3) return;
@@ -3310,6 +3272,7 @@
             this.guard = false; this.airJumps = 1; this.coyote = 0; this.hammer = 0; this.kos = 0; this.falls = 0; this.respawn = 0;
             this.lastHit = { by: null, at: 0 }; this.anim = 0; this.orb = { x: this.W / 2, y: 150, t: 0 }; this.state = 0; this.shake = 0;
             this.hitFlash = 0; this.hitlag = 0; this.dropTimer = 0; this.dodge = 0; this.dodgeCd = 0; this.shieldBreak = 0;
+            this.shield = 100; this.guardT = 0; this.shieldRest = 0; this.pendingHeavy = [];
             this.view = { z: 1, x: this.me.x + 17, y: this.me.y + 28 }; this.aim = 0; this.swingAim = 0; this.offX = 0; this.offY = 0; this.touchAim = null;
             this.hillTick = 0; this.hillState = 'away';
             this.zones = [
@@ -3317,7 +3280,7 @@
                 { x: 400, y: 390, w: 220, name: 'Left ledge' }, { x: 980, y: 390, w: 220, name: 'Right ledge' }
             ];
             this.zones = this.zones.map(zone => ({ ...zone, x: zone.x * scaleX, w: zone.w * scaleX }));
-            this.res = new A.Resource('Energy', '#fb7185', 100, 60, 2);
+            this.res = new A.Resource('Energy', '#fb7185', 100, 40, 2);
         }
 
         // The hill moves every 20 seconds; all clients derive it from the shared start time
@@ -3390,11 +3353,21 @@
                 return;
             }
             const ax = this.stun > 0 || this.dodge > 0 ? 0 : s.axis().x;
-            this.guard = this.stun <= 0 && this.dodge <= 0 && this.shieldBreak <= 0 && s.down('KeyS');
+            this.guard = this.stun <= 0 && this.dodge <= 0 && this.shieldBreak <= 0 && this.shield > 0 && s.down('KeyS');
             if (this.guard) {
+                this.guardT += dt;
+                // a raised shield slowly wears down, so it has to be timed instead of held up forever
+                this.shield = Math.max(0, this.shield - dt * Duel.SHIELD.holdWear);
+                this.shieldRest = Duel.SHIELD.regenDelay;
                 this.res.drain(dt * A.ENERGY_COSTS.duel.guard);
                 if (this.res.value <= 0) { this.guard = false; this.shieldBreak = 0.8; s.sfx('click'); }
+                else if (this.shield <= 0) this.breakShield();
+            } else {
+                this.guardT = 0;
+                this.shieldRest = Math.max(0, this.shieldRest - dt);
+                if (this.shieldRest <= 0) this.shield = Math.min(100, this.shield + dt * Duel.SHIELD.regen);
             }
+            this.checkPendingHeavy();
             if (this.stun <= 0 && this.dodgeCd <= 0 && s.pressed('ShiftLeft', 'ShiftRight', 'KeyF')) {
                 this.dodge = 0.18; this.dodgeCd = 0.85; this.invuln = Math.max(this.invuln, 0.16);
                 me.vx = (ax || me.face || 1) * 760; me.vy *= 0.45; this.guard = false; s.sfx('dash');
@@ -3471,7 +3444,8 @@
             const centerX = (minX + maxX) / 2, centerY = (minY + maxY) / 2;
             const fit = Math.min(w / (maxX - minX), h / (maxY - minY));
             const cssScale = this.s.scale || 1;
-            const z = this.s.preview ? fit : clamp(fit, .65 / cssScale, 1.15 / cssScale);
+            // big screens follow the fighter instead of showing the whole arena at once
+            const z = this.s.preview ? fit : clamp(Math.max(fit, w / Duel.VIEW_WIDTH), .65 / cssScale, 1.5 / cssScale);
             const halfW = w / (2 * z), halfH = h / (2 * z);
             const fitsX = halfW * 2 >= maxX - minX - 0.01;
             const fitsY = halfH * 2 >= maxY - minY - 0.01;
@@ -3511,10 +3485,10 @@
 
         attackHits(ev, body) {
             const angle = typeof ev.a === 'number' ? ev.a : (ev.d > 0 ? 0 : Math.PI);
-            const reach = ev.h === 1 ? 180 : 110;
+            const heavy = ev.h === 1, reach = heavy ? Duel.HEAVY_REACH : 110, half = heavy ? 1.1 : 0.86;
             const sweep = [{ x: ev.x, y: ev.y }];
             for (let i = 0; i <= 16; i++) {
-                const a = angle - 0.86 + i * 1.72 / 16;
+                const a = angle - half + i * half * 2 / 16;
                 sweep.push({ x: ev.x + Math.cos(a) * reach, y: ev.y + Math.sin(a) * reach });
             }
             const rect = [
@@ -3550,33 +3524,82 @@
                 from.swing = performance.now();
                 from.swingAim = typeof ev.a === 'number' ? ev.a : (ev.d > 0 ? 0 : Math.PI);
                 from.swingHeavy = ev.h === 1;
-                if (this.respawn > 0 || this.invuln > 0 || this.stun > 0.2 || !this.attackHits(ev, me)) return;
-                const angle = from.swingAim, dx = Math.cos(angle), dy = Math.sin(angle);
-                const blocked = this.guard && me.face === -(dx >= 0 ? 1 : -1);
-                const impact = this.hitImpact(ev, this.dmg, blocked), force = impact.force;
-                this.dmg = impact.damage;
-                me.vx = dx * force; me.vy = blocked ? 0 : dy * force * 0.58 - (150 + this.dmg * 2.2);
-                me.onGround = false;
-                this.stun = impact.stun;
-                this.hitlag = blocked ? 0.035 : 0.055; this.hitFlash = 0.2; this.shake = 0.24;
-                s.sfx(blocked ? 'click' : 'hit', 60);
-                this.lastHit = { by: ev.by, at: Date.now() };
-                this.particles.burst(me.x + 17, me.y + 28, blocked ? '#7dd3fc' : '#fca5a5', 14, 320, 0.45, 5);
-                s.emit({ k: 'hit', by: ev.by, blocked });
+                if (this.respawn > 0) return;
+                if (this.receiveSwing(ev, from)) return;
+                // the Special's hammer stays live through its whole slam, so dashing into it late still connects
+                if (ev.h === 1) this.pendingHeavy.push({ ev, from, until: this.anim + Duel.HEAVY_ACTIVE });
             } else if (ev.k === 'hit' && ev.by === s.user.id) {
+                if (ev.parry) {
+                    this.stun = Math.max(this.stun, 0.55); this.swingT = 0; this.shake = 0.2;
+                    s.toast('Parried!', '#7dd3fc'); s.sfx('click', 60);
+                    return;
+                }
                 this.specialCharge = Math.min(100, this.specialCharge + (ev.blocked ? 10 : 35));
                 this.hitlag = Math.max(this.hitlag, 0.04); this.shake = 0.18;
                 s.addScore(ev.blocked ? 3 : 10); s.sfx('pop', 60);
                 this.particles.burst(from.x + 17, from.y + 28, '#fde68a', 8, 200, 0.3, 4);
+                if (ev.broke) s.toast(`Shield broken! ${from.name || 'Rival'} is open`, '#fbbf24');
             } else if (ev.k === 'ko' && ev.by === s.user.id) {
                 this.kos++; s.addScore(100); s.sfx('win'); s.toast(`KO! ${from.name} launched out`, '#facc15');
             }
         }
 
+        checkPendingHeavy() {
+            if (!this.pendingHeavy.length) return;
+            this.pendingHeavy = this.pendingHeavy.filter(p => {
+                if (this.anim > p.until || this.respawn > 0) return false;
+                // follow the attacker as they move during the slam
+                const ev = Number.isFinite(p.from.x) && Number.isFinite(p.from.y) ? { ...p.ev, x: p.from.x + 17, y: p.from.y + 28 } : p.ev;
+                return !this.receiveSwing(ev, p.from);
+            });
+        }
+
+        breakShield() {
+            this.guard = false; this.shield = 0; this.shieldBreak = Duel.SHIELD.breakTime; this.guardT = 0;
+            this.stun = Math.max(this.stun, 0.45); this.shieldRest = Duel.SHIELD.regenDelay;
+            this.s.sfx('boom', 60); this.s.toast('Shield broken!', '#f87171');
+            this.particles.burst(this.me.x + 17, this.me.y + 28, '#7dd3fc', 22, 380, 0.55, 5);
+        }
+
+        // Apply an attack to the local fighter; returns true when it connected.
+        receiveSwing(ev, from) {
+            const s = this.s, me = this.me;
+            if (this.invuln > 0 || this.stun > 0.2 || !this.attackHits(ev, me)) return false;
+            const angle = typeof ev.a === 'number' ? ev.a : (ev.d > 0 ? 0 : Math.PI), dx = Math.cos(angle), dy = Math.sin(angle);
+            const heavy = ev.h === 1;
+            const facing = me.face === -(dx >= 0 ? 1 : -1);
+            let blocked = this.guard && facing && !heavy, broke = false;
+            if (this.guard && heavy) { this.breakShield(); broke = true; }
+            if (blocked && this.guardT <= Duel.SHIELD.parryWindow) {
+                // well-timed guard: no damage or knockback and the attacker is left reeling
+                this.shield = Math.min(100, this.shield + 10); this.hitlag = 0.05; this.hitFlash = 0.1;
+                s.sfx('click', 60);
+                this.particles.burst(me.x + 17 + me.face * 20, me.y + 28, '#e0f2fe', 18, 360, 0.4, 4);
+                s.emit({ k: 'hit', by: ev.by, blocked: true, parry: true });
+                return true;
+            }
+            if (blocked) {
+                this.shield = Math.max(0, this.shield - Duel.SHIELD.hitWear * (ev.p || 1));
+                this.shieldRest = Duel.SHIELD.regenDelay;
+                if (this.shield <= 0) { this.breakShield(); blocked = false; broke = true; }
+            }
+            const impact = this.hitImpact(ev, this.dmg, blocked), force = impact.force;
+            this.dmg = impact.damage;
+            me.vx = dx * force; me.vy = blocked ? 0 : dy * force * 0.58 - (150 + this.dmg * 2.2);
+            me.onGround = false;
+            this.stun = Math.max(this.stun, impact.stun);
+            this.hitlag = blocked ? 0.035 : 0.055; this.hitFlash = 0.2; this.shake = 0.24;
+            s.sfx(blocked ? 'click' : 'hit', 60);
+            this.lastHit = { by: ev.by, at: Date.now() };
+            this.particles.burst(me.x + 17, me.y + 28, blocked ? '#7dd3fc' : '#fca5a5', 14, 320, 0.45, 5);
+            s.emit({ k: 'hit', by: ev.by, blocked, broke });
+            return true;
+        }
+
         net() {
             const m = this.me;
             return { x: Math.round(m.x), y: Math.round(m.y), vx: Math.round(m.vx), vy: Math.round(m.vy), f: m.face, a: this.state,
-                ex: { d: Math.round(this.dmg), h: this.hammer > 0 ? 1 : 0, hv: this.swingHeavy ? 1 : 0, i: this.invuln > 0 ? 1 : 0, t: +(this.aim || 0).toFixed(2), k: this.kos, f: this.falls } };
+                ex: { d: Math.round(this.dmg), h: this.hammer > 0 ? 1 : 0, hv: this.swingHeavy ? 1 : 0, i: this.invuln > 0 ? 1 : 0, t: +(this.aim || 0).toFixed(2), k: this.kos, f: this.falls, sh: Math.round(this.shield) } };
         }
 
         goalText() { return `${this.kos} KOs · ${Math.round(this.dmg)}% damage · Special ${this.heavyCd > 0 ? `${this.heavyCd.toFixed(1)}s` : this.specialCharge >= 100 ? 'READY' : `${Math.floor(this.specialCharge)}%`}`; }
@@ -3584,7 +3607,7 @@
         touchHint() { return 'Joystick to move · Jump for an air jump · Tap to swing · Charge Special by holding the hill or hitting rivals: 3x power, 10 energy, 12s cooldown'; }
         hint() { return 'A/D move · Space jump twice · S guard · E/click swing · R Special (charge on hill/hits, 3x power, 10 energy, 12s cooldown) · Shift/F dodge · Down fast-fall · Q recharge'; }
 
-        drawFighter(ctx, x, y, who, face, state, dmg, name, hammer, swingAge, alpha, you, aim, swingAim, heavySwing = false) {
+        drawFighter(ctx, x, y, who, face, state, dmg, name, hammer, swingAge, alpha, you, aim, swingAim, heavySwing = false, shield = 100) {
             const color = who.color;
             drawRunner(ctx, x, y, 34, 56, who, face, this.anim, state === 1 ? 1 : 0, alpha);
             const cx = x + 34 / 2, cy = y + 28;
@@ -3598,7 +3621,7 @@
             const eased = 1 - Math.pow(1 - strike, 3);
             const angle = base + (swinging ? sweepProgress < .18 ? -.62 - .24 * Math.sin(sweepProgress / .18 * Math.PI / 2) : -.86 + eased * 1.72 : -.35);
             ctx.globalAlpha = alpha;
-            const reach = heavySwing ? 180 : 110;
+            const reach = heavySwing ? Duel.HEAVY_REACH : 110;
             if (heavySwing && swinging) {
                 ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 8 * (1 - sweepProgress) + 2;
                 ctx.globalAlpha = alpha * (1 - sweepProgress);
@@ -3626,7 +3649,12 @@
             ctx.fillStyle = hammer ? '#ec4899' : '#94a3b8'; ctx.fillRect(shaft - headW / 2 + 3, headH / 2 - 8, headW - 6, 4);
             ctx.restore();
             if (state === 6) { ctx.strokeStyle = 'rgba(56,189,248,.9)'; ctx.lineWidth = 3; ctx.strokeRect(x - 3, y - 3, 40, 62); }
-            if (state === 4) { ctx.strokeStyle = 'rgba(125,211,252,.85)'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(cx, cy, 44, 0, TAU); ctx.stroke(); }
+            if (state === 4) {
+                // the bubble thins and reddens as the shield wears down
+                const left = clamp(Number.isFinite(shield) ? shield : 100, 0, 100) / 100;
+                ctx.strokeStyle = left > .35 ? 'rgba(125,211,252,.85)' : 'rgba(248,113,113,.9)'; ctx.lineWidth = 2 + left * 4;
+                ctx.beginPath(); ctx.arc(cx, cy, 44, -Math.PI / 2, -Math.PI / 2 + TAU * Math.max(.05, left)); ctx.stroke();
+            }
             if (!this.s.preview) nameTag(ctx, `${you ? 'You' : name} · ${Math.round(dmg)}%`, cx, y - 14, you ? '#fff' : color);
         }
 
@@ -3669,11 +3697,11 @@
             for (const r of s.remoteList()) {
                 if (r.a === 5 || !visible(r.x, r.y, 34, 56)) continue;
                 const swingAge = r.swing ? (performance.now() - r.swing) / 1000 : 9;
-                this.drawFighter(ctx, r.x, r.y, r, r.f || 1, r.a, r.ex?.d || 0, r.name, r.ex?.h, swingAge, r.ex?.i ? 0.5 : 0.95, false, r.ex?.t, r.swingAim, r.swingHeavy ?? Boolean(r.ex?.hv));
+                this.drawFighter(ctx, r.x, r.y, r, r.f || 1, r.a, r.ex?.d || 0, r.name, r.ex?.h, swingAge, r.ex?.i ? 0.5 : 0.95, false, r.ex?.t, r.swingAim, r.swingHeavy ?? Boolean(r.ex?.hv), r.ex?.sh ?? 100);
             }
             if (this.respawn <= 0) {
                 const alpha = this.invuln > 0 ? 0.55 + Math.sin(this.anim * 22) * 0.25 : 1;
-                this.drawFighter(ctx, me.x, me.y, s.local, me.face, this.state, this.dmg, 'You', this.hammer > 0, this.swingT > 0 ? (this.swingHeavy ? 0.45 : 0.22) - this.swingT : 9, alpha, true, this.aim, this.swingAim, this.swingHeavy);
+                this.drawFighter(ctx, me.x, me.y, s.local, me.face, this.state, this.dmg, 'You', this.hammer > 0, this.swingT > 0 ? (this.swingHeavy ? 0.45 : 0.22) - this.swingT : 9, alpha, true, this.aim, this.swingAim, this.swingHeavy, this.shield);
                 if (!s.preview) {
                     ctx.fillStyle = '#1e293b'; ctx.fillRect(me.x - 8, me.y - 42, 50, 6);
                     ctx.fillStyle = this.specialCharge >= 100 && this.heavyCd <= 0 ? '#fef08a' : '#f59e0b';
@@ -3693,6 +3721,10 @@
             for (const r of s.remoteList()) if (r.a !== 5) this.edgeArrow(ctx, r.x + 17, r.y + 28, r.name, r.color, w, h);
         }
     }
+    Duel.HEAVY_REACH = 200;
+    Duel.VIEW_WIDTH = 1450;
+    Duel.HEAVY_ACTIVE = 0.3;
+    Duel.SHIELD = Object.freeze({ holdWear: 9, hitWear: 30, regen: 22, regenDelay: 1, breakTime: 2.2, parryWindow: 0.2 });
 
     /* ------------------------------------------------------------------ */
     /* Starfall Blasters: top-down twin-stick arena shooter                */
@@ -3730,7 +3762,7 @@
             this.hp = 100; this.maxHp = 100; this.dead = 0; this.invuln = 2;
             this.bullets = []; this.drones = []; this.packs = []; this.spawnT = 1.5; this.fireCd = 0;
             this.dashT = 0; this.dashCd = 0; this.nova = 0; this.novaCd = 0; this.overdrive = 0; this.jam = 0; this.kills = 0; this.pk = 0; this.deaths = 0;
-            this.res = new A.Resource('Ammo', '#67e8f9', 150, 60, 3);
+            this.res = new A.Resource('Ammo', '#67e8f9', 150, 45, 3);
             this.cam = { x: this.me.x, y: this.me.y }; this.anim = 0; this.shake = 0; this.hitmark = 0; this.flash = 0; this.dx = 1; this.dy = 0;
             this.weapon = 'blaster'; this.weaponT = 0; this.damageTexts = []; this.streak = 0; this.streakT = 0; this.wave = 1;
             this.pickups = [];

@@ -539,6 +539,13 @@
                         <div class="study-toolbar">
                             <button id="study-star-btn" type="button" class="chip-btn" aria-pressed="false" title="Star this card (S)"><i class="far fa-star"></i> <span>Star</span></button>
                             <label class="chip-toggle" title="Type your answer before revealing (T)"><input id="study-type-toggle" type="checkbox"> <i class="fas fa-keyboard"></i> Type answer</label>
+                            <label class="chip-select" title="Choose which side of each card is the question"><i class="fas fa-right-left" aria-hidden="true"></i> <span>Ask with</span>
+                                <select id="study-direction" aria-label="Ask with">
+                                    <option value="front">Term</option>
+                                    <option value="back">Definition</option>
+                                    <option value="mixed">Mixed</option>
+                                </select>
+                            </label>
                             <span id="study-combo" class="study-combo hidden" aria-live="polite"></span>
                             <span class="study-keys" aria-hidden="true"><kbd>Space</kbd> flip · <kbd>1</kbd>–<kbd>4</kbd> rate · <kbd>S</kbd> star</span>
                         </div>
@@ -695,7 +702,6 @@
                                     <option value="miner">Crystal Mining</option>
                                     <option value="duel">King of the Hill</option>
                                     <option value="shooter">Arena Shooter</option>
-                                    <option value="sports">Soccer</option>
                                     <option value="defense">Team Tower Defense</option>
                                     <option value="chess">Question Chess (1v1)</option>
                                 </select>
@@ -748,7 +754,6 @@
                                         <button type="button" class="multiplayer-mode" data-mode="miner"><canvas class="mode-preview-canvas" data-preview-mode="miner" aria-hidden="true"></canvas><strong>Crystal Mining</strong><small>Dig crystals, avoid lava</small></button>
                                         <button type="button" class="multiplayer-mode" data-mode="duel"><canvas class="mode-preview-canvas" data-preview-mode="duel" aria-hidden="true"></canvas><strong>King of the Hill</strong><small>King of the Hill: hold the zone, knock rivals off</small></button>
                                         <button type="button" class="multiplayer-mode" data-mode="shooter"><canvas class="mode-preview-canvas" data-preview-mode="shooter" aria-hidden="true"></canvas><strong>Arena Shooter</strong><small>Aim, dash and blast drones and rivals</small></button>
-                                        <button type="button" class="multiplayer-mode" data-mode="sports"><canvas class="mode-preview-canvas" data-preview-mode="sports" aria-hidden="true"></canvas><strong>Soccer</strong><small>Blue vs red teams, dribble and score goals</small></button>
                                         <button type="button" class="multiplayer-mode" data-mode="defense"><canvas class="mode-preview-canvas" data-preview-mode="defense" aria-hidden="true"></canvas><strong>Team Tower Defense</strong><small>Build, upgrade and send enemies · 1v1 or teams</small></button>
                                         <button type="button" class="multiplayer-mode" data-mode="chess"><canvas class="mode-preview-canvas" data-preview-mode="chess" aria-hidden="true"></canvas><strong>Question Chess</strong><small>1v1: answer for a move, win by checkmate</small></button>
                                     </div>

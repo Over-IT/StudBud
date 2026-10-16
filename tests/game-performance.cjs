@@ -64,7 +64,7 @@ assert.equal(particles.items, array, 'particle cleanup reuses its allocation');
 let ticks = 0, draws = 0;
 sandbox.requestAnimationFrame = () => 1;
 const frameSession = {
-    lastFrame: 0, graphics: full, mode: 'sports', countdown: 0, practice: true, testing: false, paused: false,
+    lastFrame: 0, graphics: full, mode: 'market', countdown: 0, practice: true, testing: false, paused: false,
     game: { update() { ticks++; }, draw() { draws++; } }, overlay: { querySelector: () => ({ classList: { add() {} } }) },
     ctx: { setTransform() {} }, remotes: new Map(), justPressed: new Set(), mouse: {},
     checkEnd() {}, updateMeter() {}, dpr: 1, scale: 1, vw: 100, vh: 100
@@ -112,19 +112,7 @@ vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'multiplayerGames2.js
 const arenaView = { x0: 500, x1: 800, y0: 400, y1: 600 };
 assert.equal(A.Arena.prototype.seenRect.call(arenaView, 0, 450, 600, 20, 0), true, 'large rectangles crossing the view are retained');
 assert.equal(A.Arena.prototype.seenRect.call(arenaView, 0, 0, 100, 100, 0), false, 'distant scenery is rejected');
-const soccerSession = { preview: true, roster: new Map([['you', {}]]), user: { id: 'you' } };
-const soccer = new A.games.sports(soccerSession);
-soccer.begin = () => Object.assign(soccer, arenaView);
-soccer.drawPlayers = soccer.end = soccer.qMark = soccer.ring = soccer.particles.draw = () => {};
-let visibilityChecks = 0;
-soccer.seen = function(...args) { visibilityChecks++; return A.Arena.prototype.seen.apply(this, args); };
-const noop = () => {};
-const drawContext = new Proxy({}, { get: (target, key) => key in target ? target[key] : noop });
-const ballBefore = JSON.stringify(soccer.ball);
-soccer.draw(drawContext, 300, 200);
-assert.ok(visibilityChecks < 200, 'soccer visits visible grass cells instead of scanning the entire field');
-assert.equal(JSON.stringify(soccer.ball), ballBefore, 'viewport optimization does not change ball simulation');
-console.log('Arena rectangle intersection and bounded soccer terrain iteration passed.');
+console.log('Arena rectangle intersection passed.');
 const U = A.util;
 const solids = Array.from({ length: 10000 }, (_, i) => ({ x: (i % 5) * 100, y: -i * 90, w: 90, h: 16, oneway: true }));
 solids.push({ x: -50, y: -60000, w: 12, h: 62000 }, { x: 120, y: 150, w: 80, h: 15, mover: true },

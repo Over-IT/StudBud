@@ -293,8 +293,8 @@ async function run() {
     const setupIds = ['multiplayer-preview-title', 'multiplayer-preview-description', 'host-game-resource-label', 'solo-game-resource-label'];
     for (const id of setupIds) elements.set(id, {});
     for (const [mode, resource, multiplier] of [
-        ['sports', 'Energy', 1], ['miner', 'Fuel', 1], ['shooter', 'Ammo', 1],
-        ['river', 'Bait', 1], ['frenzy', 'Bait', 1], ['fishing', 'Bait', 1],
+        ['market', 'Energy', 1], ['miner', 'Fuel', 1], ['shooter', 'Ammo', 1],
+        ['river', 'Energy', 1], ['frenzy', 'Bait', 1], ['fishing', 'Bait', 1],
         ['crypto', 'Research cash', 8], ['hack', 'Crypto', 3]
     ]) {
         assert.deepEqual(normal(app.questionRewardInfo(mode)), { resource, multiplier });
@@ -311,7 +311,7 @@ async function run() {
     }
     for (const [mode, min, max] of [
         ['skyline', 20, 35], ['duel', 25, 45], ['miner', 30, 45], ['river', 20, 40],
-        ['frenzy', 15, 30], ['fishing', 15, 30], ['market', 30, 50], ['sports', 40, 60],
+        ['frenzy', 10, 20], ['fishing', 10, 20], ['market', 30, 50],
         ['shooter', 30, 50], ['crypto', 15, 30], ['hack', 10, 25]
     ]) {
         const recommendation = app.questionRewardRecommendation(mode);
@@ -737,7 +737,7 @@ async function run() {
     community.recordStudyTime = originalRecordStudyTime;
     delete window.StudBudCloud.user;
     await state.importAppState(backup);
-    const match = { testing: false, mode: 'sports', t: 45, score: 5, answered: 2, correct: 1, game: { title: 'Soccer' },
+    const match = { testing: false, mode: 'market', t: 45, score: 5, answered: 2, correct: 1, game: { title: 'Package Delivery' },
         questionHistory: [{ prompt: 'Q', answer: 'A', chosen: 'wrong', correct: false }], standingsCache: [{ id: 'owner', n: 'Demo', s: 5, g: 1 }] };
     await app.saveGameSummary(match);
     const savedMatch = state.state.studyHistory.find(session => session.source === 'multiplayer');

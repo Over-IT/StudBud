@@ -323,7 +323,7 @@
             this.ui = new Ui(s);
             this.splash = [];
             const r = mulberry32(s.seed);
-            this.res = new A.Resource('Bait', '#7dd3fc', 100, 50, 2);
+            this.res = new A.Resource('Bait', '#7dd3fc', 100, 20, 2);
             this.school = Array.from({ length: 22 }, () => ({ y: r(), x0: r() * 3000, spd: (30 + r() * 60) * (r() < 0.5 ? 1 : -1), type: r() < 0.5 ? 0 : r() < 0.6 ? 1 : r() < 0.85 ? 2 : 3 }));
         }
 
@@ -727,6 +727,7 @@
                     { x: offset + 250, y: 500 }, { x: offset + 250, y: 900 }, { x: offset + 850, y: 900 }, { x: offset + 850, y: 1310 }];
             });
             this.troops = []; this.enemies = []; this.shots = []; this.nextId = 1;
+            this.waveNumber = 0; this.waveTimer = 25; this.waveSpawnRemaining = 0; this.waveSpawnTimer = 0;
             this.lastSeq = {}; this.answers = {}; this.pending = []; this.sequence = 0; this.retryT = 0;
             this.answerCount = 0;
             this.ui = new Ui(s); this.buildType = 0; this.selected = null;
@@ -743,6 +744,28 @@
         answerCash() { return this.s.rewardAmount() * 3; }
         canAfford(team, cost) { return this.s.testing === true || this.wallets[team] >= cost; }
         upgradeCost(troop) { return DEFENSE_TROOPS[troop.type].cost * troop.level; }
+        waveEnemyHealth(type, wave) {
+            return DEFENSE_ENEMIES[type].hp * (1 + Math.min(2.5, Math.max(0, wave - 1) * .14));
+        }
+        waveEnemySpeed(enemy) {
+            return DEFENSE_ENEMIES[enemy.type].speed * (1 + Math.min(.5, Math.max(0, (enemy.wave || 1) - 1) * .025));
+        }
+        waveEnemyDamage(enemy) {
+            return DEFENSE_ENEMIES[enemy.type].damage * (1 + Math.min(.6, Math.floor(Math.max(0, (enemy.wave || 1) - 1) / 4) * .1));
+        }
+        waveEnemyType(slot) {
+            if (this.waveNumber >= 8 && slot % 5 === 0) return 4;
+            if (this.waveNumber >= 6 && slot % 4 === 1) return 5;
+            if (this.waveNumber >= 4 && slot % 5 === 2) return 2;
+            if (this.waveNumber >= 3 && slot % 3 === 1) return 1;
+            if (this.waveNumber >= 2 && slot % 4 === 3) return 3;
+            return 0;
+        }
+        waveStatusText() {
+            return this.waveSpawnRemaining > 0
+                ? `WAVE ${this.waveNumber} · DEPLOYING ${this.waveSpawnRemaining}`
+                : `WAVE ${this.waveNumber + 1} IN ${Math.ceil(this.waveTimer)}s`;
+        }
         troopStats(type, level = 1) {
             const spec = DEFENSE_TROOPS[type];
             return { range: spec.range + (level - 1) * 35, damage: spec.damage * (1 + (level - 1) * .65),
@@ -815,7 +838,7 @@
             } else if (order.action === 'send' && Number.isInteger(type) && DEFENSE_ENEMIES[type]) {
                 if (this.enemies.filter(e => e.team === 1 - team).length >= 60) return this.reject(id, 'The enemy path is full; wait for space');
                 cost = DEFENSE_ENEMIES[type].cost;
-                execute = () => this.enemies.push({ id: this.nextId++, team: 1 - team, type, hp: DEFENSE_ENEMIES[type].hp, segment: 0, progress: 0, slow: 0 });
+                execute = () => this.enemies.push({ id: this.nextId++, team: 1 - team, type, wave: 1, hp: DEFENSE_ENEMIES[type].hp, segment: 0, progress: 0, slow: 0 });
             } else if (order.action === 'upgrade') {
                 const troop = this.troops.find(t => t.id === order.id && t.team === team);
                 if (!troop || troop.level >= 3) return this.reject(id, 'Select a friendly troop below level 3');
@@ -842,6 +865,30 @@
             }, `Correct answer: +$${this.answerCash()} shared team cash`, true);
         }
         simulate(dt) {
+            if (this.waveSpawnRemaining > 0) {
+                this.waveSpawnTimer -= dt;
+                while (this.waveSpawnRemaining > 0 && this.waveSpawnTimer <= 0) {
+                    const slot = 4 + this.waveNumber - this.waveSpawnRemaining;
+                    const type = this.waveEnemyType(slot), hp = this.waveEnemyHealth(type, this.waveNumber);
+                    for (const team of [0, 1]) {
+                        let teamEnemies = 0;
+                        for (const enemy of this.enemies) if (enemy.team === team) teamEnemies++;
+                        if (teamEnemies >= 60) continue;
+                        this.enemies.push({ id: this.nextId++, team, type, wave: this.waveNumber, hp,
+                            segment: 0, progress: 0, slow: 0 });
+                    }
+                    this.waveSpawnRemaining--;
+                    if (this.waveSpawnRemaining > 0) this.waveSpawnTimer += 1.2;
+                    else { this.waveTimer = 32; this.waveSpawnTimer = 0; }
+                }
+            } else {
+                this.waveTimer -= dt;
+                if (this.waveTimer <= 0) {
+                    this.waveNumber++;
+                    this.waveSpawnRemaining = 4 + this.waveNumber;
+                    this.waveSpawnTimer = 0; this.waveTimer = 0;
+                }
+            }
             for (const enemy of this.enemies) {
                 if (enemy.hp <= 0) continue;
                 const spec = DEFENSE_ENEMIES[enemy.type];
@@ -851,7 +898,7 @@
                     enemy.hp -= enemy.poisonD * poisoned; enemy.poisonT -= poisoned;
                     if (enemy.hp <= 0) { this.wallets[enemy.team] += spec.reward; continue; }
                 }
-                enemy.progress += spec.speed * (enemy.slow > 0 ? .5 : 1) * dt;
+                enemy.progress += this.waveEnemySpeed(enemy) * (enemy.slow > 0 ? .5 : 1) * dt;
                 const path = this.paths[enemy.team];
                 while (enemy.segment < path.length - 1) {
                     const a = path[enemy.segment], b = path[enemy.segment + 1], length = dist(a.x, a.y, b.x, b.y);
@@ -859,8 +906,9 @@
                     enemy.progress -= length; enemy.segment++;
                 }
                 if (enemy.segment === path.length - 1) {
-                    this.health[enemy.team] = Math.max(0, this.health[enemy.team] - spec.damage);
-                    this.teamDamage[1 - enemy.team] += spec.damage; enemy.hp = 0;
+                    const damage = this.waveEnemyDamage(enemy);
+                    this.health[enemy.team] = Math.max(0, this.health[enemy.team] - damage);
+                    this.teamDamage[1 - enemy.team] += damage; enemy.hp = 0;
                     this.s.sfx('baseHit', 240);
                     if (this.health[enemy.team] === 0) { this.winner = 1 - enemy.team; this.finished = true; break; }
                 }
@@ -896,6 +944,8 @@
         }
         snapshot() {
             return { serial: ++this.serial, health: [...this.health], wallets: [...this.wallets], damage: [...this.teamDamage],
+                waveNumber: this.waveNumber, waveTimer: this.waveTimer, waveSpawnRemaining: this.waveSpawnRemaining,
+                waveSpawnTimer: this.waveSpawnTimer,
                 teams: { ...this.teams }, lastSeq: { ...this.lastSeq }, answers: { ...this.answers }, nextId: this.nextId,
                 troops: this.troops.map(t => ({ ...t })), enemies: this.enemies.map(e => ({ ...e })),
                 shots: this.shots.map(shot => ({ ...shot })), battleSounds: this.battleSounds, winner: this.winner ?? null };
@@ -903,9 +953,15 @@
         applySnapshot(state) {
             const pair = values => Array.isArray(values) && values.length === 2 && values.every(v => Number.isFinite(v) && v >= 0);
             const object = value => value && typeof value === 'object' && !Array.isArray(value);
+            const waveNumber = state?.waveNumber ?? 0, waveTimer = state?.waveTimer ?? 25;
+            const waveSpawnRemaining = state?.waveSpawnRemaining ?? 0, waveSpawnTimer = state?.waveSpawnTimer ?? 0;
             if (!state || !Number.isInteger(state.serial) || !pair(state.health) || state.health.some(v => v > 100)
                 || !pair(state.wallets) || !pair(state.damage) || !object(state.teams) || !object(state.lastSeq) || !object(state.answers)
                 || ![0, 1].includes(state.teams[this.s.user.id]) || !Number.isInteger(state.nextId)
+                || !Number.isInteger(waveNumber) || waveNumber < 0 || waveNumber > 10000
+                || !Number.isFinite(waveTimer) || waveTimer < 0 || waveTimer > 32
+                || !Number.isInteger(waveSpawnRemaining) || waveSpawnRemaining < 0 || waveSpawnRemaining > 10004
+                || !Number.isFinite(waveSpawnTimer) || waveSpawnTimer < 0 || waveSpawnTimer > 1.2
                 || !Array.isArray(state.troops) || state.troops.length > Object.keys(state.teams).length * this.playerTroopLimit
                 || !Array.isArray(state.enemies) || state.enemies.length > 120
                 || ![null, 0, 1].includes(state.winner)
@@ -919,7 +975,9 @@
                     || this.distanceToPath(t.x, t.y, t.team) <= 68)
                 || state.enemies.some(e => !e || !Number.isInteger(e.id) || ![0, 1].includes(e.team) || !Number.isInteger(e.type) || !DEFENSE_ENEMIES[e.type]
                     || !Number.isInteger(e.segment) || e.segment < 0 || e.segment > 6 || !Number.isFinite(e.progress) || !Number.isFinite(e.hp) || !Number.isFinite(e.slow)
-                    || e.hp <= 0 || e.hp > DEFENSE_ENEMIES[e.type].hp || e.progress < 0 || e.progress > 740 || e.slow < 0 || e.slow > 1.5
+                    || e.hp <= 0 || e.hp > this.waveEnemyHealth(e.type, Number.isInteger(e.wave) ? e.wave : 1)
+                    || (e.wave !== undefined && (!Number.isInteger(e.wave) || e.wave < 1 || e.wave > Math.max(1, waveNumber)))
+                    || e.progress < 0 || e.progress > 740 || e.slow < 0 || e.slow > 1.5
                     || (e.poisonT !== undefined && (!Number.isFinite(e.poisonT) || e.poisonT < 0 || e.poisonT > 3))
                     || (e.poisonD !== undefined && (!Number.isFinite(e.poisonD) || e.poisonD < 0 || e.poisonD > 21)))) {
                 console.error('[Tower Defense] Invalid battle snapshot');
@@ -947,8 +1005,10 @@
             this.battleSounds = state.battleSounds || 0;
             this.receivedSerial = state.serial; this.serial = state.serial;
             this.health = [...state.health]; this.wallets = [...state.wallets]; this.teamDamage = [...state.damage];
+            this.waveNumber = waveNumber; this.waveTimer = waveTimer;
+            this.waveSpawnRemaining = waveSpawnRemaining; this.waveSpawnTimer = waveSpawnTimer;
             this.teams = { ...state.teams }; this.lastSeq = { ...state.lastSeq }; this.answers = { ...state.answers };
-            this.nextId = state.nextId; this.troops = state.troops.map(t => ({ ...t })); this.enemies = state.enemies.map(e => ({ ...e }));
+            this.nextId = state.nextId; this.troops = state.troops.map(t => ({ ...t })); this.enemies = state.enemies.map(e => ({ wave: 1, ...e }));
             this.shots = (state.shots || []).map(shot => ({ ...shot })); this.winner = state.winner;
             this.finished = state.winner === 0 || state.winner === 1;
             this.myTeam = this.teams[this.s.user.id] ?? this.myTeam;
@@ -1022,16 +1082,16 @@
             const value = this.teamValue(this.myTeam);
             this.s.score = value; this.s.setGoal(value);
         }
-        teamValue(team) { return (this.finished && this.winner === team ? 10000 : 0) + this.teamDamage[team]; }
+        teamValue(team) { return (this.finished && this.winner === team ? 1000000 : 0) + this.waveNumber * 100 + this.teamDamage[team]; }
         standingValues(id) { const value = this.teamValue(this.teamOf(id) ?? this.myTeam); return { s: value, g: value }; }
         rankMetric(row) { return row.g; }
         resultTitle(rows) {
-            return rows[0]?.g >= 10000 ? `${this.teamOf(rows[0].id) ? 'Red' : 'Blue'} team wins!` : 'Battle ended';
+            return rows[0]?.g >= 1000000 ? `${this.teamOf(rows[0].id) ? 'Red' : 'Blue'} team wins!` : 'Battle ended';
         }
-        isWinner(rows, id) { return rows[0]?.g >= 10000 && this.teamOf(rows[0].id) === this.teamOf(id); }
-        goalText() { return `${this.myTeam ? 'Red' : 'Blue'} team · Base ${this.health[this.myTeam]} HP · Towers ${this.troopCount(this.s.user.id)}/12 · ${this.s.testing === true ? 'unlimited test cash' : `$${this.wallets[this.myTeam]} shared`}`; }
-        hint() { return 'WASD walk on either side · Choose a troop, click an empty grid cell on your side to build (12 towers per player) · Click friendly troops to upgrade · Send enemies to the rival path · Q/E answer for shared cash · First base to 0 HP loses'; }
-        touchHint() { return 'Joystick to walk · Select troop, tap an empty grid cell to build (12 per player) · Tap friendly troops to upgrade · Send enemies with the buttons · Answer for team cash'; }
+        isWinner(rows, id) { return rows[0]?.g >= 1000000 && this.teamOf(rows[0].id) === this.teamOf(id); }
+        goalText() { return `${this.myTeam ? 'Red' : 'Blue'} team · Wave ${this.waveNumber} · Base ${this.health[this.myTeam]} HP · Towers ${this.troopCount(this.s.user.id)}/12 · ${this.s.testing === true ? 'unlimited test cash' : `$${this.wallets[this.myTeam]} shared`}`; }
+        hint() { return 'WASD walk on either side · Choose a troop, click an empty grid cell on your side to build (12 towers per player) · Click friendly troops to upgrade · Send enemies to the rival path · Q/E answer for shared cash · Survive the automatic waves; first base to 0 HP loses'; }
+        touchHint() { return 'Joystick to walk · Select troop, tap an empty grid cell to build (12 per player) · Tap friendly troops to upgrade · Send enemies with the buttons · Answer for team cash and hold off the incoming waves'; }
         touchLayout() { return { stick: true, buttons: [{ k: 'KeyE', label: 'Earn cash', cls: 'main' }] }; }
         drawTroop(ctx, troop, angle = -.6) {
             const spec = DEFENSE_TROOPS[troop.type];
@@ -1197,21 +1257,22 @@
             this.end(ctx);
             this.ui.begin();
             if (this.s.preview) return;
-            this.ui.transform = this.s.placeHud(ctx, 0, 0, 320, 306, 'top-right');
-            ctx.fillStyle = 'rgba(15,23,42,.95)'; roundRect(ctx, 0, 0, 320, 306, 10); ctx.fill();
-            this.ui.addRect({ id: 'panel', x: 0, y: 0, w: 320, h: 306, on: false });
+            this.ui.transform = this.s.placeHud(ctx, 0, 0, 320, 326, 'top-right');
+            ctx.fillStyle = 'rgba(15,23,42,.95)'; roundRect(ctx, 0, 0, 320, 326, 10); ctx.fill();
+            this.ui.addRect({ id: 'panel', x: 0, y: 0, w: 320, h: 326, on: false });
             ctx.fillStyle = '#fff'; ctx.font = '800 14px system-ui'; ctx.textAlign = 'center';
             ctx.fillText(`BLUE ${this.health[0]} HP  |  RED ${this.health[1]} HP`, 160, 20);
             ctx.fillStyle = DEFENSE_COLORS[this.myTeam]; ctx.fillText(`${this.myTeam ? 'RED' : 'BLUE'} TEAM CASH: ${this.s.testing === true ? 'UNLIMITED (TEST)' : `$${this.wallets[this.myTeam]}`}`, 160, 42);
-            this.ui.button(ctx, 'catalog', 8, 50, 304, 24, `Catalog ${this.catalogPage + 1}/2 · click for more`, true, '#334155');
+            ctx.fillStyle = '#fbbf24'; ctx.font = '800 12px system-ui'; ctx.fillText(this.waveStatusText(), 160, 64);
+            this.ui.button(ctx, 'catalog', 8, 70, 304, 24, `Catalog ${this.catalogPage + 1}/2 · click for more`, true, '#334155');
             DEFENSE_TROOPS.slice(this.catalogPage * 3, this.catalogPage * 3 + 3).forEach((type, slot) => {
                 const i = this.catalogPage * 3 + slot;
-                this.ui.button(ctx, `build:${i}`, 8 + slot * 103, 80, 98, 42, type.name, this.troopCount(this.s.user.id) < this.playerTroopLimit,
+                this.ui.button(ctx, `build:${i}`, 8 + slot * 103, 100, 98, 42, type.name, this.troopCount(this.s.user.id) < this.playerTroopLimit,
                     i === this.buildType ? '#2563eb' : '#475569', `$${type.cost} · build`);
             });
             DEFENSE_ENEMIES.slice(this.catalogPage * 3, this.catalogPage * 3 + 3).forEach((type, slot) => {
                 const i = this.catalogPage * 3 + slot;
-                this.ui.button(ctx, `send:${i}`, 8 + slot * 103, 128, 98, 42, type.name,
+                this.ui.button(ctx, `send:${i}`, 8 + slot * 103, 148, 98, 42, type.name,
                     this.canAfford(this.myTeam, type.cost), '#be123c', `$${type.cost} · send`);
             });
             const selected = this.troops.find(t => t.id === this.selected);
@@ -1220,21 +1281,21 @@
             const typeIndex = hover ? Number(hover.id.split(':')[1]) : selected?.type ?? this.buildType;
             const info = enemyInfo ? DEFENSE_ENEMIES[typeIndex] : DEFENSE_TROOPS[typeIndex];
             ctx.textAlign = 'left'; ctx.fillStyle = info.color; ctx.font = '800 13px system-ui';
-            ctx.fillText(`${info.name}${selected && !hover ? ` · Level ${selected.level}` : ''} · Your towers ${this.troopCount(this.s.user.id)}/12`, 12, 190);
-            ctx.fillStyle = '#cbd5e1'; ctx.font = '600 11px system-ui'; ctx.fillText(info.desc, 12, 208);
-            if (enemyInfo) ctx.fillText(`HP ${info.hp} · Speed ${info.speed} · Base hit ${info.damage}`, 12, 225);
+            ctx.fillText(`${info.name}${selected && !hover ? ` · Level ${selected.level}` : ''} · Your towers ${this.troopCount(this.s.user.id)}/12`, 12, 210);
+            ctx.fillStyle = '#cbd5e1'; ctx.font = '600 11px system-ui'; ctx.fillText(info.desc, 12, 228);
+            if (enemyInfo) ctx.fillText(`HP ${info.hp} · Speed ${info.speed} · Base hit ${info.damage}`, 12, 245);
             else {
                 const stats = this.troopStats(typeIndex, selected && !hover ? selected.level : 1);
-                ctx.fillText(`Damage ${stats.damage.toFixed(1)} · Range ${stats.range} · Fires ${stats.rate.toFixed(2)}s`, 12, 225);
+                ctx.fillText(`Damage ${stats.damage.toFixed(1)} · Range ${stats.range} · Fires ${stats.rate.toFixed(2)}s`, 12, 245);
                 if (selected && !hover && selected.level < 3) {
                     const next = this.troopStats(selected.type, selected.level + 1);
-                    ctx.fillText(`Upgrade: +${(next.damage - stats.damage).toFixed(1)} dmg · +35 range · ${next.rate.toFixed(2)}s fire`, 12, 242);
-                } else ctx.fillText('Hover/tap a choice for stats · Click a tower to upgrade', 12, 242);
+                    ctx.fillText(`Upgrade: +${(next.damage - stats.damage).toFixed(1)} dmg · +35 range · ${next.rate.toFixed(2)}s fire`, 12, 262);
+                } else ctx.fillText('Hover/tap a choice for stats · Click a tower to upgrade', 12, 262);
             }
-            this.ui.button(ctx, 'upgrade', 8, 251, 148, 48, selected ? `Upgrade L${selected.level}` : 'Select troop',
+            this.ui.button(ctx, 'upgrade', 8, 271, 148, 48, selected ? `Upgrade L${selected.level}` : 'Select troop',
                 Boolean(selected && selected.level < 3 && this.canAfford(this.myTeam, this.upgradeCost(selected))), '#7c3aed',
                 selected ? selected.level >= 3 ? 'MAX LEVEL' : `$${this.upgradeCost(selected)}` : 'Tap a friendly troop');
-            this.ui.button(ctx, 'earn', 164, 251, 148, 48, 'Answer for cash', !this.s.question, '#15803d', `+$${this.answerCash()} to team`);
+            this.ui.button(ctx, 'earn', 164, 271, 148, 48, 'Answer for cash', !this.s.question, '#15803d', `+$${this.answerCash()} to team`);
             ctx.restore();
             const mw = 160, mh = mw * this.H / this.W;
             this.ui.transform = this.s.placeHud(ctx, 0, 0, mw, mh, 'bottom-right');

@@ -222,38 +222,7 @@ for (const [code, expected] of [['KeyS', 'guard'], ['KeyE', 'swing'], ['KeyR', '
     if (expected === 'heavy') assert.ok(game.swingT > 0 && game.swingHeavy && !game.guard, 'R performs a heavy swing, not guard');
     if (expected === 'dodge') assert.ok(game.dodge > 0, 'Shift or F dodges');
 }
-for (const action of ['pass', 'power']) {
-    const { session, game, hold, tap } = demoFor('sports');
-    hold.clear(); tap.clear();
-    session.spend = amount => game.res.spend(amount);
-    session.mouse.pressed = false;
-    game.kickCd = game.kickCharge = 0;
-    game.kickHeld = false;
-    game.freeze = 0;
-    game.pads.forEach(pad => { pad.used = true; });
-    game.ball.x = game.me.x + 45;
-    game.ball.y = game.me.y;
-    game.ball.vx = game.ball.vy = 0;
-    const before = game.res.value;
-    if (action === 'pass') tap.add('KeyE');
-    else {
-        hold.add('Space');
-        for (let i = 0; i < 48; i++) {
-            game.ball.x = game.me.x + 45;
-            game.ball.y = game.me.y;
-            game.update(1 / 60);
-        }
-        assert.ok(game.kickCharge >= .99, 'holding Space charges the power kick');
-        hold.delete('Space');
-        game.ball.x = game.me.x + 45;
-        game.ball.y = game.me.y;
-    }
-    game.update(1 / 60);
-    assert.ok(game.kickCd > 0, `${action} kicks the ball`);
-    assert.ok(game.res.value < before, `${action} spends energy`);
-    assert.ok(Math.hypot(game.ball.vx, game.ball.vy) > (action === 'power' ? 900 : 400), `${action} applies the expected impulse`);
-}
-console.log('Nearby King of the Hill actions and Soccer pass/charged power-kick input passed.');
+console.log('Nearby King of the Hill actions passed.');
 {
     const { session, game, tap, hold } = demoFor('duel');
     hold.clear(); tap.clear(); session.mouse.pressed = false;
@@ -298,13 +267,59 @@ console.log('Nearby King of the Hill actions and Soccer pass/charged power-kick 
     assert.equal(game.attackHits(ev, fighter(-60, -28)), false, 'attacks do not hit wholly behind the attacker');
     assert.equal(game.attackHits(ev, fighter(111, -28)), false, 'light attacks do not hit beyond their visible reach');
     assert.equal(game.attackHits({ ...ev, h: 1 }, fighter(125, -28)), true, 'heavy attacks have their visible longer reach');
-    assert.equal(game.attackHits({ ...ev, h: 1 }, fighter(181, -28)), false, 'specials do not hit beyond their visible reach');
+    assert.equal(game.attackHits({ ...ev, h: 1 }, fighter(181, -28)), true, 'specials reach 200 units');
+    assert.equal(game.attackHits({ ...ev, h: 1 }, fighter(201, -28)), false, 'specials do not hit beyond their visible reach');
+    assert.equal(game.attackHits({ ...ev, h: 1 }, fighter(80, -150)), true, 'specials sweep a wider arc than light attacks');
+    assert.equal(game.attackHits(ev, fighter(80, -150)), false, 'light attacks keep their narrower arc');
     assert.equal(game.attackHits({ ...ev, a: Math.PI }, fighter(-139, -28)), true, 'left-facing sweeps use the same geometry');
     assert.equal(game.attackHits({ ...ev, a: Math.PI / 2 }, fighter(-17, 105)), true, 'vertical aiming uses fighter bounds too');
     const bot = { ...fighter(75, -28), id: 'victim', dmg: 0, stun: 0, respawn: 0, invuln: 0 };
     app.duelSwing({ game, bots: [bot], meId: 'attacker' }, { ...ev, h: 1, p: 2, by: 'attacker' });
     assert.equal(bot.dmg, heavy.damage, 'solo bots take the same heavy damage as multiplayer players');
     assert.equal(bot.vx, heavy.force, 'solo bots use the same heavy launch force');
+    const late = { ...fighter(400, -28), id: 'late', dmg: 0, stun: 0, respawn: 0, invuln: 0 };
+    const demo = { game, bots: [late], meId: 'attacker' };
+    Object.assign(game.me, { x: -17, y: -28 }); game.respawn = 0;
+    app.duelSwing(demo, { ...ev, h: 1, p: 2, by: 'attacker' });
+    assert.equal(late.dmg, 0, 'a fighter out of reach is not hit at the start of the slam');
+    demo.meId = 'attacker'; game.me.x = 260 - 17;
+    app.stepDuelHeavies(demo, .1);
+    assert.equal(late.dmg, heavy.damage, 'the Special stays live while the attacker closes in');
+    app.stepDuelHeavies(demo, .1);
+    assert.equal(late.dmg, heavy.damage, 'a lingering Special only hits each fighter once');
+}
+{
+    // Shields: timed parries, wear from hits, and the Special breaking through
+    const setup = () => {
+        const { session, game } = demoFor('duel');
+        const sent = [];
+        session.emit = e => sent.push(e);
+        Object.assign(game.me, { x: 100, y: 100, face: -1 });
+        Object.assign(game, { respawn: 0, invuln: 0, stun: 0, guard: true, shield: 100, guardT: 1 });
+        return { game, sent, from: { x: 0, y: 100, name: 'Rival' } };
+    };
+    const swing = (x, h = 0) => ({ k: 'sw', x, y: 128, a: 0, h, p: h ? 3 : 1, by: 'rival' });
+    let { game, sent, from } = setup();
+    game.guardT = .1;
+    game.onEvent(swing(60), from);
+    assert.equal(game.dmg, 0, 'a well-timed guard parries without damage');
+    assert.ok(sent.some(e => e.k === 'hit' && e.parry), 'parries tell the attacker');
+    ({ game, sent, from } = setup());
+    game.onEvent(swing(60), from);
+    assert.ok(game.shield < 100 && game.shield > 0 && game.dmg > 0 && game.dmg < 9, 'a held guard blocks most damage but wears the shield');
+    for (let i = 0; i < 4 && game.shieldBreak <= 0; i++) { game.stun = 0; game.guard = true; game.onEvent(swing(60), from); }
+    assert.ok(game.shieldBreak > 0 && !game.guard, 'repeated hits break a held shield');
+    ({ game, sent, from } = setup());
+    game.onEvent(swing(60, 1), from);
+    assert.ok(game.shieldBreak > 0 && game.dmg >= 27, 'the Special breaks through a raised shield for full damage');
+    ({ game } = setup());
+    const session = game.s;
+    game.placeAtSpawn(game.me, game.spawn); game.orb.t = 1e6;
+    session.down = code => code === 'KeyS';
+    game.res.value = 1e6;
+    for (let i = 0; i < 60 * 15 && game.shieldBreak <= 0; i++) game.update(1 / 60);
+    assert.ok(game.shieldBreak > 0, 'a shield cannot be held up forever');
+    console.log('King of the Hill parry, shield wear and Special guard-break passed.');
 }
 for (const fps of [30, 60, 120]) {
     const { session, game } = demoFor('duel');
@@ -353,137 +368,7 @@ for (const fps of [30, 60, 120]) {
     assert.equal(game.inHill({ x: zone.x, y: zone.y - 207 }, zone), false, 'above the visible zone does not count');
     assert.equal(game.inHill({ x: zone.x, y: zone.y + 20 }, zone), false, 'below the platform does not count');
 }
-{
-    const { session, game, hold, tap } = demoFor('sports');
-    hold.clear(); tap.clear(); session.mouse.pressed = false;
-    session.spend = () => true;
-    session.remoteList = () => [];
-    game.freeze = game.stun = game.kickCd = 0;
-    game.pads.forEach(pad => { pad.used = true; });
-    const nearBall = () => { game.ball.x = game.me.x + 45; game.ball.y = game.me.y; game.ball.vx = game.ball.vy = 0; };
-    hold.add('Space'); nearBall(); game.update(.8);
-    hold.delete('Space'); nearBall(); game.update(0);
-    assert.equal(game.heavyCd, 3, 'soccer power kicks start a three-second cooldown');
-    game.kickCd = 0;
-    hold.add('Space'); nearBall(); game.update(0);
-    assert.equal(game.kickCharge, 0, 'power kick cannot charge during cooldown');
-    hold.delete('Space'); nearBall(); game.update(0);
-    assert.equal(game.kickCd, 0, 'releasing the blocked heavy cannot shoot');
-    tap.add('KeyE'); nearBall(); game.update(0);
-    assert.ok(game.kickCd > 0, 'passing remains available during heavy cooldown');
-    assert.equal(game.heavyCd, 3, 'passes do not restart heavy cooldown');
-    tap.clear(); nearBall(); game.update(2.99);
-    assert.ok(game.heavyCd > 0);
-    nearBall(); game.update(.01);
-    assert.equal(game.heavyCd, 0);
-    game.freeze = game.stun = game.kickCd = 0;
-    hold.add('Space'); nearBall(); game.update(.8);
-    assert.ok(game.kickCharge >= .99, 'power kicks charge again after cooldown');
-    hold.delete('Space'); nearBall(); game.update(0);
-    assert.equal(game.heavyCd, 3);
-}
 console.log('Charged twelve-second specials, triple-power hill swings, fighter-bound hitboxes and cumulative sole-control hill time passed.');
-const realDate = sandbox.Date;
-let ballNow = 100000;
-sandbox.Date = class extends Date { static now() { return ballNow; } };
-const soccerPeer = id => {
-    const { session, game } = demoFor('sports');
-    session.user = { id };
-    session.roster = new Map([['a', {}], ['b', {}]]);
-    session.practice = session.preview = false;
-    session.remotes = new Map();
-    session.remoteList = () => [];
-    session.mouse.pressed = false;
-    session.axis = () => ({ x: 0, y: 0 });
-    session.down = session.pressed = () => false;
-    const events = [];
-    let sends = 0;
-    session.emit = event => events.push(event);
-    session.sendState = () => sends++;
-    game.teamsOn = true; game.teamIds = ['a', 'b']; game.myTeam = id === 'a' ? 0 : 1;
-    game.freeze = 0; game.me.x = 300; game.me.y = 200;
-    game.pads = [];
-    Object.assign(game.ball, { x: 1200, y: 550, vx: 0, vy: 0 });
-    return { session, game, events, sends: () => sends };
-};
-const left = soccerPeer('a'), right = soccerPeer('b');
-const advanceSoccer = (peer, seconds) => {
-    for (let i = 0; i < Math.round(seconds * 120); i++) peer.game.update(1 / 120);
-};
-for (let pass = 0; pass < 12; pass++) {
-    const sender = pass % 2 ? right : left, receiver = pass % 2 ? left : right;
-    sender.game.ball.vx = pass % 2 ? -650 : 650;
-    sender.game.ball.vy = pass % 3 ? 80 : -80;
-    sender.game.lastTouch = sender.session.user.id;
-    sender.game.sendKick();
-    const event = sender.events.at(-1);
-    assert.equal(sender.sends(), Math.floor(pass / 2) + 1, 'contacts flush immediately, not on the 100ms timer');
-    const transit = [.05, .15, .3][pass % 3];
-    ballNow += transit * 1000;
-    advanceSoccer(sender, transit);
-    receiver.game.ball.vx += 120;
-    receiver.game.ball.x -= 20;
-    receiver.game.onEvent(event, { id: sender.session.user.id });
-    assert.ok(Math.hypot(sender.game.ball.x - receiver.game.ball.x, sender.game.ball.y - receiver.game.ball.y) < .01, 'remote kick accounts for variable 50–300ms transit using the same physics');
-    assert.ok(Math.hypot(sender.game.ball.vx - receiver.game.ball.vx, sender.game.ball.vy - receiver.game.ball.vy) < .01, 'remote kick replaces divergent velocity rather than stacking impulses');
-    const beforeDuplicate = JSON.stringify(receiver.game.ball);
-    receiver.game.onEvent(event, { id: sender.session.user.id });
-    assert.equal(JSON.stringify(receiver.game.ball), beforeDuplicate, 'duplicate kick does not apply twice');
-    assert.ok(!receiver.game.ex().ball, 'non-owner does not broadcast a competing ball state');
-    const snapshot = sender.game.ex();
-    receiver.game.ball.x += 15; receiver.game.ball.vx += 40;
-    receiver.game.onState(snapshot, { id: sender.session.user.id });
-    assert.ok(Math.abs(receiver.game.ball.x - sender.game.ball.x) < .01, 'owner heartbeat corrects drift even without a new kick');
-    assert.ok(Math.abs(receiver.game.ballSpin - sender.game.ballSpin) < .01, 'snapshots do not double-count ball rotation during latency projection');
-    const corrected = JSON.stringify(receiver.game.ball);
-    receiver.game.onState(snapshot, { id: sender.session.user.id });
-    receiver.game.onEvent(event, { id: sender.session.user.id });
-    assert.equal(JSON.stringify(receiver.game.ball), corrected, 'older events and duplicate snapshots cannot rewind the ball');
-    advanceSoccer(sender, .1); advanceSoccer(receiver, .1); ballNow += 100;
-    assert.ok(Math.abs(sender.game.ball.x - receiver.game.ball.x) < .01, 'visual smoothing never changes physical trajectory');
-}
-const simultaneousA = soccerPeer('a'), simultaneousB = soccerPeer('b');
-simultaneousA.game.ball.vx = 500; simultaneousB.game.ball.vx = -700;
-simultaneousA.game.sendKick(); simultaneousB.game.sendKick();
-simultaneousA.game.onEvent(simultaneousB.events.at(-1), { id: 'b' });
-simultaneousB.game.onEvent(simultaneousA.events.at(-1), { id: 'a' });
-assert.equal(simultaneousA.game.ballOwner, 'b');
-assert.equal(simultaneousB.game.ballOwner, 'b');
-assert.equal(simultaneousA.game.ball.vx, simultaneousB.game.ball.vx, 'simultaneous touches resolve identically on both clients');
-const staleBeforeReset = simultaneousB.game.ex();
-simultaneousA.game.kickoff();
-simultaneousA.game.onState(staleBeforeReset, { id: 'b' });
-assert.equal(simultaneousA.game.ball.vx, 0, 'pre-goal snapshot cannot undo a kickoff');
-simultaneousA.game.freeze = 1;
-simultaneousB.game.sendKick();
-simultaneousA.game.onEvent(simultaneousB.events.at(-1), { id: 'b' });
-assert.equal(simultaneousA.game.ball.vx, 0, 'goal freeze rejects incoming kicks');
-simultaneousA.game.freeze = 0;
-simultaneousA.game.onEvent({ ...simultaneousB.events.at(-1), vx: NaN }, { id: 'b' });
-assert.equal(simultaneousA.game.ball.vx, 0, 'malformed realtime state cannot poison ball physics');
-const bounceSender = soccerPeer('a'), bounceReceiver = soccerPeer('b');
-Object.assign(bounceSender.game.ball, { y: 25, vx: 400, vy: -600 });
-bounceSender.game.sendKick();
-ballNow += 200; advanceSoccer(bounceSender, .2);
-bounceReceiver.game.onEvent(bounceSender.events.at(-1), { id: 'a' });
-assert.ok(Math.abs(bounceSender.game.ball.y - bounceReceiver.game.ball.y) < .01, 'latency projection includes pitch-wall bounces');
-assert.ok(bounceReceiver.game.ball.vy > 0);
-const transportSender = soccerPeer('a'), transportReceiver = soccerPeer('b');
-transportSender.session.connected = true;
-transportSender.session.outbox = [];
-transportSender.session.emit = A.Session.prototype.emit;
-transportSender.session.sendState = A.Session.prototype.sendState;
-transportSender.session.send = packet => A.Session.prototype.receive.call(transportReceiver.session, packet);
-transportSender.game.ball.vx = 600;
-transportSender.game.lastTouch = 'a';
-transportSender.game.sendKick();
-assert.equal(transportReceiver.game.ball.vx, 600, 'actual session packets deliver kick events and owner snapshots');
-transportSender.game.update(.1);
-transportReceiver.game.ball.vx = -100;
-transportSender.session.sendState();
-assert.equal(transportReceiver.game.ball.vx, transportSender.game.ball.vx, 'actual periodic state packets reconcile ball motion');
-sandbox.Date = realDate;
-console.log('Soccer alternating passes, latency, owner snapshots, duplicate/reordered updates, simultaneous touches, resets, and wall bounces passed.');
 const lava = demoFor('miner').game, C = lava.cols;
 lava.T.fill(1); lava.F.fill(0); lava.D.fill(0); lava.flowing.clear();
 for (let x = 2; x <= 40; x++) {
@@ -866,15 +751,7 @@ for (const mode of ['duel', 'shooter', 'skyline']) {
     assert.equal(bot.vx, 0); assert.equal(bot.vy, 0);
     assert.ok(Number.isFinite(bot.x) && Number.isFinite(bot.y));
 }
-const kickoff = demoFor('sports');
-kickoff.game.freeze = 1; kickoff.botKickoff = false;
-for (const bot of kickoff.bots) Object.assign(bot, { x: 50, y: 50, vx: 500, vy: 500 });
-app.stepSportsBots(kickoff, 0);
-for (const bot of kickoff.bots) {
-    assert.equal(bot.x, bot.home[0]); assert.equal(bot.y, bot.home[1]);
-    assert.equal(bot.vx, 0); assert.equal(bot.vy, 0);
-}
-console.log('Forced bot respawns, parkour fall recovery and soccer kickoff resets passed.');
+console.log('Forced bot respawns and parkour fall recovery passed.');
 {
     const demo = demoFor('duel'), bot = demo.bots[0];
     const oldRaf = sandbox.requestAnimationFrame;
@@ -1005,7 +882,6 @@ for (const mode of Object.keys(A.games)) {
             assert.ok(demo.game.troops.length > 0 && demo.game.nextId > 10, 'defense bots build troops and send real enemies');
         }
         if (mode === 'miner') assert.ok(demo.bots.every(bot => bot.goal > 0), 'every mining bot must bank real crystals');
-        if (mode === 'sports') assert.ok(demo.bots.some(bot => bot.goal > 0), 'soccer bots must score team goals');
         if (mode === 'frenzy' || mode === 'fishing' || mode === 'river' || mode === 'hack') {
             assert.ok(demo.bots.every(bot => bot.goal > 0), `${mode} every bot must complete the objective`);
         }

@@ -69,7 +69,7 @@ async function run() {
     };
     checkReward('skyline', {}, app.questionRewardRecommendation('skyline').suggested);
     checkReward('shooter', {}, app.questionRewardRecommendation('shooter').suggested);
-    checkReward('sports', {}, app.questionRewardRecommendation('sports').suggested);
+    checkReward('market', {}, app.questionRewardRecommendation('market').suggested);
     nodes.set('solo-game-reward', { value: '65', dataset: { custom: 'true' } });
     checkReward('skyline', {}, 65);
     checkReward('skyline', { questionReward: 75 }, 75);

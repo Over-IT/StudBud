@@ -546,8 +546,12 @@
             return data;
         }
 
-        async buyMysteryItem(box = 'basic') {
-            const { data, error } = await this.getClient().rpc('studbud_buy_mystery_item', { p_box: box });
+        async buyMysteryItem(box = 'basic', seasonMonth = StudBudCommunityGames.currentSeason().month) {
+            const requestedBox = box === 'season' ? `season:${seasonMonth}` : box;
+            const { data, error } = await this.getClient().rpc('studbud_buy_mystery_item', { p_box: requestedBox });
+            if (error && box === 'season' && /Unknown mystery box/i.test(error.message || '')) {
+                throw new Error('Seasonal boxes need the latest supabase-setup.sql. Ask the site admin to run it.');
+            }
             if (error && /You already own every item that box can contain!?/.test(error.message)) {
                 const profile = await this.getPlayerProfile();
                 return { ...profile, collection_complete: true, completed_box: box };
@@ -787,6 +791,20 @@
             return this.getGameClient().channel(`studbud-room-${roomCode}`, {
                 config: { broadcast: { self: false, ack: false } }
             });
+        }
+
+        watchRoom(roomCode, onUpdate) {
+            const client = this.getGameClient();
+            const channel = client.channel(`studbud-lobby-${roomCode}`, { config: { presence: { key: (window.StudBudCloud?.user || window.StudBudCloud?.guestUser)?.id || 'player' } } });
+            let closed = false;
+            channel.on('presence', { event: 'sync' }, () => { if (!closed) onUpdate(); });
+            channel.subscribe(status => {
+                if (!closed && status === 'SUBSCRIBED') {
+                    channel.track({ joined: true }).catch(() => {});
+                    onUpdate();
+                }
+            });
+            return () => { closed = true; client.removeChannel(channel); };
         }
 
         async leaveRoom(roomCode) {
