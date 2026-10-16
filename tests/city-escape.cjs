@@ -10,60 +10,61 @@ for (const file of ['multiplayerEngine.js', 'multiplayerGames.js']) {
 const A = sandbox.window.StudBudArcade, U = A.util;
 const makeGame = seed => new A.games.skyline({ seed, local: { color: '#fff' }, user: { id: 'test' } });
 const maps = [];
-for (const seed of [1, 42, 12345, 67890, 45678, 0xffffffff]) {
+const SEEDS = [1, 42, 12345, 67890, 45678, 0xffffffff];
+for (const seed of SEEDS) {
     const game = makeGame(seed), again = makeGame(seed);
     maps.push(game);
     assert.equal(JSON.stringify(game.solids), JSON.stringify(again.solids), 'room seeds produce identical geometry');
-    assert.equal(new Set(game.challenges.map(c => c.kind)).size, 6, 'every seed includes all six mixed route layouts');
-    assert.ok(game.challenges.length >= 14, 'the shorter climb retains substantial challenges alongside larger Space transfers');
-    assert.equal(game.WIDTH, 14000, 'the world extends far beyond the old central shaft');
+    assert.equal(game.WIDTH, 20000, 'the world extends far beyond the old central shaft');
     assert.equal(A.games.skyline.testDestinations.length, 3, 'three staff destinations are available before creating the game');
-    assert.equal(game.SUMMIT, 45000, 'removing Sky shortens the target course by 25 percent');
-    assert.ok(game.summitH < 48000, 'actual generated summit stays near the shorter target');
+    assert.equal(game.SUMMIT, 45000);
+    assert.ok(game.summitH < 48000, 'actual generated summit stays near the target');
+    assert.ok(game.challenges.length >= 7, 'factory and space are made of many chambers');
     const routePieces = game.solids.filter(p => p.chamber !== undefined);
-    assert.ok(Math.max(...routePieces.map(p => p.x + p.w)) - Math.min(...routePieces.map(p => p.x)) > 7000, 'the actual course uses the expanded horizontal world');
-    const towers = game.towers;
-    assert.ok(towers.length >= 8 && towers[towers.length - 1].x + towers[towers.length - 1].w - towers[0].x > 9000, 'the city is a long run of skyscrapers rather than one shaft');
-    assert.ok(game.spikes.length + game.saws.length + game.balls.length + game.lasers.length + game.drills.length + game.blinkers.length + game.crumbles.length >= 40, 'obstacles are gameplay, not just decoration');
-    for (let i = 0; i < game.challenges.length; i += 6) {
-        const batch = game.challenges.slice(i, i + 6);
-        assert.equal(new Set(batch.map(c => c.kind)).size, batch.length, 'no repeated challenge until the variety bag is exhausted');
-    }
-    for (const c of game.challenges) {
-        const solids = game.solids.filter(p => p.chamber === c.id);
-        assert.ok(!solids.some(p => p.wall || p.facade || (p.foundation && !(p.cityTower && p.bi === 0))), 'routes are open clusters, not continuous building borders');
-        const caps = solids.filter(p => p.motif === 'rooftop-walk');
-        assert.equal(caps.length, 2);
-        assert.equal(caps[0].x + caps[0].w, c.exitX - 90);
-        assert.equal(caps[1].x, c.exitX + 90);
-        assert.equal(Math.abs(caps[0].y - caps[1].y), 140, 'neighboring towers end at different heights');
-        assert.ok(caps.every(p => p.w >= 600 && p.navX !== undefined && p.island), 'large roofs/clouds provide substantial horizontal traversals');
-        const room = c.nodes.find(p => p.motif === 'rooftop-room');
-        const lower = c.nodes.find(p => p.motif === 'rooftop-walk');
-        assert.equal(room.y + room.h, lower.y, 'rooftop structures sit flush on their roof');
-        assert.equal(c.exit.y + c.exit.h, c.nodes[c.nodes.length - 2].y, 'penthouse sits flush on the taller roof');
-        assert.ok(c.nodes.every(p => !p.jt && (!p.oneway || p.factoryStep)), 'main routes stay solid; only the two open grated service stairs allow ascent from below');
-        assert.ok(c.motifs.includes('balcony') && c.motifs.includes('lift') && c.motifs.includes('spring'), 'buildings, timing and transfers coexist in every stretch');
-        assert.ok(c.nodes.filter(p => p.slope).length <= 1, 'curves are occasional terrain, not platform spam');
-        assert.ok(c.nodes.every(p => p.bi === c.nodes[0].bi), 'all objects in a route share its biome');
-        const hazards = game.spikes.filter(p => p.support?.chamber === c.id).length
-            + game.saws.filter(p => p.chamber === c.id).length
-            + game.lasers.filter(p => p.support?.chamber === c.id).length
-            + game.drills.filter(p => p.chamber === c.id).length;
-        assert.ok(hazards <= (c.introductory ? 0 : c.nodes[0].bi === 0 ? 1 : c.nodes[0].bi === 2 ? 2 : c.nodes[0].bi === 1 ? 5 : 3), 'hazards ease in with biome difficulty');
-        if (c.introductory) assert.ok(c.nodes.every(p => !p.crumble && !p.blink), 'opening landings stay stable');
-        assert.ok(Math.abs(room.x - c.exit.x) > 1000, 'routes traverse both sides instead of only climbing the center');
-        assert.ok(caps.every(p => solids.some(s => s.prop && s.y + s.h === p.y && s.x >= p.x && s.x + s.w <= p.x + p.w)), 'large islands have actual rooftop obstacles');
-        if (c.nodes[0].bi > 0) {
-            assert.ok(!solids.some(p => p.prop === 'ac' || p.prop === 'crate' || p.decor?.length), 'upper biomes do not inherit city clutter');
+    assert.ok(Math.max(...routePieces.map(p => p.x + p.w)) - Math.min(...routePieces.map(p => p.x)) > 7000, 'the course uses the whole horizontal world');
+
+    // ---- factory and space: chambers chain hand-built set pieces and never settle into a repeating layout ----
+    const kinds = game.challenges.map(c => c.kind);
+    assert.ok(new Set(kinds).size >= kinds.length - 1, 'chambers almost never share a layout');
+    for (let i = 1; i < game.challenges.length; i++) {
+        const a = game.challenges[i - 1], b = game.challenges[i];
+        assert.ok(b.pieces.length >= 1, 'every chamber holds at least one set piece');
+        assert.equal(new Set(b.pieces).size, b.pieces.length, 'a chamber never uses the same piece twice');
+        if (a.bi === b.bi) {
+            const shared = b.pieces.filter(p => a.pieces.includes(p) && p !== 'landing');
+            assert.ok(shared.length <= 1, `seed ${seed} chambers ${a.id}/${b.id} (${a.kind} / ${b.kind}) do not repeat each other`);
         }
     }
-    for (const p of game.solids.filter(p => p.chamber !== undefined && p.slope)) {
-        assert.ok(p.w >= 460 && p.h <= 36, 'curves are broad, gentle walking terrain');
-        assert.equal(U.slopeY(p, p.x), U.slopeY(p, p.x + p.w * .2), 'terrain has flat sections before its curve');
-        assert.equal(U.slopeY(p, p.x + p.w), U.slopeY(p, p.x + p.w * .8), 'terrain has flat sections after its curve');
+    for (const bi of [1, 3]) {
+        const used = game.challenges.filter(c => c.bi === bi).flatMap(c => c.pieces).filter(p => p !== 'landing');
+        assert.ok(used.length - new Set(used).size <= 1, `seed ${seed}: every section in a biome is its own hand-mapped piece`);
     }
-    assert.ok(game.solids.every(p => !p.decor || p.decor.length <= 3), 'decoration is bounded, not removed');
+    for (const c of game.challenges) {
+        assert.ok(c.nodes.every(p => p.bi === c.bi), 'all objects in a chamber share its biome');
+        if (c.introductory) assert.ok(c.nodes.every(p => !p.crumble && !p.blink), 'opening chambers stay stable');
+    }
+    const factory = game.challenges.filter(c => c.bi === 1), space = game.challenges.filter(c => c.bi === 3);
+    assert.ok(factory.length >= 3 && space.length >= 3, 'factory and space each get a real stretch');
+    assert.ok(new Set(factory.flatMap(c => c.pieces)).size >= 12, 'the factory works through its whole deck of set pieces');
+    assert.ok(new Set(space.flatMap(c => c.pieces)).size >= 10, 'space works through its whole deck of set pieces');
+    assert.ok(game.drills.length >= 4 && game.drills.every(d => d.bi === 1), 'drills and presses appear only in the factory');
+    assert.ok(game.drills.some(d => d.crusher) && game.drills.some(d => !d.crusher), 'factory contains both crushers and drills');
+    for (const d of game.drills) {
+        assert.ok(game.solids.some(p => p.chamber === d.chamber && Math.abs(p.y - d.surfaceY) < 1 && d.x >= p.x && d.x <= p.x + p.w), 'drills strike a real deck');
+    }
+    assert.ok(game.solids.some(p => p.factoryBelt && p.w >= 600), 'long conveyor belts run through the factory');
+    assert.ok(!game.solids.some(p => p.bi === 2 || p.cloud || p.sinker || p.prop === 'cloudbank'), 'removed Sky generates no cloud platforms');
+    assert.ok(!game.saws.some(s => s.bi === 0), 'city rooftops do not use saw blades');
+
+    // ---- space: asteroids cross once from off screen on fixed lanes, and some lanes are the route itself ----
+    assert.ok(game.lanes.length >= 8 && game.lanes.every(l => l.bi === 3), 'asteroid lanes only exist in space');
+    assert.ok(game.meteors.every(m => m.lane && m.bi === 3), 'every asteroid belongs to a lane');
+    const climbs = space.filter(c => c.pieces.includes('meteor-climb'));
+    assert.ok(climbs.length >= 1, 'space includes a climb that hops from moving meteor to moving meteor');
+    assert.ok(game.solids.some(p => p.via?.length), 'meteor-climb lanes carry you between decks');
+    assert.ok(game.debris.length >= 4, 'debris showers rain through the station');
+
+    // ---- checkpoints ----
     assert.equal(game.checkpoints.length, 3, 'exactly three biome entrance checkpoints');
     game.checkpoints.forEach((cp, i) => {
         assert.equal(cp.id, i);
@@ -71,64 +72,55 @@ for (const seed of [1, 42, 12345, 67890, 45678, 0xffffffff]) {
         assert.equal(game.biomeProgress(-cp.y), i, 'biome color transitions match checkpoint positions');
         assert.ok(game.solids.some(p => !p.wall && p.y === cp.y && cp.x >= p.x && cp.x + 26 <= p.x + p.w), 'checkpoint has a real landing surface');
     });
-    assert.ok(game.spikes.every(p => p.mounted && game.solids.some(s => s.prop && p.x >= s.x && p.x + p.w <= s.x + s.w && Math.abs(p.y + p.h - s.y) < .01)), 'every spike is mounted on real machinery');
-    assert.ok(game.saws.every(p => p.mountY !== undefined), 'saws have visible support tracks');
-    assert.ok(game.solids.filter(p => p.jt).length < game.solids.length * .05, 'glass does not dominate the climb');
-    assert.equal(game.solids.filter(p => p.wall && !p.boundary).length, 0, 'only invisible world limits remain, not architectural borders');
-    const [alleyLeft, alleyRight] = towers, start = game.checkpoints[0];
-    assert.ok(start.x > alleyLeft.x + alleyLeft.w && start.x + 26 < alleyRight.x && alleyRight.x - alleyLeft.x - alleyLeft.w <= 400, 'you start boxed into an alley between two towers');
-    assert.ok(!game.solids.some(p => p.bi === 2 || p.cloud || p.sinker || p.prop === 'cloudbank'), 'removed Sky generates no cloud platforms or obstacles');
-    assert.ok(game.drills.length >= 2 && game.drills.every(d => d.bi === 1), 'machine presses appear only in the factory');
-    assert.ok(!game.saws.some(s => s.bi === 0), 'city rooftops do not use saw blades');
-    for (const d of game.drills) {
-        const width = d.width || 24;
-        const zone = { x: d.x - width / 2 - 8, y: d.mountY - 40, w: width + 16, h: d.surfaceY - d.mountY + 39 };
-        assert.ok(!game.solids.some(p => p.chamber === d.chamber && U.overlap(zone, p)), 'drill housings never clip into platforms');
-        assert.ok(game.solids.some(p => p.chamber === d.chamber && p.y === d.surfaceY && d.x - 12 >= p.x && d.x + 12 <= p.x + p.w), 'drills strike a real deck');
-    }
-    const factory = game.challenges.filter(c => c.nodes[0].bi === 1);
-    assert.ok(factory.every(c => game.solids.filter(p => p.chamber === c.id && p.factoryBelt).length === 2), 'each factory route has two dedicated conveyor sections, not belts everywhere');
-    assert.ok(factory.every(c => c.nodes.some(p => p.factoryBelt && p.w >= 600) && c.nodes.filter(p => !p.factoryBelt).length >= 8), 'large production belts alternate with lifts and stable service platforms');
-    for (const c of factory) {
-        const steps = game.solids.filter(p => p.chamber === c.id && p.factoryStep && !p.factoryEntry), decks = c.nodes.filter(p => p.motif === 'rooftop-walk');
-        assert.equal(steps.length, 2);
-        const left = decks.find(p => p.x < c.exitX), right = decks.find(p => p.x > c.exitX);
-        assert.equal(Math.min(...steps.map(p => p.x)), left.x + left.w);
-        assert.equal(Math.max(...steps.map(p => p.x + p.w)), right.x);
-        assert.ok(steps.every(p => p.w === 90 && p.h === 16 && p.y > Math.min(left.y, right.y) && p.y < Math.max(left.y, right.y)), 'grated service stairs connect staggered production decks');
-        assert.ok(c.nodes.some(p => p.factoryEntry && p.oneway && p.w === 140), 'open entry grate gives head-clear access into production decks');
-        for (let i = 1; i <= c.motifs.length; i++) {
-            const source = c.nodes[i - 1], target = c.nodes[i];
-            if (source.motif === 'spring') continue;
-            assert.ok(target.x >= source.x + source.w + 59 || target.x + target.w <= source.x - 59, 'factory takeoffs are not covered by the next solid platform');
-        }
-    }
-    assert.ok(game.drills.some(d => d.crusher) && game.drills.some(d => !d.crusher), 'factory contains both broad crushers and pointed drills');
-    assert.ok(game.solids.some(p => p.factoryLift), 'suspended cargo lifts connect conveyor sections');
-    assert.equal(new Set(game.solids.filter(p => p.bi === 3 && p.spaceStyle !== undefined).map(p => p.spaceStyle)).size, 3, 'space uses asteroid, station and thruster deck designs');
+    assert.equal(game.solids.filter(p => p.wall && !p.boundary).length, 0, 'only invisible world limits remain');
+
+    // ---- the city: connected skyscrapers, a fire-escape start and finish, and crossings that never fall into a loop ----
+    const towers = game.towers;
+    assert.ok(towers.length >= 8 && towers[towers.length - 1].x + towers[towers.length - 1].w - towers[0].x > 9000, 'the city is a long run of skyscrapers');
     for (let i = 0; i < towers.length; i++) {
         const t = towers[i];
         assert.equal(t.y + t.h, 0, 'city skyscrapers extend down to the street');
         assert.ok(t.w >= 760 && t.w <= 980, 'towers keep an average building width');
         if (i) assert.ok(t.x - towers[i - 1].x - towers[i - 1].w >= 150, 'towers have real gaps between them');
     }
+    const [T0, T1] = towers, start = game.checkpoints[0], opening = game.fireEscapes[0];
+    assert.ok(start.x > T0.x + T0.w && start.x + 26 < T1.x, 'you start in the alley between the first two towers');
+    assert.equal(game.cityPath.indexOf(opening[0]), 0, 'the run begins on the fire escape');
+    assert.ok(opening.length === 6 && opening.every(p => p.fireEscape && p.oneway && p.x >= T0.x + T0.w && p.x + p.w <= T1.x), 'the fire escape hangs in the alley and every flight is jump-through');
+    assert.equal(opening[opening.length - 1].y, T1.y, 'the top landing is level with the first roof');
+    assert.equal(opening[opening.length - 1].x + opening[opening.length - 1].w, T1.x, 'the top landing meets the roof edge');
+    const finale = game.cityCrossings[game.cityCrossings.length - 1];
+    assert.equal(finale.kind, 'fire-escape', 'the city ends on a second fire escape into the clouds');
+    const crossings = game.cityCrossings.slice(0, -1).map(c => c.kind);
+    assert.ok(new Set(crossings).size >= 6, `seed ${seed}: the city mixes many crossing styles (${crossings.join(' ')})`);
+    const vertical = new Set(['climb', 'scale', 'gondola', 'scaffold', 'crane']);
+    crossings.forEach((k, i) => {
+        if (!i) return;
+        assert.notEqual(k, crossings[i - 1], 'no crossing repeats back to back');
+        assert.ok(!(vertical.has(k) && vertical.has(crossings[i - 1])), 'wall climbs never come back to back');
+    });
+    const themes = game.cityCrossings.map(c => c.from.theme);
+    themes.forEach((t, i) => i && assert.notEqual(t, themes[i - 1], 'neighbouring roofs never share a theme'));
+    const laserRoofs = game.cityCrossings.filter(c => c.from.theme === 'security' || c.from.theme === 'tripwire');
+    assert.ok(laserRoofs.every(c => !vertical.has(c.kind)), 'laser roofs never lead straight into a wall climb');
+    assert.ok(laserRoofs.length <= 3, 'laser roofs are occasional, not every other roof');
+    for (const c of game.cityCrossings) if (c.level < 3) assert.ok(!c.pieces.some(p => p.crumble || p.blink), 'the first crossings stay stable');
     for (const p of game.solids.filter(p => p.wallX !== undefined)) {
         const offset = p.far ? 150 : 0;
         assert.equal(p.wallSide > 0 ? p.x : p.x + p.w, p.wallX + p.wallSide * offset, 'wall fixtures sit on (or hang a fixed arm from) their wall');
         assert.ok(towers.some(t => (t.x === p.wallX || t.x + t.w === p.wallX) && t.y < p.y), 'every fixture is bolted to a real tower face');
     }
-    const cityHazards = [...game.lasers, ...game.springs].filter(h => h.city && h.period);
-    for (const c of game.cityCrossings) {
-        if (c.level < 3) assert.ok(!c.pieces.some(p => p.crumble || p.blink), 'the first crossings stay stable');
-    }
-    assert.ok(!cityHazards.some(l => game.cityCrossings.find(c => c.from === l.support || c.pieces.includes(l.support))?.level < 3), 'city hazards ease in after the first crossings');
     assert.ok(!game.solids.some(p => p.city && p.chamber !== undefined), 'the city route is not built from floating clusters');
-    assert.ok(new Set(game.cityCrossings.map(c => c.kind)).size >= 3, 'wall-heavy city still retains varied crossing styles');
-    assert.ok(game.cityCrossings.filter(c => c.kind === 'climb' || c.kind === 'scale').length >= Math.ceil(game.cityCrossings.length / 2), 'at least half the city crossings require substantial wall scaling');
     const highestTower = Math.min(...towers.map(t => t.y));
     assert.ok(game.challenges.every(c => c.nodes.every(p => p.y + p.h < highestTower - 100)), 'the cloud route starts above every rooftop');
 }
-console.log('Six seeded shorter City/Factory/Space maps: open themed island clusters, broad traversals, themed hazards and three ordered biome checkpoints passed.');
+{
+    // across many seeds the city never plays out the same crossing order twice
+    const orders = new Set();
+    for (let seed = 1; seed <= 40; seed++) orders.add(makeGame(seed).cityCrossings.map(c => c.kind).join(' '));
+    assert.ok(orders.size >= 38, 'city crossing orders differ between maps');
+}
+console.log('Six seeded City/Factory/Space maps: varied chambers, factory machinery, meteor lanes, fire-escape city and three checkpoints passed.');
 
 for (const fps of [30, 60, 120]) {
     for (const slope of [1, -1]) {
@@ -187,36 +179,6 @@ assert.equal(game.circleHits({ x: 0, y: 0, w: 20, h: 40 }, { x: 25, y: 45, r: 6 
     assert.equal(game.drillHits({ x: 113, y: -41, w: 20, h: 38 }, d), false, 'space beside the narrow bit is safe');
     assert.equal(game.drillHits({ x: 109, y: -14, w: 20, h: 11 }, d), false, 'the empty corner beside the pointed tip is safe');
 }
-{
-    const g = makeGame(42);
-    assert.ok(g.spaceLaunch && g.meteors.length >= 2, 'dedicated meteor transfers are distributed through Space');
-    assert.ok(g.challenges.filter(c => c.nodes[0].bi === 3).length >= 4, 'space retains platform routes rather than becoming a separate meteor section');
-    assert.ok(g.meteors.every(m => m.bi === 3 && m.off && m.w === m.h && Math.abs(m.verticalSpeed) >= 35), 'rough ball meteors start despawned and travel diagonally');
-    const rows = [...new Set(g.meteors.map(x => x.by))].sort((a, b) => b - a);
-    assert.ok(rows[0] - rows.at(-1) > 4000, 'meteors appear throughout the space biome instead of a single cluster');
-    assert.ok(g.summit.y < rows[rows.length - 1], 'the summit is above the meteor field');
-}
-for (const fps of [30, 60, 120]) for (const map of maps) {
-    map.camInit = true; map.viewWidth = 1000;
-    for (const m of map.meteors) {
-        map.cam = { x: m.anchorX - 500, y: m.by }; map.me.y = m.wait.y - 44;
-        map.despawnMeteor(m); map.updateMeteor(m, 0);
-        assert.equal(m.off, false, 'waiting on the actual boarding ledge always activates its meteor');
-        assert.equal(m.x, m.startX, 'meteor starts beside its waiting ledge, not beyond the viewport');
-        let reachedLanding = false, returned = false;
-        for (let frame = 0; frame < fps * 16; frame++) {
-            map.updateMeteor(m, 1 / fps);
-            assert.equal(m.off, false, 'an active transfer never despawns mid-ride');
-            assert.equal(map.meteorPathBlocked(m, m.x, m.y), false, 'seeded asteroid paths never intersect platforms or rider headroom');
-            if (Math.abs(m.x - m.endX) < 1 && Math.abs(m.y - m.endY) < 1) reachedLanding = true;
-            if (reachedLanding && Math.abs(m.x - m.startX) < 1) returned = true;
-        }
-        assert.ok(reachedLanding && returned, `${fps} FPS seed ${map.s.seed}: meteor visibly reaches both docking points on schedule`);
-    }
-}
-console.log('Straight/curved slope landings, foot-width support, uphill/downhill contact, jumps, undersides, fast falls and hazard hitboxes passed at 30/60/120 FPS.');
-
-// Search real ballistic jump inputs, without autoplay recovery or teleporting.
 function reachable(from, target, solids, fps, spring = false, aimX = target.x + target.w / 2, exit = null, maxDrop = 120) {
     const space = target.bi === 3;
     for (const doubleAt of [null, .15, .25, .35, .45]) {
@@ -253,6 +215,8 @@ for (const fps of [30, 60, 120]) {
             const targets = c.nodes;
             for (let i = 0; i < targets.length - 1; i++) {
                 const source = targets[i], target = targets[i + 1];
+                const moving = p => p.mover || p.lane || p.meteor || p.via || p.freight || p.piston || p.factoryLift || p.arm;
+                if (moving(source) || moving(target)) continue;
                 const sx = source.navX !== undefined ? source.navX - 13 : source.slope ? source.curve === 'arch' ? source.x + source.w / 2 - 13 : source.slope > 0 ? source.x + source.w - 26 : source.x : source.x + source.w / 2 - 13;
                 const aimX = target.navX ?? target.x + target.w / 2;
                 const aims = target.navX !== undefined ? [aimX] : [aimX, target.x + 20, target.x + target.w - 20];

@@ -1,18 +1,22 @@
 (function (window) {
     'use strict';
     const A = window.StudBudArcade;
-    const PIECES = { K: '♔', Q: '♕', R: '♖', B: '♗', N: '♘', P: '♙', k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
     const NAMES = { k: 'king', q: 'queen', r: 'rook', b: 'bishop', n: 'knight', p: 'pawn' };
     const VALUES = { k: 0, q: 9, r: 5, b: 3, n: 3, p: 1 };
+    // Original silhouettes shared by the SVG board, drag ghost and canvas previews.
     const SHAPES = {
-        p: '<circle cx="32" cy="18" r="8"/><path d="M26 26h12l4 17H22z"/>',
-        r: '<path d="M18 12h7v7h5v-7h5v7h5v-7h7v17l-6 4v12H23V33l-5-4z"/>',
-        n: '<path d="M23 44l5-13-11-1 3-13 12-7 11 7 5 27z"/><path d="M32 10l-1-5 8 8"/><circle cx="32" cy="21" r="2" fill="var(--piece-stroke)" stroke="none"/>',
-        b: '<path d="M32 7c-13 11-16 20-5 25l-6 12h22l-6-12C48 27 45 18 32 7z"/><path d="M34 15l-6 10" fill="none"/>',
-        q: '<path d="M19 43l-6-23 12 10 7-17 7 17 12-10-6 23z"/><circle cx="12" cy="17" r="3"/><circle cx="32" cy="10" r="3"/><circle cx="52" cy="17" r="3"/>',
-        k: '<path d="M29 5h6v6h6v6h-6v6h-6v-6h-6v-6h6z"/><path d="M22 24h20l-5 11 6 9H21l6-9z"/>'
+        p: ['M40 18a8 8 0 1 1-16 0 8 8 0 1 1 16 0Z', 'M27 26h10c-1 8 0 13 6 19H21c6-6 7-11 6-19Z'],
+        r: ['M18 11h7v8h5v-8h5v8h5v-8h7v17l-7 5 2 12H22l2-12-6-5Z', 'M23 29h18'],
+        n: ['M21 45c0-9 5-13 12-18l-8 4-9-5 6-12 9-3 2-6 8 8c8 8 7 20 6 32Z', 'M23 17l7-3M35 23c5 4 5 11 2 17', 'M29 20h1'],
+        b: ['M32 7c-5 5-13 11-13 18 0 5 4 8 9 9-1 4-4 8-7 11h22c-3-3-6-7-7-11 5-1 9-4 9-9 0-7-8-13-13-18Z', 'M35 15l-7 12M25 35h14'],
+        q: ['M20 44l-6-23 11 9 7-16 7 16 11-9-6 23Z', 'M16 16a3 3 0 1 1-6 0 3 3 0 1 1 6 0ZM35 10a3 3 0 1 1-6 0 3 3 0 1 1 6 0ZM54 16a3 3 0 1 1-6 0 3 3 0 1 1 6 0Z', 'M21 38h22'],
+        k: ['M29 5h6v6h6v6h-6v8h-6v-8h-6v-6h6Z', 'M32 27c-8-10-18-4-15 4l8 14h14l8-14c3-8-7-14-15-4Z', 'M25 37h14']
     };
-    const pieceMarkup = piece => piece === '.' ? '' : `<svg class="chess-piece ${Rules.side(piece) === 0 ? 'white-piece' : 'black-piece'}" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><g fill="var(--piece-fill)" stroke="var(--piece-stroke)" stroke-width="2.5" stroke-linejoin="round">${SHAPES[piece.toLowerCase()]}<path d="M20 44h24l4 8H16z"/><path d="M15 53h34v5H15z"/></g></svg>`;
+    const BASE = ['M21 44h22l5 8H16Z', 'M17 52h30l3 6H14Z'];
+    const PREVIEW_PATHS = new Map();
+    const previewPath = d => { if (!PREVIEW_PATHS.has(d)) PREVIEW_PATHS.set(d, new Path2D(d)); return PREVIEW_PATHS.get(d); };
+    const PALETTE = [{ fill: '#f8f4e7', stroke: '#3c4038', shine: '#ffffff' }, { fill: '#454943', stroke: '#222820', shine: '#798174' }];
+    const pieceMarkup = piece => piece === '.' ? '' : `<svg class="chess-piece ${Rules.side(piece) === 0 ? 'white-piece' : 'black-piece'}" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><g fill="var(--piece-fill)" stroke="var(--piece-stroke)" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">${[...SHAPES[piece.toLowerCase()], ...BASE].map(d => `<path d="${d}"/>`).join('')}<path d="M22 48h20M20 55h24" fill="none" stroke="var(--piece-shine)" stroke-width="1.8" opacity=".65"/></g></svg>`;
     const Rules = {
         initial() { return 'rnbqkbnrpppppppp................................PPPPPPPPRNBQKBNR'; },
         side(piece) { return piece === '.' ? -1 : piece === piece.toUpperCase() ? 0 : 1; },
@@ -186,12 +190,23 @@
             if (!this.panel) return;
             const state = this.state;
             const ready = state.credits[this.side] === 1 && !this.pending && !this.s.over;
+            const previous = this.renderedBoard;
+            const changed = previous ? [...state.board].map((piece, at) => piece !== previous[at] ? at : -1).filter(at => at >= 0) : [];
+            if (changed.length) this.lastMove = changed;
+            const checkedKings = [0, 1].filter(side => Rules.inCheck(state.board, side)).map(side => side === 0 ? 'K' : 'k');
             for (const square of this.squares) {
                 const at = Number(square.dataset.square), piece = state.board[at];
                 const rank = (this.side === 1 ? at % 8 === 7 : at % 8 === 0) ? String(8 - Math.floor(at / 8)) : '';
                 if (square.dataset.piece !== piece) {
                     square.innerHTML = pieceMarkup(piece) + (rank ? `<span class="chess-rank">${rank}</span>` : '');
                     square.dataset.piece = piece;
+                    const artwork = square.querySelector('.chess-piece');
+                    const from = previous && piece !== '.' ? changed.find(index => previous[index] === piece && state.board[index] === '.') : undefined;
+                    if (from !== undefined && artwork?.animate && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+                        const origin = this.squares.find(cell => Number(cell.dataset.square) === from);
+                        const sourceRect = origin.getBoundingClientRect(), targetRect = square.getBoundingClientRect();
+                        artwork.animate([{ transform: `translate(${sourceRect.left - targetRect.left}px, ${sourceRect.top - targetRect.top}px)` }, { transform: 'translate(0, 0)' }], { duration: 180, easing: 'ease-out' });
+                    }
                 }
                 square.dataset.rank = rank;
                 square.dataset.file = (this.side === 1 ? at < 8 : at >= 56) ? 'abcdefgh'[at % 8] : '';
@@ -199,11 +214,13 @@
                 square.setAttribute('aria-label', label);
                 square.setAttribute('aria-pressed', String(this.selected === at));
                 square.classList.toggle('selected', this.selected === at);
+                square.classList.toggle('in-check', checkedKings.includes(piece));
                 const legal = ready && this.selected >= 0 && Rules.legal(state.board, this.selected, at, this.side, state);
                 square.classList.toggle('legal', legal && piece === '.');
                 square.classList.toggle('capture', legal && piece !== '.');
                 square.classList.toggle('last-move', Boolean(this.lastMove?.includes(at)));
             }
+            this.renderedBoard = state.board;
             this.statusElement.textContent = state.winner === -2 ? 'Draw: no legal moves or only kings remain.' : state.winner >= 0 ? `${state.winner === 0 ? 'White' : 'Black'} wins by checkmate!`
                 : this.pending ? 'Waiting for the host to confirm…'
                     : Rules.inCheck(state.board, this.side) ? `${this.side === 0 ? 'White' : 'Black'} is in check. ${ready ? 'Move to a safe square, block or capture the attacker.' : 'Answer for a move to escape.'}`
@@ -392,15 +409,28 @@
             }
         }
         draw(ctx, w, h) {
-            ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, w, h);
+            const background = ctx.createLinearGradient(0, 0, w, h);
+            background.addColorStop(0, '#344a3c'); background.addColorStop(1, '#1d2b27');
+            ctx.fillStyle = background; ctx.fillRect(0, 0, w, h);
             if (!this.s.preview) return;
             const size = Math.min(w, h) * .86, cell = size / 8, x = (w - size) / 2, y = (h - size) / 2;
             for (let at = 0; at < 64; at++) {
-                ctx.fillStyle = (Math.floor(at / 8) + at % 8) % 2 ? '#64748b' : '#e2e8f0';
+                ctx.fillStyle = (Math.floor(at / 8) + at % 8) % 2 ? '#779556' : '#ebecd0';
                 ctx.fillRect(x + at % 8 * cell, y + Math.floor(at / 8) * cell, cell, cell);
-                ctx.fillStyle = Rules.side(this.state.board[at]) === 0 ? '#fff' : '#111827';
-                ctx.font = `${cell * .78}px serif`; ctx.textAlign = 'center';
-                ctx.fillText(PIECES[this.state.board[at]] || '', x + (at % 8 + .5) * cell, y + (Math.floor(at / 8) + .8) * cell);
+                const piece = this.state.board[at];
+                if (piece === '.') continue;
+                const colors = PALETTE[Rules.side(piece)];
+                ctx.save();
+                ctx.translate(x + at % 8 * cell + cell * .075, y + Math.floor(at / 8) * cell + cell * .075);
+                ctx.scale(cell * .85 / 64, cell * .85 / 64);
+                ctx.fillStyle = colors.fill; ctx.strokeStyle = colors.stroke;
+                ctx.lineWidth = 2.3; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+                for (const d of [...SHAPES[piece.toLowerCase()], ...BASE]) {
+                    const shape = previewPath(d); ctx.fill(shape); ctx.stroke(shape);
+                }
+                ctx.strokeStyle = colors.shine; ctx.lineWidth = 1.8; ctx.globalAlpha = .65;
+                ctx.stroke(previewPath('M22 48h20M20 55h24'));
+                ctx.restore();
             }
         }
     }

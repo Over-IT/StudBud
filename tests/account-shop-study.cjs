@@ -27,7 +27,7 @@ const sandbox = {
     StudBudSfx: { settings: {}, save() {} }
 };
 const context = vm.createContext(sandbox);
-for (const file of ['communityGames.js', 'cloudSync.js', 'flashcardEngine.js', 'pchsData.js']) vm.runInContext(source(file), context, { filename: file });
+for (const file of ['communityGames.js', 'cloudSync.js', 'flashcardEngine.js', 'parkwayData.js', 'data/schools/central.js', 'data/schools/north.js', 'data/schools/south.js', 'data/schools/west.js']) vm.runInContext(source(file), context, { filename: file });
 const appSource = source('app.js');
 vm.runInContext(appSource.slice(appSource.indexOf('    const ACTIVITY_RESET_ID'), appSource.indexOf('    const AppState =')), context);
 vm.runInContext('globalThis.AppState = new AppStateEngine();', context);
@@ -247,13 +247,13 @@ async function run() {
     }
     for (const id of setupIds) elements.delete(id);
     for (const prefix of ['host', 'solo']) {
-        elements.set(`${prefix}-game-reward`, { value: '20' });
+        elements.set(`${prefix}-game-reward`, { value: '20', dataset: { custom: '1' } });
         elements.set(`${prefix}-game-reward-guidance`, {});
     }
     for (const [mode, min, max] of [
-        ['skyline', 25, 45], ['duel', 20, 35], ['miner', 25, 45], ['river', 20, 40],
-        ['frenzy', 20, 40], ['fishing', 20, 40], ['market', 30, 60], ['sports', 30, 50],
-        ['shooter', 20, 40], ['crypto', 15, 30], ['hack', 10, 25]
+        ['skyline', 30, 50], ['duel', 25, 45], ['miner', 30, 45], ['river', 20, 40],
+        ['frenzy', 15, 30], ['fishing', 15, 30], ['market', 40, 60], ['sports', 50, 70],
+        ['shooter', 30, 50], ['crypto', 15, 30], ['hack', 10, 25]
     ]) {
         const recommendation = app.questionRewardRecommendation(mode);
         assert.equal(recommendation.min, min);
@@ -268,8 +268,12 @@ async function run() {
             assert.ok(host.includes(`Recommended setting: ${min}-${max}`));
             assert.ok(host.includes(expected), `${mode} guidance at ${amount}`);
             assert.equal(host, elements.get('solo-game-reward-guidance').textContent, 'host and solo recommendations agree');
-            assert.equal(elements.get('host-game-reward').value, String(amount), 'advice never silently overrides the setting');
+            assert.equal(elements.get('host-game-reward').value, String(amount), 'advice never overrides a player-chosen setting');
         }
+        for (const prefix of ['host', 'solo']) elements.get(`${prefix}-game-reward`).dataset = {};
+        app.updateQuestionRewardGuidance(mode);
+        assert.equal(Number(elements.get('host-game-reward').value), recommendation.suggested, 'untouched amount defaults to the recommendation');
+        for (const prefix of ['host', 'solo']) elements.get(`${prefix}-game-reward`).dataset = { custom: '1' };
     }
     for (const prefix of ['host', 'solo']) {
         elements.delete(`${prefix}-game-reward`);

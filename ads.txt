@@ -1,0 +1,2 @@
+# Replace with your authorized AdSense seller line before enabling ads:
+# google.com, pub-XXXXXXXXXXXXXXXX, DIRECT, f08c47fec0942fa0

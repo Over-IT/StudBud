@@ -413,8 +413,8 @@ console.log('Stationary grid aim, full-cell selection, safe deselection and curr
 {
     const s = session('skyline'), g = s.game;
     s.testing = true;
-    const counts = { belt: 0, deck: 0, prop: 0, space: 0, scaffold: 0 };
-    for (const [method, key] of [['drawConveyor', 'belt'], ['drawFactoryDeck', 'deck'], ['drawProp', 'prop'], ['drawSpaceDeck', 'space'], ['drawGirders', 'scaffold']]) {
+    const counts = { belt: 0, deck: 0, frame: 0, drill: 0, space: 0, station: 0, scaffold: 0 };
+    for (const [method, key] of [['drawConveyor', 'belt'], ['drawFactoryDeck', 'deck'], ['drawFactoryFrame', 'frame'], ['drawDrill', 'drill'], ['drawSpaceDeck', 'space'], ['drawStationFrame', 'station'], ['drawGirders', 'scaffold']]) {
         const draw = g[method].bind(g);
         g[method] = (...args) => { counts[key]++; return draw(...args); };
     }
@@ -423,10 +423,10 @@ console.log('Stationary grid aim, full-cell selection, safe deselection and curr
         g.me.x = deck.x + deck.w / 2; g.me.y = deck.y - g.me.h; g.snapCam = true;
         g.draw(ctx, 1280, 720);
     }
-    assert.ok(counts.belt > 0 && counts.deck > 0 && counts.prop > 0, 'factory render path draws conveyor decks, metal connections and machines');
+    assert.ok(counts.belt > 0 && counts.deck > 0 && counts.frame > 0 && counts.drill > 0, 'factory render path draws conveyor decks, the building frame and drills/crushers');
     assert.equal(counts.scaffold, 0, 'factory no longer renders construction scaffolding');
     g.testTeleport(2); g.draw(ctx, 1280, 720);
-    assert.ok(counts.space > 0, 'space platform styles render ahead of generic roofs');
+    assert.ok(counts.space > 0 && counts.station > 0, 'space platform styles and the station frame render ahead of generic roofs');
     const crusher = g.drills.find(d => d.crusher);
     const box = { x: crusher.x - 13, y: crusher.surfaceY - 44, w: 26, h: 44 };
     g.updateDrill(crusher, crusher.period * .75 - crusher.phase);
@@ -458,60 +458,61 @@ console.log('Industrial conveyor/deck/prop render dispatch, no construction scaf
 console.log('Complete planet rings and correct rear/disk/front drawing order passed.');
 for (const fps of [30, 60, 120]) {
     const s = session('skyline'), g = s.game;
-    s.testing = true; s.testNoTide = true; g.testTeleport(2);
+    s.testing = true; s.testNoTide = true; s.testInvincible = true; g.testTeleport(2);
     assert.equal(g.inDeepSpace(), true, 'Space keeps low gravity after removing Sky');
-    const y = g.cp.y - 300;
-    const m = { x: 5000, y, by: y, w: 84, h: 84, bi: 3, meteor: true, mover: true, oneway: true,
-        direction: 1, speed: 150, verticalSpeed: 70, spawned: true, off: false, delay: 0, respawnDelay: 2,
-        viewLeft: 4700, viewWidth: 900, endX: 5950, anchorX: 5000, travelTime: 0, dx: 0, dy: 0 };
-    const block = { x: m.x + m.w + 42, y: y - 120, w: 100, h: 300, bi: 3 };
-    g.solids = [m, block]; g.movers = [m]; g.meteors = [m];
-    g.spikes = []; g.saws = []; g.drills = []; g.balls = []; g.lasers = []; g.springs = [];
-    Object.assign(g.me, { x: m.x + 28, y: m.y - g.me.h, vx: 0, vy: 0, ground: m, onGround: true });
-    for (let frame = 0; frame < fps * 2; frame++) {
-        const previousX = g.me.x, previousY = g.me.y;
-        g.update(1 / fps);
-        assert.equal(A.util.overlap(g.me, block), false, `${fps} FPS: asteroid never carries its rider inside a block`);
-        assert.equal(g.meteorPathBlocked(m, m.x, m.y), false, 'active trajectory reserves asteroid and rider clearance');
-        assert.ok(Math.abs(g.me.x - previousX) <= m.speed / fps + .01 && Math.abs(g.me.y - previousY) <= 70 / fps + .01, 'rider movement stays continuous rather than snapping');
+    const climb = g.lanes.filter(lane => lane.axis === 'x');
+    assert.ok(climb.length >= 3, 'Space builds asteroid lanes');
+    for (const lane of climb) assert.ok(lane.x1 - lane.x0 >= 1200, 'asteroids enter from well outside the viewport and cross the whole lane');
+    const lane = climb[0], rocks = g.meteors.filter(m => m.lane === lane), rock = rocks[0];
+    g.spikes = []; g.saws = []; g.drills = []; g.balls = []; g.lasers = []; g.springs = []; g.debris = [];
+    g.solids = [...rocks]; g.movers = [...rocks]; g.meteors = [...rocks];
+    const start = s.startedAt;
+    let t = 0;
+    const step = () => { t += 1 / fps; s.testPauseAt = start + t * 1000; g.update(1 / fps); };
+    s.testPauseAt = start; g.update(0);
+    // wait until the tracked rock has just appeared at its entry end
+    let guard = 0;
+    while (!(rock.off === false && rock.fade < .5 && Math.abs((lane.speed > 0 ? lane.x0 : lane.x1 - lane.size) - rock.x) < 40) && guard++ < fps * 60) step();
+    assert.ok(guard < fps * 60, 'every rock periodically spawns at the entry end of its lane');
+    const firstSeed = rock.seed, firstLap = rock.lap;
+    Object.assign(g.me, { x: rock.x + rock.w / 2 - 13, y: rock.y - g.me.h, vx: 0, vy: 0, ground: rock, onGround: true });
+    s.axis = () => ({ x: 0, y: 0 }); s.down = () => false; s.pressed = () => false;
+    let rode = 0, previous = { x: g.me.x, y: g.me.y };
+    for (let frame = 0; frame < fps * 30 && rock.lap === firstLap && !rock.off; frame++) {
+        const x = rock.x;
+        step();
+        if (rock.off || rock.lap !== firstLap) break;
+        assert.ok((rock.x - x) * Math.sign(lane.speed) >= -1e-6, `${fps} FPS: asteroids never reverse direction`);
+        if (g.me.ground === rock) {
+            rode++;
+            assert.ok(Math.abs(g.me.x - previous.x) <= Math.abs(lane.speed) / fps + 2, 'rider is carried continuously');
+        }
+        previous = { x: g.me.x, y: g.me.y };
     }
-    assert.equal(m.direction, -1, 'asteroid reverses before its trajectory reaches the obstruction');
-    const position = { x: g.me.x, y: g.me.y };
-    g.despawnMeteor(m);
-    assert.equal(g.me.ground, null); assert.equal(g.me.onGround, false);
-    assert.equal(g.me.x, position.x); assert.equal(g.me.y, position.y, 'despawning detaches without repositioning the rider');
-    m.delay = 0; g.updateMeteor(m, 1 / fps);
-    assert.equal(g.me.x, position.x); assert.equal(g.me.y, position.y, 'respawning cannot teleport the former rider');
+    assert.ok(rode > fps, `${fps} FPS: a standing player rides the asteroid`);
+    while ((rock.off || rock.lap === firstLap) && guard++ < fps * 120) step();
+    assert.notEqual(g.me.ground, rock, 'a rock leaving its lane drops its rider instead of carrying them back');
+    assert.notEqual(rock.seed, firstSeed, 'a respawned asteroid looks like a new rock');
+    assert.ok(Math.abs(rock.x - (lane.speed > 0 ? lane.x0 : lane.x1 - lane.size)) < Math.abs(lane.speed) / fps + 2, 'new rocks appear back at the entry end, not mid-lane');
 }
-console.log('Head-clear asteroid trajectory reversal, continuous riders, safe despawn/respawn and Space gravity passed at 30/60/120 FPS.');
-for (const fps of [30, 60, 120]) {
-    const s = session('skyline'), g = s.game;
-    s.testing = true; s.testNoTide = true; g.testTeleport(2);
-    g.spikes = []; g.saws = []; g.drills = []; g.balls = []; g.lasers = []; g.springs = [];
-    const m = g.meteors[0];
-    Object.assign(g.me, { x: m.wait.x + m.wait.w / 2 - 13, y: m.wait.y - 44,
-        vx: 0, vy: 0, ground: m.wait, onGround: true });
-    g.update(0);
-    assert.equal(m.off, false, 'meteor is immediately available beside its marked waiting platform');
-    assert.ok(Math.abs(m.x + m.w / 2 - g.me.x - 13) < 300, 'boarding meteor is visible in a narrow viewport');
-    assert.ok(m.wait.y - m.landing.y > (560 ** 2 + 520 ** 2) / (2 * 650), 'transfer cannot be skipped with a low-gravity double jump');
-    let board = true, boarded = false, jumpOff = false, landed = false;
-    for (let frame = 0; frame < fps * 14; frame++) {
-        const aim = jumpOff ? m.landing.x + m.landing.w / 2 : m.x + m.w / 2;
-        s.axis = () => ({ x: boarded && !jumpOff ? 0 : A.util.clamp((aim - g.me.x - 13) / 45, -1, 1), y: 0 });
-        s.down = (...keys) => keys.includes('Space');
-        const disembark = boarded && !jumpOff && m.rideTime >= m.dwell + m.rideDuration;
-        s.pressed = (...keys) => (board || disembark) && keys.includes('Space');
-        if (disembark) jumpOff = true;
-        g.update(1 / fps); board = false;
-        if (g.me.ground === m) boarded = true;
-        assert.equal(g.deaths, 0, 'complete meteor transfer never resets the player');
-        assert.ok(!g.solids.some(p => p !== m && !p.off && !p.oneway && A.util.overlap(g.me, p)), 'boarding and riding never embed the player in a solid');
-        if (g.me.ground === m.landing) { landed = true; break; }
+{
+    const g = session('skyline').game;
+    for (const lane of g.lanes) {
+        const positions = [];
+        for (let k = 0; k < lane.count; k++) for (let t = 0; t < 20; t += .25) {
+            const pos = g.lanePos(lane, k, t);
+            if (pos) positions.push(pos.at);
+        }
+        const lo = lane.axis === 'y' ? lane.y0 : lane.x0, hi = (lane.axis === 'y' ? lane.y1 : lane.x1) - lane.size;
+        assert.ok(positions.every(at => at >= lo - 1e-6 && at <= hi + 1e-6), 'lane traffic stays inside its reserved lane');
     }
-    assert.ok(boarded && jumpOff && landed, `${fps} FPS: real player inputs board, ride and disembark onto the destination`);
+    const shower = g.lanes.find(lane => lane.axis === 'y');
+    assert.ok(shower && shower.hazard, 'Space includes falling debris showers');
+    const climb = g.solids.filter(p => p.motif === 'meteor-climb' && p.via);
+    assert.ok(climb.length > 0, 'Space includes a climb that is only reachable by hopping between moving asteroids');
+    for (const top of climb) for (const lane of top.via) assert.ok(lane.y > top.y, 'climb lanes sit between the dock and the upper dock');
 }
-console.log('Visible boarding ledges, mandatory meteor transfers and real low-gravity board/ride/landing inputs passed at 30/60/120 FPS.');
+console.log('Off-screen asteroid spawns, one-way crossings, fresh rock looks, continuous riders, safe drop-offs and the asteroid climb passed at 30/60/120 FPS.');
 for (const fps of [30, 60, 120]) {
     const s = session('skyline'), g = s.game;
     s.testing = true; s.testNoTide = true; s.testInvincible = true;

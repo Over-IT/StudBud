@@ -127,7 +127,7 @@
             this.matches = new Set();
             items.forEach((item, index) => {
                 const rect = bounds(item), first = Math.floor(rect.y / 256), last = Math.floor((rect.y + rect.h) / 256);
-                if (item.mover || last - first > 128) { this.broad.push(index); return; }
+                if ((item.mover && !item.lane) || last - first > 128) { this.broad.push(index); return; }
                 for (let band = first; band <= last; band++) {
                     if (!this.buckets.has(band)) this.buckets.set(band, []);
                     this.buckets.get(band).push(index);
@@ -188,12 +188,14 @@
                 if (rose && b.vy === 0) { b.onGround = true; b.ground = s; }
                 continue;
             }
-            if (b.vx > 0 || (b.vx === 0 && b.x + b.w / 2 < s.x + s.w / 2)) { b.x = s.x - b.w; b.wall = 1; }
+            // resolve by motion relative to the solid, so a cart sliding into you pushes you along its travel
+            const relative = b.vx * dt - (s.dx || 0);
+            if (relative > 0 || (relative === 0 && b.x + b.w / 2 < s.x + s.w / 2)) { b.x = s.x - b.w; b.wall = 1; }
             else { b.x = s.x + s.w; b.wall = -1; }
-            b.vx = 0;
+            if (!s.dx || Math.sign(b.vx) !== Math.sign(s.dx)) b.vx = 0;
         }
         for (const s of solids) {
-            if (!s.slope || s.off || !overlap(b, s)) continue;
+            if (!s.slope || s.off || s.oneway || !overlap(b, s)) continue;
             const oldSurface = slopeSurface(s, prevX, b.w);
             const surface = slopeSurface(s, b.x, b.w);
             if (b.y + b.h > surface + 2 && prevGround !== s && prevY + b.h > oldSurface + 2) {
@@ -207,7 +209,8 @@
         for (const s of solids) {
             if (s.slope && !s.off) {
                 if (b.x + b.w <= s.x || b.x >= s.x + s.w) continue;
-                if (b.vy < 0 && b.y < s.y + s.h && prevY >= s.y + s.h - 1) {
+                // a jump-through slope (a fire-escape flight) only ever catches you from above
+                if (b.vy < 0 && !s.oneway && b.y < s.y + s.h && prevY >= s.y + s.h - 1) {
                     b.y = s.y + s.h; b.vy = 0;
                     continue;
                 }
@@ -219,9 +222,11 @@
                 continue;
             }
             if (s.off || !overlap(b, s)) continue;
+            // compare against where a moving deck's top was last frame too, so a rising lift catches you instead of shoving you sideways
+            const top = Math.max(s.y, s.y - (s.dy || 0));
             if (s.oneway) {
-                if (b.vy >= 0 && prevBottom <= s.y + 6) { b.y = s.y - b.h; b.vy = 0; b.onGround = true; b.ground = s; }
-            } else if (b.vy >= 0 && prevBottom <= s.y + 12 + Math.abs(b.vy) * dt) {
+                if (b.vy >= 0 && prevBottom <= top + 6) { b.y = s.y - b.h; b.vy = 0; b.onGround = true; b.ground = s; }
+            } else if (b.vy >= 0 && prevBottom <= top + 12 + Math.abs(b.vy) * dt) {
                 b.y = s.y - b.h; b.vy = 0; b.onGround = true; b.ground = s;
             } else if (b.vy < 0) {
                 // a jump that only clips a ceiling corner slides past it instead of bonking
@@ -291,11 +296,25 @@
         ctx.fillText(name, x, y);
     }
 
-    function graphicsProfile(mode = window.NexusApp?.AppState?.get('settings')?.gameQuality || 'auto', device = window.navigator || {}) {
-        const low = mode === 'low' || (mode === 'auto' && ((device.hardwareConcurrency || 8) <= 4
-            || (device.deviceMemory || 8) <= 4 || device.connection?.saveData || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches));
-        return { low: Boolean(low), maxDpr: low ? 1 : 2, fps: low ? 60 : 120, previewFps: low ? 12 : 24,
-            avatarFps: low ? 12 : 30, particleScale: low ? .35 : 1, particleLimit: low ? 90 : 320 };
+    function graphicsProfile() {
+        // Legacy saved quality preferences do not affect rendering fidelity.
+        // fps: Infinity = draw on every display refresh (no artificial frame cap)
+        return { low: false, maxDpr: 2, fps: Infinity, previewFps: 60,
+            avatarFps: 60, particleScale: 1, particleLimit: 320 };
+    }
+
+    function canvasView(ctx, margin = 0) {
+        const m = ctx.getTransform?.(), canvas = ctx.canvas;
+        if (!m || !canvas || !Number.isFinite(canvas.width) || !Number.isFinite(canvas.height)) return null;
+        const det = m.a * m.d - m.b * m.c;
+        if (!Number.isFinite(det) || Math.abs(det) < 1e-12) return null;
+        const x = (m.c * m.f - m.d * m.e) / det, y = (m.b * m.e - m.a * m.f) / det;
+        const dx = m.d * canvas.width / det, dy = -m.b * canvas.width / det;
+        const ex = -m.c * canvas.height / det, ey = m.a * canvas.height / det;
+        return { x0: x + Math.min(0, dx) + Math.min(0, ex) - margin,
+            x1: x + Math.max(0, dx) + Math.max(0, ex) + margin,
+            y0: y + Math.min(0, dy) + Math.min(0, ey) - margin,
+            y1: y + Math.max(0, dy) + Math.max(0, ey) + margin };
     }
 
     class Particles {
@@ -324,7 +343,10 @@
             this.items.length = kept;
         }
         draw(ctx) {
+            const view = canvasView(ctx, 8);
             for (const p of this.items) {
+                const radius = p.size / 2;
+                if (view && (p.x + radius < view.x0 || p.x - radius > view.x1 || p.y + radius < view.y0 || p.y - radius > view.y1)) continue;
                 ctx.globalAlpha = clamp(p.life / p.max, 0, 1);
                 ctx.fillStyle = p.color;
                 ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
@@ -343,6 +365,19 @@
         drain(n) { this.value = Math.max(0, this.value - n); }
         add(n) { this.value += n; }
     }
+
+    // Resource costs shared by players and bots. Tuned so the recommended answer reward lasts roughly
+    // 10 seconds of typical play in every mode (see questionRewardRecommendation in app.js).
+    const ENERGY_COSTS = Object.freeze({
+        skyline: Object.freeze({ run: 0.5, air: 0.3, jump: 2, wallJump: 3, airJump: 3, dash: 8 }),
+        duel: Object.freeze({ swing: 3, special: 10, guard: 5 }),
+        miner: Object.freeze({ jet: 9, dig: 2.8 }),
+        river: Object.freeze({ cast: 6 }),
+        fishing: Object.freeze({ cast: 10 }),
+        market: Object.freeze({ walk: 2.5, sprint: 10 }),
+        sports: Object.freeze({ walk: 2.5, sprint: 10, kickMin: 3, kickMax: 10 }),
+        shooter: Object.freeze({ nova: 30 })
+    });
 
     class BaseGame {
         constructor(session) {
@@ -1260,13 +1295,7 @@
 
         resize() {
             this.graphics = graphicsProfile();
-            if (this.adaptiveLow) {
-                this.graphics.low = true;
-                this.graphics.maxDpr = Math.min(this.graphics.maxDpr, 1);
-                this.graphics.particleScale = Math.min(this.graphics.particleScale, .35);
-                this.graphics.particleLimit = Math.min(this.graphics.particleLimit, 90);
-            }
-            const dpr = Math.min(window.devicePixelRatio || 1, this.graphics.maxDpr) * (this.resolutionScale || 1);
+            const dpr = Math.min(window.devicePixelRatio || 1, this.graphics.maxDpr);
             const w = this.overlay.clientWidth, h = this.overlay.clientHeight;
             if (this.canvas.width !== Math.floor(w * dpr)) this.canvas.width = Math.floor(w * dpr);
             if (this.canvas.height !== Math.floor(h * dpr)) this.canvas.height = Math.floor(h * dpr);
@@ -1405,9 +1434,6 @@
         // ---------- main loop ----------
         frame(now) {
             if (this.destroyed) return;
-            const workStarted = performance.now();
-            const elapsed = now - this.lastFrame;
-            this.frameInterval = this.frameInterval === undefined ? elapsed : this.frameInterval * .9 + elapsed * .1;
             const dt = Math.min(0.05, (now - this.lastFrame) / 1000);
             this.lastFrame = now;
             if (!this.over) {
@@ -1453,31 +1479,11 @@
             this.justPressed.clear();
             this.mouse.pressed = false;
             this.mouse.rpressed = false;
-            if ((this.mode !== 'chess' || this.preview) && now - (this.lastDrawAt ?? -Infinity) >= 1000 / (this.graphics?.fps || 60) - .1) {
+            if ((this.mode !== 'chess' || this.preview) && now - (this.lastDrawAt ?? -Infinity) >= 1000 / (this.graphics?.fps ?? Infinity) - .1) {
                 this.lastDrawAt = now;
                 const ctx = this.ctx;
                 ctx.setTransform(this.dpr * this.scale, 0, 0, this.dpr * this.scale, 0, 0);
                 this.game.draw(ctx, this.vw, this.vh);
-            }
-            if (this.mode !== 'chess' && !this.preview && !this.paused && !this.over) {
-                const cost = performance.now() - workStarted;
-                this.frameCost = this.frameCost === undefined ? cost : this.frameCost * .95 + cost * .05;
-                this.performanceFrames = (this.performanceFrames || 0) + 1;
-                if (this.performanceFrames >= (this.frameCost > 12 || this.frameInterval > 26 ? 30 : 240)) {
-                    this.performanceFrames = 0;
-                    const scale = this.resolutionScale || 1;
-                    const struggling = this.frameCost > 12 || this.frameInterval > 26;
-                    const recovered = this.frameCost < 5 && this.frameInterval < 19;
-                    this.strugglingWindows = struggling ? (this.strugglingWindows || 0) + 1 : 0;
-                    const next = struggling ? Math.max(.5, scale - .15) : recovered ? Math.min(1, scale + .05) : scale;
-                    // Low detail needs sustained slowness and then latches, so scenes don't flicker between detail modes.
-                    const low = this.strugglingWindows >= 3 || this.adaptiveLow;
-                    if (this.canvas && (Math.abs(next - scale) > .01 || !!low !== !!this.adaptiveLow)) {
-                        this.resolutionScale = next;
-                        this.adaptiveLow = !!low;
-                        this.resize();
-                    }
-                }
             }
             this.raf = requestAnimationFrame(t => this.frame(t));
         }
@@ -2514,7 +2520,7 @@
 
     window.StudBudArcade = {
         graphicsProfile,
-        Session, BaseGame, Particles, Resource, games: {},
-        util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, VerticalIndex, slopeY, slopeSurface, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, accountTagMarkup, who, playerCosmetics, avatarUrl, avatarMarkup, animatedCosmetics, drawAvatar, observeAvatars, drawHat, drawFigureSide, drawFigureTop, sceneZoom, questionHistoryMarkup, defaultPlayerColors }
+        Session, BaseGame, Particles, Resource, ENERGY_COSTS, games: {},
+        util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, VerticalIndex, slopeY, slopeSurface, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, accountTagMarkup, who, playerCosmetics, avatarUrl, avatarMarkup, animatedCosmetics, drawAvatar, observeAvatars, drawHat, drawFigureSide, drawFigureTop, sceneZoom, canvasView, questionHistoryMarkup, defaultPlayerColors }
     };
 })(window);

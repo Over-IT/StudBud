@@ -1252,11 +1252,14 @@
             waitingCanvas.addEventListener('contextmenu', event => event.preventDefault());
             document.addEventListener('input', event => {
                 if (event.target.matches('[data-reward-slider]')) {
-                    document.getElementById(event.target.dataset.rewardSlider).value = event.target.value;
+                    const linked = document.getElementById(event.target.dataset.rewardSlider);
+                    linked.value = event.target.value;
+                    linked.dataset.custom = '1';
                     this.updateQuestionRewardGuidance();
                 }
                 if (event.target.matches('#host-game-reward, #solo-game-reward')) {
                     if (event.target.validity.valid) document.querySelector(`[data-reward-slider="${event.target.id}"]`).value = event.target.value;
+                    event.target.dataset.custom = '1';
                     this.updateQuestionRewardGuidance();
                 }
                 if (event.target.matches('#grade-scenario-assignment-form [name="pointsEarned"], #grade-scenario-assignment-form [name="maxPoints"]')) {
@@ -1588,7 +1591,7 @@
 
         renderCourses() {
             const courses = AppState.get('courses') || [];
-            const catalog = window.PCHS_COURSE_CATALOG || [];
+            const catalog = window.STUDBUD_COURSE_CATALOG || window.PCHS_COURSE_CATALOG || [];
             const body = document.getElementById('transcript-body');
             const cards = document.getElementById('class-card-grid');
             const summary = document.getElementById('cumulative-gpa-summary');
@@ -2161,7 +2164,7 @@
             container.querySelectorAll('select[data-ic-class]').forEach(select => {
                 overrides[plan.classes[Number(select.dataset.icClass)].key] = select.value;
             });
-            const options = { overrides, catalog: window.PCHS_COURSE_CATALOG || [] }; // full catalog so previously saved codes still resolve
+            const options = { overrides, catalog: window.STUDBUD_COURSE_CATALOG || window.PCHS_COURSE_CATALOG || [] }; // full catalog so previously saved codes still resolve
             container.querySelectorAll('[data-ic-option]').forEach(box => { options[box.dataset.icOption] = box.checked; });
             if (Object.values(overrides).every(value => value === 'skip')) throw new Error('Choose at least one class to import.');
             const result = IC.applyImportPlan(model, plan, {
@@ -2430,7 +2433,7 @@
 
         /** Minimize the sum of class target percentages while meeting the credit-weighted GPA goal. */
         gpaTargetPlan(targetGpa, mode = 'weighted', courses = AppState.get('courses') || []) {
-            const scale = (window.studbudGradeScale?.() || window.PCHS_GRADE_SCALE || []).slice().sort((a, b) => a.minPct - b.minPct);
+            const scale = (window.studbudGradeScale?.() || window.PARKWAY_GRADE_SCALE || []).slice().sort((a, b) => a.minPct - b.minPct);
             const points = (item, course) => Number(mode === 'weighted' && course.isWeighted ? item.weighted : item.unweighted);
             const rows = courses.map(course => {
                 const ladder = [];
@@ -3361,10 +3364,28 @@
         }
 
         closeUnboxing() {
+            this.unboxState?.resizeObserver?.disconnect();
             clearTimeout(this.unboxState?.timer);
             this.unboxState?.resolve?.();
             this.unboxState?.overlay?.remove();
             this.unboxState = null;
+        }
+
+        unboxingLandingOffset(strip, winningTile, marker) {
+            strip.style.transform = 'translateX(0px)';
+            const tileRect = winningTile.getBoundingClientRect();
+            const markerRect = marker.getBoundingClientRect();
+            // Ancestor pop/reveal animations scale DOM rects, but translateX uses local pixels.
+            const scale = markerRect.width / marker.offsetWidth || 1;
+            return (markerRect.left + markerRect.width / 2 - tileRect.left - tileRect.width / 2) / scale;
+        }
+
+        mysteryDropMessage(item, profile) {
+            const reward = item?.name || profile.unlocked_item || 'cosmetic';
+            const rarity = item?.rarity || profile.rarity || '';
+            return profile.duplicate
+                ? `Duplicate: ${reward}. ${Math.max(0, Number(profile.refund) || 0)} coins refunded.`
+                : `New ${rarity} drop: ${reward}!`;
         }
 
         async revealUnboxing(item, profile) {
@@ -3383,7 +3404,7 @@
             const winnerIndex = 30;
             const reel = Array.from({ length: 36 }, (_, index) => index === winnerIndex ? item : pick());
             const strip = overlay.querySelector('.unbox-strip');
-            strip.innerHTML = reel.map(entry => `<span class="unbox-tile rarity-${entry.rarity}">${this.shopItemPreview(profile, entry)}<small>${this.escapeHTML(entry.name)}</small></span>`).join('');
+            strip.innerHTML = reel.map(entry => `<span class="unbox-tile rarity-${entry.rarity}" data-item-id="${this.escapeHTML(entry.id)}">${this.shopItemPreview(profile, entry)}<small>${this.escapeHTML(entry.name)}</small></span>`).join('');
             const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
             const wait = ms => new Promise(resolve => {
                 state.resolve = resolve;
@@ -3393,13 +3414,14 @@
             if (this.unboxState !== state) return;
             overlay.classList.replace('phase-shake', 'phase-spin');
             window.StudBudSfx?.play('open', 'ui');
-            const tileWidth = strip.firstElementChild?.getBoundingClientRect().width || 120;
-            const gap = parseFloat(getComputedStyle(strip).columnGap) || 10;
-            const reelWidth = overlay.querySelector('.unbox-reel').clientWidth;
-            const offset = winnerIndex * (tileWidth + gap) + tileWidth / 2 - reelWidth / 2 + (Math.random() - .5) * tileWidth * .6;
+            const winningTile = strip.children[winnerIndex];
+            const marker = overlay.querySelector('.unbox-marker');
+            const offset = this.unboxingLandingOffset(strip, winningTile, marker);
+            // Commit the starting layout before enabling the transition (including cached/instant replies).
+            void strip.offsetWidth;
             const spinMs = state.skipped || reduce ? 0 : 4200;
             strip.style.transition = `transform ${spinMs}ms cubic-bezier(.08, .72, .16, 1)`;
-            requestAnimationFrame(() => { strip.style.transform = `translateX(${-offset}px)`; });
+            strip.style.transform = `translateX(${offset}px)`;
             if (spinMs) {
                 let last = -1;
                 const started = performance.now();
@@ -3416,7 +3438,15 @@
             await wait(spinMs + 250);
             if (this.unboxState !== state) return;
             strip.style.transition = 'none';
-            strip.style.transform = `translateX(${-(winnerIndex * (tileWidth + gap) + tileWidth / 2 - reelWidth / 2)}px)`;
+            const alignWinner = () => {
+                strip.style.transition = 'none';
+                strip.style.transform = `translateX(${this.unboxingLandingOffset(strip, winningTile, marker)}px)`;
+            };
+            alignWinner();
+            if (window.ResizeObserver) {
+                state.resizeObserver = new window.ResizeObserver(alignWinner);
+                state.resizeObserver.observe(overlay.querySelector('.unbox-reel'));
+            }
             overlay.classList.remove('phase-spin');
             overlay.classList.add('phase-reveal', `rarity-${item.rarity}`);
             const big = ['legendary', 'mythic'].includes(item.rarity);
@@ -3424,10 +3454,13 @@
             overlay.querySelector('.unbox-confetti').innerHTML = reduce ? '' : Array.from({ length: pieces }, (_, index) =>
                 `<i style="--x:${(Math.random() * 2 - 1).toFixed(2)};--y:${(-Math.random() - .35).toFixed(2)};--r:${Math.round(Math.random() * 720)}deg;--d:${(index % 8) * 35}ms;--h:${Math.round(Math.random() * 360)}"></i>`).join('');
             const again = games.boxPool(box, profile.owned_items || []).length && profile.coins >= box.price;
-            overlay.querySelector('.unbox-result').innerHTML = `<div class="unbox-card rarity-${item.rarity}">
+            winningTile?.classList?.add('is-winner');
+            overlay.querySelector('.unbox-result').innerHTML = `<div class="unbox-card rarity-${item.rarity}${profile.duplicate ? ' is-duplicate' : ''}">
+                    <span class="unbox-badge">${profile.duplicate ? 'Duplicate' : 'New!'}</span>
                     <span class="unbox-card-preview">${this.shopItemPreview(profile, item, true)}</span>
                     <small class="rarity-label">${this.escapeHTML(item.rarity)}${item.set ? ` · ${this.escapeHTML(item.set)} set` : ''}</small>
                     <strong>${this.escapeHTML(item.name)}</strong>
+                    <span>${this.escapeHTML(this.mysteryDropMessage(item, profile))}</span>
                     ${item.description ? `<span>${this.escapeHTML(item.description)}</span>` : ''}
                     <div class="unbox-actions">
                         <button type="button" class="primary-btn" data-action="multiplayer-equip" data-id="${this.escapeHTML(item.id)}">Equip now</button>
@@ -4073,7 +4106,7 @@
                 await this.renderMultiplayerProfile(true);
                 if (action === 'multiplayer-mystery') {
                     const item = window.StudBudCommunityGames.catalog.find(entry => entry.id === unlockedItem);
-                    document.getElementById('multiplayer-shop-status').textContent = `New ${item?.rarity || profile.rarity} drop: ${item?.name || 'cosmetic'}!`;
+                    document.getElementById('multiplayer-shop-status').textContent = this.mysteryDropMessage(item, profile);
                     await this.revealUnboxing(item, profile);
                 }
                 if (action === 'multiplayer-equip' && itemId.startsWith('palette_')) {
@@ -4132,16 +4165,16 @@
 
         questionRewardRecommendation(mode) {
             const recommendations = {
-                skyline: [25, 45, 'About 4-7 basic jumps or 1 dash, before movement costs.'],
-                duel: [20, 35, 'About 2-4 attacks or 1-2 seconds of shielding.'],
+                skyline: [30, 50, 'About 10 seconds of climbing: jumps cost 2, air and wall jumps 3, dashes 8, plus a light running drain.'],
+                duel: [25, 45, 'About 10 seconds of fighting: swings cost 3, the Special 10 and shielding 5 per second.'],
                 defense: [20, 40, 'Pays $60-120 into your shared team wallet; troops, enemies and upgrades all cost cash.'],
-                miner: [25, 45, 'About 2-4 seconds of jetpack use or 9-16 seconds of mining.'],
-                river: [20, 40, 'About 2-4 net casts.'],
-                frenzy: [20, 40, 'About 2-4 net casts.'],
-                fishing: [20, 40, 'About 2-4 fishing casts.'],
-                market: [30, 60, 'About 10-20 seconds of walking or 2-4 seconds of sprinting.'],
-                sports: [30, 50, 'About 2-3 full-power kicks, before movement costs.'],
-                shooter: [20, 40, 'About 20-40 basic shots or 1 shockwave at 30 or above.'],
+                miner: [30, 45, 'About 10 seconds of digging and flying: mining costs 2.8 fuel per second, the jetpack 9.'],
+                river: [20, 40, 'About 10 seconds of fishing: each net cast costs 6 bait.'],
+                frenzy: [15, 30, 'About 10 seconds of fishing: each cast costs 10 bait.'],
+                fishing: [15, 30, 'About 10 seconds of fishing: each cast costs 10 bait.'],
+                market: [40, 60, 'About 10 seconds of deliveries: walking costs 2.5 per second, sprinting 10.'],
+                sports: [50, 70, 'About 10 seconds of play: dribbling costs 2.5 per second, sprinting 10 and kicks 3-10.'],
+                shooter: [30, 50, 'About 10 seconds of combat: basic shots cost 1 ammo; the shockwave costs 30.'],
                 crypto: [15, 30, 'Pays 120-240 research cash before analyst bonuses. Trading has no refill cycle.'],
                 hack: [10, 25, 'Pays 30-75 crypto per mining answer. This changes payouts, not question frequency.']
             };
@@ -4155,6 +4188,12 @@
                 const input = document.getElementById(`${prefix}-game-reward`);
                 const guidance = document.getElementById(`${prefix}-game-reward-guidance`);
                 if (!input || !guidance) continue;
+                // the amount follows each game's recommendation until the player picks their own
+                if (mode !== 'chess' && !input.dataset?.custom && Number(input.value) !== suggested) {
+                    input.value = suggested;
+                    const slider = document.querySelector(`[data-reward-slider="${prefix}-game-reward"]`);
+                    if (slider) slider.value = suggested;
+                }
                 if (mode === 'chess') {
                     guidance.textContent = 'Chess always awards exactly one move per correct answer. Resource amount does not apply.';
                     continue;
@@ -4535,7 +4574,8 @@
                 const waiting = document.getElementById('waiting-arcade-card');
                 if (waiting && !waiting.classList.contains('hidden') && this.canvasIsVisible(document.getElementById('waiting-runner-canvas'))) {
                     this.stepWaitingRunner(delta);
-                    if (drawPreviews) this.drawWaitingWarmup(document.getElementById('waiting-runner-canvas'), now / 1000);
+                    // the waiting runner is playable, so it renders every display frame rather than at the thumbnail rate
+                    this.drawWaitingWarmup(document.getElementById('waiting-runner-canvas'), now / 1000);
                 }
                 this.multiplayerFrame = requestAnimationFrame(animate);
             };
@@ -4759,7 +4799,7 @@
                 }
                 U.moveBody(b, game.solids, dt);
                 if (ready && tgt && b.swingCd <= 0 && b.stun <= 0 && bd < 115) {
-                    b.ai.energy = Math.max(0, (b.ai.energy ?? 100) - 8);
+                    b.ai.energy = Math.max(0, (b.ai.energy ?? 100) - window.StudBudArcade.ENERGY_COSTS.duel.swing);
                     const ang = Math.atan2(tgt.y - b.y, tgt.x - b.x);
                     b.swingT = 0.22; b.swingCd = 0.6 + (b.ai?.rng?.() || 0.5) * 0.5; b.swing = now; b.swingAim = ang;
                     const ev = { k: 'sw', x: b.x + 17, y: b.y + 28, d: b.f, a: ang, p: 1, by: b.id, c: b.dmg };
@@ -4917,7 +4957,7 @@
             const all = demo.bots.map(b => ({ x: b.x, y: b.y, team: b.team, id: b.id }));
             all.push({ x: game.me.x, y: game.me.y, team: game.myTeam, id: demo.meId });
             for (const b of demo.bots) {
-                const ready = this.botResourceReady(demo, b, dt, Math.hypot(b.vx, b.vy) > 20 ? 3 : 0);
+                const ready = this.botResourceReady(demo, b, dt, Math.hypot(b.vx, b.vy) > 20 ? window.StudBudArcade.ENERGY_COSTS.sports.walk : 0);
                 b.seen = now; b.ex = { t: 0 }; b.kickCd -= dt;
                 const own = all.filter(o => o.team === b.team);
                 const closest = own.reduce((best, o) => Math.hypot(o.x - ball.x, o.y - ball.y) < Math.hypot(best.x - ball.x, best.y - ball.y) ? o : best, own[0]);
@@ -4948,11 +4988,11 @@
                     const nx = bx / (bd || 1), ny = by / (bd || 1);
                     ball.x = b.x + nx * min; ball.y = b.y + ny * min;
                     const goalAngle = Math.atan2(goalY + (b.ai.rng() - 0.5) * 105 - ball.y, goalX - ball.x);
-                    const shoot = b.kickCd <= 0 && b.ai.energy >= 10 && Math.abs(goalX - ball.x) < 690 && (chaser || b.role === 'attacker');
+                    const shoot = b.kickCd <= 0 && b.ai.energy >= window.StudBudArcade.ENERGY_COSTS.sports.kickMax && Math.abs(goalX - ball.x) < 690 && (chaser || b.role === 'attacker');
                     const shotSpeed = shoot ? 850 + b.ai.aggression * 90 : 300;
                     ball.vx = Math.cos(goalAngle) * shotSpeed; ball.vy = Math.sin(goalAngle) * shotSpeed;
                     game.lastTouch = b.id;
-                    if (shoot) { b.kickCd = 3; b.ai.energy = Math.max(0, (b.ai.energy ?? 100) - 10); }
+                    if (shoot) { b.kickCd = 3; b.ai.energy = Math.max(0, (b.ai.energy ?? 100) - window.StudBudArcade.ENERGY_COSTS.sports.kickMax); }
                 }
             }
         }
@@ -5041,7 +5081,7 @@
                 if (demo.clock >= ai.rechargeAt) { ai.energy += demo.session.rewardAmount(); ai.rechargeAt = 0; }
                 b.vx *= Math.max(0, 1 - 8 * dt);
             } else {
-                ai.energy = Math.max(0, ai.energy - (b.onGround ? 2 : 1.2) * dt);
+                ai.energy = Math.max(0, ai.energy - (b.onGround ? window.StudBudArcade.ENERGY_COSTS.skyline.run : window.StudBudArcade.ENERGY_COSTS.skyline.air) * dt);
                 const groundIndex = b.onGround ? R.list.findIndex(p => p === b.ground || p.surface === b.ground) : -1;
                 if (groundIndex > st.i) { st.i = groundIndex; st.progressAt = demo.clock; st.flagDone = !R.flags.has(groundIndex); st.jump = null; }
                 if (st.wait > 0) st.wait -= dt;
@@ -5062,12 +5102,12 @@
                     } else {
                         const choices = [{ dbl: 0.08, dash: null }, { dbl: 0.22, dash: null }, { dbl: 0.16, dash: 0.35 }, { dbl: 0.3, dash: 0.18 }];
                         const plan = choices.find(choice => {
-                            if (choice.dbl > 0.1 && ai.energy < 18) return false;
-                            if (choice.dash !== null && ai.energy < 34) return false;
+                            if (choice.dbl > 0.1 && ai.energy < window.StudBudArcade.ENERGY_COSTS.skyline.jump + window.StudBudArcade.ENERGY_COSTS.skyline.airJump) return false;
+                            if (choice.dash !== null && ai.energy < window.StudBudArcade.ENERGY_COSTS.skyline.jump + window.StudBudArcade.ENERGY_COSTS.skyline.airJump + window.StudBudArcade.ENERGY_COSTS.skyline.dash) return false;
                             return this.skyPredict(game, R, { cur: st.i }, b, b.vx, dir, choice) > st.i;
                         });
-                        if (plan && ai.energy >= 6) {
-                            b.vy = -850; ai.energy -= 6; b.airJumps = 1;
+                        if (plan && ai.energy >= window.StudBudArcade.ENERGY_COSTS.skyline.jump) {
+                            b.vy = -850; ai.energy -= window.StudBudArcade.ENERGY_COSTS.skyline.jump; b.airJumps = 1;
                             st.jump = { t: demo.clock, v: plan, dbl: false, dash: false };
                             b.face = dir; st.moving = true;
                         } else {
@@ -5091,11 +5131,11 @@
                 if (keys.dir) b.vx += U.clamp(keys.dir * 340 * speed - b.vx, -2300 * dt, 2300 * dt);
                 b.vy = Math.min(1150, b.vy + 2300 * dt);
                 if (!keys.hold && b.vy < -250) b.vy += 2600 * dt;
-                if (keys.dbl && !st.jump.dbl && (b.airJumps || 0) > 0 && ai.energy >= 12) {
-                    b.vy = -780; b.airJumps--; ai.energy -= 12; st.jump.dbl = true;
+                if (keys.dbl && !st.jump.dbl && (b.airJumps || 0) > 0 && ai.energy >= window.StudBudArcade.ENERGY_COSTS.skyline.airJump) {
+                    b.vy = -780; b.airJumps--; ai.energy -= window.StudBudArcade.ENERGY_COSTS.skyline.airJump; st.jump.dbl = true;
                 }
-                if (keys.dash && !st.jump.dash && b.dashCd <= 0 && ai.energy >= 25) {
-                    b.dash = 0.16; b.dashCd = 0.9; ai.energy -= 25; st.jump.dash = true;
+                if (keys.dash && !st.jump.dash && b.dashCd <= 0 && ai.energy >= window.StudBudArcade.ENERGY_COSTS.skyline.dash) {
+                    b.dash = 0.16; b.dashCd = 0.9; ai.energy -= window.StudBudArcade.ENERGY_COSTS.skyline.dash; st.jump.dash = true;
                 }
             } else if (!b.onGround) {
                 b.vy = Math.min(1150, b.vy + 2300 * dt);
@@ -5475,7 +5515,7 @@
             const U = window.StudBudArcade.util;
             const ai = bot.ai || (bot.ai = { rng: U.mulberry32(U.hashStr(`${mode}:${bot.id}`)), speed: 1, aggression: 0.5, reaction: 0.3, area: (index + 0.5) / 3, phase: index, stuck: 0, lastX: bot.x, lastY: bot.y });
             const rand = ai.rng || Math.random, W = game.W || game.WIDTH || 1600, H = game.H || 800;
-            const ready = mode === 'miner' || this.botResourceReady(demo, bot, dt, Math.hypot(bot.vx, bot.vy) > 20 ? 3 : 0);
+            const ready = mode === 'miner' || this.botResourceReady(demo, bot, dt, Math.hypot(bot.vx, bot.vy) > 20 ? window.StudBudArcade.ENERGY_COSTS.market.walk : 0);
             const speed = ready ? (mode === 'miner' ? 74 : mode === 'market' ? game.baseSpeed : mode === 'river' ? 115 : mode === 'hack' ? 112 : 84) * (ai.speed || 1) : 0;
             const setTarget = (target, duration = 2.2) => { ai.target = target; ai.targetUntil = clock + duration; };
             let target = ai.target;
@@ -5533,7 +5573,7 @@
                 this.moveBotToward(bot, dx, dy, speed, dt);
                 ai.castTimer -= dt;
                 if (ready && fish && ai.castTimer <= 0 && Math.hypot(p.x - bot.x, p.y - bot.y) < 78 + game.fishSpec(fish.type).r) {
-                    ai.energy = Math.max(0, (ai.energy ?? 100) - 10);
+                    ai.energy = Math.max(0, (ai.energy ?? 100) - window.StudBudArcade.ENERGY_COSTS.river.cast);
                     bot.score = (bot.score || 0) + game.fishSpec(fish.type).v;
                     ai.catches = (ai.catches || 0) + 1;
                     game.away.set(fish.i, clock + 9);
@@ -5594,8 +5634,8 @@
                 const type = game.tile(tx, ty);
                 const diggable = type > 0 && type !== 6 && type !== 10
                     && Math.hypot(tx * TS + TS / 2 - cx, ty * TS + TS / 2 - cy) < TS * 2.25;
-                if (diggable && !recharging && bot.fuel >= 2.8 * dt) {
-                    bot.fuel = Math.max(0, bot.fuel - 2.8 * dt);
+                if (diggable && !recharging && bot.fuel >= window.StudBudArcade.ENERGY_COSTS.miner.dig * dt) {
+                    bot.fuel = Math.max(0, bot.fuel - window.StudBudArcade.ENERGY_COSTS.miner.dig * dt);
                     if (!ai.dig || ai.dig.x !== tx || ai.dig.y !== ty) ai.dig = { x: tx, y: ty, progress: 0 };
                     ai.dig.progress += dt;
                     bot.vx *= Math.max(0, 1 - 10 * dt);
@@ -5615,10 +5655,10 @@
                 }
 
                 bot.vy = Math.min(860, (bot.vy || 0) + 1750 * dt);
-                const shouldJet = !recharging && dy < -42 && bot.fuel >= 11 * dt;
+                const shouldJet = !recharging && dy < -42 && bot.fuel >= window.StudBudArcade.ENERGY_COSTS.miner.jet * dt;
                 if (shouldJet) {
                     bot.vy = Math.max(-590, bot.vy - 3000 * dt);
-                    bot.fuel = Math.max(0, bot.fuel - 11 * dt);
+                    bot.fuel = Math.max(0, bot.fuel - window.StudBudArcade.ENERGY_COSTS.miner.jet * dt);
                 }
                 U.moveBody(bot, game.collisionSolids(bot), dt);
                 bot.x = U.clamp(bot.x, TS + 1, game.W - TS - bot.w - 1);
@@ -5877,7 +5917,7 @@
                     };
                     const cosmetics = this.profileCosmetics(this.multiplayerProfile || {});
                     const base = {
-                        preview: true, stickJumpHeld: false, seed: 4242, local: { id: 'demo', color: '#38bdf8', nickname: 'You', cos: { skin: cosmetics.skin, hat: cosmetics.hat, acc: cosmetics.acc, effect: cosmetics.effect } }, user: { id: 'demo' }, t: 0, startedAt: Date.now(), done: false, finishMs: 0, over: false, paused: false, question: null, score: 0,
+                        preview: true, lowDetail: false, graphics: A.graphicsProfile(), stickJumpHeld: false, seed: 4242, local: { id: 'demo', color: '#38bdf8', nickname: 'You', cos: { skin: cosmetics.skin, hat: cosmetics.hat, acc: cosmetics.acc, effect: cosmetics.effect } }, user: { id: 'demo' }, t: 0, startedAt: Date.now(), done: false, finishMs: 0, over: false, paused: false, question: null, score: 0,
                         vw: viewWidth, vh: viewHeight, scale: 1, canvas: mockCanvas, overlay: mockOverlay, roster: new Map(), cards: [], keys: hold, hudBounds() { return { x: 12, y: 12, w: Math.max(1, this.vw - 24), h: Math.max(1, this.vh - 24) }; }, mouse: { x: width / 2, y: height / 2, down: false, pressed: false, touchAt: 0 },
                         down: (...keys) => keys.some(key => hold.has(key)), pressed: (...keys) => keys.some(key => tap.has(key)),
                         axis: () => ({ x: (hold.has('KeyD') || hold.has('ArrowRight') ? 1 : 0) - (hold.has('KeyA') || hold.has('ArrowLeft') ? 1 : 0), y: (hold.has('KeyS') || hold.has('ArrowDown') ? 1 : 0) - (hold.has('KeyW') || hold.has('ArrowUp') ? 1 : 0) }),
@@ -6724,6 +6764,11 @@
             if (targetGpa) targetGpa.value = String(Number.isFinite(Number(profile.targetGpa)) && profile.targetGpa !== '' && profile.targetGpa !== null ? Number(Number(profile.targetGpa).toFixed(2)) : 3.8);
             const currentTermSetting = document.getElementById('settings-current-term');
             if (currentTermSetting) currentTermSetting.value = profile.currentTerm || 'auto';
+            const schoolSetting = document.getElementById('settings-school');
+            if (schoolSetting && !schoolSetting.dataset?.dirty) {
+                const stored = profile.school || window.StudBudCloud?.user?.user_metadata?.school;
+                schoolSetting.value = this.isKnownSchool(stored) ? stored : 'pchs';
+            }
 
             const classYear = profile.graduationYear || 2026;
             const displayName = this.multiplayerDisplayName();
@@ -6789,9 +6834,6 @@
             if (themeSelect) themeSelect.value = theme;
             const compact = document.getElementById('ui-compact-mode');
             if (compact) compact.checked = Boolean(settings.compactUi);
-            const quality = document.getElementById('game-quality');
-            if (quality) quality.value = settings.gameQuality || 'auto';
-            document.body.classList.toggle('low-effects', Boolean(window.StudBudArcade?.graphicsProfile().low));
             document.querySelectorAll('.scheme-option').forEach(button => {
                 const selected = button.dataset.colorScheme === colorScheme;
                 button.classList.toggle('selected', selected);
@@ -7054,8 +7096,8 @@
                 { route: 'exam-arcade', sel: '#workspace-tabs', title: 'Practice games', text: 'Practice turns your sets into quick games: Streak Builder, Lightning Round, Survival, True or False and Memory Match. Answer with the 1\u20134 keys (T or F in True or False), build combos for bonus points and earn up to three stars. Practice Test mixes typing, choices and matching.' },
                 { route: 'multiplayer', sel: '#workspace-tabs', title: 'Play, connect and customize', text: 'Games hosts or joins a room with friends. Buds manages friends, Leaderboards compares progress, and the Shop has boxes you can open with coins to collect characters, hats and auras for your Locker.' },
                 { route: 'dashboard', sel: '#classes-nav-item:not(.hidden)', title: 'Classes for students and teachers', text: 'At a Parkway school there is nothing to join: when your teacher is on StudBud, their class and flashcard sets show up automatically for every course in your list. Teachers pick the courses they teach, then see each student\u2019s grades, missing work and study time, and publish flashcard sets the whole class can study.' },
-                { route: 'settings', sel: '#public-profile-card', title: 'Keep private data private', text: 'Your real name stays inside the app. Public profiles show your username; your real name and school appear only if you choose to share them. Profile & backups also lets you export your saved data.' },
-                { route: 'appearance', sel: '#game-quality', title: 'Make it yours, keep it fast', text: 'Pick a color scheme and theme in Appearance. On a Chromebook or older laptop, choose a lower game performance setting: StudBud switches off heavy effects so everything stays smooth. Open StudBud once online and it keeps working offline.' },
+                { route: 'profile', sel: '#public-profile-card:not(.hidden), #guest-appearance:not(.hidden)', title: 'Keep private data private', text: 'Your real name stays inside the app. Public profiles show your username; your real name and school appear only if you choose to share them. Settings \u2192 Data lets you export your saved data.' },
+                { route: 'appearance', sel: '#ui-theme-select', title: 'Make it yours, keep it fast', text: 'Pick a color scheme and theme in Appearance. Games keep their full visuals and skip off-screen drawing to stay smooth. Open StudBud once online and it keeps working offline.' },
                 { route: 'dashboard', title: 'Your first three steps', text: 'Import classes from Infinite Campus, add an upcoming quiz or assignment, then create a study set for it. Come back to Home each day to see what to work on next. Good luck!' }
             ];
         }
@@ -7066,7 +7108,7 @@
             this.tutorialStep = 0;
             const root = document.createElement('div');
             root.id = 'tutorial-root';
-            root.innerHTML = `<div class="tutorial-spot" hidden></div><div class="tutorial-card" role="dialog" aria-modal="true" aria-labelledby="tutorial-title" aria-describedby="tutorial-description"><div class="tutorial-progress"><span class="tutorial-progress-bar"></span></div><small class="tutorial-count"></small><label class="tutorial-jump">Jump to a topic<select aria-label="Tutorial topic">${this.tutorialSteps().map((step, index) => `<option value="${index}">${index + 1}. ${this.escapeHTML(step.title)}</option>`).join('')}</select></label><h3 id="tutorial-title"></h3><p id="tutorial-description" class="tutorial-text"></p><div class="tutorial-buttons"><button type="button" class="text-btn" data-tour="skip">Finish later</button><span class="tutorial-spacer"></span><button type="button" class="secondary-btn" data-tour="back">Back</button><button type="button" class="primary-btn" data-tour="next">Next</button></div></div>`;
+            root.innerHTML = `<div class="tutorial-spot" hidden></div><div class="tutorial-card" role="dialog" aria-modal="true" aria-labelledby="tutorial-title" aria-describedby="tutorial-description"><div class="tutorial-progress"><span class="tutorial-progress-bar"></span></div><div class="tutorial-head"><small class="tutorial-count"></small><label class="tutorial-jump"><span class="sr-only">Jump to a topic</span><select aria-label="Jump to a topic">${this.tutorialSteps().map((step, index) => `<option value="${index}">${index + 1}. ${this.escapeHTML(step.title)}</option>`).join('')}</select></label></div><h3 id="tutorial-title"></h3><p id="tutorial-description" class="tutorial-text"></p><div class="tutorial-buttons"><button type="button" class="text-btn" data-tour="skip">Finish later</button><span class="tutorial-spacer"></span><button type="button" class="secondary-btn" data-tour="back">Back</button><button type="button" class="primary-btn" data-tour="next">Next</button></div></div>`;
             document.body.appendChild(root);
             root.querySelector('select').addEventListener('change', event => this.showTutorialStep(Number(event.target.value)));
             root.addEventListener('click', event => {
@@ -7088,7 +7130,20 @@
                     event.preventDefault(); (event.shiftKey ? last : first).focus();
                 }
             };
-            this.tutorialResize = () => this.positionTutorialSpot();
+            this.tutorialResize = () => this.refreshTutorialGeometry();
+            this.tutorialObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(this.tutorialResize) : null;
+            this.tutorialObserver?.observe(root.querySelector('.tutorial-card'));
+            this.tutorialTransition = event => {
+                if (!root.contains(event.target)) this.refreshTutorialGeometry();
+            };
+            document.addEventListener('transitionend', this.tutorialTransition, true);
+            document.addEventListener('animationend', this.tutorialTransition, true);
+            window.addEventListener('orientationchange', this.tutorialResize);
+            window.visualViewport?.addEventListener('resize', this.tutorialResize);
+            window.visualViewport?.addEventListener('scroll', this.tutorialResize);
+            document.fonts?.ready.then(() => {
+                if (root.isConnected) this.refreshTutorialGeometry();
+            });
             document.addEventListener('keydown', this.tutorialKeys);
             window.addEventListener('resize', this.tutorialResize);
             window.addEventListener('scroll', this.tutorialResize, { capture: true, passive: true });
@@ -7112,22 +7167,49 @@
             root.querySelector('[data-tour="next"]').textContent = this.tutorialStep === steps.length - 1 ? 'Finish' : 'Next';
             root.querySelector('[data-tour="skip"]').hidden = this.tutorialStep === steps.length - 1;
             this.tutorialSel = step.sel || '';
-            const spot = root.querySelector('.tutorial-spot');
-            if (!this.tutorialSel && spot) spot.hidden = true;
-            setTimeout(() => {
-                const el = this.tutorialSel ? document.querySelector(this.tutorialSel) : null;
-                if (el && el.getBoundingClientRect().width) {
-                    // Tall targets on small screens are pinned to the top so the tour card never hides them.
-                    const tall = el.getBoundingClientRect().height > window.innerHeight * 0.45;
-                    const inNav = Boolean(el.closest('#sidebar'));
-                    if (inNav && window.matchMedia('(max-width: 768px)').matches) window.scrollTo({ top: 0, behavior: 'smooth' });
-                    el.scrollIntoView({ block: inNav ? 'nearest' : (tall ? 'start' : 'center'), inline: 'center', behavior: 'smooth' });
-                }
-                this.positionTutorialSpot();
-                setTimeout(() => this.positionTutorialSpot(), 400);
-                setTimeout(() => this.positionTutorialSpot(), 900);
-            }, 80);
+            root.querySelector('.tutorial-spot').hidden = true;
+            this.tutorialPreparing = true;
+            this.tutorialScrollTarget = null;
+            this.tutorialStableFrames = 0;
+            this.tutorialLastRect = '';
+            this.tutorialPrepareUntil = performance.now() + 1600;
+            this.refreshTutorialGeometry();
             root.querySelector('[data-tour="next"]').focus({ preventScroll: true });
+        }
+
+        tutorialViewport() {
+            const viewport = window.visualViewport;
+            const left = viewport?.offsetLeft || 0, top = viewport?.offsetTop || 0;
+            const width = viewport?.width || document.documentElement.clientWidth;
+            const height = viewport?.height || window.innerHeight;
+            return { left, top, width, height, right: left + width, bottom: top + height };
+        }
+
+        tutorialTarget() {
+            if (!this.tutorialSel) return null;
+            const selectors = [this.tutorialSel];
+            if (this.tutorialSel.includes('#sidebar')) selectors.push('#main-nav', '#sidebar-collapse-btn');
+            if (this.tutorialSel.includes('#classes-nav-item')) selectors.push('#workspace-tabs [aria-current="page"]', '#main-nav .nav-item.active');
+            for (const selector of selectors) {
+                for (const element of document.querySelectorAll(selector)) {
+                    const rect = element.getBoundingClientRect();
+                    const style = getComputedStyle(element);
+                    if (element.getClientRects().length && rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && style.opacity !== '0') return element;
+                }
+            }
+            return null;
+        }
+
+        refreshTutorialGeometry() {
+            this.tutorialMeasureUntil = performance.now() + 500;
+            if (this.tutorialFrame) return;
+            const measure = () => {
+                this.tutorialFrame = null;
+                if (!document.getElementById('tutorial-root')) return;
+                this.positionTutorialSpot();
+                if (this.tutorialPreparing || performance.now() < this.tutorialMeasureUntil) this.tutorialFrame = requestAnimationFrame(measure);
+            };
+            this.tutorialFrame = requestAnimationFrame(measure);
         }
 
         positionTutorialSpot() {
@@ -7135,35 +7217,110 @@
             const spot = root?.querySelector('.tutorial-spot');
             const card = root?.querySelector('.tutorial-card');
             if (!spot || !card) return;
-            const el = this.tutorialSel ? document.querySelector(this.tutorialSel) : null;
-            const rect = el ? el.getBoundingClientRect() : null;
-            const viewH = window.innerHeight;
-            if (!rect || !rect.width || !rect.height) {
-                spot.hidden = true;
-                card.classList.remove('tutorial-card-top');
-                return;
+            const view = this.tutorialViewport();
+            const el = this.tutorialTarget();
+            if (el !== this.tutorialObservedTarget) {
+                if (this.tutorialObservedTarget) this.tutorialObserver?.unobserve(this.tutorialObservedTarget);
+                this.tutorialObservedTarget = el;
+                if (el) this.tutorialObserver?.observe(el);
             }
-            // Put the card on whichever side of the screen has more room than the highlighted element.
-            const spaceAbove = rect.top;
-            const spaceBelow = viewH - rect.bottom;
-            card.classList.toggle('tutorial-card-top', spaceAbove > spaceBelow && rect.top + rect.height / 2 > viewH * 0.4);
-            const cardRect = card.getBoundingClientRect();
-            const pad = 6;
-            let top = Math.max(4, rect.top - pad);
-            let bottom = Math.min(viewH - 4, rect.bottom + pad);
-            if (card.classList.contains('tutorial-card-top')) top = Math.max(top, Math.min(bottom - 40, cardRect.bottom + 8));
-            else bottom = Math.min(bottom, Math.max(top + 40, cardRect.top - 8));
-            const left = Math.max(4, rect.left - pad);
-            const right = Math.min(window.innerWidth - 4, rect.right + pad);
-            spot.hidden = false;
-            Object.assign(spot.style, { left: `${left}px`, top: `${top}px`, width: `${Math.max(24, right - left)}px`, height: `${Math.max(24, bottom - top)}px` });
+            if (this.tutorialPreparing && el && this.tutorialScrollTarget !== el) {
+                this.tutorialScrollTarget = el;
+                // Scroll every containing scroller before measuring, without a lingering smooth-scroll animation.
+                el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+                const rect = el.getBoundingClientRect();
+                let inset = view.top;
+                for (const header of document.querySelectorAll('#sidebar, #top-header')) {
+                    if (header === el || header.contains(el)) continue;
+                    const style = getComputedStyle(header), bounds = header.getBoundingClientRect();
+                    if (['sticky', 'fixed'].includes(style.position) && bounds.top <= view.top + 1 && bounds.right > rect.left && bounds.left < rect.right) inset = Math.max(inset, bounds.bottom + 12);
+                }
+                if (rect.top < inset) window.scrollBy({ top: rect.top - inset, behavior: 'instant' });
+            }
+            let rect = el?.getBoundingClientRect();
+            if (this.tutorialPreparing) {
+                const key = rect ? [rect.left, rect.top, rect.width, rect.height, view.width, view.height].map(value => value.toFixed(2)).join(',') : '';
+                this.tutorialStableFrames = key === this.tutorialLastRect ? this.tutorialStableFrames + 1 : 0;
+                this.tutorialLastRect = key;
+                if (this.tutorialStableFrames >= 4 || performance.now() > this.tutorialPrepareUntil) this.tutorialPreparing = false;
+            }
+            // Only spotlight the visible intersection of a target and its clipping scroll containers.
+            let bounds = rect ? { left: Math.max(view.left, rect.left), top: Math.max(view.top, rect.top), right: Math.min(view.right, rect.right), bottom: Math.min(view.bottom, rect.bottom) } : null;
+            for (let parent = el?.parentElement; bounds && parent && parent !== document.body; parent = parent.parentElement) {
+                const style = getComputedStyle(parent), clip = parent.getBoundingClientRect();
+                if (/(auto|scroll|hidden|clip)/.test(style.overflowX)) { bounds.left = Math.max(bounds.left, clip.left); bounds.right = Math.min(bounds.right, clip.right); }
+                if (/(auto|scroll|hidden|clip)/.test(style.overflowY)) { bounds.top = Math.max(bounds.top, clip.top); bounds.bottom = Math.min(bounds.bottom, clip.bottom); }
+            }
+            if (bounds && (bounds.right <= bounds.left || bounds.bottom <= bounds.top)) bounds = null;
+            spot.hidden = !bounds || this.tutorialPreparing;
+            const pad = 6, margin = 12, gap = 14;
+            if (bounds) {
+                const dpr = window.devicePixelRatio || 1;
+                const left = Math.floor(Math.max(view.left, bounds.left - pad) * dpr) / dpr;
+                const top = Math.floor(Math.max(view.top, bounds.top - pad) * dpr) / dpr;
+                const right = Math.ceil(Math.min(view.right, bounds.right + pad) * dpr) / dpr;
+                const bottom = Math.ceil(Math.min(view.bottom, bounds.bottom + pad) * dpr) / dpr;
+                Object.assign(spot.style, { left: left + 'px', top: top + 'px', width: (right - left) + 'px', height: (bottom - top) + 'px' });
+            }
+            const width = Math.max(0, Math.min(500, view.width - margin * 2));
+            const maxHeight = Math.max(0, view.height - margin * 2);
+            // Measure intrinsic content without expanding a scrolled card and resetting its scroll position.
+            let cardWidth = width, cardHeight = Math.min(maxHeight, card.scrollHeight ? card.scrollHeight + 2 : card.getBoundingClientRect().height);
+            let chosen = null;
+            let left = view.left + (view.width - cardWidth) / 2, top = view.top + (view.height - cardHeight) / 2;
+            if (bounds) {
+                const spaces = [
+                    { side: 'right', width: view.right - bounds.right - gap - margin, height: maxHeight },
+                    { side: 'left', width: bounds.left - view.left - gap - margin, height: maxHeight },
+                    { side: 'bottom', width, height: view.bottom - bounds.bottom - gap - margin },
+                    { side: 'top', width, height: bounds.top - view.top - gap - margin }
+                ];
+                const fits = spaces.filter(space => space.width >= Math.min(280, width) && space.height >= Math.min(140, cardHeight));
+                fits.sort((a, b) => (Math.min(b.width, cardWidth) * Math.min(b.height, cardHeight)) - (Math.min(a.width, cardWidth) * Math.min(a.height, cardHeight)));
+                chosen = fits[0];
+                if (!chosen) {
+                    // Big targets: dock the card to whichever screen edge leaves more of the target visible.
+                    const below = view.bottom - bounds.bottom, above = bounds.top - view.top;
+                    chosen = { side: below >= above ? 'dock-bottom' : 'dock-top', width, height: Math.max(Math.min(cardHeight, maxHeight * .5), Math.max(below, above) - gap - margin) };
+                }
+            }
+            Object.assign(card.style, { width: Math.min(width, chosen?.width ?? width) + 'px', maxHeight: Math.min(maxHeight, chosen?.height ?? maxHeight) + 'px' });
+            cardWidth = card.getBoundingClientRect().width; cardHeight = card.getBoundingClientRect().height;
+            left = view.left + (view.width - cardWidth) / 2; top = view.top + (view.height - cardHeight) / 2;
+            if (bounds && chosen) {
+                const best = chosen;
+                left = bounds.left + (bounds.right - bounds.left - cardWidth) / 2;
+                top = bounds.top + (bounds.bottom - bounds.top - cardHeight) / 2;
+                if (best.side === 'right') left = bounds.right + gap;
+                if (best.side === 'left') left = bounds.left - gap - cardWidth;
+                if (best.side === 'bottom') top = bounds.bottom + gap;
+                if (best.side === 'top') top = bounds.top - gap - cardHeight;
+                if (best.side === 'dock-bottom') top = view.bottom - margin - cardHeight;
+                if (best.side === 'dock-top') top = view.top + margin;
+            }
+            left = Math.max(view.left + margin, Math.min(left, view.right - margin - cardWidth));
+            top = Math.max(view.top + margin, Math.min(top, view.bottom - margin - cardHeight));
+            Object.assign(card.style, { left: left + 'px', top: top + 'px' });
         }
 
         endTutorialUI() {
             document.getElementById('tutorial-root')?.remove();
+            cancelAnimationFrame(this.tutorialFrame);
+            this.tutorialFrame = null;
+            this.tutorialPreparing = false;
+            this.tutorialObserver?.disconnect();
+            this.tutorialObserver = this.tutorialObservedTarget = this.tutorialScrollTarget = null;
+            if (this.tutorialTransition) {
+                document.removeEventListener('transitionend', this.tutorialTransition, true);
+                document.removeEventListener('animationend', this.tutorialTransition, true);
+                this.tutorialTransition = null;
+            }
             if (this.tutorialKeys) document.removeEventListener('keydown', this.tutorialKeys);
             if (this.tutorialResize) {
                 window.removeEventListener('resize', this.tutorialResize);
+                window.removeEventListener('orientationchange', this.tutorialResize);
+                window.visualViewport?.removeEventListener('resize', this.tutorialResize);
+                window.visualViewport?.removeEventListener('scroll', this.tutorialResize);
                 window.removeEventListener('scroll', this.tutorialResize, { capture: true });
             }
             document.body.classList.remove('tutorial-active');
@@ -7949,7 +8106,7 @@
         }
 
         async handleClick(event) {
-            if (!event.target.closest('#course-modal')) this.hideCourseSuggestions();
+            if (!event.target.closest('.course-autocomplete')) this.hideCourseSuggestions();
             if (event.target.closest('#current-flashcard')) {
                 if (event.detail > 1 || (event.detail !== 0 && this.flashcardPointer?.moved)) return;
                 this.revealCard();
@@ -7993,6 +8150,7 @@
                     const { suggested } = this.questionRewardRecommendation(this.selectedMultiplayerMode || 'skyline');
                     input.value = suggested;
                     slider.value = suggested;
+                    delete input.dataset.custom;
                     this.updateQuestionRewardGuidance();
                 } else if (target.matches('.multiplayer-mode[data-mode]')) {
                     this.selectedMultiplayerMode = target.dataset.mode;
@@ -8554,6 +8712,8 @@
                 time.disabled = chess;
             }
             if (event.target.id === 'settings-school') {
+                // Remember the unsaved pick so profile re-renders don't reset it before Save.
+                if (event.target.dataset) event.target.dataset.dirty = '1';
                 this.updateCourseSchoolFields();
                 this.renderOtherGradeScaleEditor();
                 this.updatePublicSchoolOption();
@@ -8630,11 +8790,6 @@
             } else if (event.target.id === 'ui-compact-mode') {
                 AppState.set('settings', { ...AppState.get('settings'), compactUi: event.target.checked });
                 this.applyAppearance();
-            } else if (event.target.id === 'game-quality') {
-                if (!['auto', 'low', 'full'].includes(event.target.value)) throw new Error('Choose a valid game quality.');
-                AppState.set('settings', { ...AppState.get('settings'), gameQuality: event.target.value });
-                this.applyAppearance();
-                this.arcadeSession?.resize(); this.practiceSession?.resize();
             } else if (event.target.id === 'sfx-ui' || event.target.id === 'sfx-game') {
                 this.updateGameAudio({ [event.target.id === 'sfx-ui' ? 'ui' : 'game']: event.target.checked });
             } else if (event.target.id === 'music-on') {
@@ -8727,7 +8882,7 @@
             document.getElementById('course-modal-title').textContent = course ? 'Edit Course' : 'Add Course';
             const search = document.getElementById('course-search');
             const selectedCatalogCourse = course && this.isParkwaySchool(course.school || this.currentSchool())
-                && (window.PCHS_COURSE_CATALOG || []).find(item => item.code === (course.catalogCode || course.code));
+                && this.findCatalogCourse(course.catalogCode || course.code);
             search.value = selectedCatalogCourse ? `${selectedCatalogCourse.title} (${selectedCatalogCourse.code})` : '';
             document.getElementById('course-name').value = selectedCatalogCourse?.code || '';
             document.getElementById('course-selection-hint').textContent = selectedCatalogCourse ? 'Catalog course selected.' : `Choose a ${this.schoolShortName()} course from the matches.`;
@@ -8748,8 +8903,8 @@
         }
 
         currentSchool() {
-            const selected = document.getElementById('settings-school')?.value;
-            if (this.isKnownSchool(selected)) return selected;
+            const select = document.getElementById('settings-school');
+            if (select?.dataset?.dirty && this.isKnownSchool(select.value)) return select.value;
             const profile = AppState.get('profile') || {};
             const stored = profile.school || window.StudBudCloud?.user?.user_metadata?.school;
             return this.isKnownSchool(stored) ? stored : 'pchs';
@@ -8773,7 +8928,13 @@
 
         schoolCatalog(id = this.currentSchool()) {
             if (window.STUDBUD_SCHOOLS) return window.STUDBUD_SCHOOLS.catalog(id);
-            return (window.PCHS_COURSE_CATALOG || []).filter(course => !course.legacy);
+            return (window.STUDBUD_COURSE_CATALOG || []).filter(course => !course.legacy);
+        }
+
+        // Resolves any saved code (current offerings at every school or retired/legacy codes).
+        findCatalogCourse(code) {
+            if (!code) return null;
+            return (window.STUDBUD_COURSE_CATALOG || window.PCHS_COURSE_CATALOG || []).find(item => item.code === code) || null;
         }
 
         updatePublicSchoolOption() {
@@ -8824,22 +8985,14 @@
         filterCourseCatalog(query) {
             const list = document.getElementById('course-suggestions');
             if (!list) return;
-            const normalized = String(query || '').trim().toLowerCase();
-            const catalog = this.schoolCatalog();
+            const normalized = String(query || '').trim();
             if (!normalized) {
                 this.hideCourseSuggestions();
                 return;
             }
-            const terms = normalized.split(/\s+/).filter(Boolean);
-            const scored = [];
-            for (const course of catalog) {
-                const title = course.title.toLowerCase();
-                const haystack = `${course.code} ${title} ${course.category}`.toLowerCase();
-                if (!terms.every(term => haystack.includes(term))) continue;
-                const score = (course.code.toLowerCase().startsWith(normalized) ? 0 : title.startsWith(normalized) ? 1 : title.includes(normalized) ? 2 : 3) * 1000 + title.length;
-                scored.push([score, course]);
-            }
-            const matches = scored.sort((a, b) => a[0] - b[0]).slice(0, 12).map(entry => entry[1]);
+            const matches = window.STUDBUD_SCHOOLS?.search
+                ? window.STUDBUD_SCHOOLS.search(this.currentSchool(), normalized, 12)
+                : this.schoolCatalog().filter(course => `${course.code} ${course.title}`.toLowerCase().includes(normalized.toLowerCase())).slice(0, 12);
             this.courseSuggestionIndex = -1;
             list.innerHTML = matches.length ? matches.map(course =>
                 `<button type="button" id="course-option-${this.escapeHTML(course.code)}" role="option" aria-selected="false" class="course-suggestion" data-action="select-course" data-id="${this.escapeHTML(course.code)}"><strong>${this.escapeHTML(course.title)}${course.isWeighted ? ' <em class="course-weighted-pill">Weighted</em>' : ''}</strong><span>${this.escapeHTML(course.code)} · ${this.escapeHTML(course.category)} · ${Number(course.credits)} cr</span></button>`
@@ -8869,8 +9022,8 @@
         }
 
         selectCatalogCourse(courseCode) {
-            const course = (window.PCHS_COURSE_CATALOG || []).find(item => item.code === courseCode);
-            if (!course) throw new Error('That course is not in the Parkway catalog.');
+            const course = this.schoolCatalog().find(item => item.code === courseCode);
+            if (!course) throw new Error(`That course is not offered at ${this.schoolShortName()}.`);
             document.getElementById('course-name').value = course.code;
             document.getElementById('course-search').value = `${course.title} (${course.code})`;
             document.getElementById('course-selection-hint').textContent = 'Catalog course selected.';
@@ -8880,7 +9033,7 @@
 
         populateCourseFromCatalog() {
             const courseCode = document.getElementById('course-name').value;
-            const catalogCourse = (window.PCHS_COURSE_CATALOG || []).find(course => course.code === courseCode);
+            const catalogCourse = this.findCatalogCourse(courseCode);
             if (!catalogCourse) return;
             const categoryMap = {
                 'Visual Arts': 'Fine Arts',
@@ -8888,13 +9041,15 @@
                 Business: 'Practical Arts',
                 CS: 'Practical Arts',
                 CTE: 'Practical Arts',
-                'Practical Arts': 'Practical Arts'
+                'Practical Arts': 'Practical Arts',
+                'World Languages': 'Electives'
             };
-            const category = categoryMap[catalogCourse.category] || catalogCourse.category;
             const categorySelect = document.getElementById('course-subject-category');
-            if (Array.from(categorySelect.options).some(option => option.value === category)) categorySelect.value = category;
+            const mapped = categoryMap[catalogCourse.category] || catalogCourse.category;
+            const category = Array.from(categorySelect.options).some(option => option.value === mapped) ? mapped : 'Electives';
+            categorySelect.value = category;
             document.getElementById('course-credits').value = catalogCourse.credits;
-            const weightedScale = (window.studbudGradeScale?.() || window.PCHS_GRADE_SCALE || []).map(item =>
+            const weightedScale = (window.studbudGradeScale?.() || window.PARKWAY_GRADE_SCALE || []).map(item =>
                 `${item.letter} ${catalogCourse.isWeighted ? item.weighted : item.unweighted.toFixed(2)}`
             ).join(' · ');
             document.getElementById('course-weight-label').textContent =
@@ -9000,7 +9155,7 @@
         }
 
         gradeForPercentage(percentage) {
-            const scale = window.studbudGradeScale?.() || window.PCHS_GRADE_SCALE || [];
+            const scale = window.studbudGradeScale?.() || window.PARKWAY_GRADE_SCALE || [];
             const grade = scale.slice().sort((a, b) => b.minPct - a.minPct).find(item => percentage >= item.minPct);
             return grade ? grade.letter : (percentage >= 90 ? 'A-' : percentage >= 80 ? 'B-' : percentage >= 70 ? 'C-' : percentage >= 60 ? 'D-' : 'F');
         }
@@ -9012,7 +9167,7 @@
             const existingCourse = (AppState.get('courses') || []).find(item => item.code === oldCode);
             const school = existingCourse?.school || this.currentSchool();
             const otherSchool = !this.isParkwaySchool(school);
-            const catalogCourse = otherSchool ? null : (window.PCHS_COURSE_CATALOG || []).find(item => item.code === catalogCode);
+            const catalogCourse = otherSchool ? null : this.findCatalogCourse(catalogCode);
             if (!otherSchool && !catalogCourse) throw new Error(`Select a course from the ${this.schoolShortName(school)} catalog.`);
             let code, title, credits, isWeighted;
             if (otherSchool) {
@@ -9683,6 +9838,8 @@
                 currentTerm: document.getElementById('settings-current-term').value
             };
             AppState.set('profile', profile);
+            const savedSchoolSelect = document.getElementById('settings-school');
+            if (savedSchoolSelect?.dataset) delete savedSchoolSelect.dataset.dirty;
             const schoolStatus = document.getElementById('school-profile-status');
             if (window.StudBudCommunityGames?.hasAccount?.()) {
                 if (schoolStatus) schoolStatus.textContent = 'Saving school…';

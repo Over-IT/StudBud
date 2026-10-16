@@ -7,11 +7,11 @@ const root = path.join(__dirname, '..');
 const sandbox = { console };
 sandbox.window = sandbox;
 vm.createContext(sandbox);
-vm.runInContext(fs.readFileSync(path.join(root, 'pchsData.js'), 'utf8'), sandbox);
+['parkwayData.js', 'data/schools/central.js', 'data/schools/north.js', 'data/schools/south.js', 'data/schools/west.js'].forEach(file => vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), sandbox, { filename: file }));
 vm.runInContext(fs.readFileSync(path.join(root, 'infiniteCampusImport.js'), 'utf8'), sandbox);
 const IC = sandbox.StudBudIC;
 const plain = value => JSON.parse(JSON.stringify(value));
-const catalog = sandbox.PCHS_COURSE_CATALOG;
+const catalog = sandbox.STUDBUD_COURSE_CATALOG;
 
 // Course matching: course numbers first, then abbreviated names
 const byNumber = IC.matchCourse('057011-1', 'ENGLISH 1', catalog);

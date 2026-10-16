@@ -78,6 +78,10 @@
 
         seen(x, y, pad = 80) { return x > this.x0 - pad && x < this.x1 + pad && y > this.y0 - pad && y < this.y1 + pad; }
 
+        seenRect(x, y, w, h, pad = 80) {
+            return x + w >= this.x0 - pad && x <= this.x1 + pad && y + h >= this.y0 - pad && y <= this.y1 + pad;
+        }
+
         drawPlayers(ctx, extra) {
             const s = this.s, me = this.me;
             for (const r of s.remoteList()) {
@@ -102,7 +106,7 @@
         }
 
         qMark(ctx, x, y, color, pulse) {
-            if (this.s.preview) return;
+            if (this.s.preview || !this.seen(x, y, 50)) return;
             const r = 20 + Math.sin(pulse * 4) * 2;
             ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(x + 3, y + 6, r, r * 0.8, 0, 0, TAU); ctx.fill();
             ctx.fillStyle = color; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
@@ -359,7 +363,7 @@
             me.vy = Math.min(1050, me.vy + 1750 * dt);
             const jetKey = s.down('ArrowUp', 'KeyW', 'Space');
             this.jetting = false;
-            if (jetKey && this.stun <= 0 && s.spend(11 * dt)) {
+            if (jetKey && this.stun <= 0 && s.spend(A.ENERGY_COSTS.miner.jet * dt)) {
                 me.vy = Math.max(-620, me.vy - 3000 * dt);
                 this.jetting = true;
                 if (Math.random() < dt * 20) this.particles.burst(me.x + me.w / 2, me.y + me.h - 1, '#fb923c', 2, 95, 0.28, 3);
@@ -409,7 +413,7 @@
             if (target) {
                 const { x: tx, y: ty } = target, type = this.tile(tx, ty);
                 const close = Math.hypot(tx * TS + TS / 2 - centerX, ty * TS + TS / 2 - centerY) < TS * 2.25;
-                if (close && this.solid(type) && type !== 10 && this.stun <= 0 && s.spend(2.8 * dt)) {
+                if (close && this.solid(type) && type !== 10 && this.stun <= 0 && s.spend(A.ENERGY_COSTS.miner.dig * dt)) {
                     if (this.dig.tx !== tx || this.dig.ty !== ty) this.dig = { tx, ty, p: 0 };
                     this.dig.p += dt;
                     this.digClock += dt;
@@ -501,7 +505,7 @@
             sky.addColorStop(0, '#38bdf8'); sky.addColorStop(0.72, '#bae6fd'); sky.addColorStop(1, '#e0f2fe');
             ctx.fillStyle = sky; ctx.fillRect(this.x0, 0, this.x1 - this.x0, 4 * TS);
             ctx.fillStyle = 'rgba(255,255,255,.72)';
-            for (let i = Math.floor(this.x0 / 260) - 1; i < this.x1 / 260 + 1; i++) {
+            if (this.y0 < 150 && this.y1 > 20) for (let i = Math.floor(this.x0 / 260) - 1; i < this.x1 / 260 + 1; i++) {
                 const hx = A.util.hashStr(`cloud:${i}`), cx = i * 260 + (hx % 130), cy = 42 + ((hx >>> 8) % 74);
                 ctx.beginPath(); ctx.ellipse(cx, cy, 38, 12, 0, 0, TAU); ctx.ellipse(cx + 22, cy - 7, 25, 15, 0, 0, TAU); ctx.ellipse(cx - 21, cy - 5, 19, 11, 0, 0, TAU); ctx.fill();
             }
@@ -545,22 +549,61 @@
                     const visibility = s.preview ? 1 : this.lavaVisibility[idx];
                     if (visibility <= 0) continue;
                     ctx.save(); ctx.globalAlpha = visibility;
-                    ctx.fillStyle = '#21140f'; ctx.fillRect(x, y, TS, TS);
-                    const pulse = 0.76 + Math.sin(this.anim * 4 + idx) * 0.12;
-                    const glow = ctx.createRadialGradient(x + 24, y + 24, 3, x + 24, y + 24, 38);
-                    glow.addColorStop(0, `rgba(255,196,55,${pulse})`); glow.addColorStop(0.55, 'rgba(249,115,22,.86)'); glow.addColorStop(1, 'rgba(220,38,38,0)');
-                    ctx.fillStyle = glow; ctx.fillRect(x - 8, y - 8, TS + 16, TS + 16);
+                    ctx.fillStyle = '#1a0d09'; ctx.fillRect(x, y, TS, TS);
+                    const t = this.anim, h = this.tileHashes[idx] || idx * 2654435761;
                     const level = Math.min(LAVA_SIDE_REACH, this.F[idx]);
                     const surfaceHeight = this.D[idx] || level === 0 ? TS : TS * (1 - level / (LAVA_SIDE_REACH + 1));
                     const surfaceY = y + TS - surfaceHeight;
-                    ctx.fillStyle = '#d9481b'; ctx.fillRect(x + 2, surfaceY, TS - 4, surfaceHeight - 2);
-                    ctx.fillStyle = '#ff7a18'; ctx.beginPath();
-                    ctx.moveTo(x + 3, y + TS - 3);
-                    ctx.lineTo(x + 12, surfaceY + 9 + Math.sin(this.anim * 4 + tx) * 2);
-                    ctx.lineTo(x + 21, y + TS - 3); ctx.lineTo(x + 32, surfaceY + 5);
-                    ctx.lineTo(x + 44, y + TS - 3); ctx.closePath(); ctx.fill();
-                    ctx.fillStyle = 'rgba(255,218,95,.56)';
-                    ctx.fillRect(x + 4, surfaceY + 3, TS - 8, 2);
+                    const exposed = !this.D[idx] && this.tile(tx, ty - 1) !== 6;
+                    // heat bloom bleeding into the surrounding rock
+                    const pulse = 0.5 + Math.sin(t * 2.2 + idx * 0.7) * 0.12;
+                    const glow = ctx.createRadialGradient(x + TS / 2, surfaceY + 6, 2, x + TS / 2, surfaceY + 6, TS);
+                    glow.addColorStop(0, `rgba(255,170,60,${pulse})`); glow.addColorStop(1, 'rgba(255,80,20,0)');
+                    ctx.fillStyle = glow; ctx.fillRect(x - 10, y - 10, TS + 20, TS + 20);
+                    // molten body: deep red at the bottom, bright orange near the surface
+                    const body = ctx.createLinearGradient(0, surfaceY, 0, y + TS);
+                    body.addColorStop(0, '#ffb02e'); body.addColorStop(0.25, '#ff6a13'); body.addColorStop(1, '#a3180d');
+                    ctx.fillStyle = body;
+                    ctx.beginPath();
+                    ctx.moveTo(x, y + TS);
+                    if (exposed) {
+                        for (let k = 0; k <= 6; k++) {
+                            const wx = x + k * TS / 6;
+                            ctx.lineTo(wx, surfaceY + 2 + Math.sin(t * 3 + (tx * TS + wx) * 0.09) * 2.2);
+                        }
+                    } else { ctx.lineTo(x, surfaceY); ctx.lineTo(x + TS, surfaceY); }
+                    ctx.lineTo(x + TS, y + TS); ctx.closePath(); ctx.fill();
+                    // slowly drifting dark crust plates with glowing seams between them
+                    ctx.save(); ctx.beginPath(); ctx.rect(x, surfaceY + 4, TS, surfaceHeight - 4); ctx.clip();
+                    const drift = (t * 6 + (h & 63)) % TS;
+                    ctx.fillStyle = 'rgba(60,14,6,.55)';
+                    for (let k = 0; k < 3; k++) {
+                        const px = x - TS + ((((h >>> (k * 6)) & 47) + drift + k * 19) % (TS * 2)), py = surfaceY + 8 + (((h >>> (k * 5 + 3)) & 15) / 15) * Math.max(4, surfaceHeight - 20);
+                        ctx.beginPath(); ctx.ellipse(px, py, 9 + (k & 1) * 4, 4 + (k % 3), 0.3 * k, 0, TAU); ctx.fill();
+                    }
+                    ctx.strokeStyle = `rgba(255,236,150,${0.45 + Math.sin(t * 4 + idx) * 0.2})`; ctx.lineWidth = 1.2; ctx.beginPath();
+                    const cy0 = surfaceY + 10 + (h & 7);
+                    ctx.moveTo(x + ((h >>> 3) & 15), cy0); ctx.lineTo(x + 18 + ((h >>> 7) & 7), cy0 + 6); ctx.lineTo(x + 34, cy0 + 2 + ((h >>> 11) & 7));
+                    ctx.stroke(); ctx.restore();
+                    if (exposed) {
+                        // bright skin on the surface and rising, popping bubbles
+                        ctx.strokeStyle = 'rgba(255,240,170,.85)'; ctx.lineWidth = 2; ctx.beginPath();
+                        for (let k = 0; k <= 6; k++) {
+                            const wx = x + k * TS / 6, wy = surfaceY + 2 + Math.sin(t * 3 + (tx * TS + wx) * 0.09) * 2.2;
+                            if (k) ctx.lineTo(wx, wy); else ctx.moveTo(wx, wy);
+                        }
+                        ctx.stroke();
+                        for (let k = 0; k < 2; k++) {
+                            const life = (t * (0.55 + k * 0.2) + ((h >>> (k * 9)) & 255) / 255) % 1;
+                            const bx = x + 8 + (((h >>> (k * 4 + 2)) & 31) / 31) * (TS - 16);
+                            const by = surfaceY + 4 - life * 6, r = 1.5 + life * 3.5;
+                            ctx.globalAlpha = visibility * (1 - life);
+                            ctx.fillStyle = '#ffe08a'; ctx.beginPath(); ctx.arc(bx, by, r, 0, TAU); ctx.fill();
+                            ctx.fillStyle = '#ff7a18'; ctx.beginPath(); ctx.arc(bx, by + r * 0.3, r * 0.55, 0, TAU); ctx.fill();
+                            if (life > 0.7) { ctx.fillStyle = '#ffd36b'; ctx.fillRect(bx - 4, by - 8 - (life - 0.7) * 30, 2, 2); ctx.fillRect(bx + 3, by - 6 - (life - 0.7) * 24, 2, 2); }
+                        }
+                        ctx.globalAlpha = visibility;
+                    }
                     ctx.restore();
                     continue;
                 }
@@ -597,45 +640,48 @@
             }
             const groundY = 4 * TS;
             ctx.fillStyle = '#4ade80'; ctx.fillRect(this.x0, groundY - 5, this.x1 - this.x0, 6);
-            const depot = this.base, bob = Math.sin(this.anim * 2.2) * 1.5;
-            const cartX = depot.x + 62, cartY = depot.y + 25 + bob, cartW = depot.w - 124, cartH = 48;
-            ctx.fillStyle = 'rgba(15,23,42,.3)'; ctx.beginPath(); ctx.ellipse(depot.x + depot.w / 2, groundY - 3, depot.w * 0.43, 9, 0, 0, TAU); ctx.fill();
-            ctx.strokeStyle = '#64748b'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(cartX + 15, groundY - 5); ctx.lineTo(cartX + cartW - 15, groundY - 5); ctx.stroke();
-            ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cartX + 12, groundY - 11); ctx.lineTo(cartX + cartW - 12, groundY - 11); ctx.stroke();
-            ctx.fillStyle = '#334155'; A.util.roundRect(ctx, cartX, cartY, cartW, cartH, 9); ctx.fill();
-            ctx.fillStyle = '#64748b'; A.util.roundRect(ctx, cartX + 5, cartY + 5, cartW - 10, cartH - 10, 6); ctx.fill();
-            ctx.fillStyle = '#1e293b'; A.util.roundRect(ctx, cartX + 12, cartY + 9, cartW - 24, cartH - 13, 4); ctx.fill();
-            ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(cartX + 4, cartY + 8); ctx.lineTo(cartX + 4, cartY + cartH + 4); ctx.lineTo(cartX + cartW - 4, cartY + cartH + 4); ctx.lineTo(cartX + cartW - 4, cartY + 8); ctx.stroke();
-            const displayCrystals = Object.values(CRYSTALS);
-            for (let i = 0; i < 5; i++) {
-                const crystal = displayCrystals[i % displayCrystals.length], cx = cartX + 38 + i * ((cartW - 76) / 4), cy = cartY + 23 + Math.sin(this.anim * 2.5 + i) * 2;
-                ctx.save(); ctx.shadowColor = crystal.color; ctx.shadowBlur = 12; ctx.fillStyle = crystal.color;
-                ctx.beginPath(); ctx.moveTo(cx, cy - 12); ctx.lineTo(cx + 9, cy); ctx.lineTo(cx, cy + 11); ctx.lineTo(cx - 8, cy); ctx.closePath(); ctx.fill(); ctx.restore();
-            }
-            for (const wx of [cartX + 34, cartX + cartW - 34]) {
-                ctx.fillStyle = '#0f172a'; ctx.beginPath(); ctx.arc(wx, groundY - 8, 11, 0, TAU); ctx.fill();
-                ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(wx, groundY - 8, 7, 0, TAU); ctx.stroke();
-                ctx.fillStyle = '#94a3b8'; ctx.beginPath(); ctx.arc(wx, groundY - 8, 2, 0, TAU); ctx.fill();
-            }
-            ctx.fillStyle = '#0f172a'; A.util.roundRect(ctx, cartX + cartW / 2 - 85, cartY + 31, 170, 24, 5); ctx.fill();
-            ctx.fillStyle = '#fef3c7'; ctx.font = '900 13px system-ui'; ctx.textAlign = 'center'; ctx.fillText('CRYSTAL DEPOT', cartX + cartW / 2, cartY + 48);
-            ctx.fillStyle = '#cbd5e1'; ctx.font = '700 10px system-ui'; if (!s.preview) ctx.fillText('BANK HAUL  /  REFUEL', cartX + cartW / 2, groundY + 20);
+            const depot = this.base;
+            if (this.seenRect(depot.x, depot.y - 140, depot.w, depot.h + 200)) {
+                const bob = Math.sin(this.anim * 2.2) * 1.5;
+                const cartX = depot.x + 62, cartY = depot.y + 25 + bob, cartW = depot.w - 124, cartH = 48;
+                ctx.fillStyle = 'rgba(15,23,42,.3)'; ctx.beginPath(); ctx.ellipse(depot.x + depot.w / 2, groundY - 3, depot.w * 0.43, 9, 0, 0, TAU); ctx.fill();
+                ctx.strokeStyle = '#64748b'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(cartX + 15, groundY - 5); ctx.lineTo(cartX + cartW - 15, groundY - 5); ctx.stroke();
+                ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cartX + 12, groundY - 11); ctx.lineTo(cartX + cartW - 12, groundY - 11); ctx.stroke();
+                ctx.fillStyle = '#334155'; A.util.roundRect(ctx, cartX, cartY, cartW, cartH, 9); ctx.fill();
+                ctx.fillStyle = '#64748b'; A.util.roundRect(ctx, cartX + 5, cartY + 5, cartW - 10, cartH - 10, 6); ctx.fill();
+                ctx.fillStyle = '#1e293b'; A.util.roundRect(ctx, cartX + 12, cartY + 9, cartW - 24, cartH - 13, 4); ctx.fill();
+                ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(cartX + 4, cartY + 8); ctx.lineTo(cartX + 4, cartY + cartH + 4); ctx.lineTo(cartX + cartW - 4, cartY + cartH + 4); ctx.lineTo(cartX + cartW - 4, cartY + 8); ctx.stroke();
+                const displayCrystals = Object.values(CRYSTALS);
+                for (let i = 0; i < 5; i++) {
+                    const crystal = displayCrystals[i % displayCrystals.length], cx = cartX + 38 + i * ((cartW - 76) / 4), cy = cartY + 23 + Math.sin(this.anim * 2.5 + i) * 2;
+                    ctx.save(); ctx.shadowColor = crystal.color; ctx.shadowBlur = 12; ctx.fillStyle = crystal.color;
+                    ctx.beginPath(); ctx.moveTo(cx, cy - 12); ctx.lineTo(cx + 9, cy); ctx.lineTo(cx, cy + 11); ctx.lineTo(cx - 8, cy); ctx.closePath(); ctx.fill(); ctx.restore();
+                }
+                for (const wx of [cartX + 34, cartX + cartW - 34]) {
+                    ctx.fillStyle = '#0f172a'; ctx.beginPath(); ctx.arc(wx, groundY - 8, 11, 0, TAU); ctx.fill();
+                    ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(wx, groundY - 8, 7, 0, TAU); ctx.stroke();
+                    ctx.fillStyle = '#94a3b8'; ctx.beginPath(); ctx.arc(wx, groundY - 8, 2, 0, TAU); ctx.fill();
+                }
+                ctx.fillStyle = '#0f172a'; A.util.roundRect(ctx, cartX + cartW / 2 - 85, cartY + 31, 170, 24, 5); ctx.fill();
+                ctx.fillStyle = '#fef3c7'; ctx.font = '900 13px system-ui'; ctx.textAlign = 'center'; ctx.fillText('CRYSTAL DEPOT', cartX + cartW / 2, cartY + 48);
+                ctx.fillStyle = '#cbd5e1'; ctx.font = '700 10px system-ui'; if (!s.preview) ctx.fillText('BANK HAUL  /  REFUEL', cartX + cartW / 2, groundY + 20);
 
-            if (!s.preview) {
-                const sign = { x: depot.x + depot.w / 2 - 112, y: depot.y - 126, w: 224, h: 112 };
-                ctx.strokeStyle = '#713f12'; ctx.lineWidth = 8; ctx.beginPath(); ctx.moveTo(sign.x + 19, sign.y + sign.h); ctx.lineTo(sign.x + 19, groundY - 8); ctx.moveTo(sign.x + sign.w - 19, sign.y + sign.h); ctx.lineTo(sign.x + sign.w - 19, groundY - 8); ctx.stroke();
-                ctx.fillStyle = '#422f24'; A.util.roundRect(ctx, sign.x, sign.y, sign.w, sign.h, 8); ctx.fill();
-                ctx.fillStyle = '#f5d99e'; A.util.roundRect(ctx, sign.x + 5, sign.y + 5, sign.w - 10, sign.h - 10, 5); ctx.fill();
-                ctx.fillStyle = '#422f24'; ctx.font = '900 12px system-ui'; ctx.textAlign = 'center'; ctx.fillText('CRYSTAL VALUES / COINS', sign.x + sign.w / 2, sign.y + 19);
-                displayCrystals.forEach((crystal, i) => {
-                    const col = i % 2, row = Math.floor(i / 2), x = sign.x + 12 + col * 107, y = sign.y + 30 + row * 23;
-                    ctx.fillStyle = crystal.color; ctx.beginPath(); ctx.arc(x + 5, y + 4, 4, 0, TAU); ctx.fill();
-                    ctx.fillStyle = '#2d2118'; ctx.textAlign = 'left'; ctx.font = '800 9px system-ui'; ctx.fillText(crystal.name, x + 13, y + 7);
-                    ctx.textAlign = 'right'; ctx.font = '900 10px system-ui'; ctx.fillText(`${crystal.value}c`, x + 101, y + 7);
-                });
+                if (!s.preview) {
+                    const sign = { x: depot.x + depot.w / 2 - 112, y: depot.y - 126, w: 224, h: 112 };
+                    ctx.strokeStyle = '#713f12'; ctx.lineWidth = 8; ctx.beginPath(); ctx.moveTo(sign.x + 19, sign.y + sign.h); ctx.lineTo(sign.x + 19, groundY - 8); ctx.moveTo(sign.x + sign.w - 19, sign.y + sign.h); ctx.lineTo(sign.x + sign.w - 19, groundY - 8); ctx.stroke();
+                    ctx.fillStyle = '#422f24'; A.util.roundRect(ctx, sign.x, sign.y, sign.w, sign.h, 8); ctx.fill();
+                    ctx.fillStyle = '#f5d99e'; A.util.roundRect(ctx, sign.x + 5, sign.y + 5, sign.w - 10, sign.h - 10, 5); ctx.fill();
+                    ctx.fillStyle = '#422f24'; ctx.font = '900 12px system-ui'; ctx.textAlign = 'center'; ctx.fillText('CRYSTAL VALUES / COINS', sign.x + sign.w / 2, sign.y + 19);
+                    displayCrystals.forEach((crystal, i) => {
+                        const col = i % 2, row = Math.floor(i / 2), x = sign.x + 12 + col * 107, y = sign.y + 30 + row * 23;
+                        ctx.fillStyle = crystal.color; ctx.beginPath(); ctx.arc(x + 5, y + 4, 4, 0, TAU); ctx.fill();
+                        ctx.fillStyle = '#2d2118'; ctx.textAlign = 'left'; ctx.font = '800 9px system-ui'; ctx.fillText(crystal.name, x + 13, y + 7);
+                        ctx.textAlign = 'right'; ctx.font = '900 10px system-ui'; ctx.fillText(`${crystal.value}c`, x + 101, y + 7);
+                    });
+
+                }
 
             }
-
             for (const r of s.remoteList()) {
                 if (!Number.isFinite(r.x) || !Number.isFinite(r.y) || !this.seen(r.x, r.y)) continue;
                 A.util.drawFigureSide(ctx, r, r.x, r.y, 26, 40, Number.isFinite(r.f) ? r.f : 1, this.anim + r.x * 0.01, r.a === 1, 0.82);
@@ -861,7 +907,7 @@
 
             // net casting
             const m = this.mouseWorld();
-            if (s.mouse.pressed && this.castCd <= 0 && !this.cast && s.spend(10)) {
+            if (s.mouse.pressed && this.castCd <= 0 && !this.cast && s.spend(A.ENERGY_COSTS.river.cast)) {
                 const ang = Math.atan2(m.y - me.y, m.x - me.x);
                 const d = Math.min(320, dist(m.x, m.y, me.x, me.y));
                 this.cast = { x: me.x + Math.cos(ang) * d, y: me.y + Math.sin(ang) * d, fromX: me.x, fromY: me.y, t: 0 };
@@ -1015,6 +1061,7 @@
                 ctx.stroke();
             }
             for (const [top, y0] of [[true, 0], [false, this.H - this.bank]]) {
+                if (!this.seenRect(this.x0, y0 - 20, this.x1 - this.x0, this.bank + 40, 0)) continue;
                 ctx.fillStyle = '#365314'; ctx.fillRect(this.x0, y0, this.x1 - this.x0, this.bank);
                 ctx.fillStyle = '#4d7c0f'; ctx.fillRect(this.x0, top ? this.bank - 36 : y0, this.x1 - this.x0, 36);
                 for (let x = Math.floor(this.x0 / 28) * 28; x < this.x1; x += 28) {
@@ -1048,7 +1095,7 @@
                 for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.arc(pos.x, pos.y, p.r * (0.3 + i * 0.22), t * 2 + i, t * 2 + i + 4.2); ctx.stroke(); }
                 ctx.fillStyle = 'rgba(8,145,178,.45)'; ctx.beginPath(); ctx.arc(pos.x, pos.y, 18, 0, TAU); ctx.fill();
             }
-            for (const wk of this.wake) { ctx.fillStyle = `rgba(255,255,255,${0.35 * (1 - wk.t)})`; ctx.beginPath(); ctx.arc(wk.x, wk.y, 6 + wk.t * 12, 0, TAU); ctx.fill(); }
+            for (const wk of this.wake) { if (!this.seen(wk.x, wk.y, 24)) continue; ctx.fillStyle = `rgba(255,255,255,${0.35 * (1 - wk.t)})`; ctx.beginPath(); ctx.arc(wk.x, wk.y, 6 + wk.t * 12, 0, TAU); ctx.fill(); }
             for (const f of this.fish) {
                 if ((this.away.get(f.i) || 0) > now) continue;
                 const p = this.fishPos(f, now);
@@ -1287,7 +1334,7 @@
             const sprint = wantsSprint && this.res.has(1);
             if (this.moving) {
                 if (winded) s.spend(1);
-                else this.res.drain((sprint ? 14 : 3) * dt);
+                else this.res.drain((sprint ? A.ENERGY_COSTS.market.sprint : A.ENERGY_COSTS.market.walk) * dt);
             }
             this.boost = Math.max(0, this.boost - dt);
             this.hitCd = Math.max(0, this.hitCd - dt);
@@ -1354,9 +1401,11 @@
             ctx.fillStyle = '#334155'; ctx.fillRect(0, 0, w, h);
             this.begin(ctx, w, h, w < 600 ? 640 : 820);
             if (!this.cityLayer) this.buildCityLayer();
-            ctx.drawImage(this.cityLayer, 0, 0);
+            const cx = Math.max(0, Math.floor(this.x0)), cy = Math.max(0, Math.floor(this.y0));
+            const cw = Math.min(this.W, Math.ceil(this.x1)) - cx, ch = Math.min(this.H, Math.ceil(this.y1)) - cy;
+            if (cw > 0 && ch > 0) ctx.drawImage(this.cityLayer, cx, cy, cw, ch, cx, cy, cw, ch);
             for (const shop of this.shops) {
-                if (this.pkg) continue;
+                if (this.pkg || !this.seen(shop.door.x, shop.door.y)) continue;
                 this.ring(ctx, shop.door.x, shop.door.y, 42 + Math.sin(t * 5) * 4, '#fde047', 4);
                 ctx.fillStyle = '#fde047'; ctx.font = '800 15px system-ui'; ctx.textAlign = 'center'; if (!s.preview) ctx.fillText('PICK UP', shop.door.x, shop.door.y + 5);
             }
@@ -1635,7 +1684,7 @@
             const sprint = wantsSprint && (free || this.res.has(1));
             if (this.moving && !free) {
                 if (winded) s.spend(1);
-                else this.res.drain((sprint ? 16 : 3) * dt);
+                else this.res.drain((sprint ? A.ENERGY_COSTS.sports.sprint : A.ENERGY_COSTS.sports.walk) * dt);
             }
             this.speedMul = (winded ? 0.5 : sprint ? 1.4 : 1) * (free ? 1.15 : 1);
             this.step(dt, 3000);
@@ -1681,7 +1730,7 @@
                     this.kickHeld = held;
                     if ((tapped || (released && this.heavyCd <= 0)) && this.kickCd <= 0 && d < 78) {
                         const charge = tapped ? .12 : this.kickCharge;
-                        const cost = Math.round(4 + charge * 11);
+                        const cost = Math.round(A.ENERGY_COSTS.sports.kickMin + charge * (A.ENERGY_COSTS.sports.kickMax - A.ENERGY_COSTS.sports.kickMin));
                         if (s.spend(cost)) {
                             const aim = mousePass || (!tapped && !this.moving && this.kickAim) ? this.kickAim : null;
                             const angle = aim ? Math.atan2(aim.y - me.y, aim.x - me.x) : me.aim;
@@ -1723,7 +1772,7 @@
             return this.teamsOn ? `Blue ${this.teamTd[0]} – ${this.teamTd[1]} Red · You ${this.td} goal${this.td === 1 ? '' : 's'}` : `${this.td} goal${this.td === 1 ? '' : 's'}`;
         }
         touchLayout() { return { stick: true, buttons: [{ k: 'ShiftLeft', label: 'Sprint' }, { k: 'Space', label: 'Power kick', cls: 'main' }] }; }
-        hint() { return `${this.teamsOn ? `${this.myTeam === 0 ? 'Blue' : 'Red'} team · ` : ''}WASD dribble · Shift sprint · E or click pass · hold Space, release for a power kick (4–15 energy, 3s cooldown) · Q recharge`; }
+        hint() { return `${this.teamsOn ? `${this.myTeam === 0 ? 'Blue' : 'Red'} team · ` : ''}WASD dribble · Shift sprint · E or click pass · hold Space, release for a power kick (3–10 energy, 3s cooldown) · Q recharge`; }
         touchHint() { return 'Joystick to dribble · Tap toward a pass · Hold Power kick, release to shoot (3s cooldown) · Sprint to steal'; }
 
         draw(ctx, w, h) {
@@ -1731,14 +1780,14 @@
             ctx.fillStyle = '#14532d'; ctx.fillRect(0, 0, w, h);
             this.begin(ctx, w, h, w < 600 ? 650 : 800);
             ctx.fillStyle = '#273744'; ctx.fillRect(-90, -80, W + 180, H + 160);
-            for (let row = 0; row < 3; row++) for (let x = -40; x < W + 40; x += 24) {
+            if (this.y0 < 0 || this.y1 > H) for (let row = 0; row < 3; row++) for (let x = -40 + Math.max(0, Math.ceil((this.x0 - 10 + 40) / 24)) * 24; x < Math.min(W + 40, this.x1 + 10); x += 24) {
                 ctx.fillStyle = ['#df6b68', '#79abd4', '#edcc79', '#b4c5ce'][mod(Math.floor(x / 24) + row * 7, 4)];
                 ctx.beginPath(); ctx.arc(x, -20 - row * 20, 5, 0, TAU); ctx.arc(x, H + 20 + row * 20, 5, 0, TAU); ctx.fill();
             }
-            for (let i = 0; i < 24; i++) { ctx.fillStyle = i % 2 ? '#15803d' : '#16a34a'; ctx.fillRect(i * 100, 0, 100, H); }
+            for (let i = Math.max(0, Math.floor(this.x0 / 100)); i < Math.min(24, Math.ceil(this.x1 / 100)); i++) { ctx.fillStyle = i % 2 ? '#15803d' : '#16a34a'; ctx.fillRect(i * 100, 0, 100, H); }
             ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 5;
             ctx.strokeStyle = 'rgba(224,255,208,.09)'; ctx.lineWidth = 1; ctx.beginPath();
-            for (let y = 12; y < H; y += 21) for (let x = mod(y, 33); x < W; x += 31) {
+            for (let y = 12 + Math.max(0, Math.ceil((this.y0 - 20 - 12) / 21)) * 21; y < Math.min(H, this.y1 + 20); y += 21) for (let x = mod(y, 33) + Math.max(0, Math.ceil((this.x0 - 20 - mod(y, 33)) / 31)) * 31; x < Math.min(W, this.x1 + 20); x += 31) {
                 if (!this.seen(x, y, 20)) continue;
                 ctx.moveTo(x, y); ctx.lineTo(x + 2, y - 4); ctx.moveTo(x + 4, y); ctx.lineTo(x + 5, y - 3);
             }
@@ -1748,6 +1797,7 @@
             ctx.beginPath(); ctx.arc(W / 2, H / 2, 130, 0, TAU); ctx.stroke();
             ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.beginPath(); ctx.arc(W / 2, H / 2, 6, 0, TAU); ctx.fill();
             for (const side of [0, 1]) {
+                if (!this.seenRect(side ? W - 400 : -100, -80, 500, H + 160)) continue;
                 const bx = side ? W - 260 : 0;
                 ctx.strokeRect(bx, H / 2 - 260, 260, 520);
                 ctx.beginPath(); ctx.arc(side ? W - 190 : 190, H / 2, 7, 0, TAU); ctx.fillStyle = '#ecf7e9'; ctx.fill();
@@ -1769,15 +1819,17 @@
             }
             for (const p of this.pads) { if (!p.used) this.qMark(ctx, p.x, p.y, '#7c3aed', t); }
             // ball: shadow, white body with dark patches; glows when a power kick is in reach
-            const near = dist(me.x, me.y, b.x, b.y) < 64 && this.kickCd <= 0;
-            ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(b.x + 3, b.y + 6, b.r, b.r * 0.6, 0, 0, TAU); ctx.fill();
-            if (near) this.ring(ctx, b.x, b.y, b.r + 9, 'rgba(253,224,71,.85)', 3);
-            ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, TAU); ctx.fill();
-            ctx.fillStyle = '#1e293b';
-            const spin = this.ballSpin;
-            for (let k = 0; k < 5; k++) { const a = spin + k * TAU / 5; ctx.beginPath(); ctx.arc(b.x + Math.cos(a) * b.r * 0.58, b.y + Math.sin(a) * b.r * 0.58, 3, 0, TAU); ctx.fill(); }
-            ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, TAU); ctx.fill();
-            if (!this.teamsOn) {
+            if (this.seen(b.x, b.y, 60)) {
+                const near = dist(me.x, me.y, b.x, b.y) < 64 && this.kickCd <= 0;
+                ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(b.x + 3, b.y + 6, b.r, b.r * 0.6, 0, 0, TAU); ctx.fill();
+                if (near) this.ring(ctx, b.x, b.y, b.r + 9, 'rgba(253,224,71,.85)', 3);
+                ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, TAU); ctx.fill();
+                ctx.fillStyle = '#1e293b';
+                const spin = this.ballSpin;
+                for (let k = 0; k < 5; k++) { const a = spin + k * TAU / 5; ctx.beginPath(); ctx.arc(b.x + Math.cos(a) * b.r * 0.58, b.y + Math.sin(a) * b.r * 0.58, 3, 0, TAU); ctx.fill(); }
+                ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, TAU); ctx.fill();
+            }
+            if (!this.teamsOn && this.seen(this.keeper.x, this.keeper.y)) {
                 const keeper = this.keeper;
                 drawFigureTop(ctx, { color: '#fbbf24' }, keeper.x, keeper.y, keeper.r, Math.PI, t, 1);
                 if (!this.s.preview) nameTag(ctx, 'Keeper', keeper.x, keeper.y - 34, '#fbbf24');

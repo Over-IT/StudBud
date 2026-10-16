@@ -43,14 +43,20 @@ assert.equal(label.text, 'Bait');
 assert.equal(value.text, '4');
 console.log('6000-frame meter DOM-query/write bounds, rounding, depleted state, testing visibility and resource replacement passed.');
 const A = sandbox.window.StudBudArcade;
-const low = A.graphicsProfile('auto', { hardwareConcurrency: 2, deviceMemory: 2 });
-assert.equal(low.maxDpr, 1);
-assert.equal(low.fps, 60);
-assert.equal(A.graphicsProfile('full', { hardwareConcurrency: 2 }).fps, 120);
-assert.equal(A.graphicsProfile('auto', { connection: { saveData: true } }).low, true);
-const particles = new A.Particles({ graphics: low, preview: true });
+sandbox.window.matchMedia = () => ({ matches: true });
+sandbox.window.NexusApp = { AppState: { get: () => ({ gameQuality: 'low' }) } };
+const full = A.graphicsProfile();
+assert.equal(full.low, false, 'legacy saved low quality is ignored');
+for (const mode of ['auto', 'low', 'full', 'high', undefined]) {
+    const profile = A.graphicsProfile(mode, { hardwareConcurrency: 2, deviceMemory: 2, connection: { saveData: true } });
+    assert.equal(profile.low, false, 'hardware, reduced motion and saved settings cannot lower game quality');
+    assert.equal(profile.maxDpr, 2);
+    assert.equal(profile.fps, Infinity, 'game rendering is not frame capped');
+    assert.equal(profile.particleScale, 1);
+}
+const particles = new A.Particles({ graphics: full, preview: true });
 for (let i = 0; i < 100; i++) particles.burst(0, 0, '#fff', 100);
-assert.equal(particles.items.length, 90, 'low-end particle growth is bounded');
+assert.equal(particles.items.length, 320, 'full-detail particle growth is bounded');
 const array = particles.items;
 particles.update(2);
 assert.equal(particles.items.length, 0);
@@ -58,18 +64,67 @@ assert.equal(particles.items, array, 'particle cleanup reuses its allocation');
 let ticks = 0, draws = 0;
 sandbox.requestAnimationFrame = () => 1;
 const frameSession = {
-    lastFrame: 0, graphics: low, mode: 'sports', countdown: 0, practice: true, testing: false, paused: false,
+    lastFrame: 0, graphics: full, mode: 'sports', countdown: 0, practice: true, testing: false, paused: false,
     game: { update() { ticks++; }, draw() { draws++; } }, overlay: { querySelector: () => ({ classList: { add() {} } }) },
     ctx: { setTransform() {} }, remotes: new Map(), justPressed: new Set(), mouse: {},
     checkEnd() {}, updateMeter() {}, dpr: 1, scale: 1, vw: 100, vh: 100
 };
 for (let i = 1; i <= 6000; i++) A.Session.prototype.frame.call(frameSession, i * 1000 / 60);
 assert.equal(ticks, 6000, 'all game physics updates survive render throttling');
-assert.equal(draws, 6000, 'low detail renders all 60 Hz display frames instead of imposing a 30 FPS cap');
+assert.equal(draws, 6000, 'full detail renders all 60 Hz display frames');
 frameSession.mode = 'chess';
 A.Session.prototype.frame.call(frameSession, 100100);
 assert.equal(draws, 6000, 'DOM chess avoids redundant canvas frames');
-console.log('Low-end GPU resolution/frame policy, bounded effects, zero-allocation cleanup and full-rate game simulation passed.');
+assert.equal(frameSession.graphics.low, false);
+assert.equal(frameSession.resolutionScale, undefined, 'frame timing never silently lowers render resolution');
+const resizeSession = {
+    adaptiveLow: true, resolutionScale: .5, overlay: { clientWidth: 800, clientHeight: 600 },
+    canvas: {}, layoutHud() {}
+};
+sandbox.window.devicePixelRatio = 2;
+A.Session.prototype.resize.call(resizeSession);
+assert.equal(resizeSession.graphics.low, false, 'stale adaptive low flags cannot affect graphics');
+assert.equal(resizeSession.dpr, 2, 'stale resolution scales cannot degrade rendering');
+assert.equal(resizeSession.canvas.width, 1600);
+assert.equal(resizeSession.graphics.particleLimit, 320);
+const particleState = (x, y, size = 4) => ({ x, y, size, vx: 0, vy: 0, life: 1, max: 1, color: '#fff' });
+particles.items.push(particleState(50, 30), particleState(1000, 30), particleState(-10, 30, 30));
+const paint = {
+    canvas: { width: 200, height: 100 },
+    getTransform: () => ({ a: 2, b: 0, c: 0, d: 2, e: 0, f: 0 }),
+    fillRect() { this.calls = (this.calls || 0) + 1; }
+};
+particles.draw(paint);
+assert.equal(paint.calls, 2, 'off-screen particles skip drawing while edge-overlapping effects remain');
+assert.equal(particles.items.length, 3, 'drawing does not remove particles or alter simulation');
+assert.equal(paint.globalAlpha, 1);
+particles.update(.25);
+assert.equal(particles.items[1].life, .75, 'off-screen effects still expire at the same rate');
+const rotated = A.util.canvasView({ canvas: { width: 200, height: 100 }, getTransform: () => ({ a: 0, b: 2, c: -2, d: 0, e: 200, f: 0 }) });
+assert.deepEqual(JSON.parse(JSON.stringify(rotated)), { x0: 0, x1: 50, y0: 0, y1: 100 }, 'viewport handles rotated, scaled cameras');
+assert.equal(A.util.canvasView({ getTransform: () => ({ a: 0, b: 0, c: 0, d: 0 }), canvas: paint.canvas }), null);
+assert.equal(A.util.canvasView({}), null, 'lightweight preview contexts retain a safe fallback');
+const uiSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+assert.ok(!uiSource.includes('id="game-quality"'), 'obsolete quality selector is absent');
+assert.ok(!fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8').includes('low-effects'), 'quality CSS cannot silently suppress effects');
+console.log('Full-quality rendering, legacy preference compatibility, viewport particle culling and unchanged simulation passed.');
+vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'multiplayerGames2.js'), 'utf8'), sandbox);
+const arenaView = { x0: 500, x1: 800, y0: 400, y1: 600 };
+assert.equal(A.Arena.prototype.seenRect.call(arenaView, 0, 450, 600, 20, 0), true, 'large rectangles crossing the view are retained');
+assert.equal(A.Arena.prototype.seenRect.call(arenaView, 0, 0, 100, 100, 0), false, 'distant scenery is rejected');
+const soccerSession = { preview: true, roster: new Map([['you', {}]]), user: { id: 'you' } };
+const soccer = new A.games.sports(soccerSession);
+soccer.begin = () => Object.assign(soccer, arenaView);
+soccer.drawPlayers = soccer.end = soccer.qMark = soccer.ring = soccer.particles.draw = () => {};
+let visibilityChecks = 0;
+soccer.seen = function(...args) { visibilityChecks++; return A.Arena.prototype.seen.apply(this, args); };
+const noop = () => {};
+const drawContext = new Proxy({}, { get: (target, key) => key in target ? target[key] : noop });
+const ballBefore = JSON.stringify(soccer.ball);
+soccer.draw(drawContext, 300, 200);
+assert.ok(visibilityChecks < 200, 'soccer visits visible grass cells instead of scanning the entire field');
+assert.equal(JSON.stringify(soccer.ball), ballBefore, 'viewport optimization does not change ball simulation');
+console.log('Arena rectangle intersection and bounded soccer terrain iteration passed.');
 const U = A.util;
 const solids = Array.from({ length: 10000 }, (_, i) => ({ x: (i % 5) * 100, y: -i * 90, w: 90, h: 16, oneway: true }));
 solids.push({ x: -50, y: -60000, w: 12, h: 62000 }, { x: 120, y: 150, w: 80, h: 15, mover: true },

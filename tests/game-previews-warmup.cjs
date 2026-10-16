@@ -14,6 +14,7 @@ const localValues = new Map();
 const sandbox = {
     console: { ...console, warn: (...args) => { errors.push(args); console.warn(...args); } },
     performance, Date, Math, Map, Set, Uint8Array,
+    Path2D: class { constructor(d) { assert.equal(typeof d, "string"); this.d = d; } },
     document: { addEventListener() {}, getElementById() { return { textContent: '' }; } },
     window: { devicePixelRatio: 1, addEventListener() {} },
     navigator: { maxTouchPoints: 0 },
@@ -221,7 +222,7 @@ console.log('Nearby King of the Hill actions and Soccer pass/charged power-kick 
     assert.equal(game.specialCharge, 0, 'special consumes its charge');
     game.swingCd = 0; game.update(0);
     assert.equal(swings.length, 1, 'a second heavy is blocked during cooldown');
-    assert.equal(spent, 24, 'blocked specials consume no energy');
+    assert.equal(spent, A.ENERGY_COSTS.duel.special, 'blocked specials consume no energy');
     tap.clear(); tap.add('KeyE'); game.update(0);
     assert.equal(swings.length, 2, 'light attacks still work during heavy cooldown');
     assert.equal(swings[1].p, 1);

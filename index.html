@@ -49,6 +49,7 @@
                     <button type="submit" class="primary-btn full-width">Join game</button>
                 </form>
             </details>
+            <p class="settings-hint auth-legal"><a href="privacy.html" target="_blank" rel="noopener">Privacy policy</a></p>
         </div>
         <div id="guest-game-lobby" class="glass-card hidden"></div>
     </section>
@@ -281,6 +282,7 @@
                             <div id="study-history-list" class="study-history-list"></div>
                         </div>
                     </div>
+                    <aside class="ad-slot" data-ad-placement="home" aria-label="Advertisement" hidden></aside>
                 </section>
 
                 <!-- 2. GPA & Transcript View -->
@@ -508,6 +510,8 @@
                         <div class="empty-state glass-card full-width">No decks available. Create one or import flashcards.</div>
                     </div>
                     
+                    <aside class="ad-slot" data-ad-placement="decks" aria-label="Advertisement" hidden></aside>
+
                     <!-- Active Study Area (Hidden until a deck is opened) -->
                     <div id="active-study-area" class="glass-card full-width hidden">
                         <div class="study-header">
@@ -911,6 +915,7 @@
                         <p id="multiplayer-shop-status" class="community-status" role="status" aria-live="polite"></p>
                         <div id="multiplayer-shop-items" class="multiplayer-shop-items"></div>
                     </section>
+                    <aside class="ad-slot" data-ad-placement="shop" aria-label="Advertisement" hidden></aside>
                 </section>
 
                 <!-- 7. Flashcard Importer View -->
@@ -1089,6 +1094,7 @@
                                 <button id="open-backup-modal-btn" class="secondary-btn"><i class="fas fa-download"></i> Export / Import Backup</button>
                                 <button class="secondary-btn open-ic-import-btn" type="button"><i class="fas fa-cloud-arrow-down"></i> Import from Infinite Campus</button>
                             </div>
+                            <p class="settings-hint"><a href="privacy.html" target="_blank" rel="noopener">Privacy policy &amp; advertising</a></p>
                             <div class="danger-zone">
                                 <h4>Danger Zone</h4>
                                 <button id="factory-reset-btn" class="danger-btn"><i class="fas fa-trash-alt"></i> Factory Reset (Delete All Data)</button>
@@ -1133,10 +1139,7 @@
                             </div>
                             <label class="setting-toggle"><input type="checkbox" id="ui-compact-mode"> <span>Compact spacing</span></label>
                             <p class="settings-hint">Compact mode fits more information on smaller displays.</p>
-                            <div class="form-group"><label for="game-quality">Game performance</label>
-                                <select id="game-quality"><option value="auto">Auto (recommended)</option><option value="low">Low power / older devices</option><option value="full">Full visuals</option></select>
-                                <p class="settings-hint">Low power lowers resolution and effects. Gameplay is unchanged.</p>
-                            </div>
+
                         </section>
                     </div>
                 </section>
@@ -1657,7 +1660,11 @@
     <script src="supabase-config.js" defer></script>
     
     <!-- Application Scripts (Zero Dependency strict vanilla logic apart from Chart rendering on canvas) -->
-    <script src="pchsData.js" defer></script>
+    <script src="parkwayData.js" defer></script>
+<script src="data/schools/central.js" defer></script>
+<script src="data/schools/north.js" defer></script>
+<script src="data/schools/south.js" defer></script>
+<script src="data/schools/west.js" defer></script>
     <script src="gpaCalculator.js" defer></script>
     <script src="plannerEngine.js" defer></script>
     <script src="flashcardEngine.js" defer></script>
@@ -1674,6 +1681,7 @@
     <script src="infiniteCampusImport.js" defer></script>
     <script src="classrooms.js" defer></script>
     <script src="app.js" defer></script>
+    <script src="ads.js" defer></script>
     <script>
         let installPrompt = null;
         const installBtn = () => document.getElementById('install-app-button');

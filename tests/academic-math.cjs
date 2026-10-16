@@ -11,7 +11,7 @@ const sandbox = {
     AppState: { get: key => state[key] }
 };
 vm.createContext(sandbox);
-for (const file of ['pchsData.js', 'gpaCalculator.js', 'plannerEngine.js', 'flashcardEngine.js']) {
+for (const file of ['parkwayData.js', 'data/schools/central.js', 'data/schools/north.js', 'data/schools/south.js', 'data/schools/west.js', 'gpaCalculator.js', 'plannerEngine.js', 'flashcardEngine.js']) {
     vm.runInContext(source(file), sandbox, { filename: file });
 }
 const appSource = source('app.js');
@@ -50,7 +50,7 @@ function exhaustive(courses, target, mode) {
             if (earned >= target * totalCredits - 1e-9) best = Math.min(best, cost);
             return;
         }
-        for (const grade of sandbox.window.PCHS_GRADE_SCALE) {
+        for (const grade of sandbox.window.PARKWAY_GRADE_SCALE) {
             const row = courses[index];
             visit(index + 1, earned + Number(mode === 'weighted' && row.isWeighted ? grade.weighted : grade.unweighted) * row.credits, cost + grade.minPct);
         }

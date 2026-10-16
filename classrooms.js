@@ -55,6 +55,8 @@
             this.lastCodesKey = '';
             this.syncTimer = null;
             this.loading = false;
+            this.courseIndex = -1;
+            this.addingCourse = false;
         }
 
         get view() { return document.getElementById('classes-view'); }
@@ -75,6 +77,13 @@
             view.addEventListener('submit', event => this.onSubmit(event));
             view.addEventListener('input', event => this.onInput(event));
             view.addEventListener('change', event => this.onInput(event));
+            view.addEventListener('keydown', event => this.onKeydown(event));
+            view.addEventListener('focusin', event => {
+                if (event.target.id === 'teacher-course-search' && event.target.value.trim()) this.renderCourseResults(event.target.value);
+            });
+            document.addEventListener('click', event => {
+                if (!event.target.closest?.('.teacher-course-combobox')) this.hideCourseResults();
+            });
             this.app.EventBus.on('courses:updated', () => { this.studentData = null; this.scheduleSync(2500, true); });
             this.app.EventBus.on('assignments:updated', () => this.scheduleSync());
             document.addEventListener('visibilitychange', () => {
@@ -153,12 +162,14 @@
                 <section class="glass-card teacher-new-class">
                     <h3><i class="fas fa-plus"></i> Add a course you teach</h3>
                     <form id="teacher-class-form" class="teacher-class-form" autocomplete="off">
-                        <label class="teacher-course-search">Search the ${esc(school)} course catalog
-                            <input id="teacher-course-search" type="search" placeholder="e.g. AP Biology, Algebra 2, 0412" aria-describedby="teacher-course-help">
-                        </label>
-                        <small id="teacher-course-help" class="muted">Tap a course to add it. Courses you already teach are checked.</small>
+                        <label for="teacher-course-search" class="teacher-course-search-label">Search the ${esc(school)} course catalog</label>
+                        <div class="teacher-course-combobox">
+                            <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                            <input id="teacher-course-search" type="search" placeholder="e.g. AP Biology, Algebra 2, 0412" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="teacher-course-results" aria-describedby="teacher-course-help">
+                            <div id="teacher-course-results" class="teacher-course-results hidden" role="listbox" aria-label="${esc(school)} courses"></div>
+                        </div>
+                        <small id="teacher-course-help" class="muted">Only ${esc(school)} courses are listed. Use ↑ ↓ and Enter, or tap a course to add it. Courses you already teach are checked.</small>
                     </form>
-                    <div id="teacher-course-results" class="teacher-course-results" role="listbox"></div>
                 </section>
                 <p id="classes-status" class="classes-status" role="status" aria-live="polite"></p>
                 <div class="teacher-class-grid">
@@ -186,20 +197,81 @@
 
         renderCourseResults(query) {
             const box = document.getElementById('teacher-course-results');
+            const input = document.getElementById('teacher-course-search');
             if (!box) return;
-            const terms = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
-            if (!terms.length) { box.innerHTML = ''; return; }
-            const matches = (this.app.schoolCatalog?.() || [])
-                .filter(course => terms.every(term => `${course.code} ${course.title} ${course.category || ''}`.toLowerCase().includes(term)))
-                .slice(0, 8);
+            this.courseIndex = -1;
+            input?.removeAttribute('aria-activedescendant');
+            const text = String(query || '').trim();
+            if (!text) { this.hideCourseResults(); return; }
+            const schoolId = this.app.currentSchool?.() || 'pchs';
+            const schools = window.STUDBUD_SCHOOLS;
+            const matches = schools?.search
+                ? schools.search(schoolId, text, 10)
+                : (this.app.schoolCatalog?.() || []).filter(course => `${course.code} ${course.title}`.toLowerCase().includes(text.toLowerCase())).slice(0, 10);
             const taught = new Set((this.teacherData?.classes || []).map(item => item.course_code));
-            box.innerHTML = matches.length ? matches.map(course => {
+            box.innerHTML = matches.length ? matches.map((course, index) => {
                 const have = taught.has(course.code);
-                return `<button type="button" role="option" class="teacher-course-option${have ? ' added' : ''}" data-class-action="add-course" data-code="${esc(course.code)}" aria-selected="${have}"${have ? ' disabled' : ''}>
-                    <span><strong>${esc(course.title)}</strong><small>${esc(course.code)}${course.category ? ` · ${esc(course.category)}` : ''}</small></span>
+                return `<button type="button" id="teacher-course-option-${index}" role="option" tabindex="-1" class="teacher-course-option${have ? ' added' : ''}" data-class-action="add-course" data-code="${esc(course.code)}" aria-selected="false"${have ? ' aria-disabled="true" disabled' : ''}>
+                    <span><strong>${esc(course.title)}${course.isWeighted ? ' <em class="course-weighted-pill">Weighted</em>' : ''}</strong><small>${esc(course.code)}${course.category ? ` · ${esc(course.category)}` : ''} · ${Number(course.credits) || 0} cr${have ? ' · You teach this' : ''}</small></span>
                     <i class="fas ${have ? 'fa-circle-check' : 'fa-circle-plus'}" aria-hidden="true"></i></button>`;
             }).join('')
-                : '<p class="muted">No courses match. Try fewer words.</p>';
+                : `<p class="teacher-course-empty muted">No ${esc(this.app.schoolShortName?.() || '')} courses match “${esc(text)}”. Try fewer or shorter words.</p>`;
+            box.classList.remove('hidden');
+            input?.setAttribute('aria-expanded', 'true');
+        }
+
+        hideCourseResults() {
+            const box = document.getElementById('teacher-course-results');
+            if (box) { box.classList.add('hidden'); box.innerHTML = ''; }
+            const input = document.getElementById('teacher-course-search');
+            input?.setAttribute('aria-expanded', 'false');
+            input?.removeAttribute('aria-activedescendant');
+            this.courseIndex = -1;
+        }
+
+        courseOptions() {
+            return Array.from(document.querySelectorAll('#teacher-course-results .teacher-course-option:not([disabled])'));
+        }
+
+        highlightCourse(index) {
+            const options = this.courseOptions();
+            if (!options.length) return;
+            this.courseIndex = Math.max(0, Math.min(index, options.length - 1));
+            const input = document.getElementById('teacher-course-search');
+            options.forEach((option, i) => {
+                const selected = i === this.courseIndex;
+                option.setAttribute('aria-selected', String(selected));
+                option.classList.toggle('active', selected);
+                if (selected) {
+                    input?.setAttribute('aria-activedescendant', option.id);
+                    option.scrollIntoView?.({ block: 'nearest' });
+                }
+            });
+        }
+
+        onKeydown(event) {
+            if (event.target.id !== 'teacher-course-search') return;
+            const box = document.getElementById('teacher-course-results');
+            const open = box && !box.classList.contains('hidden');
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                event.preventDefault();
+                if (!open) this.renderCourseResults(event.target.value);
+                const current = this.courseIndex ?? -1;
+                this.highlightCourse(event.key === 'ArrowDown' ? current + 1 : (current < 0 ? this.courseOptions().length - 1 : current - 1));
+            } else if (event.key === 'Escape' && open) {
+                event.preventDefault();
+                event.stopPropagation();
+                this.hideCourseResults();
+            } else if (event.key === 'Enter') {
+                event.preventDefault();
+                const options = this.courseOptions();
+                const pick = options[this.courseIndex >= 0 ? this.courseIndex : 0];
+                if (!pick) {
+                    this.status(open ? 'That course is already in your classes, or nothing matches.' : 'Search for a course, then pick it from the list.', 'error');
+                    return;
+                }
+                this.addCourse(pick.dataset.code).catch(error => this.status(this.app.friendlyErrorMessage(error), 'error'));
+            }
         }
 
         async openClass(id) {
@@ -217,8 +289,23 @@
 
         async addCourse(code) {
             const course = (this.app.schoolCatalog?.() || []).find(entry => entry.code === code);
-            if (!course) throw new Error('Pick a course from the list first.');
-            await this.call('studbud_teacher_create_class', { p_course_code: course.code, p_title: course.title, p_section: '' });
+            if (!course) throw new Error(`Pick a ${this.app.schoolShortName?.() || 'school'} course from the list first.`);
+            if (this.addingCourse) return;
+            if ((this.teacherData?.classes || []).some(item => item.course_code === course.code)) {
+                this.status(`You already teach ${course.title}.`);
+                return;
+            }
+            this.addingCourse = true;
+            const box = document.getElementById('teacher-course-results');
+            box?.setAttribute('aria-busy', 'true');
+            box?.querySelectorAll('button').forEach(button => { button.disabled = true; });
+            this.status(`Adding ${course.title}…`);
+            try {
+                await this.call('studbud_teacher_create_class', { p_course_code: course.code, p_title: course.title, p_section: '' });
+            } finally {
+                this.addingCourse = false;
+                box?.removeAttribute('aria-busy');
+            }
             await this.loadTeacher();
             this.status(`Added ${course.title}. Students with this course are added automatically.`, 'success');
             this.app.Sfx?.play?.('success');
@@ -340,7 +427,7 @@
                     <span class="muted">${minutes(weekStudy)} studied by the class this week</span>
                 </div>
                 <div class="roster-head" aria-hidden="true"><span>Student</span><span>Grade</span><span>Missing</span><span>Study</span><span>Streak</span><span>Last active</span></div>
-                <div class="roster-list">${rows || '<p class="muted">No students match.</p>'}</div>
+                <div class="roster-list">${rows || `<p class="muted roster-empty">No students match “${esc(this.rosterFilter.trim())}”.</p>`}</div>
                 <p class="muted roster-note">Grades and missing work come from each student's StudBud (usually imported from Infinite Campus) and update when they open the app.</p>${removedMarkup}`;
         }
 
@@ -551,10 +638,17 @@
         onInput(event) {
             const target = event.target;
             if (target.id === 'teacher-course-search' && event.type === 'input') {
-                document.getElementById('teacher-course-code').value = '';
                 this.renderCourseResults(target.value);
             } else if (target.id === 'roster-search' && event.type === 'input') {
                 this.rosterFilter = target.value;
+                // Only swap the rows so typing doesn't rebuild the page (keeps focus, scroll and the toolbar).
+                const list = this.root?.querySelector('.roster-list');
+                if (list) {
+                    const scratch = document.createElement('div');
+                    scratch.innerHTML = this.rosterMarkup(0);
+                    list.innerHTML = scratch.querySelector('.roster-list')?.innerHTML || '';
+                    return;
+                }
                 const position = target.selectionStart;
                 this.renderTeacherDetail();
                 const input = document.getElementById('roster-search');
@@ -584,7 +678,8 @@
             if (button) button.disabled = true;
             try {
                 if (form.id === 'teacher-class-form') {
-                    const first = document.querySelector('#teacher-course-results .teacher-course-option:not([disabled])');
+                    const options = this.courseOptions();
+                    const first = options[this.courseIndex >= 0 ? this.courseIndex : 0];
                     if (!first) throw new Error('Search for a course, then tap it to add it.');
                     await this.addCourse(first.dataset.code);
                 } else if (form.id === 'teacher-deck-form') {

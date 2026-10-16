@@ -354,7 +354,7 @@
             const space = s.pressed('Space');
             const act = click || space;
             if (this.st === 0) {
-                if (act && s.spend(10)) { this.st = 1; this.power = 0; this.dir = 1; s.sfx('cast'); }
+                if (act && s.spend(A.ENERGY_COSTS.fishing.cast)) { this.st = 1; this.power = 0; this.dir = 1; s.sfx('cast'); }
             } else if (this.st === 1) {
                 this.power += this.dir * dt * 1.4;
                 if (this.power >= 1) { this.power = 1; this.dir = -1; } else if (this.power <= 0) { this.power = 0; this.dir = 1; }
@@ -430,6 +430,7 @@
                 const span = w + 200;
                 const fx = ((((f.x0 + f.spd * t) % span) + span) % span) - 100;
                 const fy = wy + 40 + f.y * (h - wy - 70);
+                if (fx < -35 || fx > w + 35 || fy < -20 || fy > h + 20) continue;
                 const kind = CATCH[f.type];
                 ctx.save(); ctx.translate(fx, fy); ctx.scale(Math.sign(f.spd), 1); ctx.globalAlpha = 0.5;
                 ctx.fillStyle = kind.color; ctx.beginPath(); ctx.ellipse(0, 0, 14 + f.type * 3, 7 + f.type, 0, 0, TAU); ctx.fill();
@@ -626,14 +627,16 @@
             this.begin(ctx, w, h, 800);
             ctx.fillStyle = '#0a1224'; ctx.fillRect(0, 0, this.W, this.H);
             ctx.strokeStyle = 'rgba(34,211,238,.1)'; ctx.lineWidth = 1;
-            for (let x = 0; x <= this.W; x += 60) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, this.H); ctx.stroke(); }
-            for (let y = 0; y <= this.H; y += 60) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(this.W, y); ctx.stroke(); }
+            for (let x = Math.max(0, Math.ceil(this.x0 / 60) * 60); x <= Math.min(this.W, this.x1); x += 60) { ctx.beginPath(); ctx.moveTo(x, Math.max(0, this.y0)); ctx.lineTo(x, Math.min(this.H, this.y1)); ctx.stroke(); }
+            for (let y = Math.max(0, Math.ceil(this.y0 / 60) * 60); y <= Math.min(this.H, this.y1); y += 60) { ctx.beginPath(); ctx.moveTo(Math.max(0, this.x0), y); ctx.lineTo(Math.min(this.W, this.x1), y); ctx.stroke(); }
             for (const wl of this.walls) {
+                if (!this.seenRect(wl.x, wl.y, wl.w, wl.h)) continue;
                 ctx.fillStyle = '#1e293b'; ctx.fillRect(wl.x, wl.y, wl.w, wl.h);
                 ctx.strokeStyle = '#334155'; ctx.lineWidth = 3; ctx.strokeRect(wl.x + 1.5, wl.y + 1.5, wl.w - 3, wl.h - 3);
                 if (wl.w > 100 && wl.h > 100) for (let i = 0; i < 8; i++) { ctx.fillStyle = (Math.floor(t * 4 + i * 1.7) % 3 === 0) ? '#22d3ee' : '#4ade80'; ctx.fillRect(wl.x + 14 + (i % 2) * 70, wl.y + 14 + Math.floor(i / 2) * 42, 10, 6); }
             }
             for (const term of this.terms) {
+                if (!this.seen(term.x, term.y)) continue;
                 const mine = term.kind === 'mine', color = mine ? '#4ade80' : '#f87171', on = term.cd <= 0;
                 ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.beginPath(); ctx.ellipse(term.x + 3, term.y + 26, 34, 12, 0, 0, TAU); ctx.fill();
                 ctx.fillStyle = '#0f172a'; roundRect(ctx, term.x - 30, term.y - 26, 60, 46, 8); ctx.fill();
@@ -642,7 +645,7 @@
                 if (on) this.ring(ctx, term.x, term.y, 44 + Math.sin(t * 5 + term.id) * 3, color + 'aa', 3);
             }
             this.drawPlayers(ctx, (c, x, y, r) => { if (r ? r.ex?.sh : this.shield > 0) this.ring(c, x, y, 28, 'rgba(56,189,248,.8)', 3); });
-            for (const c of this.s.preview ? [] : this.pops) { ctx.globalAlpha = 1 - c.t / 1.2; ctx.fillStyle = c.color; ctx.font = '900 18px system-ui'; ctx.textAlign = 'center'; ctx.fillText(c.text, c.x, c.y - c.t * 50); ctx.globalAlpha = 1; }
+            for (const c of this.s.preview ? [] : this.pops) { if (!this.seen(c.x, c.y - c.t * 50, 180)) continue; ctx.globalAlpha = 1 - c.t / 1.2; ctx.fillStyle = c.color; ctx.font = '900 18px system-ui'; ctx.textAlign = 'center'; ctx.fillText(c.text, c.x, c.y - c.t * 50); ctx.globalAlpha = 1; }
             this.particles.draw(ctx);
             this.end(ctx);
             if (!this.s.preview && this.hk) this.drawHack(ctx, w, h);
@@ -1109,6 +1112,7 @@
             this.previewPoint = this.s.mouse.active && !overHud && !this.s.question && !this.selected ? this.gridPoint(pointer.x, pointer.y) : null;
             for (const team of [0, 1]) {
                 const color = DEFENSE_COLORS[team], path = this.paths[team];
+                if (!this.seenRect(team * 1100, 0, 1100, this.H, 120)) continue;
                 ctx.fillStyle = team ? '#3f4934' : '#354c43'; ctx.fillRect(team * 1100, 0, 1100, this.H);
                 for (let y = Math.floor(this.y0 / 100) * 100; y < Math.min(this.H, this.y1); y += 100) {
                     for (let x = Math.max(team * 1100, Math.floor(this.x0 / 100) * 100); x < Math.min((team + 1) * 1100, this.x1); x += 100) {
@@ -1125,7 +1129,7 @@
                 ctx.strokeStyle = '#988366'; ctx.lineWidth = 82; ctx.stroke();
                 ctx.strokeStyle = '#bba581'; ctx.lineWidth = 62; ctx.stroke();
                 ctx.strokeStyle = 'rgba(70,53,33,.22)'; ctx.lineWidth = 3; ctx.setLineDash([3, 28]); ctx.stroke(); ctx.setLineDash([]);
-                for (let row = 0; row < 20; row++) for (let col = 0; col < 14; col++) {
+                for (let row = Math.max(0, Math.ceil((this.y0 - this.gridSize - 85) / this.gridSize)); row < Math.min(20, Math.floor((this.y1 + this.gridSize - 85) / this.gridSize) + 1); row++) for (let col = Math.max(0, Math.ceil((this.x0 - this.gridSize - team * 1100 - 95) / this.gridSize)); col < Math.min(14, Math.floor((this.x1 + this.gridSize - team * 1100 - 95) / this.gridSize) + 1); col++) {
                     const x = team * 1100 + 95 + col * this.gridSize, y = 85 + row * this.gridSize;
                     if (!this.seen(x, y, this.gridSize) || this.distanceToPath(x, y, team) <= 68) continue;
                     ctx.strokeStyle = team === this.myTeam ? 'rgba(226,232,240,.16)' : 'rgba(248,113,113,.1)';
@@ -1133,6 +1137,7 @@
                 }
                 for (let i = 1; i < path.length; i++) {
                     const a = path[i - 1], b = path[i], angle = Math.atan2(b.y - a.y, b.x - a.x);
+                    if (!this.seen((a.x + b.x) / 2, (a.y + b.y) / 2, 24)) continue;
                     ctx.save(); ctx.translate((a.x + b.x) / 2, (a.y + b.y) / 2); ctx.rotate(angle);
                     ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(12, 0); ctx.lineTo(-8, -9); ctx.lineTo(-8, 9); ctx.fill(); ctx.restore();
                 }
@@ -1185,7 +1190,7 @@
                 ctx.fillText(`${spec.name} $${spec.cost} · ${atLimit ? '12/12 tower limit' : valid ? `Range ${spec.range}` : 'Cannot place here'}`, p.x, p.y + 51);
             }
             for (const shot of this.shots) {
-                if (!this.seen(shot.x, shot.y, 300)) continue;
+                if (!this.seenRect(Math.min(shot.x, shot.tx), Math.min(shot.y, shot.ty), Math.abs(shot.tx - shot.x), Math.abs(shot.ty - shot.y), 8)) continue;
                 ctx.strokeStyle = shot.color; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(shot.x, shot.y); ctx.lineTo(shot.tx, shot.ty); ctx.stroke();
             }
             this.drawPlayers(ctx, (c, x, y, player) => this.ring(c, x, y, 22, DEFENSE_COLORS[this.teamOf(player?.id || this.s.user.id) ?? 0], 3));

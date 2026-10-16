@@ -1,4 +1,4 @@
-const CACHE_NAME = 'studbud-shell-v94';
+const CACHE_NAME = 'studbud-shell-v95';
 let offlineNavigation = false;
 const PUBLIC_DEPENDENCIES = [
     'https://cdn.jsdelivr.net/npm/chart.js',
@@ -19,7 +19,11 @@ const APP_FILES = [
     './icons/icon-512.png',
     './icons/icon-maskable-512.png',
     './icons/apple-touch-icon.png',
-    './pchsData.js',
+    './parkwayData.js',
+    './data/schools/central.js',
+    './data/schools/north.js',
+    './data/schools/south.js',
+    './data/schools/west.js',
     './gpaCalculator.js',
     './plannerEngine.js',
     './flashcardEngine.js',
@@ -35,7 +39,8 @@ const APP_FILES = [
     './chessGame.js',
     './infiniteCampusImport.js',
     './classrooms.js',
-    './app.js'
+    './app.js',
+    './ads.js'
 ];
 
 function fetchWithTimeout(request) {
