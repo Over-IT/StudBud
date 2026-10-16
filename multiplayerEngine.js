@@ -1354,19 +1354,21 @@
             if (this.preview) return;
             if (this.over) return;
             const o = this.overlay;
-            o.querySelector('.mpg-name').textContent = this.game.title || '';
-            o.querySelector('.mpg-goal').textContent = this.game.goalText();
+            // Skip unchanged text so the 4 Hz HUD tick doesn't invalidate layout over the game canvas.
+            const setText = (el, text) => { if (el && el.textContent !== text) el.textContent = text; };
+            setText(o.querySelector('.mpg-name'), this.game.title || '');
+            setText(o.querySelector('.mpg-goal'), this.game.goalText());
             const objective = this.game.scoreGoal === false;
             const scoreBox = o.querySelector('.mpg-score');
-            scoreBox.querySelector('span').textContent = objective ? (this.game.goalLabel || 'Score') : 'Score';
-            scoreBox.querySelector('strong').textContent = objective
+            setText(scoreBox.querySelector('span'), objective ? (this.game.goalLabel || 'Score') : 'Score');
+            setText(scoreBox.querySelector('strong'), objective
                 ? (this.game.formatValue ? this.game.formatValue(Math.round(this.goal)) : Math.round(this.goal).toLocaleString())
-                : Math.round(this.score).toLocaleString();
+                : Math.round(this.score).toLocaleString());
             const left = Math.max(0, this.deadline - Date.now());
             const countdownTimer = this.practice ? Number.isFinite(this.deadline) : this.room.goal_type === 'time';
-            o.querySelector('.mpg-timer').textContent = countdownTimer && Number.isFinite(left)
+            setText(o.querySelector('.mpg-timer'), countdownTimer && Number.isFinite(left)
                 ? `${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, '0')}`
-                : `${Math.floor(this.t / 60)}:${String(Math.floor(this.t) % 60).padStart(2, '0')}`;
+                : `${Math.floor(this.t / 60)}:${String(Math.floor(this.t) % 60).padStart(2, '0')}`);
             const touch = o.classList.contains('has-touch');
             const hint = touch ? (this.game.touchHint?.() || this.game.hint()) : this.game.hint();
             const controlsHint = touch ? '' : 'Keyboard/mouse controls';
@@ -1970,7 +1972,74 @@
 
     function drawSeasonalHat(ctx, { shape, colors: [main, accent, detail] }, r) {
         const fill = (color, fn) => { ctx.fillStyle = color; ctx.beginPath(); fn(); ctx.fill(); };
-        if (shape === 'tophat') {
+        if (shape === 'pumpkin') {
+            fill(detail, () => ctx.rect(-r * .13, -r * .65, r * .26, r * .5));
+            fill(main, () => ctx.ellipse(0, r * .9, r * 1.22, r * 1.12, 0, 0, TAU));
+            ctx.strokeStyle = '#c2410c'; ctx.lineWidth = r * .09;
+            for (const side of [-1, 1]) {
+                ctx.beginPath(); ctx.ellipse(side * r * .32, r * .9, r * .5, r * 1.02, 0, 0, TAU); ctx.stroke();
+                fill('#431407', () => { ctx.moveTo(side * r * .43, r * .35); ctx.lineTo(side * r * .82, r * .9); ctx.lineTo(side * r * .15, r * .85); });
+                fill(accent, () => { ctx.moveTo(side * r * .43, r * .48); ctx.lineTo(side * r * .66, r * .8); ctx.lineTo(side * r * .26, r * .76); });
+            }
+            fill('#431407', () => { ctx.moveTo(-r * .73, r * 1.22); ctx.lineTo(-r * .36, r * 1.4); ctx.lineTo(0, r * 1.24); ctx.lineTo(r * .36, r * 1.4); ctx.lineTo(r * .73, r * 1.22); ctx.lineTo(r * .48, r * 1.76); ctx.lineTo(-r * .48, r * 1.76); });
+            fill(accent, () => { ctx.moveTo(-r * .52, r * 1.43); ctx.lineTo(0, r * 1.55); ctx.lineTo(r * .52, r * 1.43); ctx.lineTo(r * .35, r * 1.65); ctx.lineTo(-r * .35, r * 1.65); });
+        } else if (shape === 'ghost') {
+            fill(main, () => {
+                ctx.moveTo(-r * 1.15, r * .8); ctx.bezierCurveTo(-r * 1.15, -r * .7, r * 1.15, -r * .7, r * 1.15, r * .8);
+                ctx.lineTo(r * 1.4, r * 2.5);
+                for (let i = 4; i >= 0; i--) ctx.lineTo(r * (-1.4 + i * .56), r * (i % 2 ? 2.15 : 2.5));
+                ctx.closePath();
+            });
+            ctx.strokeStyle = accent; ctx.lineWidth = r * .08;
+            for (const side of [-1, 1]) {
+                ctx.beginPath(); ctx.moveTo(side * r * .75, r * 1.35); ctx.lineTo(side * r * .95, r * 2.1); ctx.stroke();
+                fill(detail, () => ctx.ellipse(side * r * .4, r * .8, r * .17, r * .25, 0, 0, TAU));
+            }
+            fill(detail, () => ctx.ellipse(0, r * 1.35, r * .16, r * .22, 0, 0, TAU));
+        } else if (shape === 'antlers') {
+            ctx.strokeStyle = main; ctx.lineWidth = r * .22; ctx.lineCap = 'round';
+            for (const side of [-1, 1]) {
+                ctx.beginPath(); ctx.moveTo(side * r * .55, r * .25); ctx.lineTo(side * r * .85, -r * 1.4); ctx.lineTo(side * r * .7, -r * 2);
+                ctx.moveTo(side * r * .8, -r * .8); ctx.lineTo(side * r * 1.4, -r * 1.25); ctx.lineTo(side * r * 1.45, -r * 1.65);
+                ctx.moveTo(side * r * .85, -r * 1.4); ctx.lineTo(side * r * 1.2, -r * 1.8); ctx.stroke();
+            }
+            fill(accent, () => ctx.arc(0, r * .22, r * .25, 0, TAU));
+            fill(detail, () => ctx.arc(-r * .1, r * .12, r * .07, 0, TAU));
+        } else if (shape === 'elf') {
+            fill(main, () => { ctx.moveTo(-r, r * .35); ctx.quadraticCurveTo(-r * .9, -r * 1.9, r * .8, -r * 1.4); ctx.lineTo(r * 1.4, -r * .7); ctx.lineTo(r * .7, -r * .7); ctx.lineTo(r, r * .35); });
+            fill(accent, () => { ctx.moveTo(-r, r * .1); ctx.lineTo(r, r * .1); for (let i = 4; i >= 0; i--) ctx.lineTo(-r + i * r * .5, r * (i % 2 ? .65 : .3)); });
+            fill(detail, () => ctx.arc(r * 1.4, -r * .7, r * .2, 0, TAU));
+        } else if (shape === 'wings') {
+            for (const side of [-1, 1]) {
+                fill(main, () => { ctx.moveTo(side * r * .25, r * .1); ctx.quadraticCurveTo(side * r * .7, -r * 1.3, side * r * 1.8, -r * 1.4); ctx.quadraticCurveTo(side * r * 1.6, -r * .3, side * r * .5, r * .35); });
+                ctx.strokeStyle = detail; ctx.lineWidth = r * .08;
+                ctx.beginPath(); ctx.moveTo(side * r * .55, 0); ctx.lineTo(side * r * 1.4, -r * .85); ctx.stroke();
+            }
+            fill(accent, () => ctx.arc(0, r * .1, r * .28, 0, TAU));
+        } else if (shape === 'sunglasses') {
+            ctx.strokeStyle = main; ctx.lineWidth = r * .16;
+            ctx.beginPath(); ctx.moveTo(-r * 1.1, r * .8); ctx.lineTo(r * 1.1, r * .8); ctx.stroke();
+            for (const side of [-1, 1]) {
+                fill(main, () => ctx.rect(side * r * .52 - r * .47, r * .58, r * .94, r * .62));
+                fill(accent, () => ctx.rect(side * r * .52 - r * .34, r * .69, r * .68, r * .4));
+                ctx.strokeStyle = detail; ctx.lineWidth = r * .08;
+                ctx.beginPath(); ctx.moveTo(side * r * .52 - r * .18, r * .78); ctx.lineTo(side * r * .52 + r * .1, r * .78); ctx.stroke();
+            }
+        } else if (shape === 'fin') {
+            fill(main, () => { ctx.moveTo(-r * 1.1, r * .3); ctx.quadraticCurveTo(-r * .5, -r * .35, r * .1, -r * 1.8); ctx.quadraticCurveTo(r * 1, -r * 1, r * .9, r * .3); });
+            ctx.strokeStyle = accent; ctx.lineWidth = r * .1;
+            ctx.beginPath(); ctx.moveTo(-r * .5, r * .1); ctx.lineTo(r * .1, -r * 1.3); ctx.stroke();
+            fill(detail, () => ctx.ellipse(0, r * .3, r * 1.15, r * .2, 0, 0, TAU));
+        } else if (shape === 'turkey') {
+            for (let i = 0; i < 5; i++) {
+                const a = (i - 2) * .45;
+                fill(i % 2 ? accent : main, () => ctx.ellipse(Math.sin(a) * r, -Math.cos(a) * r * .8, r * .32, r * 1.1, a, 0, TAU));
+            }
+            fill(main, () => ctx.ellipse(0, r * .15, r * .7, r * .6, 0, 0, TAU));
+            fill(detail, () => ctx.ellipse(r * .15, r * .4, r * .14, r * .35, 0, 0, TAU));
+            fill(accent, () => { ctx.moveTo(-r * .18, r * .1); ctx.lineTo(r * .18, r * .1); ctx.lineTo(0, r * .4); });
+            for (const side of [-1, 1]) fill('#0f172a', () => ctx.arc(side * r * .25, -r * .05, r * .08, 0, TAU));
+        } else if (shape === 'tophat') {
             ctx.fillStyle = main; ctx.fillRect(-r * .78, -r * 1.45, r * 1.56, r * 1.8);
             fill(main, () => ctx.ellipse(0, r * .32, r * 1.3, r * .27, 0, 0, TAU));
             ctx.fillStyle = accent; ctx.fillRect(-r * .78, -r * .12, r * 1.56, r * .3);
@@ -2039,7 +2108,17 @@
         ctx.lineWidth = Math.max(.8, size * .3);
         ctx.strokeStyle = ctx.fillStyle;
         ctx.beginPath();
-        if (shape === 'planet') {
+        if (shape === 'bat') {
+            ctx.moveTo(0, -size * .35);
+            for (const side of [-1, 1]) {
+                ctx.lineTo(side * size * 1.5, -size);
+                ctx.quadraticCurveTo(side * size * 1.4, -size * .1, side * size, size * .3);
+                ctx.quadraticCurveTo(side * size * .75, -size * .1, side * size * .5, size * .55);
+                ctx.lineTo(0, size * .2);
+            }
+            ctx.closePath(); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(-size * .25, 0); ctx.lineTo(-size * .25, -size * .65); ctx.lineTo(0, -size * .4); ctx.lineTo(size * .25, -size * .65); ctx.lineTo(size * .25, 0); ctx.fill();
+        } else if (shape === 'planet') {
             ctx.arc(0, 0, size * .65, 0, TAU); ctx.fill();
             ctx.beginPath(); ctx.ellipse(0, 0, size * 1.3, size * .4, -.4, 0, TAU); ctx.stroke();
         } else if (shape === 'note') {
@@ -2299,7 +2378,16 @@
         const id = c.skinId;
         ctx.save(); ctx.translate(x, y); ctx.scale(r / 12, r / 12);
         ctx.fillStyle = c.skin.trim; ctx.strokeStyle = c.skin.trim; ctx.lineWidth = 1.8;
-        if (['skin_robot', 'skin_chrome', 'skin_cyber', 'skin_astronaut'].includes(id)) {
+        if (c.skin.pattern === 'bones') {
+            ctx.strokeStyle = '#f1f5f9'; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
+            ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(0, 10);
+            for (let i = 0; i < 3; i++) {
+                const y = -7 + i * 5;
+                ctx.moveTo(-8, y - 1); ctx.quadraticCurveTo(-7, y + 4, 0, y + 2);
+                ctx.quadraticCurveTo(7, y + 4, 8, y - 1);
+            }
+            ctx.moveTo(-6, 9); ctx.lineTo(0, 7); ctx.lineTo(6, 9); ctx.stroke();
+        } else if (['skin_robot', 'skin_chrome', 'skin_cyber', 'skin_astronaut'].includes(id)) {
             roundRect(ctx, -8, -7, 16, 14, 2); ctx.stroke();
             ctx.fillStyle = c.skin.eye; ctx.fillRect(-5, -4, id === 'skin_cyber' ? 11 : 5, 3);
             ctx.fillStyle = '#f8fafc'; ctx.fillRect(-5, 3, 3, 2); ctx.fillRect(2, 3, 3, 2);
@@ -2426,7 +2514,7 @@
         if (!c.hat && c.skin === SKINS.skin_alien) { ctx.strokeStyle = '#16a34a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx - 5, y + 1 + bob); ctx.lineTo(cx - 8, y - 6 + bob); ctx.moveTo(cx + 5, y + 1 + bob); ctx.lineTo(cx + 8, y - 6 + bob); ctx.stroke(); }
         drawHat(ctx, c.hat, cx, y + bob, 11, face * 0.03, time);
         ctx.fillStyle = c.skin?.eye || '#0f172a';
-        ctx.fillRect(cx + face * 4 - 1.5, y + 9 + bob, 3, 4);
+        if (!['pumpkin', 'ghost', 'sunglasses'].includes(SEASONAL_HATS[c.hat]?.shape)) ctx.fillRect(cx + face * 4 - 1.5, y + 9 + bob, 3, 4);
         if (c.acc === 'acc_shades') { ctx.fillStyle = '#0f172a'; ctx.fillRect(cx + face * 4 - 6, y + 8 + bob, 12, 5); }
         if (c.acc === 'acc_monocle') { ctx.strokeStyle = '#facc15'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(cx + face * 5, y + 11 + bob, 4.5, 0, TAU); ctx.stroke(); }
         if (c.acc === 'acc_eyepatch') { ctx.fillStyle = '#0f172a'; ctx.fillRect(cx + face * 4 - 3, y + 8 + bob, 6, 5); ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(cx - 11, y + 5 + bob); ctx.lineTo(cx + 11, y + 12 + bob); ctx.stroke(); }
@@ -2479,7 +2567,9 @@
             ctx.restore();
         }
         ctx.fillStyle = c.skin?.eye || '#0f172a';
-        ctx.beginPath(); ctx.arc(r * 0.5, -r * 0.2, r * 0.1, 0, TAU); ctx.arc(r * 0.5, r * 0.2, r * 0.1, 0, TAU); ctx.fill();
+        if (!['pumpkin', 'ghost', 'sunglasses'].includes(SEASONAL_HATS[c.hat]?.shape)) {
+            ctx.beginPath(); ctx.arc(r * 0.5, -r * 0.2, r * 0.1, 0, TAU); ctx.arc(r * 0.5, r * 0.2, r * 0.1, 0, TAU); ctx.fill();
+        }
         if (c.acc === 'acc_shades') { ctx.fillStyle = '#0f172a'; ctx.fillRect(r * 0.4, -r * 0.34, r * 0.26, r * 0.68); }
         if (c.acc === 'acc_monocle') { ctx.strokeStyle = '#facc15'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(r * 0.55, r * 0.2, r * 0.18, 0, TAU); ctx.stroke(); }
         if (c.acc === 'acc_eyepatch') { ctx.strokeStyle = '#0f172a'; ctx.lineWidth = Math.max(1, r * 0.08); ctx.beginPath(); ctx.moveTo(-r * 0.3, -r * 0.45); ctx.lineTo(r * 0.5, r * 0.25); ctx.stroke(); ctx.fillStyle = '#0f172a'; ctx.beginPath(); ctx.arc(r * 0.5, r * 0.2, r * 0.18, 0, TAU); ctx.fill(); }

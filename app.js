@@ -1220,6 +1220,12 @@
             // Quiet by default: only a few controls (shop and rewards) make UI sounds, called where they happen
             document.addEventListener('click', event => this.handleClick(event));
             document.addEventListener('keydown', event => this.handleKeydown(event));
+            document.addEventListener('keyup', event => {
+                if (event.key !== ' ' && event.code !== 'Space') return;
+                const studyArea = document.getElementById('active-study-area');
+                if (Router.activeRoute === 'flashcard' && studyArea && !studyArea.classList.contains('hidden')
+                    && event.target.closest?.('#active-study-area button')) event.preventDefault();
+            });
             document.addEventListener('submit', event => this.handleSubmit(event));
             document.addEventListener('change', event => this.handleChange(event));
             this.bindFlashcardInteraction();
@@ -1486,7 +1492,7 @@
                 return Number.isFinite(grade) ? { ...course, targetGrade: this.gradeForPercentage(grade) } : null;
             }).filter(Boolean);
             const projectedGpa = window.GPACalculator
-                ? window.GPACalculator.calculateCurrentGPA(projectedCourses)
+                ? this.withPriorGPA(window.GPACalculator.calculateCurrentGPA(projectedCourses))
                 : currentGpa;
             summary.innerHTML = `
                 <article class="glass-card"><span class="gpa-summary-label">Current weighted GPA</span><strong>${Number(currentGpa.weighted).toFixed(2)}</strong><small>Before hypothetical grades</small></article>
@@ -1604,9 +1610,12 @@
             const summary = document.getElementById('cumulative-gpa-summary');
             const currentGpa = this.calculateTrackedGPA(courses);
             if (summary) {
+                const creditNote = currentGpa.priorCredits
+                    ? `${this.formatNumber(currentGpa.trackedCredits)} tracked + ${this.formatNumber(currentGpa.priorCredits)} past credits`
+                    : `Across ${this.formatNumber(currentGpa.totalCredits)} tracked credits · add past credits in Settings`;
                 summary.innerHTML = `
-                    <article class="glass-card"><span class="gpa-summary-label">Cumulative weighted GPA</span><strong>${Number(currentGpa.weighted).toFixed(2)}</strong><small>Across ${this.formatNumber(currentGpa.totalCredits)} tracked credits</small></article>
-                    <article class="glass-card"><span class="gpa-summary-label">Cumulative unweighted GPA</span><strong>${Number(currentGpa.unweighted).toFixed(2)}</strong><small>Across ${this.formatNumber(currentGpa.totalCredits)} tracked credits</small></article>
+                    <article class="glass-card"><span class="gpa-summary-label">Cumulative weighted GPA</span><strong>${Number(currentGpa.weighted).toFixed(2)}</strong><small>${creditNote}</small></article>
+                    <article class="glass-card"><span class="gpa-summary-label">Cumulative unweighted GPA</span><strong>${Number(currentGpa.unweighted).toFixed(2)}</strong><small>${creditNote}</small></article>
                 `;
             }
             if (body) {
@@ -1717,7 +1726,27 @@
                 const grade = this.calculateCourseGrade(course);
                 return Number.isFinite(grade) ? { ...course, targetGrade: this.gradeForPercentage(grade) } : null;
             }).filter(Boolean);
-            return calculator.calculateCurrentGPA(currentCourses);
+            return this.withPriorGPA(calculator.calculateCurrentGPA(currentCourses));
+        }
+
+        /** Credits and GPA earned before the classes tracked in StudBud (from Settings). */
+        priorGPA(profile = AppState.get('profile') || {}) {
+            const read = value => value === '' || value === null || value === undefined ? NaN : Number(value);
+            const credits = read(profile.priorCredits);
+            const weighted = read(profile.priorWeightedGpa);
+            const unweighted = read(profile.priorUnweightedGpa);
+            if (!(credits > 0) || !Number.isFinite(weighted) || !Number.isFinite(unweighted)) return null;
+            return { credits, weighted, unweighted };
+        }
+
+        /** Blends past credits into a GPA result, weighting each side by its credits. */
+        withPriorGPA(result) {
+            const prior = this.priorGPA();
+            const trackedCredits = Number(result?.totalCredits) || 0;
+            if (!prior) return { ...result, trackedCredits, priorCredits: 0 };
+            const totalCredits = trackedCredits + prior.credits;
+            const blend = key => String(((Number(result?.[key]) || 0) * trackedCredits + prior[key] * prior.credits) / totalCredits);
+            return { ...result, weighted: blend('weighted'), unweighted: blend('unweighted'), totalCredits, trackedCredits, priorCredits: prior.credits };
         }
 
         usesCategoryWeights(course) {
@@ -2459,8 +2488,10 @@
                 });
                 return { course, ladder, credits: Math.max(0, Number(course.credits) || 0) };
             });
-            const totalCredits = rows.reduce((sum, row) => sum + row.credits, 0);
-            let plans = [{ earned: 0, cost: 0, grades: [] }];
+            const prior = this.priorGPA();
+            const priorCredits = prior ? prior.credits : 0;
+            const totalCredits = rows.reduce((sum, row) => sum + row.credits, 0) + priorCredits;
+            let plans = [{ earned: prior ? Math.round(prior[mode === 'weighted' ? 'weighted' : 'unweighted'] * priorCredits * 1e9) / 1e9 : 0, cost: 0, grades: [] }];
             for (const row of rows) {
                 const options = row.credits > 0 ? row.ladder : row.ladder.slice(0, 1);
                 const next = new Map();
@@ -2479,7 +2510,7 @@
             const reachablePlans = plans.filter(plan => plan.earned >= targetGpa * totalCredits - 1e-9);
             const best = reachablePlans.sort((a, b) => a.cost - b.cost || a.earned - b.earned)[0] || plans[0];
             const byCode = new Map(rows.map((row, i) => [row.course.code, best.grades[i]]));
-            return { byCode, gpa: totalCredits > 0 ? best.earned / totalCredits : 0, reachable: totalCredits > 0 && reachablePlans.length > 0 };
+            return { byCode, gpa: totalCredits > 0 ? best.earned / totalCredits : 0, reachable: totalCredits - priorCredits > 0 && reachablePlans.length > 0 };
         }
 
         /** Decks linked to a quiz/test first, then decks tagged with the same class. */
@@ -3925,7 +3956,7 @@
                     <div><strong>Multiplayer game test bench</strong><small>Launch any arena with simulated players. Test sessions do not award coins or affect leaderboards.</small></div>
                     <div class="admin-test-settings">
                         <label>Game to test<select id="admin-game-test-mode">
-                            <option value="skyline">City Escape</option><option value="river">River Fishing</option>
+                            <option value="skyline">Escape to Space</option><option value="river">River Fishing</option>
                             <option value="defense">Team Tower Defense</option>
                             <option value="market">Package Delivery</option><option value="miner">Crystal Mining</option>
                             <option value="duel">King of the Hill</option><option value="shooter">Arena Shooter</option>
@@ -4205,15 +4236,15 @@
 
         questionRewardRecommendation(mode) {
             const recommendations = {
-                skyline: [30, 50, 'About 10 seconds of climbing: jumps cost 2, air and wall jumps 3, dashes 8, plus a light running drain.'],
+                skyline: [20, 35, 'About 6-8 seconds of climbing: jumps cost 2, air and wall jumps 3, dashes 8, plus a light running drain.'],
                 duel: [25, 45, 'About 10 seconds of fighting: swings cost 3, the Special 10 and shielding 5 per second.'],
                 defense: [20, 40, 'Pays $60-120 into your shared team wallet; troops, enemies and upgrades all cost cash.'],
                 miner: [30, 45, 'About 10 seconds of digging and flying: mining costs 2.8 fuel per second, the jetpack 9.'],
                 river: [20, 40, 'About 10 seconds of fishing: each net cast costs 6 bait.'],
                 frenzy: [15, 30, 'About 10 seconds of fishing: each cast costs 10 bait.'],
                 fishing: [15, 30, 'About 10 seconds of fishing: each cast costs 10 bait.'],
-                market: [40, 60, 'About 10 seconds of deliveries: walking costs 2.5 per second, sprinting 10.'],
-                sports: [50, 70, 'About 10 seconds of play: dribbling costs 2.5 per second, sprinting 10 and kicks 3-10.'],
+                market: [30, 50, 'About 10 seconds of deliveries: walking costs 2.5 per second, sprinting 10.'],
+                sports: [40, 60, 'About 10 seconds of play: dribbling costs 2.5 per second, sprinting 10 and kicks 3-10.'],
                 shooter: [30, 50, 'About 10 seconds of combat: basic shots cost 1 ammo; the shockwave costs 30.'],
                 crypto: [15, 30, 'Pays 120-240 research cash before analyst bonuses. Trading has no refill cycle.'],
                 hack: [10, 25, 'Pays 30-75 crypto per mining answer. This changes payouts, not question frequency.']
@@ -4268,7 +4299,7 @@
                 : 'Correct answers give the resource shown above. End game opens your summary. Practice awards no multiplayer coins.';
             const labels = {
                 defense: ['Team Tower Defense', 'Red vs blue, 1v1 or teams. Share cash, build and upgrade troops, send enemies to the rival path. First base to 0 HP loses; no time limit.'],
-                skyline: ['City Escape', 'Climb a rooftop obstacle course before the tide.'],
+                skyline: ['Escape to Space', 'Parkour from the city through a factory to space before the tide.'],
                 river: ['River Fishing', 'Steer a boat, dodge obstacles and catch fish.'],
                 market: ['Package Delivery', 'Deliver packages across town and dodge cars.'],
                 miner: ['Crystal Mining', 'Dig crystals, bank them at base, avoid lava.'],
@@ -5066,7 +5097,7 @@
             if (dBall < 52 && Math.abs(goalX - ball.x) < 760 && Math.abs(ball.y - goalY) < 260 && (ball.x - me.x) * dir > 0) tap.add('KeyE');
         }
 
-        // ---- City Escape autoplay ----
+        // ---- Escape to Space autoplay ----
         // The route provides navigation targets; movement still uses the game's physical jump and collision rules.
         skyRoute(game) {
             if (game.botRoute) return game.botRoute;
@@ -5218,7 +5249,7 @@
                 me: bot, cp: demo.game.checkpoints[bot.st.checkpoint || 0], res: new A.Resource('Energy', '#facc15', 100, 50),
                 dead: 0, finished: false, deaths: 0, maxH: 0, biomeSeen: 0, dash: 0, dashCd: 0,
                 kick: 0, buffer: 0, coyote: .1, airJumps: 1, sprung: false, boost: 0, slow: 0,
-                stuckT: 0, stuckX: undefined, stuckY: undefined, strandedT: 0, tideY: bot.y + 1200,
+                stuckT: 0, stuckX: undefined, stuckY: undefined, strandedT: 0, trapT: 0, voidT: 0, voidCheck: 0, tideY: bot.y + 1200,
                 retirePassedAreas() {}, particles: { burst() {}, update() {} }
             });
             actor.s = {
@@ -5309,7 +5340,7 @@
                     Object.assign(sim, {
                         me: { ...b, ground: clones.get(b.ground) || null }, solids: [...clones.values()],
                         res: new window.StudBudArcade.Resource('Energy', '#fff', 100, actor.res.value),
-                        captureCheckpoint() {}, dead: 0, finished: false, stuckT: 0, strandedT: 0,
+                        captureCheckpoint() {}, dead: 0, finished: false, stuckT: 0, strandedT: 0, trapChecks: false,
                         springs: springs.map(p => ({ ...p })), boxes: [],
                         lasers: lasers.map(p => ({ ...p })), drills: drills.map(p => ({ ...p })),
                         debris: debris.map(p => ({ ...p })), saws: saws.map(p => ({ ...p })),
@@ -5370,8 +5401,9 @@
                                     }
                                     return false;
                                 }) || sim.lasers.some(l => {
+                                    const lethal = l.steam ? { x: l.x + 4, y: l.y + 30, w: l.w - 8, h: l.h - 30 } : l;
                                     for (let at = sim.hazardClock; at <= safeUntil; at += .1) {
-                                        if (((at + l.phase) % l.period) < l.period * .55 && U.overlap(sim.me, l)) return true;
+                                        if (((at + l.phase) % l.period) < l.period * .55 && U.overlap(sim.me, lethal)) return true;
                                     }
                                     return false;
                                 });
@@ -5429,7 +5461,7 @@
             if (feet > list[S.cur].y + 520) { this.skyPlace(game, S, list[S.cur], c); return; }
             if (c - S.lastProg > 3) { S.cur = Math.min(list.length - 1, S.cur + 1); S.flagDone = true; this.skyPlace(game, S, list[S.cur], c); return; }
             const ncx = nx.x + nx.w / 2;
-            if (me.onGround) {
+            if (me.onGround && me.ground) {
                 const n = me.ground;
                 S.jump = null;
                 const fx = gi >= 0 ? R.flags.get(gi) : undefined;
@@ -6578,7 +6610,7 @@
             const modeNames = {
                 defense: 'Team Tower Defense',
                 classic: 'Classic', rush: 'Rush', survival: 'Survival',
-                skyline: 'City Escape', river: 'River Fishing', market: 'Package Delivery',
+                skyline: 'Escape to Space', river: 'River Fishing', market: 'Package Delivery',
                 miner: 'Crystal Mining', duel: 'King of the Hill',
                 crypto: 'Crypto Trading', shooter: 'Arena Shooter', sports: 'Soccer', chess: 'Question Chess' };
             document.getElementById('hosted-room-title').textContent = `${room.deck_title} · ${modeNames[room.mode] || room.mode}`;
@@ -6624,7 +6656,7 @@
                 }).join('');
             const sceneNames = {
                 defense: 'Team Tower Defense',
-                skyline: 'City Escape', river: 'River Fishing', market: 'Package Delivery',
+                skyline: 'Escape to Space', river: 'River Fishing', market: 'Package Delivery',
                 miner: 'Crystal Mining', duel: 'King of the Hill',
                 crypto: 'Crypto Trading', shooter: 'Arena Shooter', sports: 'Soccer', chess: 'Question Chess',
                 classic: 'Flashcard Face-off', rush: 'Rapid Recall', survival: 'Last Learner Standing'
@@ -6993,6 +7025,11 @@
             if (targetGpa) targetGpa.value = String(Number.isFinite(Number(profile.targetGpa)) && profile.targetGpa !== '' && profile.targetGpa !== null ? Number(Number(profile.targetGpa).toFixed(2)) : 3.8);
             const currentTermSetting = document.getElementById('settings-current-term');
             if (currentTermSetting) currentTermSetting.value = profile.currentTerm || 'auto';
+            const priorFields = { 'settings-prior-credits': 'priorCredits', 'settings-prior-weighted': 'priorWeightedGpa', 'settings-prior-unweighted': 'priorUnweightedGpa' };
+            for (const [id, key] of Object.entries(priorFields)) {
+                const field = document.getElementById(id);
+                if (field) field.value = Number(profile.priorCredits) > 0 && profile[key] !== null && profile[key] !== undefined ? String(profile[key]) : '';
+            }
             const schoolSetting = document.getElementById('settings-school');
             if (schoolSetting && !schoolSetting.dataset?.dirty) {
                 const stored = profile.school || window.StudBudCloud?.user?.user_metadata?.school;
@@ -8183,7 +8220,7 @@
                             const grade = this.calculateCourseGrade(course, scored);
                             return Number.isFinite(grade) ? { ...course, targetGrade: this.gradeForPercentage(grade) } : null;
                         }).filter(Boolean);
-                        return Number(window.GPACalculator.calculateCurrentGPA(coursesAtDate)[metric]);
+                        return Number(this.withPriorGPA(window.GPACalculator.calculateCurrentGPA(coursesAtDate))[metric]);
                     }),
                     borderColor: accentColor
                 }];
@@ -8778,11 +8815,18 @@
             }
             const navItem = event.target.closest('.nav-item[data-target]');
             const studyArea = document.getElementById('active-study-area');
-            if (Router.activeRoute === 'flashcard' && !modalActive && studyArea && !studyArea.classList.contains('hidden')
-                && !event.target.closest('input, textarea, select, summary, label') && !this.studyKeyBusy && !event.ctrlKey && !event.metaKey && !event.altKey) {
+            const studying = Router.activeRoute === 'flashcard' && !modalActive && studyArea && !studyArea.classList.contains('hidden')
+                && !event.target.closest('input, textarea, select, summary, label') && !event.ctrlKey && !event.metaKey && !event.altKey;
+            // Space only ever flips the card: never "click" a focused rating/star button, even mid-rating.
+            if (studying && (event.key === ' ' || event.code === 'Space')) {
+                event.preventDefault();
+                if (!event.repeat && !this.studyKeyBusy) this.revealCard();
+                return;
+            }
+            if (studying && !this.studyKeyBusy) {
                 const revealed = !document.getElementById('sm2-controls').classList.contains('hidden');
                 const onButton = Boolean(event.target.closest('button'));
-                if (!onButton && (event.key === ' ' || (event.key === 'Enter' && !revealed))) {
+                if (!onButton && event.key === 'Enter' && !revealed) {
                     event.preventDefault();
                     this.revealCard();
                     return;
@@ -10056,6 +10100,24 @@
                 throw new Error('Graduation year must be between 2026 and 2030.');
             }
             if (!this.isKnownSchool(school)) throw new Error('Choose your school from the list.');
+            const priorValue = id => {
+                const raw = document.getElementById(id)?.value?.trim() || '';
+                return raw === '' ? null : Number(raw);
+            };
+            const priorCredits = priorValue('settings-prior-credits');
+            let priorWeightedGpa = priorValue('settings-prior-weighted');
+            let priorUnweightedGpa = priorValue('settings-prior-unweighted');
+            if (priorCredits !== null && (!Number.isFinite(priorCredits) || priorCredits < 0 || priorCredits > 100)) {
+                throw new Error('Past credits must be between 0 and 100.');
+            }
+            for (const value of [priorWeightedGpa, priorUnweightedGpa]) {
+                if (value !== null && (!Number.isFinite(value) || value < 0 || value > 5)) throw new Error('Past GPA must be between 0 and 5.');
+            }
+            if (priorCredits > 0) {
+                if (priorWeightedGpa === null && priorUnweightedGpa === null) throw new Error('Enter your past GPA to go with your past credits.');
+                if (priorWeightedGpa === null) priorWeightedGpa = priorUnweightedGpa;
+                if (priorUnweightedGpa === null) priorUnweightedGpa = priorWeightedGpa;
+            }
             const profile = {
                 ...AppState.get('profile'),
                 school,
@@ -10063,6 +10125,9 @@
                 lastName: document.getElementById('settings-last-name').value.trim(),
                 graduationYear,
                 targetGpa,
+                priorCredits: priorCredits > 0 ? priorCredits : 0,
+                priorWeightedGpa: priorCredits > 0 ? priorWeightedGpa : null,
+                priorUnweightedGpa: priorCredits > 0 ? priorUnweightedGpa : null,
                 currentTerm: document.getElementById('settings-current-term').value
             };
             AppState.set('profile', profile);

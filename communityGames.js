@@ -195,7 +195,9 @@
                                     aura: ['Confetti Countdown', 'confetti', '#facc15', '#e2e8f0', '#a5b4fc'], palette: ['Golden Midnight', 45, 250] },
                                 { month: 2, key: 'valentine', name: "Valentine's", icon: 'fa-heart', colors: ['#fb7185', '#f9a8d4'],
                                     skin: ['Sweetheart', '#e11d48', '#ffe4e6', '#881337', '#f9a8d4'], hat: ['Heart Headband', 'band', '#f43f5e', '#fecdd3', '#be123c'],
-                                    aura: ['Love Notes', 'heart', '#fb7185', '#fda4af', '#f9a8d4'], palette: ['Rose Petal', 345, 320] },
+                                    aura: ['Love Notes', 'heart', '#fb7185', '#fda4af', '#f9a8d4'], palette: ['Rose Petal', 345, 320], extras: [
+                                        { key: 'cupid', type: 'hat', name: 'Cupid Wing Crown', hatShape: 'wings', hatColors: ['#fff1f2', '#fb7185', '#fda4af'] }
+                                    ] },
                                 { month: 3, key: 'clover', name: "St. Patrick's", icon: 'fa-clover', colors: ['#22c55e', '#facc15'],
                                     skin: ['Lucky Clover', '#15803d', '#fde7c8', '#14532d', '#facc15'], hat: ['Lucky Top Hat', 'tophat', '#166534', '#facc15', '#bbf7d0'],
                                     aura: ['Four-Leaf Flurry', 'leaf', '#22c55e', '#86efac', '#facc15'], palette: ['Emerald Luck', 140, 50] },
@@ -207,7 +209,10 @@
                                     aura: ['Cap Toss Stars', 'star', '#facc15', '#fef3c7', '#93c5fd'], palette: ['Class Colors', 225, 45] },
                                 { month: 6, key: 'summer', name: 'Summer', icon: 'fa-umbrella-beach', colors: ['#22d3ee', '#fbbf24'],
                                     skin: ['Beach Day', '#0ea5e9', '#fed7aa', '#0c4a6e', '#fde047'], hat: ['Sun Hat', 'straw', '#fcd34d', '#f97316', '#fef3c7'],
-                                    aura: ['Heat Shimmer', 'ray', '#fde68a', '#fbbf24', '#22d3ee'], palette: ['Tropical Wave', 190, 40] },
+                                    aura: ['Heat Shimmer', 'ray', '#fde68a', '#fbbf24', '#22d3ee'], palette: ['Tropical Wave', 190, 40], extras: [
+                                        { key: 'sunglasses', type: 'hat', name: 'Beach Sunglasses', hatShape: 'sunglasses', hatColors: ['#facc15', '#0f172a', '#38bdf8'] },
+                                        { key: 'shark', type: 'hat', name: 'Shark Fin', hatShape: 'fin', hatColors: ['#64748b', '#cbd5e1', '#334155'] }
+                                    ] },
                                 { month: 7, key: 'fireworks', name: 'Fireworks', icon: 'fa-burst', colors: ['#ef4444', '#3b82f6'],
                                     skin: ['Firecracker', '#1d4ed8', '#f8fafc', '#1e3a8a', '#ef4444'], hat: ['Rocket Party Hat', 'cone', '#ef4444', '#f8fafc', '#3b82f6'],
                                     aura: ['Sparkler Show', 'spark', '#ef4444', '#f8fafc', '#60a5fa'], palette: ['Star Spangled', 0, 220] },
@@ -219,13 +224,25 @@
                                     aura: ['Falling Maple', 'leaf', '#f97316', '#dc2626', '#fbbf24'], palette: ['Maple Glow', 25, 5] },
                                 { month: 10, key: 'halloween', name: 'Halloween', icon: 'fa-ghost', colors: ['#f97316', '#a855f7'],
                                     skin: ['Jack-o\u2019-Spook', '#f97316', '#1c1917', '#facc15', '#7c3aed'], hat: ['Witching Hat', 'witch', '#3b0764', '#f97316', '#a855f7'],
-                                    aura: ['Spectral Flames', 'flame', '#a855f7', '#22c55e', '#f97316'], palette: ['Haunted Night', 275, 25] },
+                                    aura: ['Spectral Flames', 'flame', '#a855f7', '#22c55e', '#f97316'], palette: ['Haunted Night', 275, 25], extras: [
+                                        { key: 'pumpkin', type: 'hat', name: 'Pumpkin Head', hatShape: 'pumpkin', hatColors: ['#f97316', '#fde047', '#166534'] },
+                                        { key: 'ghost', type: 'hat', name: 'Ghost Sheet', hatShape: 'ghost', hatColors: ['#f8fafc', '#cbd5e1', '#0f172a'] },
+                                        { key: 'ghost', type: 'skin', name: 'Pale Phantom', skinColors: { body: '#e2e8f0', head: '#f8fafc', eye: '#334155', trim: '#cbd5e1', alpha: .72 } },
+                                        { key: 'skeleton', type: 'skin', name: 'Skeleton Suit', skinColors: { body: '#18181b', head: '#f1f5f9', eye: '#09090b', trim: '#e2e8f0', pattern: 'bones' } },
+                                        { key: 'bats', type: 'effect', name: 'Bat Swarm', particle: { shape: 'bat', colors: ['#312e81', '#7e22ce', '#1c1917'] } },
+                                        { key: 'candycorn', type: 'palette', name: 'Candy Corn', hue: 30, hue2: 50 }
+                                    ] },
                                 { month: 11, key: 'harvest', name: 'Thanksgiving', icon: 'fa-wheat-awn', colors: ['#b45309', '#facc15'],
                                     skin: ['Harvest Host', '#92400e', '#fde7c8', '#451a03', '#f59e0b'], hat: ['Pilgrim Hat', 'tophat', '#292524', '#a8a29e', '#facc15'],
-                                    aura: ['Harvest Breeze', 'leaf', '#b45309', '#f59e0b', '#facc15'], palette: ['Pumpkin Pie', 30, 15] },
+                                    aura: ['Harvest Breeze', 'leaf', '#b45309', '#f59e0b', '#facc15'], palette: ['Pumpkin Pie', 30, 15], extras: [
+                                        { key: 'turkey', type: 'hat', name: 'Turkey Fan', hatShape: 'turkey', hatColors: ['#92400e', '#f59e0b', '#dc2626'] }
+                                    ] },
                                 { month: 12, key: 'holiday', name: 'Christmas', icon: 'fa-tree', colors: ['#ef4444', '#22c55e'],
                                     skin: ['Jolly Elf', '#15803d', '#fde7c8', '#14532d', '#ef4444'], hat: ['Santa Hat', 'santa', '#dc2626', '#f8fafc', '#fef2f2'],
-                                    aura: ['Let It Snow', 'snowflake', '#f8fafc', '#bae6fd', '#ef4444'], palette: ['Candy Cane', 355, 140] }
+                                    aura: ['Let It Snow', 'snowflake', '#f8fafc', '#bae6fd', '#ef4444'], palette: ['Candy Cane', 355, 140], extras: [
+                                        { key: 'antlers', type: 'hat', name: 'Reindeer Antlers', hatShape: 'antlers', hatColors: ['#92400e', '#dc2626', '#facc15'] },
+                                        { key: 'elf', type: 'hat', name: 'Workshop Elf Hat', hatShape: 'elf', hatColors: ['#16a34a', '#ef4444', '#facc15'] }
+                                    ] }
                             ];
                         }
 
@@ -259,7 +276,14 @@
                                     { ...set, id: `hat_seasonal_${season.key}_alt`, name: extraHat, icon: season.icon, price: null, rarity: 'rare', type: 'hat', hatShape: extraShape, hatColors: [season.colors[1], season.colors[0], head], description: `A limited ${season.name} hat` },
                                     { ...set, id: `skin_seasonal_${season.key}_alt`, name: extraSkin, icon: season.icon, price: null, rarity: 'epic', type: 'skin', skinColors: { body: trim, head, eye, trim: body }, description: `A limited ${season.name} character` },
                                     { ...set, id: `acc_seasonal_${season.key}_alt_effect`, name: extraAura, icon: 'fa-wand-magic-sparkles', price: null, rarity: 'legendary', type: 'effect', particle: { shape: extraParticle, colors: [season.colors[1], head, season.colors[0]] }, description: `A limited ${season.name} aura` }
-                                ];
+                                ].concat((season.extras || []).map(({ key, ...item }) => ({
+                                    ...set, icon: season.icon, price: null,
+                                    rarity: { palette: 'uncommon', hat: 'rare', skin: 'epic', effect: 'legendary' }[item.type],
+                                    description: `A limited ${season.name} ${item.type === 'effect' ? 'aura' : item.type}`,
+                                    ...item,
+                                    id: `${item.type === 'effect' ? 'acc' : item.type}_seasonal_${season.key}_${key}${item.type === 'effect' ? '_effect' : ''}`,
+                                    ...(item.type === 'palette' ? { color: `seasonal_${season.key}_${key}` } : {})
+                                })));
                             });
                         }
 

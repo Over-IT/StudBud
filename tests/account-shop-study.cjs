@@ -310,8 +310,8 @@ async function run() {
         elements.set(`${prefix}-game-reward-guidance`, {});
     }
     for (const [mode, min, max] of [
-        ['skyline', 30, 50], ['duel', 25, 45], ['miner', 30, 45], ['river', 20, 40],
-        ['frenzy', 15, 30], ['fishing', 15, 30], ['market', 40, 60], ['sports', 50, 70],
+        ['skyline', 20, 35], ['duel', 25, 45], ['miner', 30, 45], ['river', 20, 40],
+        ['frenzy', 15, 30], ['fishing', 15, 30], ['market', 30, 50], ['sports', 40, 60],
         ['shooter', 30, 50], ['crypto', 15, 30], ['hack', 10, 25]
     ]) {
         const recommendation = app.questionRewardRecommendation(mode);

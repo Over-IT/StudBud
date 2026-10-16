@@ -3449,7 +3449,7 @@ body.compact-ui .streak-flame b { bottom: 4px; font-size: .85rem; }
     .mpg-overlay.hud-collapsed .mpg-hud .mpg-top { grid-template-columns: minmax(0, 1fr) auto auto; }
     .mpg-overlay.hud-collapsed .mpg-hud .mpg-actions { grid-column: auto; grid-row: auto; max-width: none; }
     .mpg-overlay.hud-collapsed .mpg-hud .mpg-timer { grid-column: auto; grid-row: auto; min-height: 44px; }
-    .mpg-overlay.hud-collapsed .mpg-hud .mpg-status { justify-content: flex-end; }
+    .mpg-overlay.hud-collapsed .mpg-hud .mpg-status { grid-column: 1 / -1; justify-content: flex-end; }
     .mpg-overlay.hud-collapsed .mpg-hud .mpg-toasts { grid-column: 1 / -1; }
 }
 .mpg-overlay.has-touch .mpg-hint {
@@ -4582,3 +4582,36 @@ body.studying { overflow: hidden; }
     .ad-slot .adsbygoogle { height: 50px; }
 }
 body.tutorial-active .ad-slot, body.studying .ad-slot { display: none !important; }
+
+
+/* Optional Supabase TOTP setup and verification panels. */
+.mfa-panel { margin-top: 14px; padding: 14px; border: 1px solid var(--border-glass); border-radius: var(--border-radius-md); background: var(--bg-glass); }
+.mfa-panel label, .mfa-code-form label { display: block; margin: 10px 0 6px; font-weight: 700; }
+.mfa-panel input, .mfa-code-form input { box-sizing: border-box; width: 100%; max-width: 320px; padding: 11px 12px; border: 1px solid var(--border-glass); border-radius: 10px; background: var(--bg-base); color: var(--text-primary); font: inherit; letter-spacing: .12em; }
+.mfa-settings-card { grid-column: 1 / -1; }
+.mfa-settings-card .mfa-qr-code { display: block; width: min(240px, 100%); height: auto; margin: 12px auto; padding: 8px; border-radius: 12px; background: #fff; }
+.mfa-settings-card code { display: inline-block; max-width: 100%; padding: 6px 8px; overflow-wrap: anywhere; user-select: all; }
+.mfa-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.mfa-code-form { display: grid; gap: 8px; }
+.mfa-code-form label { margin-bottom: 0; }
+.mfa-code-form input { margin-bottom: 8px; }
+@media (max-width: 600px) {
+    .mfa-settings-card, .mfa-panel { min-width: 0; }
+    .mfa-actions { flex-direction: column; }
+    .mfa-actions button, #mfa-enable-btn, #mfa-disable-btn { width: 100%; }
+    .mfa-code-form input, .mfa-panel input { max-width: none; }
+}
+
+/* Past-credit GPA inputs in Settings. */
+.settings-prior-gpa { margin: 0 0 var(--spacing-md, 16px); padding: var(--spacing-sm, 10px) var(--spacing-md, 16px) var(--spacing-xs, 4px); border: 1px solid var(--glass-border, rgba(255,255,255,.18)); border-radius: 12px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 0 var(--spacing-sm, 10px); }
+.settings-prior-gpa legend { padding: 0 6px; font-weight: 700; }
+.settings-prior-gpa .settings-hint { grid-column: 1 / -1; margin: 0 0 var(--spacing-sm, 10px); }
+.settings-prior-gpa .form-group { margin-bottom: var(--spacing-sm, 10px); min-width: 0; }
+
+/* Uniform in-game HUD actions: buttons and disclosure toggles share one size and touch target. */
+.mpg-overlay .mpg-hud .mpg-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px; }
+.mpg-overlay .mpg-hud .mpg-actions > button, .mpg-overlay .mpg-hud .mpg-actions > details > summary { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 6px 10px; border: 1px solid rgba(255,255,255,.25); border-radius: 10px; background: rgba(15,23,42,.85); color: #fff; font-size: .74rem; font-weight: 700; line-height: 1.1; white-space: nowrap; }
+.mpg-overlay .mpg-hud .mpg-actions > button.hidden { display: none; }
+@media (max-width: 480px) {
+    .mpg-overlay .mpg-hud .mpg-actions > button, .mpg-overlay .mpg-hud .mpg-actions > details > summary { min-height: 36px; padding: 5px 8px; font-size: .68rem; }
+}

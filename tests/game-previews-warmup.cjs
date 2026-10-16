@@ -115,7 +115,7 @@ console.log('Live parkour previews have consistent physics and camera timing at 
     assert.equal(demo.sky.start, 1, 'preview scenes loop back through the city after space');
     assert.equal(game.retiredArea || 0, 0);
 }
-console.log('Looping City Escape previews preserve visible scenery and rotate through every biome.');
+console.log('Looping Escape to Space previews preserve visible scenery and rotate through every biome.');
 
 {
     let frame;
@@ -600,7 +600,7 @@ const retiredTrails = [
     'acc_meteor_trail', 'acc_aurora_trail'
 ];
 assert.equal(catalog.filter(item => item.type === 'effect' && !item.season).length, 36);
-assert.equal(catalog.filter(item => item.season).length, 84, 'twelve seasonal sets of seven cosmetics');
+assert.equal(catalog.filter(item => item.season).length, 96, 'twelve seasonal sets retain their originals plus twelve themed extras');
 assert.ok(!catalog.some(item => item.type === 'trail' || retiredTrails.includes(item.id)));
 assert.ok(!sandbox.window.StudBudCommunityGames.constructor.boxes.some(box => box.id === 'trail'));
 assert.doesNotMatch(source, /\['trail',|trail: 'Trails'|item\.type === 'trail'/);

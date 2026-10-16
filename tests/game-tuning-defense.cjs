@@ -153,7 +153,7 @@ assert.ok(skyline.solids.length < oldCount * .65, 'passed areas release at least
 assert.ok(skyline.solids.includes(skyline.summit), 'culling preserves the finish');
 assert.ok(skyline.solids.some(p => p.boundary), 'culling preserves boundary walls');
 skyline.draw(ctx, 1280, 720);
-console.log('Fishing destruction/spin/ejection, dry caves, four traffic-safe corners, eased shooter zoom, charged specials and City Escape retirement passed.');
+console.log('Fishing destruction/spin/ejection, dry caves, four traffic-safe corners, eased shooter zoom, charged specials and Escape to Space retirement passed.');
 
 const host = session('defense'), game = host.game;
 assert.equal(game.teamOf('host'), game.teamOf('ally'));
@@ -450,8 +450,10 @@ console.log('Stationary grid aim, full-cell selection, safe deselection and curr
     assert.ok(counts.space > 0 && counts.station > 0, 'space platform styles and the station frame render ahead of generic roofs');
     const crusher = g.drills.find(d => d.crusher);
     const box = { x: crusher.x - 13, y: crusher.surfaceY - 44, w: 26, h: 44 };
+    g.updateDrill(crusher, crusher.period * .675 - crusher.phase);
+    assert.equal(g.drillHits(box, crusher), true, 'slamming crushers crush the supported landing');
     g.updateDrill(crusher, crusher.period * .75 - crusher.phase);
-    assert.equal(g.drillHits(box, crusher), true, 'extended crushers crush the supported landing');
+    assert.equal(g.drillHits(box, crusher), false, 'a crusher holding still on the deck does not kill');
     g.updateDrill(crusher, -crusher.phase);
     assert.equal(g.drillHits(box, crusher), false, 'retracted crushers leave safe clearance');
 }
@@ -561,7 +563,7 @@ for (const fps of [30, 60, 120]) {
     const s = session('skyline'), g = s.game;
     s.testing = true; s.testNoTide = true; s.testInvincible = true;
     const deck = g.solids.find(p => p.factoryBelt && p.w >= 600);
-    g.solids = [deck]; g.springs = []; g.winds = []; g.boxes = [];
+    g.solids = [deck]; g.springs = []; g.winds = []; g.boxes = []; g.drills = [];
     Object.assign(g.me, { x: deck.x + deck.w / 2, y: deck.y - g.me.h, vx: 0, vy: 0, ground: deck, onGround: true });
     const x = g.me.x;
     for (let i = 0; i < fps; i++) g.update(1 / fps);

@@ -3,11 +3,13 @@
  * Teachers (account tag "teacher" at a Parkway school) pick the courses they teach from their school's catalog,
  * see a roster with each student's grade, missing work and study activity, and publish flashcard sets to the class.
  * Students at the same school who have that course in their course list get access automatically (no join codes).
+ * The visible tab polls every 30 seconds; teacher drafts are left untouched until the user leaves the editor.
  */
 (function (window) {
     'use strict';
 
     const SNAPSHOT_EVERY_MS = 5 * 60 * 1000;
+    const REFRESH_EVERY_MS = 30 * 1000;
     const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
     const todayKey = () => {
         const now = new Date();
@@ -57,6 +59,10 @@
             this.loading = false;
             this.courseIndex = -1;
             this.addingCourse = false;
+            this.requestId = 0;
+            this.context = '';
+            this.syncing = false;
+            this.polling = false;
         }
 
         get view() { return document.getElementById('classes-view'); }
@@ -66,7 +72,58 @@
 
         available() {
             const cloud = window.StudBudCloud;
-            return Boolean(cloud?.user && !cloud.offlineMode && !cloud.isGuest?.() && this.app.isParkwaySchool?.());
+            return Boolean(cloud?.user && cloud.accountReady !== false && !cloud.offlineMode && !cloud.isGuest?.() && this.app.isParkwaySchool?.());
+        }
+
+        contextKey() {
+            return [window.StudBudCloud?.user?.id || '', this.app.currentSchool?.() || '', this.isTeacher()].join('|');
+        }
+
+        resetContext() {
+            const key = this.available() ? this.contextKey() : '';
+            if (key === this.context) return false;
+            this.context = key;
+            this.requestId++;
+            this.teacherData = this.studentData = this.detail = this.editingDeck = null;
+            this.lastSync = 0;
+            this.lastCodesKey = '';
+            this.loading = false;
+            clearTimeout(this.syncTimer);
+            return true;
+        }
+
+        currentRequest(id, key) {
+            return this.available() && id === this.requestId && key === this.contextKey();
+        }
+
+        visible() {
+            return document.visibilityState !== 'hidden' && this.view && !this.view.classList.contains('hidden');
+        }
+
+        async refreshVisible() {
+            if (!this.available() || !this.visible() || this.loading || this.polling || this.addingCourse) return;
+            // Never replace a teacher's draft or an actively used roster control during polling.
+            if (this.editingDeck || this.detailTab === 'settings' && this.detail
+                || this.root?.contains(document.activeElement)) return;
+            this.polling = true;
+            const key = this.contextKey();
+            const id = this.requestId;
+            const classId = this.detail?.id;
+            try {
+                if (this.isTeacher()) {
+                    const data = await this.call(classId ? 'studbud_teacher_class_detail' : 'studbud_teacher_classes', classId ? { p_class_id: classId } : undefined);
+                    if (!this.currentRequest(id, key) || !this.visible() || this.editingDeck
+                        || this.detailTab === 'settings' && this.detail || this.root?.contains(document.activeElement)) return;
+                    if (classId) { this.detail = data; this.renderTeacherDetail(); }
+                    else { this.teacherData = data; this.renderTeacherHome(); }
+                } else {
+                    await this.syncSnapshots(true);
+                }
+            } catch (error) {
+                if (this.currentRequest(id, key)) this.status(this.app.friendlyErrorMessage(error), 'error');
+            } finally {
+                this.polling = false;
+            }
         }
 
         init() {
@@ -84,14 +141,23 @@
             document.addEventListener('click', event => {
                 if (!event.target.closest?.('.teacher-course-combobox')) this.hideCourseResults();
             });
-            this.app.EventBus.on('courses:updated', () => { this.studentData = null; this.scheduleSync(2500, true); });
+            this.app.EventBus.on('courses:updated', () => { this.studentData = null; this.scheduleSync(350, true); });
+            this.app.EventBus.on('state:restored', () => { this.resetContext(); this.scheduleSync(350, true); });
             this.app.EventBus.on('assignments:updated', () => this.scheduleSync());
             document.addEventListener('visibilitychange', () => {
-                if (document.visibilityState === 'visible') this.scheduleSync();
+                if (document.visibilityState === 'visible') { this.refreshVisible(); this.scheduleSync(); }
             });
+            window.addEventListener?.('online', () => { this.refreshNav(); this.refreshVisible(); });
+            this.pollTimer = setInterval(() => {
+                if (this.visible()) this.refreshVisible();
+                else this.scheduleSync(0);
+            }, REFRESH_EVERY_MS);
         }
 
         refreshNav() {
+            this.init();
+            const changed = this.resetContext();
+            if (changed && this.visible()) this.render();
             const item = document.getElementById('classes-nav-item');
             if (!item) return;
             const show = this.available();
@@ -111,6 +177,7 @@
         }
 
         async render() {
+            this.resetContext();
             this.init();
             const root = this.root;
             if (!root) return;
@@ -123,7 +190,7 @@
                 const guide = document.getElementById('page-guide');
                 if (title) title.textContent = 'Teach';
                 if (guide) guide.textContent = 'Your classes, student progress and class flashcard sets.';
-                if (this.detail) return this.renderTeacherDetail();
+                if (this.detail) return this.openClass(this.detail.id);
                 return this.loadTeacher();
             }
             return this.loadStudent();
@@ -131,12 +198,19 @@
 
         // ------------------------------------------------------------------ TEACHER
         async loadTeacher() {
+            const id = ++this.requestId;
+            const key = this.contextKey();
+            this.loading = true;
             this.root.innerHTML = '<div class="classes-skeleton" aria-busy="true"><span></span><span></span><span></span></div>';
             try {
-                this.teacherData = await this.call('studbud_teacher_classes');
+                const data = await this.call('studbud_teacher_classes');
+                if (!this.currentRequest(id, key)) return;
+                this.teacherData = data;
                 this.renderTeacherHome();
             } catch (error) {
-                this.root.innerHTML = `<div class="glass-card empty-state">${esc(this.app.friendlyErrorMessage(error))}</div>`;
+                if (this.currentRequest(id, key)) this.root.innerHTML = `<div class="glass-card empty-state">${esc(this.app.friendlyErrorMessage(error))}</div>`;
+            } finally {
+                if (id === this.requestId) this.loading = false;
             }
         }
 
@@ -275,15 +349,23 @@
         }
 
         async openClass(id) {
+            const request = ++this.requestId;
+            const key = this.contextKey();
+            this.loading = true;
             this.root.innerHTML = '<div class="classes-skeleton" aria-busy="true"><span></span><span></span><span></span></div>';
             try {
-                this.detail = await this.call('studbud_teacher_class_detail', { p_class_id: id });
+                const data = await this.call('studbud_teacher_class_detail', { p_class_id: id });
+                if (!this.currentRequest(request, key)) return;
+                this.detail = data;
                 this.editingDeck = null;
                 this.renderTeacherDetail();
                 this.view?.scrollIntoView?.({ block: 'start' });
             } catch (error) {
+                if (!this.currentRequest(request, key)) return;
                 this.detail = null;
                 this.root.innerHTML = `<div class="glass-card empty-state">${esc(this.app.friendlyErrorMessage(error))}</div>`;
+            } finally {
+                if (request === this.requestId) this.loading = false;
             }
         }
 
@@ -493,7 +575,7 @@
         // ------------------------------------------------------------------ STUDENT
         courseCodes() {
             return Array.from(new Set((this.app.AppState.get('courses') || [])
-                .flatMap(course => this.codesForCourse(course)))).slice(0, 40);
+                .flatMap(course => this.codesForCourse(course))));
         }
 
         codesForCourse(course) {
@@ -506,19 +588,28 @@
         }
 
         courseMatches(course, code) {
-            const codes = this.codesForCourse(course);
-            return [code, ...String(code).split('/')].some(part => codes.includes(part.trim()));
+            const codes = this.codesForCourse(course).map(value => value.toUpperCase());
+            return [code, ...String(code).split('/')].some(part => codes.includes(String(part).trim().toUpperCase()));
         }
 
         async loadStudent() {
+            const id = ++this.requestId;
+            const key = this.contextKey();
+            this.loading = true;
             this.root.innerHTML = '<div class="classes-skeleton" aria-busy="true"><span></span><span></span></div>';
             try {
-                this.studentData = await this.call('studbud_my_classes', { p_course_codes: this.courseCodes() });
-                this.lastCodesKey = this.courseCodes().join('|');
-                this.renderStudent();
-                this.syncSnapshots(true);
+                await this.syncSnapshots(true);
+                if (this.currentRequest(id, key) && this.studentData) this.renderStudent();
             } catch (error) {
-                this.root.innerHTML = `<div class="glass-card empty-state">${esc(this.app.friendlyErrorMessage(error))}</div>`;
+                if (!this.currentRequest(id, key)) return;
+                if (this.studentData) {
+                    this.renderStudent();
+                    this.status(this.app.friendlyErrorMessage(error), 'error');
+                } else {
+                    this.root.innerHTML = `<div class="glass-card empty-state">${esc(this.app.friendlyErrorMessage(error))}</div>`;
+                }
+            } finally {
+                if (id === this.requestId) this.loading = false;
             }
         }
 
@@ -625,23 +716,47 @@
         scheduleSync(delay = 4000, force = false) {
             if (this.isTeacher() || !this.available()) return;
             clearTimeout(this.syncTimer);
-            this.syncTimer = setTimeout(() => this.syncSnapshots(force), delay);
+            this.syncTimer = setTimeout(() => this.syncSnapshots(force).catch(error => {
+                console.warn('[Classes] Could not sync class progress:', error.message);
+                if (this.visible()) this.status(this.app.friendlyErrorMessage(error), 'error');
+            }), delay);
         }
 
         async syncSnapshots(force = false) {
             if (this.isTeacher() || !this.available()) return;
+            if (this.syncing) {
+                await this.syncing;
+                if (force && this.available() && !this.isTeacher()) return this.syncSnapshots(true);
+                return;
+            }
             if (!force && Date.now() - this.lastSync < SNAPSHOT_EVERY_MS) return;
-            try {
-                const codesKey = this.courseCodes().join('|');
-                this.studentData = await this.call('studbud_my_classes', { p_course_codes: this.courseCodes() });
+            const key = this.contextKey();
+            const request = this.requestId;
+            const codes = this.courseCodes();
+            const codesKey = codes.join('|');
+            const current = () => this.currentRequest(request, key) && codesKey === this.courseCodes().join('|');
+            this.syncing = (async () => {
+                // Persist school/course changes before the teacher reconciles this enrollment against cloud data.
+                if (!this.studentData || codesKey !== this.lastCodesKey) await window.StudBudCloud?.syncNow?.();
+                if (!current()) return;
+                const data = await this.call('studbud_my_classes', { p_course_codes: codes });
+                if (!current()) return;
+                this.studentData = data;
                 this.lastCodesKey = codesKey;
-                const items = (this.studentData.classes || []).slice(0, 20)
+                if (this.visible() && !this.loading) this.renderStudent();
+                const items = (data.classes || [])
                     .map(item => ({ class_id: item.id, snapshot: this.snapshotFor(item.course_code) }))
                     .filter(item => item.snapshot);
-                this.lastSync = Date.now();
-                if (items.length) await this.call('studbud_sync_class_stats', { p_snapshots: items });
-            } catch (error) {
-                console.warn('[Classes] Could not sync class progress:', error.message);
+                for (let offset = 0; offset < items.length; offset += 20) {
+                    if (!current()) return;
+                    await this.call('studbud_sync_class_stats', { p_snapshots: items.slice(offset, offset + 20) });
+                }
+                if (current()) this.lastSync = Date.now();
+            })();
+            try {
+                await this.syncing;
+            } finally {
+                this.syncing = false;
             }
         }
 

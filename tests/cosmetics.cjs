@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+require('./seasonal-cosmetics.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');

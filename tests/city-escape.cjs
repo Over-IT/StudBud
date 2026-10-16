@@ -196,9 +196,13 @@ assert.equal(game.circleHits({ x: 0, y: 0, w: 20, h: 40 }, { x: 25, y: 45, r: 6 
     game.updateDrill(d, 1);
     assert.equal(d.warn, true, 'drills shake before striking');
     assert.equal(game.drillHits(standing, d), false, 'the warning itself is harmless');
+    game.updateDrill(d, 1.35);
+    assert.equal(d.slamming, true, 'drills are lethal while slamming down');
+    assert.equal(game.drillHits(standing, d), true, 'a descending drill hits a standing player');
     game.updateDrill(d, 1.5);
     assert.equal(d.tipY, -2, 'drills slam down to the deck');
-    assert.equal(game.drillHits(standing, d), true, 'an extended drill hits a standing player');
+    assert.equal(game.drillHits(standing, d), false, 'a drill resting on the deck is a solid block, not a hazard');
+    game.updateDrill(d, 1.35);
     assert.equal(game.drillHits({ x: 113, y: -41, w: 20, h: 38 }, d), false, 'space beside the narrow bit is safe');
     assert.equal(game.drillHits({ x: 109, y: -14, w: 20, h: 11 }, d), false, 'the empty corner beside the pointed tip is safe');
 }
@@ -522,7 +526,7 @@ for (const fps of [30, 60, 120]) {
     const machines = [...game.drills], jets = game.lasers.filter(l => l.steam);
     for (const d of machines) {
         game.drills = [d]; game.lasers = [];
-        for (const [phase, lethal] of [[0, false], [.5, false], [.75, true]]) {
+        for (const [phase, lethal] of [[0, false], [.5, false], [.675, true], [.75, false], [.9, false]]) {
             game.dead = 0; game.boost = 0; game.res.value = 100;
             game.cp = game.checkpoints[0]; game.tideY = d.surfaceY + 1200;
             Object.assign(game.me, { x: d.x - 13, y: d.surfaceY - 44, vx: 0, vy: 0, onGround: true, ground: null });
@@ -546,3 +550,27 @@ for (const fps of [30, 60, 120]) {
     }
 }
 console.log('Every conveyor has timed machinery; crusher/drill strikes and steam warning/cooldown collisions passed at 30/60/120 FPS.');
+
+{
+    for (const seed of SEEDS) {
+        const game = makeGame(seed), graph = game.escapeGraph();
+        game.retirePassedAreas = () => {};
+        Object.assign(game.s, { game, t: 0, startedAt: Date.now(), axis: () => ({ x: 0, y: 0 }), down: () => false, pressed: () => false,
+            spend: n => game.res.spend(n), toast() {}, sfx() {}, setGoal() {} });
+        const route = [...game.climbPath, ...game.cityPath, ...(game.fireEscapes || []).flat()];
+        for (const piece of route) {
+            const node = graph.byRef.get(piece.lane || piece);
+            if (node) assert.equal(node.ok, true, `seed ${seed}: route surface can still reach the summit`);
+        }
+        assert.equal(graph.nodes.every(node => node.ok), true, `seed ${seed}: no generated surface is a dead end`);
+        const trap = { x: game.cp.x - 3000, y: game.cp.y + 700, w: 120, h: 20 };
+        game.solids.push(trap);
+        const pit = game.escapeGraph().byRef.get(trap);
+        assert.equal(pit.ok, false, `seed ${seed}: a sealed pit is detected as a dead end`);
+        Object.assign(game.me, { x: trap.x + 40, y: trap.y - game.me.h, vx: 0, vy: 0, onGround: true, ground: trap });
+        game.hazardClock = 0; game.tideY = trap.y + 5000;
+        for (let i = 0; i < 90 && game.dead <= 0; i++) { game.me.onGround = true; game.me.ground = trap; game.updatePlayer(1 / 60); }
+        assert.ok(game.dead > 0 || game.me.y < trap.y - 200, `seed ${seed}: dead-end pits always return you to a checkpoint`);
+    }
+}
+console.log('Every generated surface leads back to the summit, and dead-end pits always respawn you.');

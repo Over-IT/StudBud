@@ -19,6 +19,8 @@
             this.lastSnapshot = null;
             this.restoringSnapshot = false;
             this.offlineMode = false;
+            this.mfaPendingUser = null;
+            this.mfaSetupFactor = null;
         }
 
         static mergeData(base, local, remote, field = 'account') {
@@ -151,14 +153,14 @@
                     });
                     return;
                 }
-                if (session?.user && ['INITIAL_SESSION', 'SIGNED_IN', 'TOKEN_REFRESHED', 'USER_UPDATED'].includes(event)) {
-                    window.setTimeout(() => this.openAccount(session.user).catch(error => this.reportAccountError(error)), 0);
+                if (session?.user && ['INITIAL_SESSION', 'SIGNED_IN', 'TOKEN_REFRESHED', 'USER_UPDATED', 'MFA_CHALLENGE_VERIFIED'].includes(event)) {
+                    window.setTimeout(() => this.routeAuthenticatedUser(session.user).catch(error => this.reportAccountError(error)), 0);
                 }
             });
             this.authSubscription = authListener.subscription;
             const { data, error } = await this.client.auth.getSession();
             if (error) throw error;
-            if (data.session) await this.openAccount(data.session.user);
+            if (data.session) await this.routeAuthenticatedUser(data.session.user);
         }
 
         bindAuthUI() {
@@ -167,6 +169,14 @@
             document.getElementById('auth-switch-btn')?.addEventListener('click', () => this.setAuthMode(this.authMode === 'login' ? 'signup' : 'login'));
             document.getElementById('login-form')?.addEventListener('submit', event => this.handleLogin(event));
             document.getElementById('signup-form')?.addEventListener('submit', event => this.handleSignup(event));
+            document.getElementById('mfa-login-form')?.addEventListener('submit', event => this.verifyMfaLogin(event));
+            document.getElementById('mfa-login-cancel')?.addEventListener('click', () => this.cancelMfaLogin());
+            document.getElementById('mfa-enable-btn')?.addEventListener('click', () => this.beginMfaSetup());
+            document.getElementById('mfa-verify-setup-btn')?.addEventListener('click', () => this.verifyMfaSetup());
+            document.getElementById('mfa-cancel-setup-btn')?.addEventListener('click', () => this.cancelMfaSetup());
+            document.getElementById('mfa-disable-btn')?.addEventListener('click', () => this.showMfaDisablePanel());
+            document.getElementById('mfa-confirm-disable-btn')?.addEventListener('click', () => this.disableMfa());
+            document.getElementById('mfa-cancel-disable-btn')?.addEventListener('click', () => this.hideMfaDisablePanel());
             document.getElementById('guest-game-form')?.addEventListener('submit', event => this.handleGuestJoin(event));
             document.getElementById('sign-out-btn')?.addEventListener('click', () => this.signOut());
             document.getElementById('offline-start-btn')?.addEventListener('click', () => this.startOffline().catch(error => this.reportAccountError(error)));
@@ -335,7 +345,8 @@
             const { data, error } = await this.client.auth.getSession();
             if (error) throw error;
             if (data.session?.user) {
-                await this.openAccount(data.session.user);
+                await this.routeAuthenticatedUser(data.session.user);
+                if (!this.accountReady) return;
                 this.queueSync();
                 await window.NexusApp?.syncPendingStudyTime?.();
                 await window.NexusApp?.refreshPendingSharedDecks?.();
@@ -384,6 +395,69 @@
             status.classList.toggle('error', isError);
         }
 
+        async routeAuthenticatedUser(user) {
+            if (!user?.id || (this.accountReady && this.user?.id === user.id)) return;
+            if (!this.client?.auth?.mfa?.getAuthenticatorAssuranceLevel) return this.openAccount(user);
+            const { data, error } = await this.client.auth.mfa.getAuthenticatorAssuranceLevel();
+            if (error) throw new Error(this.friendlyAuthError(error, 'Could not check your authenticator status. Please try signing in again.'));
+            if (data?.nextLevel === 'aal2' && data?.currentLevel !== 'aal2') {
+                this.showMfaLoginPrompt(user);
+                return;
+            }
+            this.clearMfaLoginPrompt();
+            await this.openAccount(user);
+        }
+
+        showMfaLoginPrompt(user) {
+            this.mfaPendingUser = user;
+            this.showAuth();
+            document.getElementById('mfa-login-prompt')?.classList.remove('hidden');
+            ['login-form', 'signup-form', 'auth-switch-prompt', 'auth-switch-btn', 'offline-start-btn', 'guest-start-hint', 'auth-divider', 'guest-join', 'auth-legal'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
+            this.setAuthStatus('');
+            document.getElementById('mfa-login-code')?.focus();
+        }
+
+        clearMfaLoginPrompt() {
+            this.mfaPendingUser = null;
+            document.getElementById('mfa-login-prompt')?.classList.add('hidden');
+            document.getElementById('login-form')?.classList.toggle('hidden', this.authMode === 'signup');
+            document.getElementById('signup-form')?.classList.toggle('hidden', this.authMode !== 'signup');
+            ['auth-switch-prompt', 'auth-switch-btn', 'offline-start-btn', 'guest-start-hint', 'auth-divider', 'guest-join', 'auth-legal'].forEach(id => document.getElementById(id)?.classList.remove('hidden'));
+        }
+
+        async verifyMfaLogin(event) {
+            event.preventDefault();
+            if (!this.mfaPendingUser) return;
+            const code = document.getElementById('mfa-login-code')?.value.trim() || '';
+            if (!/^[0-9]{6}$/.test(code)) { this.setAuthStatus('Enter the 6-digit code from your authenticator app.', true); return; }
+            this.setAuthStatus('Verifying your code...');
+            try {
+                const { data: factors, error: factorsError } = await this.client.auth.mfa.listFactors();
+                if (factorsError) throw factorsError;
+                const factor = (factors?.totp || []).find(item => item.status === 'verified');
+                if (!factor) throw new Error('No verified authenticator was found for this account. Contact support or sign in another way.');
+                const { error } = await this.client.auth.mfa.challengeAndVerify({ factorId: factor.id, code });
+                if (error) throw error;
+                const user = this.mfaPendingUser;
+                document.getElementById('mfa-login-code').value = '';
+                await this.routeAuthenticatedUser(user);
+            } catch (error) {
+                console.error('[StudBudCloud] Authenticator verification failed:', error);
+                this.setAuthStatus(this.friendlyAuthError(error, 'That code could not be verified. Check your authenticator and try again.'), true);
+            }
+        }
+
+        async cancelMfaLogin() {
+            try {
+                const { error } = await this.client.auth.signOut({ scope: 'local' });
+                if (error) throw error;
+                await this.handleSignedOut();
+                this.setAuthStatus('Signed out. You can sign in again when ready.');
+            } catch (error) {
+                this.setAuthStatus(this.friendlyAuthError(error, 'Could not cancel sign-in. Please try again.'), true);
+            }
+        }
+
         usernameEmail(username) {
             const normalized = String(username || '').trim().toLowerCase();
             if (!/^[a-z0-9_]{3,24}$/.test(normalized)) {
@@ -401,7 +475,7 @@
                     password: document.getElementById('login-password').value
                 });
                 if (error) throw error;
-                await this.openAccount(data.user);
+                await this.routeAuthenticatedUser(data.user || data.session?.user);
             } catch (error) {
                 console.error('[StudBudCloud] Sign-in failed:', error);
                 this.reportAccountError(error);
@@ -443,10 +517,141 @@
                     this.setAuthStatus('Account created, but Supabase did not sign you in. Check that email confirmations are disabled in Supabase Auth.', true);
                     return;
                 }
-                await this.openAccount(data.user);
+                await this.routeAuthenticatedUser(data.user || data.session?.user);
             } catch (error) {
                 console.error('[StudBudCloud] Sign-up failed:', error);
                 this.setAuthStatus(this.friendlyAuthError(error, 'Could not create your account. Check your details and try again.'), true);
+            }
+        }
+
+        async refreshMfaSettings() {
+            const card = document.getElementById('mfa-settings-card');
+            if (!card) return;
+            const signedIn = Boolean(this.user?.id && !this.offlineMode);
+            card.classList.toggle('hidden', !signedIn);
+            if (!signedIn) return;
+            const status = document.getElementById('mfa-settings-status');
+            const message = document.getElementById('mfa-settings-message');
+            const enable = document.getElementById('mfa-enable-btn');
+            const disable = document.getElementById('mfa-disable-btn');
+            if (message) message.textContent = '';
+            if (status) status.textContent = 'Checking authenticator status...';
+            try {
+                const { data, error } = await this.client.auth.mfa.listFactors();
+                if (error) throw error;
+                const factors = data?.totp || [];
+                const verified = factors.find(factor => factor.status === 'verified');
+                if (status) status.textContent = verified ? 'Authenticator app is enabled.' : 'Authenticator app is not enabled.';
+                enable?.classList.toggle('hidden', Boolean(verified));
+                disable?.classList.toggle('hidden', !verified);
+                if (enable) enable.disabled = false;
+                if (disable) disable.disabled = false;
+            } catch (error) {
+                if (status) status.textContent = this.friendlyAuthError(error, 'Could not check authenticator status.');
+                if (enable) enable.disabled = true;
+                if (disable) disable.disabled = true;
+            }
+        }
+
+        async cleanupUnverifiedMfaFactors() {
+            const { data, error } = await this.client.auth.mfa.listFactors();
+            if (error) throw error;
+            for (const factor of data?.totp || []) {
+                if (factor.status !== 'verified') {
+                    const result = await this.client.auth.mfa.unenroll({ factorId: factor.id });
+                    if (result.error) throw result.error;
+                }
+            }
+        }
+
+        async beginMfaSetup() {
+            if (!this.user?.id || this.offlineMode) return;
+            const message = document.getElementById('mfa-settings-message');
+            try {
+                message.textContent = 'Preparing authenticator setup...';
+                await this.cleanupUnverifiedMfaFactors();
+                const { data, error } = await this.client.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'StudBud authenticator' });
+                if (error) throw error;
+                this.mfaSetupFactor = data;
+                const qr = document.getElementById('mfa-qr-code');
+                if (qr) qr.src = data.totp.qr_code;
+                document.getElementById('mfa-secret').textContent = data.totp.secret;
+                document.getElementById('mfa-setup-code').value = '';
+                document.getElementById('mfa-setup-panel')?.classList.remove('hidden');
+                document.getElementById('mfa-disable-panel')?.classList.add('hidden');
+                message.textContent = 'Scan the QR code or enter the key, then verify a current code.';
+            } catch (error) {
+                message.textContent = this.friendlyAuthError(error, 'Could not start authenticator setup. Please try again.');
+            }
+        }
+
+        async verifyMfaSetup() {
+            const factor = this.mfaSetupFactor;
+            const code = document.getElementById('mfa-setup-code')?.value.trim() || '';
+            const message = document.getElementById('mfa-settings-message');
+            if (!factor?.id) return;
+            if (!/^[0-9]{6}$/.test(code)) { message.textContent = 'Enter the 6-digit code from your authenticator app.'; return; }
+            try {
+                const { error } = await this.client.auth.mfa.challengeAndVerify({ factorId: factor.id, code });
+                if (error) throw error;
+                this.mfaSetupFactor = null;
+                document.getElementById('mfa-setup-panel')?.classList.add('hidden');
+                message.textContent = 'Two-factor authentication is enabled.';
+                await this.refreshMfaSettings();
+            } catch (error) {
+                message.textContent = this.friendlyAuthError(error, 'That code could not be verified. Check your app and try again.');
+            }
+        }
+
+        async cancelMfaSetup() {
+            const factor = this.mfaSetupFactor;
+            this.mfaSetupFactor = null;
+            document.getElementById('mfa-setup-panel')?.classList.add('hidden');
+            document.getElementById('mfa-qr-code')?.removeAttribute('src');
+            document.getElementById('mfa-secret').textContent = '';
+            try {
+                if (factor?.id) {
+                    const { error } = await this.client.auth.mfa.unenroll({ factorId: factor.id });
+                    if (error) throw error;
+                }
+                await this.cleanupUnverifiedMfaFactors();
+                document.getElementById('mfa-settings-message').textContent = 'Authenticator setup canceled.';
+            } catch (error) {
+                document.getElementById('mfa-settings-message').textContent = this.friendlyAuthError(error, 'Could not remove the unfinished authenticator. Please try setup again.');
+            }
+        }
+
+        showMfaDisablePanel() {
+            document.getElementById('mfa-disable-code').value = '';
+            document.getElementById('mfa-disable-panel')?.classList.remove('hidden');
+            document.getElementById('mfa-setup-panel')?.classList.add('hidden');
+        }
+
+        hideMfaDisablePanel() {
+            document.getElementById('mfa-disable-panel')?.classList.add('hidden');
+            document.getElementById('mfa-settings-message').textContent = '';
+        }
+
+        async disableMfa() {
+            const code = document.getElementById('mfa-disable-code')?.value.trim() || '';
+            const message = document.getElementById('mfa-settings-message');
+            if (!/^[0-9]{6}$/.test(code)) { message.textContent = 'Enter the 6-digit code from your authenticator app.'; return; }
+            try {
+                const { data, error } = await this.client.auth.mfa.listFactors();
+                if (error) throw error;
+                const factor = (data?.totp || []).find(item => item.status === 'verified');
+                if (!factor) throw new Error('No verified authenticator was found.');
+                const { error: verifyError } = await this.client.auth.mfa.challengeAndVerify({ factorId: factor.id, code });
+                if (verifyError) throw verifyError;
+                for (const verifiedFactor of (data?.totp || []).filter(item => item.status === 'verified')) {
+                    const { error: removeError } = await this.client.auth.mfa.unenroll({ factorId: verifiedFactor.id });
+                    if (removeError) throw removeError;
+                }
+                document.getElementById('mfa-disable-panel')?.classList.add('hidden');
+                message.textContent = 'Two-factor authentication is disabled.';
+                await this.refreshMfaSettings();
+            } catch (error) {
+                message.textContent = this.friendlyAuthError(error, 'That code could not be verified or the authenticator could not be removed. Try again.');
             }
         }
 
@@ -546,6 +751,7 @@
             if (version !== this.accountVersion) return;
             this.accountReady = true;
             this.offlineMode = false;
+            await this.refreshMfaSettings();
             localStorage.removeItem('STUDBUD_LOCAL_MODE');
             this.endGuestSession();
             this.updateOfflineNotice();
@@ -769,6 +975,7 @@
             this.initialSnapshot = null;
             window.clearTimeout(this.syncTimer);
             this.syncTimer = null;
+            this.clearMfaLoginPrompt();
             this.showAuth();
             this.signOutHandling = (async () => {
             try {

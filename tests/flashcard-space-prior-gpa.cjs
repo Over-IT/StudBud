@@ -1,0 +1,62 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+
+// Run the real priorGPA/withPriorGPA methods from app.js against a stubbed profile.
+{
+    const start = app.indexOf('        priorGPA(profile');
+    const end = app.indexOf('        usesCategoryWeights(course)');
+    assert.ok(start > 0 && end > start, 'prior GPA helpers exist in app.js');
+    const sandbox = { profile: {} };
+    vm.createContext(sandbox);
+    const Gpa = vm.runInContext(`const AppState = { get: () => profile }; (class { ${app.slice(start, end)} })`, sandbox);
+    const gpa = new Gpa();
+    const tracked = { totalCredits: 6, weighted: '4.5', unweighted: '4' };
+
+    sandbox.profile = {};
+    assert.equal(JSON.stringify(gpa.withPriorGPA(tracked)), JSON.stringify({ ...tracked, trackedCredits: 6, priorCredits: 0 }), 'no past credits leaves the GPA unchanged');
+    sandbox.profile = { priorCredits: 0, priorWeightedGpa: 3, priorUnweightedGpa: 3 };
+    assert.equal(gpa.withPriorGPA(tracked).weighted, '4.5', 'zero past credits are ignored');
+    sandbox.profile = { priorCredits: 6, priorWeightedGpa: '' , priorUnweightedGpa: 3 };
+    assert.equal(gpa.priorGPA(), null, 'an incomplete past GPA is ignored');
+
+    sandbox.profile = { priorCredits: 14, priorWeightedGpa: 3.5, priorUnweightedGpa: 3.2 };
+    const blended = gpa.withPriorGPA(tracked);
+    assert.equal(blended.totalCredits, 20);
+    assert.equal(blended.trackedCredits, 6);
+    assert.equal(blended.priorCredits, 14);
+    assert.ok(Math.abs(Number(blended.weighted) - (4.5 * 6 + 3.5 * 14) / 20) < 1e-9, 'weighted GPA is credit-weighted');
+    assert.ok(Math.abs(Number(blended.unweighted) - (4 * 6 + 3.2 * 14) / 20) < 1e-9, 'unweighted GPA is credit-weighted');
+
+    const empty = gpa.withPriorGPA({ totalCredits: 0, weighted: '0', unweighted: '0' });
+    assert.equal(Number(empty.weighted), 3.5, 'with no tracked classes the past GPA is the cumulative GPA');
+    assert.equal(Number(empty.unweighted), 3.2);
+}
+
+// Settings inputs and profile persistence for past credits.
+{
+    const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+    for (const id of ['settings-prior-credits', 'settings-prior-weighted', 'settings-prior-unweighted']) {
+        assert.ok(html.includes(`id="${id}"`), `${id} input exists`);
+        assert.ok(app.includes(`'${id}'`), `${id} is read and saved by app.js`);
+    }
+    for (const key of ['priorCredits', 'priorWeightedGpa', 'priorUnweightedGpa']) assert.ok(app.includes(key), `${key} is stored on the profile`);
+}
+
+// Space while studying only ever flips the card, never activates a focused rating/star button.
+{
+    const handler = app.slice(app.indexOf("const studying = Router.activeRoute === 'flashcard'"));
+    const space = handler.slice(0, handler.indexOf('if (studying && !this.studyKeyBusy)'));
+    assert.ok(space.includes("event.key === ' ' || event.code === 'Space'"), 'Space is matched by key and code');
+    assert.ok(space.includes('event.preventDefault()'), 'Space default (button click / page scroll) is always suppressed');
+    assert.ok(/if \(!event\.repeat && !this\.studyKeyBusy\) this\.revealCard\(\)/.test(space), 'held or mid-rating Space never double-flips or rates');
+    assert.ok(!space.includes('rateCurrentCard') && !space.includes('nextCard'), 'Space cannot advance to the next card');
+    assert.ok(!/studying = [^;]*closest\('button/.test(space), 'Space flips even when a study button has focus');
+    const keyup = app.slice(app.indexOf("document.addEventListener('keyup'"), app.indexOf("document.addEventListener('submit'"));
+    assert.ok(keyup.includes("#active-study-area button") && keyup.includes('preventDefault'), 'Space keyup cannot click a focused study button');
+}
+
+console.log('Prior-credit GPA blending, settings persistence and consistent flashcard Space flipping passed.');

@@ -1,3 +1,5 @@
+-- Optional account MFA: enable TOTP in Supabase Dashboard > Authentication > Multi-Factor Authentication.
+-- Supabase Auth has TOTP enabled by default; clients can enroll and verify authenticator apps.
 create table if not exists public.studbud_user_data (
     user_id uuid primary key references auth.users (id) on delete cascade,
     data jsonb not null,
@@ -493,7 +495,17 @@ as $$
     from (values ('newyear', 1), ('valentine', 2), ('clover', 3), ('spring', 4), ('grad', 5), ('summer', 6),
         ('fireworks', 7), ('school', 8), ('autumn', 9), ('halloween', 10), ('harvest', 11), ('holiday', 12)) as seasons(key, month)
     cross join (values ('hat_seasonal_', '_alt', 'rare'), ('skin_seasonal_', '_alt', 'epic'),
-        ('acc_seasonal_', '_alt_effect', 'legendary')) as extra(prefix, suffix, rarity);
+        ('acc_seasonal_', '_alt_effect', 'legendary')) as extra(prefix, suffix, rarity)
+    union all
+    select * from (values
+        ('hat_seasonal_valentine_cupid', 2, 'rare'),
+        ('hat_seasonal_summer_sunglasses', 6, 'rare'), ('hat_seasonal_summer_shark', 6, 'rare'),
+        ('hat_seasonal_halloween_pumpkin', 10, 'rare'), ('hat_seasonal_halloween_ghost', 10, 'rare'),
+        ('skin_seasonal_halloween_ghost', 10, 'epic'), ('skin_seasonal_halloween_skeleton', 10, 'epic'),
+        ('acc_seasonal_halloween_bats_effect', 10, 'legendary'), ('palette_seasonal_halloween_candycorn', 10, 'uncommon'),
+        ('hat_seasonal_harvest_turkey', 11, 'rare'),
+        ('hat_seasonal_holiday_antlers', 12, 'rare'), ('hat_seasonal_holiday_elf', 12, 'rare')
+    ) as extras(id, month, rarity);
 $$;
 
 -- Single source of truth for priced items and rarity (pets are box-only, so price is null).
@@ -3256,8 +3268,10 @@ begin
     if not exists (select 1 from public.studbud_user_tags where user_id = auth.uid() and tag = 'teacher') then
         raise exception 'Only teacher accounts can manage classes.';
     end if;
-    select coalesce(pp.school, a.raw_user_meta_data ->> 'school', 'pchs') into v_school
-    from auth.users a left join public.studbud_public_profiles pp on pp.user_id = a.id
+    select coalesce(nullif(d.data #>> '{state,profile,school}', ''), pp.school, a.raw_user_meta_data ->> 'school', 'pchs') into v_school
+    from auth.users a
+    left join public.studbud_public_profiles pp on pp.user_id = a.id
+    left join public.studbud_user_data d on d.user_id = a.id
     where a.id = auth.uid();
     if v_school not in ('pchs', 'pnhs', 'pshs', 'pwhs') then
         raise exception 'Classes are available for Parkway high schools. Pick your school in Settings first.';
@@ -3322,6 +3336,7 @@ $$;
 revoke all on function public.studbud_course_matches(jsonb, text, text) from public, anon, authenticated;
 
 -- Reconcile only this teacher's rosters. Never expose students' saved course lists to clients.
+-- A teacher must not undo a student's new enrollment using an older cloud snapshot.
 create or replace function public.studbud_refresh_teacher_roster()
 returns void
 language plpgsql
@@ -3332,6 +3347,8 @@ begin
     perform public.studbud_require_teacher();
     delete from public.studbud_class_members m using public.studbud_classes c
     where c.id = m.class_id and c.teacher_id = auth.uid() and not m.removed
+      and exists (select 1 from public.studbud_user_data latest
+          where latest.user_id = m.user_id and latest.updated_at >= m.joined_at)
       and not exists (
           select 1 from public.studbud_user_data d
           join auth.users a on a.id = d.user_id
@@ -3590,14 +3607,19 @@ declare
     v_codes text[];
 begin
     if public.studbud_is_guest() or auth.uid() is null then return jsonb_build_object('classes', '[]'::jsonb); end if;
+    -- Account tags may arrive after the client first renders. Teachers never enroll as students.
+    if exists (select 1 from public.studbud_user_tags where user_id = auth.uid() and tag = 'teacher') then
+        return jsonb_build_object('classes', '[]'::jsonb);
+    end if;
     select coalesce(nullif(d.data #>> '{state,profile,school}', ''), pp.school, a.raw_user_meta_data ->> 'school', 'pchs') into v_school
     from auth.users a
     left join public.studbud_public_profiles pp on pp.user_id = a.id
     left join public.studbud_user_data d on d.user_id = a.id
     where a.id = auth.uid();
-    select coalesce(array_agg(distinct left(btrim(code), 40)), array[]::text[]) into v_codes
-    from unnest(coalesce(p_course_codes, array[]::text[])) with ordinality as t(code, n)
-    where n <= 40 and char_length(btrim(coalesce(code, ''))) > 0;
+    if coalesce(cardinality(p_course_codes), 0) > 1000 then raise exception 'Too many course codes.'; end if;
+    select coalesce(array_agg(distinct btrim(code)), array[]::text[]) into v_codes
+    from unnest(coalesce(p_course_codes, array[]::text[])) as t(code)
+    where char_length(btrim(coalesce(code, ''))) between 1 and 40;
 
     delete from public.studbud_class_members m using public.studbud_classes c
     where m.class_id = c.id and m.user_id = auth.uid() and not m.removed

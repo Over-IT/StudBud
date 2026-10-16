@@ -93,6 +93,78 @@
     };
 
     // One unit of climb progress per biome; scenery stays anchored to world cells.
+    const SPACE_BODIES = [
+        { kind: 'ringed', x: 380, y: 300, r: 120, base: '#92400e', light: '#fde68a', ring: '#fcd34d', moon: true },
+        { kind: 'earth', x: 1250, y: 520, r: 85, base: '#1e40af', light: '#93c5fd' },
+        { kind: 'lava', x: 2050, y: 260, r: 70, base: '#450a0a', light: '#fb923c' },
+        { kind: 'ocean', x: 1800, y: 900, r: 95, base: '#115e59', light: '#5eead4' },
+        { kind: 'galaxy', x: 1050, y: 1100, r: 130 },
+        { kind: 'ice', x: 2280, y: 1300, r: 100, base: '#0e7490', light: '#e0f2fe', ring: '#bae6fd' },
+        { kind: 'banded', x: 650, y: 1550, r: 140, base: '#581c87', light: '#e9d5ff' },
+        { kind: 'moon', x: 1550, y: 1750, r: 55, base: '#475569', light: '#e2e8f0' },
+        { kind: 'comet', x: 2050, y: 2080, r: 22 },
+        { kind: 'mars', x: 250, y: 2150, r: 65, base: '#7f1d1d', light: '#fca5a5' }
+    ];
+    function drawSpaceBody(ctx, P, x, y, anim) {
+        const r = P.r;
+        if (P.kind === 'galaxy') {
+            ctx.save(); ctx.translate(x, y); ctx.rotate(-.5);
+            const core = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+            core.addColorStop(0, 'rgba(254,243,199,.9)'); core.addColorStop(.25, 'rgba(196,181,253,.45)'); core.addColorStop(1, 'rgba(76,29,149,0)');
+            ctx.fillStyle = core; ctx.scale(1, .42); ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
+            ctx.strokeStyle = 'rgba(221,214,254,.35)'; ctx.lineWidth = 6;
+            for (const turn of [0, Math.PI]) { ctx.beginPath(); for (let k = 0; k <= 24; k++) { const a = turn + k * .22, d = 12 + k * 4.4; if (k) ctx.lineTo(Math.cos(a) * d, Math.sin(a) * d); else ctx.moveTo(Math.cos(a) * d, Math.sin(a) * d); } ctx.stroke(); }
+            ctx.restore();
+            return;
+        }
+        if (P.kind === 'comet') {
+            const tail = ctx.createLinearGradient(x, y, x + 260, y - 110);
+            tail.addColorStop(0, 'rgba(186,230,253,.75)'); tail.addColorStop(1, 'rgba(186,230,253,0)');
+            ctx.fillStyle = tail; ctx.beginPath(); ctx.moveTo(x, y - r * .8); ctx.lineTo(x + 260, y - 110); ctx.lineTo(x + 6, y + r * .8); ctx.closePath(); ctx.fill();
+            ctx.fillStyle = '#f0f9ff'; ctx.beginPath(); ctx.arc(x, y, r * .55, 0, TAU); ctx.fill();
+            return;
+        }
+        if (P.ring) { ctx.strokeStyle = P.ring + '99'; ctx.lineWidth = P.kind === 'ice' ? 4 : 7; ctx.beginPath(); ctx.ellipse(x, y, r * 1.65, r * .3, -.3, Math.PI, TAU); ctx.stroke(); }
+        const body = ctx.createRadialGradient(x - r * .35, y - r * .4, 5, x, y, r);
+        body.addColorStop(0, P.light); body.addColorStop(.55, P.base); body.addColorStop(1, '#020617');
+        ctx.fillStyle = body; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+        ctx.save(); ctx.beginPath(); ctx.arc(x, y, r - 2, 0, TAU); ctx.clip();
+        if (P.kind === 'ringed' || P.kind === 'banded') {
+            ctx.strokeStyle = P.light + (P.kind === 'banded' ? '55' : '66'); ctx.lineWidth = P.kind === 'banded' ? 12 : 9;
+            for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.ellipse(x, y + i * r * .28, r, r * .13, -.25, 0, TAU); ctx.stroke(); }
+            if (P.kind === 'banded') { ctx.fillStyle = 'rgba(251,113,133,.55)'; ctx.beginPath(); ctx.ellipse(x + r * .3, y + r * .25, r * .2, r * .1, -.25, 0, TAU); ctx.fill(); }
+        } else if (P.kind === 'earth') {
+            ctx.fillStyle = 'rgba(74,222,128,.75)';
+            for (const [dx, dy, s] of [[-.35, -.2, .38], [.25, .3, .3], [.45, -.35, .2], [-.1, .55, .18]]) { ctx.beginPath(); ctx.ellipse(x + dx * r, y + dy * r, s * r, s * r * .7, .6, 0, TAU); ctx.fill(); }
+            ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 5;
+            for (const dy of [-.5, .1, .6]) { ctx.beginPath(); ctx.ellipse(x + Math.sin(anim * .05 + dy) * r * .2, y + dy * r, r * .55, r * .06, 0, 0, TAU); ctx.stroke(); }
+        } else if (P.kind === 'lava') {
+            ctx.strokeStyle = `rgba(251,146,60,${.55 + Math.sin(anim * 1.5) * .2})`; ctx.lineWidth = 3; ctx.beginPath();
+            for (const [a, b, c, d] of [[-.7, -.2, .1, .3], [.1, .3, .6, -.1], [-.3, -.6, .2, -.3], [-.2, .7, .4, .5]]) { ctx.moveTo(x + a * r, y + b * r); ctx.lineTo(x + c * r, y + d * r); }
+            ctx.stroke();
+        } else if (P.kind === 'ocean') {
+            ctx.strokeStyle = 'rgba(240,253,250,.6)'; ctx.lineWidth = 4;
+            ctx.beginPath(); ctx.arc(x + r * .25, y + r * .1, r * .22, anim * .3, anim * .3 + 4.5); ctx.stroke();
+            ctx.beginPath(); ctx.arc(x + r * .25, y + r * .1, r * .1, anim * .3 + 2, anim * .3 + 6); ctx.stroke();
+        } else if (P.kind === 'ice') {
+            ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 3; ctx.beginPath();
+            for (const [a, b, c, d] of [[-.6, -.4, .5, .2], [-.2, .5, .6, -.5], [-.7, .2, -.1, .7]]) { ctx.moveTo(x + a * r, y + b * r); ctx.lineTo(x + c * r, y + d * r); }
+            ctx.stroke();
+        } else if (P.kind === 'mars') {
+            ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.beginPath(); ctx.ellipse(x, y - r * .92, r * .45, r * .16, 0, 0, TAU); ctx.fill();
+            ctx.fillStyle = 'rgba(69,10,10,.35)'; ctx.beginPath(); ctx.ellipse(x - r * .2, y + r * .15, r * .5, r * .12, -.2, 0, TAU); ctx.fill();
+        } else {
+            ctx.fillStyle = 'rgba(15,23,42,.3)';
+            for (let i = 0; i < 6; i++) {
+                const angle = i * 2.4 + 1, d = r * (.25 + (i % 3) * .2);
+                ctx.beginPath(); ctx.arc(x + Math.cos(angle) * d, y + Math.sin(angle) * d, r * (.08 + (i % 2) * .05), 0, TAU); ctx.fill();
+            }
+        }
+        ctx.restore();
+        if (P.ring) { ctx.strokeStyle = P.ring + '99'; ctx.lineWidth = P.kind === 'ice' ? 4 : 7; ctx.beginPath(); ctx.ellipse(x, y, r * 1.65, r * .3, -.3, 0, Math.PI); ctx.stroke(); }
+        if (P.moon) { ctx.fillStyle = '#94a3b8'; ctx.beginPath(); ctx.arc(x + r * 1.9, y - r * .8, r * .14, 0, TAU); ctx.fill(); }
+    }
+
     function climbBackdrop(ctx, w, h, cam, camStart, blend, anim, low = false) {
         const { from: i, to: j, amount: t } = blend;
         const g = ctx.createLinearGradient(0, 0, 0, h);
@@ -136,10 +208,13 @@
                     const bw = size - 14 + (hh % 30), bh = base + (hh % span);
                     const bx = n * size - cam.x * f;
                     ctx.fillStyle = color; ctx.fillRect(bx, baseY - bh, bw, bh + h);
-                    ctx.fillStyle = 'rgba(250,204,21,.22)';
+                    // Windows never overlap each other, so one batched fill per building matches per-window fills.
+                    ctx.fillStyle = 'rgba(250,204,21,.22)'; ctx.beginPath();
                     for (let row = 0, wy = baseY - bh + 14; wy < baseY - 20; wy += 26, row++) {
-                        for (let col = 0, wx = bx + 10; wx < bx + bw - 12; wx += 22, col++) if (((hh >> ((row * 5 + col * 3) % 20)) & 7) < 2) ctx.fillRect(wx, wy, 8, 11);
+                        if (wy > h || wy < -11) continue;
+                        for (let col = 0, wx = bx + 10; wx < bx + bw - 12; wx += 22, col++) if (((hh >> ((row * 5 + col * 3) % 20)) & 7) < 2) ctx.rect(wx, wy, 8, 11);
                     }
+                    ctx.fill();
                 }
             });
             ctx.globalAlpha = 1;
@@ -195,35 +270,13 @@
         const au = weight(3);
         if (au > 0) {
             ctx.globalAlpha = au * 0.8;
-            cells(.035, 750, (hh, px, py) => {
-                const x = px + 180 + (hh & 127), y = py + 160 + ((hh >>> 8) & 127), radius = 55 + ((hh >>> 16) % 90);
-                const palettes = [['#0e7490', '#67e8f9'], ['#7c2d12', '#fdba74'], ['#581c87', '#d8b4fe'], ['#1e3a8a', '#93c5fd']];
-                const colors = palettes[hh % palettes.length];
-                if (hh % 3 === 0) {
-                    ctx.strokeStyle = colors[1] + '99'; ctx.lineWidth = 7; ctx.beginPath();
-                    ctx.ellipse(x, y, radius * 1.65, radius * .3, -.3, Math.PI, TAU); ctx.stroke();
-                }
-                const planet = ctx.createRadialGradient(x - radius * .35, y - radius * .4, 5, x, y, radius);
-                planet.addColorStop(0, colors[1]); planet.addColorStop(.55, colors[0]); planet.addColorStop(1, '#020617');
-                ctx.fillStyle = planet; ctx.beginPath(); ctx.arc(x, y, radius, 0, TAU); ctx.fill();
-                ctx.save(); ctx.beginPath(); ctx.arc(x, y, radius - 2, 0, TAU); ctx.clip();
-                if (hh % 2) {
-                    ctx.strokeStyle = colors[1] + '66'; ctx.lineWidth = 9;
-                    for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.ellipse(x, y + i * radius * .28, radius, radius * .13, -.25, 0, TAU); ctx.stroke(); }
-                } else {
-                    ctx.fillStyle = 'rgba(15,23,42,.3)';
-                    for (let i = 0; i < 6; i++) {
-                        const angle = i * 2.4 + hh, d = radius * (.25 + (i % 3) * .2);
-                        ctx.beginPath(); ctx.arc(x + Math.cos(angle) * d, y + Math.sin(angle) * d, radius * (.08 + (i % 2) * .05), 0, TAU); ctx.fill();
-                    }
-                }
-                ctx.restore();
-                if (hh % 3 === 0) {
-                    ctx.strokeStyle = colors[1] + '99'; ctx.lineWidth = 7; ctx.beginPath();
-                    ctx.ellipse(x, y, radius * 1.65, radius * .3, -.3, 0, Math.PI); ctx.stroke();
-                }
-                ctx.fillStyle = '#94a3b8'; ctx.beginPath(); ctx.arc(x + radius * 1.9, y - radius * .8, radius * .14, 0, TAU); ctx.fill();
-            });
+            // a fixed catalog of one-of-a-kind worlds laid out on one parallax tile larger than any viewport, so no two match
+            const ox = cam.x * .035, oy = cam.y * .035;
+            for (const P of SPACE_BODIES) {
+                const x = ((P.x - ox + 300) % 2600 + 2600) % 2600 - 300, y = ((P.y - oy + 300) % 2400 + 2400) % 2400 - 300, reach = P.r * 2.2;
+                if (x < -reach || x > w + reach || y < -reach || y > h + reach) continue;
+                drawSpaceBody(ctx, P, x, y, anim);
+            }
             cells(.14, 640, (hh, px, py) => {
                 if (hh % 3) return;
                 ctx.save(); ctx.translate(px + 300, py + 240); ctx.rotate((hh % 10) * .3);
@@ -249,7 +302,7 @@
     class Skyline extends A.BaseGame {
         constructor(s) {
             super(s);
-            this.title = 'City Escape';
+            this.title = 'Escape to Space';
             this.scoreGoal = false; this.goalUnit = 'm'; this.goalLabel = 'Meters';
             this.formatValue = v => `${v.toLocaleString()} m`;
             this.race = true;
@@ -347,9 +400,10 @@
                 1: ['press-line', 'piston-steps', 'freight-elevator', 'catapult', 'crumble-gantry', 'stair-run', 'gantry-relay', 'drill-alley',
                     'belt-gauntlet', 'assembly-line', 'stamping-feed', 'lift-to-press', 'spring-to-crumble', 'relay-to-pistons'],
                 3: ['meteor-climb', 'asteroid-ferry', 'debris-run', 'truss-climb', 'docking-arm', 'solar-walk', 'thruster-boost', 'airlock-hall',
-                    'arm-to-solar', 'ferry-to-airlock', 'thruster-debris']
+                    'laser-grid', 'satellite-hop', 'crumble-field', 'cargo-lift',
+                    'arm-to-solar', 'ferry-to-airlock', 'thruster-debris', 'satellite-to-grid', 'crumble-to-truss']
             };
-            const TURNS = new Set(['stair-run', 'truss-climb', 'meteor-climb', 'freight-elevator', 'catapult', 'thruster-boost']);
+            const TURNS = new Set(['stair-run', 'truss-climb', 'meteor-climb', 'freight-elevator', 'catapult', 'thruster-boost', 'cargo-lift']);
             const CALM = new Set(['piston-steps', 'freight-elevator', 'catapult', 'stair-run', 'gantry-relay', 'press-line', 'assembly-line',
                 'lift-to-press', 'spring-to-crumble', 'relay-to-pistons', 'arm-to-solar', 'ferry-to-airlock', 'thruster-debris',
                 'meteor-climb', 'asteroid-ferry', 'truss-climb', 'docking-arm', 'thruster-boost', 'airlock-hall']);
@@ -616,7 +670,8 @@
                     this.springs.push({ x: pad.x + 67, y: pad.y - 16, w: 46, h: 16, bi: 1 });
                     const grate = T.add({ x: ahead(pad, d, 90, 460), y: pad.y - 300, w: 460, h: 18, jt: true,
                         grate: true, crumble: !calm, motif: 'cooling-grate' });
-                    vent(T, grate, .3, 0); vent(T, grate, .7, 1.6);
+                    // a crumbling grate gives no time to wait out steam, so vents only appear on the solid version
+                    if (calm) { vent(T, grate, .3, 0); vent(T, grate, .7, 1.6); }
                     return [pad, grate, T.add(deck(ahead(grate, d, 160, 280), grate.y - 120, 280, { motif: 'foundry-exit' }))];
                 },
                 'relay-to-pistons': (L, d, T) => {
@@ -636,7 +691,7 @@
                     const dock = T.add({ x: ahead(L, d, 150, 300), y: L.y - 170, w: 300, h: 32, spaceStyle: 1, dock: true, motif: 'meteor-climb' });
                     const cx = dock.x + dock.w / 2, lanes = [];
                     for (let k = 1; k <= 3; k++) {
-                        lanes.push(T.lane({ y: dock.y - 200 * k, cx, size: 130, h: 60, speed: (k % 2 ? 1 : -1) * d * (150 + Math.round(r() * 40)),
+                        lanes.push(T.lane({ y: dock.y - 200 * k, cx, size: 130, h: 60, speed: (k % 2 ? 1 : -1) * d * (170 + Math.round(r() * 45)),
                             spacing: 440 + Math.round(r() * 80), min: 1500 }));
                     }
                     const top = T.add({ x: cx - 260, y: dock.y - 820, w: 520, h: 32, spaceStyle: 1, jt: true, dock: true, via: lanes, motif: 'meteor-climb' });
@@ -660,7 +715,7 @@
                         const gap = 250 + Math.round(r() * 30);
                         const p = T.add({ x: ahead(prev, d, gap, 200), y: prev.y - 100, w: 200, h: 32, spaceStyle: i % 2 ? 0 : 1, motif: 'debris-run' });
                         if (!calm) T.shower({ x: d > 0 ? edgeOf(prev, 1) + gap / 2 : edgeOf(prev, -1) - gap / 2, y: p.y, size: 40,
-                            speed: 460 + Math.round(r() * 80), spacing: 600 + Math.round(r() * 120) });
+                            speed: 520 + Math.round(r() * 90), spacing: 540 + Math.round(r() * 110) });
                         prev = p; nodes.push(p);
                     }
                     return nodes;
@@ -686,7 +741,7 @@
                     let prev = L;
                     const nodes = [];
                     for (let i = 0; i < 3; i++) {
-                        prev = T.add({ x: ahead(prev, d, 170, 160), y: prev.y - 110, w: 160, h: 16, thin: true, solar: true, blink: !calm, period: 3.8, on: 2.8, phase: i * 1.2, motif: 'solar-walk' });
+                        prev = T.add({ x: ahead(prev, d, 170, 160), y: prev.y - 110, w: 160, h: 16, thin: true, solar: true, blink: !calm, period: 3.4, on: 2.4, phase: i * 1.1, motif: 'solar-walk' });
                         nodes.push(prev);
                     }
                     nodes.push(T.add({ x: ahead(prev, d, 170, 240), y: prev.y - 110, w: 240, h: 32, spaceStyle: 1, motif: 'solar-walk' }));
@@ -703,12 +758,63 @@
                 'airlock-hall': (L, d, T, calm) => {
                     const w = 600 + Math.round(r() * 120);
                     const hall = T.add({ x: ahead(L, d, 150, w), y: L.y - 150, w, h: 40, spaceStyle: 1, airlock: true, motif: 'airlock-hall' });
-                    if (!calm) for (const [i, u] of [.35, .7].entries()) {
-                        const laser = { x: Math.round(hall.x + hall.w * (d > 0 ? u : 1 - u)), y: hall.y - 240, w: 10, h: 240, period: 3.2, phase: i * 1.6, mounted: true, support: hall, bi: 3 };
+                    if (!calm) for (const [i, u] of [.25, .5, .75].entries()) {
+                        const laser = { x: Math.round(hall.x + hall.w * (d > 0 ? u : 1 - u)), y: hall.y - 240, w: 10, h: 240, period: 3, phase: i * 1.1, mounted: true, support: hall, bi: 3 };
                         this.lasers.push(laser);
                         T.zone({ x: laser.x - 20, y: laser.y - 20, w: 50, h: laser.h + 20 });
                     }
                     return [hall];
+                },
+                // hull plates with a pulsing laser gate on every plate: wait for the beam to drop, then dash through
+                'laser-grid': (L, d, T, calm) => {
+                    let prev = L;
+                    const nodes = [];
+                    for (let i = 0; i < 3; i++) {
+                        const p = T.add({ x: ahead(prev, d, 190 + Math.round(r() * 30), 200), y: prev.y - 95, w: 200, h: 32, spaceStyle: i % 2 ? 2 : 1, motif: 'laser-grid' });
+                        if (!calm) {
+                            const laser = { x: Math.round(p.x + p.w / 2 - 5), y: p.y - 220, w: 10, h: 220, period: 2.6, phase: i * .85, mounted: true, support: p, bi: 3 };
+                            this.lasers.push(laser);
+                            T.zone({ x: laser.x - 20, y: laser.y - 20, w: 50, h: laser.h + 20 });
+                        }
+                        prev = p; nodes.push(p);
+                    }
+                    return nodes;
+                },
+                // two satellites drift back and forth out of step: time the hop from one to the other
+                'satellite-hop': (L, d, T) => {
+                    const amp = 100 + Math.round(r() * 20), w = 140, nodes = [];
+                    let prev = L;
+                    for (let i = 0; i < 2; i++) {
+                        const x = d > 0 ? edgeOf(prev, 1) + 70 + amp : edgeOf(prev, -1) - 70 - amp - w;
+                        prev = T.add({ x, y: prev.y - (i ? 90 : 80), w, h: 22, mover: true, amp, speed: .85, phase: i * Math.PI, spaceStyle: 2, arm: true, motif: 'satellite-hop' });
+                        nodes.push(prev);
+                    }
+                    nodes.push(T.add({ x: ahead(prev, d, 70, 240), y: prev.y - 110, w: 240, h: 32, spaceStyle: 1, dock: true, motif: 'satellite-hop' }));
+                    return nodes;
+                },
+                // brittle hull fragments that break apart a moment after you land on them
+                'crumble-field': (L, d, T, calm) => {
+                    let prev = L;
+                    const nodes = [];
+                    for (let i = 0; i < 3; i++) {
+                        prev = T.add({ x: ahead(prev, d, 200 + Math.round(r() * 30), 150), y: prev.y - 100, w: 150, h: 16, thin: true, crumble: !calm, spaceStyle: 2, motif: 'crumble-field' });
+                        nodes.push(prev);
+                    }
+                    nodes.push(T.add({ x: ahead(prev, d, 170, 240), y: prev.y - 100, w: 240, h: 32, spaceStyle: 1, dock: true, motif: 'crumble-field' }));
+                    return nodes;
+                },
+                // a cargo lift rides up a shaft beside a rock lane: step off at the top before the asteroids sweep through
+                'cargo-lift': (L, d, T, calm) => {
+                    const rise = 380 + Math.round(r() * 80);
+                    const car = T.add({ x: ahead(L, d, 90, 150), y: L.y, w: 150, h: 20, mover: true, vert: true, by: L.y - rise / 2, amp: rise / 2,
+                        speed: .65, phase: r() * 6, spaceStyle: 2, motif: 'cargo-lift' });
+                    const dock = T.add({ x: ahead(car, d, 80, 260), y: L.y - rise + 20, w: 260, h: 32, spaceStyle: 1, dock: true, motif: 'cargo-lift' });
+                    if (!calm) {
+                        const lane = T.lane({ y: dock.y - 200, cx: dock.x + dock.w / 2, size: 120, h: 56, speed: d * (170 + Math.round(r() * 40)), spacing: 520, min: 1300 });
+                        const top = T.add({ x: dock.x + dock.w / 2 - 150, y: dock.y - 400, w: 300, h: 32, spaceStyle: 1, jt: true, dock: true, via: [lane], motif: 'cargo-lift' });
+                        return [car, dock, top];
+                    }
+                    return [car, dock];
                 },
                 // a wide deck to catch your breath (and the checkpoint pad when a new biome begins)
                 landing: (L, d, T) => [T.add({ x: ahead(L, d, 140, 380), y: L.y - 130, w: 380, h: 40, roof: true, island: true, bodyH: 40, rest: true,
@@ -723,7 +829,9 @@
             const COMBOS = {
                 'arm-to-solar': ['docking-arm', 'solar-walk'],
                 'ferry-to-airlock': ['asteroid-ferry', 'airlock-hall'],
-                'thruster-debris': ['thruster-boost', 'debris-run']
+                'thruster-debris': ['thruster-boost', 'debris-run'],
+                'satellite-to-grid': ['satellite-hop', 'laser-grid'],
+                'crumble-to-truss': ['crumble-field', 'truss-climb']
             };
             const PARTS = name => name ? COMBOS[name] || [name] : [];
             for (const [name, parts] of Object.entries(COMBOS)) PIECE[name] = combo(...parts);
@@ -865,7 +973,7 @@
             };
             // every crossing type appears once (hops twice), and no two vertical constructions are ever back to back
             const crossingOrder = () => {
-                const pool = ['hop', 'climb', 'scaffold', 'billboard', 'crane', 'scale', 'spring', 'cart', 'gondola', 'skybridge', 'drop', 'hop'];
+                const pool = ['hop', 'climb', 'scaffold', 'billboard', 'crane', 'scale', 'spring', 'cart', 'gondola', 'skybridge', 'drop', 'poles', 'signs'];
                 for (let t = 0; t < 4000; t++) {
                     const order = shuffle(pool);
                     if (VERTICAL.has(order[0]) || VERTICAL.has(order[order.length - 1])) continue;
@@ -873,7 +981,7 @@
                     if (order.indexOf('drop') < 3) continue;
                     return order;
                 }
-                return ['hop', 'climb', 'spring', 'scaffold', 'cart', 'crane', 'drop', 'scale', 'billboard', 'gondola', 'skybridge', 'hop'];
+                return ['hop', 'climb', 'spring', 'scaffold', 'cart', 'crane', 'drop', 'scale', 'billboard', 'gondola', 'skybridge', 'poles', 'signs'];
             };
             const CLIMB_PALETTES = shuffle([['ledge', 'awning'], ['ac', 'ledge'], ['awning', 'ac']]);
             let climbs = 0;
@@ -957,6 +1065,18 @@
                     };
                     return { B, pieces: [beam(0, A.y - 110, true), beam(off, A.y - 215, false)] };
                 }
+                if (kind === 'poles') {
+                    // a wide street crossed on the caps of three utility poles at staggered heights: small, precise landings
+                    const gap = Math.round(620 + r() * 60), tops = [A.y - 30 - r() * 30, A.y - 100 - r() * 30, A.y - 60 - r() * 40], poles = [];
+                    [.2, .5, .8].forEach((u, i) => poles.push(cityPut({ x: Math.round(gapX + gap * u - 32), y: Math.round(tops[i]), w: 64, h: 14, cityKit: 'pole', tier: i })));
+                    return { B: tower(gapX + gap, Math.round(poles[2].y - 90 - r() * 30), towerWidth()), pieces: poles };
+                }
+                if (kind === 'signs') {
+                    // step off the roof onto a sign bolted below its edge, leap to a sign on the next tower, then haul up onto its roof
+                    const gap = Math.round(430 + r() * 50), B = tower(gapX + gap, Math.round(A.y - 160 - r() * 20), towerWidth());
+                    const low = mount(gapX, 1, A.y + 70, 'sign'), high = mount(B.x, -1, A.y - 45, level >= 3 ? 'neon' : 'sign');
+                    return { B, pieces: [low, high] };
+                }
                 // skybridge: drop onto a truss bridge, hop its missing span, then climb the far tower's wall
                 const gap = Math.round(520 + r() * 120), deck = A.y + 130, half = (gap - 150) / 2;
                 const left = cityPut({ x: gapX, y: deck, w: half, h: 24, bridge: true }), right = cityPut({ x: gapX + half + 150, y: deck, w: half, h: 24, bridge: true });
@@ -1017,13 +1137,13 @@
                         this.climbPath.push(...bend.nodes); last = bend.nodes[bend.nodes.length - 1]; dir = -dir;
                         pad = place(['landing'], b, undefined, true)?.nodes[0];
                     }
-                    if (!pad) throw new Error('City Escape: no room for the biome checkpoint pad');
+                    if (!pad) throw new Error('Escape to Space: no room for the biome checkpoint pad');
                     last = pad; this.climbPath.push(pad); cx = pad.x + pad.w / 2; y = pad.y;
                     this.checkpoints.push({ x: pad.x + 70, y: pad.y, id: this.checkpoints.length, biome: b });
                 }
                 if (!chamber(b)) {
                     // boxed in: roll back the chamber before this one too and re-roll both
-                    if (++backtracks > 40 || history.length < 2) throw new Error(`City Escape chamber ${this.challenges.length}: no set piece fits`);
+                    if (++backtracks > 40 || history.length < 2) throw new Error(`Escape to Space chamber ${this.challenges.length}: no set piece fits`);
                     history.pop(); restore(history.pop());
                     continue;
                 }
@@ -1126,6 +1246,69 @@
             this.shake = 0.3;
         }
 
+        // Which surfaces can still reach the summit, using generous jump envelopes (jump + air jump, springs, wall-jump walls,
+        // the full sweep of moving platforms and asteroid lanes). Landing anywhere else means there is no way back up.
+        escapeGraph() {
+            if (this.escape && this.escape.solids === this.solids && this.escape.count === this.solids.length) return this.escape;
+            const launch = this.checkpoints.find(cp => cp.biome === 3), spaceY = launch ? launch.y + 60 : -Infinity;
+            const nodes = [], byRef = new Map(), lanes = new Set();
+            const add = (ref, x0, x1, yStand, yEnter) => {
+                const space = yStand <= spaceY;
+                const node = { x0, x1, yStand, yEnter, space, rise: space ? 480 : 320, ok: false };
+                nodes.push(node); byRef.set(ref, node);
+                return node;
+            };
+            for (const p of this.solids) {
+                if (p.boundary || p.ground) continue;
+                if (p.lane) {
+                    if (!lanes.has(p.lane)) { lanes.add(p.lane); add(p.lane, p.lane.x0, p.lane.x1, p.lane.y - 6, p.lane.y + 6); }
+                    continue;
+                }
+                if (p.wallJ) { add(p, p.x - 40, p.x + p.w + 40, p.y, p.y + p.h); continue; }
+                if (p.mover && p.sinker) { add(p, p.x, p.x + p.w, p.by, p.by + (p.depth || 0)); continue; }
+                if (p.mover && p.vert) { add(p, p.x, p.x + p.w, p.by - p.amp, p.by + p.amp); continue; }
+                if (p.mover) { add(p, p.bx - p.amp, p.bx + p.amp + p.w, p.y, p.y); continue; }
+                add(p, p.x, p.x + p.w, p.y, p.slope ? p.y + p.h : p.y);
+            }
+            for (const sp of this.springs) {
+                const node = nodes.find(n => Math.abs(n.yStand - (sp.y + sp.h)) < 8 && sp.x < n.x1 && sp.x + sp.w > n.x0);
+                if (node) node.rise = node.space || sp.bi === 3 ? 650 : 530;
+            }
+            const reaches = (a, b) => {
+                const up = a.yStand - b.yEnter;
+                if (up > a.rise) return false;
+                const gap = Math.max(0, b.x0 - a.x1, a.x0 - b.x1);
+                return gap <= (a.space ? 820 : 600) + Math.max(0, -up) * (a.space ? 1.3 : .8);
+            };
+            const goal = byRef.get(this.summit), queue = [];
+            if (goal) { goal.ok = true; queue.push(goal); } else for (const n of nodes) n.ok = true;
+            while (queue.length) {
+                const b = queue.pop();
+                for (const a of nodes) if (!a.ok && reaches(a, b)) { a.ok = true; queue.push(a); }
+            }
+            this.escape = { solids: this.solids, count: this.solids.length, nodes, byRef };
+            return this.escape;
+        }
+
+        isDeadEnd(ground) {
+            if (!ground || ground.ground || ground === this.summit) return false;
+            const node = this.escapeGraph().byRef.get(ground.lane || ground);
+            return !!node && !node.ok;
+        }
+
+        // Falling with no surface anywhere below (or within an air jump) before the fall line: nothing can catch you.
+        hasCatchBelow(me) {
+            const feet = me.y + me.h, space = this.inDeepSpace(me);
+            const lift = this.airJumps > 0 ? (space ? 210 : 135) : 0, floor = this.cp.y + 800;
+            for (const n of this.escapeGraph().nodes) {
+                if (n.yEnter < feet - lift || n.yStand > floor) continue;
+                const reach = (space ? 520 : 300) + Math.max(0, n.yStand - feet) * (space ? 1.3 : .8);
+                if (n.x1 + reach > me.x && n.x0 - reach < me.x + me.w) return true;
+            }
+            const street = this.solids.find(p => p.ground);
+            return !!street && street.y <= floor;
+        }
+
         biomeProgress(height) {
             let index = 0;
             for (let i = 1; i < this.checkpoints.length; i++) if (height >= -this.checkpoints[i].y) index = i;
@@ -1178,16 +1361,34 @@
             const k = u < .6 ? 0 : u < .68 ? (u - .6) / .08 : u < .85 ? 1 : 1 - (u - .85) / .15;
             d.tipY = up + (down - up) * k;
             d.warn = u >= .45 && u < .6;
+            d.slamming = u >= .6 && u < .68;
         }
 
+        drillHead(d) {
+            return d.crusher ? { x: d.x - d.width / 2, y: d.tipY - 22, w: d.width, h: 22 } : { x: d.x - 12, y: d.tipY - 20, w: 24, h: 20 };
+        }
+
+        // Only a descending head is lethal; resting, holding or retracting heads are solid blocks and the thin shaft is harmless.
         drillHits(body, d) {
-            if (d.crusher) return overlap(body, { x: d.x - d.width / 2, y: d.tipY - 22, w: d.width, h: 22 });
-            const shaft = { x: d.x - 6, y: d.mountY, w: 12, h: Math.max(0, d.tipY - 20 - d.mountY) };
-            if (shaft.h > 0 && overlap(body, shaft)) return true;
+            if (!d.slamming) return false;
+            if (d.crusher) return overlap(body, this.drillHead(d));
             const bitTop = d.tipY - 20, yTop = Math.max(body.y, bitTop);
             if (yTop > d.tipY || body.y + body.h < bitTop) return false;
             const half = 12 * (d.tipY - yTop) / 20;
             return body.x < d.x + half && body.x + body.w > d.x - half;
+        }
+
+        pushOutOfDrill(me, d, previousFeet) {
+            const head = this.drillHead(d);
+            if (!overlap(me, head)) return;
+            const up = me.y + me.h - head.y, down = head.y + head.h - me.y, left = me.x + me.w - head.x, right = head.x + head.w - me.x;
+            if (previousFeet <= head.y + 12 && me.vy >= 0 && up <= Math.min(left, right) + 12) {
+                me.y = head.y - me.h; me.vy = 0; me.onGround = true;
+                d.top = Object.assign(d.top || { drillTop: true, dx: 0, dy: 0 }, head); me.ground = d.top;
+            } else if (down < Math.min(left, right)) {
+                me.y = head.y + head.h; if (me.vy < 0) me.vy = 0;
+            } else if (left < right) { me.x = head.x - me.w; if (me.vx > 0) me.vx = 0; }
+            else { me.x = head.x + head.w; if (me.vx < 0) me.vx = 0; }
         }
 
         inDeepSpace(body = this.me) {
@@ -1314,6 +1515,7 @@
             }
             for (const w of this.saws) { w.x = w.cx; w.y = w.cy + Math.sin(clock * w.speed + w.phase) * w.amp; }
             for (const d of this.drills) this.updateDrill(d, clock);
+            for (const l of this.lasers) l.on = ((((clock + l.phase) % l.period) + l.period) % l.period) < l.period * 0.55;
             for (const d of this.debris) this.updateDebris(d, clock);
             for (const b of this.balls) {
                 const a = b.amp * Math.sin(clock * b.speed + b.phase);
@@ -1352,7 +1554,7 @@
                     const spot = this.cp;
                     me.x = spot.x; me.y = spot.y - me.h - 2; me.vx = 0; me.vy = 0; this.dash = 0; this.kick = 0;
                     this.tideY = spot.y + 900; this.tideWarn = false; this.snapCam = true;
-                    this.stuckT = 0; this.stuckX = me.x; this.stuckY = me.y; this.strandedT = 0;
+                    this.stuckT = 0; this.stuckX = me.x; this.stuckY = me.y; this.strandedT = 0; this.trapT = 0; this.voidT = 0;
                     me.onGround = false; me.ground = null; this.airJumps = 1; this.buffer = 0;
                 }
                 this.state = 4;
@@ -1472,6 +1674,7 @@
 
             const wasAir = !me.onGround, previousFeet = me.y + me.h, fallSpeed = me.vy;
             moveBody(me, this.solids, dt);
+            for (const d of this.drills) if (!d.slamming && Math.abs(d.x - me.x) < 120) this.pushOutOfDrill(me, d, previousFeet);
             if (me.onGround && wasAir && fallSpeed > 420) this.particles.burst(me.x + 13, me.y + me.h, '#94a3b8', 5, 70, 0.25, 3);
             if (me.onGround && me.ground?.crumble && me.ground.timer <= 0 && !me.ground.off) me.ground.timer = 0.5;
 
@@ -1493,11 +1696,22 @@
                 for (const b of this.balls) if (this.circleHits(box, b)) this.hurt();
                 if (me.y + me.h > this.tideY && !(s.testing === true && s.testNoTide === true)) this.hurt();
                 for (const l of this.lasers) {
-                    const on = ((clock + l.phase) % l.period) < l.period * 0.55;
-                    l.on = on;
-                    if (on && overlap(box, l)) this.hurt();
+                    l.on = ((((clock + l.phase) % l.period) + l.period) % l.period) < l.period * 0.55;
+                    if (!l.on) continue;
+                    const lethal = l.steam ? { x: l.x + 4, y: l.y + 30, w: l.w - 8, h: l.h - 30 } : l;
+                    if (overlap(box, lethal)) this.hurt();
                 }
                 if (me.y > this.cp.y + 800) this.hurt();
+                if (this.dead <= 0 && this.trapChecks !== false && !(s.testing === true && s.testInvincible === true)) {
+                    this.trapT = me.onGround && this.isDeadEnd(me.ground) ? (this.trapT || 0) + dt : 0;
+                    this.voidCheck = (this.voidCheck || 0) - dt;
+                    if (me.onGround || me.vy <= 0 || this.dash > 0) this.voidT = 0;
+                    else if (this.voidCheck <= 0) { this.voidCheck = .1; this.voidT = this.hasCatchBelow(me) ? 0 : (this.voidT || 0) + .1; }
+                    if (this.trapT > 1 || this.voidT > .25) {
+                        s.toast(this.trapT > 1 ? 'No way back up from here — returning to your checkpoint' : 'Nothing below to catch you — returning to your checkpoint', '#fbbf24');
+                        this.trapT = 0; this.voidT = 0; this.hurt(true);
+                    }
+                }
                 for (const b of this.boxes) {
                     if (b.t > 0) continue;
                     b.t = 1e9; // question boxes are disabled in the parkour climb
@@ -1558,16 +1772,25 @@
             const edge = p.x === 0 ? p.x + p.w - 18 : p.x + 10;
             ctx.fillStyle = trim; ctx.fillRect(edge, p.y + 14, 8, p.h - 14);
             if (low) return;
+            // Window bays never overlap, so each layer is batched into one path in the original paint order.
+            const bays = [], rows = [];
             for (let yy = Math.ceil((p.y + 24) / 76) * 76; yy < p.y + p.h - 34; yy += 76) {
                 if (yy < top - 60 || yy > bottom) continue;
-                ctx.fillStyle = 'rgba(15,23,42,.2)'; ctx.fillRect(p.x + 10, yy + 54, p.w - 20, 3);
-                for (let xx = p.x + 34; xx < p.x + p.w - 42; xx += 62) {
-                    const lit = ihash(Math.round(xx), Math.round(yy)) % 4 === 0;
-                    ctx.fillStyle = shade; ctx.fillRect(xx - 3, yy - 3, 35, 46);
-                    ctx.fillStyle = lit ? B.accent : mixHex(B.body, '#0f172a', .6); ctx.fillRect(xx, yy, 29, 38);
-                    ctx.fillStyle = trim; ctx.fillRect(xx + 13, yy, 3, 38); ctx.fillRect(xx, yy + 18, 29, 3);
-                    ctx.fillRect(xx - 4, yy + 38, 37, 4);
-                }
+                rows.push(yy);
+                for (let xx = p.x + 34; xx < p.x + p.w - 42; xx += 62) bays.push(xx, yy);
+            }
+            if (rows.length) {
+                ctx.fillStyle = 'rgba(15,23,42,.2)'; ctx.beginPath();
+                for (const yy of rows) ctx.rect(p.x + 10, yy + 54, p.w - 20, 3);
+                ctx.fill();
+            }
+            if (bays.length) {
+                const layer = (style, fn) => { ctx.fillStyle = style; ctx.beginPath(); for (let k = 0; k < bays.length; k += 2) fn(bays[k], bays[k + 1]); ctx.fill(); };
+                const lit = (xx, yy) => ihash(Math.round(xx), Math.round(yy)) % 4 === 0;
+                layer(shade, (xx, yy) => ctx.rect(xx - 3, yy - 3, 35, 46));
+                layer(B.accent, (xx, yy) => { if (lit(xx, yy)) ctx.rect(xx, yy, 29, 38); });
+                layer(mixHex(B.body, '#0f172a', .6), (xx, yy) => { if (!lit(xx, yy)) ctx.rect(xx, yy, 29, 38); });
+                layer(trim, (xx, yy) => { ctx.rect(xx + 13, yy, 3, 38); ctx.rect(xx, yy + 18, 29, 3); ctx.rect(xx - 4, yy + 38, 37, 4); });
             }
             ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 3; ctx.beginPath();
             const pipeX = p.x === 0 ? edge - 18 : edge + 26;
@@ -1667,6 +1890,7 @@
 
         drawBounds(p) {
             if (p.cityKit === 'scaffold') return { y: p.y - 45, h: (p.below || 0) - p.y + 50 };
+            if (p.cityKit === 'pole') return { y: p.y - 30, h: -p.y + 30 };
             if (p.cityKit === 'catwalk') return p.board.panel ? { y: p.y - 165, h: 190 } : { y: p.y - 35, h: 50 };
             if (p.cityKit === 'beam') return { y: p.jibY - 30, h: p.y - p.jibY + 50 };
             if (p.lane) return { y: p.lane.y - 20, h: p.h + 40 };
@@ -1874,6 +2098,17 @@
 
         // Scaffold planks, billboard catwalks and crane beams in the city's vertical crossings.
         drawCityKit(ctx, p) {
+            if (p.cityKit === 'pole') {
+                // utility pole down to the street, with a crossarm, insulators and a warning band
+                const cx = p.x + p.w / 2;
+                ctx.fillStyle = '#3f3f46'; ctx.fillRect(cx - 7, p.y + p.h, 14, -p.y - p.h);
+                ctx.fillStyle = '#52525b'; ctx.fillRect(cx - 7, p.y + p.h, 4, -p.y - p.h);
+                ctx.fillStyle = '#57534e'; ctx.fillRect(p.x, p.y, p.w, p.h);
+                ctx.fillStyle = '#a8a29e'; ctx.fillRect(p.x, p.y, p.w, 3);
+                ctx.fillStyle = '#22d3ee'; ctx.fillRect(p.x + 4, p.y - 8, 6, 8); ctx.fillRect(p.x + p.w - 10, p.y - 8, 6, 8);
+                ctx.fillStyle = '#facc15'; ctx.fillRect(cx - 5, p.y + 40, 10, 6);
+                return;
+            }
             if (p.cityKit === 'scaffold') {
                 const [f0, f1] = p.frame, base = p.below || 0, poles = [f0, f1];
                 ctx.fillStyle = '#64748b';
