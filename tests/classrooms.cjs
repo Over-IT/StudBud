@@ -88,7 +88,11 @@ assert.match(sql, /function public\.studbud_require_teacher\(\)[\s\S]*?'teacher'
 assert.match(sql, /drop function if exists public\.studbud_join_class\(text, uuid\)/);
 assert.doesNotMatch(sql, /grant execute on function public\.studbud_join_class/);
 const myClasses = sql.slice(sql.indexOf('create or replace function public.studbud_my_classes'));
-assert.match(myClasses, /insert into public\.studbud_class_members[\s\S]*?c\.school = v_school and c\.course_code = any\(v_codes\)/);
+assert.match(myClasses, /insert into public\.studbud_class_members[\s\S]*?c\.school = v_school[\s\S]*?studbud_course_matches/);
+assert.match(myClasses, /state,profile,school/);
+assert.match(sql, /not coalesce\(a\.is_anonymous, false\)/, 'teacher backfill excludes actual Supabase anonymous users');
+assert.match(sql, /c\.teacher_id = auth\.uid\(\)[\s\S]*?studbud_course_matches/);
+assert.match(sql, /revoke all on function public\.studbud_refresh_teacher_roster\(\) from public, anon, authenticated/);
 assert.match(myClasses, /delete from public\.studbud_class_members[\s\S]*?not m\.removed/);
 assert.doesNotMatch(source('classrooms.js'), /join_code|studbud_join_class/);
 assert.match(sql, /revoke all on function public\.studbud_class_person\(uuid\) from public, anon, authenticated/);

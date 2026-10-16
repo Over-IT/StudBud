@@ -76,8 +76,8 @@ const settle = async () => { await Promise.resolve(); await Promise.resolve(); }
     const ad = f.slots[0].children.find(child => child.className === 'adsbygoogle');
     assert.equal(ad.dataset.adClient, f.window.STUDBUD_ADS.client);
     assert.equal(ad.dataset.adSlot, '111');
-    assert.equal(ad.dataset.adFormat, 'auto');
-    assert.equal(ad.dataset.fullWidthResponsive, 'true');
+    assert.equal(ad.dataset.adFormat, 'horizontal');
+    assert.equal(ad.dataset.fullWidthResponsive, 'false');
     const narrow = fixture();
     narrow.window.STUDBUD_ADS = f.window.STUDBUD_ADS;
     narrow.layout.unitWidth = 0;

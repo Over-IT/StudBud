@@ -125,6 +125,24 @@ assert.strictEqual(imported('a1').kind, 'test');
 assert.strictEqual(first.schedule.all['1'], calcCourse.code);
 assert.strictEqual(first.schedule.all['8'], 'KEEP', 'unrelated periods are kept');
 assert.strictEqual(first.summary.coursesAdded, 2);
+for (const isWeighted of [undefined, false]) {
+    const namedPayload = plain(payload);
+    Object.values(namedPayload.details).forEach(detail => detail.details.forEach(entry => entry.categories.forEach(category => {
+        delete category.weight;
+        if (isWeighted === undefined) delete category.isWeighted;
+        else category.isWeighted = isWeighted;
+        category.isExcluded = false;
+    })));
+    const namedModel = IC.parsePayload(namedPayload);
+    const namedPlan = IC.buildImportPlan(namedModel, { courses: [] }, { school: 'pchs', catalog });
+    const named = IC.applyImportPlan(namedModel, namedPlan, { courses: [], assignments: [], schedule: {} }, options);
+    assert.ok(named.courses.flatMap(course => course.categories).every(category => category.weight === null),
+        'category names without weights stay unweighted, not 0%');
+    const repairedPlan = IC.buildImportPlan(namedModel, { courses: first.courses }, { school: 'pchs', catalog });
+    const repaired = IC.applyImportPlan(namedModel, repairedPlan, { courses: first.courses, assignments: first.assignments, schedule: first.schedule }, options);
+    assert.ok(repaired.courses.flatMap(course => course.categories).every(category => category.weight === null),
+        're-import repairs previously weighted categories when Campus no longer supplies weights');
+}
 
 // Re-importing updates in place and keeps the student's own edits
 const edited = first.assignments.map(item => item.id === 'ic_a4' ? { ...item, estimatedMinutes: 120, kind: 'test' } : item);

@@ -516,12 +516,13 @@
                     const name = text(category.name, 60);
                     if (!name) return;
                     const key = idText(category.groupID) || slug(name);
-                    const weighted = category.isWeighted === undefined ? true : bool(category.isWeighted);
-                    const weight = weighted ? Math.max(0, Math.min(100, num(category.weight) ?? 0)) : 0;
+                    const rawWeight = num(category.weight);
+                    const weighted = category.isWeighted === undefined ? rawWeight !== null : bool(category.isWeighted);
+                    const weight = weighted && rawWeight !== null ? round2(Math.max(0, Math.min(100, rawWeight))) : null;
                     const existing = section.categories.get(key);
                     if (!existing || (!existing.weight && weight)) {
                         section.categories.set(key, {
-                            id: key, name, weight: round2(weight),
+                            id: key, name, weight,
                             excluded: category.isExcluded === undefined ? false : bool(category.isExcluded),
                             usePercent: bool(category.usePercent)
                         });
@@ -916,12 +917,13 @@
                 if (!target && include.categories) {
                     let id = `category_ic_${slug(category.id)}`;
                     while (course.categories.some(item => item.id === id)) id = `${id}_${course.categories.length}`;
-                    target = { id, name: category.name, weight: category.excluded ? 0 : category.weight };
+                    target = { id, name: category.name, weight: category.excluded ? 0 : category.weight, excluded: category.excluded };
                     course.categories.push(target);
                     byName.set(category.name.toLowerCase(), target);
                     summary.categories++;
                 } else if (target && include.categories && !target.icUpdated) {
                     target.weight = category.excluded ? 0 : category.weight;
+                    target.excluded = category.excluded;
                     target.icUpdated = true;
                 }
                 if (target) categoryLookup.set(lookupKey, { category: target, source: category });

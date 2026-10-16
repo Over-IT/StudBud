@@ -8,6 +8,7 @@ const clone = value => JSON.parse(JSON.stringify(value));
 const storage = new Map();
 const stores = new Map();
 const events = [];
+const listeners = new Map();
 const elements = new Map();
 const math = Object.create(Math);
 math.random = () => 0;
@@ -17,7 +18,10 @@ const sandbox = {
     window, console, Math: math, Date, setTimeout, clearTimeout,
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
     document: { documentElement: { dataset: {} }, getElementById: id => elements.get(id) || null, querySelector: () => null },
-    EventBus: { emit: (name, data) => events.push({ name, data }) },
+    EventBus: {
+        on(name, handler) { if (!listeners.has(name)) listeners.set(name, []); listeners.get(name).push(handler); },
+        emit(name, data) { events.push({ name, data }); for (const handler of listeners.get(name) || []) handler(data); }
+    },
     NexusDB: {
         getAll: async table => clone([...(stores.get(table)?.values() || [])]),
         put: async (table, row) => { if (!stores.has(table)) stores.set(table, new Map()); stores.get(table).set(row.id, clone(row)); },
@@ -42,6 +46,56 @@ const Cloud = window.StudBudCloud.constructor;
 const normal = value => clone(value);
 
 async function run() {
+    let gradeRefreshes = 0;
+    const originalRenderUI = app.renderUI;
+    app.renderUI = () => gradeRefreshes++;
+    app.EventBus = sandbox.EventBus;
+    sandbox.eventApp = app;
+    const eventSource = source('app.js');
+    vm.runInContext(`(function () { ${eventSource.slice(eventSource.indexOf("            this.EventBus.on('courses:updated'"),
+        eventSource.indexOf("            this.EventBus.on('flashcards:updated'"))} }).call(eventApp);`, context);
+    state.set('courses', state.get('courses'));
+    state.set('assignments', state.get('assignments'));
+    assert.equal(gradeRefreshes, 2, 'bulk course/assignment replacements refresh grades and GPA through actual state events');
+    listeners.clear();
+    app.renderUI = originalRenderUI;
+    delete app.EventBus;
+    delete sandbox.eventApp;
+    const oldUser = window.StudBudCloud.user;
+    const oldProfile = app.multiplayerProfile;
+    const oldHasAccount = community.hasAccount, oldRecordBest = community.recordWaitingGameBest;
+    elements.set('waiting-runner-best', {});
+    elements.set('waiting-runner-start', {});
+    app.waitingRunner = { score: 0, best: 0, saving: false };
+    window.StudBudCloud.user = { id: 'rows-test-a' };
+    app.multiplayerProfile = { user_id: 'rows-test-a', best_wait_score: 427 };
+    app.startWaitingRunner(false);
+    assert.equal(app.waitingRunner.best, 0, 'legacy warm-up points are not displayed as Crossing rows');
+    app.saveWaitingBestLocal(8);
+    app.startWaitingRunner(false);
+    assert.equal(app.waitingRunner.best, 8);
+    for (const malformed of ['NaN', '-4', '3.5', '100001']) {
+        storage.set(app.waitingBestKey(), malformed);
+        assert.equal(app.readWaitingBest(), 0, 'invalid row records cannot inflate the personal best');
+    }
+    storage.set(app.waitingBestKey(), '8');
+    let resolveBest;
+    community.hasAccount = () => true;
+    community.recordWaitingGameBest = () => new Promise(resolve => { resolveBest = resolve; });
+    app.waitingRunner.score = 9;
+    const pendingBest = app.saveWaitingRunnerBest();
+    window.StudBudCloud.user = { id: 'rows-test-b' };
+    app.multiplayerProfile = { user_id: 'rows-test-b', best_crossing_rows: 3 };
+    assert.equal(app.readWaitingBest(), 0, 'local bests are isolated by account');
+    resolveBest({ user_id: 'rows-test-a', best_crossing_rows: 9 });
+    await pendingBest;
+    assert.equal(app.multiplayerProfile.user_id, 'rows-test-b', 'a late best response cannot replace another account profile');
+    community.hasAccount = oldHasAccount; community.recordWaitingGameBest = oldRecordBest;
+    window.StudBudCloud.user = oldUser; app.multiplayerProfile = oldProfile;
+    storage.delete('studbud.scholar-crossing.rows-v2.rows-test-a');
+    storage.delete('studbud.scholar-crossing.rows-v2.rows-test-b');
+    elements.delete('waiting-runner-best'); elements.delete('waiting-runner-start');
+    delete app.waitingRunner;
     assert.equal(state.state.settings.colorScheme, 'studbud', 'new accounts start with the StudBud palette');
     window.StudBudCloud.user = { user_metadata: { username: 'student' } };
     state.state.profile.firstName = 'Ada';
@@ -295,11 +349,11 @@ async function run() {
     assert.ok(good.dueAt > now && easy.fields.interval > good.fields.interval);
     assert.equal(again.fields.state, 'relearning');
     assert.ok(again.dueAt < good.dueAt);
-    assert.equal(app.deckStudyCount({ cards: [reviews.at(-1)] }), 0, 'future reviews are visibly unavailable in the deck UI');
+    assert.equal(app.deckStudyCount({ cards: [reviews.at(-1)] }), 1, 'future reviews remain available to study');
     assert.equal(app.deckStudyCount({ cards: [{ ...cards[0], suspended: true }] }), 0);
     assert.equal(app.deckStudyCount({ cards: cards.slice(0, 2) }), 2);
     const limitDeck = { cards: cards.slice(0, 2), ankiToday: { day: window.SM2Engine.dayNumber(now), newDone: 20, reviewsDone: 200 } };
-    assert.equal(app.deckStudyCount(limitDeck), 0, 'deck status respects the same daily limits as the study session');
+    assert.equal(app.deckStudyCount(limitDeck), 2, 'learning scheduler limits never make study cards unavailable');
 
     const base = { version: 1, state: { courses: [{ id: 'math', grade: 80 }], assignments: [], gameMetrics: { xp: 400, level: 1, streakDays: 1 }, settings: { theme: 'dark' } }, flashcards: [], studyHistory: [] };
     const local = clone(base);

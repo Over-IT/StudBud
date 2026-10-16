@@ -24,6 +24,14 @@ const assignment = (earned, possible, categoryId) => ({ courseCode: 'math', poin
 close(app.calculateCourseGrade(course, [assignment(9, 10), assignment(50, 100)]), 59 / 110 * 100);
 close(app.calculateCourseGrade(course, [assignment(0, 100), { ...assignment(100, 100), graded: false, status: 'pending' }]), 0);
 assert.equal(app.calculateCourseGrade(course, []), null);
+for (const weight of [null, 0, undefined]) {
+    const named = { ...course, categories: [{ id: 'classwork', weight }, { id: 'engagement', weight }] };
+    close(app.calculateCourseGrade(named, [assignment(10, 10, 'classwork'), assignment(10, 10, 'engagement'), assignment(60, 100)]), 80 / 120 * 100);
+    assert.equal(app.categoryWeightLabel(named, named.categories[0]), 'Unweighted');
+}
+const excluded = { ...course, categories: [{ id: 'practice', weight: 0, excluded: true }] };
+close(app.calculateCourseGrade(excluded, [assignment(0, 100, 'practice'), assignment(9, 10)]), 90);
+assert.equal(app.categoryWeightLabel(excluded, excluded.categories[0]), 'Excluded');
 const categorized = { ...course, categories: [{ id: 'tests', weight: 70 }, { id: 'work', weight: 30 }] };
 close(app.calculateCourseGrade(categorized, [assignment(80, 100, 'tests'), assignment(100, 100, 'work')]), 86);
 close(app.calculateCourseGrade(categorized, [assignment(80, 100, 'tests')]), 80);

@@ -549,7 +549,7 @@ const retiredTrails = [
     'acc_meteor_trail', 'acc_aurora_trail'
 ];
 assert.equal(catalog.filter(item => item.type === 'effect' && !item.season).length, 36);
-assert.equal(catalog.filter(item => item.season).length, 48, 'twelve seasonal sets of four cosmetics');
+assert.equal(catalog.filter(item => item.season).length, 84, 'twelve seasonal sets of seven cosmetics');
 assert.ok(!catalog.some(item => item.type === 'trail' || retiredTrails.includes(item.id)));
 assert.ok(!sandbox.window.StudBudCommunityGames.constructor.boxes.some(box => box.id === 'trail'));
 assert.doesNotMatch(source, /\['trail',|trail: 'Trails'|item\.type === 'trail'/);
@@ -800,16 +800,18 @@ for (const mode of ['duel', 'shooter', 'skyline']) {
     else if (mode === 'shooter') { bot.hp = 0; app.stepShooterBots(demo, .02); assert.equal(bot.hp, 100); }
     else {
         bot.st.checkpoint = 1;
+        bot.st.actor = app.skyBotActor(demo, bot);
+        bot.st.actor.hurt(true);
+        bot.st.actor.dead = .01;
         app.stepSkylineBot(demo, bot, 0, .02);
-        assert.equal(bot.y, demo.game.checkpoints[1].y - bot.h, 'parkour bot returns to its latest checkpoint');
-        bot.invuln = 0; bot.y = demo.game.checkpoints[1].y + 900;
+        assert.equal(bot.y, demo.game.checkpoints[1].y - bot.h - 2, 'parkour bot returns to its latest checkpoint');
+        bot.y = demo.game.checkpoints[1].y + 1500;
         app.stepSkylineBot(demo, bot, 0, .02);
-        assert.ok(bot.st.assist, 'falling parkour bot follows a smooth recovery hop toward its next route node');
-        app.stepSkylineBot(demo, bot, 0, bot.st.assist.duration);
-        assert.equal(bot.st.assist, null);
-        assert.ok(bot.onGround);
+        assert.ok(bot.respawn > 0, 'a fallen bot dies instead of flying back onto the route');
+        assert.equal(bot.st.assist, undefined);
+        app.stepSkylineBot(demo, bot, 0, 1.1);
     }
-    assert.ok(bot.respawn <= 0 && bot.invuln > 0, `${mode} bot respawns with protection`);
+    assert.ok(bot.respawn <= 0 && (mode === 'skyline' || bot.invuln > 0), `${mode} bot respawns`);
     assert.equal(bot.vx, 0); assert.equal(bot.vy, 0);
     assert.ok(Number.isFinite(bot.x) && Number.isFinite(bot.y));
 }
@@ -845,19 +847,27 @@ assert.equal(rememberedLava.lavaVisibility[lavaIndex], 1, 'revealed lava remains
 for (const [fps, seed] of [[30, 12345], [60, 67890], [120, 45678]]) {
     const paced = demoFor('skyline');
     paced.session.seed = seed;
+    paced.session.preview = false;
+    paced.session.testing = false;
     paced.game = new paced.game.constructor(paced.session);
     paced.bots = app.initPreviewBots(paced, 'skyline', paced.game);
     const finishTimes = new Map();
-    for (let i = 0; i < fps * 1200 && !paced.bots.every(bot => bot.done); i++) {
+    for (let i = 0; i < fps * 3600 && !paced.bots.every(bot => bot.done); i++) {
         paced.clock += 1 / fps;
+        paced.session.t = paced.clock;
+        paced.session.testPauseAt = paced.session.startedAt + paced.clock * 1000;
+        paced.game.update(1 / fps);
         paced.bots.forEach((bot, index) => {
             const previousNode = bot.st.i;
+            const landed = bot.onGround;
             app.stepSkylineBot(paced, bot, index, 1 / fps);
-            assert.ok(bot.st.i >= previousNode, 'paced opponents do not lose route progress');
+            assert.ok(bot.st.i >= previousNode || landed || bot.st.i === app.skyRoute(paced.game).cpNode[bot.st.checkpoint || 0], 'lost progress requires a physical lower landing or a checkpoint respawn');
             if (bot.done && !finishTimes.has(bot.id)) finishTimes.set(bot.id, paced.clock);
         });
     }
     assert.ok(paced.bots.every(bot => bot.done), `${fps} FPS seed ${seed}: all parkour bots reach the summit: ${paced.bots.map(bot => bot.st.i)}`);
+    assert.ok(paced.bots.every(bot => bot.st.assist === undefined), 'normal bots never use forward position assists');
+    assert.ok(paced.bots.every(bot => bot.st.actor.res.value >= 0 && bot.st.actor.res.value <= 100), 'normal bots spend and refill bounded energy');
     assert.ok(new Set(finishTimes.values()).size > 1, 'different bot paces produce different finish times');
 }
 for (const fps of [30, 60, 120]) {
@@ -871,7 +881,7 @@ for (const fps of [30, 60, 120]) {
     game.update(1 / fps);
     assert.ok(game.me.vy > -1280 && game.me.vy < 0, 'upward departure does not trigger the spring again');
 }
-console.log('Safe below-stage recovery, gradual permanent lava discovery and guaranteed paced parkour completion passed.');
+console.log('Safe below-stage recovery, gradual permanent lava discovery and normal-energy parkour completion with physical checkpoint retries passed.');
 
 const wall = [{ x: 100, y: 50, w: 50, h: 100 }];
 assert.equal(app.botLineClear(50, 100, 200, 100, wall), false, 'bots cannot shoot through cover');

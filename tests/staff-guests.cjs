@@ -44,6 +44,44 @@ async function run() {
         if (app.canTestGames) assert.doesNotThrow(() => app.startPractice('duel', { testing: true }));
         else assert.throws(() => app.startPractice('duel', { testing: true }), /testers/);
     }
+    const originalGet = sandbox.AppState.get;
+    sandbox.AppState.get = key => key === 'flashcards' ? [{ id: 'qa-energy', title: 'QA', cards: [{ front: 'Q', back: 'A' }] }] : [];
+    sandbox.document.body = { classList: { add() {}, remove() {} } };
+    const originalBots = app.initPreviewBots, originalCosmetics = app.profileCosmetics;
+    app.initPreviewBots = () => [];
+    app.profileCosmetics = () => ({});
+    let practiceOptions;
+    sandbox.window.StudBudArcade = { Session: class {
+        constructor(options) {
+            practiceOptions = options;
+            this.game = {};
+            this.roster = new Map(); this.remotes = new Map();
+            this.overlay = { isConnected: true };
+        }
+        emit() {}
+        destroy() {}
+    } };
+    const checkReward = (mode, config, expected) => {
+        app.startPractice(mode, { testing: true, deckId: 'qa-energy', botCount: 0, ...config });
+        assert.equal(practiceOptions.questionReward, expected);
+        assert.equal(practiceOptions.room.state.question_reward, expected, 'practice HUD and actual refill share one reward');
+        app.closePractice();
+    };
+    checkReward('skyline', {}, app.questionRewardRecommendation('skyline').suggested);
+    checkReward('shooter', {}, app.questionRewardRecommendation('shooter').suggested);
+    checkReward('sports', {}, app.questionRewardRecommendation('sports').suggested);
+    nodes.set('solo-game-reward', { value: '65', dataset: { custom: 'true' } });
+    checkReward('skyline', {}, 65);
+    checkReward('skyline', { questionReward: 75 }, 75);
+    app.hostedGameRoom = { mode: 'skyline', state: { players: [], question_reward: 25 } };
+    checkReward(undefined, {}, 25);
+    checkReward('shooter', {}, 65);
+    checkReward('chess', { questionReward: 75 }, 1);
+    delete app.hostedGameRoom;
+    delete sandbox.window.StudBudArcade;
+    nodes.delete('solo-game-reward');
+    app.initPreviewBots = originalBots; app.profileCosmetics = originalCosmetics;
+    sandbox.AppState.get = originalGet;
     admin = false; tags = ['moderator']; await app.refreshAdminAccess();
     app.adminTab = 'users';
     await app.loadAdminList();

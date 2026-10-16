@@ -493,7 +493,21 @@
         // ------------------------------------------------------------------ STUDENT
         courseCodes() {
             return Array.from(new Set((this.app.AppState.get('courses') || [])
-                .flatMap(course => [course.catalogCode, course.code]).filter(Boolean).map(String))).slice(0, 40);
+                .flatMap(course => this.codesForCourse(course)))).slice(0, 40);
+        }
+
+        codesForCourse(course) {
+            const normalize = text => String(text || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const catalog = this.app.schoolCatalog?.() || [];
+            const match = catalog.find(item => item.code === course.catalogCode || item.code === course.code)
+                || catalog.find(item => normalize(item.title) === normalize(course.title));
+            return [...new Set([match?.code, course.catalogCode, course.code].filter(Boolean).map(String)
+                .flatMap(code => [code.trim(), ...code.split('/').map(part => part.trim())]).filter(Boolean))];
+        }
+
+        courseMatches(course, code) {
+            const codes = this.codesForCourse(course);
+            return [code, ...String(code).split('/')].some(part => codes.includes(part.trim()));
         }
 
         async loadStudent() {
@@ -513,7 +527,7 @@
             const classes = data.classes || [];
             const covered = new Set(classes.map(item => item.course_code));
             const waiting = (this.app.AppState.get('courses') || [])
-                .filter(course => !covered.has(course.catalogCode) && !covered.has(course.code));
+                .filter(course => ![...covered].some(code => this.courseMatches(course, code)));
             const local = this.app.AppState.get('flashcards') || [];
             const classCards = classes.map(item => {
                 const decks = item.decks || [];
@@ -576,7 +590,7 @@
                 classDeckId: deck.id,
                 classDeckUpdatedAt: deck.updated_at || '',
                 communitySourceAuthor: personName(item.teacher),
-                courseCode: existing?.courseCode || ((AppState.get('courses') || []).find(course => (course.catalogCode || course.code) === item.course_code)?.code || ''),
+                courseCode: existing?.courseCode || ((AppState.get('courses') || []).find(course => this.courseMatches(course, item.course_code))?.code || ''),
                 courseTitle: item.title,
                 studiedCount: existing?.studiedCount || 0
             };
@@ -586,8 +600,7 @@
 
         snapshotFor(courseCode) {
             const AppState = this.app.AppState;
-            const course = (AppState.get('courses') || []).find(entry => entry.catalogCode === courseCode)
-                || (AppState.get('courses') || []).find(entry => entry.code === courseCode);
+            const course = (AppState.get('courses') || []).find(entry => this.courseMatches(entry, courseCode));
             if (!course) return null;
             const today = todayKey();
             const work = (AppState.get('assignments') || []).filter(entry => entry.courseCode === course.code);
@@ -620,10 +633,8 @@
             if (!force && Date.now() - this.lastSync < SNAPSHOT_EVERY_MS) return;
             try {
                 const codesKey = this.courseCodes().join('|');
-                if (!this.studentData || codesKey !== this.lastCodesKey) {
-                    this.studentData = await this.call('studbud_my_classes', { p_course_codes: this.courseCodes() });
-                    this.lastCodesKey = codesKey;
-                }
+                this.studentData = await this.call('studbud_my_classes', { p_course_codes: this.courseCodes() });
+                this.lastCodesKey = codesKey;
                 const items = (this.studentData.classes || []).slice(0, 20)
                     .map(item => ({ class_id: item.id, snapshot: this.snapshotFor(item.course_code) }))
                     .filter(item => item.snapshot);

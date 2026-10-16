@@ -64,6 +64,22 @@ async function verifyReel({ scale, width, gap, padding, seasonal, duplicate, ski
     else assert.match(result.innerHTML, /New rare drop: Winning Hat/);
 }
 (async () => {
+    const button = { disabled: false, setAttribute() {} }, prompt = {}, seals = Array.from({ length: 4 }, () => ({ classList: { toggle(name, broken) { this.broken = broken; } } }));
+    let released = 0, resolved = 0, removed = 0;
+    app.unboxState = { taps: 0, overlay: {
+        querySelector: selector => selector === '.unbox-box' ? button : prompt,
+        querySelectorAll: () => seals, remove() { removed++; }
+    }, releaseSeals() { released++; }, resolve() { resolved++; } };
+    for (let tap = 1; tap <= 3; tap++) {
+        app.shakeUnboxing();
+        assert.equal(released, 0, 'three taps cannot release the reveal gate');
+        assert.equal(seals.filter(seal => seal.classList.broken).length, tap);
+    }
+    app.shakeUnboxing(); app.shakeUnboxing();
+    assert.equal(released, 1, 'exactly four taps open the box once');
+    assert.equal(button.disabled, true);
+    app.closeUnboxing();
+    assert.equal(resolved, 1); assert.equal(removed, 1); assert.equal(app.unboxState, null);
     for (const scale of [0.7, 0.94, 1]) {
         for (const width of [280, 844]) {
             for (const seasonal of [false, true]) {

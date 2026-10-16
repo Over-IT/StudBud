@@ -520,7 +520,7 @@
         planner: ['Tasks & deadlines', 'Assignments, quizzes and tests.'],
         calendar: ['Calendar', 'Pick a day to add work.'],
         schedule: ['Class schedule', 'When your classes meet.'],
-        flashcard: ['My study sets', 'Create sets and study due cards.'],
+        flashcard: ['My study sets', 'Create sets and study whenever you want.'],
         'exam-arcade': ['Practice & tests', 'Tests, quizzes and solo games. Results stay private.'],
         importer: ['Import flashcards', 'Paste rows or build a set by hand.'],
         multiplayer: ['Multiplayer games', 'Pick a game and a set, then host or join.'],
@@ -1302,6 +1302,8 @@
 
             this.EventBus.on('courses:updated', () => this.renderUI());
             this.EventBus.on('assignments:updated', () => this.renderUI());
+            this.EventBus.on('state:updated:courses', () => this.renderUI());
+            this.EventBus.on('state:updated:assignments', () => this.renderUI());
             this.EventBus.on('flashcards:updated', () => {
                 this.renderDecks();
                 this.renderHostedGameDecks();
@@ -1529,7 +1531,7 @@
             const categories = course ? course.categories || [] : [];
             const previousCategory = categorySelect.value;
             categorySelect.innerHTML = '<option value="">Uncategorized</option>' + categories.map(category =>
-                `<option value="${this.escapeHTML(category.id)}">${this.escapeHTML(category.name)} (${Number(category.weight || 0).toFixed(2)}%)</option>`
+                `<option value="${this.escapeHTML(category.id)}">${this.escapeHTML(category.name)} (${this.categoryWeightLabel(course, category)})</option>`
             ).join('');
             if (categories.some(category => category.id === previousCategory)) categorySelect.value = previousCategory;
         }
@@ -1612,7 +1614,8 @@
                     const categoryGroups = categories.map(category => ({
                         id: category.id,
                         name: category.name,
-                        weight: Number(category.weight) || 0,
+                        weight: this.usesCategoryWeights(course) ? Number(category.weight) || 0 : null,
+                        excluded: category.excluded,
                         assignments: classAssignments.filter(item => item.categoryId === category.id)
                     }));
                     const categorizedIds = new Set(categories.map(category => category.id));
@@ -1646,7 +1649,7 @@
                             <summary>
                                 <span class="transcript-chevron" aria-hidden="true"><i class="fas fa-chevron-right"></i></span>
                                 <span class="transcript-category-name">${this.escapeHTML(group.name)}</span>
-                                <span class="transcript-category-meta">${group.weight === null ? 'Unweighted' : `${group.weight.toFixed(2)}% of grade`}</span>
+                                <span class="transcript-category-meta">${group.excluded ? 'Excluded' : group.weight === null ? 'Unweighted' : `${group.weight.toFixed(2)}% of grade`}</span>
                                 <strong class="transcript-category-grade">${categoryGrade}</strong>
                                 <span class="transcript-item-count">${group.assignments.length} item${group.assignments.length === 1 ? '' : 's'}</span>
                             </summary>
@@ -1712,15 +1715,24 @@
             return calculator.calculateCurrentGPA(currentCourses);
         }
 
+        usesCategoryWeights(course) {
+            return (course.categories || []).some(category => !category.excluded && Number(category.weight) > 0);
+        }
+
+        categoryWeightLabel(course, category) {
+            return category.excluded ? 'Excluded' : this.usesCategoryWeights(course) ? `${Number(category.weight || 0).toFixed(2)}%` : 'Unweighted';
+        }
+
         calculateCourseGrade(course, assignments = AppState.get('assignments') || []) {
             const courseAssignments = assignments.filter(item =>
                 item.courseCode === course.code &&
-                (this.isGradedItem(item))
+                this.isGradedItem(item) &&
+                !(course.categories || []).some(category => category.id === item.categoryId && category.excluded)
             );
             if (!courseAssignments.length) return null;
 
             const categories = course.categories || [];
-            if (categories.length) {
+            if (this.usesCategoryWeights(course)) {
                 let weightedTotal = 0;
                 let activeWeight = 0;
                 const configuredWeight = categories.reduce((sum, category) => sum + (Number(category.weight) || 0), 0);
@@ -1773,7 +1785,7 @@
                 const categoryGrade = possible > 0 ? `${(earned / possible * 100).toFixed(2)}%` : 'No graded work';
                 return `<div class="category-row">
                     <div><strong>${this.escapeHTML(category.name)}</strong><span>${categoryGrade} · ${items.length} items</span></div>
-                    <strong>${Number(category.weight || 0).toFixed(2)}%</strong>
+                    <strong>${this.categoryWeightLabel(course, category)}</strong>
                     <button class="secondary-btn" data-action="add-assignment-to-category" data-course="${this.escapeHTML(course.code)}" data-category="${this.escapeHTML(category.id)}" aria-label="Add assignment to ${this.escapeHTML(category.name)}"><i class="fas fa-plus"></i> Add</button>
                     <button class="danger-btn" data-action="remove-category" data-id="${this.escapeHTML(category.id)}" aria-label="Remove ${this.escapeHTML(category.name)}">Remove</button>
                 </div>`;
@@ -1815,7 +1827,7 @@
                         <h3>Optional grade categories</h3>
                         <p>Weights are percentages. Category averages use earned points / possible points; categories without scores are left out until work is graded. Uncategorized scores use any remaining weight. When categories total 100%, assign scored work to a category to include it in the weighted grade.</p>
                         <div class="category-list">${categoryRows || '<p class="empty-state">No categories. Your graded assignments will use a points-based average.</p>'}</div>
-                        <p class="${Math.abs(sumWeights - 100) < 0.01 ? 'weight-valid' : 'weight-note'}">Category weights total ${sumWeights.toFixed(2)}%${categories.length && Math.abs(sumWeights - 100) >= 0.01 ? ' (recommended total: 100%)' : ''}</p>
+                        <p class="${this.usesCategoryWeights(course) && Math.abs(sumWeights - 100) >= 0.01 ? 'weight-note' : 'weight-valid'}">${this.usesCategoryWeights(course) ? `Category weights total ${sumWeights.toFixed(2)}%${Math.abs(sumWeights - 100) >= 0.01 ? ' (recommended total: 100%)' : ''}` : 'Unweighted: all scored work counts by points, regardless of category.'}</p>
                         <div class="category-add-form">
                             <input id="new-category-name" type="text" aria-label="Category name" placeholder="Category name (e.g. Tests)">
                             <input id="new-category-weight" type="number" aria-label="Category weight (%)" min="0" max="100" step="0.1" placeholder="Weight %">
@@ -2655,8 +2667,7 @@
         }
 
         deckStudyCount(deck) {
-            if (!window.SM2Engine?.createSession) throw new Error('The spaced-repetition scheduler did not load. Reload before studying.');
-            return window.SM2Engine.createSession((deck.cards || []).filter(card => card && !card.suspended), { deck }).remaining;
+            return (deck.cards || []).filter(card => card && !card.suspended).length;
         }
 
         renderDecks() {
@@ -2707,15 +2718,12 @@
                     ${tags}
                     <div class="deck-stats">
                         <span><i class="fas fa-clone"></i> ${cardCount} cards</span>
-                        <span class="${studyCount ? 'is-due' : ''}"><i class="fas fa-clock"></i> ${studyCount} due</span>
                         ${mastery.starred ? `<span class="is-star"><i class="fas fa-star"></i> ${mastery.starred}</span>` : ''}
                         ${mastery.weak ? `<span class="is-weak" title="Cards under 75% accuracy"><i class="fas fa-triangle-exclamation"></i> ${mastery.weak} weak</span>` : ''}
                     </div>
                     <div class="actions deck-main-actions">
-                        ${studyCount
-                            ? `<button class="primary-btn" data-action="study-deck" data-id="${id}"><i class="fas fa-play"></i> Study ${studyCount}</button>`
-                            : `<button class="primary-btn" data-action="cram-deck" data-id="${id}" ${cardCount ? '' : 'disabled'} title="Nothing due. Go through every card without changing your schedule"><i class="fas fa-bolt"></i> Cram</button>`}
-                        ${studyCount ? `<button class="secondary-btn" data-action="cram-deck" data-id="${id}" title="Go through every card without changing your schedule"><i class="fas fa-bolt"></i> Cram</button>` : ''}
+                        <button class="primary-btn" data-action="study-deck" data-id="${id}" ${studyCount ? '' : 'disabled'}><i class="fas fa-play"></i> Study</button>
+                        <button class="secondary-btn" data-action="cram-deck" data-id="${id}" ${cardCount ? '' : 'disabled'} title="Go through every card without changing your learning progress"><i class="fas fa-bolt"></i> Cram</button>
                         ${mastery.starred ? `<button class="secondary-btn" data-action="cram-starred" data-id="${id}" title="Study only starred cards" aria-label="Study starred cards"><i class="fas fa-star"></i></button>` : ''}
                         <button class="secondary-btn" data-action="add-card" data-id="${id}" title="Add a card" aria-label="Add a card"><i class="fas fa-plus"></i></button>
                         <button class="secondary-btn" data-action="edit-deck" data-id="${id}" title="Edit set" aria-label="Edit set"><i class="fas fa-pen"></i></button>
@@ -2782,7 +2790,7 @@
                     <div><strong>${this.escapeHTML(deck.title)}</strong>
                         <span>${exact ? 'For' : 'Same class as'} ${this.escapeHTML(this.deckAssessmentLabel(item))}${when ? ` · ${when}` : ''}</span>
                         <small>${this.escapeHTML(studied)} · suggested ${item.sessionMinutes} min today</small></div>
-                    <button class="primary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}" ${studyCount ? '' : 'disabled'}>${studyCount ? '<i class="fas fa-play"></i> Study' : 'Nothing scheduled'}</button>
+                    <button class="primary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}" ${studyCount ? '' : 'disabled'}><i class="fas fa-play"></i> Study</button>
                 </article>`;
             }).join('');
         }
@@ -3351,19 +3359,44 @@
                 <div class="unbox-stage">
                     <p class="unbox-title">${this.escapeHTML(box.name)}</p>
                     <div class="unbox-rays" aria-hidden="true"></div>
-                    <div class="unbox-box" aria-hidden="true">${this.openBoxArt(this.multiplayerProfile, box, undefined, [], 'open-box-lg mystery-peek')}</div>
+                    <button type="button" class="unbox-box" data-action="unbox-shake" aria-label="Shake box, 4 taps to open">${this.openBoxArt(this.multiplayerProfile, box, undefined, [], 'open-box-lg mystery-peek')}</button>
+                    <p class="unbox-prompt" role="status">Tap to break the seals · 0 / 4</p>
+                    <div class="unbox-seals" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
                     <div class="unbox-reel" aria-hidden="true"><div class="unbox-strip"></div><span class="unbox-marker"></span></div>
                     <div class="unbox-result" aria-live="polite"></div>
                     <div class="unbox-confetti" aria-hidden="true"></div>
                 </div>
                 <button type="button" class="ghost-btn unbox-skip" data-action="unbox-skip">Skip</button>`;
             document.body.appendChild(overlay);
-            overlay.querySelector('.unbox-skip').focus({ preventScroll: true });
-            this.unboxState = { overlay, box, skipped: false, startedAt: performance.now() };
+            overlay.querySelector('.unbox-box').focus({ preventScroll: true });
+            const state = this.unboxState = { overlay, box, skipped: false, taps: 0, startedAt: performance.now() };
+            state.seals = new Promise(resolve => { state.releaseSeals = resolve; });
             return overlay;
         }
 
+        shakeUnboxing() {
+            const state = this.unboxState;
+            if (!state || state.taps >= 4 || state.skipped) return;
+            state.taps++;
+            const button = state.overlay.querySelector('.unbox-box');
+            state.overlay.querySelector('.unbox-prompt').textContent = state.taps === 4 ? 'Seals broken! Opening…' : `Tap to break the seals · ${state.taps} / 4`;
+            state.overlay.querySelectorAll('.unbox-seals i').forEach((seal, i) => seal.classList.toggle('broken', i < state.taps));
+            button.setAttribute('aria-label', state.taps === 4 ? 'Opening box' : `Shake box, ${4 - state.taps} taps remaining`);
+            if (!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+                state.shakeAnimation?.cancel();
+                const tilt = 5 + state.taps * 3;
+                state.shakeAnimation = button.animate([
+                    { transform: 'rotate(0) scale(1)' }, { transform: `rotate(-${tilt}deg) scale(1.08)` },
+                    { transform: `rotate(${tilt}deg) scale(1.08)` }, { transform: 'rotate(0) scale(1)' }
+                ], { duration: 300, easing: 'ease-out' });
+            }
+            window.StudBudSfx?.play('coin', 'ui', 0);
+            if (state.taps === 4) { button.disabled = true; state.releaseSeals(); }
+        }
+
         closeUnboxing() {
+            this.unboxState?.releaseSeals?.();
+            this.unboxState?.shakeAnimation?.cancel();
             this.unboxState?.resizeObserver?.disconnect();
             clearTimeout(this.unboxState?.timer);
             this.unboxState?.resolve?.();
@@ -3406,6 +3439,8 @@
             const strip = overlay.querySelector('.unbox-strip');
             strip.innerHTML = reel.map(entry => `<span class="unbox-tile rarity-${entry.rarity}" data-item-id="${this.escapeHTML(entry.id)}">${this.shopItemPreview(profile, entry)}<small>${this.escapeHTML(entry.name)}</small></span>`).join('');
             const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+            if (!state.skipped && state.seals) await state.seals;
+            if (this.unboxState !== state) return;
             const wait = ms => new Promise(resolve => {
                 state.resolve = resolve;
                 state.timer = setTimeout(resolve, state.skipped || reduce ? 0 : ms);
@@ -3529,7 +3564,7 @@
                 this.renderDailyReward(profile);
                 const best = document.getElementById('waiting-runner-best');
                 if (best) {
-                    this.waitingRunner.best = Math.max(Number(profile.best_wait_score || 0), this.readWaitingBest());
+                    this.waitingRunner.best = Math.max(Number(profile.best_crossing_rows || 0), this.readWaitingBest());
                     best.textContent = String(this.waitingRunner.best);
                 }
                 this.renderAppearanceShopSchemes();
@@ -4270,11 +4305,14 @@
         }
 
         waitingBestKey() {
-            return `studbud.scholar-crossing.best.${window.StudBudCloud?.user?.id || 'local'}`;
+            return `studbud.scholar-crossing.rows-v2.${window.StudBudCloud?.user?.id || 'local'}`;
         }
 
         readWaitingBest() {
-            try { return Math.max(0, Number(localStorage.getItem(this.waitingBestKey())) || 0); }
+            try {
+                const value = Number(localStorage.getItem(this.waitingBestKey()));
+                return Number.isSafeInteger(value) && value >= 0 && value <= 100000 ? value : 0;
+            }
             catch (_) { return 0; }
         }
 
@@ -4287,7 +4325,9 @@
         startWaitingRunner(reset = true) {
             const runner = this.waitingRunner;
             if (reset && runner.dead && runner.deathAge < 0.55) return;
-            runner.best = Math.max(Number(runner.best) || 0, this.readWaitingBest());
+            const profile = this.multiplayerProfile;
+            const cloudBest = profile?.user_id === window.StudBudCloud?.user?.id ? Number(profile?.best_crossing_rows || 0) : 0;
+            runner.best = Math.max(cloudBest, this.readWaitingBest());
             document.getElementById('waiting-runner-best').textContent = String(runner.best);
             if (reset) {
                 runner.x = 4; runner.row = 0; runner.rowFloat = 0; runner.score = 0;
@@ -4524,11 +4564,14 @@
             const runner = this.waitingRunner;
             if (runner.score > 0) runner.best = Math.max(runner.best, this.saveWaitingBestLocal(runner.score));
             if (!window.StudBudCommunityGames?.hasAccount?.()) return;
-            if (runner.saving || runner.score <= 0 || runner.score <= Number(this.multiplayerProfile?.best_wait_score || 0)) return;
+            if (runner.saving || runner.score <= 0 || runner.score <= Number(this.multiplayerProfile?.best_crossing_rows || 0)) return;
+            const accountKey = this.waitingBestKey();
             runner.saving = true;
             try {
-                this.multiplayerProfile = await window.StudBudCommunityGames.recordWaitingGameBest(runner.score);
-                runner.best = Math.max(Number(this.multiplayerProfile.best_wait_score || runner.score), this.readWaitingBest());
+                const profile = await window.StudBudCommunityGames.recordWaitingGameBest(runner.score);
+                if (accountKey !== this.waitingBestKey()) return;
+                this.multiplayerProfile = profile;
+                runner.best = Math.max(Number(profile.best_crossing_rows || 0), this.readWaitingBest());
                 document.getElementById('waiting-runner-best').textContent = String(runner.best);
             } catch (error) {
                 console.error('[NexusApp] Warm-up personal best could not sync:', error);
@@ -4733,11 +4776,11 @@
                 bots.forEach((b, i) => { const term = game.terms?.[i % Math.max(1, game.terms?.length || 1)]; b.x = term?.x || b.x; b.y = term?.y || b.y; b.ai.termIndex = i; });
             } else if (mode === 'skyline') {
                 const route = this.skyRoute(game);
-                const start = route.list[0], ground = game.solids.find(p => p.ground);
+                const start = route.list[0];
                 bots.forEach((b, i) => {
                     b.w = 26; b.h = 44; b.st = { i: 0, flagDone: true, jump: null, wait: i * 0.16, air: false, moving: false };
-                    b.x = start.x + 45 + i * 42; b.y = ground.y - b.h; b.f = i % 2 ? -1 : 1;
-                    b.onGround = true; b.ground = ground; b.airJumps = 1; b.dashCd = 0;
+                    b.x = start.x + 10 + i * 8; b.y = start.y - b.h; b.f = i % 2 ? -1 : 1;
+                    b.onGround = true; b.ground = start; b.airJumps = 1; b.dashCd = 0;
                 });
             } else if (mode === 'frenzy' || mode === 'fishing') {
                 bots.forEach((b, i) => { b.ai.fishingState = 0; b.ai.fishingTimer = 0.7 + i * 0.8; b.ai.power = 0; b.ai.powerDir = 1; b.ai.fishY = 100 + i * 45; });
@@ -5018,7 +5061,8 @@
         skyRoute(game) {
             if (game.botRoute) return game.botRoute;
             const cps = game.checkpoints;
-            const list = [{ x: cps[0].x - 80, y: cps[0].y, w: 200, h: 14 }];
+            const start = game.solids.find(p => !p.slope && p.y === cps[0].y && cps[0].x >= p.x && cps[0].x + 26 <= p.x + p.w);
+            const list = [start];
             const flags = new Map(), cpNode = [0];
             flags.set(0, cps[0].x + 20);
             let last = list[0];
@@ -5030,16 +5074,22 @@
                 } : solid;
             // The city runs sideways (and sometimes down) across rooftops, so it follows the generator's ordered path.
             const cityPath = game.cityPath || [];
-            for (const solid of cityPath) { list.push(node(solid)); last = list[list.length - 1]; }
-            for (const solid of game.solids) {
-                if (solid.city || cityPath.includes(solid) || solid.wall || solid.wallJ || solid.ground || (solid.slope && !solid.route) || solid.prop || solid.w < 50 || solid.y > last.y + 8) continue;
+            const startIndex = cityPath.indexOf(start);
+            for (const solid of cityPath.slice(startIndex + 1)) { list.push(node(solid)); last = list[list.length - 1]; }
+            for (const solid of game.climbPath) {
+                if (solid.via) for (const lane of solid.via) {
+                    list.push({ laneTarget: lane, x: lane.x0, y: lane.y, w: lane.size, h: lane.h, off: true });
+                }
                 const p = node(solid);
                 list.push(p); last = p;
                 cps.forEach((c, k) => {
                     if (k > 0 && cpNode[k] === undefined && Math.abs(p.y - c.y) < 1 && c.x + 20 >= p.x && c.x + 20 <= p.x + p.w) { cpNode[k] = list.length - 1; flags.set(list.length - 1, c.x + 20); }
                 });
             }
-            if (last !== game.summit) list.push(game.summit);
+            if (last !== game.summit) {
+                const approach = game.solids.filter(p => !p.wall && !p.ground && p.y < last.y && p.y >= game.summit.y && p !== game.summit);
+                list.push(...approach, game.summit);
+            }
             cps.forEach((c, k) => {
                 if (cpNode[k] !== undefined) return;
                 let best = 1, d = 1e9;
@@ -5049,112 +5099,267 @@
             return game.botRoute = { list, flags, cpNode, props: game.solids.filter(p => p.prop) };
         }
 
-        // Practice opponents attempt real jumps, with paced recovery hops so procedural hazards cannot stall the race.
+        // Opponents use the same movement, collisions, hazards and checkpoints as the player.
         skyStep(demo, game, b, st, dt, speed) {
-            const U = window.StudBudArcade.util, R = this.skyRoute(game), n = R.list[st.i], nx = R.list[st.i + 1];
-            const bw = b.w || 26, bh = b.h || 44;
-            if (st.assist) {
-                const hop = st.assist;
-                hop.elapsed += dt;
-                const progress = Math.min(1, hop.elapsed / hop.duration), target = R.list[hop.next];
-                const x = target.x + target.w / 2 - bw / 2, y = target.y - bh;
-                b.x = hop.x + (x - hop.x) * progress;
-                b.y = hop.y + (y - hop.y) * progress - Math.sin(Math.PI * progress) * Math.min(150, 50 + Math.abs(y - hop.y) * .3);
-                b.vx = (x - hop.x) / hop.duration; b.vy = 0; b.face = x >= hop.x ? 1 : -1;
-                st.air = progress < 1; st.moving = true;
-                b.onGround = progress === 1; b.ground = b.onGround ? target : null;
-                if (progress === 1) { st.i = hop.next; st.assist = null; st.jump = null; st.progressAt = demo.clock; b.vx = 0; }
-                return;
+            const U = window.StudBudArcade.util, route = this.skyRoute(game);
+            const actor = st.actor || (st.actor = this.skyBotActor(demo, b));
+            actor.s.t = demo.clock;
+            actor.s.testFreezeHazards = demo.session.testFreezeHazards;
+            if (actor.dead > 0) {
+                actor.updatePlayer(dt);
+                if (actor.dead <= 0) {
+                    st.i = route.cpNode[actor.cp.id]; st.jump = null; st.nextThink = 0;
+                }
+                b.respawn = actor.dead; st.air = !b.onGround; return;
             }
-            if (nx && (demo.clock - (st.progressAt ?? 0) > 2.2 / speed || b.y > n.y + 180 || n.off)) {
-                const distance = Math.hypot(nx.x + nx.w / 2 - b.x - bw / 2, nx.y - b.y - bh);
-                st.assist = { x: b.x, y: b.y, next: st.i + 1, elapsed: 0, duration: U.clamp(distance / (340 * speed), .45, 2.5) };
-                b.invuln = Math.max(b.invuln, st.assist.duration + .1);
-                return;
+            for (const p of route.list) if (p.laneTarget) {
+                const rocks = game.meteors.filter(rock => rock.lane === p.laneTarget && !rock.off);
+                const rock = rocks.reduce((best, candidate) => !best || Math.abs(candidate.x - b.x) < Math.abs(best.x - b.x) ? candidate : best, null);
+                if (rock) Object.assign(p, { x: rock.x, y: rock.y, w: rock.w, h: rock.h, surface: rock, off: false });
+                else p.off = true;
             }
-            st.air = false; st.moving = false;
-            const ai = b.ai;
-            ai.energy = ai.energy ?? 100;
-            if (demo.session.testing || demo.session.preview) ai.energy = 100;
-            if (ai.energy < 22) {
-                ai.rechargeAt = ai.rechargeAt || demo.clock + 1 + ai.reaction;
-                if (demo.clock >= ai.rechargeAt) { ai.energy += demo.session.rewardAmount(); ai.rechargeAt = 0; }
-                b.vx *= Math.max(0, 1 - 8 * dt);
-            } else {
-                ai.energy = Math.max(0, ai.energy - (b.onGround ? window.StudBudArcade.ENERGY_COSTS.skyline.run : window.StudBudArcade.ENERGY_COSTS.skyline.air) * dt);
-                const groundIndex = b.onGround ? R.list.findIndex(p => p === b.ground || p.surface === b.ground) : -1;
-                if (groundIndex > st.i) { st.i = groundIndex; st.progressAt = demo.clock; st.flagDone = !R.flags.has(groundIndex); st.jump = null; }
-                if (st.wait > 0) st.wait -= dt;
+            const groundIndex = b.onGround ? route.list.findIndex(p => p === b.ground || p.surface === b.ground) : -1;
+            if (groundIndex >= 0 && groundIndex !== st.i) { st.i = groundIndex; st.jump = null; st.nextThink = demo.clock + (b.ground.crumble ? 0 : Math.min(b.ai.reaction, .2)); }
+            let target = route.list[st.i + 1] || route.list[st.i];
+            let crossingMachine = false;
+            let waitingPoint = b.x + b.w / 2;
+            if (b.onGround && b.ground && !b.ground.crumble) {
+                const dir = Math.sign(target.x + target.w / 2 - b.x - b.w / 2);
+                const hazards = [...game.drills, ...game.lasers.filter(l => l.support === b.ground)
+                    .map(l => ({ x: l.x + l.w / 2, width: l.w, surfaceY: b.ground.y }))];
+                const machine = hazards.filter(d => d.surfaceY === b.ground.y
+                    && dir * (d.x - b.x - b.w / 2) > -d.width / 2
+                    && dir * (d.x - b.x - b.w / 2) < 200)
+                    .sort((a, c) => dir * (a.x - c.x))[0];
+                if (machine) {
+                    waitingPoint = U.clamp(machine.x - dir * (machine.width / 2 + b.w / 2 + 30),
+                        b.ground.x + b.w / 2 + 4, b.ground.x + b.ground.w - b.w / 2 - 4);
+                    const aim = U.clamp(machine.x + dir * (machine.width / 2 + b.w / 2 + 30),
+                        b.ground.x + b.w / 2 + 4, b.ground.x + b.ground.w - b.w / 2 - 4);
+                    target = { x: aim - 20, y: b.ground.y, w: 40, h: b.ground.h,
+                        navX: aim, surface: b.ground };
+                    crossingMachine = true;
+                }
+            }
+            if (b.ai.rechargeAt || actor.res.value < 5 || (actor.res.value < 30 && b.onGround && !b.ground.crumble && !b.ground.mover)) {
+                b.ai.rechargeAt ||= demo.clock + 1.5 + b.ai.reaction;
+                if (demo.clock < b.ai.rechargeAt) { st.air = !b.onGround; st.moving = false; return; }
+                actor.res.add(demo.session.rewardAmount()); b.ai.rechargeAt = 0; st.jump = null;
+            }
+            const shaft = game.cityCrossings.find(c => c.kind === 'scale' && c.to === target);
+            let keys = { x: 0, hold: false, jump: false, dash: false };
+            if (shaft) {
+                st.wallDirection ||= 1;
+                keys = { x: st.wallDirection, hold: true, jump: false, dash: false };
+                const feet = b.y + b.h;
+                if (b.onGround && b.ground === shaft.from) {
+                    keys.x = 1;
+                    const blocked = game.solids.some(p => p !== b.ground && !p.off && !p.oneway
+                        && p.x >= b.x + b.w - 2 && p.x < b.x + b.w + 70
+                        && p.y < b.y + b.h && p.y + p.h > b.y);
+                    if (b.x >= shaft.from.x + shaft.from.w - 45 || blocked) keys.jump = true;
+                }
+                if (b.onGround && b.ground === shaft.rig[0]) { keys.x = 1; keys.jump = Math.abs(b.vx) > 300; }
+                if (actor.wallDir && b.vy > 0) { keys.jump = true; keys.x = st.wallDirection = -actor.wallDir; }
+                else if (!b.onGround && !actor.wallDir && b.vy > 0 && actor.airJumps > 0 && Math.abs(feet - target.y) < 70) {
+                    keys.jump = true; keys.x = st.wallDirection = 1;
+                }
+                if (feet < target.y - 4) keys.x = U.clamp((target.x + 80 - b.x - b.w / 2) / 35, -1, 1);
+            } else if (st.jump?.walk && b.onGround && Math.abs(st.jump.aim - b.x - b.w / 2) > 15) {
+                keys = this.skyPlanKeys(actor, st.jump, demo.clock - st.jump.started);
+            } else if (b.onGround && demo.clock >= (st.nextThink || 0)) {
+                st.jump = this.skyPlanJump(actor, target, route, st.i, dt);
+                st.nextThink = demo.clock + (b.ground.crumble ? .05 : .25 + b.ai.reaction * .25);
+                if (st.jump) { st.jump.started = demo.clock; keys = this.skyPlanKeys(actor, st.jump, 0); keys.jump = !st.jump.walk; }
+            } else if (!b.onGround && st.jump) keys = this.skyPlanKeys(actor, st.jump, demo.clock - st.jump.started);
+            else if (!b.onGround) {
+                const surface = target.surface || target;
+                const aim = this.skyLandingAim(target, b.x < target.x ? -1 : 1, route);
+                st.jump = { target, aim, side: b.x + b.w / 2 < surface.x + surface.w / 2 ? -1 : 1,
+                    doubleAt: .3, dashAt: null, started: demo.clock, doubled: false };
+                keys = this.skyPlanKeys(actor, st.jump, 0);
+            }
+            if (!shaft && b.onGround && !keys.jump && !st.jump?.walk) {
+                const ground = b.ground;
+                const dir = Math.sign(target.x + target.w / 2 - b.x - b.w / 2);
+                const edge = dir > 0 ? ground.x + ground.w - b.w - 24 : ground.x + 24;
+                if (actor.res.value >= 30) keys.x = crossingMachine
+                    ? U.clamp((waitingPoint - b.x - b.w / 2) * 8 / 340 - (ground.belt || 0) / 340, -1, 1)
+                    : U.clamp((edge - b.x) / 60, -1, 1) * Math.min(1, speed);
+            }
+            if (crossingMachine && b.onGround && !keys.jump) actor.stuckT = 0;
+            actor.s.botKeys = keys;
+            const falling = b.vy >= 0;
+            actor.updatePlayer(dt);
+            if (falling && actor.sprung && b.vy < -500) {
+                const springNode = route.list.findIndex(p => Math.abs(p.y - b.y - b.h) < 24
+                    && b.x + b.w > p.x && b.x < p.x + p.w);
+                if (springNode > st.i) { st.i = springNode; st.jump = null; }
+            }
+            b.ai.energy = actor.res.value;
+            b.respawn = actor.dead; b.done = actor.finished;
+            st.checkpoint = actor.cp.id;
+            st.air = !b.onGround; st.moving = Math.abs(b.vx) > 35;
+        }
 
-                if (b.onGround && st.wait <= 0 && nx) {
-                    b.airJumps = 1;
-                    const fx = R.flags.get(st.i), cx = b.x + bw / 2;
-                    const dir = nx.x + nx.w / 2 >= n.x + n.w / 2 ? 1 : -1;
-                    const launchX = dir > 0 ? n.x + n.w - 20 : n.x + 20;
-                    const targetX = fx !== undefined && !st.flagDone ? fx : launchX;
-                    const dx = targetX - cx;
-                    if (fx !== undefined && !st.flagDone && Math.abs(dx) < 9) {
-                        st.flagDone = true;
-                        st.wait = 0.2;
-                    } else if (Math.abs(dx) > 16) {
-                        b.vx += U.clamp(Math.sign(dx) * 300 * speed - b.vx, -3400 * dt, 3400 * dt);
-                        b.face = Math.sign(dx); st.moving = true;
-                    } else {
-                        const choices = [{ dbl: 0.08, dash: null }, { dbl: 0.22, dash: null }, { dbl: 0.16, dash: 0.35 }, { dbl: 0.3, dash: 0.18 }];
-                        const plan = choices.find(choice => {
-                            if (choice.dbl > 0.1 && ai.energy < window.StudBudArcade.ENERGY_COSTS.skyline.jump + window.StudBudArcade.ENERGY_COSTS.skyline.airJump) return false;
-                            if (choice.dash !== null && ai.energy < window.StudBudArcade.ENERGY_COSTS.skyline.jump + window.StudBudArcade.ENERGY_COSTS.skyline.airJump + window.StudBudArcade.ENERGY_COSTS.skyline.dash) return false;
-                            return this.skyPredict(game, R, { cur: st.i }, b, b.vx, dir, choice) > st.i;
-                        });
-                        if (plan && ai.energy >= window.StudBudArcade.ENERGY_COSTS.skyline.jump) {
-                            b.vy = -850; ai.energy -= window.StudBudArcade.ENERGY_COSTS.skyline.jump; b.airJumps = 1;
-                            st.jump = { t: demo.clock, v: plan, dbl: false, dash: false };
-                            b.face = dir; st.moving = true;
-                        } else {
-                            b.vx = 0;
-                            st.retry = (st.retry || 0) + dt;
-                            if (st.retry > 1.2) {
-                                const back = dir > 0 ? n.x + 20 : n.x + n.w - 20;
-                                b.vx = Math.sign(back - cx) * Math.min(180, Math.abs(back - cx) * 2);
-                                st.retry = 0;
+        skyBotActor(demo, bot) {
+            const actor = Object.create(demo.game), A = window.StudBudArcade;
+            Object.assign(actor, {
+                me: bot, cp: demo.game.checkpoints[bot.st.checkpoint || 0], res: new A.Resource('Energy', '#facc15', 100, 50),
+                dead: 0, finished: false, deaths: 0, maxH: 0, biomeSeen: 0, dash: 0, dashCd: 0,
+                kick: 0, buffer: 0, coyote: .1, airJumps: 1, sprung: false, boost: 0, slow: 0,
+                stuckT: 0, stuckX: undefined, stuckY: undefined, strandedT: 0, tideY: bot.y + 1200,
+                retirePassedAreas() {}, particles: { burst() {}, update() {} }
+            });
+            actor.s = {
+                game: actor, user: { id: bot.id }, local: { color: bot.color }, t: demo.clock,
+                testing: demo.session.testing, preview: demo.session.preview,
+                botKeys: {}, axis() { return { x: this.botKeys.x || 0 }; },
+                down(...codes) { return codes.includes('Space') && Boolean(this.botKeys.hold); },
+                pressed(...codes) { return codes.includes('Space') ? Boolean(this.botKeys.jump) : codes.includes('ShiftLeft') ? Boolean(this.botKeys.dash) : false; },
+                spend(n) { return this.testing || this.preview || actor.res.spend(n); }, sfx() {}, toast() {}, setGoal() {}
+            };
+            return actor;
+        }
+
+        skyPlanKeys(actor, plan, elapsed) {
+            const b = actor.me, target = plan.target;
+            const surface = target.surface || target;
+            const x = surface.mover ? surface.x + surface.w / 2 : plan.aim;
+            const feet = b.y + b.h;
+            const blockedBelow = !surface.oneway && feet > surface.y + 2;
+            const side = plan.side;
+            const aim = blockedBelow ? side < 0 ? surface.x - b.w / 2 - 6 : surface.x + surface.w + b.w / 2 + 6 : x;
+            const dx = aim - b.x - b.w / 2;
+            const keys = { x: window.StudBudArcade.util.clamp(dx * 8 / 340, -1, 1), hold: true, jump: false, dash: false };
+            if (plan.walk) {
+                keys.x = window.StudBudArcade.util.clamp((dx * 8 - (b.ground?.belt || 0)) / 340, -1, 1);
+                keys.hold = false; return keys;
+            }
+            if (!plan.doubled && elapsed + 1e-6 >= plan.doubleAt && actor.airJumps > 0) { keys.jump = true; plan.doubled = true; }
+            if (!plan.dashed && plan.dashAt !== null && elapsed + 1e-6 >= plan.dashAt && Math.abs(dx) > 80) { keys.dash = true; plan.dashed = true; }
+            return keys;
+        }
+
+        skyLandingAim(target, side, route) {
+            if (target.navX !== undefined) return target.navX;
+            if (target.crumble && target.w > 250) {
+                const index = route.list.indexOf(target), next = route.list[index + 1];
+                if (next) return next.x + next.w / 2 < target.x + target.w / 2 ? target.x + 35 : target.x + target.w - 35;
+            }
+            return target.w > 250 ? side < 0 ? target.x + 35 : target.x + target.w - 35 : target.x + target.w / 2;
+        }
+
+        skyPlanJump(actor, target, route, index, step = 1 / 60) {
+            if (actor.res.value < 5) return null;
+            const b = actor.me, U = window.StudBudArcade.util;
+            const frozen = actor.s.testing === true && actor.s.testFreezeHazards === true;
+            const near = actor.solids.filter(p => p.x < b.x + 1100 && p.x + p.w > b.x - 1100 && p.y < b.y + 900 && p.y + p.h > b.y - 1500);
+            const obstacles = near.filter(p => p !== b.ground && !p.off && !p.wall && p.y < b.y + b.h && p.y > b.y - 180
+                && p.x < Math.max(b.x, target.x) + b.w && p.x + p.w > Math.min(b.x, target.x));
+            const forward = Math.sign(target.x + target.w / 2 - b.x - b.w / 2);
+            const support = near.find(p => p !== b.ground && !p.wall && !p.off && p.y >= b.y + b.h
+                && p.y < b.y + b.h + 200 && p.x < b.x && p.x + p.w > b.x + b.w + 40);
+            const stepDown = support && { ...support, surface: support, x: U.clamp(b.x + forward * 240, support.x + 30, support.x + support.w - 60), w: 40 };
+            const shortcuts = [route.list[index + 3], route.list[index + 2]].filter(p => p && !p.off && !p.laneTarget
+                && p.y < b.y + b.h && b.y + b.h - p.y < 450);
+            const targets = target.surface === b.ground ? [target] : [...shortcuts, target, ...obstacles.filter(p => forward * (p.x + p.w / 2 - b.x - b.w / 2) > 0)
+                .sort((a, c) => Math.abs(a.x - b.x) - Math.abs(c.x - b.x)).slice(0, 2), ...(stepDown ? [stepDown] : [])];
+            for (const destination of targets) {
+                if (destination.off) continue;
+                const surface = destination.surface || destination;
+                if (Math.max(0, surface.x - b.x - b.w, b.x - surface.x - surface.w) > 700) continue;
+                const preferredSide = b.x + b.w / 2 < surface.x + surface.w / 2 ? -1 : 1;
+                for (const walk of surface === b.ground ? [true, false] : [false])
+                for (const side of [preferredSide, -preferredSide]) for (const doubleAt of [9, .22, .4]) for (const dashAt of [null, .35]) {
+                    if (walk && (side !== preferredSide || doubleAt !== 9 || dashAt !== null)) continue;
+                    let aim = this.skyLandingAim(destination, side, route);
+                    if (destination.navX === undefined && destination.w > 250) {
+                        for (let attempt = 0; attempt < 12; attempt++) {
+                            if (!actor.drills.some(d => d.surfaceY === surface.y && Math.abs(d.x - aim) < d.width / 2 + b.w / 2 + 12)) break;
+                            aim = U.clamp(aim - side * 32, destination.x + 20, destination.x + destination.w - 20);
+                        }
+                    }
+                    const plan = { target: destination, aim, side, doubleAt, dashAt, walk };
+                    const sim = Object.create(actor), clones = new Map(near.map(p => [p, { ...p }]));
+                    Object.assign(sim, {
+                        me: { ...b, ground: clones.get(b.ground) || null }, solids: [...clones.values()],
+                        res: new window.StudBudArcade.Resource('Energy', '#fff', 100, actor.res.value),
+                        captureCheckpoint() {}, dead: 0, finished: false, stuckT: 0, strandedT: 0,
+                        springs: actor.springs.map(p => ({ ...p })), boxes: [],
+                        lasers: actor.lasers.map(p => ({ ...p })), drills: actor.drills.map(p => ({ ...p })),
+                        debris: actor.debris.map(p => ({ ...p })), saws: actor.saws.map(p => ({ ...p })),
+                        balls: actor.balls.map(p => ({ ...p }))
+                    });
+                    sim.s = { ...actor.s, game: sim, spend(n) { return sim.res.spend(n); } };
+                    const simulatedPlan = { ...plan, target: { ...destination, surface: clones.get(surface) || surface } };
+                    let airborne = false;
+                    for (let frame = 0; frame < Math.ceil(4 / step); frame++) {
+                        const elapsed = frame * step;
+                        sim.hazardClock = (actor.hazardClock || 0) + (frozen ? 0 : elapsed);
+                        for (const copy of clones.values()) if (frame > 0 && !frozen && copy.mover) {
+                            if (copy.lane) sim.updateLaneRock(copy, sim.hazardClock);
+                            else if (!copy.sinker) {
+                                const pos = (copy.vert ? copy.by : copy.bx) + Math.sin(sim.hazardClock * copy.speed + copy.phase) * copy.amp;
+                                copy.dx = copy.vert ? 0 : pos - copy.x; copy.dy = copy.vert ? pos - copy.y : 0;
+                                if (copy.vert) copy.y = pos; else copy.x = pos;
                             }
                         }
+                        for (const copy of clones.values()) if (frame > 0 && !frozen) {
+                            if (copy.blink) copy.off = ((actor.hazardAnim || 0) + elapsed + copy.phase) % copy.period > copy.on;
+                            if (copy.crumble) {
+                                if (copy.gone > 0) {
+                                    copy.gone -= step;
+                                    if (copy.gone <= 0) { copy.off = false; copy.timer = 0; }
+                                } else if (copy.timer > 0) {
+                                    copy.timer -= step;
+                                    if (copy.timer <= 0) { copy.off = true; copy.gone = 3; }
+                                }
+                            }
+                        }
+                        for (const drill of sim.drills) sim.updateDrill(drill, sim.hazardClock);
+                        for (const debris of sim.debris) sim.updateDebris(debris, sim.hazardClock);
+                        for (const saw of sim.saws) {
+                            saw.x = saw.cx;
+                            saw.y = saw.cy + Math.sin(sim.hazardClock * saw.speed + saw.phase) * saw.amp;
+                        }
+                        for (const ball of sim.balls) {
+                            const angle = ball.amp * Math.sin(sim.hazardClock * ball.speed + ball.phase);
+                            ball.x = ball.px + ball.len * Math.sin(angle); ball.y = ball.py + ball.len * Math.cos(angle);
+                        }
+                        sim.s.botKeys = this.skyPlanKeys(sim, simulatedPlan, elapsed);
+                        if (frame === 0) sim.s.botKeys.jump = !walk;
+                        sim.updatePlayer(step);
+                        if (sim.dead) break;
+                        airborne ||= !sim.me.onGround;
+                        if (sim.me.onGround && (airborne || (walk && Math.abs(aim - sim.me.x - sim.me.w / 2) < 15))) {
+                            const original = [...clones].find(([, copy]) => copy === sim.me.ground)?.[0];
+                            const landedIndex = route.list.findIndex(p => p === original || p.surface === original);
+                            if (original === surface || landedIndex > index) {
+                                if (sim.drills.some(d => d.surfaceY === sim.me.ground.y
+                                    && Math.abs(d.x - sim.me.x - sim.me.w / 2) < d.width / 2 + sim.me.w / 2 + 8)) break;
+                                const safeUntil = sim.hazardClock + .4;
+                                const threatened = sim.drills.some(d => {
+                                    for (let at = sim.hazardClock; at <= safeUntil; at += .1) {
+                                        sim.updateDrill(d, at);
+                                        if (sim.drillHits(sim.me, d)) return true;
+                                    }
+                                    return false;
+                                }) || sim.lasers.some(l => {
+                                    for (let at = sim.hazardClock; at <= safeUntil; at += .1) {
+                                        if (((at + l.phase) % l.period) < l.period * .55 && U.overlap(sim.me, l)) return true;
+                                    }
+                                    return false;
+                                });
+                                if (!threatened) return plan;
+                            }
+                            break;
+                        }
+                        if (sim.me.y > b.y + 650) break;
                     }
                 }
             }
-
-            b.dashCd = Math.max(0, (b.dashCd || 0) - dt);
-            const nxTarget = nx || n;
-            if (!b.onGround && st.jump && ai.energy >= 0) {
-                const elapsed = demo.clock - st.jump.t;
-                const keys = this.skyAirKeys(b, nxTarget, st.jump, elapsed, b.airJumps || 0, b.dashCd || 0);
-                if (keys.dir) b.vx += U.clamp(keys.dir * 340 * speed - b.vx, -2300 * dt, 2300 * dt);
-                b.vy = Math.min(1150, b.vy + 2300 * dt);
-                if (!keys.hold && b.vy < -250) b.vy += 2600 * dt;
-                if (keys.dbl && !st.jump.dbl && (b.airJumps || 0) > 0 && ai.energy >= window.StudBudArcade.ENERGY_COSTS.skyline.airJump) {
-                    b.vy = -780; b.airJumps--; ai.energy -= window.StudBudArcade.ENERGY_COSTS.skyline.airJump; st.jump.dbl = true;
-                }
-                if (keys.dash && !st.jump.dash && b.dashCd <= 0 && ai.energy >= window.StudBudArcade.ENERGY_COSTS.skyline.dash) {
-                    b.dash = 0.16; b.dashCd = 0.9; ai.energy -= window.StudBudArcade.ENERGY_COSTS.skyline.dash; st.jump.dash = true;
-                }
-            } else if (!b.onGround) {
-                b.vy = Math.min(1150, b.vy + 2300 * dt);
-            }
-            if (b.dash > 0) {
-                b.dash = Math.max(0, b.dash - dt);
-                b.vx = (b.face || 1) * 760; b.vy = 0;
-            }
-            const previousGround = b.ground;
-            if (previousGround?.dx || previousGround?.dy) {
-                b.x += previousGround.dx || 0; b.y += previousGround.dy || 0;
-            }
-            U.moveBody(b, game.solids, dt);
-            if (b.onGround) {
-                const spring = game.springs.find(item => U.overlap({ x: b.x + 3, y: b.y + 3, w: bw - 6, h: bh - 6 }, item));
-                if (spring && b.vy >= 0) { b.vy = -1280; b.airJumps = 1; st.jump = st.jump || { t: demo.clock, v: { dbl: 9, dash: null }, dbl: false, dash: false }; }
-            }
-            st.air = !b.onGround;
-            st.moving ||= Math.abs(b.vx) > 35;
+            return null;
         }
 
         skylineBot(demo, game, c, dt, hold, tap) {
@@ -5465,27 +5670,14 @@
         }
 
         stepSkylineBot(demo, bot, index, dt) {
-            const U = window.StudBudArcade.util;
             const game = demo.game, now = performance.now(), route = this.skyRoute(game);
             if (!bot.st) {
-                const ground = game.solids.find(p => p.ground), start = route.list[0];
+                const start = route.list[0];
                 bot.w = 26; bot.h = 44; bot.st = { i: 0, flagDone: true, jump: null, wait: 0, air: false, moving: false };
-                bot.x = start.x + 45 + index * 42; bot.y = ground.y - bot.h;
-                bot.vx = 0; bot.vy = 0; bot.onGround = true; bot.ground = ground; bot.airJumps = 1; bot.dashCd = 0;
+                bot.x = start.x + 10 + index * 8; bot.y = start.y - bot.h;
+                bot.vx = 0; bot.vy = 0; bot.onGround = true; bot.ground = start; bot.airJumps = 1; bot.dashCd = 0;
             }
             bot.w = 26; bot.h = 44;
-            if (bot.respawn > 0) {
-                bot.respawn = Math.max(0, bot.respawn - dt);
-                if (bot.respawn === 0) {
-                    const checkpoint = game.checkpoints[bot.st.checkpoint || 0];
-                    const node = route.cpNode[checkpoint.id];
-                    Object.assign(bot, { x: checkpoint.x + 20 - bot.w / 2, y: checkpoint.y - bot.h, vx: 0, vy: 0, onGround: false, ground: null, airJumps: 1, dash: 0, dashCd: 0, invuln: 1.5 });
-                    Object.assign(bot.st, { i: node, jump: null, assist: null, progressAt: demo.clock, flagDone: true, wait: .2 });
-                }
-                bot.tx = bot.x; bot.ty = bot.y; bot.a = 5; bot.seen = now;
-                return;
-            }
-            bot.invuln = Math.max(0, bot.invuln - dt);
             if (bot.done) {
                 bot.vx = 0; bot.vy = 0; bot.seen = now;
                 return;
@@ -5496,12 +5688,8 @@
             }
             const speed = bot.ai.speed * (0.78 + bot.ai.aggression * 0.24);
             this.skyStep(demo, game, bot, bot.st, dt, speed);
-            for (const checkpoint of game.checkpoints) {
-                if (checkpoint.id > (bot.st.checkpoint || 0) && Math.abs(bot.x + bot.w / 2 - checkpoint.x - 20) < 90
-                    && Math.abs(bot.y + bot.h - checkpoint.y) < 70) bot.st.checkpoint = checkpoint.id;
-            }
             if (bot.onGround && bot.ground === game.summit) bot.done = true;
-            bot.f = bot.face || 1; bot.a = bot.st.air ? 2 : bot.st.moving ? 1 : 0;
+            bot.f = bot.face || 1; bot.a = bot.respawn > 0 ? 4 : bot.st.air ? 2 : bot.st.moving ? 1 : 0;
             bot.tx = bot.x; bot.ty = bot.y; bot.ex = {}; bot.seen = now;
         }
 
@@ -6573,6 +6761,10 @@
             const deckId = config.deckId || document.getElementById('host-game-deck')?.value;
             if (config.testing && (!this.canTestGames || window.StudBudCloud?.offlineMode)) throw new Error('Game testing is available to testers and administrators while connected.');
             const chosenMode = modeOverride || this.hostedGameRoom?.mode || this.selectedMultiplayerMode || 'skyline';
+            const rewardInput = document.getElementById('solo-game-reward');
+            const reward = chosenMode === 'chess' ? 1 : this.questionRewardValue(config.questionReward
+                ?? (modeOverride ? undefined : this.hostedGameRoom?.state?.question_reward)
+                ?? (rewardInput?.dataset?.custom ? rewardInput.value : this.questionRewardRecommendation(chosenMode).suggested));
             const botCount = chosenMode === 'chess' ? 1 : config.botCount ?? 3;
             if (!Number.isInteger(botCount) || botCount < 0 || botCount > 3) throw new Error('Choose between zero and three simulated players.');
             const selectedDeck = (AppState.get('flashcards') || []).find(item => item.id === deckId);
@@ -6602,11 +6794,11 @@
                 mode: room.mode, room_code: 'PRACTICE', goal_type: 'points', point_limit: 99999, host_id: user.id,
                 deck_title: roomDeck?.title || 'Flashcards',
                 started_at: new Date().toISOString(),
-                state: { question_reward: config.questionReward || 20, players: [me, ...botDefs.map(([id, nickname, color], i) => ({ id, nickname, color, skin: ['skin_robot', 'skin_ninja', 'skin_alien'][i] }))] }
+                state: { question_reward: reward, players: [me, ...botDefs.map(([id, nickname, color], i) => ({ id, nickname, color, skin: ['skin_robot', 'skin_ninja', 'skin_alien'][i] }))] }
             };
             const s = this.practiceSession = new arcade.Session({
                 room: fake, user, api: window.StudBudCommunityGames, isHost: false, practice: true, testing: Boolean(config.testing),
-                timeLimitSeconds: room.mode === 'chess' ? 0 : config.timeLimitSeconds || 0, questionReward: room.mode === 'chess' ? 1 : config.questionReward || 20,
+                timeLimitSeconds: room.mode === 'chess' ? 0 : config.timeLimitSeconds || 0, questionReward: reward,
                 seed: config.seed,
                 fallbackCards: (roomDeck?.cards || []).filter(card => card.front && card.back),
                 studySet: { deckId: roomDeck?.id, title: roomDeck?.title, publicId: roomDeck?.communityDeckId || roomDeck?.communitySourceId },
@@ -7092,7 +7284,7 @@
                 { route: 'planner', sel: '#workspace-tabs', title: 'Plan the next deadline', text: 'Tasks is your work list, Calendar shows the same due dates by month and Class schedule controls which classes appear on Home. Add a quiz or test to get a suggested study plan.' },
                 { route: 'dashboard', sel: '.focus-sprint-widget', title: 'Choose what to do today', text: 'Home brings together today\u2019s classes and urgent work. Pick a quiz or test in Focus sprint, then start a timer. Finished focus time is logged automatically and keeps your streak alive.' },
                 { route: 'flashcard', sel: '#create-deck-btn', title: 'Make a study set in seconds', text: 'Select New study set, name it and link it to a class or test. In the editor, Quick add lets you type a term, press Tab, type the definition and press Enter, over and over. Paste a whole list with bulk import, or star the tricky cards.' },
-                { route: 'flashcard', sel: '#deck-grid', title: 'Study, cram or drill stars', text: 'Each set shows a mastery ring and what is due. Study runs spaced review in a distraction-free focus mode: press Space to flip, 1\u20134 to rate, S to star and T to type your answer. Cram goes through every card without changing your schedule, and the star button drills only starred cards.' },
+                { route: 'flashcard', sel: '#deck-grid', title: 'Study, cram or drill stars', text: 'Flashcards are practice, not assignments: study any set whenever you want. Study prioritizes cards that need practice: press Space to flip, 1\u20134 to rate, S to star and T to type your answer. Cram goes through every card without changing learning progress, and the star button drills starred cards.' },
                 { route: 'exam-arcade', sel: '#workspace-tabs', title: 'Practice games', text: 'Practice turns your sets into quick games: Streak Builder, Lightning Round, Survival, True or False and Memory Match. Answer with the 1\u20134 keys (T or F in True or False), build combos for bonus points and earn up to three stars. Practice Test mixes typing, choices and matching.' },
                 { route: 'multiplayer', sel: '#workspace-tabs', title: 'Play, connect and customize', text: 'Games hosts or joins a room with friends. Buds manages friends, Leaderboards compares progress, and the Shop has boxes you can open with coins to collect characters, hats and auras for your Locker.' },
                 { route: 'dashboard', sel: '#classes-nav-item:not(.hidden)', title: 'Classes for students and teachers', text: 'At a Parkway school there is nothing to join: when your teacher is on StudBud, their class and flashcard sets show up automatically for every course in your list. Teachers pick the courses they teach, then see each student\u2019s grades, missing work and study time, and publish flashcard sets the whole class can study.' },
@@ -7867,7 +8059,7 @@
                 const cards = deck.cards || [];
                 const reviewed = cards.filter(card => card.lastReviewed || Number(card.reps || card.repetitions) > 0).length;
                 const lapses = cards.reduce((sum, card) => sum + Number(card.lapses || 0), 0);
-                return `<article><strong>${this.escapeHTML(deck.title)}</strong><span>${cards.length} cards · ${this.deckStudyCount(deck)} scheduled today</span><small>${reviewed} reviewed · ${lapses} lapses</small></article>`;
+                return `<article><strong>${this.escapeHTML(deck.title)}</strong><span>${cards.length} cards · Study anytime</span><small>${reviewed} reviewed · ${lapses} lapses</small></article>`;
             }).join('') : '<p class="empty-state">Create a deck and log some study sessions to see your activity here.</p>';
         }
 
@@ -8216,8 +8408,10 @@
                 } else if (target.matches('[data-inventory-tab]')) {
                     this.inventoryTab = target.dataset.inventoryTab;
                     if (this.multiplayerProfile) this.renderInventory(this.multiplayerProfile);
+                } else if (action === 'unbox-shake') {
+                    this.shakeUnboxing();
                 } else if (action === 'unbox-skip') {
-                    if (this.unboxState) { this.unboxState.skipped = true; clearTimeout(this.unboxState.timer); this.unboxState.resolve?.(); }
+                    if (this.unboxState) { this.unboxState.skipped = true; this.unboxState.releaseSeals?.(); clearTimeout(this.unboxState.timer); this.unboxState.resolve?.(); }
                 } else if (action === 'unbox-close') {
                     this.closeUnboxing();
                 } else if (action === 'hosted-kick-player') {
@@ -9150,7 +9344,7 @@
             if (!select) return;
             const selected = selectedId ?? select.value;
             select.innerHTML = '<option value="">None</option>' +
-                (course?.categories || []).map(category => `<option value="${this.escapeHTML(category.id)}">${this.escapeHTML(category.name)} (${this.formatNumber(category.weight || 0)}%)</option>`).join('');
+                (course?.categories || []).map(category => `<option value="${this.escapeHTML(category.id)}">${this.escapeHTML(category.name)} (${this.categoryWeightLabel(course, category)})</option>`).join('');
             if ((course?.categories || []).some(category => category.id === selected)) select.value = selected;
         }
 
@@ -9495,11 +9689,8 @@
                 this.studyCards = window.FlashcardTools.adaptiveOrder ? window.FlashcardTools.adaptiveOrder([...cards]) : [...cards].sort(() => Math.random() - .5);
             } else {
                 if (!window.SM2Engine?.createSession) throw new Error('The spaced-repetition scheduler did not load. Reload before studying.');
-                const session = window.SM2Engine.createSession(cards, { deck });
-                if (!session || !session.remaining) {
-                    if (window.confirm('You have finished the cards scheduled for today. Cram the whole set instead? Cramming does not change your review schedule.')) this.startStudy(deckId, 'cram');
-                    return;
-                }
+                const session = window.SM2Engine.createSession(cards, { deck, includeAll: true });
+                if (!session || !session.remaining) throw new Error('No study cards could be loaded. Check this set in the editor.');
                 this.studySession = session;
             }
             this.activeCardIndex = 0;

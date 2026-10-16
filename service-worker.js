@@ -1,4 +1,4 @@
-const CACHE_NAME = 'studbud-shell-v95';
+const CACHE_NAME = 'studbud-shell-v96';
 let offlineNavigation = false;
 const PUBLIC_DEPENDENCIES = [
     'https://cdn.jsdelivr.net/npm/chart.js',

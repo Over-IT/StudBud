@@ -53,6 +53,16 @@ for (const seed of SEEDS) {
         assert.ok(game.solids.some(p => p.chamber === d.chamber && Math.abs(p.y - d.surfaceY) < 1 && d.x >= p.x && d.x <= p.x + p.w), 'drills strike a real deck');
     }
     assert.ok(game.solids.some(p => p.factoryBelt && p.w >= 600), 'long conveyor belts run through the factory');
+    for (const belt of game.solids.filter(p => p.factoryBelt)) {
+        const machines = game.drills.filter(d => d.chamber === belt.chamber && d.surfaceY === belt.y && d.x > belt.x && d.x < belt.x + belt.w);
+        assert.ok(machines.length >= 1, `${belt.motif}: every conveyor has a real timed hazard`);
+        if (belt.motif === 'belt-gauntlet') assert.equal(machines.length, 2, 'each gauntlet belt has two independently timed machines');
+        assert.ok(machines.every(d => d.x - belt.x > 70 && belt.x + belt.w - d.x > 70), 'belt entry and exit leave room to prepare the next crossing');
+    }
+    assert.ok(game.lasers.some(l => l.steam && l.bi === 1), 'pressure vents interrupt the factory climbs with timed hazards');
+    assert.ok(game.solids.some(p => p.motif === 'sorting-bay') && game.solids.some(p => p.motif === 'cooling-grate')
+        && game.solids.some(p => p.motif === 'cargo-unload'), 'the former composite sections now have their own layouts');
+    assert.equal(game.solids.filter(p => p.piece === 'piston-steps' && p.piston).length, 2, 'piston climb is a short transfer, not a long staircase');
     assert.ok(!game.solids.some(p => p.bi === 2 || p.cloud || p.sinker || p.prop === 'cloudbank'), 'removed Sky generates no cloud platforms');
     assert.ok(!game.saws.some(s => s.bi === 0), 'city rooftops do not use saw blades');
 
@@ -451,3 +461,38 @@ console.log('Small-lip step-ups and ceiling corner correction passed.');
     }
 }
 console.log('Staff-only flight/invincibility and complete warning/inactive platform rendering passed.');
+
+for (const fps of [30, 60, 120]) {
+    const game = makeGame(42), s = game.s;
+    game.retirePassedAreas = () => {};
+    Object.assign(s, { game, t: 0, startedAt: Date.now(), axis: () => ({ x: 0, y: 0 }), down: () => false, pressed: () => false,
+        spend: n => game.res.spend(n), toast() {}, sfx() {}, setGoal() {} });
+    game.cp = game.checkpoints[1]; game.tideY = 1000;
+    game.spikes = []; game.saws = []; game.balls = []; game.debris = [];
+    const machines = [...game.drills], jets = game.lasers.filter(l => l.steam);
+    for (const d of machines) {
+        game.drills = [d]; game.lasers = [];
+        for (const [phase, lethal] of [[0, false], [.5, false], [.75, true]]) {
+            game.dead = 0; game.boost = 0; game.res.value = 100;
+            game.cp = game.checkpoints[0]; game.tideY = d.surfaceY + 1200;
+            Object.assign(game.me, { x: d.x - 13, y: d.surfaceY - 44, vx: 0, vy: 0, onGround: true, ground: null });
+            game.hazardClock = d.period * phase - d.phase;
+            game.updateDrill(d, game.hazardClock);
+            game.updatePlayer(1 / fps);
+            assert.equal(game.dead > 0, lethal, `${fps} FPS: ${d.crusher ? 'crusher' : 'drill'} is lethal on its actual deck only during the strike`);
+        }
+    }
+    game.drills = [];
+    for (const jet of jets) {
+        game.lasers = [jet];
+        for (const [phase, lethal] of [[.2, true], [.7, false], [.9, false]]) {
+            game.dead = 0; game.boost = 0; game.res.value = 100;
+            game.cp = game.checkpoints[0]; game.tideY = jet.support.y + 1200;
+            Object.assign(game.me, { x: jet.x + 7, y: jet.support.y - 44, vx: 0, vy: 0, onGround: true, ground: null });
+            game.hazardClock = jet.period * phase - jet.phase;
+            game.updatePlayer(1 / fps);
+            assert.equal(game.dead > 0, lethal, `${fps} FPS: vent plume, cooldown and warning match collision`);
+        }
+    }
+}
+console.log('Every conveyor has timed machinery; crusher/drill strikes and steam warning/cooldown collisions passed at 30/60/120 FPS.');

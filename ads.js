@@ -58,8 +58,8 @@ window.STUDBUD_ADS = window.STUDBUD_ADS || {
                 ad.style.display = 'block';
                 ad.dataset.adClient = window.STUDBUD_ADS.client;
                 ad.dataset.adSlot = window.STUDBUD_ADS.slots[slot.dataset.adPlacement];
-                ad.dataset.adFormat = 'auto';
-                ad.dataset.fullWidthResponsive = 'true';
+                ad.dataset.adFormat = 'horizontal';
+                ad.dataset.fullWidthResponsive = 'false';
                 slot.append(label, ad);
             }
             // AdSense rejects units with no available width; retry on the next layout change instead.
@@ -70,7 +70,8 @@ window.STUDBUD_ADS = window.STUDBUD_ADS || {
             }
             (window.adsbygoogle = window.adsbygoogle || []).push({});
             slot.dataset.adRequested = 'done';
-        } catch {
+        } catch (error) {
+            console.warn('[Ads] Banner could not load:', error);
             slot.dataset.adRequested = 'failed';
             slot.hidden = true;
         }

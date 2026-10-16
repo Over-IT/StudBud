@@ -890,7 +890,8 @@
             canvas.tabIndex = 0;
             canvas.setAttribute('aria-label', 'Game area. Use the game controls, Q to refill, or Tab to reach game buttons.');
             if (!this.preview) canvas.focus({ preventScroll: true });
-            canvas.addEventListener('pointermove', e => {
+            const aimSurface = this.mode === 'shooter' ? this.overlay : canvas;
+            aimSurface.addEventListener('pointermove', e => {
                 if (this.aimPointer != null && e.pointerId !== this.aimPointer) return;
                 const b = canvas.getBoundingClientRect();
                 this.mouse.x = (e.clientX - b.left) / this.scale;
@@ -898,7 +899,7 @@
                 this.mouse.active = true;
                 this.mouse.pointerType = e.pointerType;
             });
-            canvas.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') this.mouse.active = false; });
+            aimSurface.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' || e.pointerType === 'pen') this.mouse.active = false; });
             canvas.addEventListener('pointerdown', e => {
                 if (this.question || this.over || this.paused) return;
                 this.mouse.active = true;

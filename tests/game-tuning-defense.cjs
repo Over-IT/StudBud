@@ -117,6 +117,15 @@ for (const fps of [30, 60, 120]) {
     for (let i = 0; i < fps; i++) g.update(1 / fps);
     const half = s.vw / g.zoom / 2;
     assert.ok(half - g.cam.x > 100 && half - g.cam.x <= 110.001, 'camera can show 110 world units beyond perimeter walls');
+    s.overlay.classList.contains = () => true;
+    for (const pointerType of ['mouse', 'pen', 'touch']) {
+        g.me.x = g.W / 2; g.me.y = g.H / 2;
+        g.cam.x = g.me.x; g.cam.y = g.me.y;
+        Object.assign(s.mouse, { x: s.vw, y: s.vh / 2, active: true, pointerType });
+        for (let i = 0; i < fps; i++) g.update(1 / fps);
+        if (pointerType === 'touch') assert.ok(Math.abs(g.cam.x - g.me.x) < 1, 'touch input does not trigger hover look-ahead');
+        else assert.ok(g.cam.x > g.me.x + 40, `${pointerType} moves the camera on hybrid touch devices`);
+    }
 }
 const hill = session('duel'), hg = hill.game;
 hg.hill = () => ({ zone: { x: hg.me.x, y: hg.me.y + hg.me.h, w: 200 }, left: 20 });
@@ -436,6 +445,29 @@ console.log('Stationary grid aim, full-cell selection, safe deselection and curr
 }
 console.log('Industrial conveyor/deck/prop render dispatch, no construction scaffolds, orbital deck rendering and crusher collision passed.');
 {
+    const g = session('skyline').game;
+    const p = { x: 117, y: -500, w: 1400, h: 32, belt: -150, roof: true, bodyH: 40 };
+    g.viewWidth = 720; g.clock = 2;
+    for (const cameraX of [0, 181.25, 399.5, 630]) {
+        g.cam.x = cameraX;
+        const braces = [], rivets = [], lights = [];
+        const trace = new Proxy({
+            moveTo(x, y) { if (y === p.y + 38) braces.push(x); },
+            fillRect(x, y, w, h) { if (y === p.y + 9 && w === 3 && h === 3) rivets.push(x); },
+            arc(x, y, r) { if (r === 3) lights.push(y); }
+        }, { get: (target, key) => target[key] || ctx[key] });
+        g.drawConveyor(trace, p);
+        assert.ok(braces.length > 0);
+        assert.ok(braces.every(x => Math.abs((x - p.x - 30) / 110 - Math.round((x - p.x - 30) / 110)) < 1e-9), 'conveyor braces stay on their world-space lattice as the camera moves');
+        g.drawFactoryDeck(trace, p);
+        assert.ok(rivets.length > 0 && rivets.every(x => (x - p.x - 12) % 60 === 0), 'deck rivets never change grid origin at a viewport edge');
+        const chamber = { id: -1, top: -900, bottom: -100, columns: [100, 620] };
+        g.drawStationFrame(trace, chamber, -700 + cameraX / 4, 100 + cameraX / 4);
+        assert.ok(lights.length > 0 && lights.every(y => y === chamber.top - 220 + 3), 'station end lights are anchored to the structure, never the clipped viewport edge');
+    }
+}
+console.log('World-anchored conveyor bracing, deck rivets and station end lights remain stable under fractional camera movement.');
+{
     const s = session('skyline'), g = s.game, shapes = [];
     s.testing = true; g.testTeleport(2);
     assert.ok(g.goalText().endsWith('Space'), 'Space HUD uses the remaining biome order');
@@ -576,9 +608,10 @@ for (const fps of [30, 60, 120]) {
         const inset = Math.min(120, viewHeight * .18), start = cp.y - inset;
         assert.equal(g.backdropBlend(cp.y + 1, viewHeight).to, cp.id - 1, 'next-biome scenery cannot appear while its entrance is above the screen');
         assert.equal(g.backdropBlend(start + 1, viewHeight).to, cp.id - 1, 'the next biome must be meaningfully visible before the fade starts');
-        assert.equal(g.backdropBlend(start, viewHeight).amount, 0, 'visible boundary starts the short fade continuously');
-        assert.equal(g.backdropBlend(start - 120, viewHeight).amount, .5, 'fade midpoint is only 120 camera units later');
-        assert.equal(g.backdropBlend(start - 240, viewHeight).amount, 1, 'entire biome transition finishes within 240 camera units, not thousands');
+        const span = Math.max(640, viewHeight * 1.1);
+        assert.equal(g.backdropBlend(start, viewHeight).amount, 0, 'visible boundary starts the fade continuously');
+        assert.ok(Math.abs(g.backdropBlend(start - span / 2, viewHeight).amount - .5) < 1e-10, 'fade midpoint scales with the viewport');
+        assert.equal(g.backdropBlend(start - span, viewHeight).amount, 1, 'the entire transition completes within its viewport-scaled span');
     }
 }
-console.log('Automatic height checkpoints, distant-flag capture, safe respawns and visible-boundary 240-unit fades passed at 30/60/120 FPS.');
+console.log('Automatic height checkpoints, safe respawns and viewport-scaled biome fades passed at 30/60/120 FPS.');

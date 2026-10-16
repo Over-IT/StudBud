@@ -463,6 +463,12 @@
                 T.zone({ x: d.x - width / 2 - 8, y: d.mountY - 40, w: width + 16, h: d.surfaceY - d.mountY + 39 });
                 this.drills.push(d);
             };
+            const vent = (T, platform, u, phase = 0) => {
+                const jet = { x: Math.round(platform.x + platform.w * u - 20), y: platform.y - 100, w: 40, h: 100,
+                    period: 3.2, phase, steam: true, support: platform, bi: T.b, chamber: T.id };
+                T.zone({ x: jet.x - 8, y: jet.y - 8, w: jet.w + 16, h: jet.h + 8 });
+                this.lasers.push(jet);
+            };
             const deck = (x, top, w, extra = {}) => ({ x: Math.round(x), y: Math.round(top), w, h: 32, roof: true, bodyH: 32, ...extra });
             const PIECE = {
                 // ---- factory (normal gravity) ----
@@ -479,14 +485,16 @@
                 // hydraulic pistons pumping out of phase: hop up while each one is high
                 'piston-steps': (L, d, T) => {
                     let prev = L;
-                    const nodes = [], n = 3 + Math.floor(r() * 2);
+                    const nodes = [], n = 2;
                     for (let i = 0; i < n; i++) {
                         const by = (prev.by ?? prev.y) - 115 - Math.round(r() * 15);
                         prev = T.add({ x: ahead(prev, d, 100 + Math.round(r() * 40), 110), y: by, w: 110, h: 22, mover: true, vert: true, by,
                             amp: 38, speed: 1.25, phase: i * 2.1 + r() * .4, piston: true, motif: 'piston-steps' });
                         nodes.push(prev);
                     }
-                    nodes.push(T.add(deck(ahead(prev, d, 110, 260), prev.by - 130, 260, { motif: 'press-deck' })));
+                    const exit = T.add(deck(ahead(prev, d, 110, 360), prev.by - 130, 360, { motif: 'press-deck' }));
+                    vent(T, exit, d > 0 ? .65 : .35, 1.6);
+                    nodes.push(exit);
                     return nodes;
                 },
                 // a freight elevator in a guided shaft carries you up to the next floor
@@ -507,20 +515,22 @@
                 'crumble-gantry': (L, d, T, calm) => {
                     let prev = L;
                     const nodes = [];
-                    for (let i = 0; i < 3; i++) {
-                        prev = T.add({ x: ahead(prev, d, 140 + Math.round(r() * 20), 110), y: prev.y - 95, w: 110, h: 16, thin: true, crumble: !calm, grate: true, motif: 'crumble-gantry' });
+                    for (let i = 0; i < 2; i++) {
+                        prev = T.add({ x: ahead(prev, d, i ? 180 : 110, i ? 140 : 260), y: prev.y - (i ? 140 : 80), w: i ? 140 : 260, h: 16, thin: true, crumble: !calm, grate: true, motif: 'crumble-gantry' });
                         nodes.push(prev);
+                        if (!i) vent(T, prev, d > 0 ? .7 : .3, 2.2);
                     }
                     nodes.push(T.add(deck(ahead(prev, d, 140, 260), prev.y - 100, 260, { motif: 'landing' })));
                     return nodes;
                 },
                 // zigzag service stairs: open grates you can jump up through
                 'stair-run': (L, d, T) => {
-                    const n = 4 + Math.floor(r() * 2), x0 = ahead(L, d, 90, 180), nodes = [];
+                    const n = 3, x0 = ahead(L, d, 90, 180), nodes = [];
                     for (let i = 0; i < n; i++) {
                         const w = i === n - 1 ? 240 : 180, x = x0 + (i % 2 ? d * 150 : 0) - (i === n - 1 && d < 0 ? 60 : 0);
                         const step = T.add({ x: Math.round(x), y: L.y - 120 * (i + 1), w, h: 16, factoryStep: true, oneway: true, motif: 'stair-run', below: nodes[i - 1] });
                         nodes.push(step);
+                        if (i !== 1) vent(T, step, i ? .75 : .25, i * .8);
                     }
                     return nodes;
                 },
@@ -535,14 +545,11 @@
                 },
                 // stamping decks: a pile drill hammers each one in turn
                 'drill-alley': (L, d, T) => {
-                    let prev = L;
-                    const nodes = [];
-                    for (let i = 0; i < 2; i++) {
-                        prev = T.add(deck(ahead(prev, d, 150, 340), prev.y - 120, 340, { motif: 'drill-alley' }));
-                        nodes.push(prev);
-                        drill(T, prev, prev.x + prev.w / 2 + d * 20, false, 2.6, i * 1.3 + r() * .3);
-                    }
-                    return nodes;
+                    const bed = T.add(deck(ahead(L, d, 120, 640), L.y - 100, 640, { motif: 'drill-alley' }));
+                    drill(T, bed, bed.x + bed.w * .32, false, 2.6, 0);
+                    drill(T, bed, bed.x + bed.w * .68, false, 2.6, 1.3);
+                    const perch = T.add(deck(ahead(bed, d, 170, 180), bed.y - 180, 180, { motif: 'inspection' }));
+                    return [bed, perch];
                 },
                 // a gauntlet of three long conveyors stepping up the production floor, every one armed: fight the first belt
                 // under a crusher and a drill, ride the second as it drags you forward into two crushers (back-pedal to time them),
@@ -592,6 +599,36 @@
                     }
                     const grate = T.add({ x: ahead(feed, d, 140, 130), y: feed.y - 95, w: 130, h: 16, thin: true, crumble: !calm, grate: true, motif: 'stamping-feed' });
                     return [feed, grate, T.add(deck(ahead(grate, d, 140, 300), grate.y - 105, 300, { motif: 'landing' }))];
+                },
+                'lift-to-press': (L, d, T) => {
+                    const car = T.add({ x: ahead(L, d, 100, 220), y: L.y - 90, w: 220, h: 20, mover: true, vert: true,
+                        by: L.y - 150, amp: 130, speed: .65, phase: r() * 6, freight: true, motif: 'sorting-hoist' });
+                    const bay = T.add(deck(ahead(car, d, 90, 420), L.y - 300, 420, { motif: 'sorting-bay' }));
+                    drill(T, bay, bay.x + bay.w * .55, true, 3.6, 0);
+                    const out = T.add(deck(ahead(bay, d, 100, 480), bay.y - 90, 480,
+                        { factoryBelt: true, belt: -d * 140, motif: 'packing-belt' }));
+                    drill(T, out, out.x + out.w * .4, false, 2.7, 1.4);
+                    drill(T, out, out.x + out.w * .75, true, 3.4, .6);
+                    return [car, bay, out];
+                },
+                'spring-to-crumble': (L, d, T, calm) => {
+                    const pad = T.add(deck(ahead(L, d, 120, 180), L.y - 90, 180, { pipe: true, motif: 'foundry-launch' }));
+                    this.springs.push({ x: pad.x + 67, y: pad.y - 16, w: 46, h: 16, bi: 1 });
+                    const grate = T.add({ x: ahead(pad, d, 90, 460), y: pad.y - 300, w: 460, h: 18, jt: true,
+                        grate: true, crumble: !calm, motif: 'cooling-grate' });
+                    vent(T, grate, .3, 0); vent(T, grate, .7, 1.6);
+                    return [pad, grate, T.add(deck(ahead(grate, d, 160, 280), grate.y - 120, 280, { motif: 'foundry-exit' }))];
+                },
+                'relay-to-pistons': (L, d, T) => {
+                    const amp = 120, w = 160;
+                    const trolley = T.add({ x: d > 0 ? edgeOf(L, 1) + 90 + amp : edgeOf(L, -1) - 90 - amp - w,
+                        y: L.y - 100, w, h: 20, mover: true, amp, speed: .7, phase: r() * 6, factoryLift: true, motif: 'cargo-trolley' });
+                    const bed = T.add(deck(ahead(trolley, d, 90, 540), trolley.y - 110, 540, { motif: 'cargo-unload' }));
+                    drill(T, bed, bed.x + bed.w * .3, true, 3.2, 0);
+                    drill(T, bed, bed.x + bed.w * .7, true, 3.2, 1.6);
+                    const piston = T.add({ x: ahead(bed, d, 120, 170), y: bed.y - 150, w: 170, h: 22, mover: true, vert: true,
+                        by: bed.y - 150, amp: 50, speed: .9, phase: 0, piston: true, motif: 'cargo-ejector' });
+                    return [trolley, bed, piston];
                 },
                 // ---- space station (low gravity) ----
                 // three asteroid lanes stacked above a dock, alternating direction: hop from rock to rock to reach the upper dock
@@ -684,9 +721,6 @@
                 return nodes;
             };
             const COMBOS = {
-                'lift-to-press': ['freight-elevator', 'drill-alley'],
-                'spring-to-crumble': ['catapult', 'crumble-gantry'],
-                'relay-to-pistons': ['gantry-relay', 'piston-steps'],
                 'arm-to-solar': ['docking-arm', 'solar-walk'],
                 'ferry-to-airlock': ['asteroid-ferry', 'airlock-hall'],
                 'thruster-debris': ['thruster-boost', 'debris-run']
@@ -797,6 +831,7 @@
             const T0 = tower(160, -1950, 900), T1 = tower(1400, -495, 880);
             this.checkpoints[0].x = 1080;
             const opening = this.fireEscapes = [fireEscape(1060, 1400, 0, 3, 165)];
+            Object.assign(this.checkpoints[0], { x: opening[0][1].x + 20, y: opening[0][1].y });
             path(...opening[0], T1);
             // Each roof gets its own theme and never the same one twice running; laser roofs are rare and never lead
             // straight into a wall climb, so the run never settles into a climb -> laser roof -> climb rhythm.
@@ -1103,7 +1138,7 @@
             let to = 0;
             for (let i = 1; i < this.checkpoints.length; i++) if (height >= -this.checkpoints[i].y) to = i;
             const distance = height + this.checkpoints[to].y;
-            const u = to === 0 ? 1 : clamp(distance / 240, 0, 1);
+            const u = to === 0 ? 1 : clamp(distance / Math.max(640, viewHeight * 1.1), 0, 1);
             return { from: SKY_ROUTE[Math.max(0, to - 1)], to: SKY_ROUTE[to], amount: u * u * (3 - 2 * u) };
         }
 
@@ -1202,6 +1237,7 @@
         }
 
         retirePassedAreas() {
+            if ([...(this.s.remotes?.values?.() || [])].some(player => player.st && !player.done && (player.st.checkpoint || 0) < this.cp.id)) return;
             if (this.cp.id <= (this.retiredArea || 0)) return;
             this.retiredArea = this.cp.id;
             const cutoff = this.cp.y + 1400;
@@ -1281,6 +1317,14 @@
             }
             for (const b of this.boxes) if (b.t > 0) b.t -= hazardDt;
 
+            this.retirePassedAreas();
+            this.updatePlayer(dt);
+        }
+
+        updatePlayer(dt) {
+            const s = this.s, me = this.me;
+            const clock = this.hazardClock || 0;
+            const hazardDt = s.testing === true && s.testFreezeHazards === true ? 0 : dt;
             if (s.testing === true && s.testFlight === true) {
                 const configured = Number.isFinite(s.testFlySpeed) ? clamp(s.testFlySpeed, 100, 3000) : 600;
                 const speed = configured * (s.down('ShiftLeft', 'ShiftRight') ? 11 / 6 : 1);
@@ -1304,6 +1348,8 @@
                     const spot = this.cp;
                     me.x = spot.x; me.y = spot.y - me.h - 2; me.vx = 0; me.vy = 0; this.dash = 0; this.kick = 0;
                     this.tideY = spot.y + 900; this.tideWarn = false; this.snapCam = true;
+                    this.stuckT = 0; this.stuckX = me.x; this.stuckY = me.y; this.strandedT = 0;
+                    me.onGround = false; me.ground = null; this.airJumps = 1; this.buffer = 0;
                 }
                 this.state = 4;
                 this.particles.update(dt, 600);
@@ -1311,14 +1357,21 @@
             }
 
             if (this.finished) { me.vx *= 0.9; }
-            // Safety net: R (or being stuck for a few seconds) returns you to the last checkpoint
+            // Failed escape attempts trigger recovery; simply waiting on a platform does not.
             if (!this.finished) {
                 this.captureCheckpoint();
-                this.stuckT = (this.stuckT || 0) + dt;
+                const trying = Math.abs(s.axis().x) > .1 || s.down('Space', 'ArrowUp', 'KeyW') || s.pressed('Space', 'ArrowUp', 'KeyW');
+                this.stuckT = trying ? (this.stuckT || 0) + dt : Math.max(0, (this.stuckT || 0) - dt);
                 if (Math.hypot(me.x - (this.stuckX ?? me.x), me.y - (this.stuckY ?? me.y)) > 80 || this.stuckX === undefined) { this.stuckX = me.x; this.stuckY = me.y; this.stuckT = 0; }
-                const idle = s.game.res.value >= 0.5 && this.stuckT > 5 && !me.ground?.mover;
+                const idle = s.game.res.value >= 0.5 && this.stuckT > 5 && !me.ground?.mover && !me.ground?.belt;
                 if (idle && !this.stuckHinted) { this.stuckHinted = true; s.toast('Stuck? Press R to return to your checkpoint', '#fbbf24'); }
                 if (this.stuckT < 5) this.stuckHinted = false;
+                const stranded = me.onGround && me.ground?.ground && me.y + me.h > this.cp.y + 100;
+                this.strandedT = stranded ? (this.strandedT || 0) + dt : 0;
+                if (this.strandedT > 1 || (idle && this.stuckT > 9)) {
+                    s.toast('No way out? Returning to your checkpoint', '#fbbf24');
+                    this.stuckT = 0; this.strandedT = 0; this.hurt(true); return;
+                }
                 if (s.pressed('KeyR')) { this.stuckT = 0; this.hurt(true); return; }
             }
             const exhausted = !this.finished && s.game.res.value < 0.5;
@@ -2169,19 +2222,20 @@
             if (upper >= lower) return;
             const gaps = this.lanes.filter(l => l.chamber === c.id && l.axis === 'x').map(l => [l.y - 70, l.y + l.h + 20]);
             const segments = [];
-            let from = upper;
+            let from = y0;
             for (const [g0, g1] of gaps.sort((a, b) => a[0] - b[0])) {
-                if (g1 < from || g0 > lower) continue;
+                if (g1 < from || g0 > y1) continue;
                 if (g0 > from) segments.push([from, g0]);
                 from = Math.max(from, g1);
             }
-            if (from < lower) segments.push([from, lower]);
+            if (from < y1) segments.push([from, y1]);
             for (const x of c.columns) {
                 for (const [a, b] of segments) {
+                    if (b < upper || a > lower) continue;
                     ctx.fillStyle = 'rgba(30,27,75,.85)'; ctx.fillRect(x - 9, a, 18, b - a);
                     ctx.strokeStyle = 'rgba(129,140,248,.55)'; ctx.lineWidth = 2; ctx.beginPath();
                     ctx.moveTo(x - 9, a); ctx.lineTo(x - 9, b); ctx.moveTo(x + 9, a); ctx.lineTo(x + 9, b);
-                    for (let y = Math.ceil(a / 36) * 36; y < b - 36; y += 36) { ctx.moveTo(x - 9, y); ctx.lineTo(x + 9, y + 18); ctx.lineTo(x - 9, y + 36); }
+                    for (let y = Math.ceil(Math.max(a, upper - 36) / 36) * 36; y < Math.min(b - 36, lower); y += 36) { ctx.moveTo(x - 9, y); ctx.lineTo(x + 9, y + 18); ctx.lineTo(x - 9, y + 36); }
                     ctx.stroke();
                     ctx.fillStyle = '#4c1d95'; ctx.fillRect(x - 13, a, 26, 6); ctx.fillRect(x - 13, b - 6, 26, 6);
                     const blink = (Math.sin(this.anim * 3 + x * .01) + 1) / 2;
@@ -2320,7 +2374,8 @@
             ctx.fillStyle = '#1e293b'; roundRect(ctx, p.x, p.y, p.w, bodyH, 4); ctx.fill();
             ctx.fillStyle = '#475569'; ctx.fillRect(p.x + 3, p.y + 5, p.w - 6, Math.max(2, bodyH - 8));
             ctx.fillStyle = '#cbd5e1'; ctx.fillRect(p.x, p.y, p.w, 4);
-            const left = Math.max(p.x + 12, Math.floor((this.cam.x - 60) / 60) * 60);
+            const origin = p.x + 12;
+            const left = origin + Math.max(0, Math.floor((this.cam.x - 60 - origin) / 60)) * 60;
             const right = Math.min(p.x + p.w - 48, this.cam.x + (this.viewWidth || 1000) + 60);
             for (let x = left; x < right; x += 60) {
                 ctx.fillStyle = '#94a3b8'; ctx.fillRect(x, p.y + 9, 3, 3);
@@ -2358,7 +2413,8 @@
             if (!p.stacked) { ctx.fillStyle = '#64748b'; ctx.fillRect(p.x + 18, p.y + 32, 9, 40); ctx.fillRect(p.x + p.w - 27, p.y + 32, 9, 40); }
             if (!low && !p.stacked) {
                 ctx.strokeStyle = '#475569'; ctx.lineWidth = 4; ctx.beginPath();
-                for (let x = left + 30; x < right - 40; x += 110) { ctx.moveTo(x, p.y + 38); ctx.lineTo(x + 55, p.y + 67); ctx.lineTo(x + 110, p.y + 38); }
+                const origin = p.x + 30, start = origin + Math.max(0, Math.floor((left - origin - 110) / 110)) * 110;
+                for (let x = start; x < Math.min(right, p.x + p.w - 110); x += 110) { ctx.moveTo(x, p.y + 38); ctx.lineTo(x + 55, p.y + 67); ctx.lineTo(x + 110, p.y + 38); }
                 ctx.stroke();
             }
             ctx.fillStyle = '#fbbf24'; ctx.beginPath();
@@ -2402,6 +2458,7 @@
                 for (let i = 0; i < d.width; i += 16) {
                     ctx.fillStyle = i % 32 ? '#1c1917' : '#fbbf24'; ctx.fillRect(x - d.width / 2 + i, d.tipY - 15, Math.min(16, d.width - i), 11);
                 }
+
                 if (d.warn) { ctx.fillStyle = 'rgba(239,68,68,.2)'; ctx.fillRect(d.x - d.width / 2, d.mountY, d.width, d.surfaceY - d.mountY); }
                 return;
             }
@@ -2412,6 +2469,28 @@
             ctx.stroke();
             if (d.tipY > d.surfaceY - 8) { ctx.fillStyle = 'rgba(214,211,209,.5)'; ctx.fillRect(d.x - 26, d.surfaceY - 6, 52, 6); }
             if (d.warn) { ctx.fillStyle = 'rgba(239,68,68,.2)'; ctx.fillRect(d.x - 14, d.mountY, 28, d.surfaceY - d.mountY); }
+        }
+
+        drawSteamVent(ctx, jet) {
+            const base = jet.y + jet.h, clock = this.hazardClock || 0;
+            const cycle = ((clock + jet.phase) % jet.period + jet.period) % jet.period / jet.period;
+            const warn = !jet.on && cycle > .85;
+            ctx.fillStyle = '#292524'; ctx.fillRect(jet.x - 6, base - 5, jet.w + 12, 11);
+            ctx.fillStyle = '#a8a29e';
+            for (let x = jet.x; x < jet.x + jet.w; x += 8) ctx.fillRect(x, base - 4, 4, 8);
+            ctx.fillStyle = jet.on ? '#f87171' : warn ? '#fbbf24' : '#34d399';
+            ctx.fillRect(jet.x - 5, base + 8, jet.w + 10, 4);
+            if (!jet.on) return;
+            const plume = ctx.createLinearGradient(0, jet.y, 0, base);
+            plume.addColorStop(0, 'rgba(226,232,240,.12)'); plume.addColorStop(1, 'rgba(226,232,240,.85)');
+            ctx.fillStyle = plume; ctx.fillRect(jet.x, jet.y, jet.w, jet.h);
+            ctx.strokeStyle = 'rgba(248,250,252,.7)'; ctx.lineWidth = 3; ctx.beginPath();
+            for (let i = 0; i < 3; i++) {
+                const x = jet.x + 7 + i * 13;
+                ctx.moveTo(x, base - 7);
+                for (let y = base - 12; y > jet.y + 5; y -= 10) ctx.lineTo(x + Math.sin(y * .08 - clock * 12 + i) * 4, y);
+            }
+            ctx.stroke();
         }
 
         drawUnstablePlatform(ctx, p, B) {
@@ -2842,6 +2921,7 @@
             }
             for (const l of this.lasers) {
                 if (l.x > right || l.x + l.w < left || !seen(l.y)) continue;
+                if (l.steam) { this.drawSteamVent(ctx, l); continue; }
                 if (l.horiz) {
                     // knee-high tripwire strung between two emitter posts on the roof
                     const base = l.support ? l.support.y : l.y + 34;
@@ -3615,7 +3695,8 @@
             const halfW = s.vw / this.zoom / 2, halfH = s.vh / this.zoom / 2;
             const touch = s.overlay.classList.contains('has-touch');
             const inside = s.mouse.x >= 0 && s.mouse.x <= s.vw && s.mouse.y >= 0 && s.mouse.y <= s.vh;
-            const look = !s.preview && s.mouse.active && inside && s.mouse.pointerType !== 'touch' && (!touch || s.mouse.pointerType === 'mouse') ? (this.weapon === 'rail' ? .68 : .58) : 0;
+            const precisionPointer = s.mouse.pointerType === 'mouse' || s.mouse.pointerType === 'pen' || !touch && s.mouse.pointerType !== 'touch';
+            const look = !s.preview && s.mouse.active && inside && precisionPointer ? (this.weapon === 'rail' ? .68 : .58) : 0;
             const fitsX = halfW * 2 >= this.W, fitsY = halfH * 2 >= this.H;
             const edge = 110;
             const tx = fitsX ? this.W / 2 : clamp(me.x + clamp((s.mouse.x - s.vw / 2) / this.zoom * look, -halfW * .52, halfW * .52), halfW - edge, this.W - halfW + edge);

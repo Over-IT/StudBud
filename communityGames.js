@@ -230,17 +230,35 @@
                         }
 
                         static seasonalItems() {
+                            const extras = [
+                                ['Starlight Party Crown', 'cone', 'Aurora Celebrant', 'Midnight Wishes', 'star'],
+                                ['Cupid Wings Headband', 'ears', 'Velvet Valentine', 'Rose Petal Shower', 'petal'],
+                                ['Clover Cap', 'cap', 'Emerald Guardian', 'Pot of Gold', 'spark'],
+                                ['Garden Straw Hat', 'straw', 'Meadow Sprite', 'Buttercup Stars', 'star'],
+                                ['Alumni Top Hat', 'tophat', 'Golden Graduate', 'Honor Roll Confetti', 'confetti'],
+                                ['Coral Party Hat', 'cone', 'Sunset Surfer', 'Ocean Sparkles', 'spark'],
+                                ['Parade Top Hat', 'tophat', 'Starlight Captain', 'Freedom Confetti', 'confetti'],
+                                ['Study Session Beanie', 'beanie', 'Campus Captain', 'Notebook Stars', 'star'],
+                                ['Woodland Ears', 'ears', 'Golden Scarecrow', 'Autumn Embers', 'flame'],
+                                ['Midnight Cat Ears', 'ears', 'Moonlit Phantom', 'Haunted Stardust', 'star'],
+                                ['Harvest Straw Hat', 'straw', 'Cranberry Wanderer', 'Golden Harvest', 'spark'],
+                                ['Reindeer Ears', 'ears', 'Frost Guardian', 'Holiday Wishes', 'star']
+                            ];
                             return StudBudCommunityGames.seasons.flatMap(season => {
                                 const set = { season: season.month, set: season.name };
                                 const [skinName, body, head, eye, trim] = season.skin;
                                 const [hatName, shape, ...hatColors] = season.hat;
                                 const [auraName, particle, ...auraColors] = season.aura;
                                 const [paletteName, hue, hue2] = season.palette;
+                                const [extraHat, extraShape, extraSkin, extraAura, extraParticle] = extras[season.month - 1];
                                 return [
                                     { ...set, id: `palette_seasonal_${season.key}`, name: paletteName, color: `seasonal_${season.key}`, hue, hue2, price: null, rarity: 'uncommon', type: 'palette', description: `${season.name} colors for your character and app theme` },
                                     { ...set, id: `hat_seasonal_${season.key}`, name: hatName, icon: season.icon, price: null, rarity: 'rare', type: 'hat', hatShape: shape, hatColors, description: `A limited ${season.name} hat` },
                                     { ...set, id: `skin_seasonal_${season.key}`, name: skinName, icon: season.icon, price: null, rarity: 'epic', type: 'skin', skinColors: { body, head, eye, trim }, description: `A limited ${season.name} character` },
-                                    { ...set, id: `acc_seasonal_${season.key}_effect`, name: auraName, icon: 'fa-wand-magic-sparkles', price: null, rarity: 'legendary', type: 'effect', particle: { shape: particle, colors: auraColors }, description: `A limited ${season.name} aura` }
+                                    { ...set, id: `acc_seasonal_${season.key}_effect`, name: auraName, icon: 'fa-wand-magic-sparkles', price: null, rarity: 'legendary', type: 'effect', particle: { shape: particle, colors: auraColors }, description: `A limited ${season.name} aura` },
+                                    { ...set, id: `hat_seasonal_${season.key}_alt`, name: extraHat, icon: season.icon, price: null, rarity: 'rare', type: 'hat', hatShape: extraShape, hatColors: [season.colors[1], season.colors[0], head], description: `A limited ${season.name} hat` },
+                                    { ...set, id: `skin_seasonal_${season.key}_alt`, name: extraSkin, icon: season.icon, price: null, rarity: 'epic', type: 'skin', skinColors: { body: trim, head, eye, trim: body }, description: `A limited ${season.name} character` },
+                                    { ...set, id: `acc_seasonal_${season.key}_alt_effect`, name: extraAura, icon: 'fa-wand-magic-sparkles', price: null, rarity: 'legendary', type: 'effect', particle: { shape: extraParticle, colors: [season.colors[1], head, season.colors[0]] }, description: `A limited ${season.name} aura` }
                                 ];
                             });
                         }
@@ -601,7 +619,7 @@
         }
 
         async recordWaitingGameBest(score) {
-            const { data, error } = await this.getClient().rpc('studbud_record_waiting_game_best', {
+            const { data, error } = await this.getClient().rpc('studbud_record_crossing_best', {
                 p_score: score
             });
             if (error) throw new Error(`Could not save your warm-up record: ${error.message}`);

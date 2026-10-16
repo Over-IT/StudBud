@@ -288,9 +288,18 @@ assert.equal(soccerButtons.find(button => button.textContent === 'Power kick').d
     session.justPressed = new Set();
     session.mouse = {};
     session.over = true;
+    session.mode = 'shooter';
+    session.scale = 2;
     let refills = 0;
     session.recharge = () => refills++;
     session.bind();
+    overlay.emit('pointermove', 70, 36, { pointerType: 'mouse' });
+    assert.equal(session.mouse.x, 35, 'shooter HUD overlays keep tracking canvas-relative aim');
+    assert.equal(session.mouse.y, 18);
+    assert.equal(session.mouse.active, true);
+    assert.equal(canvas.handlers.pointermove, undefined, 'the shooter has one overlay-wide aim listener');
+    overlay.emit('pointerleave', 70, 36, { pointerType: 'pen' });
+    assert.equal(session.mouse.active, false);
     assert.equal(sandbox.document.activeElement, canvas, 'launching a game moves focus away from setup fields into the game');
     const tab = { code: 'Tab', preventDefault() {}, target: canvas };
     canvas.focus();
@@ -303,6 +312,15 @@ assert.equal(soccerButtons.find(button => button.textContent === 'Power kick').d
     session.handlers.keydown({ code: 'KeyQ', target: canvas });
     assert.equal(refills, 0, 'finished games never open refill questions');
     assert.equal(session.keys.size, 0, 'finished games ignore movement input');
+}
+
+for (const reward of [5, 40, 65, 100]) {
+    const session = Object.create(A.Session.prototype);
+    session.reward = reward;
+    session.game = { res: new A.Resource('Energy', '#fff', 100, 0) };
+    session.sfx = session.toast = () => {};
+    assert.equal(session.refill(), reward);
+    assert.equal(session.game.res.value, reward, 'a correct answer adds exactly the configured energy');
 }
 
 const appSource = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');

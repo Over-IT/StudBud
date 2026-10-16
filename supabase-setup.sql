@@ -465,6 +465,10 @@ alter table public.studbud_multiplayer_profiles
     add column if not exists solo_coins_today integer not null default 0;
 
 -- Limited monthly sets. They only drop from that month's seasonal box (month is UTC).
+-- Crossing counts rows, unlike the older warm-up score. Keep the legacy record separately.
+alter table public.studbud_multiplayer_profiles
+    add column if not exists best_crossing_rows integer not null default 0 check (best_crossing_rows between 0 and 100000);
+
 create or replace function public.studbud_seasonal_items()
 returns table (id text, month integer, rarity text)
 language sql
@@ -483,7 +487,13 @@ as $$
         ('palette_seasonal_halloween', 10, 'uncommon'), ('hat_seasonal_halloween', 10, 'rare'), ('skin_seasonal_halloween', 10, 'epic'), ('acc_seasonal_halloween_effect', 10, 'legendary'),
         ('palette_seasonal_harvest', 11, 'uncommon'), ('hat_seasonal_harvest', 11, 'rare'), ('skin_seasonal_harvest', 11, 'epic'), ('acc_seasonal_harvest_effect', 11, 'legendary'),
         ('palette_seasonal_holiday', 12, 'uncommon'), ('hat_seasonal_holiday', 12, 'rare'), ('skin_seasonal_holiday', 12, 'epic'), ('acc_seasonal_holiday_effect', 12, 'legendary')
-    ) as seasonal(id, month, rarity);
+    ) as seasonal(id, month, rarity)
+    union all
+    select extra.prefix || seasons.key || extra.suffix, seasons.month, extra.rarity
+    from (values ('newyear', 1), ('valentine', 2), ('clover', 3), ('spring', 4), ('grad', 5), ('summer', 6),
+        ('fireworks', 7), ('school', 8), ('autumn', 9), ('halloween', 10), ('harvest', 11), ('holiday', 12)) as seasons(key, month)
+    cross join (values ('hat_seasonal_', '_alt', 'rare'), ('skin_seasonal_', '_alt', 'epic'),
+        ('acc_seasonal_', '_alt_effect', 'legendary')) as extra(prefix, suffix, rarity);
 $$;
 
 -- Single source of truth for priced items and rarity (pets are box-only, so price is null).
@@ -619,6 +629,7 @@ begin
         'equipped_effect', v_profile.equipped_effect,
         'equipped_pet', v_profile.equipped_pet,
         'best_wait_score', v_profile.best_wait_score,
+        'best_crossing_rows', v_profile.best_crossing_rows,
         'daily_claimed', v_profile.last_daily_claim = current_date,
         'daily_streak', v_profile.daily_streak,
         'solo_coins_today', case when v_profile.solo_coins_day = current_date then v_profile.solo_coins_today else 0 end
@@ -815,6 +826,26 @@ begin
     return public.studbud_get_multiplayer_profile();
 end;
 $$;
+
+create or replace function public.studbud_record_crossing_best(p_score integer)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    if auth.uid() is null or public.studbud_is_guest() then raise exception 'Sign in to save your Crossing record.'; end if;
+    if p_score is null or p_score not between 0 and 100000 then raise exception 'That Crossing row count is invalid.'; end if;
+    insert into public.studbud_multiplayer_profiles (user_id, best_crossing_rows)
+    values (auth.uid(), p_score)
+    on conflict (user_id) do update
+        set best_crossing_rows = greatest(studbud_multiplayer_profiles.best_crossing_rows, excluded.best_crossing_rows),
+            updated_at = now();
+    return public.studbud_get_multiplayer_profile();
+end;
+$$;
+revoke all on function public.studbud_record_crossing_best(integer) from public, anon;
+grant execute on function public.studbud_record_crossing_best(integer) to authenticated;
 
 create or replace function public.studbud_buy_multiplayer_item(p_item_id text)
 returns jsonb
@@ -3271,6 +3302,66 @@ as $$
 $$;
 revoke all on function public.studbud_class_summary(public.studbud_classes) from public, anon, authenticated;
 
+create or replace function public.studbud_course_matches(p_course jsonb, p_code text, p_title text)
+returns boolean
+language sql
+immutable
+set search_path = public, pg_temp
+as $$
+    select exists (
+        select 1 from unnest(array[p_course ->> 'catalogCode', p_course ->> 'code']) as c(code)
+        where length(btrim(coalesce(c.code, ''))) > 0 and length(btrim(coalesce(p_code, ''))) > 0
+          and regexp_split_to_array(upper(btrim(c.code)), '\s*/\s*')
+            && regexp_split_to_array(upper(btrim(p_code)), '\s*/\s*')
+    ) or (
+        length(regexp_replace(lower(coalesce(p_title, '')), '[^a-z0-9]', '', 'g')) > 0
+        and regexp_replace(lower(coalesce(p_course ->> 'title', '')), '[^a-z0-9]', '', 'g')
+            = regexp_replace(lower(p_title), '[^a-z0-9]', '', 'g')
+    );
+$$;
+revoke all on function public.studbud_course_matches(jsonb, text, text) from public, anon, authenticated;
+
+-- Reconcile only this teacher's rosters. Never expose students' saved course lists to clients.
+create or replace function public.studbud_refresh_teacher_roster()
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    perform public.studbud_require_teacher();
+    delete from public.studbud_class_members m using public.studbud_classes c
+    where c.id = m.class_id and c.teacher_id = auth.uid() and not m.removed
+      and not exists (
+          select 1 from public.studbud_user_data d
+          join auth.users a on a.id = d.user_id
+          left join public.studbud_public_profiles pp on pp.user_id = d.user_id
+          cross join lateral jsonb_array_elements(
+              case when jsonb_typeof(d.data #> '{state,courses}') = 'array'
+                  then d.data #> '{state,courses}' else '[]'::jsonb end) as course(value)
+          where d.user_id = m.user_id
+            and coalesce(nullif(d.data #>> '{state,profile,school}', ''), pp.school, a.raw_user_meta_data ->> 'school', 'pchs') = c.school
+            and public.studbud_course_matches(course.value, c.course_code, c.title)
+      );
+    insert into public.studbud_class_members (class_id, user_id)
+    select distinct c.id, d.user_id
+    from public.studbud_classes c
+    join public.studbud_user_data d on d.user_id <> c.teacher_id
+    join auth.users a on a.id = d.user_id
+    left join public.studbud_public_profiles pp on pp.user_id = d.user_id
+    cross join lateral jsonb_array_elements(
+        case when jsonb_typeof(d.data #> '{state,courses}') = 'array'
+            then d.data #> '{state,courses}' else '[]'::jsonb end) as course(value)
+    where c.teacher_id = auth.uid()
+      and coalesce(nullif(d.data #>> '{state,profile,school}', ''), pp.school, a.raw_user_meta_data ->> 'school', 'pchs') = c.school
+      and public.studbud_course_matches(course.value, c.course_code, c.title)
+      and not exists (select 1 from public.studbud_user_tags t where t.user_id = d.user_id and t.tag = 'teacher')
+      and not coalesce(a.is_anonymous, false)
+    on conflict do nothing;
+end;
+$$;
+revoke all on function public.studbud_refresh_teacher_roster() from public, anon, authenticated;
+
 create or replace function public.studbud_teacher_create_class(p_course_code text, p_title text, p_section text)
 returns jsonb
 language plpgsql
@@ -3297,6 +3388,7 @@ begin
     insert into public.studbud_classes (teacher_id, school, course_code, title, section, join_code)
     values (auth.uid(), v_school, btrim(p_course_code), btrim(p_title), btrim(coalesce(p_section, '')), v_code)
     returning * into v_class;
+    perform public.studbud_refresh_teacher_roster();
     return public.studbud_class_summary(v_class) || jsonb_build_object('join_code', v_class.join_code);
 end;
 $$;
@@ -3346,13 +3438,13 @@ $$;
 create or replace function public.studbud_teacher_classes()
 returns jsonb
 language plpgsql
-stable
 security definer
 set search_path = public, pg_temp
 as $$
 declare
     v_school text := public.studbud_require_teacher();
 begin
+    perform public.studbud_refresh_teacher_roster();
     return jsonb_build_object('school', v_school, 'classes', coalesce((
         select jsonb_agg(public.studbud_class_summary(c) || jsonb_build_object(
             'join_code', c.join_code,
@@ -3369,7 +3461,6 @@ $$;
 create or replace function public.studbud_teacher_class_detail(p_class_id uuid)
 returns jsonb
 language plpgsql
-stable
 security definer
 set search_path = public, pg_temp
 as $$
@@ -3380,6 +3471,7 @@ begin
     perform public.studbud_require_teacher();
     select * into v_class from public.studbud_classes where id = p_class_id and teacher_id = auth.uid();
     if v_class.id is null then raise exception 'Class not found.'; end if;
+    perform public.studbud_refresh_teacher_roster();
     return public.studbud_class_summary(v_class) || jsonb_build_object(
         'join_code', v_class.join_code,
         'students', coalesce((
@@ -3498,19 +3590,29 @@ declare
     v_codes text[];
 begin
     if public.studbud_is_guest() or auth.uid() is null then return jsonb_build_object('classes', '[]'::jsonb); end if;
-    select coalesce(pp.school, a.raw_user_meta_data ->> 'school', 'pchs') into v_school
-    from auth.users a left join public.studbud_public_profiles pp on pp.user_id = a.id where a.id = auth.uid();
+    select coalesce(nullif(d.data #>> '{state,profile,school}', ''), pp.school, a.raw_user_meta_data ->> 'school', 'pchs') into v_school
+    from auth.users a
+    left join public.studbud_public_profiles pp on pp.user_id = a.id
+    left join public.studbud_user_data d on d.user_id = a.id
+    where a.id = auth.uid();
     select coalesce(array_agg(distinct left(btrim(code), 40)), array[]::text[]) into v_codes
     from unnest(coalesce(p_course_codes, array[]::text[])) with ordinality as t(code, n)
     where n <= 40 and char_length(btrim(coalesce(code, ''))) > 0;
 
     delete from public.studbud_class_members m using public.studbud_classes c
     where m.class_id = c.id and m.user_id = auth.uid() and not m.removed
-      and (c.school <> v_school or not (c.course_code = any(v_codes)));
+      and (c.school <> v_school or not exists (
+          select 1 from unnest(v_codes) as code(value)
+          where public.studbud_course_matches(jsonb_build_object('code', code.value), c.course_code, '')
+      ));
 
     insert into public.studbud_class_members (class_id, user_id)
     select c.id, auth.uid() from public.studbud_classes c
-    where c.school = v_school and c.course_code = any(v_codes) and c.teacher_id <> auth.uid()
+    where c.school = v_school and c.teacher_id <> auth.uid()
+      and exists (
+          select 1 from unnest(v_codes) as code(value)
+          where public.studbud_course_matches(jsonb_build_object('code', code.value), c.course_code, '')
+      )
     on conflict do nothing;
 
     return jsonb_build_object(
