@@ -4,7 +4,7 @@ StudBud is a student hub with three parts: **Plan** (classes, assignments, grade
 
 ## Open StudBud
 
-After the GitHub Pages deployment finishes, open **https://over-it.github.io/StudBud/** in Chrome, Safari, Edge, or Firefox. The site works on phones, tablets, Chromebooks, and computers without installing anything.
+After the GitHub Pages deployment finishes, open **https://mystudbud.org/** in Chrome, Safari, Edge, or Firefox. The site works on phones, tablets, Chromebooks, and computers without installing anything.
 
 On Chrome for desktop, use the install icon in the address bar or choose **Install StudBud** from the browser menu. On Android, open the site in Chrome and choose **Add to Home screen**. On iPhone or iPad, open it in Safari and choose **Share → Add to Home Screen**.
 
