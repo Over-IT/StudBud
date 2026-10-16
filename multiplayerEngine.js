@@ -920,6 +920,9 @@
             };
             for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.addEventListener(type, releaseAim);
             canvas.addEventListener('contextmenu', e => e.preventDefault());
+            this.overlay.addEventListener('change', e => {
+                if (e.target.dataset.testBiome !== undefined) this.teleportTestBiome(Number(e.target.value));
+            });
             this.overlay.addEventListener('click', e => {
                 const target = e.target.closest('button');
                 if (!target) return;
@@ -945,14 +948,21 @@
                 else if (target.dataset.testAction && this.testing && this.mode === 'skyline') {
                     const index = target.dataset.testAction === 'checkpoint' ? this.game.cp.id
                         : Number(this.overlay.querySelector('[data-test-biome]').value);
-                    this.game.testTeleport(index);
-                    this.keys.clear(); this.justPressed.clear(); this.resetTouchStick?.();
-                    this.mouse.down = false; this.mouse.pressed = false;
+                    this.teleportTestBiome(index);
                 }
                 else if (target.classList.contains('mpg-leave') && this.practice && !this.testing && !this.over) this.finish();
                 else if (target.classList.contains('mpg-leave') || target.classList.contains('mpg-exit')) this.onLeave?.();
                 else if (target.classList.contains('mpg-end')) this.hostEnd();
             });
+        }
+
+        teleportTestBiome(index) {
+            if (!this.testing || this.mode !== 'skyline') return;
+            if (this.game.testTeleport(index) === false) return;
+            this.keys.clear(); this.justPressed.clear(); this.resetTouchStick?.();
+            this.mouse.down = false; this.mouse.pressed = false; this.mouse.rdown = false;
+            const select = this.overlay.querySelector('[data-test-biome]');
+            if (select) select.value = String(index);
         }
 
         // ---------- DOM ----------

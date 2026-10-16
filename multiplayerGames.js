@@ -770,6 +770,7 @@
                     // never put a section right after one that shares a machine with it
                     const prevParts = new Set(PARTS(pieces[pieces.length - 1] || lastPiece));
                     order = order.filter(name => !PARTS(name).some(p => prevParts.has(p))).concat(order.filter(name => PARTS(name).some(p => prevParts.has(p))));
+                    if (b === 1 && intro && n === 0) order = ['belt-gauntlet'];
                     let made = place(order, b, id, intro, !nearEdge) || (nearEdge ? null : place([...bags[b]], b, id, intro));
                     // boxed in against the world edge with no unused turn left: a short landing buys room to turn around
                     if (!made) made = place(['landing'], b, id, intro);
@@ -1237,11 +1238,12 @@
         }
 
         retirePassedAreas() {
+            if (this.s.preview) return;
             if ([...(this.s.remotes?.values?.() || [])].some(player => player.st && !player.done && (player.st.checkpoint || 0) < this.cp.id)) return;
             if (this.cp.id <= (this.retiredArea || 0)) return;
             this.retiredArea = this.cp.id;
             const cutoff = this.cp.y + 1400;
-            const keep = p => p.boundary || p.ground || (p.by ?? p.cy ?? p.y ?? p.py ?? 0) < cutoff;
+            const keep = p => p.boundary || p.ground || (p.by ?? p.cy ?? p.y ?? p.py ?? p.surfaceY ?? 0) < cutoff;
             for (const list of [this.solids, this.movers, this.meteors, this.spikes, this.saws, this.lasers,
                 this.springs, this.boxes, this.drills, this.crumbles, this.balls, this.blinkers, this.towers, this.lanes, this.debris, this.climbPath]) {
                 let count = 0;
@@ -1262,6 +1264,8 @@
                 return false;
             }
             this.build();
+            this.botRoute = null;
+            this.testTeleportVersion = (this.testTeleportVersion || 0) + 1;
             this.retiredArea = 0;
             this.cp = this.checkpoints[index];
             Object.assign(this.me, { x: this.cp.x, y: this.cp.y - this.me.h - 2, vx: 0, vy: 0, onGround: false, ground: null });
@@ -2170,13 +2174,14 @@
         }
 
         // The factory hall: riveted I-beam columns, cross bracing and a roof truss, plus the press frames that carry each drill.
-        drawFactoryFrame(ctx, c, top, bottom) {
+        drawFactoryFrame(ctx, c, top, bottom, left = -Infinity, right = Infinity) {
             const y0 = c.top - 220, y1 = c.bottom + 120, upper = Math.max(y0, top - 40), lower = Math.min(y1, bottom + 40);
             if (upper >= lower) return;
             const cols = c.columns, low = this.s.graphics?.low || this.s.lowDetail;
             ctx.strokeStyle = 'rgba(71,85,105,.5)'; ctx.lineWidth = 4; ctx.beginPath();
             for (let i = 0; i + 1 < cols.length; i++) {
                 const a = cols[i] + 13, b = cols[i + 1] - 13;
+                if (b < left || a > right) continue;
                 for (let y = y0 + 60; y < y1 - 40; y += 340) {
                     const yb = Math.min(y + 340, y1 - 40);
                     if (yb < upper || y > lower) continue;
@@ -2186,6 +2191,7 @@
             }
             ctx.stroke();
             for (const x of cols) {
+                if (x + 17 < left || x - 17 > right) continue;
                 ctx.fillStyle = '#1e293b'; ctx.fillRect(x - 13, upper, 26, lower - upper);
                 ctx.fillStyle = '#334155'; ctx.fillRect(x - 4, upper, 8, lower - upper);
                 ctx.fillStyle = '#475569'; ctx.fillRect(x - 13, upper, 3, lower - upper); ctx.fillRect(x + 10, upper, 3, lower - upper);
@@ -2199,15 +2205,17 @@
                 const a = cols[0] - 20, b = cols[cols.length - 1] + 20;
                 ctx.fillStyle = '#1e293b'; ctx.fillRect(a, y0 - 8, b - a, 12); ctx.fillRect(a, y0 + 40, b - a, 10);
                 ctx.strokeStyle = '#475569'; ctx.lineWidth = 4; ctx.beginPath();
-                for (let x = a; x < b - 40; x += 60) { ctx.moveTo(x, y0 + 44); ctx.lineTo(x + 30, y0); ctx.lineTo(x + 60, y0 + 44); }
+                const start = Number.isFinite(left) ? a + Math.max(0, Math.floor((left - 60 - a) / 60)) * 60 : a;
+                for (let x = start; x < Math.min(b - 40, right); x += 60) { ctx.moveTo(x, y0 + 44); ctx.lineTo(x + 30, y0); ctx.lineTo(x + 60, y0 + 44); }
                 ctx.stroke();
                 ctx.fillStyle = '#fbbf24';
-                for (let x = a + 40; x < b; x += 360) { ctx.beginPath(); ctx.arc(x, y0 + 58, 6, 0, TAU); ctx.fill(); }
+                const light = Number.isFinite(left) ? a + 40 + Math.max(0, Math.ceil((left - 6 - a - 40) / 360)) * 360 : a + 40;
+                for (let x = light; x < Math.min(b, right + 6); x += 360) { ctx.beginPath(); ctx.arc(x, y0 + 58, 6, 0, TAU); ctx.fill(); }
             }
             for (const d of this.drills) {
                 if (d.chamber !== c.id || !d.gantry) continue;
                 const beamY = d.mountY - 50, [g0, g1] = d.gantry;
-                if (beamY > lower || d.surfaceY < upper) continue;
+                if (beamY > lower || d.surfaceY < upper || g1 + 8 < left || g0 - 8 > right) continue;
                 ctx.fillStyle = '#292524';
                 for (const x of [g0, g1 - 14]) ctx.fillRect(x, beamY, 14, d.surfaceY - beamY);
                 ctx.fillStyle = '#44403c'; ctx.fillRect(g0 - 8, beamY - 4, g1 - g0 + 16, 18);
@@ -2217,7 +2225,7 @@
         }
 
         // Space station: lattice pylons with marker lights, broken where asteroid lanes cross the chamber.
-        drawStationFrame(ctx, c, top, bottom) {
+        drawStationFrame(ctx, c, top, bottom, left = -Infinity, right = Infinity) {
             const y0 = c.top - 220, y1 = c.bottom + 140, upper = Math.max(y0, top - 40), lower = Math.min(y1, bottom + 40);
             if (upper >= lower) return;
             const gaps = this.lanes.filter(l => l.chamber === c.id && l.axis === 'x').map(l => [l.y - 70, l.y + l.h + 20]);
@@ -2230,6 +2238,7 @@
             }
             if (from < y1) segments.push([from, y1]);
             for (const x of c.columns) {
+                if (x + 13 < left || x - 13 > right) continue;
                 for (const [a, b] of segments) {
                     if (b < upper || a > lower) continue;
                     ctx.fillStyle = 'rgba(30,27,75,.85)'; ctx.fillRect(x - 9, a, 18, b - a);
@@ -2247,7 +2256,8 @@
                 const a = c.columns[0] - 30, b = c.columns[c.columns.length - 1] + 30;
                 ctx.fillStyle = '#312e81'; roundRect(ctx, a, y0 - 10, b - a, 22, 10); ctx.fill();
                 ctx.fillStyle = '#a5b4fc'; ctx.fillRect(a + 10, y0 - 10, b - a - 20, 3);
-                for (let x = a + 30; x < b - 30; x += 46) { ctx.fillStyle = ihash(Math.round(x), Math.round(y0)) % 3 ? '#1e1b4b' : '#67e8f9'; ctx.fillRect(x, y0 - 2, 22, 7); }
+                const start = Number.isFinite(left) ? a + 30 + Math.max(0, Math.floor((left - 22 - a - 30) / 46)) * 46 : a + 30;
+                for (let x = start; x < Math.min(b - 30, right); x += 46) { ctx.fillStyle = ihash(Math.round(x), Math.round(y0)) % 3 ? '#1e1b4b' : '#67e8f9'; ctx.fillRect(x, y0 - 2, 22, 7); }
             }
         }
 
@@ -2708,8 +2718,8 @@
             const visible = this.drawIndex?.items === this.drawList ? this.drawIndex.query(top, bottom) : this.drawList;
             for (const chamber of this.challenges) {
                 if (!chamber || chamber.left - 120 > right || chamber.right + 120 < left || chamber.top - 260 > bottom || chamber.bottom + 160 < top) continue;
-                if (chamber.bi === 1) this.drawFactoryFrame(ctx, chamber, top, bottom);
-                else if (chamber.bi === 3) this.drawStationFrame(ctx, chamber, top, bottom);
+                if (chamber.bi === 1) this.drawFactoryFrame(ctx, chamber, top, bottom, left, right);
+                else if (chamber.bi === 3) this.drawStationFrame(ctx, chamber, top, bottom, left, right);
             }
             for (const p of visible) {
                 if (p.boundary || p.x > right + 200 || p.x + p.w < left - 200) continue;
@@ -3082,6 +3092,7 @@
                 .sort((a, b) => a.y - b.y)[0] || this.stage;
             body.y = support.y - body.h;
             body.vx = body.vy = 0; body.onGround = true; body.ground = support;
+            body.tx = body.x; body.ty = body.y; body.wall = 0;
         }
 
         hill() {

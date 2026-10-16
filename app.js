@@ -429,6 +429,11 @@
             if (window.NexusApp?.syncStudyTimeEntry) await window.NexusApp.syncStudyTimeEntry(session);
         }
 
+        emptyCloudSnapshot() {
+            const { currentView, flashcards, studyHistory, ...state } = new AppStateEngine().state;
+            return { version: "1.0.0", state, flashcards: [], studyHistory: [] };
+        }
+
         async exportAppState() {
             const stateSnapshot = JSON.parse(JSON.stringify({
                 profile: this.state.profile,
@@ -4600,6 +4605,11 @@
                 }
                 const delta = Math.min(0.1, Math.max(0, (now - this.multiplayerFrameTime) / 1000));
                 this.multiplayerFrameTime = now;
+                if (document.body.classList.contains('mpg-active')) {
+                    this.livePreviews.clear();
+                    this.multiplayerFrame = requestAnimationFrame(animate);
+                    return;
+                }
                 const drawPreviews = now - (this.lastPreviewDrawAt ?? -Infinity) >= 1000 / (window.StudBudArcade?.graphicsProfile().previewFps || 24);
                 if (drawPreviews) {
                     this.lastPreviewDrawAt = now;
@@ -5261,8 +5271,22 @@
             const support = near.find(p => p !== b.ground && !p.wall && !p.off && p.y >= b.y + b.h
                 && p.y < b.y + b.h + 200 && p.x < b.x && p.x + p.w > b.x + b.w + 40);
             const stepDown = support && { ...support, surface: support, x: U.clamp(b.x + forward * 240, support.x + 30, support.x + support.w - 60), w: 40 };
+            if (stepDown) for (const spring of actor.springs) {
+                if (spring.y + spring.h !== support.y) continue;
+                const center = stepDown.x + stepDown.w / 2;
+                if (center + b.w / 2 + 20 < spring.x || center - b.w / 2 - 20 > spring.x + spring.w) continue;
+                stepDown.x = U.clamp((forward > 0 ? spring.x - b.w / 2 - 20 : spring.x + spring.w + b.w / 2 + 20)
+                    - stepDown.w / 2, support.x + 30, support.x + support.w - 60);
+            }
             const shortcuts = [route.list[index + 3], route.list[index + 2]].filter(p => p && !p.off && !p.laneTarget
                 && p.y < b.y + b.h && b.y + b.h - p.y < 450);
+            const nearby = (x, y, w, h) => x < b.x + 1100 && x + w > b.x - 1100 && y < b.y + 900 && y + h > b.y - 1500;
+            const springs = actor.springs.filter(p => nearby(p.x, p.y, p.w, p.h));
+            const lasers = actor.lasers.filter(p => nearby(p.x, p.y, p.w, p.h));
+            const drills = actor.drills.filter(p => nearby(p.x - p.width / 2, p.mountY - 34, p.width, p.surfaceY - p.mountY + 34));
+            const debris = actor.debris.filter(p => nearby(p.x - p.r, p.lane.y0, p.r * 2, p.lane.y1 - p.lane.y0));
+            const saws = actor.saws.filter(p => nearby(p.cx - p.r, p.cy - p.amp - p.r, p.r * 2, (p.amp + p.r) * 2));
+            const balls = actor.balls.filter(p => nearby(p.px - p.len - p.r, p.py - p.len - p.r, (p.len + p.r) * 2, (p.len + p.r) * 2));
             const targets = target.surface === b.ground ? [target] : [...shortcuts, target, ...obstacles.filter(p => forward * (p.x + p.w / 2 - b.x - b.w / 2) > 0)
                 .sort((a, c) => Math.abs(a.x - b.x) - Math.abs(c.x - b.x)).slice(0, 2), ...(stepDown ? [stepDown] : [])];
             for (const destination of targets) {
@@ -5286,10 +5310,10 @@
                         me: { ...b, ground: clones.get(b.ground) || null }, solids: [...clones.values()],
                         res: new window.StudBudArcade.Resource('Energy', '#fff', 100, actor.res.value),
                         captureCheckpoint() {}, dead: 0, finished: false, stuckT: 0, strandedT: 0,
-                        springs: actor.springs.map(p => ({ ...p })), boxes: [],
-                        lasers: actor.lasers.map(p => ({ ...p })), drills: actor.drills.map(p => ({ ...p })),
-                        debris: actor.debris.map(p => ({ ...p })), saws: actor.saws.map(p => ({ ...p })),
-                        balls: actor.balls.map(p => ({ ...p }))
+                        springs: springs.map(p => ({ ...p })), boxes: [],
+                        lasers: lasers.map(p => ({ ...p })), drills: drills.map(p => ({ ...p })),
+                        debris: debris.map(p => ({ ...p })), saws: saws.map(p => ({ ...p })),
+                        balls: balls.map(p => ({ ...p }))
                     });
                     sim.s = { ...actor.s, game: sim, spend(n) { return sim.res.spend(n); } };
                     const simulatedPlan = { ...plan, target: { ...destination, surface: clones.get(surface) || surface } };
@@ -5371,7 +5395,10 @@
                 this.skylineCut(demo, game, c);
             }
             const S = demo.sky;
-            if (game.finished) return;
+            if (c - S.sceneStarted >= 15 || game.finished) {
+                this.skylineCut(demo, game, c);
+                return;
+            }
             if (game.cp.id > S.start) {
                 S.reachT = S.reachT ?? c;
                 if (c - S.reachT > 0.9) { this.skylineCut(demo, game, c); return; }
@@ -5382,14 +5409,17 @@
         skyPlace(game, S, node, c) {
             const me = game.me;
             me.x = node.x + node.w / 2 - me.w / 2; me.y = node.y - me.h; me.vx = 0; me.vy = 0;
-            Object.assign(game, { dash: 0, kick: 0, snapCam: true, stuckX: undefined });
+            Object.assign(me, { onGround: false, ground: null, wall: 0 });
+            Object.assign(game, { dash: 0, kick: 0, dashCd: 0, buffer: 0, coyote: .1,
+                airJumps: 1, sprung: false, wallDir: 0, finished: false, dead: 0,
+                stuckT: 0, strandedT: 0, snapCam: true, stuckX: undefined, stuckY: undefined });
             S.jump = null; S.lastProg = c;
         }
 
         // Presses the same keys a player would; the real game physics does the movement. Gets teleported forward only if it ever stalls.
         skyDrive(game, S, R, c, hold, tap) {
             const me = game.me, list = R.list, cx = me.x + me.w / 2, feet = me.y + me.h;
-            const gi = list.indexOf(me.ground);
+            const gi = list.findLastIndex(p => p === me.ground || p.surface === me.ground);
             if (me.onGround && gi >= 0 && gi !== S.cur) {
                 if (gi > S.cur) S.lastProg = c;
                 S.cur = gi; S.flagDone = !R.flags.has(gi); S.jump = null; S.fail = 0; S.runBack = false;
@@ -5535,7 +5565,7 @@
             const S = demo.sky, me = game.me, cps = game.checkpoints, R = this.skyRoute(game);
             const k = (S.start + 1) % cps.length;
             const n = R.list[R.cpNode[k]];
-            S.start = k; S.reachT = undefined; S.cur = R.cpNode[k]; S.flagDone = true;
+            S.start = k; S.sceneStarted = c; S.reachT = undefined; S.cur = R.cpNode[k]; S.flagDone = true;
             this.skyPlace(game, S, n, c);
             me.x = cps[k].x + 20 - me.w / 2; me.face = 1;
             Object.assign(game, { cp: cps[k], dead: 0, tideY: cps[k].y + 1000 });
@@ -5671,6 +5701,13 @@
 
         stepSkylineBot(demo, bot, index, dt) {
             const game = demo.game, now = performance.now(), route = this.skyRoute(game);
+            if (game.testTeleportVersion && bot.st?.teleportVersion !== game.testTeleportVersion) {
+                const i = route.cpNode[game.cp.id], start = route.list[i];
+                bot.st = { i, checkpoint: game.cp.id, teleportVersion: game.testTeleportVersion, jump: null, air: false, moving: false };
+                Object.assign(bot, { x: start.x + 10 + index * 8, y: start.y - 44,
+                    vx: 0, vy: 0, onGround: true, ground: start, done: false, respawn: 0 });
+                bot.ai.rechargeAt = 0;
+            }
             if (!bot.st) {
                 const start = route.list[0];
                 bot.w = 26; bot.h = 44; bot.st = { i: 0, flagDone: true, jump: null, wait: 0, air: false, moving: false };

@@ -11,6 +11,18 @@ const A = sandbox.window.StudBudArcade, U = A.util;
 const makeGame = seed => new A.games.skyline({ seed, local: { color: '#fff' }, user: { id: 'test' } });
 const maps = [];
 const SEEDS = [1, 42, 12345, 67890, 45678, 0xffffffff];
+{
+    const game = makeGame(42);
+    const machines = [...game.drills];
+    game.cp = game.checkpoints[1];
+    game.retirePassedAreas();
+    assert.equal(game.drills.length, machines.length, 'reaching Factory must not retire its lethal machinery');
+    assert.ok(game.drills.every(d => machines.includes(d)), 'cleanup retains the actual moving hazard objects');
+    game.cp = game.checkpoints[2];
+    game.retirePassedAreas();
+    assert.ok(game.drills.length < machines.length, 'machinery far below Space can still be retired');
+    assert.ok(game.drills.every(d => d.surfaceY < game.cp.y + 1400), 'machine retirement uses its real deck height');
+}
 for (const seed of SEEDS) {
     const game = makeGame(seed), again = makeGame(seed);
     maps.push(game);
@@ -44,6 +56,7 @@ for (const seed of SEEDS) {
         if (c.introductory) assert.ok(c.nodes.every(p => !p.crumble && !p.blink), 'opening chambers stay stable');
     }
     const factory = game.challenges.filter(c => c.bi === 1), space = game.challenges.filter(c => c.bi === 3);
+    assert.equal(factory[0].pieces[0], 'belt-gauntlet', 'factory starts with the lethal conveyor gauntlet, not a long chain of plain jumps');
     assert.ok(factory.length >= 3 && space.length >= 3, 'factory and space each get a real stretch');
     assert.ok(new Set(factory.flatMap(c => c.pieces)).size >= 12, 'the factory works through its whole deck of set pieces');
     assert.ok(new Set(space.flatMap(c => c.pieces)).size >= 10, 'space works through its whole deck of set pieces');
@@ -415,7 +428,11 @@ console.log('Small-lip step-ups and ceiling corner correction passed.');
     assert.ok(Math.abs(g.hazardClock - 1.1) < 1e-9);
     s.toast = () => {}; s.setGoal = value => { s.goal = value; };
     for (const index of [1, 2, 0]) {
+        g.botRoute = { stale: true };
+        const version = g.testTeleportVersion || 0;
         assert.equal(g.testTeleport(index), true);
+        assert.equal(g.botRoute, null, 'rebuilt geometry invalidates cached bot route references');
+        assert.equal(g.testTeleportVersion, version + 1);
         assert.equal(g.cp.id, index); assert.equal(g.me.y + g.me.h + 2, g.cp.y);
         assert.equal(g.me.vx, 0); assert.equal(g.dead, 0);
         assert.ok(g.solids.some(p => p.y === g.cp.y && p.x <= g.me.x && p.x + p.w >= g.me.x + g.me.w), 'teleport restores a safe biome landing');
@@ -461,6 +478,39 @@ console.log('Small-lip step-ups and ceiling corner correction passed.');
     }
 }
 console.log('Staff-only flight/invincibility and complete warning/inactive platform rendering passed.');
+
+for (const game of maps) for (const fps of [30, 60, 120]) {
+    for (const belt of game.solids.filter(p => p.factoryBelt)) {
+        const index = game.climbPath.indexOf(belt), previous = game.climbPath[index - 1];
+        const direction = Math.sign(belt.x + belt.w / 2 - previous.x - previous.w / 2);
+        const machines = game.drills.filter(d => d.surfaceY === belt.y && d.x > belt.x && d.x < belt.x + belt.w);
+        for (const machine of machines) {
+            let crossed = false;
+            for (let phase = 0; phase < 32 && !crossed; phase++) {
+                const clearance = machine.width / 2 + 13 + 20;
+                const start = machine.x - direction * clearance, end = machine.x + direction * clearance;
+                const sim = Object.create(game);
+                Object.assign(sim, {
+                    me: { x: start - 13, y: belt.y - 44, w: 26, h: 44, vx: 0, vy: 0, face: direction, onGround: true, ground: belt },
+                    res: new A.Resource('Energy', '#fff', 100, 100), dead: 0, finished: false,
+                    stuckT: 0, strandedT: 0, tideY: belt.y + 1200, cp: game.checkpoints[1],
+                    drills: machines.map(d => ({ ...d })), springs: [], spikes: [], saws: [], balls: [], debris: [], lasers: [],
+                    captureCheckpoint() {}, particles: { burst() {}, update() {} }
+                });
+                sim.s = { game: sim, t: 0, axis: () => ({ x: direction }), down: () => false, pressed: () => false,
+                    spend: n => sim.res.spend(n), toast() {}, sfx() {}, setGoal() {} };
+                for (let frame = 0; frame < fps * 2 && !sim.dead; frame++) {
+                    sim.hazardClock = phase * machine.period / 32 - machine.phase + frame / fps;
+                    sim.drills.forEach(d => sim.updateDrill(d, sim.hazardClock));
+                    sim.updatePlayer(1 / fps);
+                    if (direction * (sim.me.x + 13 - end) >= 0 && !sim.dead) { crossed = true; break; }
+                }
+            }
+            assert.ok(crossed, `${fps} FPS: each ${belt.motif} machine has a real, survivable walking window against its conveyor`);
+        }
+    }
+}
+console.log('All conveyor machinery has survivable timed crossings with real belt physics on six layouts at 30/60/120 FPS.');
 
 for (const fps of [30, 60, 120]) {
     const game = makeGame(42), s = game.s;

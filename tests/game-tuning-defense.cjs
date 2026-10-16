@@ -20,6 +20,18 @@ for (const file of ['multiplayerEngine.js', 'multiplayerGames.js', 'multiplayerG
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), sandbox, { filename: file });
 }
 const A = sandbox.window.StudBudArcade;
+{
+    const g = new A.games.skyline({ seed: 42, local: { color: '#fff' }, user: { id: 'culling-test' } });
+    const chamber = { id: -1, top: -1000, bottom: 1000, columns: Array.from({ length: 100 }, (_, i) => i * 500) };
+    for (const method of ['drawFactoryFrame', 'drawStationFrame']) {
+        drawCalls = 0;
+        g[method](ctx, chamber, -1300, 1200);
+        const full = drawCalls;
+        drawCalls = 0;
+        g[method](ctx, chamber, -1300, 1200, 900, 1900);
+        assert.ok(drawCalls < full * .15, `${method} skips at least 85% of draw operations outside a narrow viewport`);
+    }
+}
 function session(mode, id = 'host', ids = ['host', 'guest', 'ally', 'rival']) {
     const events = [], messages = [], taps = new Set();
     const s = {

@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const source = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 const storage = new Map(), nodes = new Map(), events = new Map();
 let initializations = 0, timers = 0;
-let snapshot = { state: { courses: [{ code: 'local', title: 'Offline class' }], settings: { theme: 'dark' } },
+let snapshot = { state: { profile: { graduationYear: 2026 }, courses: [{ code: 'local', title: 'Offline class' }], settings: { theme: 'dark' } },
     flashcards: [{ id: 'local-deck', title: 'Local set', cards: [] }], studyHistory: [] };
 const sandbox = {
     console, Date, Map, Set, JSON,
@@ -22,9 +22,14 @@ const sandbox = {
         addEventListener: (name, callback) => events.set(name, callback),
         NexusApp: {
             init: async () => initializations++,
-            AppState: { exportAppState: async () => JSON.stringify(snapshot), setSaveStatus(message) { this.status = message; } },
+            friendlyErrorMessage: (error, fallback) => error?.message || fallback,
+            AppState: {
+                exportAppState: async () => JSON.stringify(snapshot),
+                emptyCloudSnapshot: () => ({ state: { profile: { graduationYear: 2026 }, courses: [], settings: { theme: 'dark' } }, flashcards: [], studyHistory: [] }),
+                setSaveStatus(message) { this.status = message; }
+            },
             EventBus: { on() {} }, recoverOwnedCommunityDecks: async () => {}, refreshAdminAccess() {},
-            restoreCloudSnapshot: async data => { snapshot = data; }
+            restoreCloudSnapshot: async data => { snapshot = JSON.parse(JSON.stringify(data)); }
         }
     }
 };
@@ -53,17 +58,42 @@ async function run() {
     await cloud.connectOnline();
     assert.equal(cloud.offlineMode, true, 'offline reconnect requests do not pretend to sync');
 
-    const remote = { state: { courses: [{ code: 'remote', title: 'Cloud class' }], settings: { theme: 'dark' } },
+    const remote = { state: { profile: { graduationYear: 2027 }, courses: [{ code: 'remote', title: 'Cloud class' }], settings: { theme: 'dark' } },
         flashcards: [{ id: 'remote-deck', title: 'Cloud set', cards: [] }], studyHistory: [] };
     sandbox.window.navigator.onLine = true;
     cloud.client = { from: () => ({ select() { return this; }, eq() { return this; }, maybeSingle: async () => ({ data: { data: remote } }) }) };
     await cloud.openAccount({ id: 'account', user_metadata: { username: 'student' } });
     assert.equal(snapshot.flashcards.length, 2, 'first account connection retains offline and cloud decks');
     assert.equal(snapshot.state.courses.length, 2);
+    assert.equal(snapshot.state.profile.graduationYear, 2027, 'untouched guest profile defaults do not conflict with an existing account');
     assert.equal(storage.get('STUDBUD_LOCAL_ONLY_DATA'), undefined);
     assert.equal(cloud.offlineMode, false);
     assert.equal(cloud.accountReady, true);
     assert.equal(storage.get('STUDBUD_LOCAL_MODE'), undefined);
+    const base = JSON.parse(JSON.stringify(snapshot));
+    storage.set('STUDBUD_CLOUD_SYNC_BASE', JSON.stringify(base));
+    snapshot.state.profile.graduationYear = 2028;
+    remote.state.profile.graduationYear = 2029;
+    cloud.accountReady = false;
+    cloud.client.auth = { signInWithPassword: async () => ({ data: { user: { id: 'account' } } }) };
+    sandbox.document.getElementById('login-username').value = 'student';
+    sandbox.document.getElementById('login-password').value = 'not-a-real-password';
+    let resolutions = 0;
+    const renderConflict = cloud.renderConflictResolution;
+    cloud.renderConflictResolution = (conflict, message) => {
+        resolutions++;
+        assert.match(message, /both devices/i);
+        assert.equal(conflict.local.state.profile.graduationYear, 2028);
+        assert.equal(conflict.remoteSnapshot.state.profile.graduationYear, 2029);
+    };
+    await cloud.handleLogin({ preventDefault() {} });
+    assert.equal(resolutions, 1, 'password sign-in preserves recovery choices for genuine concurrent edits');
+    assert.equal(snapshot.state.profile.graduationYear, 2028, 'conflicts never overwrite device data');
+    cloud.renderConflictResolution = renderConflict;
+    snapshot = base;
+    remote.state.profile.graduationYear = 2027;
+    await cloud.openAccount({ id: 'account' });
+    assert.equal(cloud.pendingConflict, null, 'successful retries clear stale conflict state');
     events.get('offline')();
     assert.equal(cloud.offlineMode, true);
     const before = JSON.stringify(snapshot);

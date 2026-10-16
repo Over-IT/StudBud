@@ -404,7 +404,7 @@
                 await this.openAccount(data.user);
             } catch (error) {
                 console.error('[StudBudCloud] Sign-in failed:', error);
-                this.setAuthStatus(this.friendlyAuthError(error, 'Could not sign in. Check your username and password, then try again.'), true);
+                this.reportAccountError(error);
             }
         }
 
@@ -484,6 +484,7 @@
         }
 
         async loadAccount(user, version) {
+            this.pendingConflict = null;
             this.setAuthStatus('');
             const { data: row, error } = await this.client
                 .from('studbud_user_data')
@@ -522,7 +523,10 @@
                 const local = JSON.parse(await window.NexusApp.AppState.exportAppState());
                 if (version !== this.accountVersion) return;
                 try {
-                    const merged = StudBudCloudSync.mergeData(JSON.parse(savedBase), local, remoteSnapshot);
+                    const base = !previousAccount
+                        ? window.NexusApp.AppState.emptyCloudSnapshot()
+                        : JSON.parse(savedBase);
+                    const merged = StudBudCloudSync.mergeData(base, local, remoteSnapshot);
                     await window.NexusApp.restoreCloudSnapshot(merged);
                     this.initialSnapshot = remoteSnapshot;
                 } catch (mergeError) {

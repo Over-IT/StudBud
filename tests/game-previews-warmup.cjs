@@ -96,11 +96,62 @@ for (const position of previewPositions) {
 assert.doesNotMatch(source, /drawRecordedCityPreview|recordedCityPreview/);
 console.log('Live parkour previews have consistent physics and camera timing at 30, 60 and 120 FPS.');
 
+{
+    const c = canvas(200, 112);
+    app.drawLivePreview(c, 'skyline', 1000);
+    const demo = app.livePreviews.get(c), game = demo.game;
+    const count = game.solids.length, scenes = new Set();
+    for (let frame = 1; frame <= 650; frame++) {
+        assert.equal(app.drawLivePreview(c, 'skyline', 1000 + frame * 100), true);
+        scenes.add(demo.sky.start);
+        assert.equal(game.solids.length, count, 'looping previews retain scenery for revisited biomes');
+        if (demo.clock - demo.sky.sceneStarted < .11) {
+            const visible = game.drawList.filter(p => p.x < game.cam.x + 900 && p.x + p.w > game.cam.x
+                && p.y < game.cam.y + demo.session.vh && p.y + p.h > game.cam.y);
+            assert.ok(visible.length, 'each preview scene starts with visible level geometry');
+        }
+    }
+    assert.equal(scenes.size, game.checkpoints.length, 'the preview rotates through every checkpoint instead of stalling');
+    assert.equal(demo.sky.start, 1, 'preview scenes loop back through the city after space');
+    assert.equal(game.retiredArea || 0, 0);
+}
+console.log('Looping City Escape previews preserve visible scenery and rotate through every biome.');
+
+{
+    let frame;
+    const oldRaf = sandbox.requestAnimationFrame, oldBody = sandbox.document.body;
+    sandbox.requestAnimationFrame = callback => { frame = callback; return 1; };
+    sandbox.document.body = { classList: { contains: name => name === 'mpg-active' } };
+    sandbox.document.visibilityState = 'visible';
+    sandbox.Router = { activeRoute: 'multiplayer' };
+    const backgroundApp = Object.create(sandbox.window.TestApp.prototype);
+    backgroundApp.livePreviews = new Map([[{}, {}]]);
+    backgroundApp.startMultiplayerAnimation();
+    frame(performance.now() + 16);
+    assert.equal(backgroundApp.livePreviews.size, 0, 'covered lobby previews release their simulation while an actual game is open');
+    sandbox.requestAnimationFrame = oldRaf;
+    sandbox.document.body = oldBody;
+    delete sandbox.Router;
+}
+
 const demoFor = mode => {
     const c = canvas(900, 500);
     assert.equal(app.drawLivePreview(c, mode, 1000), true);
     return app.livePreviews.get(c);
 };
+{
+    const demo = demoFor('skyline');
+    demo.session.testing = true;
+    for (const index of [1, 2, 0]) {
+        assert.equal(demo.game.testTeleport(index), true);
+        for (const [i, bot] of demo.bots.entries()) {
+            app.stepSkylineBot(demo, bot, i, 1 / 60);
+            assert.equal(bot.st.checkpoint, index, 'staff teleports relocate simulated players to the selected biome');
+            assert.equal(bot.st.teleportVersion, demo.game.testTeleportVersion);
+            assert.ok(!bot.ground || demo.game.solids.includes(bot.ground), 'bot actors never keep geometry from before the level rebuild');
+        }
+    }
+}
 for (const mode of ['skyline', 'duel']) {
     const { session, game, hold, tap } = demoFor(mode);
     hold.clear(); tap.clear();
@@ -824,6 +875,29 @@ for (const bot of kickoff.bots) {
     assert.equal(bot.vx, 0); assert.equal(bot.vy, 0);
 }
 console.log('Forced bot respawns, parkour fall recovery and soccer kickoff resets passed.');
+{
+    const demo = demoFor('duel'), bot = demo.bots[0];
+    const oldRaf = sandbox.requestAnimationFrame;
+    sandbox.requestAnimationFrame = () => 1;
+    for (const fps of [30, 60, 120]) for (let cycle = 0; cycle < 3; cycle++) {
+        bot.y = bot.ty = demo.game.H + 100;
+        bot.x = bot.tx = -500;
+        bot.respawn = .001;
+        const now = performance.now();
+        const live = {
+            lastFrame: now - 1000 / fps, mode: 'duel', countdown: 0, countdownHidden: true,
+            practice: true, t: 0, game: demo.game, ctx: context, remotes: new Map([[bot.id, bot]]),
+            justPressed: new Set(), mouse: {}, checkEnd: noop, updateMeter: noop,
+            dpr: 1, scale: 1, vw: 900, vh: 500,
+            onTick: dt => app.stepDuelBots(demo, dt)
+        };
+        A.Session.prototype.frame.call(live, now);
+        assert.equal(bot.tx, bot.x, 'respawn resets the horizontal interpolation target');
+        assert.equal(bot.ty, bot.y, 'the actual remote-interpolation frame preserves the new spawn');
+        assert.ok(bot.onGround && bot.ground && bot.y + bot.h <= demo.game.stage.y, `${fps} FPS repeated respawn stays on map support`);
+    }
+    sandbox.requestAnimationFrame = oldRaf;
+}
 for (const fps of [30, 60, 120]) {
     const demo = demoFor('duel'), bot = demo.bots[0];
     Object.assign(bot, { x: demo.game.stage.x + 100, y: demo.game.stage.y + 300, invuln: 0 });
@@ -844,7 +918,7 @@ assert.equal(rememberedLava.lavaVisibility[lavaIndex], 1);
 rememberedLava.me.x = 100; rememberedLava.me.y = 100;
 rememberedLava.revealLava(5);
 assert.equal(rememberedLava.lavaVisibility[lavaIndex], 1, 'revealed lava remains known after leaving');
-for (const [fps, seed] of [[30, 12345], [60, 67890], [120, 45678]]) {
+for (const [fps, seed] of [[30, 12345], [60, 67890], [120, 45678], [30, 1], [60, 42], [120, 0xffffffff]]) {
     const paced = demoFor('skyline');
     paced.session.seed = seed;
     paced.session.preview = false;
@@ -869,6 +943,7 @@ for (const [fps, seed] of [[30, 12345], [60, 67890], [120, 45678]]) {
     assert.ok(paced.bots.every(bot => bot.st.assist === undefined), 'normal bots never use forward position assists');
     assert.ok(paced.bots.every(bot => bot.st.actor.res.value >= 0 && bot.st.actor.res.value <= 100), 'normal bots spend and refill bounded energy');
     assert.ok(new Set(finishTimes.values()).size > 1, 'different bot paces produce different finish times');
+    console.log(`${fps} FPS seed ${seed}: all three normal-energy bots completed the course.`);
 }
 for (const fps of [30, 60, 120]) {
     const { game } = demoFor('skyline');

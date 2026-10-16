@@ -1,5 +1,10 @@
 # StudBud
 
+City Escape lobby previews rotate through checkpoint scenes without retiring scenery needed by later loops. Guest-to-account sync treats untouched app defaults as the merge baseline, while genuine concurrent edits retain explicit cloud/device recovery choices during sign-in.
+The staff-test biome selector teleports immediately on selection, rebuilding the level and bot routes so backward teleports restore scenery and simulated players follow the selected biome.
+Factory starts with its three-belt crusher/drill gauntlet; the timed production-floor hazards are part of the route immediately after the biome checkpoint.
+Checkpoint cleanup retains machinery by its actual strike-deck height. Covered lobby previews stop simulating during gameplay; factory/station structure is culled horizontally as well as vertically, and bot jump planning clones only hazards in the reachable neighborhood. These optimizations preserve full visual detail and collision timing. King of the Hill respawns reset interpolation targets along with the physical body.
+
 StudBud is a student hub with three parts: **Plan** (classes, assignments, grades, calendar), **Study** (flashcards, focus sessions, study streaks and leaderboards) and **Play** (live multiplayer games and arcade modes powered by your own flashcards, with a coin shop for characters, hats and accessories). Flashcards are study material, not assignments: every non-suspended card is available whenever you want, without due counts or daily study limits. Anki's SM-2 learning/relearning steps, Again/Hard/Good/Easy interval adjustments and leech detection still prioritize practice. Cram does not change learning progress. Only linked tests and quizzes have deadlines. Quiz and game questions are randomized independently.
 
 ### Latest gameplay and grade changes

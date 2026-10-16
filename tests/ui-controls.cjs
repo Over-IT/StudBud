@@ -367,9 +367,15 @@ async function checkPracticeGrading() {
         session.bind();
         session.mode = 'skyline';
         session.game = { cp: { id: 2 }, testTeleport: index => { session.destination = index; } };
+        const select = { dataset: { testBiome: '' }, value: '0' };
+        session.overlay.querySelector = selector => selector === '[data-test-biome]' ? select : null;
         const teleport = new Element(); teleport.dataset.testAction = 'checkpoint';
         session.overlay.handlers.click[0]({ target: { closest: () => teleport } });
         assert.equal(session.destination, testing ? 2 : undefined, 'checkpoint tools are gated to staff sessions');
+        session.destination = undefined;
+        select.value = '1';
+        session.overlay.handlers.change[0]({ target: select });
+        assert.equal(session.destination, testing ? 1 : undefined, 'selecting a biome immediately teleports only in staff tests');
         const leave = new Element();
         leave.classList.add('mpg-leave');
         session.overlay.handlers.click[0]({ target: { closest: () => leave } });

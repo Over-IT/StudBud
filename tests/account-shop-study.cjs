@@ -46,6 +46,11 @@ const Cloud = window.StudBudCloud.constructor;
 const normal = value => clone(value);
 
 async function run() {
+    const emptySnapshot = state.emptyCloudSnapshot();
+    assert.equal(emptySnapshot.state.profile.graduationYear, 2026);
+    assert.equal(emptySnapshot.state.currentView, undefined);
+    emptySnapshot.state.settings.theme = 'light';
+    assert.equal(state.emptyCloudSnapshot().state.settings.theme, 'dark', 'guest merge defaults are independent fresh state');
     let gradeRefreshes = 0;
     const originalRenderUI = app.renderUI;
     app.renderUI = () => gradeRefreshes++;
