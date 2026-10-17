@@ -3247,7 +3247,7 @@
             const nickname = this.gameNickname();
             ['host-game-nickname', 'join-game-nickname'].forEach(id => {
                 const input = document.getElementById(id);
-                if (input && !input.value) input.value = nickname;
+                if (input) input.placeholder = nickname;
             });
         }
 
@@ -3258,11 +3258,13 @@
             return fullName || user?.user_metadata?.username || (window.StudBudCloud?.isGuest?.() ? (profile.guestName || 'Guest') : 'Student');
         }
 
-        // Room nicknames must be 2–20 letters, numbers, spaces, _ or -; display names can include accents, apostrophes or run long.
+        // Player names are optional: a blank name uses your username, so joining never stalls on an empty field.
         gameNickname(preferred) {
             const clean = value => String(value || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
                 .replace(/[^A-Za-z0-9 _-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 20).trim();
-            for (const candidate of [preferred, this.multiplayerDisplayName(), window.StudBudCloud?.user?.user_metadata?.username]) {
+            const cloud = window.StudBudCloud, profile = AppState.get('profile') || {};
+            const username = cloud?.user?.user_metadata?.username;
+            for (const candidate of [preferred, username, cloud?.isGuest?.() ? profile.guestName : '', this.multiplayerDisplayName()]) {
                 const name = clean(candidate);
                 if (name.length >= 2) return name;
             }
@@ -6547,7 +6549,7 @@
         }
 
         async hostGame(form) {
-            const nickname = form.elements.nickname.value.trim();
+            const nickname = this.gameNickname(form.elements.nickname.value);
             const deck = (AppState.get('flashcards') || []).find(item => item.id === form.elements.deckId.value);
             if (!deck) throw new Error('Add a flashcard set before hosting a game.');
             const cards = (deck.cards || []).filter(card => String(card.front || '').trim() && String(card.back || '').trim());
@@ -6597,7 +6599,7 @@
         }
 
         async joinGame(form) {
-            const nickname = form.elements.nickname.value.trim();
+            const nickname = this.gameNickname(form.elements.nickname.value);
             const roomCode = form.elements.roomCode.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
             const room = await window.StudBudCommunityGames.joinRoom(roomCode, nickname);
             this.openHostedGame(room);

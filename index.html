@@ -760,7 +760,7 @@
                                     <div class="hosted-game-setup">
                                     <form id="host-game-form" class="hosted-game-form">
                                         <h4>Host a room</h4>
-                                        <label>Player name<input id="host-game-nickname" name="nickname" type="text" minlength="2" maxlength="20" pattern="[A-Za-z0-9 _\-]{2,20}" required></label>
+                                        <label>Player name<input id="host-game-nickname" name="nickname" type="text" maxlength="20" placeholder="Your username" aria-describedby="host-game-nickname-hint"><small id="host-game-nickname-hint" class="settings-hint">Optional. Leave blank to use your username.</small></label>
                                         <label>Flashcard set<select id="host-game-deck" name="deckId" required></select></label>
                                         <input id="host-game-mode" name="mode" type="hidden" value="skyline">
                                         <p id="chess-setup-note" class="settings-hint hidden">1v1, no timer. Answer correctly to earn one move. Either player can move when ready; while in check, only the checked player moves.</p>
@@ -806,7 +806,7 @@
                                 <section id="multiplayer-join-flow" class="multiplayer-flow hidden" role="tabpanel" aria-labelledby="multiplayer-join-tab">
                                     <form id="join-game-form" class="hosted-game-form join-game-form">
                                         <h4>Join a room</h4>
-                                        <label>Player name<input id="join-game-nickname" name="nickname" type="text" minlength="2" maxlength="20" pattern="[A-Za-z0-9 _\-]{2,20}" required></label>
+                                        <label>Player name<input id="join-game-nickname" name="nickname" type="text" maxlength="20" placeholder="Your username" aria-describedby="join-game-nickname-hint"><small id="join-game-nickname-hint" class="settings-hint">Optional. Leave blank to use your username.</small></label>
                                         <label>6-character room code<input id="join-game-code" name="roomCode" type="text" inputmode="text" autocomplete="off" minlength="6" maxlength="6" pattern="[A-HJ-NP-Z2-9]{6}" required></label>
                                         <button class="secondary-btn" type="submit"><i class="fas fa-right-to-bracket"></i> Join room</button>
                                     </form>
