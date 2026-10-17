@@ -3244,10 +3244,10 @@
                 practiceSelect.disabled = !decks.length;
             }
             if (decks.some(deck => deck.id === previous)) select.value = previous;
-            const nickname = this.multiplayerDisplayName().replace(/[^A-Za-z0-9 _-]/g, '').slice(0, 20);
+            const nickname = this.gameNickname();
             ['host-game-nickname', 'join-game-nickname'].forEach(id => {
                 const input = document.getElementById(id);
-                if (input && !input.value) input.value = nickname.length >= 2 ? nickname : 'Student';
+                if (input && !input.value) input.value = nickname;
             });
         }
 
@@ -3256,6 +3256,17 @@
             const profile = AppState.get('profile') || {};
             const fullName = [profile.firstName, profile.lastName].map(name => String(name || '').trim()).filter(Boolean).join(' ');
             return fullName || user?.user_metadata?.username || (window.StudBudCloud?.isGuest?.() ? (profile.guestName || 'Guest') : 'Student');
+        }
+
+        // Room nicknames must be 2–20 letters, numbers, spaces, _ or -; display names can include accents, apostrophes or run long.
+        gameNickname(preferred) {
+            const clean = value => String(value || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+                .replace(/[^A-Za-z0-9 _-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 20).trim();
+            for (const candidate of [preferred, this.multiplayerDisplayName(), window.StudBudCloud?.user?.user_metadata?.username]) {
+                const name = clean(candidate);
+                if (name.length >= 2) return name;
+            }
+            return 'Student';
         }
 
         profileCosmetics(profile) {
@@ -6574,7 +6585,7 @@
             let room;
             for (let attempt = 0; attempt < 3; attempt++) {
                 try {
-                    room = await window.StudBudCommunityGames.createRoom(this.createRoomCode(), this.multiplayerDisplayName(), deck, mode,
+                    room = await window.StudBudCommunityGames.createRoom(this.createRoomCode(), this.gameNickname(), deck, mode,
                         { staff_test: true, seed, time_limit_seconds: 3600, question_reward: mode === 'chess' ? 1 : 100 });
                     break;
                 } catch (error) {
@@ -7362,7 +7373,7 @@
             try {
                 if (!window.StudBudCloud?.user || window.StudBudCloud.user.is_anonymous || window.StudBudCloud.offlineMode) throw new Error('Sign in and connect to join a bud’s game.');
                 if (this.hostedGameRoom) throw new Error('Leave your current room before joining another game.');
-                const room = await window.StudBudCommunityGames.joinRoom(code, this.multiplayerDisplayName());
+                const room = await window.StudBudCommunityGames.joinRoom(code, this.gameNickname(document.getElementById('join-game-nickname')?.value));
                 Router.navigate('multiplayer');
                 this.openHostedGame(room);
             } catch (error) {
