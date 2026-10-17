@@ -89,12 +89,14 @@ for (const fps of [30, 60, 120]) {
     assert.equal(g.riding, false);
 }
 
-// Whirlpool: spin in, then glide out along the steering direction with no teleport.
+// Whirlpool: automatic spin and launch ignore steering, including the ejection glide.
+let automaticLaunch;
 for (const steer of [{ x: 0, y: 1 }, { x: -1, y: 0 }, { x: 0, y: 0 }]) {
     const s = openRiver(), g = s.game;
     s.testPauseAt = 5000;
     g.pools = [{ x: 1800, y: 900, r: 130, phase: 0, ampX: 0, ampY: 0 }];
     Object.assign(g.me, { x: 1800 + 60, y: 900, vx: 0, vy: 0 });
+    g.whirlpool = { pool: g.pools[0], t: 0, radius: 60, angle: 0 };
     s.axis = () => steer;
     let last = { x: g.me.x, y: g.me.y }, maxStep = 0, released = false, frames = 0, preview = null;
     while (frames < 240) {
@@ -111,10 +113,14 @@ for (const steer of [{ x: 0, y: 1 }, { x: -1, y: 0 }, { x: 0, y: 0 }]) {
     assert.ok(speed > 700, 'launch is fast');
     assert.ok(maxStep < 40, `position is continuous through the launch (max ${maxStep.toFixed(1)}px/frame)`);
     assert.ok(Math.hypot(g.me.x - 1800, g.me.y - 900) > 180, 'boat clears the pool on release');
-    if (steer.x || steer.y) {
-        const dot = (g.me.vx * steer.x + g.me.vy * steer.y) / speed;
-        assert.ok(dot > .99, 'launch follows the held steering direction');
+    const launch = { x: g.me.x, y: g.me.y, vx: g.me.vx, vy: g.me.vy, aim: g.me.aim };
+    for (let i = 0; i < 30; i++) {
+        s.testPauseAt += 1000 / 60;
+        g.update(1 / 60);
     }
+    const result = { launch, glide: { x: g.me.x, y: g.me.y, vx: g.me.vx, vy: g.me.vy } };
+    if (!automaticLaunch) automaticLaunch = result;
+    else assert.deepEqual(result, automaticLaunch, 'held steering cannot change whirlpool spin, launch direction or ejection glide');
 }
 
 // Market leaderboard formats money, not delivery counts.
@@ -130,4 +136,4 @@ for (const moving of [false, true]) {
     A.util.drawFigureTop(context, { color: '#38bdf8', cos: {} }, 0, 0, 15, 0, 1.2, 1, moving);
     A.util.drawFigureTop(context, { color: '#38bdf8', cos: { hat: 'crown', aura: 'flame' } }, 0, 0, 15, 0, 1.2, 1, moving);
 }
-console.log('Shared duel choices, wave surfing at 30/60/120 FPS, shallows shelter, steered whirlpool launches, cash leaderboard and top-down figures passed.');
+console.log('Shared duel choices, wave surfing at 30/60/120 FPS, shallows shelter, automatic whirlpool launches, cash leaderboard and top-down figures passed.');

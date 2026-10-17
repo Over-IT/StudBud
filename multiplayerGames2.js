@@ -29,11 +29,11 @@
             return { x: rect.x - 5, y: rect.y - 5, w: rect.w + 10, h: rect.h + 10 };
         }
 
-        step(dt, accel = 2400, drift = { x: 0, y: 0 }) {
+        step(dt, accel = 2400, drift = { x: 0, y: 0 }, allowSteering = true) {
             const s = this.s, me = this.me;
             this.anim += dt;
             this.stun = Math.max(0, this.stun - dt);
-            const a = this.stun > 0 ? { x: 0, y: 0 } : s.axis();
+            const a = this.stun > 0 || !allowSteering ? { x: 0, y: 0 } : s.axis();
             const len = Math.hypot(a.x, a.y) || 1;
             const sp = this.baseSpeed * this.speedMul;
             const tx = (a.x || a.y ? (a.x / len) * sp : 0) + drift.x;
@@ -798,8 +798,7 @@
         }
 
         launchDir(spin, pos) {
-            const axis = this.s.axis();
-            let dir = Math.hypot(axis.x, axis.y) > 0 ? Math.atan2(axis.y, axis.x) : spin.angle + Math.PI / 2;
+            let dir = spin.angle + Math.PI / 2;
             const room = 260, dy = Math.sin(dir);
             if ((dy < 0 && pos.y - this.bank < room) || (dy > 0 && this.H - this.bank - pos.y < room)) dir = -dir;
             return dir;
@@ -809,7 +808,7 @@
             const s = this.s, me = this.me, now = clock(s);
             this.ejectT = Math.max(0, this.ejectT - dt);
             this.aimLocked = Boolean(this.whirlpool) || this.ejectT > 0;
-            const axis = s.axis(), steering = this.stun <= 0 && !this.whirlpool && Math.hypot(axis.x, axis.y) > 0;
+            const axis = s.axis(), steering = this.stun <= 0 && !this.aimLocked && Math.hypot(axis.x, axis.y) > 0;
             // Surfing a wave face is free: the wave does the work.
             const canMove = !steering || this.riding || s.spend(A.ENERGY_COSTS.river.walk * dt);
             this.speedMul = this.whirlpool ? .22 : canMove ? 1 : .08;
@@ -834,7 +833,7 @@
                 this.surfT = 0;
             }
             const drift = { x: 24 * shelter + this.surgePush, y: 0 };
-            this.step(dt, this.ejectT > 0 ? 240 : 1800, drift);
+            this.step(dt, this.ejectT > 0 ? 240 : 1800, drift, !this.aimLocked);
             this.updateLogs(now);
             this.castCd -= dt; this.hurt = Math.max(0, this.hurt - dt); this.comboT -= dt; this.poolHitCd = Math.max(0, this.poolHitCd - dt);
             if (this.comboT <= 0) this.combo = 0;
@@ -857,7 +856,7 @@
             }
             this.duelCheck(now);
             if (this.whirlpool) {
-                // Spin inward, then lock a launch direction (your steering, or the spin tangent) and glide out along
+                // Spin inward, then lock the spin tangent as the launch direction and glide out along
                 // it before release, so the exit is a clean straight shot with no teleport.
                 const spin = this.whirlpool, pos = this.poolPos(spin.pool, now);
                 spin.t += dt;

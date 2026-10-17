@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const noop = () => {};
+const documentHandlers = new Map();
 let now = 1000, starts = 0, intervals = 0;
 const param = () => ({
     value: 0,
@@ -33,13 +34,14 @@ class AudioContext {
 }
 const sandbox = {
     window: { AudioContext, addEventListener: noop, StudBudArcade: { previewDepth: 0 } },
-    document: { addEventListener: noop }, localStorage: { getItem: () => null },
-    performance: { now: () => now }, Math, console,
+    document: { addEventListener: (name, handler) => documentHandlers.set(name, handler) }, localStorage: { getItem: () => null },
+    performance: { now: () => now }, Math: Object.assign(Object.create(Math), { random: () => 0 }), console,
     setInterval: () => { intervals++; return intervals; }, clearInterval: () => { intervals--; }
 };
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'sfx.js'), 'utf8'), sandbox);
 const sfx = sandbox.window.StudBudSfx;
+assert.ok(!documentHandlers.has('keydown') && !documentHandlers.has('input'), 'typing and slider movement never generate automatic ticking effects');
 let arrangement;
 const musicStep = sfx.musicStep.bind(sfx);
 sfx.musicStep = (style, ...args) => { arrangement = style; return musicStep(style, ...args); };
@@ -59,8 +61,66 @@ for (const [mode, style] of Object.entries(styles)) {
     sfx.endMusic(); assert.equal(sfx.mus, null); assert.equal(intervals, 0);
 }
 assert.equal(new Set(arrangements).size, Object.keys(styles).length, 'games use distinct compositions, not renamed copies');
+{
+    const used = new Set();
+    for (const mode of Object.keys(styles)) {
+        for (const biome of mode === 'skyline' ? [0, 1, 3] : [0]) {
+            sfx.musicBiome = biome;
+            const pool = new Set();
+            for (const random of [0, .5, .999]) {
+                sfx.endMusic(); sfx.musicBiome = biome;
+                sandbox.Math.random = () => random;
+                sfx.startMusic(mode);
+                const first = sfx.mus.style;
+                pool.add(first); used.add(first);
+                const same = sfx.mus;
+                sfx.startMusic(mode);
+                assert.equal(sfx.mus, same, 'ordinary updates never reroll a track');
+                sfx.mus.step = 1024; sfx.mus.next = sfx.ctx.currentTime;
+                sfx.pumpMusic();
+                assert.notEqual(sfx.mus.style, first, 'a complete arrangement rotates without immediately repeating');
+                pool.add(sfx.mus.style); used.add(sfx.mus.style);
+                const selected = sfx.mus.style;
+                sfx.stopMusic(); sfx.startMusic(mode);
+                assert.equal(sfx.mus.style, selected, 'mute/resume retains the selected playlist track');
+                sfx.pumpMusic();
+                if (mode === 'miner' || (mode === 'skyline' && biome === 3)) {
+                    assert.ok(arrangement.quiet && arrangement.bpm <= 80, 'all Mining and Space playlist choices remain calm');
+                }
+            }
+            assert.ok(pool.size >= 2, `${mode} has multiple usable tracks`);
+        }
+    }
+    const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+    const tracks = [...html.matchAll(/<option value="([^"]+)">[^<]+<\/option>/g)]
+        .map(match => match[1]).filter(style => used.has(style));
+    assert.equal(used.size, 19, 'every composed song has a gameplay playlist home');
+    assert.equal(new Set(tracks).size, 19, 'all gameplay songs are also available for preview');
+    sfx.endMusic(); sandbox.Math.random = () => 0;
+}
+{
+    sfx.settings.musicVolume = 0;
+    sfx.startMusic('duel');
+    assert.equal(sfx.mus, null);
+    sfx.update({ musicVolume: .5 });
+    assert.ok(sfx.mus, 'raising music volume from zero starts the active game soundtrack');
+    sfx.endMusic();
+    sfx.startMusic('lagoon');
+    sfx.startMusic('river');
+    assert.equal(sfx.mus.mode, 'river', 'starting a game with the same track as a preview still enables its playlist rotation');
+    sfx.endMusic();
+    const wood = sfx.wood;
+    sfx.wood = () => assert.fail('landing and hit effects must not introduce wooden ticks');
+    try {
+        for (const random of [0, .999]) {
+            sandbox.Math.random = () => random;
+            for (const name of ['hit', 'act']) { now += 1000; sfx.play(name, 'game', 0); }
+        }
+    } finally { sfx.wood = wood; sandbox.Math.random = () => 0; }
+}
 for (const name of ['mine', 'rockBreak', 'crystal', 'cast', 'catch', 'wave', 'whirlpool', 'towerBuild', 'towerUpgrade',
-    'towerShot', 'cannon', 'zap', 'enemySend', 'baseHit', 'jump', 'doubleJump', 'spring', 'dash', 'burn']) {
+    'towerShot', 'cannon', 'zap', 'enemySend', 'baseHit', 'jump', 'doubleJump', 'spring', 'dash', 'burn',
+    'shieldBlock', 'shieldParry', 'shieldBreak', 'hammerSwing', 'hammerSpecial', 'hammerHit', 'fighterFall', 'fighterKO', 'hillTick']) {
     const before = starts; now += 1000; sfx.play(name, 'game', 150);
     assert.ok(starts > before, `${name} synthesizes its action sound`);
     const played = starts; sfx.play(name, 'game', 150); assert.equal(starts, played, 'effects are throttled');
@@ -74,7 +134,7 @@ for (const name of ['mine', 'rockBreak', 'crystal', 'cast', 'catch', 'wave', 'wh
     now += 1000; sfx.play('spring', 'game', 0);
     assert.equal(sfx.springBuffer, buffer, 'spring launch reuses its consistent cached physical resonance');
 }
-for (const voice of ['guitar', 'piano', 'marimba', 'bass', 'bright']) {
+for (const voice of ['guitar', 'piano', 'marimba', 'bass']) {
     const buffer = sfx.acousticBuffer(voice), samples = buffer.getChannelData(0);
     assert.equal(buffer, sfx.acousticBuffer(voice), 'instrument samples are cached rather than regenerated per note');
     assert.ok(samples.every(sample => Number.isFinite(sample) && Math.abs(sample) <= 1), 'instrument samples are finite and normalized');
@@ -83,6 +143,23 @@ for (const voice of ['guitar', 'piano', 'marimba', 'bass', 'bright']) {
 }
 const notes = [], acousticNote = sfx.acousticNote.bind(sfx);
 sfx.acousticNote = (...args) => { notes.push([args[0], args[1], args[2], args[4]]); acousticNote(...args); };
+{
+    const percussion = [], musicNoise = sfx.musicNoise;
+    sfx.musicNoise = (...args) => percussion.push(args);
+    try {
+        for (const mode of Object.keys(styles)) {
+            sfx.startMusic(mode, true); sfx.pumpMusic();
+            notes.length = 0;
+            for (let step = 16; step < 32; step++) musicStep(arrangement, step, step * .125, .125);
+            assert.ok(!notes.some(note => note[0] === 170 && note[3] === 'marimba'), 'songs never add the wooden ticking backbeat');
+            sfx.endMusic();
+        }
+        assert.ok(percussion.length > 0);
+        assert.ok(percussion.every(([, duration, volume]) => duration >= .07 && volume <= .022), 'background percussion uses softer, less abrupt noise rather than sharp ticks');
+    } finally {
+        sfx.musicNoise = musicNoise;
+    }
+}
 sfx.startMusic('skyline', true);
 const sections = [];
 for (let section = 0; section < 4; section++) {
@@ -106,14 +183,13 @@ sfx.endMusic();
     sfx.setMusicBiome('skyline', 0);
     assert.equal(sfx.mus.style, 'summit', 'falling back into City restores its high-energy song');
     assert.ok(moods.city.bpm >= 130 && moods.city.drive && !moods.city.quiet, 'City is explicitly upbeat rather than chill');
-    assert.equal(moods.city.voice, 'bright', 'City uses a bright rhythmic lead instead of the mellow acoustic guitar');
-    assert.equal(moods.city.chords[0][1], 0, 'City opens with a bright major chord');
+    assert.equal(moods.city.voice, 'guitar', 'City returns to its softer guitar arrangement');
+    assert.equal(moods.city.bpm, 136, 'City restores the original pace instead of the intensified 144 BPM version');
     for (const section of [0, 1, 2, 3]) {
         notes.length = 0;
         for (let step = section * 128; step < section * 128 + 16; step++) musicStep(moods.city, step, step * .125, .125);
-        assert.equal(notes.filter(note => note[3] === 'bass').length, 8, 'City keeps an active eighth-note bassline throughout the song');
-        assert.ok(notes.filter(note => note[3] === 'bright').length >= 12, 'City starts with bright lead and offbeat chord stabs, including its bridge');
-        assert.ok(!notes.some(note => note[3] === 'guitar' || note[3] === 'piano'), 'City never falls back to the chill guitar/piano arrangement');
+        assert.equal(notes.filter(note => note[3] === 'bass').length, 2, 'City uses the restrained bassline rather than constant eighth notes');
+        assert.ok(!notes.some(note => note[3] === 'bright'), 'City no longer uses the bright lead');
     }
     assert.ok(moods.factory.bpm >= 115 && moods.factory.drive, 'Factory keeps a driving mechanical pace');
     assert.ok(moods.space.bpm <= 80 && moods.space.quiet, 'Space uses a calm, sparse arrangement');
@@ -127,9 +203,9 @@ sfx.endMusic();
     assert.equal(kicks, 0, 'Space stays free of a driving kick pattern');
     sfx.musicKick = kick;
     sfx.settings.musicStyle = 'zen'; sfx.startMusic('skyline');
-    const manual = sfx.mus;
+    assert.equal(sfx.mus.style, 'summit', 'saved preview tracks never override City');
     sfx.setMusicBiome('skyline', 1);
-    assert.equal(sfx.mus, manual, 'biome changes respect a manually selected song');
+    assert.equal(sfx.mus.style, 'foundry', 'biome changes ignore the preview track choice');
     sfx.settings.musicStyle = 'auto';
     sfx.stopMusic(); sfx.setMusicBiome('skyline', 3);
     assert.equal(sfx.mus, null, 'biome updates never restart intentionally stopped music');
@@ -159,11 +235,14 @@ sfx.endMusic();
     sfx.settings.musicStyle = 'zen';
     for (const mode of Object.keys(styles)) {
         sfx.startMusic(mode, true);
-        assert.equal(sfx.mus.style, 'zen', 'a deliberately chosen track still overrides automatic per-game music');
+        assert.equal(sfx.mus.style, styles[mode], 'a saved global track never overrides a game soundtrack');
         assert.equal(sfx.activeMode, mode, 'game IDs that also name a song still retain their active game');
         sfx.endMusic();
     }
     sfx.settings.musicStyle = 'auto';
+    sfx.startMusic('zen', true);
+    assert.equal(sfx.mus.style, 'zen', 'explicit settings previews can still audition another track');
+    sfx.endMusic();
 }
 {
     const gains = [], createGain = sfx.ctx.createGain;

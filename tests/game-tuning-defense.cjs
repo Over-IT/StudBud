@@ -21,6 +21,11 @@ for (const file of ['multiplayerEngine.js', 'multiplayerGames.js', 'multiplayerG
 }
 const A = sandbox.window.StudBudArcade;
 {
+    const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+    assert.doesNotMatch(app, /fillText\(['"]LOG RIDE['"]/, 'Crossy Road no longer displays the redundant log-riding label');
+    assert.match(app, /effect\.kind === 'log-land'[\s\S]*?ctx\.ellipse/, 'log landings retain their visual ripple');
+}
+{
     const g = new A.games.skyline({ seed: 42, local: { color: '#fff' }, user: { id: 'culling-test' } });
     const chamber = { id: -1, top: -1000, bottom: 1000, columns: Array.from({ length: 100 }, (_, i) => i * 500) };
     for (const method of ['drawFactoryFrame', 'drawStationFrame']) {
@@ -50,6 +55,57 @@ function session(mode, id = 'host', ids = ['host', 'guest', 'ally', 'rival']) {
     };
     s.game = new A.games[mode](s);
     return s;
+}
+for (const fps of [30, 60, 120]) {
+    const s = session('duel'), g = s.game, sounds = [];
+    s.sfx = name => sounds.push(name);
+    g.updateHill = noop; g.updateCamera = noop;
+    g.orb.t = 999; g.invuln = 999;
+    g.me.x = g.stage.x + g.stage.w / 2; g.me.y = g.stage.y - g.me.h;
+    g.shield = 30; g.shieldRest = 1;
+    for (let i = 0; i < fps * 2; i++) g.update(1 / fps);
+    assert.ok(Math.abs(g.shield - 52) < .001, `${fps} FPS: lowered shield recovers exactly 22 points after one second of rest`);
+    g.shield = 90; g.shieldRest = 0;
+    for (let i = 0; i < fps; i++) g.update(1 / fps);
+    assert.equal(g.shield, 100, 'shield regeneration never exceeds full durability');
+    s.down = key => key === 'KeyS'; g.stun = 0;
+    g.shield = 70;
+    for (let i = 0; i < fps / 2; i++) g.update(1 / fps);
+    assert.ok(g.shield < 70, 'holding guard wears down the shield instead of healing it');
+    s.down = () => false;
+    g.breakShield();
+    assert.equal(sounds.at(-1), 'shieldBreak', 'breaking guard uses its own shattering effect');
+    g.hitlag = .2;
+    for (let i = 0; i < fps * 2; i++) g.update(1 / fps);
+    assert.ok(Math.abs(g.shield - 22) < .001, 'broken shields recover while lowered, including during hitlag');
+    assert.ok(g.shieldBreak > 0, 'recovery does not bypass the guard lockout');
+    g.respawn = 1; g.shieldRest = 0;
+    const before = g.shield;
+    g.update(1 / fps);
+    assert.ok(g.shield > before, 'unused shields also recover during respawn');
+    assert.ok(!sounds.includes('click') && !sounds.includes('boom'), 'shield feedback never falls back to UI clicks or explosions');
+}
+{
+    const s = session('duel'), g = s.game, sounds = [];
+    s.sfx = name => sounds.push(name);
+    g.attackHits = () => true;
+    const swing = { k: 'sw', by: 'guest', x: 0, y: 0, d: 1, p: 1 }, from = { x: 0, y: 0, name: 'Rival' };
+    const reset = () => Object.assign(g, { invuln: 0, stun: 0, guard: true, guardT: .5, shield: 100 });
+    g.me.face = -1;
+    reset(); g.receiveSwing(swing, from);
+    assert.equal(sounds.at(-1), 'shieldBlock');
+    reset(); g.guardT = .1; g.receiveSwing(swing, from);
+    assert.equal(sounds.at(-1), 'shieldParry');
+    reset(); sounds.length = 0; g.receiveSwing({ ...swing, h: 1, p: 3 }, from);
+    assert.deepEqual(sounds, ['shieldBreak'], 'a guard-breaking Special plays one shatter, not an overlapping generic hit');
+    reset(); g.guard = false; g.receiveSwing(swing, from);
+    assert.equal(sounds.at(-1), 'hammerHit');
+    g.onEvent({ k: 'hit', by: 'host', broke: true }, from);
+    assert.equal(sounds.at(-1), 'shieldBreak', 'attacker hears the shield break too');
+    g.onEvent({ k: 'hit', by: 'host', parry: true }, from);
+    assert.equal(sounds.at(-1), 'shieldParry', 'attacker hears the parry too');
+    g.onEvent({ k: 'ko', by: 'host' }, from);
+    assert.equal(sounds.at(-1), 'fighterKO', 'KO feedback is short instead of a match victory jingle');
 }
 for (const fps of [30, 60, 120]) {
     const s = session('river'), g = s.game;

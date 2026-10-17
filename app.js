@@ -6475,8 +6475,7 @@
                     ctx.globalAlpha = 1 - k;
                     ctx.strokeStyle = '#fef3c7'; ctx.lineWidth = Math.max(2, tile * .045);
                     ctx.beginPath(); ctx.ellipse(fx, fy, tile * (.22 + k * .45), tile * (.1 + k * .2), 0, 0, Math.PI * 2); ctx.stroke();
-                    ctx.fillStyle = '#fff7ed'; ctx.font = '900 12px system-ui'; ctx.textAlign = 'center';
-                    ctx.fillText('LOG RIDE', fx, fy - tile * (.42 + k * .25)); ctx.globalAlpha = 1;
+                    ctx.globalAlpha = 1;
                 } else {
                     ctx.globalAlpha = 1 - k; ctx.fillStyle = '#fde047'; ctx.font = '900 14px system-ui'; ctx.textAlign = 'center';
                     ctx.fillText('+1', fx, fy - tile * (.8 + k * .5)); ctx.globalAlpha = 1;
@@ -8813,7 +8812,11 @@
                     clearTimeout(this.musicPreviewTimer);
                     if (sfx.mus) { sfx.stopMusic(); } else {
                         sfx.startMusic(sfx.settings.musicStyle === 'auto' ? 'summit' : sfx.settings.musicStyle, true);
-                        this.musicPreviewTimer = setTimeout(() => sfx.stopMusic(), 12000);
+                        const previewMusic = sfx.mus;
+                        const previewMode = sfx.activeMode;
+                        this.musicPreviewTimer = setTimeout(() => {
+                            if (sfx.mus === previewMusic && sfx.activeMode === previewMode) sfx.stopMusic();
+                        }, 12000);
                     }
                 } else if (target.matches('.audio-btn[data-audio]')) {
                     this.toggleSoundscape(target);

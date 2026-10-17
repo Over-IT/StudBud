@@ -6,8 +6,8 @@
 
     // Original two-bar phrases played with decaying acoustic-style instruments.
     const MUSIC = {
-        summit: { name: 'Rooftop Rush', bpm: 144, drive: true, upbeat: true, chords: [[60, 0], [55, 0], [57, 1], [53, 0]], voice: 'bright',
-            melody: [0, 2, 3, 4, 3, null, 2, 3, 4, 3, 2, 1, 2, 3, 1, 0] },
+        summit: { name: 'Rooftop Rush', bpm: 136, drive: true, chords: [[57, 1], [53, 0], [48, 0], [55, 0]], voice: 'guitar',
+            melody: [0, 1, 2, 3, 4, null, 3, 2, 1, 2, 3, 4, 2, 1, 0, null] },
         foundry: { name: 'Foundry Motion', bpm: 120, drive: true, chords: [[50, 1], [58, 0], [53, 0], [48, 0]], voice: 'marimba',
             melody: [0, null, 2, 0, 3, 2, null, 4, 3, 1, null, 2, 1, 0, 2, null] },
         starlight: { name: 'Starlight Drift', bpm: 78, quiet: true, chords: [[60, 0], [55, 0], [57, 1], [53, 0]], voice: 'piano',
@@ -48,6 +48,19 @@
     const MODE_STYLE = { skyline: 'summit', river: 'lagoon', market: 'bazaar', miner: 'cavern', duel: 'battle', shooter: 'orbit',
         sports: 'stadium', crypto: 'neon', defense: 'fortress', chess: 'zen', hack: 'midnight', frenzy: 'frenzy', fishing: 'tropic',
         classic: 'sunrise', rush: 'pixel', survival: 'survival' };
+    const PLAYLISTS = {
+        skyline: ['summit', 'sunrise', 'bazaar'],
+        factory: ['foundry', 'pixel', 'funk'],
+        space: ['starlight', 'zen', 'cavern'],
+        river: ['lagoon', 'tropic'], market: ['bazaar', 'funk', 'sunrise'],
+        miner: ['cavern', 'zen', 'starlight'], duel: ['battle', 'stadium', 'foundry'],
+        shooter: ['orbit', 'battle', 'survival'], sports: ['stadium', 'frenzy'],
+        crypto: ['neon', 'funk', 'midnight'], defense: ['fortress', 'survival', 'orbit'],
+        chess: ['zen', 'cavern'], hack: ['midnight', 'neon'],
+        frenzy: ['frenzy', 'pixel', 'stadium'], fishing: ['tropic', 'lagoon'],
+        classic: ['sunrise', 'bazaar'], rush: ['pixel', 'frenzy', 'foundry'],
+        survival: ['survival', 'fortress', 'battle']
+    };
 
     // Every sound is synthesized on the fly, so there are no audio files to load.
     const RECIPES = {
@@ -67,7 +80,7 @@
         doubleJump: c => { c.jumpSound(true); },
         spring: c => { c.springJump(); },
         dash: c => { c.whoosh(); },
-        act: c => { c.wood(360, .055, .07); },
+        act: c => { c.noise(.045, .035, 650); },
         shoot: c => { c.noise(.055, .085, 2200); c.tone('sine', 150, 65, .07, .1); },
         hit: c => { c.noise(.065, .075, 850); c.tone('sine', 120, 55, .1, .13); },
         burn: c => {
@@ -76,6 +89,15 @@
             c.noise(.065, .085, 2800, .065);
             c.noise(.085, .055, 2200, .15);
         },
+        shieldBlock: c => { c.noise(.055, .045, 1600); c.tone('sine', 430, 260, .085, .09); },
+        shieldParry: c => { c.noise(.035, .035, 2600); c.tone('sine', 950, 1350, .1, .09); },
+        shieldBreak: c => { c.noise(.07, .1, 2600); c.noise(.16, .055, 1400, .045); c.tone('sine', 260, 70, .16, .12); },
+        hammerSwing: c => { c.whoosh(.14, .045); },
+        hammerSpecial: c => { c.whoosh(.27, .065); c.tone('sine', 170, 65, .18, .1, .08); },
+        hammerHit: c => { c.noise(.045, .055, 1200); c.tone('sine', 155, 65, .09, .13); },
+        fighterFall: c => { c.whoosh(.25, .05); c.tone('sine', 220, 65, .2, .075); },
+        fighterKO: c => { c.tone('sine', 440, 660, .12, .09); c.tone('sine', 660, 880, .14, .07, .08); },
+        hillTick: c => { c.noise(.035, .025, 900); },
         pop: c => { c.tone('sine', 560, 200, 0.09, 0.15); c.noise(0.03, 0.05, 5000); },
         boom: c => { c.noise(0.6, 0.24, 520); c.tone('sine', 85, 38, .28, .2); },
         splash: c => { c.noise(.1, .13, 4200); c.noise(.35, .09, 1200, .025); },
@@ -117,7 +139,7 @@
     Object.assign(RECIPES, {
         click: [RECIPES.click, c => { c.tone('sine', 880, 620, 0.05, 0.15); c.tone('triangle', 1760, 1200, 0.025, 0.04); }, c => { c.tone('triangle', 640, 420, 0.07, 0.15); c.noise(0.015, 0.03, 6000); }],
         shoot: [RECIPES.shoot, c => { c.noise(.07, .12, 3700); c.wood(155, .08, .09); }],
-        hit: [RECIPES.hit, c => { c.noise(.1, .16, 1400); c.wood(135, .12, .14); }],
+        hit: [RECIPES.hit, c => { c.noise(.065, .07, 950); c.tone('sine', 135, 60, .1, .12); }],
         pop: [RECIPES.pop, c => { c.tone('triangle', 700, 260, 0.08, 0.14); c.noise(0.025, 0.05, 6000); }, c => { c.tone('sine', 440, 160, 0.1, 0.15); c.tone('sine', 880, 320, 0.05, 0.05); }],
         correct: [RECIPES.correct, c => { [587, 740, 880, 1175].forEach((f, i) => c.chime(f, i === 3 ? 0.35 : 0.14, 0.18, i * 0.07)); }, c => { [440, 554, 659, 880].forEach((f, i) => c.chime(f, i === 3 ? 0.35 : 0.14, 0.18, i * 0.07)); }],
         wrong: [RECIPES.wrong, c => { c.wood(220, .2, .13); c.wood(165, .24, .11, .12); }],
@@ -199,10 +221,12 @@
         update(patch) {
             Object.assign(this.settings, patch);
             this.save();
-            if ('musicVolume' in patch) this.applyMusicLevel();
+            if ('musicVolume' in patch) {
+                this.applyMusicLevel();
+                if (patch.musicVolume > 0 && this.settings.music && this.activeMode && !this.mus) this.startMusic(this.activeMode);
+            }
             if (patch.music === false) this.stopMusic();
             else if (patch.music === true && this.activeMode && !this.mus) this.startMusic(this.activeMode);
-            else if ('musicStyle' in patch && this.activeMode) this.startMusic(this.activeMode);
         }
 
         applyMusicLevel() {
@@ -214,9 +238,23 @@
         }
 
         styleFor(mode) {
-            const chosen = this.settings.musicStyle;
-            if (mode === 'skyline' && !MUSIC[chosen]) return this.musicBiome === 3 ? 'starlight' : this.musicBiome === 1 ? 'foundry' : 'summit';
-            return MUSIC[chosen] ? chosen : (MODE_STYLE[mode] || 'summit');
+            const key = this.playlistKey(mode);
+            return this.musicChoices?.get(key) || PLAYLISTS[key]?.[0] || 'summit';
+        }
+
+        playlistKey(mode) {
+            return mode === 'skyline' ? this.musicBiome === 3 ? 'space' : this.musicBiome === 1 ? 'factory' : 'skyline' : mode;
+        }
+
+        chooseMusic(mode, rotate = false) {
+            const key = this.playlistKey(mode), pool = PLAYLISTS[key];
+            this.musicChoices ||= new Map();
+            const current = this.musicChoices.get(key);
+            if (current && !rotate) return current;
+            const choices = pool.filter(style => style !== current);
+            const chosen = choices[Math.floor(Math.random() * choices.length)];
+            this.musicChoices.set(key, chosen);
+            return chosen;
         }
 
         setMusicBiome(mode, biome) {
@@ -227,7 +265,7 @@
 
         // mode is a game id (or a style id for previews); restarts only when the style changes.
         // Call when a match ends: stops the music and forgets the active mode so settings changes don't restart it.
-        endMusic() { this.activeMode = null; this.musicBiome = null; this.stopMusic(); }
+        endMusic() { this.activeMode = null; this.musicBiome = null; this.musicChoices?.clear(); this.stopMusic(); }
 
         makeReverb(seconds, decay) {
             const ctx = this.ctx, length = Math.floor(ctx.sampleRate * seconds);
@@ -245,8 +283,11 @@
             if (window.StudBudArcade?.previewDepth > 0) return;
             if (MODE_STYLE[mode]) this.activeMode = mode;
             if (!this.settings.music || !this.settings.musicVolume || !this.unlock()) return;
-            const style = MODE_STYLE[mode] ? this.styleFor(mode) : MUSIC[mode] ? mode : this.styleFor(mode);
-            if (this.mus && this.mus.style === style && !forceRestart) return;
+            const style = MODE_STYLE[mode] ? this.chooseMusic(mode) : MUSIC[mode] ? mode : this.styleFor(mode);
+            if (this.mus && this.mus.style === style && !forceRestart) {
+                this.mus.mode = MODE_STYLE[mode] ? mode : null;
+                return;
+            }
             this.stopMusic();
             if (!this.musicGain) {
                 this.musicGain = this.ctx.createGain();
@@ -263,7 +304,7 @@
                 this.fxIn.connect(reverb); reverb.connect(wet); wet.connect(this.musicGain);
             }
             this.applyMusicLevel();
-            this.mus = { style, step: 0, next: this.ctx.currentTime + 0.15, timer: setInterval(() => this.pumpMusic(), 60) };
+            this.mus = { style, mode: MODE_STYLE[mode] ? mode : null, step: 0, next: this.ctx.currentTime + 0.15, timer: setInterval(() => this.pumpMusic(), 60) };
         }
 
         stopMusic() {
@@ -282,9 +323,16 @@
             const m = this.mus;
             if (!m) return;
             if (this.ctx.state !== 'running') { this.ctx.resume?.().catch(() => { }); m.next = this.ctx.currentTime + 0.1; return; }
-            const T = MUSIC[m.style], spb = 60 / T.bpm / 4, now = this.ctx.currentTime;
+            const now = this.ctx.currentTime;
             if (m.next < now - 0.3) m.next = now + 0.05;
-            while (m.next < now + 0.7) { this.musicStep(T, m.step, m.next, spb); m.next += spb; m.step++; }
+            while (m.next < now + 0.7) {
+                if (m.mode && m.step >= 1024) {
+                    m.style = this.chooseMusic(m.mode, true);
+                    m.step = 0; delete m.lastNote;
+                }
+                const T = MUSIC[m.style], spb = 60 / T.bpm / 4;
+                this.musicStep(T, m.step, m.next, spb); m.next += spb; m.step++;
+            }
         }
 
         musicStep(T, step, t0, spb) {
@@ -298,15 +346,15 @@
             const hz = n => 440 * Math.pow(2, (n - 69) / 12);
             const sparse = (section === 2 && !T.drive) || T.quiet;
             const chord = [root, root + (minor ? 3 : 4), root + 7];
-            if (T.upbeat ? s % 4 === 2 : s === 0 || (!sparse && s === 8)) {
-                const accompaniment = T.upbeat ? 'bright' : section === 1 && T.voice === 'guitar' ? 'piano' : 'guitar';
-                chord.forEach((n, i) => this.acousticNote(hz(n + (section === 2 ? 12 : 0)), spb * (T.upbeat ? 1.3 : sparse ? 10 : 7), T.upbeat ? .085 : .065, t + i * (T.upbeat ? .004 : .018), accompaniment, this.musicGain));
+            if (s === 0 || (!sparse && s === 8)) {
+                const accompaniment = section === 1 && T.voice === 'guitar' ? 'piano' : 'guitar';
+                chord.forEach((n, i) => this.acousticNote(hz(n + (section === 2 ? 12 : 0)), spb * (sparse ? 10 : 7), .065, t + i * .018, accompaniment, this.musicGain));
             }
-            if (T.upbeat ? s % 2 === 0 : s === 0 || s === 8) {
-                const bass = root - 12 + (T.upbeat ? [0, 0, 7, 12, 0, 7, 12, 7][s / 2] : s === 8 ? section === 1 ? 12 : 7 : 0);
-                this.acousticNote(hz(bass), spb * (T.upbeat ? 1.5 : 5), T.upbeat ? .24 : .21, t, 'bass', this.musicGain);
+            if (s === 0 || s === 8) {
+                const bass = root - 12 + (s === 8 ? section === 1 ? 12 : 7 : 0);
+                this.acousticNote(hz(bass), spb * 5, .21, t, 'bass', this.musicGain);
             }
-            if (s % 2 === 0 && (T.upbeat || barIndex > 0)) {
+            if (s % 2 === 0 && barIndex > 0) {
                 const index = (barIndex % 2) * 8 + s / 2, degree = melody[index];
                 if (degree !== null) {
                     const scale = minor ? [0, 3, 5, 7, 10] : [0, 2, 4, 7, 9];
@@ -316,17 +364,16 @@
                         while (this.mus.lastNote - note > 7 && note < 76) note += 12;
                     }
                     if (this.mus) this.mus.lastNote = note;
-                    const held = T.upbeat ? 1.35 : melody[(index + 1) % 16] === null ? 3.6 : 1.8;
-                    const voice = section === 2 && T.voice !== 'piano' && !T.upbeat ? 'piano' : T.voice;
-                    this.acousticNote(hz(note), spb * held, T.upbeat ? .22 : T.quiet ? .14 : section === 3 ? .17 : .19, t, voice, this.musicGain);
+                    const held = melody[(index + 1) % 16] === null ? 3.6 : 1.8;
+                    const voice = section === 2 && T.voice !== 'piano' ? 'piano' : T.voice;
+                    this.acousticNote(hz(note), spb * held, T.quiet ? .14 : section === 3 ? .17 : .19, t, voice, this.musicGain);
                 }
             }
             if (!T.quiet && (s === 0 || (!sparse && (s === 8 || (T.drive && s % 4 === 0))))) this.musicKick(t);
             if (!sparse && (s === 4 || s === 12)) {
-                this.acousticNote(170, .09, .075, t, 'marimba', this.musicGain);
-                this.musicNoise(t, T.upbeat ? .11 : .085, T.upbeat ? .075 : .035, T.upbeat ? 2200 : 1400, 'bandpass');
+                this.musicNoise(t, .1, .022, 1100, 'bandpass');
             }
-            if (!sparse && s % (T.drive ? 2 : 4) === (T.drive ? 1 : 2)) this.musicNoise(t, .045, .018, 3600, 'highpass');
+            if (!sparse && s % (T.drive ? 2 : 4) === (T.drive ? 1 : 2)) this.musicNoise(t, .07, .008, 2600, 'highpass');
         }
 
         acousticBuffer(voice) {
@@ -336,8 +383,7 @@
                 guitar: { ratios: [1, 2, 3, 4, 5, 6], weights: [1, .42, .21, .1, .05, .025], decay: 2.1, attack: .004 },
                 piano: { ratios: [1, 2.001, 3.004, 4.01], weights: [1, .32, .13, .045], decay: 1.7, attack: .009 },
                 marimba: { ratios: [1, 4, 9], weights: [1, .09, .012], decay: 5.5, attack: .003 },
-                bass: { ratios: [1, 2, 3], weights: [1, .24, .055], decay: 2.5, attack: .012 },
-                bright: { ratios: [1, 2, 3, 4, 5], weights: [1, .65, .38, .18, .08], decay: 3.2, attack: .003 }
+                bass: { ratios: [1, 2, 3], weights: [1, .24, .055], decay: 2.5, attack: .012 }
             };
             const profile = profiles[voice];
             if (!profile) throw new Error(`Unknown acoustic voice: ${voice}`);
@@ -391,7 +437,9 @@
             const ctx = this.ctx, src = ctx.createBufferSource(), filter = ctx.createBiquadFilter(), gain = ctx.createGain();
             src.buffer = this.noiseBuf;
             filter.type = type; filter.frequency.setValueAtTime(cutoff, t);
-            gain.gain.setValueAtTime(vol, t); gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+            gain.gain.setValueAtTime(.0001, t);
+            gain.gain.exponentialRampToValueAtTime(vol, t + .008);
+            gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
             src.connect(filter); filter.connect(gain); gain.connect(this.musicGain);
             src.start(t, Math.random() * 0.5); this.finishMusicSource(src, t + dur + 0.02);
         }
@@ -552,12 +600,14 @@
             source.buffer = buffer;
             filter.type = 'lowpass';
             filter.frequency.setValueAtTime(cutoff, t);
-            gain.gain.setValueAtTime(vol, t);
+            gain.gain.setValueAtTime(.0001, t);
+            gain.gain.exponentialRampToValueAtTime(vol, t + Math.min(.005, dur / 4));
             gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
             source.connect(filter);
             filter.connect(gain);
             gain.connect(this.effectOut || this.master);
             source.start(t);
+            source.stop(t + dur + .02);
         }
     }
 
@@ -579,7 +629,6 @@
 
     // ---- Automatic interface sounds: the kind of control decides what plays ----
     const uiSfx = (name, gap) => { try { window.StudBudSfx.play(name, 'ui', gap); } catch (error) { /* audio is optional */ } };
-    const TEXT_INPUT = 'input:not([type]), input[type="text"], input[type="search"], input[type="email"], input[type="password"], input[type="number"], input[type="url"], textarea';
     const DANGER = /\b(delete|remove|clear|reset|discard|ban|sign out|log out|logout|wipe)\b/i;
     const CONFIRM = /\b(save|add|create|submit|import|start|finish|done|apply|sign in|log in|login|register|sign up|change|claim|publish|generate|continue)\b/i;
     const CLOSE = /\b(close|cancel|back|dismiss|no thanks)\b|^[×x✕]$/i;
@@ -607,23 +656,9 @@
         uiSfx(kindOf(el), 30);
     }, true);
 
-    // Select menus, sliders and typing each have their own small sounds
+    // Continuous controls and typing stay silent.
     document.addEventListener('change', event => {
         const t = event.target;
         if (t instanceof HTMLSelectElement) uiSfx('tick', 30);
-    }, true);
-    let lastSlider = 0;
-    document.addEventListener('input', event => {
-        const t = event.target;
-        if (t instanceof HTMLInputElement && t.type === 'range') {
-            const now = performance.now();
-            if (now - lastSlider > 70) { lastSlider = now; uiSfx('slide', 0); }
-        }
-    }, true);
-    document.addEventListener('keydown', event => {
-        const t = event.target;
-        if (!(t instanceof Element) || !t.matches(TEXT_INPUT) || event.ctrlKey || event.metaKey || event.altKey) return;
-        if (event.key === 'Enter') uiSfx('enter', 80);
-        else if (event.key.length === 1 || event.key === 'Backspace') uiSfx('typeKey', 35);
     }, true);
 })(window);

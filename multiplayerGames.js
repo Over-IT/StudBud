@@ -3348,7 +3348,7 @@
                 this.hillTick = Math.max(0, this.hillTick - seconds);
                 this.hillSecs = (this.hillSecs || 0) + seconds;
                 this.specialCharge = Math.min(100, this.specialCharge + seconds * 20);
-                s.setGoal(this.hillSecs); s.addScore(12 * seconds); s.sfx('coin', 300);
+                s.setGoal(this.hillSecs); s.addScore(12 * seconds); s.sfx('hillTick', 300);
                 this.particles.burst(this.me.x + 17, this.me.y, '#fde047', 4, 120, 0.4, 3);
             }
         }
@@ -3373,12 +3373,14 @@
                 if (this.dropTimer === 0) for (const p of this.solids) if (p.oneway) p.off = false;
             }
             if (this.hitlag > 0) {
+                if (!this.guard || !s.down('KeyS')) { this.guard = false; this.guardT = 0; this.recoverShield(dt); }
                 this.hitlag = Math.max(0, this.hitlag - dt);
                 this.updateHill(dt);
                 this.particles.update(dt, 300);
                 return;
             }
             if (this.respawn > 0) {
+                this.guard = false; this.guardT = 0; this.recoverShield(dt);
                 this.respawn -= dt;
                 if (this.respawn <= 0) {
                     this.placeAtSpawn(me, this.spawn);
@@ -3396,12 +3398,11 @@
                 this.shield = Math.max(0, this.shield - dt * Duel.SHIELD.holdWear);
                 this.shieldRest = Duel.SHIELD.regenDelay;
                 this.res.drain(dt * A.ENERGY_COSTS.duel.guard);
-                if (this.res.value <= 0) { this.guard = false; this.shieldBreak = 0.8; s.sfx('click'); }
+                if (this.res.value <= 0) { this.guard = false; this.shieldBreak = 0.8; s.sfx('shieldBlock'); }
                 else if (this.shield <= 0) this.breakShield();
             } else {
                 this.guardT = 0;
-                this.shieldRest = Math.max(0, this.shieldRest - dt);
-                if (this.shieldRest <= 0) this.shield = Math.min(100, this.shield + dt * Duel.SHIELD.regen);
+                this.recoverShield(dt);
             }
             this.checkPendingHeavy();
             if (this.stun <= 0 && this.dodgeCd <= 0 && s.pressed('ShiftLeft', 'ShiftRight', 'KeyF')) {
@@ -3437,7 +3438,7 @@
             if (this.stun <= 0 && !this.guard && this.dodge <= 0 && this.swingCd <= 0 && attack && s.spend(heavy ? A.ENERGY_COSTS.duel.special : A.ENERGY_COSTS.duel.swing)) {
                 this.swingHeavy = heavy;
                 if (heavy) { this.heavyCd = 12; this.specialCharge = 0; this.shake = .4; s.toast('THUNDER HAMMER!', '#fbbf24'); }
-                this.swingT = heavy ? 0.45 : 0.22; this.swingCd = heavy ? 1 : 0.52; s.sfx('swing'); this.swingAim = this.aim;
+                this.swingT = heavy ? 0.45 : 0.22; this.swingCd = heavy ? 1 : 0.52; s.sfx(heavy ? 'hammerSpecial' : 'hammerSwing'); this.swingAim = this.aim;
                 s.emit({ k: 'sw', x: Math.round(me.x + 17), y: Math.round(me.y + 28), d: me.face, a: +this.aim.toFixed(2), p: (this.hammer > 0 ? 1.6 : 1) * (heavy ? 3 : 1), h: heavy ? 1 : 0, by: s.user.id, c: (this.dmg | 0) });
                 this.particles.burst(me.x + 17 + Math.cos(this.aim) * 70, me.y + 28 + Math.sin(this.aim) * 70, '#fde68a', heavy ? 32 : 8, heavy ? 420 : 200, heavy ? .65 : .25, heavy ? 7 : 4);
             }
@@ -3514,7 +3515,7 @@
         ko() {
             if (this.respawn > 0) return;
             const s = this.s;
-            this.particles.burst(this.me.x, this.me.y, s.local.color, 30, 500, 0.8, 6); s.sfx('boom');
+            this.particles.burst(this.me.x, this.me.y, s.local.color, 30, 500, 0.8, 6); s.sfx('fighterFall');
             const by = Date.now() - this.lastHit.at < 6000 ? this.lastHit.by : null;
             this.falls++;
             s.emit({ k: 'ko', to: s.user.id, by, falls: this.falls });
@@ -3562,6 +3563,8 @@
                 from.swing = performance.now();
                 from.swingAim = typeof ev.a === 'number' ? ev.a : (ev.d > 0 ? 0 : Math.PI);
                 from.swingHeavy = ev.h === 1;
+                const distance = dist(me.x + 17, me.y + 28, ev.x, ev.y);
+                if (distance < 900) s.sfx(ev.h === 1 ? 'hammerSpecial' : 'hammerSwing', 60, .6 * (1 - distance / 900) ** 2);
                 if (this.respawn > 0) return;
                 if (this.receiveSwing(ev, from)) return;
                 // the Special's hammer stays live through its whole slam, so dashing into it late still connects
@@ -3569,16 +3572,16 @@
             } else if (ev.k === 'hit' && ev.by === s.user.id) {
                 if (ev.parry) {
                     this.stun = Math.max(this.stun, 0.55); this.swingT = 0; this.shake = 0.2;
-                    s.toast('Parried!', '#7dd3fc'); s.sfx('click', 60);
+                    s.toast('Parried!', '#7dd3fc'); s.sfx('shieldParry', 60);
                     return;
                 }
                 this.specialCharge = Math.min(100, this.specialCharge + (ev.blocked ? 10 : 35));
                 this.hitlag = Math.max(this.hitlag, 0.04); this.shake = 0.18;
-                s.addScore(ev.blocked ? 3 : 10); s.sfx('pop', 60);
+                s.addScore(ev.blocked ? 3 : 10); s.sfx(ev.broke ? 'shieldBreak' : ev.blocked ? 'shieldBlock' : 'hammerHit', 60);
                 this.particles.burst(from.x + 17, from.y + 28, '#fde68a', 8, 200, 0.3, 4);
                 if (ev.broke) s.toast(`Shield broken! ${from.name || 'Rival'} is open`, '#fbbf24');
             } else if (ev.k === 'ko' && ev.by === s.user.id) {
-                this.kos++; s.addScore(100); s.sfx('win'); s.toast(`KO! ${from.name} launched out`, '#facc15');
+                this.kos++; s.addScore(100); s.sfx('fighterKO'); s.toast(`KO! ${from.name} launched out`, '#facc15');
             }
         }
 
@@ -3592,10 +3595,16 @@
             });
         }
 
+        recoverShield(dt) {
+            const recovering = Math.max(0, dt - this.shieldRest);
+            this.shieldRest = Math.max(0, this.shieldRest - dt);
+            this.shield = Math.min(100, this.shield + recovering * Duel.SHIELD.regen);
+        }
+
         breakShield() {
             this.guard = false; this.shield = 0; this.shieldBreak = Duel.SHIELD.breakTime; this.guardT = 0;
             this.stun = Math.max(this.stun, 0.45); this.shieldRest = Duel.SHIELD.regenDelay;
-            this.s.sfx('boom', 60); this.s.toast('Shield broken!', '#f87171');
+            this.s.sfx('shieldBreak', 60); this.s.toast('Shield broken!', '#f87171');
             this.particles.burst(this.me.x + 17, this.me.y + 28, '#7dd3fc', 22, 380, 0.55, 5);
         }
 
@@ -3611,7 +3620,7 @@
             if (blocked && this.guardT <= Duel.SHIELD.parryWindow) {
                 // well-timed guard: no damage or knockback and the attacker is left reeling
                 this.shield = Math.min(100, this.shield + 10); this.hitlag = 0.05; this.hitFlash = 0.1;
-                s.sfx('click', 60);
+                s.sfx('shieldParry', 60);
                 this.particles.burst(me.x + 17 + me.face * 20, me.y + 28, '#e0f2fe', 18, 360, 0.4, 4);
                 s.emit({ k: 'hit', by: ev.by, blocked: true, parry: true });
                 return true;
@@ -3627,7 +3636,7 @@
             me.onGround = false;
             this.stun = Math.max(this.stun, impact.stun);
             this.hitlag = blocked ? 0.035 : 0.055; this.hitFlash = 0.2; this.shake = 0.24;
-            s.sfx(blocked ? 'click' : 'hit', 60);
+            if (!broke) s.sfx(blocked ? 'shieldBlock' : 'hammerHit', 60);
             this.lastHit = { by: ev.by, at: Date.now() };
             this.particles.burst(me.x + 17, me.y + 28, blocked ? '#7dd3fc' : '#fca5a5', 14, 320, 0.45, 5);
             s.emit({ k: 'hit', by: ev.by, blocked, broke });
