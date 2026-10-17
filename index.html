@@ -29,7 +29,7 @@
             <div id="auth-divider" class="auth-divider" role="presentation"><span>or sign in</span></div>
             <p id="auth-config-message" class="auth-message error hidden" role="alert"></p>
             <form id="login-form" class="auth-form">
-                <label>Username or linked email<input id="login-username" type="text" autocomplete="username" minlength="3" maxlength="254" required></label>
+                <label>Username<input id="login-username" type="text" autocomplete="username" minlength="3" maxlength="254" required></label>
                 <label>Password<input id="login-password" type="password" autocomplete="current-password" minlength="8" required></label>
                 <button class="primary-btn full-width" type="submit">Sign in</button>
             </form>
@@ -262,7 +262,7 @@
                             <ul id="daily-schedule-list" class="empty-list"></ul>
                         </div>
                         <div class="glass-card widget priority-widget">
-                            <h3>High Priority Tasks</h3>
+                            <h3>Work on next</h3>
                             <ul id="priority-task-list" class="empty-list">
                                 <li class="empty-state">No upcoming tasks.</li>
                             </ul>
@@ -412,29 +412,39 @@
                 <section id="planner-view" class="view hidden">
                     <div class="planner-grid">
                         <div class="glass-card full-width">
-                            <h2>Priorities</h2>
-                            <p class="settings-hint">Ranked by due date, priority and class grade. Click a task to edit it.</p>
+                            <h2>Your to-do plan</h2>
+                            <p class="settings-hint">Start with one task. Time estimates are a guide, not a deadline.</p>
+                            <div id="planner-next-task" aria-live="polite"></div>
+                        </div>
+                        <div class="glass-card full-width">
+                            <h2>What needs your attention</h2>
+                            <p class="settings-hint">Open work grouped by urgency, with estimated time. Select a task to update it.</p>
+                            <p class="settings-hint">Suggested order considers due dates, the task's saved priority, and how close your class grade is to a letter-grade cutoff. It is not a percentage, grade prediction, or time estimate.</p>
                             <div class="eisenhower-matrix">
                                 <div class="matrix-quadrant quadrant-1">
                                     <h4>Do first</h4>
+                                    <p class="settings-hint">Due soon or ranked highest for attention.</p>
                                     <ul id="quad-1-list"></ul>
                                 </div>
                                 <div class="matrix-quadrant quadrant-2">
                                     <h4>Plan for later</h4>
+                                    <p class="settings-hint">Important work with more time before it is due.</p>
                                     <ul id="quad-2-list"></ul>
                                 </div>
                                 <div class="matrix-quadrant quadrant-3">
                                     <h4>Quick wins</h4>
+                                    <p class="settings-hint">Less urgent tasks estimated at 15 minutes or less.</p>
                                     <ul id="quad-3-list"></ul>
                                 </div>
                                 <div class="matrix-quadrant quadrant-4">
                                     <h4>Lower urgency</h4>
+                                    <p class="settings-hint">Other open work. Keep it on your list, without starting here.</p>
                                     <ul id="quad-4-list"></ul>
                                 </div>
                             </div>
                         </div>
                         <div class="glass-card full-width">
-                            <h2>Master Assignment List</h2>
+                            <h2>Your tasks</h2>
                             <div id="assignment-status-summary" class="assignment-status-summary" aria-label="Assignments by status"></div>
                             <div class="assignment-filters" role="search" aria-label="Filter assignments">
                                 <label class="assignment-search-field" for="assignment-search"><i class="fas fa-search" aria-hidden="true"></i><span class="sr-only">Search assignments</span><input id="assignment-search" type="search" placeholder="Search assignments or classes"></label>
@@ -443,7 +453,7 @@
                                 <label for="assignment-status-filter" class="sr-only">Filter by status</label>
                                 <select id="assignment-status-filter">
                                     <option value="all">All work</option>
-                                    <option value="todo">To do</option>
+                                    <option value="todo" selected>To do</option>
                                     <option value="overdue">Overdue</option>
                                     <option value="awaiting">Done, waiting for grade</option>
                                     <option value="graded">Graded</option>
@@ -458,7 +468,7 @@
                                         <th>Assignment</th>
                                         <th>Course</th>
                                         <th>Due / Score</th>
-                                        <th>Priority score</th>
+                                        <th>Estimated time</th>
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
@@ -1505,6 +1515,7 @@
                                 </div>
                                 <div class="half-width">
                                     <label for="assignment-importance">Importance (1–5)</label>
+                                    <p class="settings-hint">1 = routine, 3 = normal, 5 = major assessment. Higher importance adds preparation time to quiz and test study plans; it is not a grade or urgency score.</p>
                                     <input type="range" id="assignment-importance" min="1" max="5" value="3">
                                 </div>
                             </div>
@@ -1514,6 +1525,7 @@
                 <div class="modal-footer">
                     <button class="secondary-btn cancel-modal-btn">Cancel</button>
                     <button type="button" id="save-add-another-assignment-btn" class="secondary-btn">Save &amp; add another</button>
+                    <button id="delete-assignment-editor-btn" type="button" class="danger-btn hidden" data-action="delete-assignment">Delete assignment</button>
                     <button type="submit" form="assignment-form" class="primary-btn">Save</button>
                 </div>
             </div>
@@ -1734,6 +1746,7 @@
     <script src="supabase-config.js" defer></script>
     
     <!-- Application Scripts (Zero Dependency strict vanilla logic apart from Chart rendering on canvas) -->
+    <script src="appDialogs.js" defer></script>
     <script src="parkwayData.js" defer></script>
 <script src="data/schools/central.js" defer></script>
 <script src="data/schools/north.js" defer></script>

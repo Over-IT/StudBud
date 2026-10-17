@@ -1428,6 +1428,21 @@ tbody tr:hover {
     gap: var(--spacing-lg);
 }
 
+.app-confirmation { color: var(--text-primary); background: var(--bg-base); border: 1px solid var(--quad-2-border); border-radius: var(--border-radius-sm); padding: 1.5rem; width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; margin: auto; }
+.app-confirmation::backdrop { background: rgba(0, 0, 0, .5); }
+.app-confirmation p { margin: 1rem 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.app-confirmation input { width: 100%; }
+.app-confirmation-actions { display: flex; justify-content: flex-end; gap: .75rem; margin-top: 1rem; flex-wrap: wrap; }
+.app-notice { position: fixed; bottom: 1rem; right: 1rem; z-index: 100000; max-width: min(440px, calc(100vw - 2rem)); max-height: 45vh; overflow: auto; padding: 1rem; border-radius: var(--border-radius-sm); background: var(--bg-base); color: var(--text-primary); border: 1px solid var(--quad-2-border); box-shadow: 0 8px 30px rgba(0, 0, 0, .2); }
+.app-notice[hidden] { display: none; }
+.app-notice p { margin-bottom: .75rem; overflow-wrap: anywhere; }
+
+.planner-workload { color: var(--text-secondary); margin: 1rem 0; overflow-wrap: anywhere; }
+.planner-next-card { padding: var(--spacing-md); border: 1px solid var(--quad-2-border); border-radius: var(--border-radius-sm); background: var(--quad-2-bg); overflow-wrap: anywhere; }
+.planner-next-card h3 { margin: .75rem 0 .35rem; }
+.planner-next-card p { color: var(--text-secondary); margin-bottom: 1rem; }
+.planner-next-card button { margin: .25rem .25rem .25rem 0; }
+
 .eisenhower-matrix {
     display: grid;
     grid-template-columns: 1fr 1fr;

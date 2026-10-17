@@ -9,7 +9,7 @@ for (const id of ['account-name', 'admin-list', 'admin-status', 'admin-search', 
 const calls = [];
 const sandbox = {
     console, Map, Set, Date, Math, confirm: () => true, prompt: () => 'reason',
-    window: { location: { hash: '' }, StudBudCloud: { user: { id: 'self', user_metadata: { username: 'student' } } } },
+    window: { StudBudDialogs: { confirm: async () => true, prompt: async () => 'reason', notify() {} }, location: { hash: '' }, StudBudCloud: { user: { id: 'self', user_metadata: { username: 'student' } } } },
     document: { getElementById: id => nodes.get(id), querySelectorAll: () => [] },
     AppState: { get: () => [] }
 };

@@ -964,7 +964,7 @@
                 this.activeCardIndex += 1;
                 this.renderStudySession(deck);
             } else {
-                alert(`Session Complete! BKT Skill Mastery: ${Math.round(deck.bktMastery * 100)}%`);
+                window.StudBudDialogs.notify(`Session Complete! BKT Skill Mastery: ${Math.round(deck.bktMastery * 100)}%`);
                 this.activeDeckId = null;
                 this.activeCardIndex = 0;
                 this.render();

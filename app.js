@@ -2016,7 +2016,7 @@
             AppState.set('schedule', { ...(current.ic ? { ic: current.ic } : {}), all, odd: {}, even: {} });
             this.renderDashboard();
             this.renderCalendar();
-            window.alert('Class schedule saved.');
+            window.StudBudDialogs.notify('Class schedule saved.');
         }
 
         renderImportedScheduleStatus() {
@@ -2032,10 +2032,10 @@
             text.textContent = `Using your Infinite Campus schedule${Number.isFinite(when.getTime()) ? ` from ${when.toLocaleDateString()}` : ''}: ${(ic.sections || []).length} class periods with real times${days ? ` and ${days} school-calendar days` : ''}. The periods above still apply on days Campus doesn't cover.`;
         }
 
-        removeImportedSchedule() {
+        async removeImportedSchedule() {
             const schedule = AppState.get('schedule') || {};
             if (!schedule.ic) return;
-            if (!window.confirm('Remove the imported Infinite Campus times and school calendar? Your class periods above stay saved.')) return;
+            if (!await window.StudBudDialogs.confirm('Remove the imported Infinite Campus times and school calendar? Your class periods above stay saved.')) return;
             const { ic, ...rest } = schedule;
             AppState.set('schedule', rest);
             this.renderSchedulePage();
@@ -2321,7 +2321,7 @@
             document.getElementById('ic-import-textarea').value = '';
             document.getElementById('ic-import-file').value = '';
             this.showInfiniteCampusSteps(true);
-            window.alert(`Infinite Campus import complete: ${parts.join(', ') || 'nothing new to add'}.`);
+            window.StudBudDialogs.notify(`Infinite Campus import complete: ${parts.join(', ') || 'nothing new to add'}.`);
         }
 
         getScheduleEntries(date) {
@@ -2739,7 +2739,7 @@
                         <td>${this.escapeHTML(item.title)}</td>
                         <td>${this.escapeHTML(course ? course.title : item.courseCode || 'Unassigned')}</td>
                         <td>${graded ? `${this.formatNumber(item.pointsEarned || 0)} / ${this.formatNumber(item.maxPoints || 0)}` : this.escapeHTML(item.dueDate || 'No due date')}</td>
-                        <td>${graded || status === 'completed' ? '—' : this.assignmentPriority(item, courses).score.toFixed(2)}</td>
+                        <td>${graded || status === 'completed' ? '—' : `About ${this.plannerTaskMinutes(item)} min`}</td>
                         <td class="actions">
                             ${this.assessmentStudyButton(item)}
                             <button class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit</button>
@@ -2772,13 +2772,44 @@
             const openWork = assignments.filter(item => item.status !== 'completed' && !this.isGradedItem(item))
                 .map(item => ({ item, priority: this.assignmentPriority(item, courses) }))
                 .sort((a, b) => b.priority.score - a.priority.score);
+            const nextTask = document.getElementById('planner-next-task');
+            if (nextTask) {
+                const total = openWork.reduce((sum, { item }) => sum + this.plannerTaskMinutes(item), 0);
+                const urgent = openWork.filter(({ item }) => item.dueDate && item.dueDate.slice(0, 10) <= today).length;
+                const next = openWork[0]?.item;
+                const course = next && courses.find(entry => entry.code === next.courseCode);
+                nextTask.innerHTML = next ? `<p class="planner-workload"><strong>${openWork.length} to do</strong> · about ${total} min estimated total · ${urgent} due today or overdue</p>
+                    <article class="planner-next-card"><span class="status-pill is-todo">Start here · about ${this.plannerTaskMinutes(next)} min</span>
+                    <h3>${this.escapeHTML(next.title)}</h3><p>${this.escapeHTML(course?.title || next.courseCode || 'Unassigned')} · ${this.escapeHTML(this.dueLabel(next.dueDate).text)}</p>
+                    <p><strong>Why this task:</strong> ${this.escapeHTML(this.plannerTaskReason(next))}</p>
+                    <button type="button" class="primary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(next.id)}">Open task</button>
+                    ${this.assignmentStatusControl(next)}</article>` : '<p class="empty-state">You’re caught up! No open tasks. Add an assignment when you have new work.</p>';
+            }
             const matrixGroups = [['quad-1-list', 'doFirst'], ['quad-2-list', 'schedule'], ['quad-3-list', 'quickFinish'], ['quad-4-list', 'lowPriority']];
             matrixGroups.forEach(([id, quadrant]) => {
                 const list = document.getElementById(id);
                 if (!list) return;
                 const matches = openWork.filter(({ item, priority }) => window.PlannerEngine.getEisenhowerQuadrant(priority, Number(item.estimatedMinutes) || 30).id === quadrant);
-                list.innerHTML = matches.map(({ item, priority }) => `<li><button type="button" class="text-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">${this.escapeHTML(item.title)}</button><small>${this.escapeHTML(this.dueLabel(item.dueDate).text)} · priority ${priority.score.toFixed(2)}</small></li>`).join('') || '<li class="empty-state">No open tasks here.</li>';
+                list.innerHTML = matches.map(({ item }) => `<li><button type="button" class="text-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">${this.escapeHTML(item.title)}</button><small>${this.escapeHTML(this.dueLabel(item.dueDate).text)} · about ${this.plannerTaskMinutes(item)} min</small><small>${this.escapeHTML(this.plannerTaskReason(item))}</small></li>`).join('') || '<li class="empty-state">No open tasks here.</li>';
             });
+        }
+
+        plannerTaskMinutes(item) {
+            const minutes = Number(item.estimatedMinutes);
+            return Number.isFinite(minutes) && minutes > 0 ? Math.ceil(minutes) : 30;
+        }
+
+        plannerTaskReason(item) {
+            const today = localDateKey(new Date());
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            const due = String(item.dueDate || '').slice(0, 10);
+            if (due && due < today) return 'Overdue — check what still needs to be finished or turned in.';
+            if (due === today) return 'Due today — finish or turn it in before moving on.';
+            if (due === localDateKey(tomorrow)) return 'Due tomorrow — make time for it today.';
+            if (['high', 'critical'].includes(item.priority)) return 'Marked high priority; due date and class grade also affect its order.';
+            if (this.plannerTaskMinutes(item) <= 15) return 'A short task you can fit into a small break.';
+            return due ? 'Plan a work block before its due date.' : 'No due date yet — add one to help plan when to work.';
         }
 
         deckStudyCount(deck) {
@@ -4217,7 +4248,7 @@
                     await this.openUserProfile(data.id);
                     return;
                 } else if (action === 'delete-notice') {
-                    if (!confirm('Permanently remove this announcement from the banner and history?')) return;
+                    if (!await window.StudBudDialogs.confirm('Permanently remove this announcement from the banner and history?')) return;
                     await games.adminCall('studbud_admin_delete_site_notice', { p_publication_id: data.id });
                     await this.loadSiteNotice(true);
                     await this.loadAnnouncementHistory();
@@ -4231,25 +4262,25 @@
                     await games.adminCall('studbud_admin_resolve_reports', { p_target_type: data.reportType, p_target_id: data.id, p_status: action === 'resolve-report' ? 'resolved' : 'dismissed' });
                     status.textContent = action === 'resolve-report' ? 'Report marked as handled.' : 'Report dismissed.';
                 } else if (action === 'delete-deck') {
-                    if (!confirm(`Delete the public deck "${data.name}"?`)) return;
+                    if (!await window.StudBudDialogs.confirm(`Delete the public deck "${data.name}"?`)) return;
                     await games.adminCall('studbud_admin_delete_deck', { p_deck_id: data.id });
                     if (data.reportType === 'deck') await games.adminCall('studbud_admin_resolve_reports', { p_target_type: 'deck', p_target_id: data.id, p_status: 'resolved' }).catch(() => {});
                 } else if (action === 'remove-decks') {
-                    if (!confirm(`Remove all public decks from ${data.name}?`)) return;
+                    if (!await window.StudBudDialogs.confirm(`Remove all public decks from ${data.name}?`)) return;
                     await games.adminCall('studbud_admin_remove_user_decks', { p_user_id: data.id });
                 } else if (action === 'ban') {
-                    const reason = prompt(`Ban ${data.name}? They will lose their public decks and can't publish new ones. Reason (optional):`);
+                    const reason = await window.StudBudDialogs.prompt(`Ban ${data.name}? They will lose their public decks and can't publish new ones. Reason (optional):`);
                     if (reason === null) return;
                     await games.adminCall('studbud_admin_set_ban', { p_user_id: data.id, p_banned: true, p_reason: reason });
                 } else if (action === 'force-rename') {
-                    if (!confirm(`Force ${data.name} to choose a new username? They'll be blocked from the app until they do.`)) return;
+                    if (!await window.StudBudDialogs.confirm(`Force ${data.name} to choose a new username? They'll be blocked from the app until they do.`)) return;
                     await games.adminCall('studbud_admin_force_username', { p_user_id: data.id, p_force: true });
                 } else if (action === 'cancel-rename') {
                     await games.adminCall('studbud_admin_force_username', { p_user_id: data.id, p_force: false });
                 } else if (action === 'unban') {
                     await games.adminCall('studbud_admin_set_ban', { p_user_id: data.id, p_banned: false });
                 } else if (action === 'coins') {
-                    const input = prompt(`Add or remove coins for ${data.name} (use a negative number to remove):`, '100');
+                    const input = await window.StudBudDialogs.prompt(`Add or remove coins for ${data.name} (use a negative number to remove):`, '100');
                     if (input === null) return;
                     const amount = Number(input);
                     if (!Number.isInteger(amount) || amount === 0 || Math.abs(amount) > 2147483647) throw new Error('Enter a non-zero whole-number coin adjustment within the supported range.');
@@ -6573,11 +6604,11 @@
                 published = await window.StudBudCommunityGames.publishDeck({ ...deck, courseTitle: this.deckLinkInfo(deck).course?.title || '' });
             } catch (error) {
                 const message = String(error?.message || error);
-                if (/already shared|same title|identical|duplicate|already exists|reposted|reposting/i.test(message)) { window.alert(message); return; }
+                if (/already shared|same title|identical|duplicate|already exists|reposted|reposting/i.test(message)) { window.StudBudDialogs.notify(message); return; }
                 throw error;
             }
             await this.updateSavedDeck(deckId, { communityPublished: true, communityDeckId: published.id });
-            window.alert('Deck shared. Its title, class, card terms and definitions, and any source attribution are visible to signed-in StudBud users. Your linked test or quiz stays private. You can stop sharing it at any time.');
+            window.StudBudDialogs.notify('Deck shared. Its title, class, card terms and definitions, and any source attribution are visible to signed-in StudBud users. Your linked test or quiz stays private. You can stop sharing it at any time.');
         }
 
         async unpublishCommunityDeck(deckId) {
@@ -6707,7 +6738,7 @@
                 document.getElementById('hosted-room-status').textContent = `Room code ${code} copied. Share it with your players.`;
             } catch (error) {
                 console.error('[NexusApp] Room code could not be copied:', error);
-                window.prompt('Copy this room code and share it with your players:', code);
+                await window.StudBudDialogs.prompt('Copy this room code and share it with your players:', code);
             }
         }
 
@@ -7562,7 +7593,7 @@
         }
 
         openReportDialog(type, id, name) {
-            if (!window.StudBudCloud?.user) { window.alert('Sign in or continue as a guest to report content.'); return; }
+            if (!window.StudBudCloud?.user) { window.StudBudDialogs.notify('Sign in or continue as a guest to report content.'); return; }
             document.getElementById('report-overlay')?.remove();
             const overlay = document.createElement('div');
             overlay.id = 'report-overlay';
@@ -8362,7 +8393,7 @@
                 document.getElementById('study-log-notes').value = 'Completed a focused study sprint.';
             } catch (error) {
                 console.error('[NexusApp] Could not open the completed focus session:', error);
-                window.alert(`Focus sprint finished, but the session could not be logged. ${this.friendlyErrorMessage(error)}`);
+                window.StudBudDialogs.notify(`Focus sprint finished, but the session could not be logged. ${this.friendlyErrorMessage(error)}`);
             }
         }
 
@@ -8833,7 +8864,7 @@
                     const nameInput = document.getElementById('grade-scenario-name');
                     const name = nameInput.value.trim();
                     if (!name) {
-                        window.alert('Enter a name for this grade scenario.');
+                        window.StudBudDialogs.notify('Enter a name for this grade scenario.');
                         nameInput.focus();
                         return;
                     }
@@ -8888,7 +8919,7 @@
                 } else if (action === 'preview-public-profile') {
                     const myId = window.StudBudCloud?.user?.id;
                     if (myId && !window.StudBudCloud?.isGuest?.()) await this.openUserProfile(myId);
-                    else window.alert('Create a free account to get a public profile.');
+                    else window.StudBudDialogs.notify('Create a free account to get a public profile.');
                 } else if (action === 'edit-public-profile' || action === 'open-my-shop') {
                     document.getElementById('user-profile-overlay')?.classList.add('hidden');
                     Router.navigate(action === 'open-my-shop' ? 'shop' : 'profile');
@@ -9055,7 +9086,7 @@
                     const status = document.getElementById('multiplayer-shop-status');
                     if (status) status.textContent = message;
                     this.showLobbyToast(message);
-                } else window.alert(message);
+                } else window.StudBudDialogs.notify(message);
             }
         }
 
@@ -9251,7 +9282,7 @@
                     this.beginPracticeTest(form);
                 } catch (error) {
                     console.error('[NexusApp] Practice test could not start:', error);
-                    window.alert(`The practice test could not start. ${this.friendlyErrorMessage(error)}`);
+                    window.StudBudDialogs.notify(`The practice test could not start. ${this.friendlyErrorMessage(error)}`);
                 }
                 return;
             }
@@ -9261,7 +9292,7 @@
                     await this.submitPracticeTestAnswer(form);
                 } catch (error) {
                     console.error('[NexusApp] Practice test answer could not be checked:', error);
-                    window.alert(`Your answer could not be checked. ${this.friendlyErrorMessage(error)}`);
+                    window.StudBudDialogs.notify(`Your answer could not be checked. ${this.friendlyErrorMessage(error)}`);
                 }
                 return;
             }
@@ -9282,7 +9313,7 @@
                 this.closeModal();
             } catch (error) {
                 console.error(`[NexusApp] ${form.id} submit failed:`, error);
-                window.alert(`Could not save your changes. ${this.friendlyErrorMessage(error)}`);
+                window.StudBudDialogs.notify(`Could not save your changes. ${this.friendlyErrorMessage(error)}`);
             } finally {
                 delete form.dataset.saving;
                 submitButtons.forEach(button => { button.disabled = false; });
@@ -9328,7 +9359,7 @@
                     .catch(error => {
                         console.error('[NexusApp] Flashcard links could not update:', error);
                         this.renderDecks();
-                        window.alert(`Could not update the set's class or test. ${this.friendlyErrorMessage(error)}`);
+                        window.StudBudDialogs.notify(`Could not update the set's class or test. ${this.friendlyErrorMessage(error)}`);
                     });
                 return;
             }
@@ -9680,6 +9711,11 @@
             form.reset();
             const graded = assignment ? this.isGradedItem(assignment) : false;
             document.getElementById('assignment-id').value = assignment ? assignment.id : '';
+            const deleteButton = document.getElementById('delete-assignment-editor-btn');
+            if (deleteButton) {
+                deleteButton.classList.toggle('hidden', !assignment);
+                deleteButton.dataset.id = assignment ? assignment.id : '';
+            }
             document.getElementById('assignment-modal-title').textContent = assignment ? 'Edit Assignment' : 'Add Assignment';
             document.getElementById('assignment-name').value = assignment ? assignment.title : '';
             const onlyCourse = (AppState.get('courses') || []).length === 1 ? AppState.get('courses')[0].code : '';
@@ -9694,7 +9730,7 @@
             form.querySelector(`input[name="assignment-state"][value="${formState}"]`).checked = true;
             document.getElementById('assignment-course-group').classList.toggle('hidden', false);
             if (!assignment && !(AppState.get('courses') || []).length && typeof document.getElementById('assignment-course')?.querySelectorAll === 'function') {
-                window.alert('Add a class first, then you can add assignments to it.');
+                window.StudBudDialogs.notify('Add a class first, then you can add assignments to it.');
                 Router.navigate('gpa');
                 this.openCourseForm();
                 return;
@@ -9936,7 +9972,7 @@
                 Router.navigate('class');
             }
             if (action === 'edit-course') this.openCourseForm(courses.find(item => item.code === id));
-            if (action === 'delete-course' && window.confirm('Delete this class and its assignments?')) {
+            if (action === 'delete-course' && await window.StudBudDialogs.confirm('Delete this class and its assignments?')) {
                 AppState.removeCourse(id);
                 this.renderUI();
             }
@@ -9954,7 +9990,10 @@
                     document.getElementById('deck-editor-assessment').innerHTML = this.deckAssessmentOptions(assessment.courseCode, String(assessment.id));
                 }
             }
-            if (action === 'delete-assignment' && window.confirm('Delete this assignment and its saved grade?')) AppState.deleteAssignment(id);
+            if (action === 'delete-assignment' && await window.StudBudDialogs.confirm('Delete this assignment and its saved grade?')) {
+                AppState.deleteAssignment(id);
+                if (document.getElementById('assignment-id')?.value === id) this.closeModal();
+            }
             if (action === 'grade-assignment') {
                 const assignment = assignments.find(item => item.id === id);
                 if (assignment) {
@@ -9982,12 +10021,12 @@
                 const name = nameInput.value.trim();
                 const weight = Number(weightInput.value);
                 if (!course || !name || !Number.isFinite(weight) || weight <= 0 || weight > 100) {
-                    window.alert('Enter a category name and a weight from 0.1% to 100%.');
+                    window.StudBudDialogs.notify('Enter a category name and a weight from 0.1% to 100%.');
                     return;
                 }
                 const existingTotal = (course.categories || []).reduce((sum, category) => sum + Number(category.weight || 0), 0);
                 if (existingTotal + weight > 100.001) {
-                    window.alert(`Category weights cannot exceed 100%. There is ${(100 - existingTotal).toFixed(2)}% available.`);
+                    window.StudBudDialogs.notify(`Category weights cannot exceed 100%. There is ${(100 - existingTotal).toFixed(2)}% available.`);
                     return;
                 }
                 AppState.updateCourse(course.code, { categories: [...(course.categories || []), { id: `category_${Date.now()}`, name, weight }] });
@@ -10012,13 +10051,13 @@
                 }
                 const targetPct = Number(input.value);
                 if (!course || !Number.isFinite(targetPct) || targetPct < 0 || targetPct > 100) {
-                    window.alert('Enter a target between 0 and 100%.');
+                    window.StudBudDialogs.notify('Enter a target between 0 and 100%.');
                     return;
                 }
                 AppState.updateCourse(course.code, { targetPct, targetGrade: this.gradeForPercentage(targetPct) });
                 this.renderClassDetail();
             }
-            if (action === 'delete-deck' && window.confirm('Delete this flashcard deck and its cards?')) {
+            if (action === 'delete-deck' && await window.StudBudDialogs.confirm('Delete this flashcard deck and its cards?')) {
                 const deck = (AppState.get('flashcards') || []).find(item => item.id === id);
                 if (deck?.communityPublished) await window.StudBudCommunityGames.unpublishDeck(id);
                 await AppState.deleteFlashcardDeck(id);
@@ -10051,7 +10090,7 @@
             }
             if (action === 'editor-delete-card') {
                 if (!this.deckEditorDraft?.cards.some(card => card.id === id)) throw new Error('The selected card no longer exists.');
-                if (window.confirm('Delete this card and its review progress when you save the set?')) {
+                if (await window.StudBudDialogs.confirm('Delete this card and its review progress when you save the set?')) {
                     const index = this.deckEditorDraft.cards.findIndex(card => card.id === id);
                     (this.deckEditorUndo ||= []).push({ index, card: this.deckEditorDraft.cards[index] });
                     this.deckEditorDraft.cards = this.deckEditorDraft.cards.filter(card => card.id !== id);
@@ -10071,7 +10110,7 @@
             const active = (deck.cards || []).filter(card => card && !card.suspended);
             const cards = mode === 'starred' ? (deck.cards || []).filter(card => card && card.starred) : mode === 'cram' ? (deck.cards || []).filter(Boolean) : active;
             if (!cards.length) {
-                window.alert(mode === 'starred' ? 'Star some cards first (press S while studying, or use the set editor).' : 'This deck has no cards yet.');
+                window.StudBudDialogs.notify(mode === 'starred' ? 'Star some cards first (press S while studying, or use the set editor).' : 'This deck has no cards yet.');
                 return;
             }
             if (window.SM2Engine?.migrateDeck?.(deck)) AppState.saveFlashcardDeck(deck).catch(error => console.error('[NexusApp] Deck migration could not be saved:', error));
@@ -10396,7 +10435,7 @@
             const target = Number(document.getElementById('desired-gpa').value);
             const mode = document.getElementById('gpa-solver-mode').value;
             if (!Number.isFinite(target) || target < 0 || target > 5) {
-                window.alert('Enter a target GPA between 0 and 5.');
+                window.StudBudDialogs.notify('Enter a target GPA between 0 and 5.');
                 return;
             }
             const courses = AppState.get('courses') || [];
@@ -10498,7 +10537,7 @@
             this.updatePublicSchoolOption();
             this.classrooms?.refreshNav();
             this.renderUI();
-            window.alert('Profile saved.');
+            window.StudBudDialogs.notify('Profile saved.');
         }
 
         async saveOtherGradeScale() {
@@ -10540,7 +10579,7 @@
         }
 
         async factoryReset() {
-            if (!window.confirm('Permanently delete all locally stored StudBud data?')) return;
+            if (!await window.StudBudDialogs.confirm('Permanently delete all locally stored StudBud data?')) return;
             await Promise.all(['flashcards', 'studyHistory', 'gameMetrics'].map(store => NexusDB.clear(store)));
             localStorage.removeItem(AppState.STORAGE_KEY);
             window.location.reload();
@@ -10628,9 +10667,9 @@
                 if (front && back) cards.push({ id: `card_${Date.now()}_${Math.random().toString(36).slice(2)}`, front, back, repetitions: 0, interval: 0, easeFactor: 2.5 });
                 else if (front || back) { partial++; row.classList.add('incomplete'); }
             });
-            if (!title) { window.alert('Enter a deck name first.'); nameInput.focus(); return; }
-            if (partial) { window.alert(`${partial} card${partial === 1 ? ' is' : 's are'} missing a front or back (highlighted). Fill ${partial === 1 ? 'it' : 'them'} in or remove ${partial === 1 ? 'it' : 'them'}.`); return; }
-            if (!cards.length) { window.alert('Add at least one card with both a front and a back.'); return; }
+            if (!title) { window.StudBudDialogs.notify('Enter a deck name first.'); nameInput.focus(); return; }
+            if (partial) { window.StudBudDialogs.notify(`${partial} card${partial === 1 ? ' is' : 's are'} missing a front or back (highlighted). Fill ${partial === 1 ? 'it' : 'them'} in or remove ${partial === 1 ? 'it' : 'them'}.`); return; }
+            if (!cards.length) { window.StudBudDialogs.notify('Add at least one card with both a front and a back.'); return; }
             AppState.saveFlashcardDeck({ id: `deck_${Date.now()}`, title, cards, ...this.importerDeckLink() }).then(() => {
                 nameInput.value = '';
                 this.resetImporterDeckLink();
@@ -10639,7 +10678,7 @@
                 Router.navigate('flashcard');
             }).catch(error => {
                 console.error('[NexusApp] Manual deck creation failed:', error);
-                window.alert(`The deck could not be created. ${this.friendlyErrorMessage(error)}`);
+                window.StudBudDialogs.notify(`The deck could not be created. ${this.friendlyErrorMessage(error)}`);
             });
         }
 
@@ -10654,7 +10693,7 @@
                 return { id: `card_${Date.now()}_${Math.random().toString(36).slice(2)}`, front: line.slice(0, splitAt).trim(), back: line.slice(splitAt + delimiter.length).trim(), repetitions: 0, interval: 0, easeFactor: 2.5 };
             }).filter(card => card && card.front && card.back);
             if (!title || !cards.length) {
-                window.alert('Enter a deck name and at least one valid term/definition row.');
+                window.StudBudDialogs.notify('Enter a deck name and at least one valid term/definition row.');
                 return;
             }
             AppState.saveFlashcardDeck({ id: `deck_${Date.now()}`, title, cards, ...this.importerDeckLink() }).then(() => {
@@ -10664,7 +10703,7 @@
                 this.resetImporterDeckLink();
             }).catch(error => {
                 console.error('[NexusApp] Flashcard import failed:', error);
-                window.alert(`The flashcards could not be imported. ${this.friendlyErrorMessage(error)}`);
+                window.StudBudDialogs.notify(`The flashcards could not be imported. ${this.friendlyErrorMessage(error)}`);
             });
         }
 
@@ -10678,7 +10717,7 @@
                 this.updateFocusTimerDisplay();
                 if (this.timerSeconds <= 0) {
                     this.stopFocusTimer(true);
-                    window.alert('Focus session complete.');
+                    window.StudBudDialogs.notify('Focus session complete.');
                 }
             }, 1000);
             document.querySelectorAll('.focus-play-btn').forEach(item => {
@@ -10731,7 +10770,7 @@
                 .map(item => item.card);
             if (this.arcadeCards.length > 40) this.arcadeCards = this.arcadeCards.slice(0, 40);
             if (this.arcadeCards.length < 2) {
-                window.alert('Create a flashcard deck with at least two complete cards to play.');
+                window.StudBudDialogs.notify('Create a flashcard deck with at least two complete cards to play.');
                 return;
             }
             this.arcadeStudyStartedAt = Date.now();

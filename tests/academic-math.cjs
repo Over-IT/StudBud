@@ -18,6 +18,35 @@ const appSource = source('app.js');
 vm.runInContext(appSource.slice(appSource.indexOf('    function localDateKey'), appSource.indexOf('    window.NexusApp ='))
     + '\nglobalThis.app = Object.create(AppOrchestrator.prototype);', sandbox);
 const app = sandbox.app;
+{
+    const next = { innerHTML: '' };
+    elements.set('planner-next-task', next);
+    state.assignments = [
+        { id: 'task', title: '<Read chapter>', estimatedMinutes: 25, priority: 'high', dueDate: '2000-01-01' },
+        { id: 'later', title: 'Practice', estimatedMinutes: 15, dueDate: '2099-01-01' },
+        { id: 'done', title: 'Finished', status: 'completed', estimatedMinutes: 500 }
+    ];
+    app.renderAssignments();
+    assert.match(next.innerHTML, /2 to do/);
+    assert.match(next.innerHTML, /40 min estimated total/);
+    assert.match(next.innerHTML, /1 due today or overdue/);
+    assert.match(next.innerHTML, /&lt;Read chapter&gt;/, 'task titles are escaped');
+    assert.doesNotMatch(next.innerHTML, /Finished/);
+    assert.equal(app.plannerTaskMinutes({ estimatedMinutes: -4 }), 30);
+    assert.match(app.plannerTaskReason(state.assignments[0]), /Overdue/);
+    assert.match(app.plannerTaskReason({ dueDate: '2099-01-01', priority: 'high' }), /Marked high priority/);
+    assert.match(app.plannerTaskReason({ estimatedMinutes: 10 }), /short task/);
+    assert.match(app.plannerTaskReason({}), /No due date/);
+    assert.match(next.innerHTML, /Why this task:/);
+    state.assignments = [];
+    app.renderAssignments();
+    assert.match(next.innerHTML, /No open tasks/);
+    elements.delete('planner-next-task');
+    const html = source('index.html');
+    assert.match(html, /value="todo" selected/);
+    assert.match(html, /id="delete-assignment-editor-btn"[^>]*data-action="delete-assignment"/);
+    assert.match(appSource, /deleteButton\.classList\.toggle\('hidden', !assignment\)/, 'delete is available only when editing saved work');
+}
 const close = (actual, expected) => assert.ok(Math.abs(Number(actual) - expected) < 1e-9, `${actual} should equal ${expected}`);
 const course = { code: 'math', credits: 1, isWeighted: false };
 const assignment = (earned, possible, categoryId) => ({ courseCode: 'math', pointsEarned: earned, maxPoints: possible, categoryId, graded: true, status: 'completed' });

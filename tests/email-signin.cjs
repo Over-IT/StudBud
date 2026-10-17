@@ -294,6 +294,7 @@ async function run() {
     assert.match(html, /id="mfa-login-form"/);
     assert.match(html, /id="email-login-form"/);
     assert.match(html, /id="email-settings-card"/);
+    assert.match(html, /<label>Username<input id="login-username"/, 'main sign-in field uses the simple Username label');
     const signupMarkup = html.slice(html.indexOf('<form id="signup-form"'), html.indexOf('</form>', html.indexOf('<form id="signup-form"')));
     assert.doesNotMatch(signupMarkup, /type="email"|signup-email/, 'signup has no email field, required or optional verification step');
     assert.match(signupMarkup, /No email or verification is needed/);

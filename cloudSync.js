@@ -1123,7 +1123,7 @@
 
         async signOut() {
             if (this.offlineMode) return this.connectOnline().catch(error => this.reportAccountError(error));
-            if (!window.confirm('Sign out of StudBud on this device? Your synced account data will remain in the cloud.')) return;
+            if (!await window.StudBudDialogs.confirm('Sign out of StudBud on this device? Your synced account data will remain in the cloud.')) return;
             try { await this.syncNow(); }
             catch (error) {
                 console.error('[StudBudCloud] Could not save before sign-out:', error);

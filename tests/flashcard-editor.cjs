@@ -28,7 +28,7 @@ for (const id of ['card-form', 'card-deck-id', 'card-id', 'card-front', 'card-ba
 let failStorage = false;
 const sandbox = {
     console, Date, Math, Map, Set,
-    window: { crypto: require('node:crypto').webcrypto, confirm: () => true },
+    window: { crypto: require('node:crypto').webcrypto, StudBudDialogs: { confirm: async () => true, notify() {} } },
     document: {
         getElementById: id => elements.get(id) || null,
         querySelector: () => ({ textContent: '' }),

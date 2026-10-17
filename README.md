@@ -176,6 +176,10 @@ Cloud sync merges independent edits against the last saved baseline and retries 
 
 ### Offline access and compact workspaces
 
+The Planner opens on to-do work, highlights a recommended next task, and shows task counts, due-today/overdue counts and estimated minutes. Plain-language reasons and group descriptions replace raw priority scores: suggested order considers due dates, saved task priority and proximity to class grade cutoffs, not a predicted grade or required minutes. Estimates are planning guides, not tracked remaining time; completed and graded work stays available through the filters. Existing assignments can also be deleted directly from their editor, with confirmation.
+
+Confirmations and text requests use styled in-app dialogs with keyboard cancellation and focus restoration, not native browser alerts, confirms or prompts. Informational and error messages appear in a dismissible page notice. The Infinite Campus collector includes its own student chooser inside its import panel.
+
 Open the app once online (HTTPS or localhost) to cache its shell, scripts, icon fonts and public rendering libraries. After that, it loads without a network connection; stalled asset requests fall back to the cache after six seconds.
 
 ### Guest mode (accounts are optional)

@@ -13,6 +13,7 @@ const elements = new Map();
 const math = Object.create(Math);
 math.random = () => 0;
 const window = { addEventListener() {}, setTimeout, clearTimeout, crypto: require('node:crypto').webcrypto };
+window.StudBudDialogs = { notify() {}, confirm: async () => true, prompt: async () => '' };
 window.StudBudSfx = { settings: {}, update(patch) { Object.assign(this.settings, patch); } };
 const sandbox = {
     window, console, Math: math, Date, setTimeout, clearTimeout,

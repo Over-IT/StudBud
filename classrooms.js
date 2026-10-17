@@ -844,14 +844,14 @@
                 else if (action === 'back') { this.detail = null; this.detailTab = 'students'; await this.loadTeacher(); }
                 else if (action === 'tab') { this.detailTab = button.dataset.tab; this.renderTeacherDetail(); }
                 else if (action === 'delete-class') {
-                    if (!window.confirm('Stop teaching this course? Its flashcard sets are deleted and students lose access.')) return;
+                    if (!await window.StudBudDialogs.confirm('Stop teaching this course? Its flashcard sets are deleted and students lose access.')) return;
                     await this.call('studbud_teacher_delete_class', { p_class_id: this.detail.id });
                     this.detail = null;
                     this.detailTab = 'students';
                     await this.loadTeacher();
                     this.status('Course removed.');
                 } else if (action === 'remove-student') {
-                    if (!window.confirm(`Remove ${button.dataset.name}? They stop seeing this class and you stop seeing their progress. You can restore them later.`)) return;
+                    if (!await window.StudBudDialogs.confirm(`Remove ${button.dataset.name}? They stop seeing this class and you stop seeing their progress. You can restore them later.`)) return;
                     await this.call('studbud_teacher_remove_student', { p_class_id: this.detail.id, p_user_id: id });
                     await this.openClass(this.detail.id);
                 } else if (action === 'restore-student') {
@@ -862,7 +862,7 @@
                 else if (action === 'edit-deck') { this.editingDeck = (this.detail.decks || []).find(deck => deck.id === id) || null; this.renderTeacherDetail(); }
                 else if (action === 'cancel-deck') { this.editingDeck = null; this.renderTeacherDetail(); }
                 else if (action === 'delete-deck') {
-                    if (!window.confirm('Delete this set for the whole class?')) return;
+                    if (!await window.StudBudDialogs.confirm('Delete this set for the whole class?')) return;
                     await this.call('studbud_teacher_delete_deck', { p_deck_id: id });
                     await this.openClass(this.detail.id);
                 } else if (action === 'copy-deck-local' || action === 'save-class-deck') {

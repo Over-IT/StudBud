@@ -1,4 +1,4 @@
-const CACHE_NAME = 'studbud-shell-v123';
+const CACHE_NAME = 'studbud-shell-v127';
 let offlineNavigation = false;
 const PUBLIC_DEPENDENCIES = [
     'https://cdn.jsdelivr.net/npm/chart.js',
@@ -26,6 +26,7 @@ const APP_FILES = [
     './data/schools/west.js',
     './gpaCalculator.js',
     './plannerEngine.js',
+    './appDialogs.js',
     './flashcardEngine.js',
     './analyticsEngine.js',
     './practiceExamEngine.js',

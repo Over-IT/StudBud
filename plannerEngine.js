@@ -247,7 +247,7 @@
                     <!-- Header -->
                     <div class="flex flex-col md:flex-row md:items-center justify-between border-b border-slate-700 pb-5 gap-4">
                         <div>
-                            <h1 class="text-3xl font-bold text-white tracking-tight">Assignment Calculus Engine</h1>
+                            <h1 class="text-3xl font-bold text-white tracking-tight">Your to-do plan</h1>
                             <p class="text-slate-400 mt-1">Algorithmic prioritization based on grade boundaries, due dates, and burnout risk.</p>
                         </div>
                         <button id="btn-add-task" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg transition-all">
@@ -326,7 +326,7 @@
                                         <th class="p-4">Assignment</th>
                                         <th class="p-4">Course</th>
                                         <th class="p-4">Due</th>
-                                        <th class="p-4">P-Score</th>
+                                        <th class="p-4">Suggested order</th>
                                         <th class="p-4 text-right">Actions</th>
                                     </tr>
                                 </thead>
@@ -339,7 +339,7 @@
                                             <td class="p-4 font-semibold text-white ${asgn.status === 'completed' ? 'line-through' : ''}">${asgn.title}</td>
                                             <td class="p-4"><span class="px-2 py-1 bg-slate-700 rounded text-xs">${asgn.courseCode}</span></td>
                                             <td class="p-4 text-slate-400">${asgn.dueDate}</td>
-                                            <td class="p-4 font-mono font-bold ${asgn.calc.score >= 20 ? 'text-red-400' : 'text-emerald-400'}">${asgn.calc.score}</td>
+                                            <td class="p-4">${asgn.quad.title}</td>
                                             <td class="p-4 text-right">
                                                 <button data-action="delete" data-id="${asgn.id}" class="text-xs text-slate-400 hover:text-red-400 px-3 py-1 bg-slate-800 hover:bg-slate-700 rounded transition-colors">Delete</button>
                                             </td>
@@ -379,7 +379,7 @@
                                 </div>
                                 <div class="text-right">
                                     <div class="text-xs font-mono font-bold px-2 py-1 bg-slate-900 rounded text-amber-300 border border-slate-700 mb-1">
-                                        P: ${item.calc.score}
+                                        ${item.quad.title}
                                     </div>
                                     <div class="text-[10px] text-slate-500">${item.estimatedMinutes || 30}m</div>
                                 </div>
@@ -393,13 +393,13 @@
         bindEvents() {
             const addBtn = this.container.querySelector('#btn-add-task');
             if (addBtn) {
-                addBtn.addEventListener('click', () => {
-                    const title = prompt("Assignment Title:");
+                addBtn.addEventListener('click', async () => {
+                    const title = await window.StudBudDialogs.prompt("Assignment Title:");
                     if (!title) return;
                     
-                    const code = prompt("Course Code (e.g. MAT402):", "MAT402") || "GEN101";
-                    const days = parseInt(prompt("Days until due:", "2")) || 2;
-                    const mins = parseInt(prompt("Estimated minutes to complete:", "45")) || 45;
+                    const code = await window.StudBudDialogs.prompt("Course Code (e.g. MAT402):", "MAT402") || "GEN101";
+                    const days = parseInt(await window.StudBudDialogs.prompt("Days until due:", "2")) || 2;
+                    const mins = parseInt(await window.StudBudDialogs.prompt("Estimated minutes to complete:", "45")) || 45;
                     
                     const dueDate = new Date();
                     dueDate.setDate(dueDate.getDate() + days);
@@ -416,7 +416,7 @@
                 });
             }
 
-            this.container.addEventListener('click', (e) => {
+            this.container.addEventListener('click', async (e) => {
                 const toggleTarget = e.target.closest('[data-action="toggle"]');
                 const deleteTarget = e.target.closest('[data-action="delete"]');
 
@@ -433,7 +433,7 @@
                 if (deleteTarget) {
                     e.stopPropagation();
                     const id = deleteTarget.getAttribute('data-id');
-                    if (confirm("Delete this assignment?")) {
+                    if (await window.StudBudDialogs.confirm("Delete this assignment?")) {
                         this.appState.deleteAssignment(id);
                     }
                 }

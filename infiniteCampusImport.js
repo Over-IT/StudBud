@@ -101,9 +101,24 @@
             if (!students.length) throw new Error('No student was found on this Infinite Campus account.');
             let student = students[0];
             if (students.length > 1) {
-                const choice = window.prompt(`Which student should be imported?\n${students.map((item, index) => `${index + 1}. ${item.firstName || ''} ${item.lastName || ''}`.trim()).join('\n')}`, '1');
-                if (choice === null) { box.remove(); return; }
-                student = students[Math.max(0, Math.min(students.length - 1, Number(choice) - 1 || 0))];
+                say('Choose the student to import.');
+                const choice = await new Promise(resolve => {
+                    const select = document.createElement('select');
+                    select.setAttribute('aria-label', 'Student to import');
+                    select.style.cssText = 'width:100%;padding:8px;margin:8px 0;color:#111827;background:#fff';
+                    students.forEach((item, index) => {
+                        const option = document.createElement('option');
+                        option.value = String(index);
+                        option.textContent = `${item.firstName || ''} ${item.lastName || ''}`.trim() || `Student ${index + 1}`;
+                        select.append(option);
+                    });
+                    box.insertBefore(select, actions);
+                    button('Import student', () => { select.remove(); actions.replaceChildren(); resolve(Number(select.value)); });
+                    button('Cancel', () => { box.remove(); resolve(null); }, true);
+                    select.focus();
+                });
+                if (choice === null) return;
+                student = students[choice];
             }
             const personID = encodeURIComponent(student.personID);
             const enrollments = list(student.enrollments).map(item => pick(item, ['enrollmentID', 'calendarID', 'structureID', 'schoolName', 'calendarName', 'endYear', 'startDate', 'endDate']));
