@@ -307,7 +307,7 @@
                 this.setSaveStatus(`Saved on this device · ${new Date(payload.savedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`);
             } catch (error) {
                 console.error('[AppState] Could not save local app data:', error);
-                this.setSaveStatus('Could not save on this device. Export a backup before leaving.', 'error');
+                this.setSaveStatus('Could not save on this device. Keep this page open, free storage space and try saving again.', 'error');
                 throw new Error(`Your changes could not be saved on this device: ${error.message}`);
             }
         }
@@ -534,7 +534,7 @@
         profile: ['Your profile', 'Your character, rewards and public profile.'],
         shop: ['Shop', 'Open boxes and buy cosmetics.'],
         inventory: ['Locker', 'Everything you own. Equip it here.'],
-        settings: ['Profile & backups', 'Name, school, privacy and backups.'],
+        settings: ['Profile & data', 'Name, school, privacy and account settings.'],
         appearance: ['Appearance & performance', 'Colors, spacing and game detail.'],
         sound: ['Sound & music', 'Interface sounds, effects and music.'],
         about: ['Help & about', 'How StudBud works.'],
@@ -1115,7 +1115,7 @@
             const wasInert = container?.inert;
             if (container) container.inert = true;
             try {
-                if (!await AppState.importAppState(snapshot)) throw new Error('Your cloud backup could not be restored. Export a backup before reloading.');
+                if (!await AppState.importAppState(snapshot)) throw new Error('Your cloud data could not be restored. Keep this page open and retry syncing.');
                 this.renderUI();
                 this.setCloudChartControls();
                 this.renderGradeProgress();
@@ -1184,7 +1184,7 @@
                 return 'That took too long. Check your connection and try again.';
             }
             if (/quota|storage is full|QuotaExceeded/i.test(`${error?.name || ''} ${message}`)) {
-                return 'Your device is out of storage space. Free some space or export a backup, then try again.';
+                return 'Your device is out of storage space. Keep this page open, free some space and try saving again.';
             }
             if (/rate limit|too many requests|429/i.test(`${code} ${message}`)) {
                 return 'You are going too fast. Wait a few seconds and try again.';
@@ -1463,7 +1463,7 @@
 
             const courseSelect = document.getElementById('grade-scenario-course');
             const previousCourse = this.selectedScenarioCourseCode || courseSelect.value;
-            const courses = AppState.get('courses') || [];
+            const courses = this.schoolSemesterCourses();
             courseSelect.innerHTML = courses.map(course =>
                 `<option value="${this.escapeHTML(course.code)}">${this.escapeHTML(course.title)}</option>`
             ).join('');
@@ -1488,9 +1488,12 @@
                 return;
             }
 
-            const scenarioItems = Array.isArray(selectedScenario.items) ? selectedScenario.items : [];
+            const visibleCourseCodes = new Set(courses.map(course => course.code));
+            const scenarioItems = Array.isArray(selectedScenario.items)
+                ? selectedScenario.items.filter(item => visibleCourseCodes.has(item.courseCode))
+                : [];
             const overrides = selectedScenario.overrides || {};
-            const realAssignments = AppState.get('assignments') || [];
+            const realAssignments = this.semesterAssignments(AppState.get('assignments') || [], courses);
             const assignments = realAssignments.map(item => Object.prototype.hasOwnProperty.call(overrides, item.id)
                 ? { ...item, pointsEarned: Number(overrides[item.id]), graded: true, status: 'completed' }
                 : item);
@@ -1504,19 +1507,19 @@
                 maxPoints: Number(item.maxPoints),
                 status: 'completed'
             }));
-            const currentGpa = this.calculateTrackedGPA();
+            const currentGpa = this.calculateSemesterGPA(courses);
             const projectedCourses = courses.map(course => {
                 const grade = this.calculateScenarioCourseGrade(course, assignments, hypotheticalAssignments);
                 return Number.isFinite(grade) ? { ...course, targetGrade: this.gradeForPercentage(grade) } : null;
             }).filter(Boolean);
             const projectedGpa = window.GPACalculator
-                ? this.withPriorGPA(window.GPACalculator.calculateCurrentGPA(projectedCourses))
+                ? window.GPACalculator.calculateCurrentGPA(projectedCourses)
                 : currentGpa;
             summary.innerHTML = `
-                <article class="glass-card"><span class="gpa-summary-label">Current weighted GPA</span><strong>${Number(currentGpa.weighted).toFixed(2)}</strong><small>Before hypothetical grades</small></article>
-                <article class="glass-card"><span class="gpa-summary-label">Projected weighted GPA</span><strong>${Number(projectedGpa.weighted).toFixed(2)}</strong><small>${this.formatGpaChange(currentGpa.weighted, projectedGpa.weighted)}</small></article>
-                <article class="glass-card"><span class="gpa-summary-label">Current unweighted GPA</span><strong>${Number(currentGpa.unweighted).toFixed(2)}</strong><small>Before hypothetical grades</small></article>
-                <article class="glass-card"><span class="gpa-summary-label">Projected unweighted GPA</span><strong>${Number(projectedGpa.unweighted).toFixed(2)}</strong><small>${this.formatGpaChange(currentGpa.unweighted, projectedGpa.unweighted)}</small></article>
+                <article class="glass-card"><span class="gpa-summary-label">Current ${this.termLabel(this.schoolSemester())} weighted GPA</span><strong>${Number(currentGpa.weighted).toFixed(2)}</strong><small>Before hypothetical grades</small></article>
+                <article class="glass-card"><span class="gpa-summary-label">Projected ${this.termLabel(this.schoolSemester())} weighted GPA</span><strong>${Number(projectedGpa.weighted).toFixed(2)}</strong><small>${this.formatGpaChange(currentGpa.weighted, projectedGpa.weighted)}</small></article>
+                <article class="glass-card"><span class="gpa-summary-label">Current ${this.termLabel(this.schoolSemester())} unweighted GPA</span><strong>${Number(currentGpa.unweighted).toFixed(2)}</strong><small>Before hypothetical grades</small></article>
+                <article class="glass-card"><span class="gpa-summary-label">Projected ${this.termLabel(this.schoolSemester())} unweighted GPA</span><strong>${Number(projectedGpa.unweighted).toFixed(2)}</strong><small>${this.formatGpaChange(currentGpa.unweighted, projectedGpa.unweighted)}</small></article>
             `;
 
             itemsContainer.innerHTML = scenarioItems.length ? scenarioItems.map(item => {
@@ -1621,27 +1624,29 @@
         }
 
         renderCourses() {
-            const courses = AppState.get('courses') || [];
+            const allCourses = AppState.get('courses') || [];
+            const courses = this.schoolSemesterCourses(allCourses);
+            const semester = this.schoolSemester();
+            const semesterSelect = document.getElementById('school-semester-select');
+            if (semesterSelect) semesterSelect.value = semester;
             const catalog = window.STUDBUD_COURSE_CATALOG || window.PCHS_COURSE_CATALOG || [];
             const body = document.getElementById('transcript-body');
             const cards = document.getElementById('class-card-grid');
             const summary = document.getElementById('cumulative-gpa-summary');
-            const currentGpa = this.calculateTrackedGPA(courses);
+            const currentGpa = this.calculateSemesterGPA(courses);
             if (summary) {
-                const creditNote = currentGpa.priorCredits
-                    ? `${this.formatNumber(currentGpa.trackedCredits)} tracked + ${this.formatNumber(currentGpa.priorCredits)} past credits`
-                    : `Across ${this.formatNumber(currentGpa.totalCredits)} tracked credits · add past credits in Settings`;
+                const creditNote = `${this.formatNumber(currentGpa.totalCredits)} tracked credits in ${this.termLabel(semester)}`;
                 summary.innerHTML = `
-                    <article class="glass-card"><span class="gpa-summary-label">Cumulative weighted GPA</span><strong>${Number(currentGpa.weighted).toFixed(2)}</strong><small>${creditNote}</small></article>
-                    <article class="glass-card"><span class="gpa-summary-label">Cumulative unweighted GPA</span><strong>${Number(currentGpa.unweighted).toFixed(2)}</strong><small>${creditNote}</small></article>
+                    <article class="glass-card"><span class="gpa-summary-label">${this.termLabel(semester)} weighted GPA</span><strong>${Number(currentGpa.weighted).toFixed(2)}</strong><small>${creditNote}</small></article>
+                    <article class="glass-card"><span class="gpa-summary-label">${this.termLabel(semester)} unweighted GPA</span><strong>${Number(currentGpa.unweighted).toFixed(2)}</strong><small>${creditNote}</small></article>
                 `;
             }
             if (body) {
                 const assignments = AppState.get('assignments') || [];
                 body.innerHTML = courses.length ? courses.map(course => {
-                    const classAssignments = assignments.filter(item => item.courseCode === course.code);
+                    const classAssignments = this.semesterAssignments(assignments, [course]);
                     const categories = course.categories || [];
-                    const currentGrade = this.calculateCourseGrade(course);
+                    const currentGrade = this.calculateCourseGrade(course, classAssignments);
                     const gradeLetter = currentGrade === null ? '—' : this.gradeForPercentage(currentGrade);
                     const categoryGroups = categories.map(category => ({
                         id: category.id,
@@ -1707,11 +1712,11 @@
                             <button class="danger-btn" data-action="delete-course" data-id="${this.escapeHTML(course.code)}">Delete</button>
                         </div>
                     </article>`;
-                }).join('') : '<p class="empty-state">No classes added yet.</p>';
+                }).join('') : `<p class="empty-state">No classes for ${this.escapeHTML(this.termLabel(semester))} yet. Switch semesters or add a class.</p>`;
             }
             if (cards) {
                 cards.innerHTML = courses.length ? courses.map(course => {
-                    const grade = this.calculateCourseGrade(course);
+                    const grade = this.calculateSemesterCourseGrade(course);
                     const target = course.targetPct === null || course.targetPct === undefined ? NaN : Number(course.targetPct);
                     return `<article class="glass-card class-card">
                         <div><h3>${this.escapeHTML(course.title)}</h3><span class="class-term">${this.escapeHTML(this.termLabel(course.term))}</span></div>
@@ -1719,22 +1724,73 @@
                         <div class="class-grade-track"><span style="width:${Math.max(0, Math.min(100, grade || 0))}%"></span></div>
                         <button class="primary-btn" data-action="open-class" data-id="${this.escapeHTML(course.code)}">Open class</button>
                     </article>`;
-                }).join('') : '<p class="empty-state glass-card">No classes yet. Add your first class to start tracking grades.</p>';
+                }).join('') : `<p class="empty-state glass-card">No classes for ${this.escapeHTML(this.termLabel(semester))} yet. Switch semesters or add a class.</p>`;
             }
 
             const options = document.getElementById('assignment-course');
             if (options) {
                 const selected = options.value;
-                options.innerHTML = '<option value="">Select a Course...</option>' + courses.map(course =>
+                options.innerHTML = '<option value="">Select a Course...</option>' + allCourses.map(course =>
                     `<option value="${this.escapeHTML(course.code)}">${this.escapeHTML(course.title)}</option>`
                 ).join('');
-                if (courses.some(course => course.code === selected)) options.value = selected;
+                if (allCourses.some(course => course.code === selected)) options.value = selected;
             }
             if (!catalog.length) console.error('[StudBud] Parkway course catalog did not load.');
         }
 
         termLabel(term) {
             return ({ S1: 'Semester 1', S2: 'Semester 2', FY: 'Full Year' })[term] || 'Full Year';
+        }
+
+        configuredSemester() {
+            const term = (AppState.get('profile') || {}).currentTerm;
+            return term === 'S1' || term === 'S2' ? term : (new Date().getMonth() >= 7 ? 'S1' : 'S2');
+        }
+
+        schoolSemester() {
+            return this.semesterView === 'S1' || this.semesterView === 'S2'
+                ? this.semesterView
+                : this.configuredSemester();
+        }
+
+        schoolSemesterCourses(courses = AppState.get('courses') || []) {
+            const semester = this.schoolSemester();
+            return courses.filter(course => !['S1', 'S2'].includes(course.term) || course.term === semester);
+        }
+
+        semesterAssignments(assignments, courses) {
+            const coursesByCode = new Map(courses.map(course => [course.code, course]));
+            const semester = this.schoolSemester();
+            return assignments.filter(item => {
+                const course = coursesByCode.get(item.courseCode);
+                if (!course) return false;
+                if (course.term === 'S1' || course.term === 'S2') return course.term === semester;
+                const rawDate = item.dueDate || item.gradedAt;
+                if (!rawDate) return true;
+                const date = String(rawDate);
+                const month = /^\d{4}-\d{2}-\d{2}$/.test(date)
+                    ? Number(date.slice(5, 7)) - 1
+                    : new Date(date).getMonth();
+                return !Number.isInteger(month) || month < 0 || month > 11
+                    || (month >= 7 ? 'S1' : 'S2') === semester;
+            });
+        }
+
+        calculateSemesterGPA(courses) {
+            const calculator = window.GPACalculator;
+            if (!calculator) return { weighted: '0.000', unweighted: '0.000', totalCredits: 0 };
+            const assignments = this.semesterAssignments(AppState.get('assignments') || [], courses);
+            const currentCourses = courses.map(course => {
+                const courseAssignments = assignments.filter(item => item.courseCode === course.code);
+                const grade = this.calculateCourseGrade(course, courseAssignments);
+                return Number.isFinite(grade) ? { ...course, targetGrade: this.gradeForPercentage(grade) } : null;
+            }).filter(Boolean);
+            return calculator.calculateCurrentGPA(currentCourses);
+        }
+
+        calculateSemesterCourseGrade(course) {
+            const assignments = this.semesterAssignments(AppState.get('assignments') || [], [course]);
+            return this.calculateCourseGrade(course, assignments);
         }
 
         calculateTrackedGPA(courses = AppState.get('courses') || []) {
@@ -1819,14 +1875,19 @@
         renderClassDetail() {
             const container = document.getElementById('class-detail-content');
             if (!container) return;
-            const course = (AppState.get('courses') || []).find(item => item.code === Router.selectedClassCode);
+            const allCourses = AppState.get('courses') || [];
+            const course = this.schoolSemesterCourses(allCourses).find(item => item.code === Router.selectedClassCode);
             if (!course) {
-                container.innerHTML = '<div class="glass-card empty-state">That class could not be found.</div>';
+                const otherSemesterCourse = allCourses.find(item => item.code === Router.selectedClassCode);
+                const message = otherSemesterCourse
+                    ? `That class belongs to ${this.termLabel(otherSemesterCourse.term)}. Change semesters from My Classes & Grades to view it.`
+                    : 'That class could not be found.';
+                container.innerHTML = `<div class="glass-card empty-state">${this.escapeHTML(message)}</div>`;
                 return;
             }
             const categories = course.categories || [];
-            const assignments = (AppState.get('assignments') || []).filter(item => item.courseCode === course.code);
-            const grade = this.calculateCourseGrade(course);
+            const assignments = this.semesterAssignments(AppState.get('assignments') || [], [course]);
+            const grade = this.calculateCourseGrade(course, assignments);
             const target = course.targetPct === null || course.targetPct === undefined ? NaN : Number(course.targetPct);
             const sumWeights = categories.reduce((sum, category) => sum + Number(category.weight || 0), 0);
             const categoryRows = categories.map(category => {
@@ -3244,7 +3305,14 @@
                 practiceSelect.disabled = !decks.length;
             }
             if (decks.some(deck => deck.id === previous)) select.value = previous;
-            const nickname = this.gameNickname();
+            let nickname;
+            try {
+                nickname = this.gameNickname();
+            } catch (error) {
+                if (error.code !== 'INAPPROPRIATE_NAME') throw error;
+                console.warn('[Multiplayer] Choose a different nickname:', error);
+                nickname = 'Enter an appropriate nickname';
+            }
             ['host-game-nickname', 'join-game-nickname'].forEach(id => {
                 const input = document.getElementById(id);
                 if (input) input.placeholder = nickname;
@@ -3260,13 +3328,17 @@
 
         // Player names are optional: a blank name uses your username, so joining never stalls on an empty field.
         gameNickname(preferred) {
+            if (String(preferred || '').trim()) window.StudBudNameModeration.assertAllowed(preferred, 'Nickname');
             const clean = value => String(value || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
                 .replace(/[^A-Za-z0-9 _-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 20).trim();
             const cloud = window.StudBudCloud, profile = AppState.get('profile') || {};
             const username = cloud?.user?.user_metadata?.username;
             for (const candidate of [preferred, username, cloud?.isGuest?.() ? profile.guestName : '', this.multiplayerDisplayName()]) {
                 const name = clean(candidate);
-                if (name.length >= 2) return name;
+                if (name.length >= 2) {
+                    window.StudBudNameModeration.assertAllowed(name, 'Nickname');
+                    return name;
+                }
             }
             return 'Student';
         }
@@ -3760,6 +3832,7 @@
             if (!/^[a-z0-9_]{3,24}$/.test(username)) { statusEl.textContent = 'Use 3–24 letters, numbers, or underscores.'; return false; }
             statusEl.textContent = 'Saving…';
             try {
+                window.StudBudNameModeration.assertAllowed(username, 'Username');
                 await window.StudBudCommunityGames.changeUsername(username);
                 const cloud = window.StudBudCloud;
                 const { data } = await cloud.client.auth.refreshSession();
@@ -3863,6 +3936,8 @@
             const status = document.getElementById('public-profile-status');
             status.textContent = 'Saving…';
             try {
+                window.StudBudNameModeration.assertAllowed(document.getElementById('settings-first-name').value, 'First name');
+                window.StudBudNameModeration.assertAllowed(document.getElementById('settings-last-name').value, 'Last name');
                 await window.StudBudCommunityGames.friendCall('studbud_set_public_profile', {
                     p_bio: document.getElementById('public-bio').value,
                     p_favorite_subject: document.getElementById('public-subject').value,
@@ -4278,15 +4353,6 @@
                     document.getElementById('multiplayer-shop-status').textContent = this.mysteryDropMessage(item, profile);
                     await this.revealUnboxing(item, profile);
                 }
-                if (action === 'multiplayer-equip' && itemId.startsWith('palette_')) {
-                    const colorScheme = itemId.slice('palette_'.length);
-                    AppState.set('settings', { ...AppState.get('settings'), colorScheme, schemePicked: true });
-                    this.applyAppearance();
-                } else if (action === 'multiplayer-unequip' && itemId === 'palette'
-                    && AppState.get('settings')?.colorScheme === previousProfile.equipped_palette?.slice('palette_'.length)) {
-                    AppState.set('settings', { ...AppState.get('settings'), colorScheme: 'studbud', schemePicked: true });
-                    this.applyAppearance();
-                }
                 return true;
             } catch (error) {
                 if (box) this.closeUnboxing();
@@ -4311,14 +4377,17 @@
             const current = AppState.get('settings')?.colorScheme || 'studbud';
             const activePremiumScheme = Array.from(document.querySelectorAll('.scheme-option[data-shop-item]'))
                 .find(button => button.dataset.colorScheme === current);
-            if (activePremiumScheme && !owned.includes(activePremiumScheme.dataset.shopItem)) {
-                AppState.set('settings', { ...AppState.get('settings'), colorScheme: 'studbud' });
+            const equipped = window.StudBudCommunityGames?.catalog.find(item => item.type === 'palette' && item.id === this.multiplayerProfile?.equipped_palette);
+            const selectedScheme = equipped?.color || (activePremiumScheme ? 'studbud' : current);
+            if (selectedScheme !== current) {
+                AppState.set('settings', { ...AppState.get('settings'), colorScheme: selectedScheme, schemePicked: true });
                 this.applyAppearance();
             }
-            const selectedScheme = activePremiumScheme && !owned.includes(activePremiumScheme.dataset.shopItem) ? 'studbud' : current;
-            document.querySelectorAll('.scheme-option').forEach(button =>
-                button.classList.toggle('selected', button.dataset.colorScheme === selectedScheme)
-            );
+            document.querySelectorAll('.scheme-option').forEach(button => {
+                const selected = button.dataset.colorScheme === selectedScheme;
+                button.classList.toggle('selected', selected);
+                button.setAttribute('aria-pressed', String(selected));
+            });
         }
 
         updateMultiplayerGoalInputs() {
@@ -4335,7 +4404,7 @@
 
         questionRewardValue(value) {
             const amount = Number(value);
-            if (!Number.isInteger(amount) || amount < 5 || amount > 100 || amount % 5 !== 0) throw new Error('Choose a resource amount from 5 to 100 in increments of 5.');
+            if (!Number.isInteger(amount) || amount < 5 || amount > 100) throw new Error('Choose a whole-number resource amount from 5 to 100.');
             return amount;
         }
 
@@ -4374,10 +4443,10 @@
                     continue;
                 }
                 const amount = Number(input.value);
-                const warning = !Number.isInteger(amount) || amount < 5 || amount > 100 || amount % 5 !== 0 ? ' Choose a value from 5 to 100 in increments of 5.'
+                const warning = !Number.isInteger(amount) || amount < 5 || amount > 100 ? ' Choose a whole number from 5 to 100.'
                     : amount < min ? ' Below recommended: expect more frequent questions.'
                         : amount > max ? ' Above recommended: expect fewer questions or larger payouts.' : ' Within the recommended range.';
-                guidance.textContent = `Recommended setting: ${min}-${max}. ${explanation}${warning} Recommendations are guidance; the allowed range is 5-100 in increments of 5. Play style affects pacing.`;
+                guidance.textContent = `Recommended setting: ${min}-${max}. ${explanation}${warning} Recommendations are guidance; the allowed range is 5-100 in steps of 1. Play style affects pacing.`;
                 const button = document.querySelector(`[data-action="recommended-reward"][data-id="${prefix}-game-reward"]`);
                 if (button) button.textContent = `Use recommended: ${suggested}`;
             }
@@ -4385,6 +4454,11 @@
 
         updateMultiplayerModeSetup(mode) {
             const chess = mode === 'chess';
+            const lateJoin = document.getElementById('host-game-late-join');
+            if (lateJoin) {
+                lateJoin.disabled = chess;
+                if (chess) lateJoin.checked = false;
+            }
             const controls = [
                 document.getElementById('host-game-time')?.closest('.multiplayer-goals'),
                 document.getElementById('host-game-reward')?.closest('.question-reward-control'),
@@ -4403,7 +4477,7 @@
                 : 'Correct answers give the resource shown above. End game opens your summary. Practice awards no multiplayer coins.';
             const labels = {
                 defense: ['Team Tower Defense', 'Red vs blue, 1v1 or teams. Share cash, build and upgrade troops, send enemies to the rival path. First base to 0 HP loses; no time limit.'],
-                skyline: ['Escape to Space', 'Parkour from the city through a factory to space before the tide.'],
+                skyline: ['Escape to Space', 'Climb rooftop switchbacks, cross a factory and reach space. Lower routes can catch a fall.'],
                 river: ['River Fishing', 'Steer a boat, dodge obstacles and catch fish.'],
                 market: ['Package Delivery', 'Deliver packages across town and dodge cars.'],
                 miner: ['Crystal Mining', 'Dig crystals, bank them at base, avoid lava.'],
@@ -4506,7 +4580,8 @@
             if (type === 'grass') {
                 for (let col = 0; col < 9; col++) if (col !== 4 && this.waitingRandom(runner, row, col + 19) < 0.22) lane.blockers.push({ col, kind: this.waitingRandom(runner, row, col + 41) < 0.66 ? 'tree' : 'rock' });
             } else if (type === 'road') {
-                lane.vehicles = [0, 1, 2].map(i => ({ x: i * 5 + this.waitingRandom(runner, row, i + 53) * 1.7, w: this.waitingRandom(runner, row, i + 71) < 0.35 ? 2.1 : 1.1, speed: direction * (1.2 + this.waitingRandom(runner, row, i + 81) * 2.8) * ramp, color: ['#38bdf8', '#fbbf24', '#f472b6', '#a78bfa', '#ef4444', '#f8fafc'][Math.floor(this.waitingRandom(runner, row, i + 91) * 6)] }));
+                lane.speed = direction * (1.2 + this.waitingRandom(runner, row, 81) * 2.8) * ramp;
+                lane.vehicles = [0, 1, 2].map(i => ({ x: i * 5 + this.waitingRandom(runner, row, i + 53) * 1.7, w: this.waitingRandom(runner, row, i + 71) < 0.35 ? 2.1 : 1.1, speed: lane.speed, color: ['#38bdf8', '#fbbf24', '#f472b6', '#a78bfa', '#ef4444', '#f8fafc'][Math.floor(this.waitingRandom(runner, row, i + 91) * 6)] }));
             }
             if ((type === 'grass' || type === 'road') && this.waitingRandom(runner, row, 151) < (type === 'grass' ? 0.2 : 0.12)) {
                 const col = Math.floor(this.waitingRandom(runner, row, 157) * 9);
@@ -4543,6 +4618,7 @@
             const blocked = destination.blockers.some(blocker => blocker.col === Math.round(col));
             runner.hop = { x: runner.x, from: runner.row, to: row, targetX: col, dx, dy, elapsed: 0, duration: blocked ? 0.22 : 0.2, t: 0, blocked };
             if (blocked) runner.bump = 0.22;
+            window.StudBudSfx?.play(blocked ? 'act' : 'jump', 'game');
         }
 
         beginWaitingHop(event) {
@@ -4570,6 +4646,7 @@
             if (runner.dead) return;
             runner.dead = true; runner.running = false; runner.hop = null; runner.deathReason = reason;
             runner.deathAge = 0;
+            window.StudBudSfx?.play(reason.startsWith('Splash!') || reason === 'Carried beyond the bank' ? 'splash' : 'hit', 'game');
             document.getElementById('waiting-runner-start').textContent = 'Oops...';
             this.saveWaitingRunnerBest();
         }
@@ -4664,6 +4741,7 @@
                             runner.ridingPlatform = platform.kind;
                             if (platform.kind === 'log') runner.fx.push({ x: runner.x, row: runner.row, age: 0, kind: 'log-land' });
                         } else runner.ridingPlatform = null;
+                        if (!hop.blocked) window.StudBudSfx?.play('act', 'game', 45, .35);
                     }
                 } else {
                     const lane = this.waitingLane(runner, runner.row);
@@ -5204,7 +5282,7 @@
                 else p.off = true;
             }
             const groundIndex = b.onGround ? route.list.findIndex(p => p === b.ground || p.surface === b.ground) : -1;
-            if (groundIndex >= 0 && groundIndex !== st.i) { st.i = groundIndex; st.jump = null; st.nextThink = demo.clock + (b.ground.crumble ? 0 : Math.min(b.ai.reaction, .2)); }
+            if (groundIndex >= 0 && groundIndex !== st.i) { st.i = groundIndex; st.jump = null; st.nextThink = demo.clock + (b.ground.crumble || b.ground.w < 180 ? 0 : Math.min(b.ai.reaction, .2)); }
             let target = route.list[st.i + 1] || route.list[st.i];
             let crossingMachine = false;
             let waitingPoint = b.x + b.w / 2;
@@ -5273,6 +5351,13 @@
                     : U.clamp((edge - b.x) / 60, -1, 1) * Math.min(1, speed);
             }
             if (crossingMachine && b.onGround && !keys.jump) actor.stuckT = 0;
+            if (st.stallX === undefined || Math.hypot(b.x - st.stallX, b.y - st.stallY) > 80 || st.stallNode !== st.i) {
+                st.stallX = b.x; st.stallY = b.y; st.stallNode = st.i; st.stallAt = demo.clock;
+            }
+            if (b.onGround && demo.clock - st.stallAt > 12) {
+                keys.reset = true;
+                st.stallAt = demo.clock;
+            }
             actor.s.botKeys = keys;
             const falling = b.vy >= 0;
             actor.updatePlayer(dt);
@@ -5293,15 +5378,15 @@
                 me: bot, cp: demo.game.checkpoints[bot.st.checkpoint || 0], res: new A.Resource('Energy', '#facc15', 100, 50),
                 dead: 0, finished: false, deaths: 0, maxH: 0, biomeSeen: 0, dash: 0, dashCd: 0,
                 kick: 0, buffer: 0, coyote: .1, airJumps: 1, sprung: false, boost: 0, slow: 0,
-                stuckT: 0, stuckX: undefined, stuckY: undefined, strandedT: 0, trapT: 0, voidT: 0, voidCheck: 0, tideY: bot.y + 1200,
-                retirePassedAreas() {}, particles: { burst() {}, update() {} }
+                stuckT: 0, stuckX: undefined, stuckY: undefined, strandedT: 0, trapT: 0,
+                particles: { burst() {}, update() {} }
             });
             actor.s = {
                 game: actor, user: { id: bot.id }, local: { color: bot.color }, t: demo.clock,
                 testing: demo.session.testing, preview: demo.session.preview,
                 botKeys: {}, axis() { return { x: this.botKeys.x || 0 }; },
                 down(...codes) { return codes.includes('Space') && Boolean(this.botKeys.hold); },
-                pressed(...codes) { return codes.includes('Space') ? Boolean(this.botKeys.jump) : codes.includes('ShiftLeft') ? Boolean(this.botKeys.dash) : false; },
+                pressed(...codes) { return codes.includes('Space') ? Boolean(this.botKeys.jump) : codes.includes('ShiftLeft') ? Boolean(this.botKeys.dash) : codes.includes('KeyR') ? Boolean(this.botKeys.reset) : false; },
                 spend(n) { return this.testing || this.preview || actor.res.spend(n); }, sfx() {}, toast() {}, setGoal() {}
             };
             return actor;
@@ -5644,7 +5729,7 @@
             S.start = k; S.sceneStarted = c; S.reachT = undefined; S.cur = R.cpNode[k]; S.flagDone = true;
             this.skyPlace(game, S, n, c);
             me.x = cps[k].x + 20 - me.w / 2; me.face = 1;
-            Object.assign(game, { cp: cps[k], dead: 0, tideY: cps[k].y + 1000 });
+            Object.assign(game, { cp: cps[k], dead: 0 });
             game.maxH = Math.max(game.maxH, -cps[k].y);
             demo.trail = [];
         }
@@ -5800,7 +5885,11 @@
             this.skyStep(demo, game, bot, bot.st, dt, speed);
             if (bot.onGround && bot.ground === game.summit) bot.done = true;
             bot.f = bot.face || 1; bot.a = bot.respawn > 0 ? 4 : bot.st.air ? 2 : bot.st.moving ? 1 : 0;
-            bot.tx = bot.x; bot.ty = bot.y; bot.ex = {}; bot.seen = now;
+            const actor = bot.st.actor;
+            bot.tx = bot.x; bot.ty = bot.y;
+            bot.ex = { g: Boolean(bot.onGround), wa: actor?.wallPose || 0, ws: actor?.wallSide || 0, wk: actor?.kick || 0,
+                dp: actor?.dashPose || 0, jp: actor?.jumpPulse || 0, j: actor?.airJumpPulse || 0, l: actor?.landingPose || 0 };
+            bot.seen = now;
         }
 
         minerSectors(game) {
@@ -6561,7 +6650,8 @@
                 goal_type: form.elements.mode.value === 'chess' ? 'points' : 'time',
                 point_limit: 1000,
                 time_limit_seconds: ['chess', 'defense'].includes(form.elements.mode.value) ? 0 : Math.min(60, Math.max(1, Number(form.elements.timeLimit.value) || 5)) * 60,
-                question_reward: form.elements.mode.value === 'chess' ? 1 : this.questionRewardValue(form.elements.questionReward.value)
+                question_reward: form.elements.mode.value === 'chess' ? 1 : this.questionRewardValue(form.elements.questionReward.value),
+                allow_late_join: form.elements.mode.value !== 'chess' && Boolean(form.elements.allowLateJoin?.checked)
             };
             let room;
             for (let attempt = 0; attempt < 3; attempt++) {
@@ -6716,7 +6806,8 @@
                     : room.mode === 'sports' ? `${room.point_limit} goal${Number(room.point_limit) === 1 ? '' : 's'}`
                     : room.mode === 'shooter' ? `${room.point_limit} combat points`
                         : `${Number(room.point_limit).toLocaleString()} point goal`;
-            document.getElementById('hosted-room-meta').textContent = `${goalLabel} · ${players.length} / ${playerLimit} players`;
+            const joinLabel = room.mode !== 'chess' && state.allow_late_join ? 'Late joining allowed' : 'Joining locks at start';
+            document.getElementById('hosted-room-meta').textContent = `${goalLabel} · ${players.length} / ${playerLimit} players · ${joinLabel}`;
             document.getElementById('hosted-room-code').textContent = room.room_code;
             const rankedPlayers = players.slice().sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
             const lobbyColors = window.StudBudArcade?.util?.defaultPlayerColors?.(players) || new Map();
@@ -6762,7 +6853,7 @@
             if (inLobby) {
                 const info = {
                     defense: ['Red vs blue: shared cash from correct answers and kills. Build troops on your side, send enemies to the other path, and reduce the rival base to 0 HP.', 'WASD walk anywhere · Click to build/select · Buttons send/upgrade · Q/E earn cash'],
-                    skyline: ['Climb to the summit past moving platforms, spikes, saws and wind. A rising tide chases you.', 'A/D run · Space jump (twice) · Shift dash'],
+                    skyline: ['Climb rooftop switchbacks and moving platforms to the summit. Falls can land on lower routes; trapped landings return you to a checkpoint.', 'A/D run · Space jump (twice) · Shift dash · R checkpoint'],
                     river: ['Steer a boat, dodge obstacles and catch fish.', 'WASD steer · click cast · Q recharge'],
                     market: ['Deliver packages across town and dodge cars.', 'WASD move · Shift sprint · Q recharge'],
                     miner: ['Dig through the cavern, haul ore back to base and avoid lava.', 'WASD move · hold click dig · Q recharge'],
@@ -7136,9 +7227,7 @@
             if (accountName) accountName.innerHTML = `${this.escapeHTML(displayName)} ${this.accountTagMarkup(window.StudBudCloud?.user?.user_metadata?.username, this.userTags)}`;
             const grade = document.getElementById('header-grade-level');
             if (grade) grade.textContent = `Class of ${classYear}`;
-            const selectedTerm = profile.currentTerm === 'S1' || profile.currentTerm === 'S2'
-                ? profile.currentTerm
-                : (new Date().getMonth() >= 7 ? 'S1' : 'S2');
+            const selectedTerm = this.configuredSemester();
             const termDisplay = document.getElementById('current-term-display');
             if (termDisplay) termDisplay.textContent = this.termLabel(selectedTerm);
             const saveStatus = document.getElementById('data-save-status');
@@ -7586,7 +7675,7 @@
             this.tutorialStep = 0;
             const root = document.createElement('div');
             root.id = 'tutorial-root';
-            root.innerHTML = `<div class="tutorial-spot" hidden></div><div class="tutorial-card" role="dialog" aria-modal="true" aria-labelledby="tutorial-title" aria-describedby="tutorial-description"><div class="tutorial-progress"><span class="tutorial-progress-bar"></span></div><div class="tutorial-head"><small class="tutorial-count"></small><label class="tutorial-jump"><span class="sr-only">Jump to a topic</span><select aria-label="Jump to a topic">${this.tutorialSteps().map((step, index) => `<option value="${index}">${index + 1}. ${this.escapeHTML(step.title)}</option>`).join('')}</select></label></div><h3 id="tutorial-title"></h3><p id="tutorial-description" class="tutorial-text"></p><div class="tutorial-buttons"><button type="button" class="text-btn" data-tour="skip">Finish later</button><span class="tutorial-spacer"></span><button type="button" class="secondary-btn" data-tour="back">Back</button><button type="button" class="primary-btn" data-tour="next">Next</button></div></div>`;
+            root.innerHTML = `<div class="tutorial-spot" hidden></div><div class="tutorial-card" role="dialog" aria-modal="true" aria-labelledby="tutorial-title" aria-describedby="tutorial-description"><div class="tutorial-brand"><span class="tutorial-brand-icon"><i class="fas fa-compass" aria-hidden="true"></i></span><span class="tutorial-brand-copy"><strong>STUDBUD GUIDE</strong><small>A quick tour of your study hub</small></span></div><div class="tutorial-progress"><span class="tutorial-progress-bar"></span></div><div class="tutorial-head"><small class="tutorial-count"></small><label class="tutorial-jump"><span class="sr-only">Jump to a topic</span><select aria-label="Jump to a topic">${this.tutorialSteps().map((step, index) => `<option value="${index}">${index + 1}. ${this.escapeHTML(step.title)}</option>`).join('')}</select></label></div><h3 id="tutorial-title"></h3><p id="tutorial-description" class="tutorial-text"></p><div class="tutorial-buttons"><button type="button" class="text-btn" data-tour="skip">Finish later</button><span class="tutorial-spacer"></span><button type="button" class="secondary-btn" data-tour="back">Back</button><button type="button" class="primary-btn" data-tour="next">Next</button></div></div>`;
             document.body.appendChild(root);
             root.querySelector('select').addEventListener('change', event => this.showTutorialStep(Number(event.target.value)));
             root.addEventListener('click', event => {
@@ -8325,10 +8414,11 @@
             const select = document.getElementById('analytics-course-select');
             if (!select) return;
             const selected = select.value || 'all';
-            select.innerHTML = '<option value="all">All classes</option>' + (AppState.get('courses') || []).map(course =>
+            const courses = this.schoolSemesterCourses();
+            select.innerHTML = '<option value="all">All classes</option>' + courses.map(course =>
                 `<option value="${this.escapeHTML(course.code)}">${this.escapeHTML(course.title)}</option>`
             ).join('');
-            if (selected === 'all' || (AppState.get('courses') || []).some(course => course.code === selected)) select.value = selected;
+            select.value = selected === 'all' || courses.some(course => course.code === selected) ? selected : 'all';
         }
 
         renderStudyAnalytics() {
@@ -8360,10 +8450,11 @@
                 document.getElementById('grade-progress-caption').textContent = 'Charts could not load. Check your internet connection and reload.';
                 return;
             }
-            const courses = AppState.get('courses') || [];
-            const assignments = AppState.get('assignments') || [];
+            const courses = this.schoolSemesterCourses();
+            const assignments = this.semesterAssignments(AppState.get('assignments') || [], courses);
             const metric = document.getElementById('analytics-metric-select')?.value || 'class';
-            const selectedCode = document.getElementById('analytics-course-select')?.value || 'all';
+            const requestedCode = document.getElementById('analytics-course-select')?.value || 'all';
+            const selectedCode = requestedCode === 'all' || courses.some(course => course.code === requestedCode) ? requestedCode : 'all';
             const chartType = document.getElementById('analytics-chart-type')?.value || 'line';
             const theme = window.getComputedStyle(document.body);
             const dark = document.body.classList.contains('dark-theme');
@@ -8406,7 +8497,7 @@
                 const currentCourses = selectedCourse ? [selectedCourse] : courses;
                 const currentGrades = currentCourses.map(course => ({
                     course,
-                    grade: this.calculateCourseGrade(course)
+                    grade: this.calculateSemesterCourseGrade(course)
                 })).filter(item => Number.isFinite(item.grade));
                 const scoredCount = assignments.filter(item =>
                     (this.isGradedItem(item)) &&
@@ -8436,7 +8527,7 @@
                     }),
                     borderColor: accentColor
                 }];
-                const currentGpa = this.calculateTrackedGPA(courses);
+                const currentGpa = this.calculateSemesterGPA(courses);
                 title.textContent = metric === 'weighted' ? 'Weighted GPA history' : 'Unweighted GPA history';
                 caption.textContent = labels.length
                     ? 'GPA is recalculated from class grades recorded on or before each date.'
@@ -8772,6 +8863,8 @@
                     const shopItem = target.dataset.shopItem;
                     if (shopItem) {
                         if (!await this.updateMultiplayerShop('multiplayer-equip', shopItem)) return;
+                    } else if (this.multiplayerProfile?.equipped_palette) {
+                        if (!await this.updateMultiplayerShop('multiplayer-unequip', 'palette')) return;
                     }
                     AppState.set('settings', { ...AppState.get('settings'), colorScheme: scheme, schemePicked: true });
                     this.applyAppearance();
@@ -8881,8 +8974,6 @@
                     await this.saveProfile();
                 } else if (id === 'save-grade-scale-btn') {
                     await this.saveOtherGradeScale();
-                } else if (id === 'open-backup-modal-btn') {
-                    this.openModal('backup-modal');
                 } else if (target.matches('.open-ic-import-btn')) {
                     this.openInfiniteCampusImport();
                 } else if (id === 'ic-open-campus-btn') {
@@ -8901,10 +8992,6 @@
                     this.applyInfiniteCampusImport();
                 } else if (id === 'remove-ic-schedule-btn') {
                     this.removeImportedSchedule();
-                } else if (id === 'export-json-btn') {
-                    await this.exportBackup();
-                } else if (id === 'import-json-btn') {
-                    await this.importBackup();
                 } else if (id === 'factory-reset-btn') {
                     await this.factoryReset();
                 } else if (id === 'change-username-btn') {
@@ -9212,6 +9299,11 @@
                 this.updateCourseSchoolFields();
                 this.renderOtherGradeScaleEditor();
                 this.updatePublicSchoolOption();
+                return;
+            }
+            if (event.target.id === 'school-semester-select') {
+                this.semesterView = event.target.value === 'S2' ? 'S2' : 'S1';
+                this.renderUI();
                 return;
             }
             const widgetPref = event.target.dataset?.homeWidgetPref;
@@ -10381,6 +10473,7 @@
                 priorUnweightedGpa: priorCredits > 0 ? priorUnweightedGpa : null,
                 currentTerm: document.getElementById('settings-current-term').value
             };
+            this.semesterView = null;
             AppState.set('profile', profile);
             const savedSchoolSelect = document.getElementById('settings-school');
             if (savedSchoolSelect?.dataset) delete savedSchoolSelect.dataset.dirty;
@@ -10441,28 +10534,6 @@
             this.renderOtherGradeScaleEditor();
             this.renderUI();
             document.getElementById('school-profile-status').textContent = 'Custom grading scale saved.';
-        }
-
-        async exportBackup() {
-            const content = await AppState.exportAppState();
-            const url = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = 'studbud-backup.json';
-            link.click();
-            URL.revokeObjectURL(url);
-        }
-
-        async importBackup() {
-            const content = document.getElementById('import-json-textarea').value.trim();
-            if (!content) {
-                window.alert('Paste a backup JSON file before restoring.');
-                return;
-            }
-            if (!window.confirm('This replaces the current app data. Continue?')) return;
-            await AppState.importAppState(content);
-            this.closeModal();
-            window.alert('Backup restored.');
         }
 
         async factoryReset() {

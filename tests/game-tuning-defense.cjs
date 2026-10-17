@@ -106,6 +106,20 @@ for (const seed of [1, 42, 12345, 67890]) {
     drawCalls = 0;
 }
 const settled = session('miner').game;
+{
+    const s = session('miner'), g = s.game, sounds = [];
+    s.sfx = (...args) => sounds.push(args);
+    g.tile = () => 0;
+    g.hitLava();
+    assert.equal(sounds.length, 0, 'dry ground never plays a burn sound');
+    g.tile = () => 6;
+    g.hitLava();
+    assert.deepEqual(sounds, [['burn', 1000]], 'actual lava contact plays the dedicated burn effect');
+    g.hitLava();
+    assert.equal(sounds.length, 1, 'remaining in lava respects the damage cooldown');
+    g.lavaCd = 0; g.hitLava();
+    assert.equal(sounds.length, 2, 'the next lava damage tick sizzles again');
+}
 settled.T.fill(1); settled.F.fill(0); settled.D.fill(0); settled.flowing.clear();
 const source = 10 * 110 + 10;
 settled.T[source] = 6; settled.flowing.add(source);
@@ -148,12 +162,12 @@ for (let i = 0; i < 3; i++) hg.onEvent({ k: 'hit', by: hill.user.id }, { id: 'gu
 assert.equal(hg.specialCharge, 100, 'three landed attacks charge the special');
 const skyline = session('skyline').game;
 const oldCount = skyline.solids.length;
-skyline.cp = skyline.checkpoints[2]; skyline.retirePassedAreas();
-assert.ok(skyline.solids.length < oldCount * .65, 'passed areas release at least 35% of solids');
+skyline.cp = skyline.checkpoints[2]; skyline.captureCheckpoint();
+assert.equal(skyline.solids.length, oldCount, 'lower routes remain playable after reaching Space');
 assert.ok(skyline.solids.includes(skyline.summit), 'culling preserves the finish');
 assert.ok(skyline.solids.some(p => p.boundary), 'culling preserves boundary walls');
 skyline.draw(ctx, 1280, 720);
-console.log('Fishing destruction/spin/ejection, dry caves, four traffic-safe corners, eased shooter zoom, charged specials and Escape to Space retirement passed.');
+console.log('Fishing destruction/spin/ejection, dry caves, four traffic-safe corners, eased shooter zoom, charged specials and retained Escape to Space routes passed.');
 
 const host = session('defense'), game = host.game;
 assert.equal(game.teamOf('host'), game.teamOf('ally'));
@@ -218,6 +232,24 @@ const rows = ['host', 'ally', 'guest', 'rival'].map(id => ({ id, ...game.standin
 assert.equal(game.resultTitle(rows), 'Blue team wins!');
 assert.equal(game.isWinner(rows, 'ally'), true, 'all winning teammates receive the winning result');
 const client = session('defense', 'guest', ['host', 'guest']);
+{
+    const late = session('defense', 'late', ['host', 'guest', 'late']);
+    const authoritativeTeams = { host: 0, guest: 1, late: 1 };
+    const existing = session('defense', 'host', ['host', 'guest']).game;
+    existing.simulate(3);
+    existing.wallets = [230, 95]; existing.health = [91, 75];
+    const snapshot = existing.snapshot();
+    late.room.state = { defense: snapshot, defense_teams: authoritativeTeams };
+    late.game.onRoom(late.room);
+    assert.equal(late.game.myTeam, 1, 'late arrivals follow server teams, not client roster alternation');
+    assert.equal(late.game.teamOf('late'), 1, 'older snapshots cannot erase a late arrival');
+    assert.deepEqual([...late.game.wallets], [...existing.wallets], 'late arrivals share the current wallet instead of resetting the economy');
+    assert.deepEqual([...late.game.health], [...existing.health], 'late arrivals inherit the current base health');
+    existing.s.room.state = { defense_teams: authoritativeTeams };
+    existing.onRoom(existing.s.room);
+    assert.equal(existing.teamOf('late'), 1, 'the host includes newcomers in the next battle snapshot');
+    assert.equal(existing.snapshot().teams.late, 1);
+}
 client.game.request('send', { type: 0 });
 assert.equal(client.game.enemies.length, 0, 'non-hosts never simulate or spend optimistically');
 client.game.update(.7);
@@ -268,21 +300,21 @@ console.log('Admin Tower Defense builds, upgrades and sends honor infinite test 
     const build = (id, data = {}) => g.command({ seq: (g.lastSeq[id] || 0) + 1, action: 'build', type: 0,
         ...nextCell(g.teamOf(id)), ...data }, id);
     for (const id of ids) {
-        for (let i = 0; i < 12; i++) build(id, { owner: 'spoofed' });
-        assert.equal(g.troopCount(id), 12, 'every player gets twelve independently owned towers');
+        for (let i = 0; i < 10; i++) build(id, { owner: 'spoofed' });
+        assert.equal(g.troopCount(id), 10, 'four teammates share forty slots equally');
         const before = g.troops.length; build(id);
-        assert.equal(g.troops.length, before, 'a thirteenth tower is rejected even with unlimited admin cash');
+        assert.equal(g.troops.length, before, 'an eleventh tower is rejected even with unlimited admin cash');
     }
-    assert.equal(g.troops.length, 96, 'snapshots allow more than the former global 72/team 36 limits');
-    assert.equal(g.troops.filter(t => t.team === 0).length, 48, 'four teammates each retain their twelve-tower allowance');
+    assert.equal(g.troops.length, 80, 'each team has a hard forty-tower maximum');
+    assert.equal(g.troops.filter(t => t.team === 0).length, 40);
     assert.ok(g.troops.every(t => t.owner !== 'spoofed'), 'ownership comes from the authenticated order sender');
     g.draw(ctx, 1280, 720);
     assert.ok(g.ui.rects.filter(r => r.id.startsWith('build:')).every(r => !r.on), 'build buttons disable at the personal cap');
-    assert.match(g.goalText(), /Towers 12\/12/);
+    assert.match(g.goalText(), /Towers 10\/10/);
     const restored = session('defense', 'guest', ids).game;
     const state = g.snapshot(); restored.applySnapshot(state);
-    assert.equal(restored.troopCount('ally'), 12, 'ownership survives snapshot restoration');
-    assert.equal(restored.troops.length, 96);
+    assert.equal(restored.troopCount('ally'), 10, 'ownership survives snapshot restoration');
+    assert.equal(restored.troops.length, 80);
     const previousSerial = restored.receivedSerial, originalError = sandbox.console.error;
     sandbox.console.error = noop;
     try {
@@ -294,7 +326,289 @@ console.log('Admin Tower Defense builds, upgrades and sends honor infinite test 
     } finally { sandbox.console.error = originalError; }
     assert.ok(restored.s.messages.some(message => /invalid tower|invalid battle/i.test(message)), 'invalid ownership is reported explicitly');
 }
-console.log('Grid placement, authenticated tower ownership, independent 12-player caps, expanded team capacity and snapshot restoration passed.');
+console.log('Grid placement, authenticated ownership, equal forty-tower team shares and snapshot restoration passed.');
+for (const count of [1, 2, 3, 4, 8]) {
+    const ids = Array.from({ length: count }, (_, i) => [`blue${i}`, `red${i}`]).flat();
+    const s = session('defense', 'blue0', ids);
+    assert.equal(s.game.playerTroopLimit, Math.floor(40 / count), 'tower allowance rounds down equally for each team size');
+    assert.ok(s.game.playerTroopLimit * count <= 40);
+    assert.equal(s.game.buildType, null, 'no Archer or other tower is selected at startup');
+    s.mouse.active = true; s.game.update(0);
+    s.game.draw(ctx, s.vw, s.vh);
+    assert.equal(s.game.previewPoint, null, 'a pointer alone cannot create a tower preview');
+}
+{
+    const s = session('defense'), g = s.game;
+    g.wallets[0] = 1000;
+    g.request('build', { type: 0, x: 515, y: 1135 });
+    const tower = g.troops[0];
+    assert.equal(g.sellValue(tower), 45);
+    g.request('upgrade', { id: tower.id }); assert.equal(g.sellValue(tower), 90);
+    g.request('upgrade', { id: tower.id }); assert.equal(g.sellValue(tower), 180, 'refund includes every paid upgrade');
+    const wallet = g.wallets[0];
+    for (const id of ['ally', 'guest']) g.command({ seq: (g.lastSeq[id] || 0) + 1, action: 'sell', id: tower.id }, id);
+    assert.equal(g.troops.length, 1, 'teammates and opponents cannot sell someone else’s tower');
+    assert.equal(g.wallets[0], wallet);
+    const sell = { seq: (g.lastSeq.host || 0) + 1, action: 'sell', id: tower.id };
+    g.command(sell, 'host'); g.command(sell, 'host');
+    assert.equal(g.troops.length, 0);
+    assert.equal(g.wallets[0], wallet + 180, 'retransmitted sell orders refund only once');
+    assert.ok(g.s.events.some(event => event.k === 'td-error' && /only sell towers you own/.test(event.message)), 'rejected selling is reported to the requesting player');
+    s.testing = true;
+    g.request('build', { type: 0, x: 515, y: 1135 });
+    assert.equal(g.sellValue(g.troops[0]), 0, 'free staff-test towers do not generate refunds');
+}
+console.log('Rounded team-size quotas, unselected startup, owner-only selling, upgrade refunds and duplicate-order safety passed.');
+{
+    const s = session('defense', 'host', ['host', 'guest']), g = s.game;
+    s.testing = true;
+    const build = id => {
+        for (let y = 85; y <= 1415; y += 70) for (let x = 95; x <= 1005; x += 70) {
+            if (g.validPlacement(x, y, 0)) {
+                g.command({ seq: (g.lastSeq[id] || 0) + 1, action: 'build', type: 0, x, y }, id);
+                return;
+            }
+        }
+        throw new Error('No empty test cell');
+    };
+    for (let i = 0; i < 25; i++) build('host');
+    s.roster.set('ally', { id: 'ally' }); g.teams.ally = 0;
+    assert.equal(g.playerTroopLimit, 20);
+    build('host'); assert.equal(g.troops.length, 25, 'late joining preserves old towers but blocks an over-quota owner');
+    for (let i = 0; i < 15; i++) build('ally');
+    build('ally'); assert.equal(g.teamTroopCount(0), 40, 'team cap applies even when a newcomer has individual slots left');
+    const restored = session('defense', 'guest', ['host', 'guest', 'ally']).game;
+    restored.applySnapshot(g.snapshot());
+    assert.equal(restored.troopCount('host'), 25, 'late-join snapshots preserve existing owners above their new quota');
+    g.selected = g.troops[0].id;
+    for (const [w, h] of [[1280, 720], [390, 844], [844, 390]]) {
+        s.vw = w; s.vh = h; s.scale = 1;
+        s.hudBounds = A.Session.prototype.hudBounds; s.placeHud = A.Session.prototype.placeHud;
+        g.draw(ctx, w, h);
+        assert.ok(g.ui.rects.some(r => r.id === 'tower-panel'));
+        assert.equal(g.ui.rects.some(r => r.id === 'shop-panel'), w >= 668, 'narrow displays show management separately rather than overlapping the shop');
+        for (const rect of g.ui.rects) {
+            assert.ok(rect.x >= 0 && rect.y >= 0 && rect.x + rect.w <= w + .01 && rect.y + rect.h <= h + .01, 'HUD controls remain inside the viewport');
+        }
+    }
+    s.taps.add('Escape'); g.update(0); s.taps.clear();
+    assert.equal(g.selected, null); assert.equal(g.buildType, null);
+}
+console.log('Late-join tower retention, forty-tower team ceiling and responsive separate management panels passed.');
+{
+    const s = session('skyline'), g = s.game;
+    const plank = { x: 1050, y: -500, w: 150, h: 16, cityKit: 'scaffold', frame: [1000, 2200], below: 0, bi: 0 };
+    g.drawList.push(plank);
+    g.drawIndex = null;
+    const seen = new Set(), drawCityKit = g.drawCityKit;
+    g.drawCityKit = function (c, p, ...args) { seen.add(p); return drawCityKit.call(this, c, p, ...args); };
+    for (const offset of [0, .25, .5, .75]) {
+        Object.assign(g.me, { x: plank.frame[1] - 20 + offset, y: plank.y - 44, vx: 0, vy: 0 });
+        g.snapCam = true; seen.clear(); g.draw(ctx, 390, 720);
+        assert.ok(plank.x + plank.w < g.cam.x - 120, 'the small collision plank is outside the render margin');
+        assert.ok(seen.has(plank), 'its wider scaffold support remains drawn while intersecting the viewport');
+    }
+    g.me.x = plank.frame[1] + 3000; g.snapCam = true; seen.clear(); g.draw(ctx, 390, 720);
+    assert.ok(!seen.has(plank), 'a truly offscreen support still gets culled');
+    for (const p of g.solids.filter(p => p.cityKit === 'catwalk' && p.board.panel)) {
+        assert.ok(g.solids.some(roof => roof.roof && roof.tower && roof.y === p.board.base
+            && p.x >= roof.x - 1 && p.x + p.w <= roof.x + roof.w + 1), 'billboard supports terminate on a real building roof');
+    }
+}
+console.log('Scaffold support visibility across fractional camera offsets, offscreen culling and roof-mounted billboards passed.');
+{
+    const g = session('skyline').game;
+    for (const pole of g.movers.filter(p => p.cityKit === 'pole')) {
+        for (const amount of [0, .5, 1]) {
+            const drawn = [], p = { ...pole, sunk: pole.depth * amount, y: pole.by + pole.depth * amount };
+            const poleCtx = new Proxy(ctx, { get: (target, key) => key === 'fillRect'
+                ? (x, y, w, h) => drawn.push({ x, y, w, h }) : target[key] });
+            g.drawCityKit(poleCtx, p);
+            assert.ok(drawn.every(rect => rect.h >= 0), 'pole sleeves and chrome rods never invert as the cap compresses');
+            const rod = drawn.find(rect => rect.w === 10);
+            assert.equal(rod.y, p.y + p.h, 'the telescoping rod remains attached beneath the moving cap');
+            assert.ok(rod.h >= 22, 'the moving rod remains above the fixed sleeve even at full compression');
+        }
+    }
+}
+{
+    const s = session('skyline'), g = s.game, buildings = [];
+    let backdrop = true;
+    const backdropCtx = new Proxy(ctx, { get: (target, key) => key === 'scale' ? () => { backdrop = false; }
+        : key === 'fillRect' ? (x, y, w, h) => {
+            if (backdrop && ['#1b2342', '#161c36', '#10152b'].includes(target.fillStyle)) buildings.push({ y, h });
+        } : target[key] });
+    g.camInit = true; g.camStart = -12000; g.snapCam = true; g.me.y = 400;
+    g.draw(backdropCtx, 1280, 720);
+    assert.ok(buildings.length > 10, 'descending still draws all three city parallax layers');
+    assert.ok(buildings.every(rect => rect.h > 0 && Math.abs(rect.y + rect.h - 720) < .001),
+        'background buildings reach the viewport bottom even far below the initial camera position');
+}
+{
+    const s = session('skyline'), g = s.game, poses = [];
+    const original = A.util.drawFigureSide;
+    let scale = [1, 1], tilt = 0;
+    const poseCtx = new Proxy(ctx, { get: (target, key) => key === 'scale' ? (x, y) => { scale = [x, y]; }
+        : key === 'rotate' ? angle => { tilt = angle; } : target[key] });
+    A.util.drawFigureSide = (...args) => { poses.push({ scale, tilt, limbs: args[10] }); return original(...args); };
+    try {
+        const pose = (state, motion, vy = state === 2 ? -850 : 0) => {
+            Object.assign(g, { state, dash: 0, dashPose: 0, wallPose: 0, kick: 0, landingPose: 0, jumpPulse: 0, airJumpPulse: 0, ...motion });
+            g.me.vy = vy;
+            const body = JSON.stringify(g.me); poses.length = 0; g.draw(poseCtx, 1280, 720);
+            assert.equal(JSON.stringify(g.me), body, 'render poses do not change physics or hitboxes');
+            return poses.at(-1);
+        };
+        const originalScale = pose(0).scale;
+        const air = pose(2, { jumpPulse: .125 }); assert.deepEqual(air.scale, originalScale, 'jumping preserves the original model proportions');
+        assert.equal(g.net().ex.jp, .125, 'ground-jump animation state is sent to other players');
+        assert.ok(air.limbs.legs[0] > 0 && air.limbs.legs[0] <= .25, 'jumping rotates the front leg slightly outward');
+        assert.equal(air.limbs.legs[1], -air.limbs.legs[0], 'both legs rotate outward by the same small angle');
+        assert.equal(air.limbs.bob, 0, 'jumping only changes the leg pose, not body height');
+        assert.equal(air.limbs.arms, undefined, 'animation preserves the original armless character');
+        assert.ok(air.limbs.legs.every(Number.isFinite), 'each leg has one rigid hip angle rather than a curved or hinged knee');
+        const fall = pose(2, {}, 650);
+        assert.ok(fall.limbs.legs.every(angle => angle === 0), 'falling without a jump pulse keeps the legs neutral');
+        assert.ok(pose(2).limbs.legs.every(angle => angle === 0), 'being airborne alone does not trigger a leg animation');
+        const start = pose(2, { jumpPulse: .25 });
+        assert.ok(Math.abs(start.limbs.legs[0]) < .001, 'the jump rotation starts neutral instead of snapping outward');
+        const release = pose(2, { jumpPulse: .025 });
+        assert.ok(release.limbs.legs[0] > 0 && release.limbs.legs[0] < air.limbs.legs[0], 'the rotation returns toward neutral at the end of the jump pulse');
+        const double = pose(2, { airJumpPulse: .125 });
+        assert.deepEqual(double.limbs.legs, air.limbs.legs, 'double jumps keep the same subtle outward rotation without tucking');
+        assert.equal(g.net().ex.j, .125, 'double-jump animation state is sent to other players');
+        const dash = pose(3, { dash: .1, dashPose: 1 }); assert.deepEqual(dash.scale, originalScale); assert.equal(Math.abs(dash.tilt), .35);
+        assert.ok(dash.limbs.legs[0] < -1, 'dashing trails the straight legs');
+        const partial = pose(3, { dash: .1, dashPose: .5 }); assert.ok(Math.abs(partial.tilt) < Math.abs(dash.tilt), 'dash pose blends instead of snapping');
+        const wall = pose(2, { wallPose: 1, wallSide: 1 }, 130);
+        assert.ok(wall.tilt < 0 && wall.limbs.legs[0] > .5, 'wall sliding braces an existing straight leg against the wall');
+        const land = pose(0, { landingPose: .16 }); assert.deepEqual(land.scale, originalScale); assert.ok(land.limbs.bob > 0, 'landing lowers the original body without deforming it');
+        const duel = session('duel').game;
+        poses.length = 0;
+        duel.drawFighter(poseCtx, 500, 500, s.local, 1, 3, 0, 'You', false, .2, 1, true, 0, 0, true);
+        assert.ok(poses[0].tilt > 0 && poses[0].tilt < .2, 'heavy attacks use follow-through, not the dash pose');
+    } finally { A.util.drawFigureSide = original; }
+}
+for (const fps of [30, 60, 120]) {
+    const s = session('skyline'), g = s.game;
+    g.solids = [{ x: 100, y: 500, w: 800, h: 40 }];
+    Object.assign(g.me, { x: 300, y: 456, vx: 0, vy: 0, onGround: true, ground: g.solids[0] });
+    s.axis = () => ({ x: 0, y: 0 });
+    s.down = key => key === 'Space';
+    s.taps.add('Space'); g.updatePlayer(1 / fps); s.taps.clear();
+    assert.equal(g.jumpPulse, .25, 'a successful ground jump triggers one short pose pulse');
+    for (let frame = 0; frame < Math.ceil(fps * .3); frame++) g.updatePlayer(1 / fps);
+    assert.equal(g.jumpPulse, 0, 'holding jump while airborne does not replay the animation');
+    assert.equal(g.me.onGround, false, 'the first jump animation finishes before landing');
+    s.taps.add('Space'); g.updatePlayer(1 / fps); s.taps.clear();
+    assert.equal(g.airJumpPulse, .25, 'double jumping triggers the animation again');
+    assert.equal(g.jumpPulse, 0, 'a double jump restarts a single pulse instead of overlapping ground-jump animation');
+    for (let frame = 0; frame < Math.ceil(fps * .3); frame++) g.updatePlayer(1 / fps);
+    assert.equal(g.airJumpPulse, 0, 'double-jump animation ends while airborne too');
+}
+console.log('Original-model jump, landing, eased dash, straight-leg wall brace and heavy-attack poses preserve character physics passed.');
+{
+    const s = session('skyline'), g = s.game, biomes = [];
+    const previousAudio = sandbox.window.StudBudSfx;
+    sandbox.window.StudBudSfx = { setMusicBiome: (mode, biome) => biomes.push([mode, biome]) };
+    const originalUpdate = g.updatePlayer;
+    g.updatePlayer = () => {};
+    try {
+        for (const [height, biome] of [[100, 0], [g.checkpoints[1].y * -1 + 100, 1], [g.checkpoints[2].y * -1 + 100, 3], [100, 0]]) {
+            g.me.y = -height - g.me.h;
+            g.update(1 / 60);
+            assert.deepEqual(biomes.at(-1), ['skyline', biome], 'music follows the current biome rather than the highest checkpoint');
+        }
+        const count = biomes.length; s.preview = true; g.update(1 / 60);
+        assert.equal(biomes.length, count, 'passive previews cannot change game music');
+    } finally {
+        sandbox.window.StudBudSfx = previousAudio;
+        g.updatePlayer = originalUpdate;
+    }
+}
+{
+    const s = session('skyline'), g = s.game, sounds = [];
+    g.solids = [{ x: 100, y: 500, w: 800, h: 40 }];
+    g.springs = [{ x: 300, y: 484, w: 46, h: 16, city: true }];
+    g.trapChecks = false;
+    Object.assign(g.me, { x: 310, y: 456, vx: 0, vy: 0, onGround: true, ground: g.solids[0] });
+    s.axis = () => ({ x: 0, y: 0 });
+    s.sfx = name => sounds.push(name);
+    g.updatePlayer(1 / 60);
+    assert.ok(g.sprung && g.me.vy === -1280, 'the spring pad retains its existing launch strength');
+    assert.equal(sounds.filter(name => name === 'spring').length, 1, 'spring contact plays its dedicated launch sound once');
+    assert.ok(!sounds.includes('powerup'), 'a spring launch is not a musical power-up jingle');
+    for (let frame = 0; frame < 10; frame++) g.updatePlayer(1 / 60);
+    assert.equal(sounds.filter(name => name === 'spring').length, 1, 'leaving the spring does not repeat the launch sound');
+}
+for (const fps of [30, 60, 120]) {
+    const s = session('skyline'), g = s.game;
+    g.solids = [{ x: 400, y: 0, w: 40, h: 800, wallJ: true }];
+    Object.assign(g.me, { x: 374, y: 200, vx: 0, vy: 100, onGround: false });
+    s.axis = () => ({ x: 1, y: 0 });
+    g.updatePlayer(1 / fps);
+    assert.ok(g.wallPose > 0 && g.wallPose < 1, 'wall attachment eases in rather than snapping');
+    for (let frame = 1; frame < fps / 5; frame++) g.updatePlayer(1 / fps);
+    assert.ok(g.wallPose > .98 && g.wallSide === 1, 'wall-slide pose settles against the contacted wall');
+    assert.equal(g.net().ex.wa, g.wallPose); assert.equal(g.net().ex.ws, 1);
+    s.taps.add('Space'); g.updatePlayer(1 / fps); s.taps.clear();
+    assert.ok(g.kick > 0 && g.me.vx < 0 && g.me.vy < 0, 'wall jumping pushes away from the wall with the real jump physics');
+    assert.equal(g.net().ex.wk, g.kick, 'remote players receive the wall-jump animation');
+    s.axis = () => ({ x: 0, y: 0 });
+    for (let frame = 0; frame < fps / 5; frame++) g.updatePlayer(1 / fps);
+    assert.ok(g.wallPose < .02, 'the wall brace releases after pushing off');
+    for (let frame = 0; frame < fps / 5; frame++) g.updatePlayer(1 / fps);
+    assert.equal(g.wallPose, 0, 'the released wall pose fully clears so ordinary running animation resumes');
+    g.dash = .3; g.dashPose = 0;
+    g.updatePlayer(1 / fps);
+    assert.ok(g.dashPose > 0 && g.dashPose < 1, 'dash attack is eased at every supported frame rate');
+    const amount = g.dashPose; g.dash = 0; g.updatePlayer(1 / fps);
+    assert.ok(g.dashPose > 0 && g.dashPose < amount, 'dash release is eased too');
+}
+for (const fps of [30, 60, 120]) {
+    for (const side of [-1, 1]) {
+        for (const input of [0, -side, side]) {
+            const s = session('skyline'), g = s.game;
+            g.solids = [{ x: 400, y: 0, w: 40, h: 800, wallJ: true }];
+            Object.assign(g.me, { x: side === 1 ? 374 : 440, y: 200, vx: 0, vy: 100, face: side, onGround: false });
+            s.axis = () => ({ x: input, y: 0 });
+            g.updatePlayer(1 / fps);
+            assert.equal(g.me.face, -side, 'sliding looks away from the contacted wall toward the next jump regardless of directional input');
+            assert.equal(g.net().f, -side, 'other players see the eyes facing toward the next jump');
+            s.taps.add('Space');
+            g.updatePlayer(1 / fps);
+            s.taps.clear();
+            assert.equal(g.me.face, -side, 'wall jumping immediately faces away from the wall');
+            assert.equal(Math.sign(g.me.vx), -side, 'the wall jump still pushes away from the contacted wall');
+        }
+    }
+}
+{
+    const s = session('miner'), g = s.game, sounds = [];
+    s.sfx = (...args) => sounds.push(args);
+    const x = 20, y = 12, index = y * 110 + x;
+    Object.assign(g.me, { x: x * 48, y: y * 48 });
+    g.T[index] = 2;
+    g.onEvent({ k: 'mh', x, y }, { id: 'guest' });
+    assert.equal(sounds.length, 0, 'old clients cannot trigger mid-dig sounds');
+    g.onEvent({ k: 'dg', x, y }, { id: s.user.id });
+    g.onEvent({ k: 'dg', x: 1.5, y }, { id: 'guest' });
+    g.onEvent({ k: 'dg', x: -1, y }, { id: 'guest' });
+    g.onEvent({ k: 'dg', x, y: 80 }, { id: 'guest' });
+    assert.equal(sounds.length, 0, 'self and invalid block-break events are silent');
+    g.T[70 * 110 + 100] = 2;
+    g.onEvent({ k: 'dg', x: 100, y: 70 }, { id: 'guest' });
+    assert.equal(sounds.length, 0, 'distant players do not play global block-break sounds');
+    g.onEvent({ k: 'dg', x, y }, { id: 'guest' });
+    assert.equal(sounds[0][0], 'rockBreak');
+    assert.ok(sounds[0][2] > 0 && sounds[0][2] < 1, 'nearby block breaks are distance-attenuated');
+    g.T[index] = 3;
+    const carry = g.carry, items = g.items, events = s.events.length;
+    g.onEvent({ k: 'dg', x, y }, { id: 'guest' });
+    assert.equal(g.T[index], 0); assert.equal(sounds.at(-1)[0], 'crystal');
+    assert.equal(g.carry, carry); assert.equal(g.items, items); assert.equal(s.events.length, events, 'remote breaks neither award local loot nor rebroadcast');
+}
+console.log('Wall attachment/push-off and eased dash transitions at 30/60/120 FPS, break-only mining audio and remote-loot isolation passed.');
 {
     const idle = session('defense'), g = idle.game;
     assert.equal(g.waveNumber, 0); assert.equal(g.enemies.length, 0);
@@ -349,12 +663,14 @@ console.log('Automatic waves, wave scaling, host-synchronized progress and idle 
         assert.equal(next.range - current.range, 35);
         assert.ok(next.damage > current.damage && next.rate < current.rate, 'described upgrade deltas match combat');
     }
-    g.catalogPage = 1; g.draw(ctx, 1280, 720);
+    g.draw(ctx, 1280, 720);
     assert.ok(g.ui.rects.some(r => r.id === 'build:5'));
+    g.shopTab = 'send'; g.draw(ctx, 1280, 720);
     assert.ok(g.ui.rects.some(r => r.id === 'send:5'));
     texts.length = 0; g.selected = g.troops[3].id; g.draw(ctx, 1280, 720);
     assert.ok(texts.some(text => text.startsWith('Upgrade: +52.0 dmg · +35 range')), 'upgrade panel describes actual ballista stats');
-    g.selected = null; g.ui.prev = [];
+    assert.ok(g.ui.rects.some(r => r.id === 'tower-panel') && g.ui.rects.some(r => r.id === 'shop-panel'), 'tower management is separate from the shop');
+    g.selected = null; g.buildType = 0; g.ui.rects = []; g.ui.prev = [];
     s.mouse.active = true; s.mouse.x = 500; s.mouse.y = 400;
     g.update(0); assert.ok(g.previewPoint, 'moving pointer creates a placement ghost');
     texts.length = 0; g.draw(ctx, 1280, 720);
@@ -454,7 +770,11 @@ for (const fps of [30, 60, 120]) {
     assert.equal(g.selected, tower.id, 'clicking anywhere in the tower cell selects it');
     pointAt(655, 1135); g.update(0);
     assert.equal(g.selected, null); assert.equal(g.troops.length, 1, 'clicking empty ground first deselects without building');
-    g.update(0); assert.equal(g.troops.length, 2, 'a subsequent deliberate build click places the tower');
+    g.update(0); assert.equal(g.troops.length, 1, 'another ground click cannot build without choosing a tower');
+    g.buildType = 0;
+    g.update(0); assert.equal(g.troops.length, 2, 'choosing a tower arms exactly one placement');
+    g.draw(ctx, s.vw, s.vh);
+    assert.equal(g.buildType, null); assert.equal(g.previewPoint, null, 'placing a tower removes its selection and preview in both update and render');
     pointAt(725, 1135);
     g.ui.prev = [{ id: 'build:0', x: s.mouse.x - 10, y: s.mouse.y - 10, w: 30, h: 30, on: true }];
     g.ui.rects = [{ id: 'minimap', x: s.mouse.x - 10, y: s.mouse.y - 10, w: 30, h: 30, on: false }];
@@ -508,7 +828,7 @@ console.log('Industrial conveyor/deck/prop render dispatch, no construction scaf
         assert.ok(rivets.length > 0 && rivets.every(x => (x - p.x - 12) % 60 === 0), 'deck rivets never change grid origin at a viewport edge');
         const chamber = { id: -1, top: -900, bottom: -100, columns: [100, 620] };
         g.drawStationFrame(trace, chamber, -700 + cameraX / 4, 100 + cameraX / 4);
-        assert.ok(lights.length > 0 && lights.every(y => y === chamber.top - 220 + 3), 'station end lights are anchored to the structure, never the clipped viewport edge');
+        assert.equal(lights.length, 0, 'background station pylons do not use bright markers that resemble solid gameplay objects');
     }
 }
 console.log('World-anchored conveyor bracing, deck rivets and station end lights remain stable under fractional camera movement.');
@@ -609,9 +929,9 @@ for (const fps of [30, 60, 120]) {
     s.testNoTide = true; g.cp = g.checkpoints[1];
     Object.assign(g.me, { x: g.cp.x, y: g.cp.y - g.me.h - 2, vx: 0, vy: 0 });
     g.tideY = g.cp.y - 100; g.update(0);
-    assert.equal(g.deaths, 1, 'ordinary games cannot disable the tide using staff flags');
+    assert.equal(g.deaths, 0, 'ordinary games have no rising tide that kills a recoverable fall');
     s.testing = true; g.dead = 0; g.tideY = g.cp.y - 100; g.update(0);
-    assert.equal(g.deaths, 1, 'staff tide toggle prevents tide death without enabling invincibility');
+    assert.equal(g.deaths, 0, 'staff tests use the same fall-friendly world');
     g.testTeleport(0);
     const arcs = [], sunStops = [], strokes = [];
     const oldGradient = ctx.createRadialGradient, oldStroke = ctx.stroke;
@@ -630,7 +950,7 @@ for (const fps of [30, 60, 120]) {
     delete ctx.arc;
     ctx.createRadialGradient = oldGradient; ctx.stroke = oldStroke;
 }
-console.log('Wide conveyor motion/freeze at 30/60/120 FPS, staff-only tide control and subtly faded borderless circular sun in both graphics modes passed.');
+console.log('Wide conveyor motion/freeze at 30/60/120 FPS, tide-free falls and subtly faded borderless circular sun in both graphics modes passed.');
 for (const fps of [30, 60, 120]) {
     const s = session('skyline'), g = s.game;
     g.spikes = []; g.saws = []; g.drills = []; g.balls = []; g.lasers = []; g.springs = [];

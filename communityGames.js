@@ -595,6 +595,7 @@
         }
 
         async changeUsername(username) {
+            window.StudBudNameModeration.assertAllowed(username, 'Username');
             const { data, error } = await this.getClient().rpc('studbud_change_username', { p_username: username });
             if (error) throw new Error(error.message.includes('Could not find the function')
                 ? 'Username changes are not set up yet. Re-run supabase-setup.sql in Supabase.' : error.message);
@@ -672,6 +673,7 @@
         }
 
         async createRoom(roomCode, nickname, deck, mode, options = {}) {
+            window.StudBudNameModeration.assertAllowed(nickname, 'Nickname');
             const cards = (deck.cards || []).filter(card => String(card.front || '').trim() && String(card.back || '').trim())
                 .map(card => ({ front: String(card.front).trim().slice(0, 1000), back: String(card.back).trim().slice(0, 1000),
                     distractors: (card.distractors || []).map(text => String(text).trim().slice(0, 1000)).filter(Boolean).slice(0, 3) }));
@@ -712,6 +714,7 @@
         }
 
         async joinRoom(roomCode, nickname) {
+            window.StudBudNameModeration.assertAllowed(nickname, 'Nickname');
             const { data, error } = await (await this.gameClient()).rpc('studbud_join_game_room', {
                 p_code: roomCode,
                 p_nickname: nickname

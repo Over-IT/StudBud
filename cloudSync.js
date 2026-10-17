@@ -20,7 +20,10 @@
             this.restoringSnapshot = false;
             this.offlineMode = false;
             this.mfaPendingUser = null;
-            this.mfaSetupFactor = null;
+            this.emailSignIn = null;
+            this.emailAuthBusy = false;
+            this.pendingAccountEmail = null;
+            this.emailLinkBusy = false;
         }
 
         async getFriendRooms() {
@@ -138,7 +141,7 @@
                 }
                 return merged;
             }
-            throw new Error(`Both devices changed ${field}. Export a backup before reloading to resolve the conflict; neither version was overwritten.`);
+            throw new Error(`Both devices changed ${field}. Choose which version to keep; neither version was overwritten.`);
         }
 
         async bootstrap() {
@@ -189,11 +192,14 @@
             document.getElementById('auth-switch-btn')?.addEventListener('click', () => this.setAuthMode(this.authMode === 'login' ? 'signup' : 'login'));
             document.getElementById('login-form')?.addEventListener('submit', event => this.handleLogin(event));
             document.getElementById('signup-form')?.addEventListener('submit', event => this.handleSignup(event));
+            document.getElementById('email-signin-form')?.addEventListener('submit', event => this.handleEmailLogin(event));
+            document.getElementById('email-login-form')?.addEventListener('submit', event => this.verifyEmailLogin(event));
+            document.getElementById('email-login-resend')?.addEventListener('click', () => this.resendEmailLogin());
+            document.getElementById('email-login-cancel')?.addEventListener('click', () => this.cancelEmailLogin());
+            document.getElementById('email-link-form')?.addEventListener('submit', event => this.linkAccountEmail(event));
+            document.getElementById('email-link-verify-form')?.addEventListener('submit', event => this.verifyAccountEmail(event));
             document.getElementById('mfa-login-form')?.addEventListener('submit', event => this.verifyMfaLogin(event));
             document.getElementById('mfa-login-cancel')?.addEventListener('click', () => this.cancelMfaLogin());
-            document.getElementById('mfa-enable-btn')?.addEventListener('click', () => this.beginMfaSetup());
-            document.getElementById('mfa-verify-setup-btn')?.addEventListener('click', () => this.verifyMfaSetup());
-            document.getElementById('mfa-cancel-setup-btn')?.addEventListener('click', () => this.cancelMfaSetup());
             document.getElementById('mfa-disable-btn')?.addEventListener('click', () => this.showMfaDisablePanel());
             document.getElementById('mfa-confirm-disable-btn')?.addEventListener('click', () => this.disableMfa());
             document.getElementById('mfa-cancel-disable-btn')?.addEventListener('click', () => this.hideMfaDisablePanel());
@@ -315,11 +321,14 @@
 
         async startOffline() {
             if (this.accountOpening || this.syncPromise) throw new Error('Wait for the account operation to finish before opening offline mode.');
+            this.clearEmailLoginPrompt();
             this.offlineMode = true;
             localStorage.setItem('STUDBUD_LOCAL_MODE', 'true');
             this.initialSnapshot = null;
             this.user = null;
             this.accountReady = false;
+            this.pendingAccountEmail = null;
+            await this.refreshEmailSettings();
             window.clearTimeout(this.syncTimer);
             if (!this.appStarted) {
                 await window.NexusApp.init();
@@ -395,10 +404,13 @@
         }
 
         setAuthMode(mode) {
+            if (this.emailAuthBusy || this.mfaPendingUser) return;
             this.authMode = mode;
+            this.clearEmailLoginPrompt();
             const signup = mode === 'signup';
             document.getElementById('login-form')?.classList.toggle('hidden', signup);
             document.getElementById('signup-form')?.classList.toggle('hidden', !signup);
+            document.getElementById('email-signin-options')?.classList.toggle('hidden', signup);
             document.getElementById('auth-title').textContent = signup ? 'Create your free account' : 'Welcome to StudBud';
             document.getElementById('auth-description').textContent = signup
                 ? 'Sync your classes and sets across devices, earn coins and share sets. Anything saved as a guest on this device comes with you.'
@@ -416,7 +428,13 @@
         }
 
         async routeAuthenticatedUser(user) {
-            if (!user?.id || (this.accountReady && this.user?.id === user.id)) return;
+            if (!user?.id) return;
+            if (this.accountReady && this.user?.id === user.id) {
+                const emailChanged = this.user.email !== user.email;
+                this.user = user;
+                if (emailChanged) await this.refreshEmailSettings();
+                return;
+            }
             if (!this.client?.auth?.mfa?.getAuthenticatorAssuranceLevel) return this.openAccount(user);
             const { data, error } = await this.client.auth.mfa.getAuthenticatorAssuranceLevel();
             if (error) throw new Error(this.friendlyAuthError(error, 'Could not check your authenticator status. Please try signing in again.'));
@@ -432,7 +450,7 @@
             this.mfaPendingUser = user;
             this.showAuth();
             document.getElementById('mfa-login-prompt')?.classList.remove('hidden');
-            ['login-form', 'signup-form', 'auth-switch-prompt', 'auth-switch-btn', 'offline-start-btn', 'guest-start-hint', 'auth-divider', 'guest-join', 'auth-legal'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
+            ['login-form', 'signup-form', 'email-signin-options', 'email-login-prompt', 'auth-switch-prompt', 'auth-switch-btn', 'offline-start-btn', 'guest-start-hint', 'auth-divider', 'guest-join', 'auth-legal'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
             this.setAuthStatus('');
             document.getElementById('mfa-login-code')?.focus();
         }
@@ -442,6 +460,7 @@
             document.getElementById('mfa-login-prompt')?.classList.add('hidden');
             document.getElementById('login-form')?.classList.toggle('hidden', this.authMode === 'signup');
             document.getElementById('signup-form')?.classList.toggle('hidden', this.authMode !== 'signup');
+            document.getElementById('email-signin-options')?.classList.toggle('hidden', this.authMode === 'signup');
             ['auth-switch-prompt', 'auth-switch-btn', 'offline-start-btn', 'guest-start-hint', 'auth-divider', 'guest-join', 'auth-legal'].forEach(id => document.getElementById(id)?.classList.remove('hidden'));
         }
 
@@ -486,29 +505,62 @@
             return `${normalized}@accounts.studbud.invalid`;
         }
 
+        emailAddress(value) {
+            const email = String(value || '').trim().toLowerCase();
+            if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.endsWith('@accounts.studbud.invalid')) {
+                throw new Error('Enter a real email address where you can receive a sign-in code.');
+            }
+            return email;
+        }
+
+        setEmailAuthBusy(busy) {
+            this.emailAuthBusy = busy;
+            document.querySelectorAll('#login-form button, #signup-form button, #email-signin-form button, #email-login-prompt button, #auth-switch-btn, #offline-start-btn')
+                .forEach(button => { button.disabled = busy; });
+        }
+
+        async handleEmailLogin(event) {
+            event.preventDefault();
+            if (this.emailAuthBusy) return;
+            try {
+                const email = this.emailAddress(document.getElementById('login-email').value);
+                await this.sendEmailLogin({ email, options: { shouldCreateUser: false } });
+            } catch (error) {
+                this.setAuthStatus(this.friendlyAuthError(error, 'Could not send your sign-in code. Please try again.'), true);
+            }
+        }
+
         async handleLogin(event) {
             event.preventDefault();
+            if (this.emailAuthBusy) return;
+            this.setEmailAuthBusy(true);
             this.setAuthStatus('Signing in…');
             try {
+                const identifier = document.getElementById('login-username').value.trim();
                 const { data, error } = await this.client.auth.signInWithPassword({
-                    email: this.usernameEmail(document.getElementById('login-username').value),
+                    email: identifier.includes('@') ? this.emailAddress(identifier) : this.usernameEmail(identifier),
                     password: document.getElementById('login-password').value
                 });
                 if (error) throw error;
+                document.getElementById('login-password').value = '';
                 await this.routeAuthenticatedUser(data.user || data.session?.user);
             } catch (error) {
                 console.error('[StudBudCloud] Sign-in failed:', error);
                 this.reportAccountError(error);
+            } finally {
+                this.setEmailAuthBusy(false);
             }
         }
 
         async handleSignup(event) {
             event.preventDefault();
+            if (this.emailAuthBusy) return;
             const username = document.getElementById('signup-username').value.trim().toLowerCase();
             const password = document.getElementById('signup-password').value;
             const school = document.getElementById('signup-school').value;
             try {
                 this.usernameEmail(username);
+                window.StudBudNameModeration.assertAllowed(username, 'Username');
             } catch (error) {
                 this.setAuthStatus(error.message, true);
                 return;
@@ -525,7 +577,8 @@
                 this.setAuthStatus('Choose your school to create an account.', true);
                 return;
             }
-            this.setAuthStatus('Creating your account…');
+            this.setEmailAuthBusy(true);
+            this.setAuthStatus('Creating your account...');
             try {
                 const { data, error } = await this.client.auth.signUp({
                     email: this.usernameEmail(username),
@@ -534,25 +587,197 @@
                 });
                 if (error) throw error;
                 if (!data.session) {
-                    this.setAuthStatus('Account created, but Supabase did not sign you in. Check that email confirmations are disabled in Supabase Auth.', true);
+                    this.setAuthStatus('Account creation is waiting for server email confirmation. The site administrator must turn off Confirm email in Supabase so username accounts can be created without email verification.', true);
                     return;
                 }
-                await this.routeAuthenticatedUser(data.user || data.session?.user);
+                document.getElementById('signup-password').value = '';
+                document.getElementById('signup-password-confirm').value = '';
+                await this.routeAuthenticatedUser(data.user || data.session.user);
             } catch (error) {
                 console.error('[StudBudCloud] Sign-up failed:', error);
-                this.setAuthStatus(this.friendlyAuthError(error, 'Could not create your account. Check your details and try again.'), true);
+                this.reportAccountError(error);
+            } finally {
+                this.setEmailAuthBusy(false);
             }
         }
 
-        async refreshMfaSettings() {
+        async sendEmailLogin(request) {
+            this.setEmailAuthBusy(true);
+            this.setAuthStatus('Sending your email code...');
+            try {
+                const { error } = await this.client.auth.signInWithOtp(request);
+                if (error) throw error;
+                this.emailSignIn = { request, sentAt: Date.now() };
+                document.getElementById('email-login-description').textContent = `Enter the code sent to ${request.email}. If it does not arrive, check spam and that you have an account with this email.`;
+                document.getElementById('email-login-code').value = '';
+                ['login-form', 'signup-form', 'email-signin-options', 'auth-switch-prompt', 'auth-switch-btn'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
+                document.getElementById('email-login-prompt')?.classList.remove('hidden');
+                this.setAuthStatus('Code requested. Keep this page open while you check your email.');
+                document.getElementById('email-login-code')?.focus();
+            } finally {
+                this.setEmailAuthBusy(false);
+            }
+        }
+
+        async resendEmailLogin() {
+            if (!this.emailSignIn || this.emailAuthBusy) return;
+            const wait = Math.ceil((60000 - (Date.now() - this.emailSignIn.sentAt)) / 1000);
+            if (wait > 0) {
+                this.setAuthStatus(`Wait ${wait} seconds before requesting another code.`);
+                return;
+            }
+            try {
+                await this.sendEmailLogin(this.emailSignIn.request);
+            } catch (error) {
+                this.setAuthStatus(this.friendlyAuthError(error, 'Could not resend the code. Please try again.'), true);
+            }
+        }
+
+        clearEmailLoginPrompt() {
+            this.emailSignIn = null;
+            document.getElementById('email-login-prompt')?.classList.add('hidden');
+            const code = document.getElementById('email-login-code');
+            if (code) code.value = '';
+            document.getElementById('login-form')?.classList.toggle('hidden', this.authMode === 'signup');
+            document.getElementById('signup-form')?.classList.toggle('hidden', this.authMode !== 'signup');
+            document.getElementById('email-signin-options')?.classList.toggle('hidden', this.authMode === 'signup');
+            ['auth-switch-prompt', 'auth-switch-btn'].forEach(id => document.getElementById(id)?.classList.remove('hidden'));
+        }
+
+        cancelEmailLogin() {
+            if (this.emailAuthBusy) return;
+            this.clearEmailLoginPrompt();
+            this.setAuthStatus('');
+            const options = document.getElementById('email-signin-options');
+            if (options) options.open = true;
+            document.getElementById('login-email')?.focus();
+        }
+
+        async verifyEmailLogin(event) {
+            event.preventDefault();
+            if (!this.emailSignIn || this.emailAuthBusy) return;
+            const token = document.getElementById('email-login-code')?.value.trim() || '';
+            if (!/^[0-9]{6,10}$/.test(token)) {
+                this.setAuthStatus('Enter the numeric code from your email.', true);
+                return;
+            }
+            this.setEmailAuthBusy(true);
+            this.setAuthStatus('Verifying your email code...');
+            try {
+                const { data, error } = await this.client.auth.verifyOtp({ email: this.emailSignIn.request.email, token, type: 'email' });
+                if (error) throw error;
+                if (!data.session?.user) throw new Error('Your email was not verified. Please request a new code.');
+                this.clearEmailLoginPrompt();
+                await this.routeAuthenticatedUser(data.session.user);
+            } catch (error) {
+                this.reportAccountError(error);
+            } finally {
+                this.setEmailAuthBusy(false);
+            }
+        }
+
+        async refreshEmailSettings() {
+            const card = document.getElementById('email-settings-card');
+            const signedIn = Boolean(this.user?.id && !this.user.is_anonymous && !this.offlineMode);
+            card?.classList.toggle('hidden', !signedIn);
+            if (!signedIn) {
+                document.getElementById('mfa-settings-card')?.classList.add('hidden');
+                return;
+            }
+            const email = this.user.email || '';
+            const legacy = !email || email.endsWith('@accounts.studbud.invalid');
+            if (this.pendingAccountEmail === email.toLowerCase()) {
+                this.pendingAccountEmail = null;
+                document.getElementById('email-link-verify-form')?.classList.add('hidden');
+                const code = document.getElementById('email-link-code');
+                if (code) code.value = '';
+                const message = document.getElementById('email-settings-message');
+                if (message) message.textContent = 'Email verified. You can now sign in with email codes.';
+            }
+            const status = document.getElementById('email-settings-status');
+            if (status) status.textContent = legacy
+                ? 'No email is linked. You can keep signing in with your username and password, or optionally verify an email below.'
+                : `Sign-in codes are sent to ${email}. Your email is not shown on your public profile.`;
+            const input = document.getElementById('account-email');
+            if (input && !this.pendingAccountEmail) input.value = legacy ? '' : email;
+            await this.refreshLegacyMfaSettings();
+        }
+
+        async linkAccountEmail(event) {
+            event.preventDefault();
+            if (this.emailLinkBusy) return;
+            const message = document.getElementById('email-settings-message');
+            if (!this.user?.id || this.offlineMode) {
+                if (message) message.textContent = 'Connect your account to verify an email.';
+                return;
+            }
+            this.emailLinkBusy = true;
+            const userId = this.user.id;
+            const version = this.accountVersion;
+            const button = document.getElementById('email-link-btn');
+            if (button) button.disabled = true;
+            try {
+                const email = this.emailAddress(document.getElementById('account-email').value);
+                if (email === this.user.email?.toLowerCase()) throw new Error('This email is already linked to your account.');
+                message.textContent = 'Sending email verification...';
+                const { error } = await this.client.auth.updateUser({ email });
+                if (error) throw error;
+                if (this.user?.id !== userId || this.accountVersion !== version || this.offlineMode) return;
+                this.pendingAccountEmail = email;
+                document.getElementById('email-link-code').value = '';
+                document.getElementById('email-link-verify-form')?.classList.remove('hidden');
+                message.textContent = `Enter the code sent to ${email}. If your server requires confirmation at both addresses, also confirm the message at your old address. For an old undeliverable username address, contact the site administrator to finish linking.`;
+                document.getElementById('email-link-code')?.focus();
+            } catch (error) {
+                if (this.user?.id !== userId || this.accountVersion !== version) return;
+                message.textContent = this.friendlyAuthError(error, 'Could not send email verification. Please try again.');
+            } finally {
+                this.emailLinkBusy = false;
+                if (button) button.disabled = false;
+            }
+        }
+
+        async verifyAccountEmail(event) {
+            event.preventDefault();
+            if (!this.pendingAccountEmail || this.emailLinkBusy) return;
+            const message = document.getElementById('email-settings-message');
+            if (!this.user?.id || this.offlineMode) {
+                message.textContent = 'Connect your account to verify an email.';
+                return;
+            }
+            const token = document.getElementById('email-link-code')?.value.trim() || '';
+            if (!/^[0-9]{6,10}$/.test(token)) { message.textContent = 'Enter the numeric code from your email.'; return; }
+            this.emailLinkBusy = true;
+            const userId = this.user.id;
+            const version = this.accountVersion;
+            const email = this.pendingAccountEmail;
+            try {
+                const { data, error } = await this.client.auth.verifyOtp({ email, token, type: 'email_change' });
+                if (error) throw error;
+                if (this.user?.id !== userId || this.accountVersion !== version || this.offlineMode) return;
+                if (data.user?.id !== userId || data.user.email?.toLowerCase() !== email) {
+                    throw new Error('The email change is not finished. Confirm the message at your old address too. If it is an undeliverable username address, contact the site administrator.');
+                }
+                this.user = data.user;
+                this.pendingAccountEmail = null;
+                document.getElementById('email-link-code').value = '';
+                document.getElementById('email-link-verify-form')?.classList.add('hidden');
+                await this.refreshEmailSettings();
+                message.textContent = 'Email verified. You can now sign in with email codes. Your account and saved data are unchanged.';
+            } catch (error) {
+                if (this.user?.id !== userId || this.accountVersion !== version) return;
+                message.textContent = this.friendlyAuthError(error, 'Could not verify this email. Check the code and try again.');
+            } finally {
+                this.emailLinkBusy = false;
+            }
+        }
+
+        async refreshLegacyMfaSettings() {
             const card = document.getElementById('mfa-settings-card');
             if (!card) return;
-            const signedIn = Boolean(this.user?.id && !this.offlineMode);
-            card.classList.toggle('hidden', !signedIn);
-            if (!signedIn) return;
+            if (!this.user?.id || this.offlineMode) { card.classList.add('hidden'); return; }
             const status = document.getElementById('mfa-settings-status');
             const message = document.getElementById('mfa-settings-message');
-            const enable = document.getElementById('mfa-enable-btn');
             const disable = document.getElementById('mfa-disable-btn');
             if (message) message.textContent = '';
             if (status) status.textContent = 'Checking authenticator status...';
@@ -561,90 +786,20 @@
                 if (error) throw error;
                 const factors = data?.totp || [];
                 const verified = factors.find(factor => factor.status === 'verified');
+                card.classList.toggle('hidden', !verified);
                 if (status) status.textContent = verified ? 'Authenticator app is enabled.' : 'Authenticator app is not enabled.';
-                enable?.classList.toggle('hidden', Boolean(verified));
                 disable?.classList.toggle('hidden', !verified);
-                if (enable) enable.disabled = false;
                 if (disable) disable.disabled = false;
             } catch (error) {
+                card.classList.remove('hidden');
                 if (status) status.textContent = this.friendlyAuthError(error, 'Could not check authenticator status.');
-                if (enable) enable.disabled = true;
                 if (disable) disable.disabled = true;
-            }
-        }
-
-        async cleanupUnverifiedMfaFactors() {
-            const { data, error } = await this.client.auth.mfa.listFactors();
-            if (error) throw error;
-            for (const factor of data?.totp || []) {
-                if (factor.status !== 'verified') {
-                    const result = await this.client.auth.mfa.unenroll({ factorId: factor.id });
-                    if (result.error) throw result.error;
-                }
-            }
-        }
-
-        async beginMfaSetup() {
-            if (!this.user?.id || this.offlineMode) return;
-            const message = document.getElementById('mfa-settings-message');
-            try {
-                message.textContent = 'Preparing authenticator setup...';
-                await this.cleanupUnverifiedMfaFactors();
-                const { data, error } = await this.client.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'StudBud authenticator' });
-                if (error) throw error;
-                this.mfaSetupFactor = data;
-                const qr = document.getElementById('mfa-qr-code');
-                if (qr) qr.src = data.totp.qr_code;
-                document.getElementById('mfa-secret').textContent = data.totp.secret;
-                document.getElementById('mfa-setup-code').value = '';
-                document.getElementById('mfa-setup-panel')?.classList.remove('hidden');
-                document.getElementById('mfa-disable-panel')?.classList.add('hidden');
-                message.textContent = 'Scan the QR code or enter the key, then verify a current code.';
-            } catch (error) {
-                message.textContent = this.friendlyAuthError(error, 'Could not start authenticator setup. Please try again.');
-            }
-        }
-
-        async verifyMfaSetup() {
-            const factor = this.mfaSetupFactor;
-            const code = document.getElementById('mfa-setup-code')?.value.trim() || '';
-            const message = document.getElementById('mfa-settings-message');
-            if (!factor?.id) return;
-            if (!/^[0-9]{6}$/.test(code)) { message.textContent = 'Enter the 6-digit code from your authenticator app.'; return; }
-            try {
-                const { error } = await this.client.auth.mfa.challengeAndVerify({ factorId: factor.id, code });
-                if (error) throw error;
-                this.mfaSetupFactor = null;
-                document.getElementById('mfa-setup-panel')?.classList.add('hidden');
-                message.textContent = 'Two-factor authentication is enabled.';
-                await this.refreshMfaSettings();
-            } catch (error) {
-                message.textContent = this.friendlyAuthError(error, 'That code could not be verified. Check your app and try again.');
-            }
-        }
-
-        async cancelMfaSetup() {
-            const factor = this.mfaSetupFactor;
-            this.mfaSetupFactor = null;
-            document.getElementById('mfa-setup-panel')?.classList.add('hidden');
-            document.getElementById('mfa-qr-code')?.removeAttribute('src');
-            document.getElementById('mfa-secret').textContent = '';
-            try {
-                if (factor?.id) {
-                    const { error } = await this.client.auth.mfa.unenroll({ factorId: factor.id });
-                    if (error) throw error;
-                }
-                await this.cleanupUnverifiedMfaFactors();
-                document.getElementById('mfa-settings-message').textContent = 'Authenticator setup canceled.';
-            } catch (error) {
-                document.getElementById('mfa-settings-message').textContent = this.friendlyAuthError(error, 'Could not remove the unfinished authenticator. Please try setup again.');
             }
         }
 
         showMfaDisablePanel() {
             document.getElementById('mfa-disable-code').value = '';
             document.getElementById('mfa-disable-panel')?.classList.remove('hidden');
-            document.getElementById('mfa-setup-panel')?.classList.add('hidden');
         }
 
         hideMfaDisablePanel() {
@@ -669,7 +824,7 @@
                 }
                 document.getElementById('mfa-disable-panel')?.classList.add('hidden');
                 message.textContent = 'Two-factor authentication is disabled.';
-                await this.refreshMfaSettings();
+                await this.refreshLegacyMfaSettings();
             } catch (error) {
                 message.textContent = this.friendlyAuthError(error, 'That code could not be verified or the authenticator could not be removed. Try again.');
             }
@@ -771,7 +926,8 @@
             if (version !== this.accountVersion) return;
             this.accountReady = true;
             this.offlineMode = false;
-            await this.refreshMfaSettings();
+            this.clearEmailLoginPrompt();
+            await this.refreshEmailSettings();
             localStorage.removeItem('STUDBUD_LOCAL_MODE');
             this.endGuestSession();
             this.updateOfflineNotice();
@@ -807,7 +963,6 @@
                     <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin-top:8px;">
                         <button type="button" class="secondary-btn" id="auth-conflict-cloud-btn">Use Cloud Data</button>
                         <button type="button" class="secondary-btn" id="auth-conflict-local-btn">Keep Device Data</button>
-                        <button type="button" class="text-btn" id="auth-conflict-backup-btn">Export Local Backup</button>
                     </div>
                 </div>
             `;
@@ -835,21 +990,6 @@
                     this.reportAccountError(err);
                 }
             });
-            document.getElementById('auth-conflict-backup-btn')?.addEventListener('click', () => {
-                try {
-                    const blob = new Blob([JSON.stringify(conflict.local, null, 2)], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `studbud-backup-conflict-${new Date().toISOString().slice(0, 10)}.json`;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                } catch (err) {
-                    console.error('Could not export backup:', err);
-                }
-            });
         }
 
         friendlyAuthError(error, fallback) {
@@ -858,10 +998,22 @@
                 return 'Could not reach the account server. Check your internet connection and try again.';
             }
             if (/invalid login credentials|invalid email or password/i.test(message)) {
-                return 'That username or password was not recognized. Check your details and try again.';
+                return 'Your username/email or password was not recognized. Check your details and try again.';
             }
             if (/already registered|user already exists/i.test(message)) {
-                return 'An account with that username already exists. Try signing in instead.';
+                return 'An account with those details already exists. Try signing in instead.';
+            }
+            if (error?.code === '23505' || /studbud_auth_username_unique|username is already taken/i.test(message)) {
+                return 'That username is already taken. Choose another username.';
+            }
+            if (/database error saving new user/i.test(message)) {
+                return 'Your account could not be created. That username may be taken; try another username. If this continues, contact the site administrator.';
+            }
+            if (error?.code === 'otp_expired' || /token.*(expired|invalid)|expired.*(token|code)|email link.*(invalid|expired)/i.test(message)) {
+                return 'That email code is invalid or has expired. Check the latest email or request another code.';
+            }
+            if (/rate.?limit|too many requests|security purposes.*seconds/i.test(message)) {
+                return 'Too many code requests. Wait a minute before trying again.';
             }
             if (/password.*(weak|short|least)/i.test(message)) {
                 return 'Choose a stronger password with at least 8 characters.';
@@ -975,7 +1127,7 @@
             try { await this.syncNow(); }
             catch (error) {
                 console.error('[StudBudCloud] Could not save before sign-out:', error);
-                this.setCloudStatus(this.friendlyAuthError(error, 'Save failed. Please export a backup before signing out.'), true);
+                this.setCloudStatus(this.friendlyAuthError(error, 'Save failed. Stay signed in and retry syncing before signing out.'), true);
                 return;
             }
             const { error } = await this.client.auth.signOut();
@@ -996,6 +1148,14 @@
             window.clearTimeout(this.syncTimer);
             this.syncTimer = null;
             this.clearMfaLoginPrompt();
+            this.clearEmailLoginPrompt();
+            this.pendingAccountEmail = null;
+            document.getElementById('email-link-verify-form')?.classList.add('hidden');
+            ['email-link-code', 'account-email', 'login-password'].forEach(id => {
+                const input = document.getElementById(id);
+                if (input) input.value = '';
+            });
+            ['email-settings-card', 'mfa-settings-card'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
             this.showAuth();
             this.signOutHandling = (async () => {
             try {

@@ -4,32 +4,50 @@
     const STORAGE_KEY = 'studbud-sfx';
     const defaults = { volume: 0.7, ui: true, game: true, music: true, musicVolume: 0.5, musicStyle: 'auto' };
 
-    // Procedural game music: each style is a chord loop with bass, pad, arpeggio lead and drums (16 steps per bar).
+    // Original two-bar phrases played with decaying acoustic-style instruments.
     const MUSIC = {
-        summit: { name: 'Summit Run', bpm: 116, chords: [[57, 1], [53, 0], [48, 0], [55, 0]], bass: '1010001010100010', lead: '1011101110111011', arp: [0, 1, 2, 3, 2, 1, 2, 1], leadWave: 'square', bassWave: 'sawtooth', kick: '1000100010001000', snare: '0000100000001000', hat: '0010001000100010' },
-        lagoon: { name: 'Lagoon Breeze', bpm: 92, chords: [[60, 0], [57, 1], [53, 0], [55, 0]], bass: '1000001010000010', lead: '1001001010010010', arp: [0, 2, 1, 3, 2, 1], leadWave: 'triangle', bassWave: 'sine', kick: '1000000010000000', snare: '0000100000001000', hat: '1010101010101010' },
-        bazaar: { name: 'Bazaar Bounce', bpm: 124, chords: [[62, 0], [67, 0], [57, 1], [67, 0]], bass: '1001001010010010', lead: '1010110110101101', arp: [0, 2, 3, 2, 1, 2], leadWave: 'square', bassWave: 'triangle', kick: '1000100010001000', snare: '0000100000001001', hat: '0110011001100110' },
-        cavern: { name: 'Crystal Cavern', bpm: 84, chords: [[52, 1], [48, 0], [55, 0], [50, 1]], bass: '1000000010000000', lead: '0010000100100001', arp: [3, 2, 1, 0, 2, 1], leadWave: 'sine', bassWave: 'sine', kick: '1000000000100000', snare: '0000000010000000', hat: '0000100000001000' },
-        battle: { name: 'Battle Drive', bpm: 140, chords: [[52, 1], [52, 1], [55, 0], [50, 0]], bass: '1011101110111011', lead: '1000100110001001', arp: [0, 2, 3, 2, 3, 1], leadWave: 'sawtooth', bassWave: 'sawtooth', kick: '1001100110011001', snare: '0000100000001000', hat: '1111111111111111' },
-        neon: { name: 'Neon Exchange', bpm: 108, chords: [[57, 1], [55, 0], [53, 0], [52, 0]], bass: '1100110011001100', lead: '1010101010101010', arp: [0, 1, 2, 3, 3, 2, 1, 0], leadWave: 'square', bassWave: 'square', kick: '1000100010001000', snare: '0000100000001000', hat: '0101010101010101' }
+        summit: { name: 'Rooftop Rush', bpm: 144, drive: true, upbeat: true, chords: [[60, 0], [55, 0], [57, 1], [53, 0]], voice: 'bright',
+            melody: [0, 2, 3, 4, 3, null, 2, 3, 4, 3, 2, 1, 2, 3, 1, 0] },
+        foundry: { name: 'Foundry Motion', bpm: 120, drive: true, chords: [[50, 1], [58, 0], [53, 0], [48, 0]], voice: 'marimba',
+            melody: [0, null, 2, 0, 3, 2, null, 4, 3, 1, null, 2, 1, 0, 2, null] },
+        starlight: { name: 'Starlight Drift', bpm: 78, quiet: true, chords: [[60, 0], [55, 0], [57, 1], [53, 0]], voice: 'piano',
+            melody: [0, null, null, 3, null, 2, null, null, 4, null, null, 2, null, 1, 0, null] },
+        lagoon: { name: 'Lagoon Breeze', bpm: 88, swing: .1, chords: [[60, 0], [57, 1], [53, 0], [55, 0]], voice: 'marimba',
+            melody: [2, null, 3, 4, 2, null, 1, null, 0, 1, 2, null, 1, null, 0, null] },
+        bazaar: { name: 'Bazaar Bounce', bpm: 110, swing: .12, chords: [[62, 0], [67, 0], [59, 1], [57, 0]], voice: 'guitar',
+            melody: [0, 2, null, 3, 2, 1, null, 2, 3, null, 4, 3, 2, null, 0, null] },
+        cavern: { name: 'Crystal Cavern', bpm: 76, chords: [[52, 1], [48, 0], [55, 0], [50, 1]], voice: 'piano', quiet: true,
+            melody: [0, null, null, 2, null, 3, null, null, 4, null, 2, null, 1, null, 0, null] },
+        battle: { name: 'Battle Drive', bpm: 116, chords: [[52, 1], [48, 0], [55, 0], [50, 0]], voice: 'piano',
+            melody: [0, 0, 2, null, 3, 2, 1, null, 2, 3, 4, null, 3, 1, 0, null] },
+        neon: { name: 'Neon Exchange', bpm: 94, swing: .14, chords: [[57, 1], [53, 0], [48, 0], [55, 0]], voice: 'piano',
+            melody: [2, null, 1, 0, null, 2, 3, null, 4, null, 3, 2, null, 1, 0, null] },
+        fortress: { name: 'Twin Citadels', bpm: 96, chords: [[50, 1], [46, 0], [53, 0], [48, 0]], voice: 'guitar',
+            melody: [0, null, 2, 3, 4, null, 3, 2, 1, null, 2, null, 0, null, null, null] },
+        sunrise: { name: 'Sunrise Run', bpm: 108, chords: [[60, 0], [67, 0], [57, 1], [65, 0]], voice: 'piano',
+            melody: [0, 1, 2, null, 4, 3, null, 2, 3, 4, null, 3, 2, 1, 0, null] },
+        midnight: { name: 'Midnight Drive', bpm: 88, swing: .18, chords: [[57, 1], [53, 0], [60, 0], [55, 0]], voice: 'piano',
+            melody: [0, null, 2, null, 3, 2, null, 1, 2, null, 4, 3, null, 1, 0, null] },
+        pixel: { name: 'Pixel Quest', bpm: 120, chords: [[60, 0], [57, 1], [53, 0], [55, 0]], voice: 'marimba',
+            melody: [0, 2, 3, null, 4, 3, 2, null, 1, 2, 3, 1, 0, null, 0, null] },
+        zen: { name: 'Zen Garden', bpm: 68, chords: [[62, 0], [59, 1], [55, 0], [57, 0]], voice: 'piano', quiet: true,
+            melody: [0, null, null, 2, null, null, 3, null, 2, null, 1, null, 0, null, null, null] },
+        funk: { name: 'Funky Groove', bpm: 104, swing: .16, chords: [[57, 1], [62, 1], [57, 1], [64, 1]], voice: 'guitar',
+            melody: [0, null, 2, 3, null, 2, 1, null, 2, null, 3, 4, null, 2, 0, null] },
+        orbit: { name: 'Orbit Station', bpm: 102, chords: [[50, 1], [46, 0], [53, 0], [48, 0]], voice: 'piano',
+            melody: [0, 2, null, 3, 4, null, 3, null, 2, 1, null, 2, 0, null, null, null] },
+        tropic: { name: 'Tropic Sunset', bpm: 94, swing: .1, chords: [[65, 0], [62, 1], [58, 0], [60, 0]], voice: 'marimba',
+            melody: [2, null, 3, 2, 1, null, 0, null, 1, 2, null, 4, 3, 1, 0, null] },
+        stadium: { name: 'Stadium Anthem', bpm: 112, chords: [[55, 0], [60, 0], [62, 0], [60, 0]], voice: 'piano',
+            melody: [0, 0, 2, null, 3, null, 4, null, 4, 3, 2, null, 1, 2, 0, null] },
+        frenzy: { name: 'Feeding Frenzy', bpm: 118, swing: .08, chords: [[62, 1], [65, 0], [60, 0], [57, 1]], voice: 'marimba',
+            melody: [0, 2, null, 4, 3, null, 2, 1, 2, null, 3, 4, null, 2, 1, 0] },
+        survival: { name: 'Last Light', bpm: 100, chords: [[45, 1], [53, 0], [50, 1], [52, 0]], voice: 'guitar',
+            melody: [0, null, 0, 2, null, 1, null, 3, 2, null, 4, null, 3, 1, null, 0] }
     };
     const MODE_STYLE = { skyline: 'summit', river: 'lagoon', market: 'bazaar', miner: 'cavern', duel: 'battle', shooter: 'orbit',
-        sports: 'stadium', crypto: 'neon', defense: 'fortress', chess: 'zen', hack: 'midnight', frenzy: 'tropic', fishing: 'tropic',
-        classic: 'sunrise', rush: 'pixel', survival: 'battle' };
-    Object.assign(MUSIC, {
-        fortress: { name: 'Twin Citadels', bpm: 104, chords: [[50, 1], [46, 0], [53, 0], [48, 0]],
-            bass: '1001000010010010', lead: '1010001010100010', arp: [0, 2, 1, 3, 2, 1, 0, 2],
-            melody: [0, 7, 12, 10, 7, 3, 5, 7], leadWave: 'triangle', bassWave: 'triangle',
-            kick: '1000000010000010', snare: '0000100000001000', hat: '0010001000100010' },
-        sunrise: { name: 'Sunrise Run', bpm: 128, chords: [[60, 0], [67, 0], [57, 1], [65, 0]], bass: '1010101010101010', lead: '1011011010110110', arp: [0, 1, 2, 3, 2, 1], leadWave: 'triangle', bassWave: 'sawtooth', kick: '1000100010001000', snare: '0000100000001000', hat: '0010001000100010', openHat: '0010001000100010' },
-        midnight: { name: 'Midnight Drive', bpm: 100, swing: 0.16, chords: [[57, 1], [53, 0], [60, 0], [55, 0]], bass: '1001001010010010', lead: '1001010010010100', arp: [0, 2, 1, 3, 2, 3, 1, 2], leadWave: 'sawtooth', bassWave: 'sawtooth', kick: '1000000110000010', snare: '0000100000001000', hat: '1010101010101010' },
-        pixel: { name: 'Pixel Quest', bpm: 150, chords: [[60, 0], [57, 1], [53, 0], [55, 0]], bass: '1011101110111011', lead: '1111101111101011', arp: [0, 1, 2, 3, 2, 1, 3, 2], leadWave: 'square', bassWave: 'square', kick: '1000100010001000', snare: '0000100000001000', hat: '0101010101010101' },
-        zen: { name: 'Zen Garden', bpm: 70, chords: [[62, 0], [59, 1], [55, 0], [57, 0]], bass: '1000000000000000', lead: '1000001000100000', arp: [0, 2, 3, 1, 2], leadWave: 'sine', bassWave: 'sine', kick: '0000000000000000', snare: '0000000000000000', hat: '0000001000000010' },
-        funk: { name: 'Funky Groove', bpm: 112, swing: 0.2, chords: [[57, 1], [62, 1], [57, 1], [64, 0]], bass: '1011001010110010', lead: '0010100100101001', arp: [0, 2, 1, 3, 1, 2], leadWave: 'square', bassWave: 'triangle', kick: '1000001010000010', snare: '0000100000001000', hat: '1011101110111011' },
-        orbit: { name: 'Orbit Station', bpm: 120, chords: [[50, 1], [46, 0], [53, 0], [48, 0]], bass: '1000100110001001', lead: '1010010110100101', arp: [0, 3, 2, 1, 2, 3], leadWave: 'sawtooth', bassWave: 'square', kick: '1000100010001000', snare: '0000100000001000', hat: '0010001000100011', openHat: '0010001000100010' },
-        tropic: { name: 'Tropic Sunset', bpm: 98, swing: 0.1, chords: [[65, 0], [64, 1], [62, 1], [67, 0]], bass: '1000101010001010', lead: '1001001010010010', arp: [0, 1, 2, 1, 3, 2], leadWave: 'triangle', bassWave: 'sine', kick: '1000000010010000', snare: '0000100000001000', hat: '1010101010101010' },
-        stadium: { name: 'Stadium Anthem', bpm: 132, chords: [[55, 0], [60, 0], [62, 0], [60, 0]], bass: '1000100010001000', lead: '1001001010010010', arp: [0, 2, 3, 2, 1, 2], leadWave: 'square', bassWave: 'sawtooth', kick: '1000100010001000', snare: '0000100000001000', hat: '0000000000000000', openHat: '0010001000100010' }
-    });
+        sports: 'stadium', crypto: 'neon', defense: 'fortress', chess: 'zen', hack: 'midnight', frenzy: 'frenzy', fishing: 'tropic',
+        classic: 'sunrise', rush: 'pixel', survival: 'survival' };
 
     // Every sound is synthesized on the fly, so there are no audio files to load.
     const RECIPES = {
@@ -37,67 +55,75 @@
         tick: c => { c.tone('sine', 920, 880, 0.04, 0.1); },
         toggle: c => { c.tone('triangle', 520, 780, 0.08, 0.12); c.tone('sine', 1040, 1560, 0.06, 0.04, 0.02); },
         success: c => { [660, 880, 1320].forEach((f, i) => c.chime(f, 0.26, 0.17, i * 0.09)); },
-        error: c => { c.tone('sawtooth', 220, 140, 0.22, 0.14); c.tone('square', 196, 110, 0.26, 0.08, 0.1); },
+        error: c => { c.wood(220, .18, .14); c.wood(165, .2, .12, .12); },
         buy: c => { c.chime(988, 0.12, 0.12); c.chime(1318, 0.22, 0.12, 0.07); c.noise(0.05, 0.03, 6000); },
         coin: c => { c.chime(1046, 0.1, 0.1); c.chime(1568, 0.3, 0.1, 0.06); },
         open: c => { c.tone('sine', 220, 880, 0.5, 0.2); c.noise(0.4, 0.06, 2500); c.chime(1318, 0.4, 0.14, 0.42); },
         question: c => { c.chime(520, 0.12, 0.14); c.chime(780, 0.16, 0.14, 0.09); },
         correct: c => { [523, 659, 784, 1046].forEach((f, i) => c.chime(f, i === 3 ? 0.35 : 0.14, 0.18, i * 0.07)); },
-        wrong: c => { c.tone('sawtooth', 190, 110, 0.32, 0.16); c.tone('triangle', 95, 60, 0.3, 0.2); },
-        refill: c => { c.tone('sine', 330, 990, 0.3, 0.18); c.chime(1320, 0.2, 0.1, 0.25); },
-        jump: c => { c.tone('square', 260, 640, 0.14, 0.07); c.tone('triangle', 520, 1280, 0.12, 0.05); },
-        dash: c => { c.noise(0.18, 0.12, 2400); c.tone('sawtooth', 300, 760, 0.12, 0.05); },
-        act: c => { c.tone('square', 420, 300, 0.05, 0.05); },
-        shoot: c => { c.noise(0.1, 0.14, 3600); c.tone('sawtooth', 820, 120, 0.12, 0.1); c.tone('sine', 140, 60, 0.1, 0.12); },
-        hit: c => { c.noise(0.14, 0.2, 1000); c.tone('square', 190, 60, 0.15, 0.12); c.tone('sine', 90, 40, 0.18, 0.2); },
+        wrong: c => { c.pluck(196, .3, .14); c.pluck(147, .3, .12, .12); },
+        refill: c => { [330, 440, 660].forEach((f, i) => c.pluck(f, .3, .14, i * .08)); },
+        jump: c => { c.jumpSound(false); },
+        doubleJump: c => { c.jumpSound(true); },
+        spring: c => { c.springJump(); },
+        dash: c => { c.whoosh(); },
+        act: c => { c.wood(360, .055, .07); },
+        shoot: c => { c.noise(.055, .085, 2200); c.tone('sine', 150, 65, .07, .1); },
+        hit: c => { c.noise(.065, .075, 850); c.tone('sine', 120, 55, .1, .13); },
+        burn: c => {
+            c.noise(.24, .075, 1800);
+            c.noise(.045, .12, 3400);
+            c.noise(.065, .085, 2800, .065);
+            c.noise(.085, .055, 2200, .15);
+        },
         pop: c => { c.tone('sine', 560, 200, 0.09, 0.15); c.noise(0.03, 0.05, 5000); },
-        boom: c => { c.noise(0.6, 0.3, 520); c.tone('sine', 120, 36, 0.5, 0.32); c.tone('sawtooth', 80, 30, 0.4, 0.1); },
-        splash: c => { c.noise(0.32, 0.14, 1600); c.tone('sine', 740, 280, 0.14, 0.07); },
+        boom: c => { c.noise(0.6, 0.24, 520); c.tone('sine', 85, 38, .28, .2); },
+        splash: c => { c.noise(.1, .13, 4200); c.noise(.35, .09, 1200, .025); },
         countdown: c => { c.chime(660, 0.16, 0.2); },
         go: c => { c.chime(990, 0.5, 0.24); c.chime(1320, 0.5, 0.14, 0.02); c.tone('triangle', 495, 495, 0.4, 0.1); },
-        powerup: c => { c.tone('square', 400, 1200, 0.22, 0.08); c.chime(1568, 0.25, 0.1, 0.18); },
+        powerup: c => { [392, 523, 659].forEach((f, i) => c.pluck(f, .35, .15, i * .08)); },
         win: c => { [523, 659, 784, 1046].forEach((f, i) => c.chime(f, 0.26, 0.2, i * 0.12)); c.chime(1318, 0.7, 0.2, 0.5); c.chime(659, 0.7, 0.1, 0.5); },
         lose: c => { [392, 330, 262].forEach((f, i) => c.tone('triangle', f, f * 0.95, 0.32, 0.18, i * 0.2)); },
         swing: [
-            c => { c.noise(0.16, 0.14, 1800); c.tone('sawtooth', 180, 520, 0.14, 0.06); },
-            c => { c.noise(0.2, 0.12, 1200); c.tone('triangle', 140, 420, 0.18, 0.08); }
+            c => { c.whoosh(.16, .055); },
+            c => { c.whoosh(.19, .05); }
         ],
         pickup: c => { c.chime(784, 0.1, 0.12); c.chime(1175, 0.18, 0.12, 0.06); c.tone('triangle', 392, 784, 0.12, 0.05); },
-        reload: c => { c.tone('square', 300, 300, 0.04, 0.06); c.tone('square', 450, 450, 0.05, 0.06, 0.12); c.noise(0.05, 0.05, 4000, 0.12); },
+        reload: c => { c.wood(540, .04, .07); c.wood(380, .05, .08, .12); c.noise(.05, .04, 3000, .12); },
         score: c => { [659, 784, 988, 1319].forEach((f, i) => c.chime(f, 0.18, 0.15, i * 0.06)); c.tone('triangle', 330, 660, 0.3, 0.08); },
-        whoosh: c => { c.noise(0.3, 0.1, 900); c.tone('sine', 200, 900, 0.28, 0.05); }
+        whoosh: c => { c.whoosh(); }
     };
     Object.assign(RECIPES, {
-        mine: c => { c.noise(.06, .08, 2600); c.tone('triangle', 630, 210, .09, .06); },
-        rockBreak: c => { c.noise(.18, .12, 900); c.tone('triangle', 180, 65, .14, .08); },
+        mine: c => { c.noise(.035, .16, 4200); c.noise(.11, .065, 1000, .015);
+            c.tone('sine', 1280, 1280, .045, .035); c.tone('sine', 2176, 2176, .03, .018); },
+        dig: c => { c.noise(.065, .13, 650); c.noise(.16, .07, 1700, .025); },
+        rockBreak: c => { c.noise(.065, .17, 3200); c.noise(.22, .1, 850, .035); c.noise(.09, .065, 1800, .1); },
         crystal: c => { [1175, 1568, 2093].forEach((f, i) => c.chime(f, .25, .07, i * .04)); },
-        cast: c => { c.noise(.16, .06, 3400); c.tone('sine', 440, 880, .18, .04); },
+        cast: c => { c.noise(.18, .07, 2300); },
         catch: c => { c.noise(.12, .07, 1700); c.chime(784, .12, .1); c.chime(1175, .24, .1, .08); },
-        wave: c => { c.noise(1.1, .14, 600); c.tone('sine', 100, 65, .8, .12); },
-        whirlpool: c => { c.noise(.7, .1, 1100); c.tone('sine', 330, 100, .65, .09); },
-        towerBuild: c => { c.noise(.12, .1, 1500); c.tone('triangle', 180, 440, .2, .08); },
+        wave: c => { c.noise(1.1, .17, 600); c.noise(.75, .08, 2600, .15); },
+        whirlpool: c => { c.whoosh(.7, .1); c.noise(.8, .09, 700); },
+        towerBuild: c => { c.wood(180, .12, .1); c.wood(280, .1, .09, .07); c.noise(.06, .04, 1400); },
         towerUpgrade: c => { [440, 660, 880].forEach((f, i) => c.chime(f, .24, .1, i * .07)); },
-        towerShot: c => { c.noise(.09, .07, 2300); c.tone('triangle', 500, 140, .1, .05); },
+        towerShot: c => { c.noise(.09, .06, 2300); c.wood(270, .07, .06); },
         cannon: c => { c.noise(.3, .13, 650); c.tone('sine', 130, 40, .26, .15); },
         zap: c => { c.noise(.12, .06, 4500); c.tone('sawtooth', 1100, 250, .15, .07); },
-        enemySend: c => { c.tone('triangle', 130, 390, .22, .09); c.noise(.18, .07, 1200); },
+        enemySend: c => { c.wood(140, .12, .09); c.wood(190, .12, .07, .09); },
         baseHit: c => { c.noise(.4, .15, 550); c.tone('sine', 90, 35, .35, .18); c.chime(220, .12, .09); }
     });
     // Jingles and alerts keep their exact pitch
-    const NO_PITCH_SHIFT = new Set(['success', 'win', 'lose', 'go', 'countdown', 'score', 'error']);
+    const NO_PITCH_SHIFT = new Set(['success', 'win', 'lose', 'go', 'countdown', 'score', 'error', 'jump', 'doubleJump', 'spring']);
     // Extra variants for sounds that play over and over
     Object.assign(RECIPES, {
         click: [RECIPES.click, c => { c.tone('sine', 880, 620, 0.05, 0.15); c.tone('triangle', 1760, 1200, 0.025, 0.04); }, c => { c.tone('triangle', 640, 420, 0.07, 0.15); c.noise(0.015, 0.03, 6000); }],
-        shoot: [RECIPES.shoot, c => { c.noise(0.08, 0.12, 4200); c.tone('square', 960, 160, 0.1, 0.07); c.tone('sine', 160, 70, 0.09, 0.12); }, c => { c.noise(0.12, 0.13, 3000); c.tone('sawtooth', 700, 90, 0.14, 0.09); }],
-        hit: [RECIPES.hit, c => { c.noise(0.1, 0.22, 1400); c.tone('triangle', 240, 80, 0.12, 0.14); }, c => { c.noise(0.16, 0.18, 800); c.tone('square', 150, 50, 0.16, 0.1); }],
+        shoot: [RECIPES.shoot, c => { c.noise(.07, .12, 3700); c.wood(155, .08, .09); }],
+        hit: [RECIPES.hit, c => { c.noise(.1, .16, 1400); c.wood(135, .12, .14); }],
         pop: [RECIPES.pop, c => { c.tone('triangle', 700, 260, 0.08, 0.14); c.noise(0.025, 0.05, 6000); }, c => { c.tone('sine', 440, 160, 0.1, 0.15); c.tone('sine', 880, 320, 0.05, 0.05); }],
-        jump: [RECIPES.jump, c => { c.tone('triangle', 300, 760, 0.13, 0.09); }, c => { c.tone('square', 340, 880, 0.11, 0.06); c.tone('sine', 680, 1500, 0.1, 0.04); }],
-        dash: [RECIPES.dash, c => { c.noise(0.22, 0.1, 3000); c.tone('triangle', 260, 900, 0.14, 0.06); }],
         correct: [RECIPES.correct, c => { [587, 740, 880, 1175].forEach((f, i) => c.chime(f, i === 3 ? 0.35 : 0.14, 0.18, i * 0.07)); }, c => { [440, 554, 659, 880].forEach((f, i) => c.chime(f, i === 3 ? 0.35 : 0.14, 0.18, i * 0.07)); }],
-        wrong: [RECIPES.wrong, c => { c.tone('square', 220, 120, 0.28, 0.1); c.tone('sawtooth', 110, 70, 0.3, 0.14); }],
+        wrong: [RECIPES.wrong, c => { c.wood(220, .2, .13); c.wood(165, .24, .11, .12); }],
         coin: [RECIPES.coin, c => { c.chime(1175, 0.1, 0.1); c.chime(1760, 0.3, 0.1, 0.06); }],
         boom: [RECIPES.boom, c => { c.noise(0.7, 0.3, 380); c.tone('sine', 100, 30, 0.6, 0.34); }],
-        splash: [RECIPES.splash, c => { c.noise(0.38, 0.14, 2200); c.tone('sine', 620, 240, 0.16, 0.07); }]
+        splash: [RECIPES.splash, c => { c.noise(.08, .13, 3400); c.noise(.38, .1, 1500, .025); }]
     });
 
     // Interface sounds: each kind of control gets its own voice, with variants so repeats never feel identical
@@ -184,17 +210,24 @@
             const g = this.musicGain.gain, t = this.ctx.currentTime;
             g.cancelScheduledValues(t);
             g.setValueAtTime(g.value, t);
-            g.setTargetAtTime(Math.pow(this.settings.musicVolume, 1.4) * 2.2, t, 0.05);
+            g.setTargetAtTime(Math.pow(this.settings.musicVolume, 1.4), t, 0.05);
         }
 
         styleFor(mode) {
             const chosen = this.settings.musicStyle;
+            if (mode === 'skyline' && !MUSIC[chosen]) return this.musicBiome === 3 ? 'starlight' : this.musicBiome === 1 ? 'foundry' : 'summit';
             return MUSIC[chosen] ? chosen : (MODE_STYLE[mode] || 'summit');
+        }
+
+        setMusicBiome(mode, biome) {
+            if (window.StudBudArcade?.previewDepth > 0 || this.activeMode !== mode || this.musicBiome === biome) return;
+            this.musicBiome = biome;
+            if (this.mus) this.startMusic(mode);
         }
 
         // mode is a game id (or a style id for previews); restarts only when the style changes.
         // Call when a match ends: stops the music and forgets the active mode so settings changes don't restart it.
-        endMusic() { this.activeMode = null; this.stopMusic(); }
+        endMusic() { this.activeMode = null; this.musicBiome = null; this.stopMusic(); }
 
         makeReverb(seconds, decay) {
             const ctx = this.ctx, length = Math.floor(ctx.sampleRate * seconds);
@@ -210,9 +243,9 @@
 
         startMusic(mode, forceRestart = false) {
             if (window.StudBudArcade?.previewDepth > 0) return;
-            if (!MUSIC[mode]) this.activeMode = mode;
+            if (MODE_STYLE[mode]) this.activeMode = mode;
             if (!this.settings.music || !this.settings.musicVolume || !this.unlock()) return;
-            const style = MUSIC[mode] ? mode : this.styleFor(mode);
+            const style = MODE_STYLE[mode] ? this.styleFor(mode) : MUSIC[mode] ? mode : this.styleFor(mode);
             if (this.mus && this.mus.style === style && !forceRestart) return;
             this.stopMusic();
             if (!this.musicGain) {
@@ -224,19 +257,11 @@
                 this.noiseBuf = this.ctx.createBuffer(1, length, this.ctx.sampleRate);
                 const data = this.noiseBuf.getChannelData(0);
                 for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
-                // Shared reverb and tempo-synced echo make the synthesized parts sound fuller
                 this.fxIn = this.ctx.createGain();
-                const reverb = this.makeReverb(2.2, 2.5), wet = this.ctx.createGain();
-                wet.gain.value = 0.35;
+                const reverb = this.makeReverb(.85, 3), wet = this.ctx.createGain();
+                wet.gain.value = .14;
                 this.fxIn.connect(reverb); reverb.connect(wet); wet.connect(this.musicGain);
-                this.echoIn = this.ctx.createGain();
-                this.echoDelay = this.ctx.createDelay(1.5);
-                const feedback = this.ctx.createGain(), echoFilter = this.ctx.createBiquadFilter();
-                feedback.gain.value = 0.32; echoFilter.type = 'lowpass'; echoFilter.frequency.value = 2600;
-                this.echoIn.connect(this.echoDelay); this.echoDelay.connect(echoFilter);
-                echoFilter.connect(feedback); feedback.connect(this.echoDelay); echoFilter.connect(this.musicGain);
             }
-            this.echoDelay.delayTime.value = 60 / MUSIC[style].bpm * 0.75;
             this.applyMusicLevel();
             this.mus = { style, step: 0, next: this.ctx.currentTime + 0.15, timer: setInterval(() => this.pumpMusic(), 60) };
         }
@@ -245,6 +270,8 @@
             if (!this.mus) return;
             clearInterval(this.mus.timer);
             this.mus = null;
+            for (const source of this.musicSources || []) source.stop(this.ctx.currentTime + .03);
+            this.musicSources?.clear();
             if (this.musicGain) {
                 const g = this.musicGain.gain, t = this.ctx.currentTime;
                 g.cancelScheduledValues(t); g.setValueAtTime(Math.max(g.value, 0.0001), t); g.exponentialRampToValueAtTime(0.0001, t + 0.25);
@@ -260,101 +287,104 @@
             while (m.next < now + 0.7) { this.musicStep(T, m.step, m.next, spb); m.next += spb; m.step++; }
         }
 
-        // Each style gets a seeded two-bar pentatonic motif so leads sing a hook instead of cycling chord tones.
-        motifFor(T) {
-            if (T._motif) return T._motif;
-            let h = 2166136261;
-            for (const ch of T.name) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
-            const rand = () => { h = Math.imul(h ^ (h >>> 15), 2246822507) >>> 0; h ^= h >>> 13; return (h >>> 0) / 4294967296; };
-            const moves = [-1, 1, 1, -2, 2, 0, -1, 3];
-            let deg = 2 + Math.floor(rand() * 3);
-            T._motif = Array.from({ length: 32 }, (_, i) => {
-                if (T.lead[i % 16] !== '1') return null;
-                deg = Math.max(0, Math.min(8, deg + moves[Math.floor(rand() * moves.length)]));
-                return deg;
-            });
-            return T._motif;
-        }
-
         musicStep(T, step, t0, spb) {
-            const s = step % 16, barIndex = Math.floor(step / 16), [root, minor] = T.chords[barIndex % T.chords.length];
-            const [nextRoot] = T.chords[(barIndex + 1) % T.chords.length];
-            // Swing delays every other sixteenth for a looser feel
-            const t = T.swing && s % 2 === 1 ? t0 + spb * T.swing : t0;
+            const s = step % 16, barIndex = Math.floor(step / 16);
+            const section = Math.floor(barIndex / 8) % 4;
+            const changes = [0, 1, 2, 3, 0, 2, 1, 3, 2, 1, 0, 3, 0, 1, 3, 0];
+            const [root, minor] = T.chords[changes[Math.floor(barIndex / 2) % changes.length] % T.chords.length];
+            const melody = section === 1 ? T.melody.map((_, i) => T.melody[(i + 8) % 16])
+                : section === 2 ? T.melody.map((degree, i) => i % 3 === 1 || degree === null ? null : 4 - degree) : T.melody;
+            const t = t0 + (s % 4 === 2 ? spb * (T.swing || 0) : 0);
             const hz = n => 440 * Math.pow(2, (n - 69) / 12);
-            const section = Math.floor(barIndex / 4) % 4, phraseBar = barIndex % 4;
-            if (s === 0) {
-                // Voice-lead the pad into one octave so chord changes glide instead of jumping.
-                const fold = n => { while (n < 55) n += 12; while (n > 67) n -= 12; return n; };
-                const pad = [root, root + (minor ? 3 : 4), root + 7].map(fold);
-                if (section % 2 === 1) pad.push(fold(root + (minor ? 10 : 11)));
-                pad.forEach((n, i) => {
-                    this.musicTone(hz(n), spb * 15, i === 3 ? 0.03 : 0.042, 'sawtooth', t, 1100, { detune: 9, attack: 0.12, send: 0.7 });
-                    if (i < 3) this.musicTone(hz(n), spb * 15, 0.045, 'triangle', t, 2200, { attack: 0.06, send: 0.4 });
-                });
+            const sparse = (section === 2 && !T.drive) || T.quiet;
+            const chord = [root, root + (minor ? 3 : 4), root + 7];
+            if (T.upbeat ? s % 4 === 2 : s === 0 || (!sparse && s === 8)) {
+                const accompaniment = T.upbeat ? 'bright' : section === 1 && T.voice === 'guitar' ? 'piano' : 'guitar';
+                chord.forEach((n, i) => this.acousticNote(hz(n + (section === 2 ? 12 : 0)), spb * (T.upbeat ? 1.3 : sparse ? 10 : 7), T.upbeat ? .085 : .065, t + i * (T.upbeat ? .004 : .018), accompaniment, this.musicGain));
             }
-            if (T.bass[s] === '1') {
-                const hop = phraseBar === 3 && s >= 8 ? 12 : 0;
-                this.musicTone(hz(root - 24 + hop), spb * 1.8, 0.3, T.bassWave, t, 600);
-                this.musicTone(hz(root - 36 + hop), spb * 1.8, 0.2, 'sine', t, 300);
-            } else if (s === 15 && nextRoot !== root) {
-                // Approach note leads the ear into the next chord.
-                this.musicTone(hz(nextRoot - 24 + (nextRoot > root ? -1 : 1)), spb * .9, 0.2, T.bassWave, t, 600);
+            if (T.upbeat ? s % 2 === 0 : s === 0 || s === 8) {
+                const bass = root - 12 + (T.upbeat ? [0, 0, 7, 12, 0, 7, 12, 7][s / 2] : s === 8 ? section === 1 ? 12 : 7 : 0);
+                this.acousticNote(hz(bass), spb * (T.upbeat ? 1.5 : 5), T.upbeat ? .24 : .21, t, 'bass', this.musicGain);
             }
-            const intro = barIndex < 2;
-            if (T.lead[s] === '1' && !intro && (section !== 2 || s % 4 === 0)) {
-                const up = section === 3 ? 12 : 0;
-                let n;
-                if (T.melody) n = root + T.melody[(Math.floor(step / 2) + barIndex) % T.melody.length];
-                else {
+            if (s % 2 === 0 && (T.upbeat || barIndex > 0)) {
+                const index = (barIndex % 2) * 8 + s / 2, degree = melody[index];
+                if (degree !== null) {
                     const scale = minor ? [0, 3, 5, 7, 10] : [0, 2, 4, 7, 9];
-                    const motif = this.motifFor(T);
-                    let deg = motif[(phraseBar % 2) * 16 + s];
-                    if (phraseBar === 2 && deg != null) deg = Math.min(8, deg + 1);
-                    // The fourth bar of each phrase answers with a held resolution instead of more notes.
-                    if (phraseBar === 3 && s >= 8) deg = s === 8 ? 5 : null;
-                    n = deg == null ? null : root + scale[deg % 5] + 12 * Math.floor(deg / 5);
-                    if (n != null && section === 3) {
-                        const hd = (deg ?? 0) + 2;
-                        this.musicTone(hz(root + scale[hd % 5] + 12 * Math.floor(hd / 5) + 12 + up), spb * 1.4, .04, 'triangle', t, 2600, { send: .5 });
+                    let note = root + 12 + scale[degree];
+                    if (this.mus?.lastNote !== undefined) {
+                        while (note - this.mus.lastNote > 7 && note > 64) note -= 12;
+                        while (this.mus.lastNote - note > 7 && note < 76) note += 12;
                     }
-                }
-                if (n != null) {
-                    const held = phraseBar === 3 && s === 8 ? 6 : section === 2 ? 2.5 : 1.4;
-                    this.musicTone(hz(n + 12 + up), spb * held, section === 0 ? .065 : .085, T.leadWave, t, section === 2 ? 1800 : 3200, { detune: 6, send: .45, echo: .35 });
+                    if (this.mus) this.mus.lastNote = note;
+                    const held = T.upbeat ? 1.35 : melody[(index + 1) % 16] === null ? 3.6 : 1.8;
+                    const voice = section === 2 && T.voice !== 'piano' && !T.upbeat ? 'piano' : T.voice;
+                    this.acousticNote(hz(note), spb * held, T.upbeat ? .22 : T.quiet ? .14 : section === 3 ? .17 : .19, t, voice, this.musicGain);
                 }
             }
-            if (T.kick[s] === '1' && (section !== 2 || s === 0)) this.musicKick(t);
-            const fill = section !== 2 && T.snare !== '0000000000000000' && phraseBar === 3 && s >= 12;
-            if (T.snare[s] === '1' || fill) this.musicNoise(t, 0.14, fill ? 0.12 : 0.16, 1800, 'highpass');
-            if (T.snare[s] === '1' && T.snare !== '0000000000000000') this.musicTone(190, 0.09, 0.08, 'triangle', t, 1200);
-            if (T.hat[s] === '1' && section !== 2) this.musicNoise(t, 0.04, s % 4 === 0 ? .05 : .035, 7000, 'highpass');
-            if (T.openHat && T.openHat[s] === '1' && s % 4 === 2) this.musicNoise(t, 0.16, 0.04, 8000, 'highpass');
-            if (s === 0 && phraseBar === 0 && barIndex > 0) this.musicNoise(t, 0.9, 0.05, 5000, 'highpass');
+            if (!T.quiet && (s === 0 || (!sparse && (s === 8 || (T.drive && s % 4 === 0))))) this.musicKick(t);
+            if (!sparse && (s === 4 || s === 12)) {
+                this.acousticNote(170, .09, .075, t, 'marimba', this.musicGain);
+                this.musicNoise(t, T.upbeat ? .11 : .085, T.upbeat ? .075 : .035, T.upbeat ? 2200 : 1400, 'bandpass');
+            }
+            if (!sparse && s % (T.drive ? 2 : 4) === (T.drive ? 1 : 2)) this.musicNoise(t, .045, .018, 3600, 'highpass');
         }
 
-        musicTone(freq, dur, vol, type, t, cutoff = 5000, opts = {}) {
-            const ctx = this.ctx, gain = ctx.createGain(), filter = ctx.createBiquadFilter();
-            const attack = opts.attack || 0.015;
-            filter.type = 'lowpass'; filter.frequency.setValueAtTime(cutoff, t);
+        acousticBuffer(voice) {
+            this.instrumentBuffers ||= new Map();
+            if (this.instrumentBuffers.has(voice)) return this.instrumentBuffers.get(voice);
+            const profiles = {
+                guitar: { ratios: [1, 2, 3, 4, 5, 6], weights: [1, .42, .21, .1, .05, .025], decay: 2.1, attack: .004 },
+                piano: { ratios: [1, 2.001, 3.004, 4.01], weights: [1, .32, .13, .045], decay: 1.7, attack: .009 },
+                marimba: { ratios: [1, 4, 9], weights: [1, .09, .012], decay: 5.5, attack: .003 },
+                bass: { ratios: [1, 2, 3], weights: [1, .24, .055], decay: 2.5, attack: .012 },
+                bright: { ratios: [1, 2, 3, 4, 5], weights: [1, .65, .38, .18, .08], decay: 3.2, attack: .003 }
+            };
+            const profile = profiles[voice];
+            if (!profile) throw new Error(`Unknown acoustic voice: ${voice}`);
+            const ctx = this.ctx, buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 3), ctx.sampleRate);
+            const data = buffer.getChannelData(0), weight = profile.weights.reduce((a, b) => a + b, 0);
+            for (let i = 0; i < data.length; i++) {
+                const time = i / ctx.sampleRate;
+                let sample = 0;
+                for (let partial = 0; partial < profile.ratios.length; partial++) {
+                    sample += Math.sin(2 * Math.PI * 220 * profile.ratios[partial] * time)
+                        * profile.weights[partial] * Math.exp(-time * (profile.decay + partial * 1.6));
+                }
+                data[i] = sample / weight * Math.min(1, time / profile.attack) * Math.min(1, (data.length - i - 1) / (ctx.sampleRate * .02));
+            }
+            this.instrumentBuffers.set(voice, buffer);
+            return buffer;
+        }
+
+        acousticNote(freq, dur, vol, t, voice, destination) {
+            const ctx = this.ctx, source = ctx.createBufferSource(), gain = ctx.createGain();
+            source.buffer = this.acousticBuffer(voice);
+            source.playbackRate.setValueAtTime(freq / 220, t);
             gain.gain.setValueAtTime(0.0001, t);
-            gain.gain.exponentialRampToValueAtTime(vol, t + attack);
+            gain.gain.exponentialRampToValueAtTime(vol, t + .006);
             gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-            filter.connect(gain); gain.connect(this.musicGain);
-            if (opts.send && this.fxIn) { const s = ctx.createGain(); s.gain.value = opts.send; gain.connect(s); s.connect(this.fxIn); }
-            if (opts.echo && this.echoIn) { const e = ctx.createGain(); e.gain.value = opts.echo; gain.connect(e); e.connect(this.echoIn); }
-            (opts.detune ? [-opts.detune, opts.detune] : [0]).forEach(cents => {
-                const osc = ctx.createOscillator();
-                osc.type = type; osc.frequency.setValueAtTime(freq, t); osc.detune.value = cents;
-                osc.connect(filter); osc.start(t); osc.stop(t + dur + 0.05);
-            });
+            source.connect(gain); gain.connect(destination);
+            if (destination === this.musicGain && this.fxIn) {
+                const send = ctx.createGain(); send.gain.value = .12;
+                gain.connect(send); send.connect(this.fxIn);
+            }
+            source.start(t);
+            if (destination === this.musicGain) this.finishMusicSource(source, t + dur + .03);
+            else source.stop(t + dur + .03);
+        }
+
+        finishMusicSource(source, end) {
+            this.musicSources ||= new Set();
+            this.musicSources.add(source);
+            source.onended = () => this.musicSources.delete(source);
+            source.stop(end);
         }
 
         musicKick(t) {
             const ctx = this.ctx, osc = ctx.createOscillator(), gain = ctx.createGain();
-            osc.frequency.setValueAtTime(150, t); osc.frequency.exponentialRampToValueAtTime(42, t + 0.12);
-            gain.gain.setValueAtTime(0.5, t); gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
-            osc.connect(gain); gain.connect(this.musicGain); osc.start(t); osc.stop(t + 0.2);
+            osc.frequency.setValueAtTime(90, t); osc.frequency.exponentialRampToValueAtTime(52, t + 0.06);
+            gain.gain.setValueAtTime(0.16, t); gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+            osc.connect(gain); gain.connect(this.musicGain); osc.start(t); this.finishMusicSource(osc, t + 0.18);
         }
 
         musicNoise(t, dur, vol, cutoff, type) {
@@ -363,7 +393,7 @@
             filter.type = type; filter.frequency.setValueAtTime(cutoff, t);
             gain.gain.setValueAtTime(vol, t); gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
             src.connect(filter); filter.connect(gain); gain.connect(this.musicGain);
-            src.start(t, Math.random() * 0.5); src.stop(t + dur + 0.02);
+            src.start(t, Math.random() * 0.5); this.finishMusicSource(src, t + dur + 0.02);
         }
 
         unlock() {
@@ -385,10 +415,10 @@
         }
 
         // category is 'ui' or 'game'; sounds in a muted category are skipped.
-        play(name, category = 'ui', minGapMs = 45) {
+        play(name, category = 'ui', minGapMs = 45, volume = 1) {
             if (window.StudBudArcade?.previewDepth > 0) return;
             const s = this.settings;
-            if (!s.volume || !s[category] || !RECIPES[name] || !this.unlock()) return;
+            if (!s.volume || !s[category] || !RECIPES[name] || !Number.isFinite(volume) || volume <= 0 || !this.unlock()) return;
             const now = performance.now();
             if (now - (this.last[name] || 0) < minGapMs) return;
             this.last[name] = now;
@@ -397,7 +427,12 @@
             let recipe = RECIPES[name];
             if (Array.isArray(recipe)) recipe = recipe[Math.floor(Math.random() * recipe.length)];
             this.pitch = NO_PITCH_SHIFT.has(name) ? 1 : 0.93 + Math.random() * 0.14;
-            try { recipe(this); } finally { this.pitch = 1; }
+            if (volume < 1) {
+                this.effectOut = this.ctx.createGain();
+                this.effectOut.gain.value = volume;
+                this.effectOut.connect(this.master);
+            }
+            try { recipe(this); } finally { this.pitch = 1; this.effectOut = null; }
         }
 
         tone(type, from, to, dur, vol, delay = 0) {
@@ -414,8 +449,13 @@
             gain.gain.exponentialRampToValueAtTime(vol, t + 0.008);
             gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
             osc.connect(gain);
-            gain.connect(this.master);
-            if (this.verbIn && dur > 0.1) gain.connect(this.verbIn);
+            gain.connect(this.effectOut || this.master);
+            if (this.verbIn && dur > 0.1) {
+                if (this.effectOut) {
+                    const send = ctx.createGain(); send.gain.value = this.effectOut.gain.value;
+                    gain.connect(send); send.connect(this.verbIn);
+                } else gain.connect(this.verbIn);
+            }
             osc.start(t);
             osc.stop(t + dur + 0.02);
         }
@@ -427,9 +467,82 @@
             this.tone('triangle', freq * 3.01, freq * 3.01, dur * 0.4, vol * 0.1, delay);
         }
 
-        noise(dur, vol, cutoff) {
+        pluck(freq, dur, vol, delay = 0) {
+            this.acousticNote(freq * (this.pitch || 1), dur, vol, this.ctx.currentTime + delay, 'guitar', this.effectOut || this.master);
+        }
+
+        wood(freq, dur, vol, delay = 0) {
+            this.acousticNote(freq * (this.pitch || 1), dur, vol, this.ctx.currentTime + delay, 'marimba', this.effectOut || this.master);
+        }
+
+        jumpSound(airborne) {
+            const ctx = this.ctx, key = airborne ? 'air' : 'ground', duration = airborne ? .21 : .17;
+            this.jumpBuffers ||= new Map();
+            if (!this.jumpBuffers.has(key)) {
+                const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * duration), ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                let phase = 0, air = 0, seed = 173;
+                for (let i = 0; i < data.length; i++) {
+                    const t = i / ctx.sampleRate, progress = t / duration;
+                    const frequency = (airborne ? 230 : 165) + (airborne ? 330 : 255) * (1 - Math.exp(-progress * 3));
+                    phase += 2 * Math.PI * frequency / ctx.sampleRate;
+                    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+                    air += .16 * (seed / 2147483648 - 1 - air);
+                    const envelope = Math.min(1, t / .008) * Math.pow(1 - progress, 2);
+                    const push = Math.sin(2 * Math.PI * 85 * t) * Math.exp(-t * 65);
+                    data[i] = envelope * (.18 * Math.sin(phase) + .045 * air + (airborne ? 0 : .07 * push));
+                }
+                this.jumpBuffers.set(key, buffer);
+            }
+            const source = ctx.createBufferSource();
+            source.buffer = this.jumpBuffers.get(key);
+            source.connect(this.effectOut || this.master);
+            source.start(ctx.currentTime);
+            source.stop(ctx.currentTime + duration);
+        }
+
+        springJump() {
+            const ctx = this.ctx, duration = .48;
+            if (!this.springBuffer) {
+                const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * duration), ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                let phase = 0;
+                for (let i = 0; i < data.length; i++) {
+                    const t = i / ctx.sampleRate;
+                    const frequency = 155 + 125 * Math.exp(-t * 7) + 65 * Math.sin(t * 2 * Math.PI * 13) * Math.exp(-t * 9);
+                    phase += 2 * Math.PI * frequency / ctx.sampleRate;
+                    const envelope = (1 - Math.exp(-t * 180)) * Math.exp(-t * 11) * Math.pow(1 - t / duration, 2);
+                    data[i] = (Math.sin(phase) + .16 * Math.sin(phase * 2.03)) * envelope * .22;
+                }
+                this.springBuffer = buffer;
+            }
+            const source = ctx.createBufferSource();
+            source.buffer = this.springBuffer;
+            source.connect(this.effectOut || this.master);
+            source.start(ctx.currentTime);
+            source.stop(ctx.currentTime + duration);
+        }
+
+        whoosh(dur = .22, vol = .055) {
+            const ctx = this.ctx, t = ctx.currentTime;
+            const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+            const source = ctx.createBufferSource(), filter = ctx.createBiquadFilter(), gain = ctx.createGain();
+            source.buffer = buffer; filter.type = 'lowpass'; filter.Q.value = .35;
+            filter.frequency.setValueAtTime(450, t);
+            filter.frequency.exponentialRampToValueAtTime(1200, t + dur * .4);
+            filter.frequency.exponentialRampToValueAtTime(400, t + dur);
+            gain.gain.setValueAtTime(.0001, t);
+            gain.gain.exponentialRampToValueAtTime(vol, t + dur * .35);
+            gain.gain.exponentialRampToValueAtTime(.0001, t + dur);
+            source.connect(filter); filter.connect(gain); gain.connect(this.effectOut || this.master);
+            source.start(t); source.stop(t + dur);
+        }
+
+        noise(dur, vol, cutoff, delay = 0) {
             const ctx = this.ctx;
-            const t = ctx.currentTime;
+            const t = ctx.currentTime + delay;
             const buffer = ctx.createBuffer(1, Math.max(1, Math.floor(ctx.sampleRate * dur)), ctx.sampleRate);
             const data = buffer.getChannelData(0);
             for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
@@ -443,7 +556,7 @@
             gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
             source.connect(filter);
             filter.connect(gain);
-            gain.connect(this.master);
+            gain.connect(this.effectOut || this.master);
             source.start(t);
         }
     }

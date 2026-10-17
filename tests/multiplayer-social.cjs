@@ -24,6 +24,7 @@ const sandbox = { console, Map, Set, Date, Math, performance,
     Router: { navigate: route => routes.push(route) }, AppState: { get: () => [] }
 };
 vm.createContext(sandbox);
+vm.runInContext(source('nameModeration.js'), sandbox);
 const appSource = source('app.js');
 vm.runInContext(appSource.slice(appSource.indexOf('    class AppOrchestrator'), appSource.indexOf('    window.NexusApp =')) + '\nglobalThis.app = Object.create(AppOrchestrator.prototype);', sandbox);
 const app = sandbox.app;
@@ -66,6 +67,23 @@ async function run() {
     app.canTestGames = false;
     await assert.rejects(app.hostStaffTest('skyline'), /connected tester/);
     app.canTestGames = true;
+
+    const originalGet = sandbox.AppState.get;
+    sandbox.AppState.get = key => key === 'flashcards' ? [{ id: 'set', title: 'Test', cards: [{ front: 'Q', back: 'A' }] }] : {};
+    const form = { elements: {
+        nickname: { value: 'Tester' }, deckId: { value: 'set' }, mode: { value: 'skyline' },
+        timeLimit: { value: '5' }, questionReward: { value: '21' }, allowLateJoin: { checked: false }
+    } };
+    await app.hostGame(form);
+    assert.equal(created[4].allow_late_join, false, 'late joining defaults to disabled');
+    assert.equal(created[4].question_reward, 21, 'hosts can choose rewards between the old five-unit steps');
+    form.elements.allowLateJoin.checked = true;
+    await app.hostGame(form);
+    assert.equal(created[4].allow_late_join, true);
+    form.elements.mode.value = 'chess';
+    await app.hostGame(form);
+    assert.equal(created[4].allow_late_join, false, 'chess always locks its two seats after starting');
+    sandbox.AppState.get = originalGet;
 
     games.friendCall = async () => ({ friends: [{ user_id: 'bud', username: 'My bud' }], incoming: [], outgoing: [] });
     cloud.getFriendRooms = async () => [{ host_id: 'bud', room_code: 'ABCDEF', mode: 'skyline', staff_test: true }];
@@ -209,6 +227,18 @@ async function run() {
     assert.equal(liveTest.roster.size, 2);
     assert.equal(liveTest.spend(100000), true, 'test resources stay unlimited');
     assert.equal(connections, 1);
+    const startedAt = new Date(Date.now() - 120000).toISOString();
+    for (const reward of [6, 7, 21, 99]) {
+        const lateRoom = { ...room([host, bud]), status: 'playing', started_at: startedAt,
+            state: { players: [host, bud], seed: 42, question_reward: reward, allow_late_join: true } };
+        const late = new Session({ room: lateRoom, user: bud, api: games, isHost: false });
+        assert.equal(late.rewardAmount(), reward, 'sessions preserve single-unit rewards');
+        assert.equal(late.startedAt, Date.parse(startedAt));
+        assert.equal(late.deadline, Date.parse(startedAt) + 300000, 'joining late preserves the original match deadline');
+        assert.equal(late.score, 0);
+        assert.equal(late.answered, 0);
+        assert.equal(late.seed, 42, 'late arrivals use the existing course seed');
+    }
     const engine = source('multiplayerEngine.js');
     assert.match(engine, /this.testing = Boolean\(options.testing \|\| this.room.state\?\.staff_test\)/);
     let saved = false;
@@ -222,12 +252,23 @@ async function run() {
     assert.match(fn('studbud_create_game_room('), /studbud_has_user_tag\(v_user_id, 'tester'\)/);
     assert.match(fn('studbud_join_game_room('), /Only testers and administrators can join staff test rooms/);
     assert.match(fn('studbud_start_game_room('), /'staff_test', coalesce\(\(v_room.state ->> 'staff_test'\)/);
+    assert.match(fn('studbud_create_game_room('), /'allow_late_join', p_mode <> 'chess' and coalesce\(\(p_options ->> 'allow_late_join'\)::boolean, false\)/);
+    assert.match(fn('studbud_start_game_room('), /'allow_late_join', coalesce\(\(v_room.state ->> 'allow_late_join'\)::boolean, false\)/);
+    const joining = fn('studbud_join_game_room(');
+    assert.match(joining, /v_room.status = 'finished'/);
+    assert.match(joining, /v_room.started_at \+ make_interval\(secs => v_room.time_limit_seconds\) <= now\(\)/);
+    assert.match(joining, /v_room.mode = 'chess' or not coalesce\(\(v_room.state ->> 'allow_late_join'\)::boolean, false\)/);
+    assert.ok(joining.indexOf("where player ->> 'id' = v_user_id::text") < joining.indexOf('late joining is disabled'), 'existing members can reconnect to a locked active room');
+    assert.match(joining, /if v_room.mode = 'defense' and v_room.status = 'playing'/);
+    assert.match(joining, /count\(\*\) filter \(where value = '0'\) <= count\(\*\) filter \(where value = '1'\)/);
     assert.match(fn('studbud_advance_game_room('), /set state = state \|\| jsonb_build_object/);
     const rewards = fn('studbud_pay_game_rewards(');
     assert.ok(rewards.indexOf("state ->> 'staff_test'") < rewards.indexOf('for v_player in'), 'reward refusal precedes wallet/win updates');
     const discovery = fn('studbud_friend_open_rooms(');
     assert.match(discovery, /f.status = 'accepted'/);
-    assert.match(discovery, /r.status = 'waiting' and r.expires_at > now\(\)/);
+    assert.match(discovery, /r.status = 'waiting' or \(r.status = 'playing' and r.mode <> 'chess'/);
+    assert.match(discovery, /allow_late_join/);
+    assert.match(discovery, /and r.expires_at > now\(\)/);
     assert.match(discovery, /when r.mode = 'chess' then 2 when r.mode = 'duel' then 8 else 16/);
     assert.match(discovery, /studbud_is_guest\(\)/);
     assert.match(sql, /revoke all on function public.studbud_friend_open_rooms\(\) from public, anon/);

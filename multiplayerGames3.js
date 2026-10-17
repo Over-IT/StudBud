@@ -730,8 +730,8 @@
             this.waveNumber = 0; this.waveTimer = 25; this.waveSpawnRemaining = 0; this.waveSpawnTimer = 0;
             this.lastSeq = {}; this.answers = {}; this.pending = []; this.sequence = 0; this.retryT = 0;
             this.answerCount = 0;
-            this.ui = new Ui(s); this.buildType = 0; this.selected = null;
-            this.catalogPage = 0; this.previewPoint = null; this.battleSounds = 0;
+            this.ui = new Ui(s); this.buildType = null; this.selected = null;
+            this.shopTab = 'build'; this.previewPoint = null; this.battleSounds = 0;
             this.pointerLook = false;
             this.anim = 0; this.serial = 0; this.receivedSerial = -1; this.saveT = 0;
             this.res = new A.Resource('Team cash', DEFENSE_COLORS[this.myTeam], 180, 0, 0);
@@ -744,6 +744,9 @@
         answerCash() { return this.s.rewardAmount() * 3; }
         canAfford(team, cost) { return this.s.testing === true || this.wallets[team] >= cost; }
         upgradeCost(troop) { return DEFENSE_TROOPS[troop.type].cost * troop.level; }
+        sellValue(troop) {
+            return this.s.testing === true ? 0 : Math.floor(DEFENSE_TROOPS[troop.type].cost * (1 + troop.level * (troop.level - 1) / 2) * .75);
+        }
         waveEnemyHealth(type, wave) {
             return DEFENSE_ENEMIES[type].hp * (1 + Math.min(2.5, Math.max(0, wave - 1) * .14));
         }
@@ -773,8 +776,16 @@
         }
         teamOf(id) { return this.teams[id]; }
         get gridSize() { return 70; }
-        get playerTroopLimit() { return 12; }
+        get teamTroopLimit() { return 40; }
+        troopLimitFor(id) {
+            const team = this.teamOf(id);
+            const members = [...this.s.roster.keys()].filter(player => this.teamOf(player) === team).length;
+            return Math.floor(this.teamTroopLimit / Math.max(1, members));
+        }
+        get playerTroopLimit() { return this.troopLimitFor(this.s.user.id); }
         troopCount(id) { return this.troops.filter(t => t.owner === id).length; }
+        teamTroopCount(team) { return this.troops.filter(t => t.team === team).length; }
+        canBuild(id) { return this.troopCount(id) < this.troopLimitFor(id) && this.teamTroopCount(this.teamOf(id)) < this.teamTroopLimit; }
         gridPoint(x, y, team = this.myTeam) {
             const originX = team * 1100 + 60, originY = 50, size = this.gridSize;
             return { x: originX + (Math.floor((x - originX) / size) + .5) * size,
@@ -831,7 +842,7 @@
                 return;
             }
             if (order.action === 'build' && Number.isInteger(type) && DEFENSE_TROOPS[type]) {
-                if (this.troopCount(id) >= this.playerTroopLimit) return this.reject(id, 'You have reached your 12-tower limit');
+                if (!this.canBuild(id)) return this.reject(id, `Tower limit reached: ${this.troopLimitFor(id)} per player, ${this.teamTroopLimit} per team`);
                 if (!this.validPlacement(order.x, order.y, team)) return this.reject(id, 'Choose an empty grid cell on your own side, away from the path');
                 cost = DEFENSE_TROOPS[type].cost;
                 execute = () => this.troops.push({ id: this.nextId++, owner: id, team, type, x: Math.round(order.x), y: Math.round(order.y), level: 1, cd: 0 });
@@ -844,6 +855,15 @@
                 if (!troop || troop.level >= 3) return this.reject(id, 'Select a friendly troop below level 3');
                 cost = this.upgradeCost(troop);
                 execute = () => { troop.level++; };
+            } else if (order.action === 'sell') {
+                const troop = this.troops.find(t => t.id === order.id && t.owner === id && t.team === team);
+                if (!troop) return this.reject(id, 'You can only sell towers you own');
+                const refund = this.sellValue(troop);
+                this.troops = this.troops.filter(t => t !== troop);
+                this.wallets[team] += refund;
+                if (this.selected === troop.id) this.selected = null;
+                this.s.sfx('coin', 80);
+                return;
             } else return this.reject(id, 'Unknown defense order');
             if (!this.canAfford(team, cost)) return this.reject(id, 'Not enough team cash - answer a flashcard or defeat enemies');
             if (this.s.testing !== true) this.wallets[team] -= cost;
@@ -953,20 +973,21 @@
         applySnapshot(state) {
             const pair = values => Array.isArray(values) && values.length === 2 && values.every(v => Number.isFinite(v) && v >= 0);
             const object = value => value && typeof value === 'object' && !Array.isArray(value);
+            const teams = { ...(object(state?.teams) ? state.teams : {}), ...this.s.room?.state?.defense_teams };
             const waveNumber = state?.waveNumber ?? 0, waveTimer = state?.waveTimer ?? 25;
             const waveSpawnRemaining = state?.waveSpawnRemaining ?? 0, waveSpawnTimer = state?.waveSpawnTimer ?? 0;
             if (!state || !Number.isInteger(state.serial) || !pair(state.health) || state.health.some(v => v > 100)
                 || !pair(state.wallets) || !pair(state.damage) || !object(state.teams) || !object(state.lastSeq) || !object(state.answers)
-                || ![0, 1].includes(state.teams[this.s.user.id]) || !Number.isInteger(state.nextId)
+                || ![0, 1].includes(teams[this.s.user.id]) || !Number.isInteger(state.nextId)
                 || !Number.isInteger(waveNumber) || waveNumber < 0 || waveNumber > 10000
                 || !Number.isFinite(waveTimer) || waveTimer < 0 || waveTimer > 32
                 || !Number.isInteger(waveSpawnRemaining) || waveSpawnRemaining < 0 || waveSpawnRemaining > 10004
                 || !Number.isFinite(waveSpawnTimer) || waveSpawnTimer < 0 || waveSpawnTimer > 1.2
-                || !Array.isArray(state.troops) || state.troops.length > Object.keys(state.teams).length * this.playerTroopLimit
+                || !Array.isArray(state.troops) || state.troops.length > this.teamTroopLimit * 2
                 || !Array.isArray(state.enemies) || state.enemies.length > 120
                 || ![null, 0, 1].includes(state.winner)
                 || state.troops.some(t => !t || !Number.isInteger(t.id) || ![0, 1].includes(t.team)
-                    || typeof t.owner !== 'string' || !Object.hasOwn(state.teams, t.owner) || state.teams[t.owner] !== t.team
+                    || typeof t.owner !== 'string' || !Object.hasOwn(teams, t.owner) || teams[t.owner] !== t.team
                     || !Number.isInteger(t.type) || !DEFENSE_TROOPS[t.type]
                     || ![1, 2, 3].includes(t.level) || !Number.isFinite(t.x) || !Number.isFinite(t.y) || !Number.isFinite(t.cd)
                     || t.cd < 0 || t.cd > DEFENSE_TROOPS[t.type].rate
@@ -984,11 +1005,11 @@
                 this.s.toast('Tower Defense received an invalid battle state. Reload or rejoin the room.', '#f87171');
                 return;
             }
-            const counts = new Map(), cells = new Set();
+            const teamCounts = [0, 0], cells = new Set();
             for (const troop of state.troops) {
-                const count = (counts.get(troop.owner) || 0) + 1, cell = `${troop.x}:${troop.y}`;
-                counts.set(troop.owner, count);
-                if (count > this.playerTroopLimit || cells.has(cell)) {
+                const cell = `${troop.x}:${troop.y}`;
+                teamCounts[troop.team]++;
+                if (teamCounts[troop.team] > this.teamTroopLimit || cells.has(cell)) {
                     console.error('[Tower Defense] Invalid tower ownership limits or occupied grid cells');
                     this.s.toast('Tower Defense received invalid tower placements. Reload or rejoin the room.', '#f87171');
                     return;
@@ -1007,7 +1028,7 @@
             this.health = [...state.health]; this.wallets = [...state.wallets]; this.teamDamage = [...state.damage];
             this.waveNumber = waveNumber; this.waveTimer = waveTimer;
             this.waveSpawnRemaining = waveSpawnRemaining; this.waveSpawnTimer = waveSpawnTimer;
-            this.teams = { ...state.teams }; this.lastSeq = { ...state.lastSeq }; this.answers = { ...state.answers };
+            this.teams = teams; this.lastSeq = { ...state.lastSeq }; this.answers = { ...state.answers };
             this.nextId = state.nextId; this.troops = state.troops.map(t => ({ ...t })); this.enemies = state.enemies.map(e => ({ wave: 1, ...e }));
             this.shots = (state.shots || []).map(shot => ({ ...shot })); this.winner = state.winner;
             this.finished = state.winner === 0 || state.winner === 1;
@@ -1028,6 +1049,10 @@
         onRoom(room) {
             const state = room.state?.defense;
             if (state && state.serial > this.serial) this.applySnapshot(state);
+            if (room.state?.defense_teams) {
+                this.teams = { ...this.teams, ...room.state.defense_teams };
+                this.myTeam = this.teams[this.s.user.id];
+            }
         }
         net() {
             const net = super.net();
@@ -1052,12 +1077,13 @@
             const action = this.ui.hit(rects);
             const overHud = rects.some(r => this.ui.inside({ ...r, on: true }));
             const pointer = this.mouseWorld();
-            this.previewPoint = this.s.mouse.active && !overHud && !this.s.question && !this.selected ? this.gridPoint(pointer.x, pointer.y) : null;
             if (action?.startsWith('build:')) { this.buildType = Number(action.split(':')[1]); this.selected = null; }
-            else if (this.s.pressed('Escape')) { this.selected = null; }
-            else if (action === 'catalog') { this.catalogPage = 1 - this.catalogPage; }
+            else if (this.s.pressed('Escape') || action === 'cancel') { this.selected = null; this.buildType = null; }
+            else if (action === 'shop-build' || action === 'shop-send') { this.shopTab = action === 'shop-build' ? 'build' : 'send'; this.buildType = null; }
             else if (action?.startsWith('send:')) this.request('send', { type: Number(action.split(':')[1]) });
             else if (action === 'upgrade') this.request('upgrade', { id: this.selected });
+            else if (action === 'sell') { if (this.request('sell', { id: this.selected })) this.selected = null; }
+            else if (action === 'close-tower') this.selected = null;
             else if (action === 'earn' || this.s.pressed('KeyE')) this.recharge();
             else if (!action && this.s.mouse.pressed && !overHud) {
                 const p = this.mouseWorld(), troop = this.troops.find(t => {
@@ -1065,11 +1091,20 @@
                     return t.x === cell.x && t.y === cell.y;
                 });
                 if (troop) {
-                    if (troop.team === this.myTeam) this.selected = troop.id;
+                    if (troop.team === this.myTeam) { this.selected = troop.id; this.buildType = null; }
                     else this.s.toast('Enemy troops cannot be upgraded', '#fbbf24');
                 } else if (this.selected !== null) this.selected = null;
-                else this.request('build', { type: this.buildType, x: p.x, y: p.y });
+                else if (this.buildType !== null) {
+                    const snapped = this.gridPoint(p.x, p.y), type = DEFENSE_TROOPS[this.buildType];
+                    if (!this.canBuild(this.s.user.id)) this.s.toast('Your tower allowance or the team cap has been reached', '#fbbf24');
+                    else if (!this.canAfford(this.myTeam, type.cost)) this.s.toast('Not enough team cash - answer a flashcard', '#fbbf24');
+                    else if (!this.validPlacement(snapped.x, snapped.y, this.myTeam)) this.s.toast('Choose an empty grid cell on your side, away from the path', '#fbbf24');
+                    else if (this.request('build', { type: this.buildType, ...snapped })) this.buildType = null;
+                }
             }
+            if (this.selected !== null && !this.troops.some(t => t.id === this.selected)) this.selected = null;
+            this.previewPoint = this.buildType !== null && this.s.mouse.active && !overHud && !this.s.question && this.selected === null
+                ? this.gridPoint(pointer.x, pointer.y) : null;
             if (this.authority) {
                 this.simulate(dt);
                 this.saveT += dt;
@@ -1089,9 +1124,9 @@
             return rows[0]?.g >= 1000000 ? `${this.teamOf(rows[0].id) ? 'Red' : 'Blue'} team wins!` : 'Battle ended';
         }
         isWinner(rows, id) { return rows[0]?.g >= 1000000 && this.teamOf(rows[0].id) === this.teamOf(id); }
-        goalText() { return `${this.myTeam ? 'Red' : 'Blue'} team · Wave ${this.waveNumber} · Base ${this.health[this.myTeam]} HP · Towers ${this.troopCount(this.s.user.id)}/12 · ${this.s.testing === true ? 'unlimited test cash' : `$${this.wallets[this.myTeam]} shared`}`; }
-        hint() { return 'WASD walk on either side · Choose a troop, click an empty grid cell on your side to build (12 towers per player) · Click friendly troops to upgrade · Send enemies to the rival path · Q/E answer for shared cash · Survive the automatic waves; first base to 0 HP loses'; }
-        touchHint() { return 'Joystick to walk · Select troop, tap an empty grid cell to build (12 per player) · Tap friendly troops to upgrade · Send enemies with the buttons · Answer for team cash and hold off the incoming waves'; }
+        goalText() { return `${this.myTeam ? 'Red' : 'Blue'} team · Wave ${this.waveNumber} · Base ${this.health[this.myTeam]} HP · Towers ${this.troopCount(this.s.user.id)}/${this.playerTroopLimit} · Team ${this.teamTroopCount(this.myTeam)}/40 · ${this.s.testing === true ? 'unlimited test cash' : `$${this.wallets[this.myTeam]} shared`}`; }
+        hint() { return 'WASD walk · Choose a tower for one placement · Escape/cancel clears placement · Click friendly towers for upgrades or sell your own for 75% · 40 towers per team, divided equally among active teammates · Q/E answer for shared cash'; }
+        touchHint() { return 'Joystick to walk · Choose a tower, tap a free cell for one placement · Cancel clears the preview · Tap a tower for upgrades/selling · 40 team slots divided among teammates · Answer for team cash'; }
         touchLayout() { return { stick: true, buttons: [{ k: 'KeyE', label: 'Earn cash', cls: 'main' }] }; }
         drawTroop(ctx, troop, angle = -.6) {
             const spec = DEFENSE_TROOPS[troop.type];
@@ -1169,7 +1204,8 @@
             const rects = this.ui.rects.length ? this.ui.rects : this.ui.prev;
             const overHud = rects.some(r => this.ui.inside({ ...r, on: true }));
             const pointer = this.mouseWorld();
-            this.previewPoint = this.s.mouse.active && !overHud && !this.s.question && !this.selected ? this.gridPoint(pointer.x, pointer.y) : null;
+            this.previewPoint = this.buildType !== null && this.s.mouse.active && !overHud && !this.s.question && this.selected === null
+                ? this.gridPoint(pointer.x, pointer.y) : null;
             for (const team of [0, 1]) {
                 const color = DEFENSE_COLORS[team], path = this.paths[team];
                 if (!this.seenRect(team * 1100, 0, 1100, this.H, 120)) continue;
@@ -1237,7 +1273,7 @@
             }
             if (this.previewPoint && !this.s.preview) {
                 const p = this.previewPoint, spec = DEFENSE_TROOPS[this.buildType];
-                const atLimit = this.troopCount(this.s.user.id) >= this.playerTroopLimit;
+                const atLimit = !this.canBuild(this.s.user.id);
                 const valid = this.validPlacement(p.x, p.y, this.myTeam) && this.canAfford(this.myTeam, spec.cost) && !atLimit;
                 const color = valid ? '#86efac' : '#f87171';
                 ctx.fillStyle = valid ? 'rgba(134,239,172,.25)' : 'rgba(248,113,113,.25)';
@@ -1247,7 +1283,7 @@
                 this.ring(ctx, p.x, p.y, spec.range, color, 2);
                 ctx.globalAlpha = .65; this.drawTroop(ctx, { x: p.x, y: p.y, type: this.buildType, team: this.myTeam, level: 1 }); ctx.globalAlpha = 1;
                 ctx.fillStyle = color; ctx.font = '700 14px system-ui'; ctx.textAlign = 'center';
-                ctx.fillText(`${spec.name} $${spec.cost} · ${atLimit ? '12/12 tower limit' : valid ? `Range ${spec.range}` : 'Cannot place here'}`, p.x, p.y + 51);
+                ctx.fillText(`${spec.name} $${spec.cost} · ${atLimit ? 'Tower limit reached' : valid ? `Range ${spec.range}` : 'Cannot place here'}`, p.x, p.y + 51);
             }
             for (const shot of this.shots) {
                 if (!this.seenRect(Math.min(shot.x, shot.tx), Math.min(shot.y, shot.ty), Math.abs(shot.tx - shot.x), Math.abs(shot.ty - shot.y), 8)) continue;
@@ -1257,46 +1293,73 @@
             this.end(ctx);
             this.ui.begin();
             if (this.s.preview) return;
-            this.ui.transform = this.s.placeHud(ctx, 0, 0, 320, 326, 'top-right');
-            ctx.fillStyle = 'rgba(15,23,42,.95)'; roundRect(ctx, 0, 0, 320, 326, 10); ctx.fill();
-            this.ui.addRect({ id: 'panel', x: 0, y: 0, w: 320, h: 326, on: false });
-            ctx.fillStyle = '#fff'; ctx.font = '800 14px system-ui'; ctx.textAlign = 'center';
-            ctx.fillText(`BLUE ${this.health[0]} HP  |  RED ${this.health[1]} HP`, 160, 20);
-            ctx.fillStyle = DEFENSE_COLORS[this.myTeam]; ctx.fillText(`${this.myTeam ? 'RED' : 'BLUE'} TEAM CASH: ${this.s.testing === true ? 'UNLIMITED (TEST)' : `$${this.wallets[this.myTeam]}`}`, 160, 42);
-            ctx.fillStyle = '#fbbf24'; ctx.font = '800 12px system-ui'; ctx.fillText(this.waveStatusText(), 160, 64);
-            this.ui.button(ctx, 'catalog', 8, 70, 304, 24, `Catalog ${this.catalogPage + 1}/2 · click for more`, true, '#334155');
-            DEFENSE_TROOPS.slice(this.catalogPage * 3, this.catalogPage * 3 + 3).forEach((type, slot) => {
-                const i = this.catalogPage * 3 + slot;
-                this.ui.button(ctx, `build:${i}`, 8 + slot * 103, 100, 98, 42, type.name, this.troopCount(this.s.user.id) < this.playerTroopLimit,
-                    i === this.buildType ? '#2563eb' : '#475569', `$${type.cost} · build`);
-            });
-            DEFENSE_ENEMIES.slice(this.catalogPage * 3, this.catalogPage * 3 + 3).forEach((type, slot) => {
-                const i = this.catalogPage * 3 + slot;
-                this.ui.button(ctx, `send:${i}`, 8 + slot * 103, 148, 98, 42, type.name,
-                    this.canAfford(this.myTeam, type.cost), '#be123c', `$${type.cost} · send`);
-            });
             const selected = this.troops.find(t => t.id === this.selected);
-            const hover = this.ui.rects.find(r => this.ui.inside({ ...r, on: true }) && /^(build|send):/.test(r.id));
-            const enemyInfo = hover?.id.startsWith('send:');
-            const typeIndex = hover ? Number(hover.id.split(':')[1]) : selected?.type ?? this.buildType;
-            const info = enemyInfo ? DEFENSE_ENEMIES[typeIndex] : DEFENSE_TROOPS[typeIndex];
-            ctx.textAlign = 'left'; ctx.fillStyle = info.color; ctx.font = '800 13px system-ui';
-            ctx.fillText(`${info.name}${selected && !hover ? ` · Level ${selected.level}` : ''} · Your towers ${this.troopCount(this.s.user.id)}/12`, 12, 210);
-            ctx.fillStyle = '#cbd5e1'; ctx.font = '600 11px system-ui'; ctx.fillText(info.desc, 12, 228);
-            if (enemyInfo) ctx.fillText(`HP ${info.hp} · Speed ${info.speed} · Base hit ${info.damage}`, 12, 245);
-            else {
-                const stats = this.troopStats(typeIndex, selected && !hover ? selected.level : 1);
-                ctx.fillText(`Damage ${stats.damage.toFixed(1)} · Range ${stats.range} · Fires ${stats.rate.toFixed(2)}s`, 12, 245);
-                if (selected && !hover && selected.level < 3) {
-                    const next = this.troopStats(selected.type, selected.level + 1);
-                    ctx.fillText(`Upgrade: +${(next.damage - stats.damage).toFixed(1)} dmg · +35 range · ${next.rate.toFixed(2)}s fire`, 12, 262);
-                } else ctx.fillText('Hover/tap a choice for stats · Click a tower to upgrade', 12, 262);
+            const compactPanels = (this.s.hudBounds?.().w ?? w) < 644 * Math.max(1, 1 / (this.s.scale || 1));
+            if (!selected || !compactPanels) {
+                this.ui.transform = this.s.placeHud(ctx, 0, 0, 320, 324, 'top-right');
+                ctx.fillStyle = 'rgba(15,23,42,.95)'; roundRect(ctx, 0, 0, 320, 324, 12); ctx.fill();
+                this.ui.addRect({ id: 'shop-panel', x: 0, y: 0, w: 320, h: 324, on: false });
+                ctx.fillStyle = '#fff'; ctx.font = '800 14px system-ui'; ctx.textAlign = 'center';
+                ctx.fillText(`BLUE ${this.health[0]} HP  |  RED ${this.health[1]} HP`, 160, 20);
+                ctx.fillStyle = DEFENSE_COLORS[this.myTeam]; ctx.fillText(`${this.myTeam ? 'RED' : 'BLUE'} TEAM CASH: ${this.s.testing === true ? 'UNLIMITED (TEST)' : `$${this.wallets[this.myTeam]}`}`, 160, 42);
+                ctx.fillStyle = '#fbbf24'; ctx.font = '800 12px system-ui'; ctx.fillText(this.waveStatusText(), 160, 64);
+                this.ui.button(ctx, 'shop-build', 8, 72, 148, 26, 'Build towers', true, this.shopTab === 'build' ? '#2563eb' : '#334155');
+                this.ui.button(ctx, 'shop-send', 164, 72, 148, 26, 'Send enemies', true, this.shopTab === 'send' ? '#be123c' : '#334155');
+                const catalog = this.shopTab === 'build' ? DEFENSE_TROOPS : DEFENSE_ENEMIES;
+                catalog.forEach((type, i) => {
+                    const build = this.shopTab === 'build';
+                    this.ui.button(ctx, `${build ? 'build' : 'send'}:${i}`, 8 + (i % 3) * 103, 106 + Math.floor(i / 3) * 50, 98, 44, type.name,
+                        this.canAfford(this.myTeam, type.cost) && (!build || this.canBuild(this.s.user.id)),
+                        build ? i === this.buildType ? '#2563eb' : '#475569' : '#9f1239', `$${type.cost}`);
+                });
+                const hover = this.ui.rects.find(r => this.ui.inside({ ...r, on: true }) && /^(build|send):/.test(r.id));
+                const enemyInfo = hover?.id.startsWith('send:');
+                const typeIndex = hover ? Number(hover.id.split(':')[1]) : this.buildType;
+                const info = typeIndex === null ? null : enemyInfo ? DEFENSE_ENEMIES[typeIndex] : DEFENSE_TROOPS[typeIndex];
+                ctx.textAlign = 'left'; ctx.fillStyle = '#cbd5e1'; ctx.font = '700 12px system-ui';
+                ctx.fillText(`Your towers ${this.troopCount(this.s.user.id)}/${this.playerTroopLimit} · Team ${this.teamTroopCount(this.myTeam)}/40`, 12, 218);
+                ctx.font = '600 11px system-ui';
+                if (info) {
+                    ctx.fillStyle = info.color; ctx.fillText(`${info.name} · ${info.desc}`, 12, 238);
+                    ctx.fillStyle = '#cbd5e1';
+                    if (enemyInfo) ctx.fillText(`HP ${info.hp} · Speed ${info.speed} · Base hit ${info.damage}`, 12, 254);
+                    else ctx.fillText(`Damage ${info.damage} · Range ${info.range} · Fires ${info.rate.toFixed(2)}s`, 12, 254);
+                } else {
+                    ctx.fillText('Choose a tower for one placement, or select a built tower.', 12, 238);
+                    ctx.fillText('40 team slots divided equally among active teammates.', 12, 254);
+                }
+                this.ui.button(ctx, 'earn', 8, 268, 148, 48, 'Answer for cash', !this.s.question, '#15803d', `+$${this.answerCash()} to team`);
+                this.ui.button(ctx, 'cancel', 164, 268, 148, 48, 'Cancel placement', this.buildType !== null, '#475569', this.buildType === null ? 'Nothing selected' : 'Escape also cancels');
+                ctx.restore();
             }
-            this.ui.button(ctx, 'upgrade', 8, 271, 148, 48, selected ? `Upgrade L${selected.level}` : 'Select troop',
-                Boolean(selected && selected.level < 3 && this.canAfford(this.myTeam, this.upgradeCost(selected))), '#7c3aed',
-                selected ? selected.level >= 3 ? 'MAX LEVEL' : `$${this.upgradeCost(selected)}` : 'Tap a friendly troop');
-            this.ui.button(ctx, 'earn', 164, 271, 148, 48, 'Answer for cash', !this.s.question, '#15803d', `+$${this.answerCash()} to team`);
-            ctx.restore();
+            if (selected) {
+                const spec = DEFENSE_TROOPS[selected.type], stats = this.troopStats(selected.type, selected.level);
+                this.ui.transform = this.s.placeHud(ctx, 0, 0, 304, 252, 'top-left');
+                this.ui.addRect({ id: 'tower-panel', x: 0, y: 0, w: 304, h: 252, on: false });
+                ctx.fillStyle = 'rgba(15,23,42,.96)'; roundRect(ctx, 0, 0, 304, 252, 12); ctx.fill();
+                ctx.textAlign = 'left'; ctx.fillStyle = spec.color; ctx.font = '800 15px system-ui';
+                ctx.fillText(`${spec.name} · Level ${selected.level}`, 12, 26);
+                this.ui.button(ctx, 'close-tower', 264, 8, 32, 26, 'X', true, '#334155');
+                const owner = this.s.roster.get(selected.owner);
+                ctx.textAlign = 'left'; ctx.fillStyle = '#94a3b8'; ctx.font = '600 11px system-ui';
+                ctx.fillText(selected.owner === this.s.user.id ? 'Your tower' : `Teammate: ${(owner?.name || owner?.nickname || 'Player').slice(0, 20)}`, 12, 48);
+                ctx.fillStyle = '#e2e8f0'; ctx.font = '700 12px system-ui';
+                ctx.fillText(`Damage ${stats.damage.toFixed(1)} · Range ${stats.range}`, 12, 74);
+                ctx.fillText(`Fires every ${stats.rate.toFixed(2)}s`, 12, 94);
+                ctx.font = '600 11px system-ui'; ctx.fillStyle = '#cbd5e1'; ctx.fillText(spec.desc, 12, 118);
+                if (selected.level < 3) {
+                    const next = this.troopStats(selected.type, selected.level + 1);
+                    ctx.fillText(`Upgrade: +${(next.damage - stats.damage).toFixed(1)} dmg · +35 range`, 12, 140);
+                    ctx.fillText(`Next firing interval: ${next.rate.toFixed(2)}s`, 12, 158);
+                } else ctx.fillText('Fully upgraded', 12, 142);
+                this.ui.button(ctx, 'upgrade', 8, 172, 140, 48, selected.level < 3 ? 'Upgrade' : 'Max level',
+                    selected.level < 3 && this.canAfford(this.myTeam, this.upgradeCost(selected)), '#7c3aed',
+                    selected.level < 3 ? `$${this.upgradeCost(selected)}` : 'Level 3');
+                this.ui.button(ctx, 'sell', 156, 172, 140, 48, 'Sell tower', selected.owner === this.s.user.id, '#b45309', `+$${this.sellValue(selected)} to team`);
+                ctx.textAlign = 'left'; ctx.fillStyle = '#94a3b8'; ctx.font = '600 10px system-ui';
+                ctx.fillText(compactPanels ? 'Close (X) or Escape to return to the shop' : 'Owner-only selling · 75% of build + upgrade costs', 12, 240);
+                ctx.restore();
+            }
             const mw = 160, mh = mw * this.H / this.W;
             this.ui.transform = this.s.placeHud(ctx, 0, 0, mw, mh, 'bottom-right');
             this.ui.addRect({ id: 'minimap', x: 0, y: 0, w: mw, h: mh, on: false });

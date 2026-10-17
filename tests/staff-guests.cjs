@@ -14,6 +14,7 @@ const sandbox = {
     AppState: { get: () => [] }
 };
 vm.createContext(sandbox);
+vm.runInContext(source('nameModeration.js'), sandbox);
 const appSource = source('app.js');
 vm.runInContext(appSource.slice(appSource.indexOf('    class AppOrchestrator'), appSource.indexOf('    window.NexusApp =')) +
     '\nglobalThis.app = Object.create(AppOrchestrator.prototype);', sandbox);
@@ -129,6 +130,7 @@ async function run() {
         supabase: { createClient: (_, __, config) => { options.push(config); return guestClient; } }
     } };
     vm.createContext(guestSandbox);
+    vm.runInContext(source('nameModeration.js'), guestSandbox);
     vm.runInContext(source('cloudSync.js'), guestSandbox);
     vm.runInContext(source('communityGames.js'), guestSandbox);
     const cloud = guestSandbox.window.StudBudCloud;

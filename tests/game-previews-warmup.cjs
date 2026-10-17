@@ -743,8 +743,11 @@ for (const mode of ['duel', 'shooter', 'skyline']) {
         assert.equal(bot.y, demo.game.checkpoints[1].y - bot.h - 2, 'parkour bot returns to its latest checkpoint');
         bot.y = demo.game.checkpoints[1].y + 1500;
         app.stepSkylineBot(demo, bot, 0, .02);
-        assert.ok(bot.respawn > 0, 'a fallen bot dies instead of flying back onto the route');
+        assert.ok(!(bot.respawn > 0), 'a bot can fall below its checkpoint without an automatic death');
         assert.equal(bot.st.assist, undefined);
+        bot.y = 1501;
+        app.stepSkylineBot(demo, bot, 0, .02);
+        assert.ok(bot.respawn > 0, 'leaving the world bottom still resets a bot instead of flying it back');
         app.stepSkylineBot(demo, bot, 0, 1.1);
     }
     assert.ok(bot.respawn <= 0 && (mode === 'skyline' || bot.invuln > 0), `${mode} bot respawns`);

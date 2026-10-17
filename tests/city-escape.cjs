@@ -15,13 +15,12 @@ const SEEDS = [1, 42, 12345, 67890, 45678, 0xffffffff];
     const game = makeGame(42);
     const machines = [...game.drills];
     game.cp = game.checkpoints[1];
-    game.retirePassedAreas();
+    game.captureCheckpoint();
     assert.equal(game.drills.length, machines.length, 'reaching Factory must not retire its lethal machinery');
     assert.ok(game.drills.every(d => machines.includes(d)), 'cleanup retains the actual moving hazard objects');
     game.cp = game.checkpoints[2];
-    game.retirePassedAreas();
-    assert.ok(game.drills.length < machines.length, 'machinery far below Space can still be retired');
-    assert.ok(game.drills.every(d => d.surfaceY < game.cp.y + 1400), 'machine retirement uses its real deck height');
+    game.captureCheckpoint();
+    assert.equal(game.drills.length, machines.length, 'machinery on lower routes remains available after reaching Space');
 }
 for (const seed of SEEDS) {
     const game = makeGame(seed), again = makeGame(seed);
@@ -49,7 +48,7 @@ for (const seed of SEEDS) {
     }
     for (const bi of [1, 3]) {
         const used = game.challenges.filter(c => c.bi === bi).flatMap(c => c.pieces).filter(p => p !== 'landing');
-        assert.ok(used.length - new Set(used).size <= 1, `seed ${seed}: every section in a biome is its own hand-mapped piece`);
+        assert.equal(used.length, new Set(used).size, `seed ${seed}: no section in a biome is repeated`);
     }
     for (const c of game.challenges) {
         assert.ok(c.nodes.every(p => p.bi === c.bi), 'all objects in a chamber share its biome');
@@ -60,12 +59,14 @@ for (const seed of SEEDS) {
     assert.ok(factory.length >= 3 && space.length >= 3, 'factory and space each get a real stretch');
     assert.ok(new Set(factory.flatMap(c => c.pieces)).size >= 12, 'the factory works through its whole deck of set pieces');
     assert.ok(new Set(space.flatMap(c => c.pieces)).size >= 10, 'space works through its whole deck of set pieces');
-    assert.ok(game.drills.length >= 4 && game.drills.every(d => d.bi === 1), 'drills and presses appear only in the factory');
+    assert.equal(game.drills.length, 3, 'only the conveyor pair and the single hopper hammer use timed strikes');
+    assert.ok(game.drills.every(d => d.bi === 1), 'drills and presses appear only in the factory');
     assert.ok(game.drills.some(d => d.crusher) && game.drills.some(d => !d.crusher), 'factory contains both crushers and drills');
     for (const d of game.drills) {
         assert.ok(game.solids.some(p => p.chamber === d.chamber && Math.abs(p.y - d.surfaceY) < 1 && d.x >= p.x && d.x <= p.x + p.w), 'drills strike a real deck');
     }
-    assert.ok(game.solids.some(p => p.factoryBelt && p.w >= 600), 'long conveyor belts run through the factory');
+    assert.equal(game.solids.filter(p => p.factoryBelt && p.w >= 600).length, 1, 'one conveyor challenge appears per run');
+    assert.equal(game.solids.filter(p => p.factoryBelt).length, 1, 'other factory sections do not repeat conveyor gameplay');
     for (const belt of game.solids.filter(p => p.factoryBelt)) {
         const machines = game.drills.filter(d => d.chamber === belt.chamber && d.surfaceY === belt.y && d.x > belt.x && d.x < belt.x + belt.w);
         assert.ok(machines.length >= 1, `${belt.motif}: every conveyor has a real timed hazard`);
@@ -206,10 +207,10 @@ assert.equal(game.circleHits({ x: 0, y: 0, w: 20, h: 40 }, { x: 25, y: 45, r: 6 
     assert.equal(game.drillHits({ x: 113, y: -41, w: 20, h: 38 }, d), false, 'space beside the narrow bit is safe');
     assert.equal(game.drillHits({ x: 109, y: -14, w: 20, h: 11 }, d), false, 'the empty corner beside the pointed tip is safe');
 }
-function reachable(from, target, solids, fps, spring = false, aimX = target.x + target.w / 2, exit = null, maxDrop = 120) {
+function reachable(from, target, solids, fps, spring = false, aimX = target.x + target.w / 2, exit = null, maxDrop = 120, doubleTimes = [null, .15, .25, .35, .45], dashTimes = [null, .25, .45, .65]) {
     const space = target.bi === 3;
-    for (const doubleAt of [null, .15, .25, .35, .45]) {
-        for (const dashAt of [null, .25, .45, .65]) {
+    for (const doubleAt of doubleTimes) {
+        for (const dashAt of dashTimes) {
             const b = { x: from.x, y: from.y - 44, w: 26, h: 44, vx: 0, vy: spring ? space ? -720 : -1280 : space ? -560 : -850 };
             let doubled = false, dashed = false, dash = 0, bridgeHop = false;
             for (let frame = 0; frame < fps * (space ? 4 : 2); frame++) {
@@ -289,7 +290,7 @@ for (const map of maps) {
         const spring = map.springs.find(p => p.city && p.y + p.h === source.y && p.x >= source.x && p.x < source.x + source.w);
         const ok = extremes(source).some(src => extremes(target).some(dst => {
             const stage = [...near, src, dst];
-            const starts = spring ? [spring.x + 10] : src.tower ? [src.x + src.w - 30, src.x + src.w - 60] : [src.x + src.w / 2 - 13, src.x + 4, src.x + src.w - 30];
+            const starts = spring ? [spring.x + 10] : src.tower && dst.rooftopRoute ? [dst.x + 10, src.x + src.w - 30, src.x + src.w - 60] : src.tower ? [src.x + src.w - 30, src.x + src.w - 60] : [src.x + src.w / 2 - 13, src.x + 4, src.x + src.w - 30];
             const aims = dst.tower ? [dst.x + 60, dst.x + 120] : [dst.x + dst.w / 2, dst.x + 20, dst.x + dst.w - 20];
             return starts.some(x => {
                 const sy = src.slope ? U.slopeSurface(src, x, 26) : src.y;
@@ -332,7 +333,7 @@ console.log('Alley climb, wall fixtures, carts, gondolas, skybridges and roof-to
                     s.axis = () => ({ x: dir, y: 0 }); s.down = (...k) => k.includes('Space'); s.pressed = (...k) => press && k.includes('Space');
                     g.update(1 / fps);
                     if (g.me.onGround) {
-                        if (g.me.ground === B) reached = true;
+                        if (g.me.ground === B || g.cityRooftopRoutes.some(loop => loop.roof === B && loop.pieces.includes(g.me.ground))) reached = true;
                         else if (g.me.ground?.prop && feet <= B.y && g.me.x >= B.x) { dir = 1; jump = true; }
                         else if (g.me.ground !== perch && g.me.ground !== roof) break;
                     }
@@ -440,7 +441,7 @@ console.log('Small-lip step-ups and ceiling corner correction passed.');
         assert.equal(g.cp.id, index); assert.equal(g.me.y + g.me.h + 2, g.cp.y);
         assert.equal(g.me.vx, 0); assert.equal(g.dead, 0);
         assert.ok(g.solids.some(p => p.y === g.cp.y && p.x <= g.me.x && p.x + p.w >= g.me.x + g.me.w), 'teleport restores a safe biome landing');
-        g.retirePassedAreas();
+        g.captureCheckpoint();
     }
     assert.ok(g.cityPath.length > 0 && g.towers.length >= 8, 'backward teleport rebuilds retired areas deterministically');
     assert.equal(g.testTeleport(-1), false); assert.equal(g.testTeleport(.5), false);
@@ -518,7 +519,6 @@ console.log('All conveyor machinery has survivable timed crossings with real bel
 
 for (const fps of [30, 60, 120]) {
     const game = makeGame(42), s = game.s;
-    game.retirePassedAreas = () => {};
     Object.assign(s, { game, t: 0, startedAt: Date.now(), axis: () => ({ x: 0, y: 0 }), down: () => false, pressed: () => false,
         spend: n => game.res.spend(n), toast() {}, sfx() {}, setGoal() {} });
     game.cp = game.checkpoints[1]; game.tideY = 1000;
@@ -554,7 +554,6 @@ console.log('Every conveyor has timed machinery; crusher/drill strikes and steam
 {
     for (const seed of SEEDS) {
         const game = makeGame(seed), graph = game.escapeGraph();
-        game.retirePassedAreas = () => {};
         Object.assign(game.s, { game, t: 0, startedAt: Date.now(), axis: () => ({ x: 0, y: 0 }), down: () => false, pressed: () => false,
             spend: n => game.res.spend(n), toast() {}, sfx() {}, setGoal() {} });
         const route = [...game.climbPath, ...game.cityPath, ...(game.fireEscapes || []).flat()];
@@ -567,10 +566,15 @@ console.log('Every conveyor has timed machinery; crusher/drill strikes and steam
         game.solids.push(trap);
         const pit = game.escapeGraph().byRef.get(trap);
         assert.equal(pit.ok, false, `seed ${seed}: a sealed pit is detected as a dead end`);
-        Object.assign(game.me, { x: trap.x + 40, y: trap.y - game.me.h, vx: 0, vy: 0, onGround: true, ground: trap });
-        game.hazardClock = 0; game.tideY = trap.y + 5000;
-        for (let i = 0; i < 90 && game.dead <= 0; i++) { game.me.onGround = true; game.me.ground = trap; game.updatePlayer(1 / 60); }
-        assert.ok(game.dead > 0 || game.me.y < trap.y - 200, `seed ${seed}: dead-end pits always return you to a checkpoint`);
+        for (const fps of [30, 60, 120]) {
+            Object.assign(game.me, { x: trap.x + 40, y: trap.y - game.me.h, vx: 0, vy: 0, onGround: true, ground: trap });
+            game.updatePlayer(1 / fps);
+            assert.ok(game.dead > 0 && game.dead <= .18, `seed ${seed}: confirmed dead ends kill on the first frame at ${fps} FPS`);
+            let elapsed = 1 / fps;
+            while (game.dead > 0) { game.updatePlayer(1 / fps); elapsed += 1 / fps; }
+            assert.ok(elapsed <= .25, 'no-way-out recovery completes within 250ms, including detection');
+            assert.equal(game.me.x, game.cp.x); assert.equal(game.me.y, game.cp.y - game.me.h - 2);
+        }
     }
 }
 console.log('Every generated surface leads back to the summit, and dead-end pits always respawn you.');
@@ -578,7 +582,6 @@ console.log('Every generated surface leads back to the summit, and dead-end pits
     // Landing on the street between towers respawns you almost immediately, even if you keep hopping around down there.
     const setup = () => {
         const game = makeGame(42);
-        game.retirePassedAreas = () => {};
         let jump = false;
         Object.assign(game.s, { game, t: 0, startedAt: Date.now(), axis: () => ({ x: 1, y: 0 }), down: (...k) => jump && k.includes('Space'), pressed: (...k) => jump && k.includes('Space'),
             spend: n => game.res.spend(n), toast() {}, sfx() {}, setGoal() {} });
@@ -586,14 +589,19 @@ console.log('Every generated surface leads back to the summit, and dead-end pits
         return { game, setJump: v => { jump = v; } };
     };
     const street = makeGame(42).solids.find(p => p.ground);
-    for (const hop of [false, true]) {
+    for (const fps of [30, 60, 120]) for (const hop of [false, true]) {
         const { game, setJump } = setup();
         const x = game.towers[3].x - 120;
         Object.assign(game.me, { x, y: street.y - game.me.h, vx: 0, vy: 0, onGround: true, ground: street });
         let frames = 0;
-        for (; frames < 120 && game.dead <= 0; frames++) { setJump(hop && frames % 20 < 3); game.updatePlayer(1 / 60); }
+        for (; frames < 120 && game.dead <= 0; frames++) { setJump(hop && frames % 20 < 3); game.updatePlayer(1 / fps); }
         assert.ok(game.dead > 0, `street landing respawns you${hop ? ' while hopping' : ''}`);
-        assert.ok(frames <= 40, `street respawn is quick (${frames} frames${hop ? ', hopping' : ''})`);
+        assert.equal(frames, 1, `street recovery starts on the first frame, even while hopping, at ${fps} FPS`);
+        setJump(false);
+        let elapsed = frames / fps;
+        while (game.dead > 0) { game.updatePlayer(1 / fps); elapsed += 1 / fps; }
+        assert.ok(elapsed <= .25, 'street recovery returns control within 250ms');
+        assert.equal(game.me.x, game.cp.x); assert.equal(game.me.y, game.cp.y - game.me.h - 2);
     }
     const { game } = setup();
     Object.assign(game.me, { x: game.alleyEnd - 200, y: street.y - game.me.h, vx: 0, vy: 0, onGround: true, ground: street });
@@ -605,15 +613,87 @@ console.log('Every generated surface leads back to the summit, and dead-end pits
     assert.ok(pole && pole.sinker && g.solids.includes(pole), 'pole caps are sinking platforms');
     Object.assign(g.s, { game: g, t: 0, startedAt: Date.now(), axis: () => ({ x: 0, y: 0 }), down: () => false, pressed: () => false,
         spend: () => true, toast() {}, sfx() {}, setGoal() {} });
-    g.retirePassedAreas = () => {}; g.trapChecks = false; g.tideY = 1e6;
+    g.trapChecks = false;
     Object.assign(g.me, { x: pole.x + 20, y: pole.y - g.me.h, vx: 0, vy: 0, onGround: true, ground: pole });
-    for (let i = 0; i < 60; i++) g.update(1 / 60);
+    for (let i = 0; i < Math.ceil(pole.depth / pole.sinkRate * 60) + 1; i++) g.update(1 / 60);
     assert.equal(pole.sunk, pole.depth, 'standing on a pole pushes it down');
     assert.ok(g.me.ground === pole && Math.abs(g.me.y + g.me.h - pole.y) < 1, 'you ride the pole down');
     Object.assign(g.me, { y: pole.y - 600, onGround: false, ground: null });
     pole.sunk = pole.depth;
-    let n = 0; for (; n < 120 && pole.sunk > 0; n++) { g.me.y = pole.y - 600; g.me.vy = 0; g.update(1 / 60); }
+    let n = 0; for (; n < Math.ceil(pole.depth / pole.riseRate * 60) + 1 && pole.sunk > 0; n++) { g.me.y = pole.y - 600; g.me.vy = 0; g.update(1 / 60); }
     assert.equal(pole.sunk, 0, 'poles rise back once you leave');
     for (const p of g.solids.filter(p => p.cityKit === 'scaffold')) assert.ok(p.frame[0] < p.x && p.frame[1] > p.x + p.w, 'scaffold decks sit within their frame ledger');
 }
 console.log('Street falls respawn quickly even while hopping, pole caps sink under weight, scaffold decks rest on ledgers.');
+for (const map of maps) {
+    for (const pole of map.cityPath.filter(p => p.cityKit === 'pole')) {
+        const target = map.cityPath[map.cityPath.indexOf(pole) + 1];
+        const resting = { ...pole, y: pole.by, mover: false };
+        const sunk = { ...resting, y: pole.by + pole.depth };
+        assert.equal(sunk.y - target.y, 220, 'a fully compressed cap leaves a 220-unit rise to the next part');
+        assert.ok(pole.depth / pole.sinkRate > 1, 'caps sink gradually rather than dropping immediately');
+        for (const fps of [30, 60, 120]) {
+            const launch = p => ({ x: p.x + p.w - 26, y: p.y });
+            const solids = [resting, target];
+            assert.ok(reachable(launch(resting), target, solids, fps, false, undefined, null, 120, [null], [null]),
+                `a quick departure from a raised cap needs only one jump at ${fps} FPS`);
+            assert.equal(reachable(launch(sunk), target, [sunk, target], fps, false, undefined, null, 120, [null], [null]), false,
+                `waiting until fully sunk puts the next part beyond a single jump at ${fps} FPS`);
+            assert.ok(reachable(launch(sunk), target, [sunk, target], fps, false, undefined, null, 120, [.15, .25, .35, .45], [null]),
+                `a double jump still reaches the next part from a fully sunk cap at ${fps} FPS`);
+        }
+    }
+}
+console.log('Every utility-pole transfer allows a quick single jump but requires a double jump after full compression at 30/60/120 FPS.');
+
+for (const map of maps) {
+    assert.ok(map.lasers.every(laser => laser.bi !== 0), 'city rooftops use physical obstacles, never lasers');
+    assert.equal(map.cityRooftopRoutes.length, 1, 'the rooftop fixture route is a unique section');
+    for (const loop of map.cityRooftopRoutes) {
+        assert.equal(loop.pieces.length, 4);
+        assert.ok(loop.pieces.every(p => p.cityKit !== 'scaffold' && map.solids.includes(p)), 'the giant rooftop scaffold is replaced by real rooftop fixtures');
+        assert.equal(loop.pieces.map(p => p.prop || 'room').join(','), 'ac,tank,room,ac');
+        assert.ok(loop.pieces.at(-1).y >= loop.roof.y - 350, 'the rooftop route stays at rooftop scale rather than becoming a scaffold tower');
+        assert.ok(map.solids.includes(loop.roof), 'the original roof catches falls beneath the fixtures');
+    }
+    const loop = map.solids.filter(p => p.piece === 'service-loop' && p.motif === 'service-loop');
+    assert.equal(loop.length, 9, 'the factory has a substantial reversing maintenance route');
+    for (let row = 0; row < 3; row++) {
+        const ledges = loop.slice(row * 3, row * 3 + 3), direction = ledges[0].routeDirection;
+        assert.ok(ledges.every(p => p.oneway && p.routeDirection === direction));
+        for (let i = 1; i < ledges.length; i++) assert.ok((ledges[i].x - ledges[i - 1].x) * direction > 0);
+        if (row) assert.equal(direction, -loop[(row - 1) * 3].routeDirection);
+    }
+}
+for (const fps of [30, 60, 120]) {
+    const g = makeGame(42), s = g.s;
+    Object.assign(s, { game: g, t: 0, startedAt: Date.now(), axis: () => ({ x: 0, y: 0 }), down: () => false, pressed: () => false,
+        spend: n => g.res.spend(n), toast() {}, sfx() {}, setGoal() {} });
+    g.cp = g.checkpoints[2];
+    for (const field of ['spikes', 'saws', 'balls', 'debris', 'drills', 'lasers', 'springs', 'winds']) g[field] = [];
+    const loop = g.cityRooftopRoutes[0], landing = loop.pieces[0], top = loop.pieces.at(-1);
+    Object.assign(g.me, { x: landing.x + 30, y: top.y - g.me.h - 20, vx: 0, vy: 400, onGround: false, ground: null });
+    let landed = false;
+    for (let i = 0; i < fps * 4; i++) {
+        g.updatePlayer(1 / fps);
+        assert.equal(g.deaths, 0, `${fps} FPS: falling below an advanced checkpoint does not kill the player`);
+        if (g.me.onGround) { landed = true; break; }
+    }
+    assert.ok(landed && g.me.ground === landing, `${fps} FPS: a lower switchback catches the fall`);
+    assert.equal(g.cp, g.checkpoints[2], 'landing below a checkpoint never loses saved progress');
+
+    g.solids = [];
+    Object.assign(g.me, { x: 1000, y: -12000, vx: 0, vy: 1000, onGround: false, ground: null });
+    for (let i = 0; i < fps * 3; i++) g.updatePlayer(1 / fps);
+    assert.equal(g.deaths, 0, `${fps} FPS: free fall is not killed by a predicted lack of catches`);
+    g.me.y = 1501; g.updatePlayer(1 / fps);
+    assert.equal(g.deaths, 1, 'only leaving the world bottom triggers out-of-bounds recovery');
+    g.dead = 0;
+    const checkpoint = g.cp;
+    g.returnToCheckpoint();
+    assert.equal(g.dead, .18, 'manual checkpoint recovery uses the short respawn');
+    for (let frame = 0; frame < Math.ceil(fps / 4); frame++) g.updatePlayer(1 / fps);
+    assert.ok(g.dead <= 0 && Math.abs(g.me.y + g.me.h - checkpoint.y) < 100, 'manual recovery returns control at the saved checkpoint within 250ms');
+    assert.equal(g.cp, checkpoint);
+}
+console.log('Reversing rooftop switchbacks, lower-route catches, saved checkpoint retention and unrestricted free fall passed at 30/60/120 FPS.');

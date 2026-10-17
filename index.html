@@ -29,7 +29,7 @@
             <div id="auth-divider" class="auth-divider" role="presentation"><span>or sign in</span></div>
             <p id="auth-config-message" class="auth-message error hidden" role="alert"></p>
             <form id="login-form" class="auth-form">
-                <label>Username<input id="login-username" type="text" autocomplete="username" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" title="Use 3–24 letters, numbers, or underscores." required></label>
+                <label>Username or linked email<input id="login-username" type="text" autocomplete="username" minlength="3" maxlength="254" required></label>
                 <label>Password<input id="login-password" type="password" autocomplete="current-password" minlength="8" required></label>
                 <button class="primary-btn full-width" type="submit">Sign in</button>
             </form>
@@ -38,11 +38,33 @@
                 <label>Password (at least 8 characters)<input id="signup-password" type="password" autocomplete="new-password" minlength="8" required></label>
                 <label>Confirm password<input id="signup-password-confirm" type="password" autocomplete="new-password" minlength="8" required></label>
                 <label>School<select id="signup-school" required><option value="">Choose your school…</option><option value="pchs">Parkway Central High School</option><option value="pnhs">Parkway North High School</option><option value="pshs">Parkway South High School</option><option value="pwhs">Parkway West High School</option><option value="other">Other / not listed</option></select></label>
+                <p class="settings-hint">No email or verification is needed to create an account. You can optionally link an email later in Settings.</p>
                 <button class="primary-btn full-width" type="submit">Create account</button>
             </form>
+            <details id="email-signin-options" class="guest-join">
+                <summary>Sign in with an email code instead</summary>
+                <p class="settings-hint">Only for accounts that have optionally linked and verified an email in Settings.</p>
+                <form id="email-signin-form" class="auth-form">
+                    <label>Email<input id="login-email" type="email" autocomplete="email" maxlength="254" required></label>
+                    <button class="secondary-btn full-width" type="submit">Send sign-in code</button>
+                </form>
+            </details>
+            <section id="email-login-prompt" class="mfa-panel hidden" aria-labelledby="email-login-title">
+                <h2 id="email-login-title">Check your email</h2>
+                <p id="email-login-description"></p>
+                <form id="email-login-form" class="mfa-code-form">
+                    <label for="email-login-code">Email code</label>
+                    <input id="email-login-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,10}" minlength="6" maxlength="10" required>
+                    <button class="primary-btn full-width" type="submit">Verify and sign in</button>
+                </form>
+                <div class="mfa-actions">
+                    <button id="email-login-resend" class="secondary-btn" type="button">Resend code</button>
+                    <button id="email-login-cancel" class="text-btn" type="button">Use a different email</button>
+                </div>
+            </section>
             <section id="mfa-login-prompt" class="mfa-panel hidden" aria-labelledby="mfa-login-title">
-                <h2 id="mfa-login-title">Verify your identity</h2>
-                <p>Enter the 6-digit code from your authenticator app to finish signing in.</p>
+                <h2 id="mfa-login-title">Verify your existing authenticator</h2>
+                <p>This account already has authenticator protection. Enter its code to sign in. You can remove it in Settings after signing in; email sign-in cannot bypass an existing second factor.</p>
                 <form id="mfa-login-form" class="mfa-code-form">
                     <label for="mfa-login-code">Authentication code</label>
                     <input id="mfa-login-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
@@ -300,6 +322,14 @@
                 <section id="gpa-view" class="view hidden">
                     <div class="view-header">
                         <h2>My Classes & Grades</h2>
+                        <label class="school-semester-switcher">
+                            <i class="fas fa-calendar-week" aria-hidden="true"></i>
+                            <span>Showing</span>
+                            <select id="school-semester-select" aria-label="Show school content for semester">
+                                <option value="S1">Semester 1</option>
+                                <option value="S2">Semester 2</option>
+                            </select>
+                        </label>
                         <div class="actions">
                             <button id="add-course-btn" class="primary-btn"><i class="fas fa-plus"></i> Add Class</button>
                             <button id="open-target-gpa-btn" class="secondary-btn"><i class="fas fa-bullseye"></i> Target GPA Solver</button>
@@ -359,7 +389,7 @@
                         </section>
                         <div class="scenario-results-grid">
                             <section class="glass-card">
-                                <div class="view-header"><div><h3>Hypothetical assignments</h3><p>Saved to your account and included in backups.</p></div></div>
+                                <div class="view-header"><div><h3>Hypothetical assignments</h3><p>Saved to your account and synced across devices.</p></div></div>
                                 <div id="grade-scenario-items" class="scenario-item-list"></div>
                             </section>
                             <section class="glass-card">
@@ -763,16 +793,18 @@
                                         <label>Player name<input id="host-game-nickname" name="nickname" type="text" maxlength="20" placeholder="Your username" aria-describedby="host-game-nickname-hint"><small id="host-game-nickname-hint" class="settings-hint">Optional. Leave blank to use your username.</small></label>
                                         <label>Flashcard set<select id="host-game-deck" name="deckId" required></select></label>
                                         <input id="host-game-mode" name="mode" type="hidden" value="skyline">
+                                        <label class="settings-check"><input id="host-game-late-join" name="allowLateJoin" type="checkbox"> Allow players to join after the game starts</label>
+                                        <small class="settings-hint">Off by default. Late joiners start fresh with the remaining match time. Not available in two-player chess.</small>
                                         <p id="chess-setup-note" class="settings-hint hidden">1v1, no timer. Answer correctly to earn one move. Either player can move when ready; while in check, only the checked player moves.</p>
                                         <div class="multiplayer-goals">
                                             <label class="time-slider">Time limit: <strong id="host-game-time-value">5 min</strong><input id="host-game-time" name="timeLimit" type="range" min="1" max="60" step="1" value="5"></label>
                                                                                     </div>
                                         <div class="question-reward-control">
                                             <label id="host-game-resource-label" for="host-game-reward">Energy per correct answer</label>
-                                            <div class="question-reward-inputs"><input type="range" min="5" max="100" step="5" value="20" data-reward-slider="host-game-reward" aria-label="Energy per correct answer slider" aria-describedby="host-game-reward-guidance"><input id="host-game-reward" name="questionReward" type="number" min="5" max="100" step="5" value="20" required aria-describedby="host-game-reward-guidance"></div>
+                                            <div class="question-reward-inputs"><input type="range" min="5" max="100" step="1" value="20" data-reward-slider="host-game-reward" aria-label="Energy per correct answer slider" aria-describedby="host-game-reward-guidance"><input id="host-game-reward" name="questionReward" type="number" min="5" max="100" step="1" value="20" required aria-describedby="host-game-reward-guidance"></div>
                                             <small id="host-game-reward-guidance" aria-live="polite"></small>
                                             <button type="button" class="secondary-btn" data-action="recommended-reward" data-id="host-game-reward">Use recommended amount</button>
-                                            <small>5–100 per answer, in steps of 5. More resources means fewer refill questions; it does not change the questions.</small>
+                                            <small>5–100 per answer, in steps of 1. More resources means fewer refill questions; it does not change the questions.</small>
                                         </div>
                                                                                     <button class="primary-btn" type="submit"><i class="fas fa-door-open"></i> Create room</button>
                                     </form>
@@ -792,10 +824,10 @@
                                             </label>
                                             <div class="question-reward-control">
                                                 <label id="solo-game-resource-label" for="solo-game-reward">Energy per correct answer</label>
-                                                <div class="question-reward-inputs"><input type="range" min="5" max="100" step="5" value="20" data-reward-slider="solo-game-reward" aria-label="Energy per correct answer slider" aria-describedby="solo-game-reward-guidance"><input id="solo-game-reward" name="questionReward" type="number" min="5" max="100" step="5" value="20" required aria-describedby="solo-game-reward-guidance"></div>
+                                                <div class="question-reward-inputs"><input type="range" min="5" max="100" step="1" value="20" data-reward-slider="solo-game-reward" aria-label="Energy per correct answer slider" aria-describedby="solo-game-reward-guidance"><input id="solo-game-reward" name="questionReward" type="number" min="5" max="100" step="1" value="20" required aria-describedby="solo-game-reward-guidance"></div>
                                                 <small id="solo-game-reward-guidance" aria-live="polite"></small>
                                                 <button type="button" class="secondary-btn" data-action="recommended-reward" data-id="solo-game-reward">Use recommended amount</button>
-                                                <small>Choose an amount from 5 to 100 in steps of 5. Resources accumulate without a cap.</small>
+                                                <small>Choose an amount from 5 to 100 in steps of 1. Resources accumulate without a cap.</small>
                                             </div>
                                             <button class="primary-btn" type="button" data-action="start-solo-game"><i class="fas fa-play" aria-hidden="true"></i> Start practice</button>
                                             <small>Correct answers give the resource shown above. End game opens your summary. Practice awards no multiplayer coins.</small>
@@ -1101,21 +1133,24 @@
                             </div>
                             <p class="settings-hint">Automatic term uses August–December for Semester 1 and January–July for Semester 2.</p>
                             <button id="save-profile-btn" class="primary-btn">Save Profile</button>
+                            <section id="email-settings-card" class="glass-card mfa-settings-card hidden" aria-labelledby="email-settings-title">
+                                <h2 id="email-settings-title">Optional email verification</h2>
+                                <p id="email-settings-status" class="settings-hint" role="status" aria-live="polite"></p>
+                                <p class="settings-hint">Adding and verifying an email is optional. You can keep using StudBud without one. After linking an email, sign in with that email and your existing password, or choose an email code instead. This is not two-factor authentication.</p>
+                                <form id="email-link-form" class="auth-form">
+                                    <label>Email for sign-in<input id="account-email" type="email" autocomplete="email" maxlength="254" required></label>
+                                    <button id="email-link-btn" class="secondary-btn" type="submit">Send email verification</button>
+                                </form>
+                                <form id="email-link-verify-form" class="mfa-code-form hidden">
+                                    <label for="email-link-code">Code sent to your new email</label>
+                                    <input id="email-link-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,10}" minlength="6" maxlength="10" required>
+                                    <button class="primary-btn" type="submit">Verify email</button>
+                                </form>
+                                <p id="email-settings-message" class="community-status" role="status" aria-live="polite"></p>
+                            </section>
                             <section id="mfa-settings-card" class="glass-card mfa-settings-card hidden" aria-labelledby="mfa-settings-title">
-                                <h2 id="mfa-settings-title">Two-factor authentication</h2>
+                                <h2 id="mfa-settings-title">Existing authenticator</h2>
                                 <p id="mfa-settings-status" class="settings-hint" role="status" aria-live="polite">Checking authenticator status...</p>
-                                <button id="mfa-enable-btn" class="secondary-btn" type="button">Set up authenticator app</button>
-                                <div id="mfa-setup-panel" class="mfa-panel hidden">
-                                    <p>Scan this QR code with your authenticator app, or enter the secret manually.</p>
-                                    <img id="mfa-qr-code" class="mfa-qr-code" alt="Authenticator setup QR code">
-                                    <p>Manual setup key: <code id="mfa-secret"></code></p>
-                                    <label for="mfa-setup-code">6-digit code</label>
-                                    <input id="mfa-setup-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6">
-                                    <div class="mfa-actions">
-                                        <button id="mfa-verify-setup-btn" class="primary-btn" type="button">Verify and enable</button>
-                                        <button id="mfa-cancel-setup-btn" class="secondary-btn" type="button">Cancel setup</button>
-                                    </div>
-                                </div>
                                 <div id="mfa-disable-panel" class="mfa-panel hidden">
                                     <p>Enter a current authenticator code to turn off two-factor authentication.</p>
                                     <label for="mfa-disable-code">6-digit code</label>
@@ -1145,12 +1180,11 @@
 
                         <div class="glass-card">
                             <h2>Data Management</h2>
-                            <p>Your classes, grades, flashcards and history are saved on this device, including offline. Connect an account to sync. Use Export Backup for an independent copy. Offline sharing updates wait for reconnection; purchases and hosted matches require internet.</p>
+                            <p>Your classes, grades, flashcards and history are saved on this device, including offline. Connect an account to sync across devices. Offline sharing updates wait for reconnection; purchases and hosted matches require internet.</p>
                             <p id="data-save-status" class="data-save-status" role="status" aria-live="polite">Checking local save status…</p>
                             <p>Signed in as <strong id="account-name">—</strong></p>
                             <div class="settings-actions">
                                 <button id="sign-out-btn" class="secondary-btn"><i class="fas fa-right-from-bracket"></i> Sign out</button>
-                                <button id="open-backup-modal-btn" class="secondary-btn"><i class="fas fa-download"></i> Export / Import Backup</button>
                                 <button class="secondary-btn open-ic-import-btn" type="button"><i class="fas fa-cloud-arrow-down"></i> Import from Infinite Campus</button>
                             </div>
                             <p class="settings-hint"><a href="privacy.html" target="_blank" rel="noopener">Privacy policy &amp; advertising</a></p>
@@ -1234,11 +1268,14 @@
                                 <label for="music-style">Track</label>
                                 <select id="music-style">
                                     <option value="auto">Automatic (matches the game)</option>
-                                    <option value="summit">Summit Run</option>
+                                    <option value="summit">Rooftop Rush (City)</option>
+                                    <option value="foundry">Foundry Motion (Factory)</option>
+                                    <option value="starlight">Starlight Drift (Space)</option>
                                     <option value="lagoon">Lagoon Breeze</option>
                                     <option value="bazaar">Bazaar Bounce</option>
                                     <option value="cavern">Crystal Cavern</option>
                                     <option value="battle">Battle Drive</option>
+                                    <option value="fortress">Twin Citadels</option>
                                     <option value="neon">Neon Exchange</option>
                                     <option value="sunrise">Sunrise Run</option>
                                     <option value="midnight">Midnight Drive</option>
@@ -1248,6 +1285,8 @@
                                     <option value="orbit">Orbit Station</option>
                                     <option value="tropic">Tropic Sunset</option>
                                     <option value="stadium">Stadium Anthem</option>
+                                    <option value="frenzy">Feeding Frenzy</option>
+                                    <option value="survival">Last Light</option>
                                 </select>
                             </div>
                             <button type="button" id="music-preview-btn" class="secondary-btn"><i class="fas fa-music"></i> Preview track</button>
@@ -1622,30 +1661,6 @@
                 </div>
             </div>
 
-            <!-- Import/Export Backup Modal -->
-            <div id="backup-modal" class="glass-card modal-content hidden">
-                <div class="modal-header">
-                    <h2>Import / Export Data</h2>
-                    <button class="close-modal-btn icon-btn"><i class="fas fa-times"></i></button>
-                </div>
-                <div class="modal-body">
-                    <div class="backup-section">
-                        <h3>Export Backup</h3>
-                        <p>Download your entire StudBud database as a JSON file.</p>
-                        <button id="export-json-btn" class="primary-btn"><i class="fas fa-file-export"></i> Download Backup</button>
-                    </div>
-                    <hr class="divider">
-                    <div class="backup-section">
-                        <h3>Import Backup</h3>
-                        <p>Paste your previously exported JSON string below to restore your data. <strong>Warning: This overwrites current data!</strong></p>
-                        <div class="form-group">
-                            <textarea id="import-json-textarea" rows="6" placeholder="Paste JSON backup here..."></textarea>
-                        </div>
-                        <button id="import-json-btn" class="danger-btn"><i class="fas fa-file-import"></i> Restore Data</button>
-                    </div>
-                </div>
-            </div>
-
             <!-- Infinite Campus Import Modal -->
             <div id="ic-import-modal" class="glass-card modal-content hidden" aria-labelledby="ic-import-title">
                 <div class="modal-header">
@@ -1729,6 +1744,7 @@
     <script src="flashcardEngine.js" defer></script>
     <script src="analyticsEngine.js" defer></script>
     <script src="practiceExamEngine.js" defer></script>
+    <script src="nameModeration.js" defer></script>
     <script src="cloudSync.js" defer></script>
     <script src="sfx.js" defer></script>
     <script src="communityGames.js" defer></script>

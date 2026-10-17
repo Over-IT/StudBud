@@ -31,7 +31,7 @@ const sandbox = {
     StudBudSfx: { settings: {}, save() {} }
 };
 const context = vm.createContext(sandbox);
-for (const file of ['communityGames.js', 'cloudSync.js', 'flashcardEngine.js', 'parkwayData.js', 'data/schools/central.js', 'data/schools/north.js', 'data/schools/south.js', 'data/schools/west.js']) vm.runInContext(source(file), context, { filename: file });
+for (const file of ['nameModeration.js', 'communityGames.js', 'cloudSync.js', 'flashcardEngine.js', 'parkwayData.js', 'data/schools/central.js', 'data/schools/north.js', 'data/schools/south.js', 'data/schools/west.js']) vm.runInContext(source(file), context, { filename: file });
 const appSource = source('app.js');
 vm.runInContext(appSource.slice(appSource.indexOf('    const ACTIVITY_RESET_ID'), appSource.indexOf('    const AppState =')), context);
 vm.runInContext('globalThis.AppState = new AppStateEngine();', context);
@@ -46,6 +46,46 @@ const Cloud = window.StudBudCloud.constructor;
 const normal = value => clone(value);
 
 async function run() {
+    {
+        let roads = 0;
+        for (const seed of [1, 42, 12345, 67890]) {
+            const runner = { seed, lanes: new Map() };
+            for (let row = 1; row <= 240; row++) {
+                const lane = app.waitingLane(runner, row);
+                if (lane.type !== 'road') continue;
+                roads++;
+                assert.ok(lane.vehicles.every(car => car.speed === lane.speed), 'cars in the same lane cannot overtake one another');
+                for (const time of [0, .2, 1, 8, 60, 300, 3600]) {
+                    const cars = lane.vehicles.map(car => ({ x: app.waitingWrap(app.waitingVehicleX(lane, car, time), 17), w: car.w })).sort((a, b) => a.x - b.x);
+                    for (let i = 0; i < cars.length; i++) {
+                        const next = cars[(i + 1) % cars.length];
+                        const gap = app.waitingWrap(next.x - cars[i].x, 17) - (cars[i].w + next.w) / 2;
+                        assert.ok(gap >= 1.19, 'cars retain a visible safe gap, including at the loop seam');
+                    }
+                }
+            }
+        }
+        assert.ok(roads > 250, 'traffic spacing is tested across hundreds of generated roads');
+        const sounds = [], oldSfx = window.StudBudSfx, oldRunner = app.waitingRunner, saveBest = app.saveWaitingRunnerBest;
+        window.StudBudSfx = { play: (...args) => sounds.push(args) };
+        app.waitingRunner = { seed: 42, x: 4, row: 0, running: true, lanes: new Map() };
+        app.waitingHop(1, 0);
+        assert.equal(sounds.at(-1)[0], 'jump');
+        app.waitingHop(0, 1);
+        assert.equal(sounds.length, 1, 'queued input does not play a second hop before it starts');
+        elements.set('waiting-runner-start', {});
+        app.saveWaitingRunnerBest = () => {};
+        app.waitingDeath('Splash! Missed a log or lily pad');
+        assert.equal(sounds.at(-1)[0], 'splash');
+        app.waitingDeath('Bumped by traffic');
+        assert.equal(sounds.length, 2, 'one failure produces only one sound');
+        app.waitingRunner.dead = false;
+        app.waitingDeath('Bumped by traffic');
+        assert.equal(sounds.at(-1)[0], 'hit');
+        assert.ok(sounds.every(sound => sound[1] === 'game'), 'warmup audio obeys game sound settings');
+        app.waitingRunner = oldRunner; window.StudBudSfx = oldSfx; app.saveWaitingRunnerBest = saveBest;
+        elements.delete('waiting-runner-start');
+    }
     const emptySnapshot = state.emptyCloudSnapshot();
     assert.equal(emptySnapshot.state.profile.graduationYear, 2026);
     assert.equal(emptySnapshot.state.currentView, undefined);
@@ -102,6 +142,51 @@ async function run() {
     elements.delete('waiting-runner-best'); elements.delete('waiting-runner-start');
     delete app.waitingRunner;
     assert.equal(state.state.settings.colorScheme, 'studbud', 'new accounts start with the StudBud palette');
+    {
+        const oldAppearance = app.applyAppearance, oldProfile = app.multiplayerProfile, oldSettings = clone(state.state.settings);
+        const buttons = ['studbud', 'forest', 'ocean', 'violet'].map(scheme => ({
+            dataset: { colorScheme: scheme, ...(['ocean', 'violet'].includes(scheme) ? { shopItem: `palette_${scheme}` } : {}) },
+            classList: { toggle() {} }, attributes: {}, querySelector: () => null,
+            setAttribute(name, value) { this.attributes[name] = value; }
+        }));
+        sandbox.document.querySelectorAll = selector => selector.includes('data-shop-item') ? buttons.filter(button => button.dataset.shopItem) : buttons;
+        let applied = 0;
+        app.applyAppearance = () => applied++;
+        app.multiplayerProfile = { owned_items: ['palette_ocean'], equipped_palette: 'palette_ocean' };
+        app.renderAppearanceShopSchemes();
+        assert.equal(state.get('settings').colorScheme, 'ocean', 'profile equipment is actually applied to the app');
+        assert.equal(buttons[2].attributes['aria-pressed'], 'true'); assert.equal(buttons[3].disabled, true);
+        app.multiplayerProfile.equipped_palette = null;
+        app.renderAppearanceShopSchemes();
+        assert.equal(state.get('settings').colorScheme, 'studbud', 'unequipping resets an active premium scheme');
+        state.state.settings.colorScheme = 'forest';
+        app.renderAppearanceShopSchemes();
+        assert.equal(state.get('settings').colorScheme, 'forest', 'free schemes survive profile refreshes');
+        assert.equal(buttons[1].attributes['aria-pressed'], 'true'); assert.equal(buttons[2].attributes['aria-pressed'], 'false');
+        assert.equal(applied, 2, 'appearance is reapplied only when equipment changes the scheme');
+        const updateShop = app.updateMultiplayerShop;
+        const schemeBody = eventSource.slice(eventSource.indexOf('                    const scheme = target.dataset.colorScheme;'),
+            eventSource.indexOf("                } else if (action === 'add-quiz')"));
+        sandbox.appearanceTestApp = app; sandbox.appearanceTarget = { dataset: { colorScheme: 'forest' } };
+        const selectScheme = () => vm.runInContext(`(async function(target) { ${schemeBody} }).call(appearanceTestApp, appearanceTarget)`, context);
+        app.multiplayerProfile.equipped_palette = 'palette_ocean'; state.state.settings.colorScheme = 'ocean';
+        app.updateMultiplayerShop = async () => { throw new Error('Server unavailable'); };
+        await assert.rejects(selectScheme(), /Server unavailable/);
+        assert.equal(state.get('settings').colorScheme, 'ocean', 'failed unequip preserves the current appearance');
+        assert.equal(app.multiplayerProfile.equipped_palette, 'palette_ocean');
+        app.updateMultiplayerShop = async (action, item) => {
+            assert.equal(action, 'multiplayer-unequip'); assert.equal(item, 'palette');
+            assert.equal(state.get('settings').colorScheme, 'ocean', 'wait for server success before changing the scheme');
+            app.multiplayerProfile.equipped_palette = null;
+            return true;
+        };
+        await selectScheme();
+        assert.equal(state.get('settings').colorScheme, 'forest'); assert.equal(app.multiplayerProfile.equipped_palette, null);
+        app.updateMultiplayerShop = updateShop;
+        delete sandbox.appearanceTestApp; delete sandbox.appearanceTarget;
+        app.applyAppearance = oldAppearance; app.multiplayerProfile = oldProfile; state.state.settings = oldSettings;
+        delete sandbox.document.querySelectorAll;
+    }
     window.StudBudCloud.user = { user_metadata: { username: 'student' } };
     state.state.profile.firstName = 'Ada';
     state.state.profile.lastName = 'Lovelace';
@@ -286,9 +371,10 @@ async function run() {
     await assert.rejects(community.buyMysteryItem(), /Profile unavailable/);
     community.getClient = originalClient;
 
-    for (const value of [5, 20, 100]) assert.equal(app.questionRewardValue(value), value);
-    for (const value of [0, 1, 7, 101, 500, 1.5, '', 'invalid']) assert.throws(() => app.questionRewardValue(value), /5 to 100.*increments of 5/);
-    assert.match(sql, /v_reward not between 5 and 100 or v_reward % 5 <> 0/);
+    for (let value = 5; value <= 100; value++) assert.equal(app.questionRewardValue(value), value);
+    for (const value of [0, 1, 101, 500, 1.5, '', 'invalid']) assert.throws(() => app.questionRewardValue(value), /whole-number.*5 to 100/);
+    assert.match(sql, /v_reward not between 5 and 100 then/);
+    assert.doesNotMatch(sql, /v_reward % 5/);
 
     const setupIds = ['multiplayer-preview-title', 'multiplayer-preview-description', 'host-game-resource-label', 'solo-game-resource-label'];
     for (const id of setupIds) elements.set(id, {});
@@ -320,7 +406,7 @@ async function run() {
         assert.ok(recommendation.suggested >= min && recommendation.suggested <= max);
         assert.equal(recommendation.suggested % 5, 0);
         assert.ok(recommendation.explanation.length);
-        for (const [amount, expected] of [[Math.max(5, min - 5), 'Below recommended'], [min, 'Within'], [max, 'Within'], [Math.min(100, max + 5), 'Above recommended'], ['', 'increments of 5']]) {
+        for (const [amount, expected] of [[Math.max(5, min - 5), 'Below recommended'], [min, 'Within'], [max, 'Within'], [Math.min(100, max + 5), 'Above recommended'], ['', 'whole number']]) {
             for (const prefix of ['host', 'solo']) elements.get(`${prefix}-game-reward`).value = String(amount);
             app.updateQuestionRewardGuidance(mode);
             const host = elements.get('host-game-reward-guidance').textContent;
@@ -582,7 +668,7 @@ async function run() {
     let conflictRow = { data: clone(conflictRemote), updated_at: new Date(now).toISOString() };
     const conflictHandlers = new Map();
     const conflictElements = new Map();
-    for (const id of ['auth-status', 'auth-conflict-cloud-btn', 'auth-conflict-local-btn', 'auth-conflict-backup-btn']) {
+    for (const id of ['auth-status', 'auth-conflict-cloud-btn', 'auth-conflict-local-btn']) {
         conflictElements.set(id, elements.get(id));
         elements.set(id, {
             classList: { add() {} },

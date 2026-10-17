@@ -22,8 +22,56 @@
         });
     }
 
-    function drawRunner(ctx, x, y, w, h, who, face, time, state, alpha = 1) {
-        A.util.drawFigureSide(ctx, who, x, y, w, h, face, time, state === 1, alpha);
+    function updateDashPose(game, active, dt) {
+        const target = active ? 1 : 0;
+        game.dashPose = target + ((game.dashPose || 0) - target) * Math.exp(-dt * (active ? 24 : 16));
+        if (Math.abs(game.dashPose - target) < .001) game.dashPose = target;
+    }
+
+    function drawRunner(ctx, x, y, w, h, who, face, time, state, alpha = 1, motion = {}) {
+        const air = state === 2 || motion.airborne;
+        const dash = clamp(motion.dashAmount ?? (motion.dashing ? 1 : 0), 0, 1);
+        const landing = clamp((motion.landing || 0) / .16, 0, 1);
+        const wall = clamp(motion.wallAmount || 0, 0, 1), wallSide = motion.wallSide || face;
+        const kick = clamp((motion.kick || 0) / .22, 0, 1);
+        const tilt = face * .35 * dash + (1 - dash) * ((motion.lean || 0) + (air ? clamp((motion.vx || 0) / 5000, -.08, .08) : 0))
+            - wallSide * .07 * wall + face * .12 * kick;
+        const jump = Math.sin(clamp(Math.max(motion.jump || 0, motion.doubleJump || 0) / .25, 0, 1) * Math.PI) * .22;
+        let pose = air ? { bob: 0, legs: [jump, -jump] }
+            : landing > 0 ? { bob: landing * 3, legs: [landing * .6, -landing * .6] }
+            : motion.lean ? { bob: 0, legs: [.45, -.35] } : null;
+        if (air && kick > 0) pose = { bob: 0, legs: [pose.legs[0] * (1 - kick) - .8 * kick, pose.legs[1] * (1 - kick) + .6 * kick] };
+        if (wall > 0) {
+            const legs = pose?.legs || [0, 0], side = wallSide * face;
+            pose = { bob: 0, legs: [legs[0] * (1 - wall) + side * .65 * wall, legs[1] * (1 - wall) + side * .15 * wall] };
+        }
+        if (dash > 0) {
+            const legs = pose?.legs || [0, 0];
+            pose = { bob: (pose?.bob || 0) * (1 - dash), legs: [legs[0] * (1 - dash) - 1.35 * dash, legs[1] * (1 - dash) - .55 * dash] };
+        }
+        if (dash) {
+            ctx.save();
+            ctx.fillStyle = who.color || '#bae6fd';
+            for (let i = 3; i > 0; i--) {
+                ctx.globalAlpha = alpha * dash * (4 - i) * .055;
+                roundRect(ctx, x - face * i * w * .7, y + h * .3, w * .85, h * .55, w * .25); ctx.fill();
+            }
+            ctx.strokeStyle = '#e0f2fe'; ctx.lineWidth = 2; ctx.globalAlpha = alpha * dash * .55;
+            ctx.beginPath();
+            for (let i = 0; i < 3; i++) {
+                const yy = y + h * (.25 + i * .23), tail = w * (1.2 + i * .45);
+                ctx.moveTo(x + w / 2 - face * w, yy); ctx.lineTo(x + w / 2 - face * tail, yy);
+            }
+            ctx.stroke(); ctx.restore();
+        }
+        if (motion.grounded ?? (!air && !dash && state <= 1)) {
+            ctx.save(); ctx.globalAlpha = alpha;
+            ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fillRect(x + 2, y + h - 2, w - 4, 3);
+            ctx.restore();
+        }
+        ctx.save(); ctx.translate(x + w / 2, y + h); ctx.rotate(tilt);
+        A.util.drawFigureSide(ctx, who, -w / 2, -h, w, h, face, time, state === 1, alpha, pose, false);
+        ctx.restore();
     }
     A.util.drawRunner = drawRunner;
 
@@ -146,7 +194,8 @@
                     const hh = ihash(n, layer);
                     const bw = size - 14 + (hh % 30), bh = base + (hh % span);
                     const bx = n * size - cam.x * f;
-                    ctx.fillStyle = color; ctx.fillRect(bx, baseY - bh, bw, bh + h);
+                    const roofY = baseY - bh;
+                    ctx.fillStyle = color; ctx.fillRect(bx, roofY, bw, Math.max(0, h - roofY));
                     // Windows never overlap each other, so one batched fill per building matches per-window fills.
                     ctx.fillStyle = 'rgba(250,204,21,.22)'; ctx.beginPath();
                     for (let row = 0, wy = baseY - bh + 14; wy < baseY - 20; wy += 26, row++) {
@@ -255,7 +304,7 @@
             this.boost = 0; this.slow = 0; this.dead = 0; this.maxH = 0; this.deaths = 0;
             this.res = new A.Resource('Energy', '#facc15', 100, 50, 2);
             this.anim = 0; this.finished = false; this.state = 0; this.carry = null;
-            this.tideY = 1100; this.kick = 0; this.wallDir = 0; this.tideWarn = false;
+            this.kick = 0; this.wallDir = 0;
         }
 
         build() {
@@ -336,15 +385,15 @@
             // Pieces only ever climb, the route only turns around on a vertical piece, and each new solid is checked against everything
             // already built (headroom, asteroid lanes, machine strokes); a piece that does not fit is rolled back and another is tried. ----
             const PIECES = {
-                1: ['press-line', 'piston-steps', 'freight-elevator', 'catapult', 'crumble-gantry', 'stair-run', 'gantry-relay', 'drill-alley',
-                    'belt-gauntlet', 'assembly-line', 'stamping-feed', 'lift-to-press', 'spring-to-crumble', 'relay-to-pistons'],
+                1: ['packing-stacks', 'piston-steps', 'freight-elevator', 'catapult', 'crumble-gantry', 'stair-run', 'gantry-relay', 'service-loop',
+                    'belt-gauntlet', 'assembly-line', 'stamping-feed', 'sorting-loft', 'spring-to-crumble', 'cargo-transfer'],
                 3: ['meteor-climb', 'asteroid-ferry', 'debris-run', 'truss-climb', 'docking-arm', 'solar-walk', 'thruster-boost', 'airlock-hall',
                     'laser-grid', 'satellite-hop', 'crumble-field', 'cargo-lift',
                     'arm-to-solar', 'ferry-to-airlock', 'thruster-debris', 'satellite-to-grid', 'crumble-to-truss']
             };
-            const TURNS = new Set(['stair-run', 'truss-climb', 'meteor-climb', 'freight-elevator', 'catapult', 'thruster-boost', 'cargo-lift']);
-            const CALM = new Set(['piston-steps', 'freight-elevator', 'catapult', 'stair-run', 'gantry-relay', 'press-line', 'assembly-line',
-                'lift-to-press', 'spring-to-crumble', 'relay-to-pistons', 'arm-to-solar', 'ferry-to-airlock', 'thruster-debris',
+            const TURNS = new Set(['stair-run', 'service-loop', 'sorting-loft', 'truss-climb', 'meteor-climb', 'freight-elevator', 'catapult', 'thruster-boost', 'cargo-lift']);
+            const CALM = new Set(['piston-steps', 'freight-elevator', 'catapult', 'stair-run', 'service-loop', 'gantry-relay', 'packing-stacks', 'assembly-line',
+                'sorting-loft', 'spring-to-crumble', 'cargo-transfer', 'arm-to-solar', 'ferry-to-airlock', 'thruster-debris',
                 'meteor-climb', 'asteroid-ferry', 'truss-climb', 'docking-arm', 'thruster-boost', 'airlock-hall']);
             const reserved = [];
             const span = p => p.lane ? { x: p.lane.x0, y: p.lane.y - 60, w: p.lane.x1 - p.lane.x0, h: p.h + 70 }
@@ -465,15 +514,19 @@
             const deck = (x, top, w, extra = {}) => ({ x: Math.round(x), y: Math.round(top), w, h: 32, roof: true, bodyH: 32, ...extra });
             const PIECE = {
                 // ---- factory (normal gravity) ----
-                // a long conveyor running against you, with a crusher and a pile drill hanging from a gantry over it
-                'press-line': (L, d, T) => {
-                    const w = 760 + Math.round(r() * 160);
-                    const belt = T.add(deck(ahead(L, d, 130, w), L.y - 115, w, { factoryBelt: true, belt: -d * 150, motif: 'press-line' }));
-                    {
-                        drill(T, belt, belt.x + belt.w * (d > 0 ? .3 : .7), true, 3.4, r() * 3);
-                        drill(T, belt, belt.x + belt.w * (d > 0 ? .72 : .28), false, 2.9, r() * 3);
+                // Climb cargo stacks, then double back along an overhead packing shelf.
+                'packing-stacks': (L, d, T) => {
+                    const floor = T.add(deck(ahead(L, d, 120, 940), L.y - 100, 940, { motif: 'packing-floor' }));
+                    const nodes = [floor];
+                    for (let i = 0; i < 3; i++) {
+                        const x = d > 0 ? floor.x + 130 + i * 240 : floor.x + floor.w - 290 - i * 240;
+                        nodes.push(T.add({ x, y: floor.y - 110 * (i + 1), w: 160, h: 38, prop: 'crate', motif: 'packing-stack' }));
                     }
-                    return [belt];
+                    for (let i = 0; i < 3; i++) {
+                        const x = d > 0 ? floor.x + 610 - i * 240 : floor.x + 170 + i * 240;
+                        nodes.push(T.add({ x, y: floor.y - 470 - i * 110, w: 160, h: 18, jt: true, grate: true, motif: 'packing-shelf' }));
+                    }
+                    return nodes;
                 },
                 // hydraulic pistons pumping out of phase: hop up while each one is high
                 'piston-steps': (L, d, T) => {
@@ -511,7 +564,6 @@
                     for (let i = 0; i < 2; i++) {
                         prev = T.add({ x: ahead(prev, d, i ? 180 : 110, i ? 140 : 260), y: prev.y - (i ? 140 : 80), w: i ? 140 : 260, h: 16, thin: true, crumble: !calm, grate: true, motif: 'crumble-gantry' });
                         nodes.push(prev);
-                        if (!i) vent(T, prev, d > 0 ? .7 : .3, 2.2);
                     }
                     nodes.push(T.add(deck(ahead(prev, d, 140, 260), prev.y - 100, 260, { motif: 'landing' })));
                     return nodes;
@@ -523,7 +575,6 @@
                         const w = i === n - 1 ? 240 : 180, x = x0 + (i % 2 ? d * 150 : 0) - (i === n - 1 && d < 0 ? 60 : 0);
                         const step = T.add({ x: Math.round(x), y: L.y - 120 * (i + 1), w, h: 16, factoryStep: true, oneway: true, motif: 'stair-run', below: nodes[i - 1] });
                         nodes.push(step);
-                        if (i !== 1) vent(T, step, i ? .75 : .25, i * .8);
                     }
                     return nodes;
                 },
@@ -536,73 +587,58 @@
                     const c = T.add({ x: x2, y: a.y - 100, w, h: 20, mover: true, amp, speed, phase: phase + Math.PI, factoryLift: true, motif: 'gantry-relay' });
                     return [a, c, T.add(deck(ahead(c, d, 70, 280), c.y - 90, 280, { motif: 'landing' }))];
                 },
-                // stamping decks: a pile drill hammers each one in turn
-                'drill-alley': (L, d, T) => {
-                    const bed = T.add(deck(ahead(L, d, 120, 640), L.y - 100, 640, { motif: 'drill-alley' }));
-                    drill(T, bed, bed.x + bed.w * .32, false, 2.6, 0);
-                    drill(T, bed, bed.x + bed.w * .68, false, 2.6, 1.3);
-                    const perch = T.add(deck(ahead(bed, d, 170, 180), bed.y - 180, 180, { motif: 'inspection' }));
-                    return [bed, perch];
+                // Three reversing service balconies share a safe lower maintenance floor.
+                'service-loop': (L, d, T) => {
+                    const floor = T.add(deck(ahead(L, d, 110, 980), L.y - 100, 980, { motif: 'service-floor' }));
+                    const nodes = [floor];
+                    for (let row = 0; row < 3; row++) for (let step = 0; step < 3; step++) {
+                        const direction = d * (row % 2 ? -1 : 1);
+                        const u = direction > 0 ? step : 2 - step;
+                        nodes.push(T.add({ x: floor.x + 50 + u * 350, y: floor.y - 140 * (row * 3 + step + 1),
+                            w: 180, h: 18, jt: true, grate: true, motif: 'service-loop', routeDirection: direction }));
+                    }
+                    return nodes;
                 },
-                // a gauntlet of three long conveyors stepping up the production floor, every one armed: fight the first belt
-                // under a crusher and a drill, ride the second as it drags you forward into two crushers (back-pedal to time them),
-                // then fight the last belt past a drill and a crusher. Each belt overlaps the next so you hop up through it.
+                // one conveyor challenge per course, followed by a short inspection-platform climb
                 'belt-gauntlet': (L, d, T) => {
-                    const at = (p, u) => Math.round(p.x + p.w * (d > 0 ? u : 1 - u));
-                    const kit = [[[.24, true, 3.2], [.62, false, 2.5]], [[.28, true, 2.9], [.66, true, 2.9]], [[.26, false, 2.4], [.64, true, 3.4]]];
-                    const speeds = [-d * 150, d * 115, -d * 170], belts = [];
-                    let prev = L, y = L.y - 110;
-                    for (let i = 0; i < 3; i++) {
-                        const w = 720 + Math.round(r() * 70);
-                        const x = i ? (d > 0 ? edgeOf(prev, 1) - 120 : edgeOf(prev, -1) + 120 - w) : ahead(L, d, 130, w);
-                        const belt = T.add(deck(x, y, w, { factoryBelt: true, belt: speeds[i], jt: i > 0, motif: 'belt-gauntlet' }));
-                        const base = r() * 3;
-                        kit[i].forEach(([u, crusher, period], k) => {
-                            const hx = at(belt, u);
-                            drill(T, belt, hx, crusher, period, base + k * period * .5, [hx - 90, hx + 90]);
-                        });
-                        belts.push(belt); prev = belt; y -= 130;
+                    const w = 780 + Math.round(r() * 70);
+                    const belt = T.add(deck(ahead(L, d, 130, w), L.y - 110, w,
+                        { factoryBelt: true, belt: -d * 150, motif: 'belt-gauntlet' }));
+                    for (const [u, crusher, period] of [[.3, true, 3.2], [.7, false, 2.5]]) {
+                        const x = belt.x + belt.w * (d > 0 ? u : 1 - u);
+                        drill(T, belt, x, crusher, period, r() * 3, [x - 90, x + 90]);
                     }
-                    return belts;
+                    const perch = T.add(deck(ahead(belt, d, 130, 180), belt.y - 140, 180, { motif: 'inspection' }));
+                    return [belt, perch, T.add(deck(ahead(perch, d, 140, 260), perch.y - 120, 260, { motif: 'landing' }))];
                 },
-                // a long assembly line: the belt drags you back toward a row of crushers and drills hammering out of step,
-                // the line breaks at a transfer gap, and a piston at the end lifts you out
+                // three small workbenches lead into a piston lift instead of another long conveyor
                 'assembly-line': (L, d, T) => {
-                    const w1 = 620 + Math.round(r() * 80), w2 = 560 + Math.round(r() * 80);
-                    const a = T.add(deck(ahead(L, d, 130, w1), L.y - 105, w1, { factoryBelt: true, belt: -d * 165, motif: 'assembly-line' }));
-                    const c = T.add(deck(ahead(a, d, 150, w2), a.y - 70, w2, { factoryBelt: true, belt: -d * 165, motif: 'assembly-line' }));
-                    {
-                        const u = d > 0 ? [.3, .75] : [.7, .25];
-                        drill(T, a, a.x + a.w * u[0], false, 2.4, r() * 2);
-                        drill(T, a, a.x + a.w * u[1], true, 3.1, r() * 2 + 1);
-                        drill(T, c, c.x + c.w * .5, true, 2.8, r() * 2 + 2);
+                    const benches = [];
+                    let previous = L;
+                    for (let i = 0; i < 3; i++) {
+                        const bench = T.add(deck(ahead(previous, d, 130, 220), previous.y - 100, 220, { motif: 'assembly-bench' }));
+                        if (i === 1) vent(T, bench, .5);
+                        benches.push(bench); previous = bench;
                     }
-                    const by = c.y - 125;
-                    const piston = T.add({ x: ahead(c, d, 70, 110), y: by, w: 110, h: 22, mover: true, vert: true, by, amp: 40, speed: 1.2, phase: r() * 6, piston: true, motif: 'assembly-line' });
-                    return [a, c, piston, T.add(deck(ahead(piston, d, 110, 280), by - 130, 280, { motif: 'press-deck' }))];
+                    const by = previous.y - 125;
+                    const piston = T.add({ x: ahead(previous, d, 70, 110), y: by, w: 110, h: 22, mover: true, vert: true, by, amp: 40, speed: 1.2, phase: r() * 6, piston: true, motif: 'assembly-line' });
+                    return [...benches, piston, T.add(deck(ahead(piston, d, 110, 280), by - 130, 280, { motif: 'press-deck' }))];
                 },
-                // a feeder belt carries you forward into a stamping press: ride it, wait for the hammer to lift,
-                // then jump the press bed before the belt dumps you onto a crumbling hopper grate
+                // one stamping hammer guards the hopper grate
                 'stamping-feed': (L, d, T, calm) => {
-                    const w = 720 + Math.round(r() * 100);
-                    const feed = T.add(deck(ahead(L, d, 130, w), L.y - 110, w, { factoryBelt: true, belt: d * 130, motif: 'stamping-feed' }));
-                    {
-                        drill(T, feed, feed.x + feed.w * .45, true, 3.0, r() * 3);
-                        drill(T, feed, feed.x + feed.w * (d > 0 ? .8 : .2), true, 3.0, r() * 3 + 1.5);
-                    }
+                    const w = 420;
+                    const feed = T.add(deck(ahead(L, d, 130, w), L.y - 110, w, { motif: 'stamping-feed' }));
+                    drill(T, feed, feed.x + feed.w * .5, true, 3.0, r() * 3);
                     const grate = T.add({ x: ahead(feed, d, 140, 130), y: feed.y - 95, w: 130, h: 16, thin: true, crumble: !calm, grate: true, motif: 'stamping-feed' });
                     return [feed, grate, T.add(deck(ahead(grate, d, 140, 300), grate.y - 105, 300, { motif: 'landing' }))];
                 },
-                'lift-to-press': (L, d, T) => {
+                'sorting-loft': (L, d, T) => {
                     const car = T.add({ x: ahead(L, d, 100, 220), y: L.y - 90, w: 220, h: 20, mover: true, vert: true,
                         by: L.y - 150, amp: 130, speed: .65, phase: r() * 6, freight: true, motif: 'sorting-hoist' });
                     const bay = T.add(deck(ahead(car, d, 90, 420), L.y - 300, 420, { motif: 'sorting-bay' }));
-                    drill(T, bay, bay.x + bay.w * .55, true, 3.6, 0);
-                    const out = T.add(deck(ahead(bay, d, 100, 480), bay.y - 90, 480,
-                        { factoryBelt: true, belt: -d * 140, motif: 'packing-belt' }));
-                    drill(T, out, out.x + out.w * .4, false, 2.7, 1.4);
-                    drill(T, out, out.x + out.w * .75, true, 3.4, .6);
-                    return [car, bay, out];
+                    const shelf = T.add({ x: car.x + (d > 0 ? -90 : 90), y: bay.y - 150, w: 220, h: 18, jt: true, grate: true, motif: 'sorting-shelf' });
+                    const out = T.add({ x: bay.x, y: shelf.y - 150, w: 420, h: 18, jt: true, grate: true, motif: 'packing-deck' });
+                    return [car, bay, shelf, out];
                 },
                 'spring-to-crumble': (L, d, T, calm) => {
                     const pad = T.add(deck(ahead(L, d, 120, 180), L.y - 90, 180, { pipe: true, motif: 'foundry-launch' }));
@@ -613,16 +649,15 @@
                     if (calm) { vent(T, grate, .3, 0); vent(T, grate, .7, 1.6); }
                     return [pad, grate, T.add(deck(ahead(grate, d, 160, 280), grate.y - 120, 280, { motif: 'foundry-exit' }))];
                 },
-                'relay-to-pistons': (L, d, T) => {
+                'cargo-transfer': (L, d, T) => {
                     const amp = 120, w = 160;
                     const trolley = T.add({ x: d > 0 ? edgeOf(L, 1) + 90 + amp : edgeOf(L, -1) - 90 - amp - w,
                         y: L.y - 100, w, h: 20, mover: true, amp, speed: .7, phase: r() * 6, factoryLift: true, motif: 'cargo-trolley' });
                     const bed = T.add(deck(ahead(trolley, d, 90, 540), trolley.y - 110, 540, { motif: 'cargo-unload' }));
-                    drill(T, bed, bed.x + bed.w * .3, true, 3.2, 0);
-                    drill(T, bed, bed.x + bed.w * .7, true, 3.2, 1.6);
+                    const crate = T.add({ x: bed.x + bed.w / 2 - 60, y: bed.y - 80, w: 120, h: 80, prop: 'crate', motif: 'unloading-crate' });
                     const piston = T.add({ x: ahead(bed, d, 120, 170), y: bed.y - 150, w: 170, h: 22, mover: true, vert: true,
                         by: bed.y - 150, amp: 50, speed: .9, phase: 0, piston: true, motif: 'cargo-ejector' });
-                    return [trolley, bed, piston];
+                    return [trolley, bed, crate, piston];
                 },
                 // ---- space station (low gravity) ----
                 // three asteroid lanes stacked above a dock, alternating direction: hop from rock to rock to reach the upper dock
@@ -821,8 +856,6 @@
                     let made = place(order, b, id, intro, !nearEdge) || (nearEdge ? null : place([...bags[b]], b, id, intro));
                     // boxed in against the world edge with no unused turn left: a short landing buys room to turn around
                     if (!made) made = place(['landing'], b, id, intro);
-                    // truly boxed in: borrow a plain turn section rather than fail the whole map
-                    if (!made && backtracks > 20) made = place(shuffle(PIECES[b].filter(name => TURNS.has(name) && !COMBOS[name])), b, id, intro);
                     if (!made) return false;
                     bags[b] = bags[b].filter(name => name !== made.name);
                     pieces.push(made.name); nodes.push(...made.nodes);
@@ -882,22 +915,20 @@
             const opening = this.fireEscapes = [fireEscape(1060, 1400, 0, 3, 165)];
             Object.assign(this.checkpoints[0], { x: opening[0][1].x + 20, y: opening[0][1].y });
             path(...opening[0], T1);
-            // Each roof gets its own theme and never the same one twice running; laser roofs are rare and never lead
-            // straight into a wall climb, so the run never settles into a climb -> laser roof -> climb rhythm.
             const VERTICAL = new Set(['climb', 'scale', 'gondola', 'scaffold', 'crane']);
-            const ROOF_ITEMS = { penthouse: ['crown'], utility: ['ac', 'tank'], water: ['tank', 'tank'], open: [], security: ['laser', 'tank', 'laser'], plant: ['ac', 'crown'],
-                tripwire: ['tripwire', 'ac', 'tripwire'] };
+            const ROOF_ITEMS = { penthouse: ['crown'], utility: ['ac', 'tank'], water: ['tank', 'tank'], terrace: ['ac', 'tank'],
+                maintenance: ['vent', 'tank', 'vent'], plant: ['ac', 'crown'], ducts: ['duct', 'ac', 'duct'] };
             let roofTheme = '', lastSecurity = -9;
             const furnish = (A, level, nextKind) => {
                 const security = level >= 2 && level - lastSecurity >= 3 && !VERTICAL.has(nextKind) && nextKind !== 'billboard';
-                const options = ['penthouse', 'utility', 'water', 'plant', ...(level ? ['open'] : []),
-                    ...(security ? [lastSecurity < 0 || r() < .5 ? 'security' : 'tripwire', lastSecurity < 0 ? 'tripwire' : 'security'] : [])].filter(t => t !== roofTheme);
+                const options = ['penthouse', 'utility', 'water', 'plant', ...(level ? ['terrace'] : []),
+                    ...(security ? [lastSecurity < 0 || r() < .5 ? 'maintenance' : 'ducts', lastSecurity < 0 ? 'ducts' : 'maintenance'] : [])].filter(t => t !== roofTheme);
                 roofTheme = A.theme = options[Math.floor(r() * options.length)];
-                if (roofTheme === 'security' || roofTheme === 'tripwire') lastSecurity = level;
+                if (roofTheme === 'maintenance' || roofTheme === 'ducts') lastSecurity = level;
                 const hi = A.x + A.w - (nextKind === 'billboard' ? 400 : 170);
                 let x = A.x + 150 + r() * 60;
                 for (const k of ROOF_ITEMS[roofTheme]) {
-                    const w = k === 'crown' ? 260 : k === 'ac' ? 192 : k === 'tank' ? 90 : k === 'tripwire' ? 190 : 40;
+                    const w = k === 'crown' ? 260 : k === 'ac' ? 192 : k === 'tank' ? 90 : k === 'duct' ? 190 : 40;
                     if (x + w > hi) break;
                     if (k === 'crown') {
                         cityPut({ x, y: A.y - 60, w: 260, h: 60, bodyH: 60, roof: true, crown: true });
@@ -906,9 +937,9 @@
                         cityPut({ x, y: A.y - 46, w: 64, h: 46, prop: 'ac' });
                         cityPut({ x: x + 128, y: A.y - 46, w: 64, h: 46, prop: 'ac' });
                     } else if (k === 'tank') cityPut({ x, y: A.y - 80, w: 90, h: 80, prop: 'tank' });
-                    else if (k === 'tripwire') this.lasers.push({ x, y: A.y - 34, w: 190, h: 8, horiz: true, period: 2.6, phase: r() * 3, bi: 0, city: true, support: A });
-                    else this.lasers.push({ x: x + 15, y: A.y - 300, w: 10, h: 300, period: 3.2, phase: r() * 3, mounted: true, support: A, bi: 0, city: true });
-                    x += w + 140 + r() * 80;
+                    else cityPut({ x, y: A.y - (k === 'duct' ? 54 : 100), w, h: k === 'duct' ? 54 : 100,
+                        prop: 'ac', support: A, phase: r() * 3 });
+                    x += w + 80 + r() * 60;
                 }
             };
             // every crossing type appears once (hops twice), and no two vertical constructions are ever back to back
@@ -919,6 +950,7 @@
                     if (VERTICAL.has(order[0]) || VERTICAL.has(order[order.length - 1])) continue;
                     if (order.some((k, i) => i && (k === order[i - 1] || (VERTICAL.has(k) && VERTICAL.has(order[i - 1]))))) continue;
                     if (order.indexOf('drop') < 3) continue;
+                    if (order.indexOf('hop') > 4) continue;
                     return order;
                 }
                 return ['hop', 'climb', 'spring', 'scaffold', 'cart', 'crane', 'drop', 'scale', 'billboard', 'gondola', 'skybridge', 'poles', 'signs'];
@@ -1012,10 +1044,12 @@
                     [.2, .5, .8].forEach((u, i) => {
                         const x = Math.round(gapX + gap * u - 32), y = Math.round(tops[i]);
                         // telescoping caps sag under your weight and spring back once you jump off
-                        const pole = cityPut({ x, y, w: 64, h: 14, cityKit: 'pole', tier: i, mover: true, sinker: true, depth: 16, sunk: 0, sinkRate: 90, riseRate: 45, bx: x, by: y, amp: 0, dx: 0, dy: 0 });
+                        const pole = cityPut({ x, y, w: 64, h: 14, cityKit: 'pole', tier: i, mover: true, sinker: true, depth: 0, sunk: 0, sinkRate: 100, riseRate: 90, bx: x, by: y, amp: 0, dx: 0, dy: 0 });
                         this.movers.push(pole); poles.push(pole);
                     });
-                    return { B: tower(gapX + gap, Math.round(poles[2].y - 90 - r() * 30), towerWidth()), pieces: poles };
+                    const B = tower(gapX + gap, Math.round(poles[2].y - 90 - r() * 30), towerWidth());
+                    poles.forEach((pole, i) => { pole.depth = 220 - (pole.by - (poles[i + 1] || B).y); });
+                    return { B, pieces: poles };
                 }
                 if (kind === 'signs') {
                     // step off the roof onto a sign bolted below its edge, leap to a sign on the next tower, then haul up onto its roof
@@ -1027,8 +1061,24 @@
                 const gap = Math.round(520 + r() * 120), deck = A.y + 130, half = (gap - 150) / 2;
                 const left = cityPut({ x: gapX, y: deck, w: half, h: 24, bridge: true }), right = cityPut({ x: gapX + half + 150, y: deck, w: half, h: 24, bridge: true });
                 const B = tower(gapX + gap, deck - 240, towerWidth()), ledge = mount(B.x, -1, deck - 120, 'ledge');
-                if (level >= 3) this.lasers.push({ x: left.x + half / 2, y: deck - 150, w: 10, h: 150, period: 2.8, phase: r() * 3, mounted: true, support: left, bi: 0, city: true });
+                if (level >= 3) {
+                    const height = 40 + Math.floor(r() * 12);
+                    cityPut({ x: left.x + half / 2 - 20, y: deck - height, w: 40, h: height, prop: 'crate', support: left });
+                }
                 return { B, pieces: [left, right, ledge] };
+            };
+            this.cityRooftopRoutes = [];
+            const rooftopLoop = (roof, level) => {
+                const pieces = [
+                    cityPut({ x: roof.x + 100, y: roof.y - 60, w: 128, h: 60, prop: 'ac' }),
+                    cityPut({ x: roof.x + 300, y: roof.y - 140, w: 90, h: 140, prop: 'tank' }),
+                    cityPut({ x: roof.x + 480, y: roof.y - 230, w: roof.w - 500, h: 230, bodyH: 230, roof: true, crown: true }),
+                    cityPut({ x: roof.x + 580, y: roof.y - 310, w: roof.w - 600, h: 80, prop: 'ac' })
+                ];
+                for (const piece of pieces) piece.rooftopRoute = true;
+                this.cityRooftopRoutes.push({ roof, pieces, level });
+                path(...pieces);
+                return pieces[pieces.length - 1];
             };
             let at = T1, level = 0;
             const order = crossingOrder();
@@ -1038,9 +1088,11 @@
                 const prev = this.cityCrossings[this.cityCrossings.length - 1]?.kind;
                 let kind = planned;
                 if (kind === 'drop' && at.y > -1100) kind = prev === 'hop' || order[level + 1] === 'hop' ? 'spring' : 'hop';
-                furnish(at, level, kind);
-                const { B, pieces, rig } = cross(at, kind, level);
-                this.cityCrossings.push({ kind, from: at, to: B, pieces, level, rig });
+                const rooftop = kind === 'hop' && !this.cityRooftopRoutes.length;
+                if (!rooftop) furnish(at, level, kind);
+                const departure = rooftop ? rooftopLoop(at, level) : at;
+                const { B, pieces, rig } = cross(departure, kind, level);
+                this.cityCrossings.push({ kind, from: departure, to: B, pieces, level, rig });
                 path(...pieces, B);
                 at = B; level++;
             }
@@ -1184,12 +1236,18 @@
             }
         }
 
-        hurt(force = false) {
+        hurt(force = false, recoveryTime = 1) {
             if (this.dead > 0 || this.finished || (!force && this.s.testing === true && this.s.testInvincible === true)) return;
-            this.dead = 1;
+            this.dead = recoveryTime;
+            this.wallPose = 0; this.kick = 0;
             this.deaths++;
             this.particles.burst(this.me.x + 13, this.me.y + 22, this.s.local.color, 22, 320, 0.7, 5);
             this.shake = 0.3;
+        }
+
+        returnToCheckpoint() {
+            if (this.dead > 0 || this.finished) return;
+            this.stuckT = 0; this.hurt(true, .18);
         }
 
         // Which surfaces can still reach the summit, using generous jump envelopes (jump + air jump, springs, wall-jump walls,
@@ -1242,17 +1300,16 @@
             return !!node && !node.ok;
         }
 
-        // Falling with no surface anywhere below (or within an air jump) before the fall line: nothing can catch you.
-        hasCatchBelow(me) {
-            const feet = me.y + me.h, space = this.inDeepSpace(me);
-            const lift = this.airJumps > 0 ? (space ? 210 : 135) : 0, floor = this.cp.y + 800;
-            for (const n of this.escapeGraph().nodes) {
-                if (n.yEnter < feet - lift || n.yStand > floor) continue;
-                const reach = (space ? 520 : 300) + Math.max(0, n.yStand - feet) * (space ? 1.3 : .8);
-                if (n.x1 + reach > me.x && n.x0 - reach < me.x + me.w) return true;
-            }
-            const street = this.solids.find(p => p.ground);
-            return !!street && street.y <= floor;
+        recoverIfTrapped() {
+            const me = this.me, s = this.s;
+            if (!me.onGround) return false;
+            const inAlley = this.alleyEnd !== undefined && me.x + me.w <= this.alleyEnd + 1;
+            const street = me.ground?.ground && me.y + me.h > this.cp.y + 100 && !inAlley;
+            const deadEnd = this.trapChecks !== false && !(s.testing === true && s.testInvincible === true) && this.isDeadEnd(me.ground);
+            if (!street && !deadEnd) return false;
+            s.toast('No way out - returning to your checkpoint', '#fbbf24');
+            this.stuckT = 0; this.hurt(true, .18);
+            return true;
         }
 
         biomeProgress(height) {
@@ -1278,7 +1335,6 @@
             for (const cp of this.checkpoints) if (cp.id > destination.id && this.me.y + this.me.h <= cp.y) destination = cp;
             if (destination === this.cp) return;
             this.cp = destination;
-            this.retirePassedAreas();
             this.s.toast(`Checkpoint ${destination.id + 1} of ${this.checkpoints.length} saved by height · ${SKY_BIOMES[destination.biome].name}`, '#34d399');
             this.s.sfx('powerup');
         }
@@ -1384,26 +1440,6 @@
             d.y = pos.at + d.r; d.fade = pos.fade;
         }
 
-        retirePassedAreas() {
-            if (this.s.preview) return;
-            if ([...(this.s.remotes?.values?.() || [])].some(player => player.st && !player.done && (player.st.checkpoint || 0) < this.cp.id)) return;
-            if (this.cp.id <= (this.retiredArea || 0)) return;
-            this.retiredArea = this.cp.id;
-            const cutoff = this.cp.y + 1400;
-            const keep = p => p.boundary || p.ground || (p.by ?? p.cy ?? p.y ?? p.py ?? p.surfaceY ?? 0) < cutoff;
-            for (const list of [this.solids, this.movers, this.meteors, this.spikes, this.saws, this.lasers,
-                this.springs, this.boxes, this.drills, this.crumbles, this.balls, this.blinkers, this.towers, this.lanes, this.debris, this.climbPath]) {
-                let count = 0;
-                for (const item of list) if (keep(item)) list[count++] = item;
-                list.length = count;
-            }
-            this.drawList = this.drawList.filter(keep);
-            this.solids.spatialIndex = new A.util.VerticalIndex(this.solids);
-            this.drawIndex = new A.util.VerticalIndex(this.drawList, p => this.drawBounds(p));
-            this.challenges = this.challenges.map(c => c && c.top < cutoff ? c : null);
-            this.cityPath.length = 0; this.cityCrossings.length = 0;
-        }
-
         static get testDestinations() { return SKY_ROUTE.map((biome, id) => ({ id, name: SKY_BIOMES[biome].name })); }
         testTeleport(index) {
             if (this.s.testing !== true || !Number.isInteger(index) || !this.checkpoints[index]) {
@@ -1413,12 +1449,11 @@
             this.build();
             this.botRoute = null;
             this.testTeleportVersion = (this.testTeleportVersion || 0) + 1;
-            this.retiredArea = 0;
             this.cp = this.checkpoints[index];
             Object.assign(this.me, { x: this.cp.x, y: this.cp.y - this.me.h - 2, vx: 0, vy: 0, onGround: false, ground: null });
             this.dead = 0; this.finished = false; this.dash = 0; this.kick = 0; this.buffer = 0; this.coyote = 0;
             this.airJumps = 1; this.carry = null; this.stuckT = 0; this.snapCam = true; this.camInit = false;
-            this.tideY = this.cp.y + 1200; this.tideWarn = false; this.maxH = -this.cp.y; this.biomeSeen = index;
+            this.maxH = -this.cp.y; this.biomeSeen = index;
             this.s.setGoal(Math.round(this.maxH / 40)); this.s.toast(`Testing ${SKY_BIOMES[SKY_ROUTE[index]].name}`, '#67e8f9');
             return true;
         }
@@ -1439,7 +1474,7 @@
                 if (freezeHazards) { m.dx = 0; m.dy = 0; continue; }
                 if (m.lane) { this.updateLaneRock(m, clock); continue; }
                 if (m.sinker) {
-                    // rain clouds sag while someone stands on them and slowly float back up once they leave
+                    // Loaded caps sink gradually and return to their original height after the rider leaves.
                     const loaded = me.onGround && me.ground === m;
                     m.sunk = loaded ? Math.min(m.depth, m.sunk + (m.sinkRate || 60) * dt) : Math.max(0, m.sunk - (m.riseRate || 35) * dt);
                     const ny = m.by + m.sunk;
@@ -1469,11 +1504,18 @@
             }
             for (const b of this.boxes) if (b.t > 0) b.t -= hazardDt;
 
-            this.retirePassedAreas();
             this.updatePlayer(dt);
+            if (!s.preview) {
+                const biome = SKY_ROUTE[Math.min(SKY_ROUTE.length - 1, Math.floor(this.biomeProgress(Math.max(0, -(me.y + me.h)))))];
+                window.StudBudSfx?.setMusicBiome('skyline', biome);
+            }
         }
 
         updatePlayer(dt) {
+            this.landingPose = Math.max(0, (this.landingPose || 0) - dt);
+            this.jumpPulse = Math.max(0, (this.jumpPulse || 0) - dt);
+            this.airJumpPulse = Math.max(0, (this.airJumpPulse || 0) - dt);
+            updateDashPose(this, this.dash > 0, dt);
             const s = this.s, me = this.me;
             const clock = this.hazardClock || 0;
             const hazardDt = s.testing === true && s.testFreezeHazards === true ? 0 : dt;
@@ -1485,10 +1527,9 @@
                 me.x = clamp(me.x + me.vx * dt, 0, this.WIDTH - me.w);
                 me.y = clamp(me.y + me.vy * dt, -this.summitH - 400, -me.h);
                 me.ground = null; me.onGround = false;
-                this.dead = 0; this.dash = 0; this.buffer = 0; this.kick = 0;
+                this.dead = 0; this.dash = 0; this.buffer = 0; this.kick = 0; this.wallPose = 0;
                 this.maxH = Math.max(this.maxH, -(me.y + me.h));
                 this.captureCheckpoint();
-                this.tideY = Math.max(this.tideY, me.y + 1200);
                 this.state = 0;
                 this.particles.update(dt, 600);
                 return;
@@ -1499,8 +1540,8 @@
                 if (this.dead <= 0) {
                     const spot = this.cp;
                     me.x = spot.x; me.y = spot.y - me.h - 2; me.vx = 0; me.vy = 0; this.dash = 0; this.kick = 0;
-                    this.tideY = spot.y + 900; this.tideWarn = false; this.snapCam = true;
-                    this.stuckT = 0; this.stuckX = me.x; this.stuckY = me.y; this.strandedT = 0; this.trapT = 0; this.voidT = 0;
+                    this.snapCam = true;
+                    this.stuckT = 0; this.stuckX = me.x; this.stuckY = me.y;
                     me.onGround = false; me.ground = null; this.airJumps = 1; this.buffer = 0;
                 }
                 this.state = 4;
@@ -1518,33 +1559,14 @@
                 const idle = s.game.res.value >= 0.5 && this.stuckT > 5 && !me.ground?.mover && !me.ground?.belt;
                 if (idle && !this.stuckHinted) { this.stuckHinted = true; s.toast('Stuck? Press R to return to your checkpoint', '#fbbf24'); }
                 if (this.stuckT < 5) this.stuckHinted = false;
-                const street = this.street || (this.street = this.solids.find(p => p.ground));
-                const feet = me.y + me.h, inAlley = this.alleyEnd !== undefined && me.x + me.w <= this.alleyEnd + 1;
-                // once you touch the street (outside the starting alley) hopping around down there can't delay the respawn
-                const onStreet = me.onGround && me.ground?.ground && feet > this.cp.y + 100 && !inAlley;
-                const nearStreet = !!street && feet > street.y - 170 && this.strandedT > 0 && !inAlley;
-                this.strandedT = onStreet || nearStreet ? (this.strandedT || 0) + dt : 0;
-                if (this.strandedT > .3 || (idle && this.stuckT > 9)) {
-                    s.toast('No way out? Returning to your checkpoint', '#fbbf24');
-                    this.stuckT = 0; this.strandedT = 0; this.hurt(true); return;
-                }
-                if (s.pressed('KeyR')) { this.stuckT = 0; this.hurt(true); return; }
+                if (this.recoverIfTrapped()) return;
+                if (s.pressed('KeyR')) { this.returnToCheckpoint(); return; }
             }
             const exhausted = !this.finished && s.game.res.value < 0.5;
             if (exhausted && !this.wasExhausted) s.toast('Out of energy — no control! Press Q for a question', '#f87171');
             this.wasExhausted = exhausted;
 
             const deepSpace = this.inDeepSpace();
-            if (!this.finished && !deepSpace && this.cp.id > 0 && !(s.testing === true && s.testNoTide === true)) {
-                this.tideY -= (24 + Math.min(3, Math.floor(this.biomeProgress(this.maxH))) * 6) * dt;
-                this.tideY = Math.min(this.tideY, me.y + 1700);
-                const gap = this.tideY - (me.y + me.h);
-                if (gap < 420 && !this.tideWarn) { this.tideWarn = true; s.toast('The tide is rising — keep climbing!', '#fb923c'); }
-                else if (gap > 800) this.tideWarn = false;
-            } else if (deepSpace) {
-                this.tideY = Math.max(this.tideY, me.y + 1500);
-                this.tideWarn = false;
-            }
 
             this.wallDir = 0;
             if (!me.onGround && !this.finished && !exhausted && this.dash <= 0) {
@@ -1555,6 +1577,11 @@
                     if (overlap(R, p)) { this.wallDir = 1; break; }
                 }
             }
+            const wallContact = this.wallDir && me.vy > 0 && this.kick <= 0;
+            if (wallContact) this.wallSide = this.wallDir;
+            const wallTarget = wallContact ? 1 : 0;
+            this.wallPose = wallTarget + ((this.wallPose || 0) - wallTarget) * Math.exp(-dt * 24);
+            if (Math.abs(this.wallPose - wallTarget) < .001) this.wallPose = wallTarget;
             // Wind never overpowers a player: it is weaker in the air than a run, ignored while dashing, and nearly cancelled when pushing against it.
             let windPush = 0;
             for (const wz of this.winds) {
@@ -1596,7 +1623,8 @@
                 const accel = (onIce ? 420 : me.onGround ? 3400 : 2300) * dt;
                 if (this.kick > 0) this.kick -= dt;
                 else me.vx += clamp(target - me.vx, -accel, accel);
-                if (ax) me.face = ax;
+                if (wallContact) me.face = -this.wallDir;
+                else if (ax) me.face = ax;
                 me.vy = Math.min(deepSpace ? 650 : 1150, me.vy + (deepSpace ? 650 : 2300) * dt);
                 if (this.wallDir && me.vy > 130) me.vy = 130;
                 if (!s.down('Space', 'ArrowUp', 'KeyW') && !s.stickJumpHeld && me.vy < -250 && !this.sprung) me.vy += (deepSpace ? 600 : 2600) * dt;
@@ -1609,7 +1637,7 @@
             if (this.buffer > 0) {
                 if (this.coyote > 0) {
                     if (!s.spend(A.ENERGY_COSTS.skyline.jump)) { this.buffer = 0; } else {
-                        me.vy = deepSpace ? -560 : -850; this.coyote = 0; this.buffer = 0; s.sfx('jump');
+                        me.vy = deepSpace ? -560 : -850; this.coyote = 0; this.buffer = 0; this.jumpPulse = .25; s.sfx('jump');
                         this.particles.burst(me.x + 13, me.y + me.h, '#cbd5e1', 6, 90, 0.3, 4);
                     }
                 } else if (this.wallDir && s.spend(A.ENERGY_COSTS.skyline.wallJump)) {
@@ -1617,7 +1645,8 @@
                     this.airJumps = Math.max(this.airJumps, 1); s.sfx('jump');
                     this.particles.burst(me.x + (this.wallDir > 0 ? me.w : 0), me.y + 22, '#e2e8f0', 8, 120, 0.3, 4);
                 } else if (this.airJumps > 0 && s.spend(A.ENERGY_COSTS.skyline.airJump)) {
-                    me.vy = deepSpace ? -520 : -780; this.airJumps--; this.buffer = 0; s.sfx('jump');
+                    me.vy = deepSpace ? -520 : -780; this.airJumps--; this.buffer = 0; s.sfx('doubleJump');
+                    this.jumpPulse = 0; this.airJumpPulse = .25;
                     this.particles.burst(me.x + 13, me.y + me.h, '#7dd3fc', 10, 140, 0.35, 4);
                 }
             }
@@ -1625,7 +1654,10 @@
             const wasAir = !me.onGround, previousFeet = me.y + me.h, fallSpeed = me.vy;
             moveBody(me, this.solids, dt);
             for (const d of this.drills) if (!d.slamming && Math.abs(d.x - me.x) < 120) this.pushOutOfDrill(me, d, previousFeet);
-            if (me.onGround && wasAir && fallSpeed > 420) this.particles.burst(me.x + 13, me.y + me.h, '#94a3b8', 5, 70, 0.25, 3);
+            if (me.onGround && wasAir && fallSpeed > 420) {
+                this.landingPose = .16;
+                this.particles.burst(me.x + 13, me.y + me.h, '#94a3b8', 5, 70, 0.25, 3);
+            }
             if (me.onGround && me.ground?.crumble && me.ground.timer <= 0 && !me.ground.off) me.ground.timer = 0.5;
 
             const box = { x: me.x + 3, y: me.y + 3, w: me.w - 6, h: me.h - 6 };
@@ -1633,7 +1665,7 @@
                 if (me.x + me.w > sp.x - 4 && me.x < sp.x + sp.w + 4 && me.vy >= 0
                     && previousFeet <= sp.y + sp.h + 8 && me.y + me.h >= sp.y - 3) {
                     me.vy = sp.bi === 3 ? -720 : -1280; me.onGround = false; me.ground = null;
-                    this.sprung = true; this.airJumps = 1; s.sfx('powerup'); sp.hit = this.anim;
+                    this.sprung = true; this.airJumps = 1; s.sfx('spring'); sp.hit = this.anim;
                     this.particles.burst(sp.x + 23, sp.y, sp.bi === 2 ? '#ffffff' : '#fbbf24', 12, 160, 0.4, 4);
                 }
             }
@@ -1644,25 +1676,14 @@
                 for (const d of this.drills) if (this.drillHits(box, d)) this.hurt();
                 for (const d of this.debris) if (!d.off && d.fade > .2 && this.circleHits(box, d)) this.hurt();
                 for (const b of this.balls) if (this.circleHits(box, b)) this.hurt();
-                if (me.y + me.h > this.tideY && !(s.testing === true && s.testNoTide === true)) this.hurt();
                 for (const l of this.lasers) {
                     l.on = ((((clock + l.phase) % l.period) + l.period) % l.period) < l.period * 0.55;
                     if (!l.on) continue;
                     const lethal = l.steam ? { x: l.x + 4, y: l.y + 30, w: l.w - 8, h: l.h - 30 } : l;
                     if (overlap(box, lethal)) this.hurt();
                 }
-                if (me.y > this.cp.y + 800) this.hurt();
-                if (this.dead <= 0 && this.trapChecks !== false && !(s.testing === true && s.testInvincible === true)) {
-                    // jumping around on a dead-end ledge keeps the timer running; only reaching real ground clears it
-                    this.trapT = me.onGround ? (this.isDeadEnd(me.ground) ? (this.trapT || 0) + dt : 0) : (this.trapT || 0);
-                    this.voidCheck = (this.voidCheck || 0) - dt;
-                    if (me.onGround || me.vy <= 0 || this.dash > 0) this.voidT = 0;
-                    else if (this.voidCheck <= 0) { this.voidCheck = .1; this.voidT = this.hasCatchBelow(me) ? 0 : (this.voidT || 0) + .1; }
-                    if (this.trapT > .6 || this.voidT > .25) {
-                        s.toast(this.trapT > .6 ? 'No way back up from here — returning to your checkpoint' : 'Nothing below to catch you — returning to your checkpoint', '#fbbf24');
-                        this.trapT = 0; this.voidT = 0; this.hurt(true);
-                    }
-                }
+                if (me.y > 1500) this.hurt(true);
+                if (this.dead <= 0 && this.recoverIfTrapped()) return;
                 for (const b of this.boxes) {
                     if (b.t > 0) continue;
                     b.t = 1e9; // question boxes are disabled in the parkour climb
@@ -1685,7 +1706,9 @@
 
         net() {
             const m = this.me;
-            return { x: Math.round(m.x), y: Math.round(m.y), vx: Math.round(m.vx), vy: Math.round(m.vy), f: m.face, a: this.state };
+            return { x: Math.round(m.x), y: Math.round(m.y), vx: Math.round(m.vx), vy: Math.round(m.vy), f: m.face, a: this.state,
+                ex: { g: Boolean(m.onGround), jp: this.jumpPulse || 0, j: this.airJumpPulse || 0, l: this.landingPose || 0, dp: this.dashPose || 0,
+                    wa: this.wallPose || 0, ws: this.wallSide || 0, wk: this.kick || 0 } };
         }
 
         goalText() { const current = Math.max(0, -(this.me.y + this.me.h)); return `Checkpoint ${this.cp.id + 1}/${this.checkpoints.length} · Height ${Math.round(current / 40)}m · Best ${Math.round(this.maxH / 40)}m / ${Math.round(this.summitH / 40)}m · ${SKY_BIOMES[SKY_ROUTE[Math.min(SKY_ROUTE.length - 1, Math.floor(this.biomeProgress(current)))]].name}`; }
@@ -1839,9 +1862,12 @@
         }
 
         drawBounds(p) {
-            if (p.cityKit === 'scaffold') return { y: p.y - 55, h: (p.below || 0) - p.y + 60 };
+            if (p.cityKit === 'scaffold') return {
+                x: p.frame[0] - 12, w: p.frame[1] - p.frame[0] + 24,
+                y: p.y - 55, h: (p.below || 0) - p.y + 60
+            };
             if (p.cityKit === 'pole') return { y: Math.min(p.y, p.by ?? p.y) - 30, h: -Math.min(p.y, p.by ?? p.y) + 30 };
-            if (p.cityKit === 'catwalk') return p.board.panel ? { y: p.y - 165, h: 190 } : { y: p.y - 35, h: 50 };
+            if (p.cityKit === 'catwalk') return p.board.panel ? { y: p.y - 165, h: p.board.base - p.y + 175 } : { y: p.y - 35, h: 50 };
             if (p.cityKit === 'beam') return { y: p.jibY - 30, h: p.y - p.jibY + 50 };
             if (p.lane) return { y: p.lane.y - 20, h: p.h + 40 };
             if (p.piston) return { y: p.by - p.amp, h: p.amp * 2 + p.h + 130 };
@@ -2047,11 +2073,11 @@
         }
 
         // Scaffold planks, billboard catwalks and crane beams in the city's vertical crossings.
-        drawCityKit(ctx, p) {
+        drawCityKit(ctx, p, layer = 'all') {
             if (p.cityKit === 'pole') {
                 // utility pole down to the street, with a crossarm, insulators and a warning band
                 // the cap rides a chrome inner pole that slides into the fixed outer sleeve as it is weighed down
-                const cx = p.x + p.w / 2, rest = p.by ?? p.y, sleeve = rest + p.h + 22, load = p.depth ? (p.sunk || 0) / p.depth : 0;
+                const cx = p.x + p.w / 2, rest = p.by ?? p.y, sleeve = rest + p.h + (p.depth || 0) + 22, load = p.depth ? (p.sunk || 0) / p.depth : 0;
                 ctx.fillStyle = '#3f3f46'; ctx.fillRect(cx - 8, sleeve, 16, -sleeve);
                 ctx.fillStyle = '#52525b'; ctx.fillRect(cx - 8, sleeve, 4, -sleeve);
                 ctx.fillStyle = '#facc15'; ctx.fillRect(cx - 8, sleeve + 34, 16, 6);
@@ -2067,6 +2093,7 @@
             if (p.cityKit === 'scaffold') {
                 // one bay of a tube-and-coupler scaffold: uprights, a ledger the deck rests on, and a single brace down to the bay below
                 const [f0, f1] = p.frame, base = p.below || 0, ledger = p.y + p.h, span = base - ledger, top = p.last ? p.y - 44 : p.y;
+                if (layer !== 'deck') {
                 ctx.fillStyle = '#64748b';
                 for (const x of [f0, f1]) ctx.fillRect(x - 4, top, 8, base - top);
                 ctx.fillStyle = '#94a3b8';
@@ -2083,15 +2110,17 @@
                 for (const x of [f0, f1]) ctx.fillRect(x - 7, ledger - 2, 14, 10);
                 if (p.last) { ctx.fillStyle = '#facc15'; for (const x of [f0, f1]) ctx.fillRect(x - 5, top - 6, 10, 6); }
                 ctx.fillStyle = 'rgba(15,23,42,.35)'; ctx.fillRect(p.x + 3, ledger + 6, p.w - 6, 4);
-                ctx.fillStyle = '#a16207'; ctx.fillRect(p.x, p.y, p.w, p.h);
-                ctx.fillStyle = '#ca8a04'; ctx.fillRect(p.x, p.y, p.w, 4);
-                ctx.fillStyle = 'rgba(66,32,6,.45)'; for (let x = p.x + 30; x < p.x + p.w; x += 30) ctx.fillRect(x, p.y + 2, 2, p.h - 2);
-                ctx.fillStyle = '#1e293b'; ctx.fillRect(p.x + 6, ledger - 3, 8, 9); ctx.fillRect(p.x + p.w - 14, ledger - 3, 8, 9);
                 if (p.tier === 0) {
                     ctx.fillStyle = '#334155'; for (const x of [f0, f1]) ctx.fillRect(x - 12, -6, 24, 6);
                     ctx.fillStyle = '#f97316'; ctx.fillRect(f0 - 8, -40, f1 - f0 + 16, 8);
                     ctx.fillStyle = '#fff7ed'; for (let x = f0; x < f1; x += 40) ctx.fillRect(x, -40, 16, 8);
                 }
+                }
+                if (layer === 'frame') return;
+                ctx.fillStyle = '#a16207'; ctx.fillRect(p.x, p.y, p.w, p.h);
+                ctx.fillStyle = '#ca8a04'; ctx.fillRect(p.x, p.y, p.w, 4);
+                ctx.fillStyle = 'rgba(66,32,6,.45)'; for (let x = p.x + 30; x < p.x + p.w; x += 30) ctx.fillRect(x, p.y + 2, 2, p.h - 2);
+                ctx.fillStyle = '#1e293b'; ctx.fillRect(p.x + 6, ledger - 3, 8, 9); ctx.fillRect(p.x + p.w - 14, ledger - 3, 8, 9);
                 return;
             }
             if (p.cityKit === 'catwalk') {
@@ -2381,8 +2410,9 @@
         drawFactoryFrame(ctx, c, top, bottom, left = -Infinity, right = Infinity) {
             const y0 = c.top - 220, y1 = c.bottom + 120, upper = Math.max(y0, top - 40), lower = Math.min(y1, bottom + 40);
             if (upper >= lower) return;
+            ctx.save();
             const cols = c.columns, low = this.s.graphics?.low || this.s.lowDetail;
-            ctx.strokeStyle = 'rgba(71,85,105,.5)'; ctx.lineWidth = 4; ctx.beginPath();
+            ctx.strokeStyle = '#4b4564'; ctx.lineWidth = 2; ctx.beginPath();
             for (let i = 0; i + 1 < cols.length; i++) {
                 const a = cols[i] + 13, b = cols[i + 1] - 13;
                 if (b < left || a > right) continue;
@@ -2394,16 +2424,11 @@
                 }
             }
             ctx.stroke();
-            for (const x of cols) {
+            for (const x of [cols[0], cols[cols.length - 1]]) {
                 if (x + 17 < left || x - 17 > right) continue;
-                ctx.fillStyle = '#1e293b'; ctx.fillRect(x - 13, upper, 26, lower - upper);
-                ctx.fillStyle = '#334155'; ctx.fillRect(x - 4, upper, 8, lower - upper);
-                ctx.fillStyle = '#475569'; ctx.fillRect(x - 13, upper, 3, lower - upper); ctx.fillRect(x + 10, upper, 3, lower - upper);
-                if (low) continue;
-                for (let y = Math.ceil((upper - y0) / 170) * 170 + y0; y < lower; y += 170) {
-                    ctx.fillStyle = '#334155'; ctx.fillRect(x - 17, y, 34, 14);
-                    ctx.fillStyle = '#94a3b8'; ctx.fillRect(x - 12, y + 5, 4, 4); ctx.fillRect(x + 8, y + 5, 4, 4);
-                }
+                ctx.strokeStyle = '#4b4564'; ctx.lineWidth = 3; ctx.beginPath();
+                ctx.moveTo(x - 5, upper); ctx.lineTo(x - 5, lower);
+                ctx.moveTo(x + 5, upper); ctx.lineTo(x + 5, lower); ctx.stroke();
             }
             if (y0 > upper - 30 && y0 < lower + 30 && cols.length > 1) {
                 const a = cols[0] - 20, b = cols[cols.length - 1] + 20;
@@ -2426,12 +2451,14 @@
                 for (let x = g0 - 8; x < g1 + 8; x += 24) { ctx.fillStyle = ((x - g0) / 24 | 0) % 2 ? '#1c1917' : '#fbbf24'; ctx.fillRect(x, beamY - 4, Math.min(24, g1 + 8 - x), 5); }
                 ctx.fillStyle = '#57534e'; ctx.fillRect(d.x - 4, beamY + 14, 8, d.mountY - 34 - beamY - 14);
             }
+            ctx.restore();
         }
 
         // Space station: lattice pylons with marker lights, broken where asteroid lanes cross the chamber.
         drawStationFrame(ctx, c, top, bottom, left = -Infinity, right = Infinity) {
             const y0 = c.top - 220, y1 = c.bottom + 140, upper = Math.max(y0, top - 40), lower = Math.min(y1, bottom + 40);
             if (upper >= lower) return;
+            ctx.save();
             const gaps = this.lanes.filter(l => l.chamber === c.id && l.axis === 'x').map(l => [l.y - 70, l.y + l.h + 20]);
             const segments = [];
             let from = y0;
@@ -2445,15 +2472,10 @@
                 if (x + 13 < left || x - 13 > right) continue;
                 for (const [a, b] of segments) {
                     if (b < upper || a > lower) continue;
-                    ctx.fillStyle = 'rgba(30,27,75,.85)'; ctx.fillRect(x - 9, a, 18, b - a);
-                    ctx.strokeStyle = 'rgba(129,140,248,.55)'; ctx.lineWidth = 2; ctx.beginPath();
+                    ctx.strokeStyle = '#484269'; ctx.lineWidth = 2; ctx.beginPath();
                     ctx.moveTo(x - 9, a); ctx.lineTo(x - 9, b); ctx.moveTo(x + 9, a); ctx.lineTo(x + 9, b);
                     for (let y = Math.ceil(Math.max(a, upper - 36) / 36) * 36; y < Math.min(b - 36, lower); y += 36) { ctx.moveTo(x - 9, y); ctx.lineTo(x + 9, y + 18); ctx.lineTo(x - 9, y + 36); }
                     ctx.stroke();
-                    ctx.fillStyle = '#4c1d95'; ctx.fillRect(x - 13, a, 26, 6); ctx.fillRect(x - 13, b - 6, 26, 6);
-                    const blink = (Math.sin(this.anim * 3 + x * .01) + 1) / 2;
-                    ctx.fillStyle = `rgba(244,114,182,${(.35 + blink * .65).toFixed(2)})`;
-                    ctx.beginPath(); ctx.arc(x, a + 3, 3, 0, TAU); ctx.fill();
                 }
             }
             if (y0 > upper - 30 && y0 < lower + 30 && c.columns.length > 1) {
@@ -2463,6 +2485,7 @@
                 const start = Number.isFinite(left) ? a + 30 + Math.max(0, Math.floor((left - 22 - a - 30) / 46)) * 46 : a + 30;
                 for (let x = start; x < Math.min(b - 30, right); x += 46) { ctx.fillStyle = ihash(Math.round(x), Math.round(y0)) % 3 ? '#1e1b4b' : '#67e8f9'; ctx.fillRect(x, y0 - 2, 22, 7); }
             }
+            ctx.restore();
         }
 
         // static decks hang off the nearest hall column on a bracket; stairs and trusses get a ladder down to the step below
@@ -2479,19 +2502,17 @@
             }
             const center = p.x + p.w / 2;
             const col = c?.columns?.length ? c.columns.reduce((best, x) => Math.abs(x - center) < Math.abs(best - center) ? x : best) : null;
-            const dark = space ? '#312e81' : '#1e293b', light = space ? '#818cf8' : '#64748b';
+            const dark = space ? '#484269' : '#4b4564', light = dark;
             if (col === null || Math.abs(col - center) > 700) {
                 // free-standing pad (checkpoints and rests between chambers): two legs into the haze
                 ctx.fillStyle = dark;
                 for (const x of [p.x + 24, p.x + p.w - 38]) {
-                    const g = ctx.createLinearGradient(0, yy, 0, yy + 220);
-                    g.addColorStop(0, dark); g.addColorStop(1, 'rgba(15,23,42,0)');
-                    ctx.fillStyle = g; ctx.fillRect(x, yy, 14, 220);
+                    ctx.fillStyle = dark; ctx.fillRect(x, yy, 4, 100);
                 }
                 return;
             }
             const attach = clamp(col, p.x + 18, p.x + p.w - 18);
-            ctx.strokeStyle = dark; ctx.lineWidth = 10; ctx.beginPath();
+            ctx.strokeStyle = dark; ctx.lineWidth = 3; ctx.beginPath();
             if (Math.abs(attach - col) < 3) {
                 ctx.moveTo(col - 30, yy + 2); ctx.lineTo(col, yy + 34); ctx.lineTo(col + 30, yy + 2);
             } else {
@@ -2926,6 +2947,11 @@
                 else if (chamber.bi === 3) this.drawStationFrame(ctx, chamber, top, bottom, left, right);
             }
             for (const p of visible) {
+                if (p.cityKit === 'scaffold') {
+                    const bounds = this.drawBounds(p);
+                    if (bounds.x <= right && bounds.x + bounds.w >= left) this.drawCityKit(ctx, p, 'frame');
+                    continue;
+                }
                 if (p.boundary || p.x > right + 200 || p.x + p.w < left - 200) continue;
                 if (p.wallX !== undefined) { this.drawWallMount(ctx, p); continue; }
                 if (p.crane) { if (p.mast) this.drawCraneRig(ctx, p); continue; }
@@ -2936,11 +2962,11 @@
             }
             for (const p of visible) {
                 const bounds = this.drawBounds(p);
-                if (p.boundary || p.x > right || p.x + p.w < left || (p.off && !p.blink && !p.crumble) || bounds.y > bottom || bounds.y + bounds.h < top) continue;
+                if (p.boundary || (bounds.x ?? p.x) > right || (bounds.x ?? p.x) + (bounds.w ?? p.w) < left || (p.off && !p.blink && !p.crumble) || bounds.y > bottom || bounds.y + bounds.h < top) continue;
                 const B = SKY_BIOMES[p.bi || 0];
                 if (p.blink || p.crumble) { this.drawUnstablePlatform(ctx, p, B); continue; }
                 if (p.cityKit) {
-                    this.drawCityKit(ctx, p);
+                    this.drawCityKit(ctx, p, p.cityKit === 'scaffold' ? 'deck' : 'all');
                 } else if (p.meteor) {
                     this.drawAsteroid(ctx, p);
                 } else if (p.bladeSign || p.climbRail) {
@@ -3204,18 +3230,6 @@
                 ctx.fillStyle = '#ef4444';
                 for (let i = 0; i < 8; i++) { const a = i * TAU / 8; ctx.beginPath(); ctx.arc(b.x + Math.cos(a) * b.r, b.y + Math.sin(a) * b.r, 4, 0, TAU); ctx.fill(); }
             }
-            if (this.tideY < bottom && !(s.testing === true && s.testNoTide === true)) {
-                const tb = SKY_ROUTE[Math.min(SKY_ROUTE.length - 1, Math.floor(this.biomeProgress(-this.tideY)))];
-                const col = [['#f97316', '#7c2d12'], ['#38bdf8', '#0c4a6e'], ['#ef4444', '#450a0a'], ['#a855f7', '#2e1065']][Math.max(0, tb)];
-                const g = ctx.createLinearGradient(0, this.tideY, 0, this.tideY + 500);
-                g.addColorStop(0, col[0]); g.addColorStop(1, col[1]);
-                ctx.fillStyle = g;
-                ctx.beginPath(); ctx.moveTo(left - 10, bottom + 80); ctx.lineTo(left - 10, this.tideY);
-                for (let x = left - 10; x <= right + 10; x += 24) ctx.lineTo(x, this.tideY + Math.sin(x * 0.03 + this.anim * 2.4) * 7);
-                ctx.lineTo(right + 10, bottom + 80); ctx.closePath(); ctx.fill();
-                ctx.fillStyle = 'rgba(255,255,255,.35)';
-                for (let x = left; x <= right; x += 24) ctx.fillRect(x, this.tideY + Math.sin(x * 0.03 + this.anim * 2.4) * 7, 12, 3);
-            }
             // summit flag
             const sm = this.summit, sx = sm.x + sm.w / 2;
             if (seen(sm.y)) {
@@ -3225,12 +3239,25 @@
 
             for (const r of s.remoteList()) {
                 if (r.x > right || r.x + 26 < left || r.y > bottom || r.y + 44 < top) continue;
-                drawRunner(ctx, r.x, r.y, 26, 44, r, r.f || 1, this.anim + r.x * 0.01, r.a === 1 ? 1 : 0, 0.8);
+                drawRunner(ctx, r.x, r.y, 26, 44, r, r.f || 1, this.anim + r.x * 0.01, r.a, 0.8,
+                    { vx: r.vx, vy: r.vy, dashing: r.a === 3, dashAmount: Number.isFinite(r.ex?.dp) ? r.ex.dp : undefined,
+                        wallAmount: Number.isFinite(r.ex?.wa) ? r.ex.wa : 0, wallSide: r.ex?.ws === -1 ? -1 : 1, kick: Number.isFinite(r.ex?.wk) ? r.ex.wk : 0,
+                        grounded: r.ex?.g === true,
+                        jump: Number.isFinite(r.ex?.jp) ? r.ex.jp : 0, doubleJump: Number.isFinite(r.ex?.j) ? r.ex.j : 0, landing: Number.isFinite(r.ex?.l) ? r.ex.l : 0 });
                 if (!this.s.preview) nameTag(ctx, r.name || '', r.x + 13, r.y - 14, r.color);
             }
             if (this.dead <= 0) {
                 const blink = this.boost > 0 ? 0.7 + Math.sin(this.anim * 20) * 0.3 : 1;
-                drawRunner(ctx, me.x, me.y, me.w, me.h, s.local, me.face, this.anim, this.state === 1 ? 1 : 0, blink);
+                if (this.airJumpPulse > 0) {
+                    const progress = 1 - this.airJumpPulse / .25;
+                    ctx.save(); ctx.globalAlpha = (1 - progress) * .7;
+                    ctx.strokeStyle = '#bae6fd'; ctx.lineWidth = 3 * (1 - progress) + 1;
+                    ctx.beginPath(); ctx.ellipse(me.x + me.w / 2, me.y + me.h + progress * 24, 12 + progress * 26, 4 + progress * 7, 0, 0, TAU); ctx.stroke();
+                    ctx.restore();
+                }
+                drawRunner(ctx, me.x, me.y, me.w, me.h, s.local, me.face, this.anim, this.state, blink,
+                    { vx: me.vx, vy: me.vy, grounded: me.onGround, dashing: this.dash > 0, dashAmount: this.dashPose, landing: this.landingPose,
+                        jump: this.jumpPulse, doubleJump: this.airJumpPulse, wallAmount: this.wallPose, wallSide: this.wallSide, kick: this.kick });
                 if (!this.s.preview) nameTag(ctx, 'You', me.x + 13, me.y - 14, '#fff');
             }
             this.particles.draw(ctx);
@@ -3333,9 +3360,13 @@
             this.orb.t = Math.max(0, this.orb.t - dt);
             this.invuln = Math.max(0, this.invuln - dt);
             this.hammer = Math.max(0, this.hammer - dt);
+            this.airJumpPulse = Math.max(0, (this.airJumpPulse || 0) - dt);
+            this.jumpPulse = Math.max(0, (this.jumpPulse || 0) - dt);
+            this.landingPose = Math.max(0, (this.landingPose || 0) - dt);
             this.swingCd = Math.max(0, this.swingCd - dt); this.swingT = Math.max(0, this.swingT - dt); this.stun = Math.max(0, this.stun - dt);
             this.heavyCd = Math.max(0, this.heavyCd - dt);
             this.dodgeCd = Math.max(0, this.dodgeCd - dt); this.dodge = Math.max(0, this.dodge - dt);
+            updateDashPose(this, this.dodge > 0, dt);
             this.shieldBreak = Math.max(0, this.shieldBreak - dt);
             if (this.dropTimer > 0) {
                 this.dropTimer = Math.max(0, this.dropTimer - dt);
@@ -3397,8 +3428,8 @@
             me.vy = Math.min(fastFalling ? 1650 : 1200, me.vy + (fastFalling ? 3200 : 2400) * dt);
             if (me.onGround) { this.airJumps = 1; this.coyote = 0.1; } else this.coyote -= dt;
             if (this.stun <= 0 && (s.pressed('Space', 'KeyW', 'ArrowUp') || (s.stickJumpHeld && me.onGround))) {
-                if (this.coyote > 0) { me.vy = -900; this.coyote = 0; s.sfx('jump'); }
-                else if (this.airJumps > 0) { me.vy = -820; this.airJumps--; s.sfx('jump'); this.particles.burst(me.x + 17, me.y + 56, '#bae6fd', 8, 120, 0.3, 4); }
+                if (this.coyote > 0) { me.vy = -900; this.coyote = 0; this.jumpPulse = .25; s.sfx('jump'); }
+                else if (this.airJumps > 0) { me.vy = -820; this.airJumps--; this.jumpPulse = 0; this.airJumpPulse = .25; s.sfx('doubleJump'); this.particles.burst(me.x + 17, me.y + 56, '#bae6fd', 8, 120, 0.3, 4); }
             }
             const heavy = s.pressed('KeyR');
             const attack = heavy ? this.heavyCd <= 0 && this.specialCharge >= 100 : s.mouse.pressed || s.pressed('KeyE');
@@ -3410,7 +3441,9 @@
                 s.emit({ k: 'sw', x: Math.round(me.x + 17), y: Math.round(me.y + 28), d: me.face, a: +this.aim.toFixed(2), p: (this.hammer > 0 ? 1.6 : 1) * (heavy ? 3 : 1), h: heavy ? 1 : 0, by: s.user.id, c: (this.dmg | 0) });
                 this.particles.burst(me.x + 17 + Math.cos(this.aim) * 70, me.y + 28 + Math.sin(this.aim) * 70, '#fde68a', heavy ? 32 : 8, heavy ? 420 : 200, heavy ? .65 : .25, heavy ? 7 : 4);
             }
+            const wasAir = !me.onGround, landingSpeed = me.vy;
             moveBody(me, this.solids, dt);
+            if (wasAir && me.onGround && landingSpeed > 420) this.landingPose = .16;
             const drag = me.onGround ? 1 : 0;
             if (drag && this.stun > 0) me.vx *= 0.92;
 
@@ -3604,7 +3637,8 @@
         net() {
             const m = this.me;
             return { x: Math.round(m.x), y: Math.round(m.y), vx: Math.round(m.vx), vy: Math.round(m.vy), f: m.face, a: this.state,
-                ex: { d: Math.round(this.dmg), h: this.hammer > 0 ? 1 : 0, hv: this.swingHeavy ? 1 : 0, i: this.invuln > 0 ? 1 : 0, t: +(this.aim || 0).toFixed(2), k: this.kos, f: this.falls, sh: Math.round(this.shield) } };
+                ex: { d: Math.round(this.dmg), h: this.hammer > 0 ? 1 : 0, hv: this.swingHeavy ? 1 : 0, i: this.invuln > 0 ? 1 : 0, t: +(this.aim || 0).toFixed(2), k: this.kos, f: this.falls, sh: Math.round(this.shield),
+                    g: Boolean(m.onGround), jp: this.jumpPulse || 0, j: this.airJumpPulse || 0, l: this.landingPose || 0, dp: this.dashPose || 0 } };
         }
 
         goalText() { return `${this.kos} KOs · ${Math.round(this.dmg)}% damage · Special ${this.heavyCd > 0 ? `${this.heavyCd.toFixed(1)}s` : this.specialCharge >= 100 ? 'READY' : `${Math.floor(this.specialCharge)}%`}`; }
@@ -3612,9 +3646,11 @@
         touchHint() { return 'Joystick to move · Jump for an air jump · Tap to swing · Charge Special by holding the hill or hitting rivals: 3x power, 10 energy, 12s cooldown'; }
         hint() { return 'A/D move · Space jump twice · S guard · E/click swing · R Special (charge on hill/hits, 3x power, 10 energy, 12s cooldown) · Shift/F dodge · Down fast-fall · Q recharge'; }
 
-        drawFighter(ctx, x, y, who, face, state, dmg, name, hammer, swingAge, alpha, you, aim, swingAim, heavySwing = false, shield = 100) {
+        drawFighter(ctx, x, y, who, face, state, dmg, name, hammer, swingAge, alpha, you, aim, swingAim, heavySwing = false, shield = 100, motion = {}) {
             const color = who.color;
-            drawRunner(ctx, x, y, 34, 56, who, face, this.anim, state === 1 ? 1 : 0, alpha);
+            drawRunner(ctx, x, y, 34, 56, who, face, this.anim, state, alpha,
+                { ...motion, airborne: state === 2, dashing: state === 6,
+                    lean: heavySwing && state === 3 ? face * .14 * Math.sin(clamp(swingAge / .45, 0, 1) * Math.PI) : 0 });
             const cx = x + 34 / 2, cy = y + 28;
             const duration = heavySwing ? 0.45 : 0.22;
             const swinging = state === 3 || swingAge < duration;
@@ -3631,6 +3667,12 @@
                 ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 8 * (1 - sweepProgress) + 2;
                 ctx.globalAlpha = alpha * (1 - sweepProgress);
                 ctx.beginPath(); ctx.arc(0, 0, reach * Math.min(1, sweepProgress * 3), base - 1.1, base + 1.1); ctx.stroke();
+                if (sweepProgress > .18) {
+                    const impact = (sweepProgress - .18) / .82;
+                    ctx.globalAlpha = alpha * (1 - impact) * .65;
+                    ctx.strokeStyle = '#fef3c7'; ctx.lineWidth = 5 * (1 - impact) + 1;
+                    ctx.beginPath(); ctx.ellipse(face * 38, 26, 25 + impact * 120, 8 + impact * 24, 0, 0, TAU); ctx.stroke();
+                }
                 ctx.globalAlpha = alpha;
             }
             if (swinging && strike > 0 && sweepProgress < .85) {
@@ -3702,11 +3744,14 @@
             for (const r of s.remoteList()) {
                 if (r.a === 5 || !visible(r.x, r.y, 34, 56)) continue;
                 const swingAge = r.swing ? (performance.now() - r.swing) / 1000 : 9;
-                this.drawFighter(ctx, r.x, r.y, r, r.f || 1, r.a, r.ex?.d || 0, r.name, r.ex?.h, swingAge, r.ex?.i ? 0.5 : 0.95, false, r.ex?.t, r.swingAim, r.swingHeavy ?? Boolean(r.ex?.hv), r.ex?.sh ?? 100);
+                this.drawFighter(ctx, r.x, r.y, r, r.f || 1, r.a, r.ex?.d || 0, r.name, r.ex?.h, swingAge, r.ex?.i ? 0.5 : 0.95, false, r.ex?.t, r.swingAim, r.swingHeavy ?? Boolean(r.ex?.hv), r.ex?.sh ?? 100,
+                    { vx: r.vx, vy: r.vy, grounded: r.ex?.g === true, dashAmount: Number.isFinite(r.ex?.dp) ? r.ex.dp : undefined,
+                        jump: Number.isFinite(r.ex?.jp) ? r.ex.jp : 0, doubleJump: Number.isFinite(r.ex?.j) ? r.ex.j : 0, landing: Number.isFinite(r.ex?.l) ? r.ex.l : 0 });
             }
             if (this.respawn <= 0) {
                 const alpha = this.invuln > 0 ? 0.55 + Math.sin(this.anim * 22) * 0.25 : 1;
-                this.drawFighter(ctx, me.x, me.y, s.local, me.face, this.state, this.dmg, 'You', this.hammer > 0, this.swingT > 0 ? (this.swingHeavy ? 0.45 : 0.22) - this.swingT : 9, alpha, true, this.aim, this.swingAim, this.swingHeavy, this.shield);
+                this.drawFighter(ctx, me.x, me.y, s.local, me.face, this.state, this.dmg, 'You', this.hammer > 0, this.swingT > 0 ? (this.swingHeavy ? 0.45 : 0.22) - this.swingT : 9, alpha, true, this.aim, this.swingAim, this.swingHeavy, this.shield,
+                    { vx: me.vx, vy: me.vy, grounded: me.onGround, dashAmount: this.dashPose, jump: this.jumpPulse, doubleJump: this.airJumpPulse, landing: this.landingPose });
                 if (!s.preview) {
                     ctx.fillStyle = '#1e293b'; ctx.fillRect(me.x - 8, me.y - 42, 50, 6);
                     ctx.fillStyle = this.specialCharge >= 100 && this.heavyCd <= 0 ? '#fef08a' : '#f59e0b';

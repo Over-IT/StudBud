@@ -1,5 +1,67 @@
--- Optional account MFA: enable TOTP in Supabase Dashboard > Authentication > Multi-Factor Authentication.
--- Supabase Auth has TOTP enabled by default; clients can enroll and verify authenticator apps.
+-- Username/password signup needs Confirm email OFF. Optional email codes need SMTP and {{ .Token }} templates.
+-- Keep TOTP verification enabled until existing enrolled accounts have removed their factors.
+create or replace function public.studbud_name_is_blocked(p_name text)
+returns boolean
+language sql
+immutable
+set search_path = public, pg_temp
+as $$
+    with folded as (
+        select translate(regexp_replace(normalize(lower(coalesce(p_name, '')), NFKD), U&'[\0300-\036f]', '', 'g'),
+            '01345789@$!', 'oieastbgasi') as value
+    ), blocked_words as (
+        select string_agg(array_to_string(regexp_split_to_array(word, ''), '[^a-z]*'), '|') as pattern
+        from unnest(array['ass', 'dick', 'cock', 'sex', 'penis', 'vagina', 'slut', 'whore', 'fag', 'kys']) as words(word)
+    )
+    select regexp_replace(value, '[^a-z]', '', 'g')
+        ~ 'f+u+c+k+|s+h+i+t+|b+i+t+c+h+|c+u+n+t+|n+i+g+(e+r+|a+)|f+a+g+o+t+|p+o+r+n+|h+e+i+l+h+i+t+l+e+r+|k+i+l+y+o+u+r+s+e+l+f+'
+        or value ~ ('(^|[^a-z])(' || pattern || ')([^a-z]|$)')
+    from folded cross join blocked_words;
+$$;
+
+-- Keep application indexes off Supabase's managed auth tables.
+create table if not exists public.studbud_username_claims (
+    user_id uuid primary key references auth.users (id) on delete cascade deferrable initially deferred,
+    username text not null unique check (username = lower(username))
+);
+alter table public.studbud_username_claims enable row level security;
+revoke all on table public.studbud_username_claims from public, anon, authenticated;
+
+insert into public.studbud_username_claims (user_id, username)
+    select id, lower(raw_user_meta_data ->> 'username')
+    from auth.users where raw_user_meta_data ->> 'username' is not null
+    on conflict (user_id) do update set username = excluded.username;
+
+create or replace function public.studbud_guard_username()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_name text := new.raw_user_meta_data ->> 'username';
+begin
+    if tg_op = 'UPDATE' then
+        if v_name is not distinct from (old.raw_user_meta_data ->> 'username') then return new; end if;
+    end if;
+    if v_name is not null and (
+        v_name !~ '^[A-Za-z0-9_]{3,24}$' or public.studbud_name_is_blocked(v_name)
+    ) then raise exception 'Choose an appropriate username with 3-24 letters, numbers, or underscores.'; end if;
+    if v_name is null then
+        delete from public.studbud_username_claims where user_id = new.id;
+    else
+        insert into public.studbud_username_claims (user_id, username)
+            values (new.id, lower(v_name))
+            on conflict (user_id) do update set username = excluded.username;
+    end if;
+    return new;
+end;
+$$;
+drop trigger if exists studbud_guard_username_trigger on auth.users;
+create trigger studbud_guard_username_trigger
+    before insert or update of raw_user_meta_data on auth.users
+    for each row execute function public.studbud_guard_username();
+
 create table if not exists public.studbud_user_data (
     user_id uuid primary key references auth.users (id) on delete cascade,
     data jsonb not null,
@@ -1196,6 +1258,7 @@ begin
     if char_length(v_nickname) not between 2 and 20 or v_nickname !~ '^[A-Za-z0-9 _-]+$' then
         raise exception 'Nickname must be 2–20 letters, numbers, spaces, underscores, or hyphens.';
     end if;
+    if public.studbud_name_is_blocked(v_nickname) then raise exception 'Nickname contains inappropriate language. Please choose a different name.'; end if;
     if coalesce(p_mode, '') not in ('classic', 'rush', 'survival', 'skyline', 'river', 'market', 'miner', 'duel', 'crypto', 'shooter', 'fishing', 'hack', 'chess', 'defense') then raise exception 'Choose a valid game mode.'; end if;
     if v_goal_type not in ('points', 'time') then raise exception 'Choose a valid match goal.'; end if;
     if p_mode = 'chess' then v_goal_type := 'points'; v_time_limit := 0; v_reward := 1; end if;
@@ -1203,7 +1266,7 @@ begin
     if p_mode not in ('chess', 'defense') and v_time_limit not between 60 and 3600 then
         raise exception 'Choose a time limit between 1 minute and 1 hour.';
     end if;
-    if p_mode <> 'chess' and (v_reward not between 5 and 100 or v_reward % 5 <> 0) then raise exception 'Choose resources per answer from 5 to 100 in increments of 5.'; end if;
+    if p_mode <> 'chess' and v_reward not between 5 and 100 then raise exception 'Choose a whole-number resource amount from 5 to 100.'; end if;
     if jsonb_typeof(v_cards) is distinct from 'array' then raise exception 'The selected deck is invalid.'; end if;
     if jsonb_array_length(v_cards) < 1 then raise exception 'A hosted game needs at least one card.'; end if;
     if exists (
@@ -1231,6 +1294,7 @@ begin
             'public_deck_id', (select d.id from public.studbud_community_decks d where d.id::text = p_options ->> 'public_deck_id'),
             'source_deck_id', left(p_options ->> 'source_deck_id', 100),
             'staff_test', v_staff_test,
+            'allow_late_join', p_mode <> 'chess' and coalesce((p_options ->> 'allow_late_join')::boolean, false),
             'seed', case when v_staff_test then (p_options ->> 'seed')::bigint else null end,
             'players', jsonb_build_array(jsonb_build_object(
                 'id', v_user_id::text, 'nickname', v_nickname, 'score', 0,
@@ -1286,18 +1350,23 @@ declare
     v_room public.studbud_game_rooms%rowtype;
     v_players jsonb;
     v_cosmetics jsonb;
+    v_team integer;
 begin
     if v_user_id is null then raise exception 'Sign in to join a game.'; end if;
     if char_length(v_nickname) not between 2 and 20 or v_nickname !~ '^[A-Za-z0-9 _-]+$' then
         raise exception 'Nickname must be 2–20 letters, numbers, spaces, underscores, or hyphens.';
     end if;
+    if public.studbud_name_is_blocked(v_nickname) then raise exception 'Nickname contains inappropriate language. Please choose a different name.'; end if;
 
     select * into v_room
     from public.studbud_game_rooms
     where room_code = upper(btrim(p_code)) and expires_at > now()
     for update;
     if not found then raise exception 'Room not found or expired. Check the code and try again.'; end if;
-    if v_room.status <> 'waiting' then raise exception 'This game has already started.'; end if;
+    if v_room.status = 'finished' or (v_room.status = 'playing' and v_room.goal_type = 'time'
+        and v_room.started_at + make_interval(secs => v_room.time_limit_seconds) <= now()) then
+        raise exception 'This game has finished.';
+    end if;
     if coalesce((v_room.state ->> 'staff_test')::boolean, false) and (
         public.studbud_is_guest() or not (public.studbud_is_admin() or public.studbud_has_user_tag(v_user_id, 'tester'))
     ) then raise exception 'Only testers and administrators can join staff test rooms.'; end if;
@@ -1307,6 +1376,9 @@ begin
         select 1 from jsonb_array_elements(v_players) as item(player)
         where player ->> 'id' = v_user_id::text
     ) then return public.studbud_game_room_view(v_room); end if;
+    if v_room.status <> 'waiting' and (
+        v_room.mode = 'chess' or not coalesce((v_room.state ->> 'allow_late_join')::boolean, false)
+    ) then raise exception 'This game has already started and late joining is disabled.'; end if;
     if v_room.mode = 'duel' and jsonb_array_length(v_players) >= 8 then
         raise exception 'This 1v1 room already has both players.';
     end if;
@@ -1333,6 +1405,22 @@ begin
         updated_at = now()
     where id = v_room.id
     returning * into v_room;
+
+    if v_room.mode = 'defense' and v_room.status = 'playing' then
+        select case when count(*) filter (where value = '0') <= count(*) filter (where value = '1')
+            then 0 else 1 end into v_team
+        from jsonb_each_text(coalesce(v_room.state -> 'defense_teams', '{}'::jsonb)) as teams(key, value)
+        where exists (select 1 from jsonb_array_elements(v_players) as roster(player) where player ->> 'id' = key);
+        update public.studbud_game_rooms
+        set state = jsonb_set(state, '{defense_teams}',
+            coalesce(state -> 'defense_teams', '{}'::jsonb) || jsonb_build_object(v_user_id::text, v_team))
+        where id = v_room.id returning * into v_room;
+        if v_room.state ? 'defense' then
+            update public.studbud_game_rooms
+            set state = jsonb_set(state, '{defense,teams}', state -> 'defense_teams')
+            where id = v_room.id returning * into v_room;
+        end if;
+    end if;
 
     return public.studbud_game_room_view(v_room);
 end;
@@ -1425,6 +1513,7 @@ begin
             'public_deck_id', v_room.state -> 'public_deck_id',
             'source_deck_id', v_room.state -> 'source_deck_id',
             'staff_test', coalesce((v_room.state ->> 'staff_test')::boolean, false),
+            'allow_late_join', coalesce((v_room.state ->> 'allow_late_join')::boolean, false),
             'seed', v_room.state -> 'seed',
             'question_index', 0,
             'question_reward', coalesce((v_room.state ->> 'question_reward')::integer, 20),
@@ -1962,10 +2051,16 @@ begin
         or (v_winner is not null and v_winner not in ('0', '1')) then
         raise exception 'Invalid Tower Defense battle state.';
     end if;
+    if exists (select 1 from jsonb_each(p_state -> 'teams') c(key, value)
+        where value is distinct from v_room.state -> 'defense_teams' -> key) then
+        raise exception 'Invalid team economy or roster.';
+    end if;
+    -- A queued save may precede a late arrival; retain the server's full team map.
+    p_state := jsonb_set(p_state, '{teams}', v_room.state -> 'defense_teams');
     if jsonb_array_length(p_state -> 'health') <> 2
         or jsonb_array_length(p_state -> 'wallets') <> 2
         or jsonb_array_length(p_state -> 'damage') <> 2
-        or jsonb_array_length(p_state -> 'troops') > 12 * (select count(*) from jsonb_object_keys(p_state -> 'teams'))
+        or jsonb_array_length(p_state -> 'troops') > 80
         or jsonb_array_length(p_state -> 'enemies') > 120
         or exists (select 1 from jsonb_array_elements_text((p_state -> 'health') || (p_state -> 'wallets') || (p_state -> 'damage')) c(value)
             where value is null or value !~ '^[0-9]{1,9}$')
@@ -2001,10 +2096,10 @@ begin
         raise exception 'Invalid troops or enemies.';
     end if;
     if exists (select 1 from jsonb_array_elements(p_state -> 'troops') c(unit)
-        group by unit ->> 'owner' having count(*) > 12)
+        group by unit ->> 'team' having count(*) > 40)
         or exists (select 1 from jsonb_array_elements(p_state -> 'troops') c(unit)
             group by unit ->> 'x', unit ->> 'y' having count(*) > 1) then
-        raise exception 'Invalid per-player tower limits or occupied grid cells.';
+        raise exception 'Invalid team tower limits or occupied grid cells.';
     end if;
     if exists (select 1 from jsonb_array_elements(p_state -> 'troops') c(unit)
         where (unit ->> 'x')::numeric < 0 or (unit ->> 'x')::numeric > 2200
@@ -2087,7 +2182,7 @@ grant execute on function public.studbud_leave_game_room(text) to authenticated;
 
 
 -- ============================================================================
--- Admin tools: only the "overit" and "andy" accounts (emails overit@/andy@accounts.studbud.invalid)
+-- Preserve the existing admin account IDs when they link real email addresses.
 -- Every function re-checks the caller on the server, so the client can't bypass it.
 -- ============================================================================
 create table if not exists public.studbud_banned_users (
@@ -2113,6 +2208,21 @@ $$;
 revoke all on function public.studbud_current_user_can_publish_community_decks() from public, anon, authenticated;
 grant execute on function public.studbud_current_user_can_publish_community_decks() to authenticated;
 
+do $$
+begin
+    if to_regclass('public.studbud_admin_accounts') is null then
+        create table public.studbud_admin_accounts (
+            user_id uuid primary key references auth.users (id) on delete cascade
+        );
+        insert into public.studbud_admin_accounts (user_id)
+            select id from auth.users
+            where lower(email) in ('overit@accounts.studbud.invalid', 'andy@accounts.studbud.invalid');
+    end if;
+end;
+$$;
+alter table public.studbud_admin_accounts enable row level security;
+revoke all on table public.studbud_admin_accounts from public, anon, authenticated;
+
 create or replace function public.studbud_is_admin()
 returns boolean
 language sql
@@ -2121,8 +2231,7 @@ security definer
 set search_path = public, pg_temp
 as $$
     select exists (
-        select 1 from auth.users
-        where id = auth.uid() and         lower(email) in ('overit@accounts.studbud.invalid', 'andy@accounts.studbud.invalid')
+        select 1 from public.studbud_admin_accounts where user_id = auth.uid()
     );
 $$;
 
@@ -2231,8 +2340,7 @@ begin
     if not public.studbud_is_admin() and (
         p_user_id = auth.uid()
         or public.studbud_has_user_tag(p_user_id, 'moderator')
-        or exists (select 1 from auth.users where id = p_user_id
-            and lower(raw_user_meta_data ->> 'username') in ('overit', 'andy'))
+        or exists (select 1 from public.studbud_admin_accounts where user_id = p_user_id)
     ) then
         raise exception 'Only administrators can moderate staff accounts or your own account.';
     end if;
@@ -2406,27 +2514,31 @@ declare
     v_uid uuid := auth.uid();
     v_name text := lower(trim(coalesce(p_username, '')));
     v_email text;
+    v_legacy boolean;
     st public.studbud_username_state;
 begin
     if public.studbud_is_guest() then raise exception 'Create a free account to use this. Your guest data comes with you.'; end if;
     if v_uid is null then raise exception 'Sign in first.'; end if;
     if public.studbud_is_admin() then raise exception 'The admin account''s username can''t be changed.'; end if;
     if v_name !~ '^[a-z0-9_]{3,24}$' then raise exception 'Username must be 3-24 characters and contain only letters, numbers, or underscores.'; end if;
+    if public.studbud_name_is_blocked(v_name) then raise exception 'Username contains inappropriate language. Please choose a different name.'; end if;
     select * into st from public.studbud_username_state where user_id = v_uid;
     if found and not st.force_change and st.changed_at is not null and st.changed_at > now() - interval '7 days' then
         raise exception 'You can change your username once a week. Try again after %.', to_char(st.changed_at + interval '7 days', 'Mon DD, HH24:MI "UTC"');
     end if;
-    v_email := v_name || '@accounts.studbud.invalid';
-    if exists (select 1 from auth.users where id = v_uid and lower(email) = v_email) then raise exception 'That is already your username.'; end if;
-    if exists (select 1 from auth.users where id <> v_uid and lower(email) = v_email) then raise exception 'That username is already taken.'; end if;
+    if exists (select 1 from auth.users where id = v_uid and lower(raw_user_meta_data ->> 'username') = v_name) then raise exception 'That is already your username.'; end if;
+    if exists (select 1 from auth.users where id <> v_uid and lower(raw_user_meta_data ->> 'username') = v_name) then raise exception 'That username is already taken.'; end if;
+    select email, lower(email) like '%@accounts.studbud.invalid' into v_email, v_legacy
+        from auth.users where id = v_uid;
+    if v_legacy then v_email := v_name || '@accounts.studbud.invalid'; end if;
     update auth.users
         set email = v_email,
-            raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb) || jsonb_build_object('username', v_name, 'email', v_email),
+            raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb) || jsonb_build_object('username', v_name),
             updated_at = now()
         where id = v_uid;
     update auth.identities
         set identity_data = coalesce(identity_data, '{}'::jsonb) || jsonb_build_object('email', v_email), updated_at = now()
-        where user_id = v_uid and provider = 'email';
+        where user_id = v_uid and provider = 'email' and v_legacy;
     insert into public.studbud_username_state (user_id, changed_at, force_change) values (v_uid, now(), false)
     on conflict (user_id) do update set changed_at = now(), force_change = false;
     return jsonb_build_object('username', v_name);
@@ -2558,7 +2670,10 @@ begin
                 (f.requester_id = v_uid and f.addressee_id = r.host_id)
                 or (f.addressee_id = v_uid and f.requester_id = r.host_id)
             )
-            where r.status = 'waiting' and r.expires_at > now()
+            where (r.status = 'waiting' or (r.status = 'playing' and r.mode <> 'chess'
+                    and coalesce((r.state ->> 'allow_late_join')::boolean, false)
+                    and (r.goal_type <> 'time' or r.started_at + make_interval(secs => r.time_limit_seconds) > now())))
+                and r.expires_at > now()
                 and not public.studbud_is_hidden_user(r.host_id)
                 and jsonb_array_length(coalesce(r.state -> 'players', '[]'::jsonb))
                     < case when r.mode = 'chess' then 2 when r.mode = 'duel' then 8 else 16 end
@@ -2643,7 +2758,9 @@ begin
         left join lateral (
             select r.room_code, r.mode, r.status,
                 coalesce((r.state ->> 'staff_test')::boolean, false) as staff_test,
-                r.status = 'waiting'
+                (r.status = 'waiting' or (r.status = 'playing' and r.mode <> 'chess'
+                    and coalesce((r.state ->> 'allow_late_join')::boolean, false)
+                    and (r.goal_type <> 'time' or r.started_at + make_interval(secs => r.time_limit_seconds) > now())))
                     and jsonb_array_length(coalesce(r.state -> 'players', '[]'::jsonb))
                         < case when r.mode = 'chess' then 2 when r.mode = 'duel' then 8 else 16 end
                     and (not coalesce((r.state ->> 'staff_test')::boolean, false) or v_can_test) as joinable
@@ -2888,6 +3005,9 @@ as $$
 begin
     if public.studbud_is_guest() then raise exception 'Create a free account to use this. Your guest data comes with you.'; end if;
     if auth.uid() is null then raise exception 'Sign in first.'; end if;
+    if public.studbud_name_is_blocked(p_first_name) or public.studbud_name_is_blocked(p_last_name) then
+        raise exception 'Name contains inappropriate language. Please choose a different name.';
+    end if;
     insert into public.studbud_public_profiles (
         user_id, bio, favorite_subject, grade_level, study_goal, first_name, last_name, show_real_name, show_school, show_stats, updated_at
     )

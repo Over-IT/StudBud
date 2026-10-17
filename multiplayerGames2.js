@@ -343,6 +343,7 @@
             for (let y = y0; y <= y1 && !hit; y++) for (let x = x0; x <= x1; x++) if (this.tile(x, y) === 6) { hit = { x, y }; break; }
             if (!hit) return;
             this.lavaCd = 1.15; this.stun = Math.max(this.stun, 0.16);
+            this.s.sfx('burn', 1000);
             const lost = Math.min(this.carry, Math.max(1, Math.ceil(this.carry * 0.22)));
             if (lost) { this.carry -= lost; this.items = Math.max(0, this.items - 1); }
             const dx = me.x + me.w / 2 - (hit.x * TS + TS / 2), dy = me.y + me.h / 2 - (hit.y * TS + TS / 2), d = Math.hypot(dx, dy) || 1;
@@ -417,9 +418,8 @@
                     if (this.dig.tx !== tx || this.dig.ty !== ty) this.dig = { tx, ty, p: 0 };
                     this.dig.p += dt;
                     this.digClock += dt;
-                    if (this.digClock > 0.16) {
+                    if (this.digClock > TAU / 18) {
                         this.digClock = 0;
-                        s.sfx('mine', 140);
                         const color = type === 2 ? '#94a3b8' : '#a16207';
                         this.particles.burst(tx * TS + TS / 2, ty * TS + TS / 2, color, 2, 75, 0.3, 3);
                     }
@@ -455,8 +455,21 @@
             }
         }
 
-        onEvent(ev) {
-            if (ev.k === 'dg' && this.tile(ev.x, ev.y) !== 0) this.breakTile(ev.x, ev.y, ev.t, false);
+        miningSound(name, x, y) {
+            const distance = Math.hypot((x + .5) * TS - this.me.x - this.me.w / 2, (y + .5) * TS - this.me.y - this.me.h / 2);
+            if (distance < 900) this.s.sfx(name, 100, .65 * (1 - distance / 900) ** 2);
+        }
+
+        onEvent(ev, from) {
+            const tileEvent = ev.k === 'dg' && Number.isInteger(ev.x) && Number.isInteger(ev.y)
+                && ev.x > 0 && ev.x < COLS - 1 && ev.y >= 0 && ev.y < ROWS - 1;
+            if (tileEvent && from?.id !== this.s.user.id) {
+                const type = this.tile(ev.x, ev.y);
+                if (this.solid(type) && type !== 10) {
+                    this.breakTile(ev.x, ev.y, type, false);
+                    this.miningSound(CRYSTALS[type] ? 'crystal' : 'rockBreak', ev.x, ev.y);
+                }
+            }
             if (ev.k === 'lv' && Array.isArray(ev.cells)) for (const cell of ev.cells) {
                 if (cell && Number.isInteger(cell.x) && Number.isInteger(cell.y) && cell.x > 0 && cell.x < COLS - 1 && cell.y >= 4 && cell.y < ROWS - 1
                     && Number.isInteger(cell.d) && cell.d >= 0 && cell.d <= LAVA_SIDE_REACH
@@ -643,7 +656,7 @@
             }
             for (const r of s.remoteList()) {
                 if (!Number.isFinite(r.x) || !Number.isFinite(r.y) || !this.seen(r.x, r.y)) continue;
-                A.util.drawFigureSide(ctx, r, r.x, r.y, 26, 40, Number.isFinite(r.f) ? r.f : 1, this.anim + r.x * 0.01, r.a === 1, 0.82);
+                A.util.drawFigureSide(ctx, r, r.x, r.y, 26, 40, Number.isFinite(r.f) ? r.f : 1, this.anim + r.x * 0.01, r.a === 1, 0.82, null, r.a === 1);
                 const dig = r.ai?.dig;
                 if (dig && dig.progress > 0) {
                     const tx = dig.x * TS, ty = dig.y * TS, type = this.tile(dig.x, dig.y);
@@ -657,7 +670,7 @@
                 if (!this.s.preview) A.util.nameTag(ctx, r.name || '', r.x + 13, r.y - 12, r.color);
             }
             if (this.dig.tx >= 0 && this.dig.ty >= 0) this.drawMineProgress(ctx, this.dig.tx * TS, this.dig.ty * TS, this.dig.p / this.digDuration(this.tile(this.dig.tx, this.dig.ty), this.dig.ty));
-            A.util.drawFigureSide(ctx, s.local, me.x, me.y, me.w, me.h, me.face, this.anim, me.onGround, this.stun > 0 ? 0.72 : 1);
+            A.util.drawFigureSide(ctx, s.local, me.x, me.y, me.w, me.h, me.face, this.anim, me.onGround, this.stun > 0 ? 0.72 : 1, null, me.onGround);
             this.drawPickaxe(ctx, me.x + me.w / 2, me.y + 22, this.dig.p > 0 ? this.aimAngle || 0 : me.face < 0 ? Math.PI : 0, this.dig.p > 0, this.anim);
             if (this.carry > 0) {
                 ctx.fillStyle = '#fef3c7'; ctx.font = '900 11px system-ui'; ctx.textAlign = 'center';

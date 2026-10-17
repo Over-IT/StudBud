@@ -3,7 +3,7 @@
 
     const TAU = Math.PI * 2;
     const GAME_GOALS = {
-        skyline: 'Reach the summit before the rising tide',
+        skyline: 'Climb switchbacks to the summit; lower platforms can catch a fall',
         duel: 'Hold the glowing hill alone to earn time',
         river: 'Catch valuable fish and avoid river hazards',
         market: 'Deliver packages to marked destinations',
@@ -15,7 +15,7 @@
         fishing: 'Catch fish to build the most valuable haul',
         hack: 'Hack terminals to earn the most payouts'
     };
-    const sfx = (name, gap) => { if (window.StudBudArcade?.previewDepth > 0) return; try { window.StudBudSfx?.play(name, 'game', gap); } catch (error) { /* audio is optional */ } };
+    const sfx = (name, gap, volume) => { if (window.StudBudArcade?.previewDepth > 0) return; try { window.StudBudSfx?.play(name, 'game', gap, volume); } catch (error) { /* audio is optional */ } };
     const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
     const lerp = (a, b, t) => a + (b - a) * t;
     const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
@@ -550,7 +550,7 @@
             this.graphics = graphicsProfile();
             this.returnFocus = document.activeElement;
             this.correct = 0;
-            this.reward = Math.min(100, Math.max(5, Math.round((Number(options.questionReward ?? this.room.state?.question_reward) || 20) / 5) * 5));
+            this.reward = Math.min(100, Math.max(5, Math.round(Number(options.questionReward ?? this.room.state?.question_reward) || 20)));
             this.mode = this.room.mode;
             if (this.mode === 'chess') this.reward = 1;
             this.code = this.room.room_code;
@@ -716,7 +716,7 @@
         remoteList() { return [...this.remotes.values()]; }
 
         // ---------- scoring / end of match ----------
-        sfx(name, gap) { if (!this.preview) sfx(name, gap); }
+        sfx(name, gap, volume) { if (!this.preview) sfx(name, gap, volume); }
 
         addScore(n) {
             this.score = Math.max(0, this.score + n);
@@ -810,7 +810,7 @@
             const me = this.standingsCache.findIndex(row => row.id === this.user.id);
             window.NexusApp?.saveGameSummary?.(this).catch(error => {
                 console.error('[Game] Could not save match summary:', error);
-                this.toast('Your match summary could not be saved. Check your connection and export a backup.', '#f87171');
+                this.toast('Your match summary could not be saved. Keep this page open, check your connection and try again.', '#f87171');
             });
             window.StudBudSfx?.stopMusic();
             const won = this.game?.isWinner ? this.game.isWinner(this.standingsCache, this.user.id) : me === 0;
@@ -1097,6 +1097,7 @@
                 else if (target.classList.contains('mpg-hud-toggle')) {
                     this.setHudCollapsed(!this.overlay.classList.contains('hud-collapsed'));
                 }
+                else if (target.classList.contains('mpg-checkpoint') && this.mode === 'skyline' && !this.over && !this.question && !this.countdown && !this.paused) this.game.returnToCheckpoint();
                 else if (target.classList.contains('mpg-test-pause') && this.testing) {
                     if (this.paused) {
                         const elapsed = Date.now() - this.testPauseAt;
@@ -1140,6 +1141,7 @@
                     <div class="mpg-chip"><strong class="mpg-name"></strong><span class="mpg-goal"></span>${this.testing ? '<small class="mpg-practice-indicator">Staff testing · infinite resources</small>' : this.practice ? '<small class="mpg-practice-indicator">Practice · no coins</small>' : ''}</div>
                     <div class="mpg-timer"></div>
                     <div class="mpg-actions">
+                        ${this.mode === 'skyline' ? '<button type="button" class="mpg-checkpoint" title="Return to your last saved checkpoint (R)">Return to checkpoint</button>' : ''}
                         <button type="button" class="mpg-hud-toggle" aria-expanded="true" aria-controls="mpg-match-details mpg-match-standings" aria-label="Hide match details and standings">HUD</button>
                         <details class="mpg-controls-help"><summary>Controls</summary><div class="mpg-help-panel"><div class="mpg-hint" id="mpg-controls-hint"></div></div></details>
                         <details class="mpg-audio-settings"><summary>Settings</summary><div class="mpg-audio-panel">
@@ -1153,7 +1155,6 @@
                             <label class="mpg-test-range">Fly speed <output data-test-speed-label aria-label="Selected fly speed">600 units/s</output><input type="range" min="100" max="3000" step="100" value="600" data-test-speed aria-label="Fly speed"></label>
                             <label><input type="checkbox" data-test-cheat="invincible"> Invincibility</label>
                             <label><input type="checkbox" data-test-cheat="freeze"> Freeze machinery and moving platforms</label>
-                            <label><input type="checkbox" data-test-cheat="tide"> Disable rising tide</label>
                             <label>Biome <select data-test-biome aria-label="Test biome">${window.StudBudArcade.games.skyline.testDestinations.map(place => `<option value="${place.id}">${esc(place.name)}</option>`).join('')}</select></label>
                             <div class="mpg-test-teleport"><button type="button" data-test-action="teleport">Teleport</button><button type="button" data-test-action="checkpoint">Reset checkpoint</button></div>` : ''}<pre class="mpg-test-stats"></pre></div></details>` : ''}
                         <button type="button" class="mpg-end ${this.isHost && !this.practice ? '' : 'hidden'}">End match</button>
@@ -1209,7 +1210,7 @@
             this.bindTouch(overlay);
             overlay.addEventListener('input', event => {
                 const cheat = event.target.dataset.testCheat;
-                const cheatKeys = { flight: 'testFlight', invincible: 'testInvincible', freeze: 'testFreezeHazards', tide: 'testNoTide' };
+                const cheatKeys = { flight: 'testFlight', invincible: 'testInvincible', freeze: 'testFreezeHazards' };
                 if (this.testing && this.mode === 'skyline' && Object.hasOwn(cheatKeys, cheat)) {
                     this[cheatKeys[cheat]] = event.target.checked;
                     if (this.testFlight || this.testInvincible) this.game.dead = 0;
@@ -2618,17 +2619,25 @@
         ctx.restore();
     }
 
-    function drawFigureSide(ctx, p, x, y, w, h, face, time, running, alpha = 1) {
+    function drawSideLeg(ctx, x, y, length, angle, face, color, width) {
+        ctx.save(); ctx.translate(x, y); ctx.rotate(-angle * face);
+        ctx.fillStyle = color; ctx.fillRect(-width / 2, 0, width, length);
+        ctx.restore();
+    }
+
+    function drawFigureSide(ctx, p, x, y, w, h, face, time, running, alpha = 1, pose = null, grounded = true) {
         const c = who(p);
         const body = c.skin?.body || c.color;
         const head = c.skin?.head || '#fde7c8';
         const cx = x + w / 2;
         const run = running ? Math.sin(time * 18) : 0;
-        const bob = running ? Math.abs(Math.sin(time * 9)) * 1.5 : Math.sin(time * 3) * 0.8;
+        const bob = pose ? pose.bob : running ? Math.abs(Math.sin(time * 9)) * 1.5 : Math.sin(time * 3) * 0.8;
         ctx.save();
         ctx.globalAlpha = alpha * (c.skin?.alpha || 1);
-        ctx.fillStyle = 'rgba(0,0,0,.25)';
-        ctx.fillRect(x + 2, y + h - 2, w - 4, 3);
+        if (grounded) {
+            ctx.fillStyle = 'rgba(0,0,0,.25)';
+            ctx.fillRect(x + 2, y + h - 2, w - 4, 3);
+        }
         if (c.skin?.mythic) drawMythicAura(ctx, cx, y + h * 0.45, Math.max(w, h) * 0.75, c.skin.mythic, time);
         drawCosmeticParticles(ctx, c.effect, cx, y + h * .5, w * .8, h * .55, time, c.hat ? h * .45 : 0);
         if (c.acc === 'acc_wings') {
@@ -2677,8 +2686,13 @@
             ctx.beginPath(); ctx.arc(cx - face * (w * 0.8 + 6), y + h - 30 + bob, 4, 0, TAU); ctx.fill();
         }
         ctx.fillStyle = c.skin?.trim || '#1e293b';
-        ctx.fillRect(cx - 8 + run * 5, y + h - 14, 7, 14);
-        ctx.fillRect(cx + 1 - run * 5, y + h - 14, 7, 14);
+        if (pose) {
+            drawSideLeg(ctx, cx - face * 4.5, y + h - 14 + bob, 14, pose.legs[1], face, ctx.fillStyle, 7);
+            drawSideLeg(ctx, cx + face * 4.5, y + h - 14 + bob, 14, pose.legs[0], face, ctx.fillStyle, 7);
+        } else {
+            ctx.fillRect(cx - 8 + run * 5, y + h - 14, 7, 14);
+            ctx.fillRect(cx + 1 - run * 5, y + h - 14, 7, 14);
+        }
         if (c.acc === 'acc_guitar') {
             ctx.save(); ctx.translate(cx - face * w * 0.55, y + 26 + bob); ctx.rotate(face * 0.5);
             ctx.fillStyle = '#92400e'; ctx.beginPath(); ctx.ellipse(0, 6, 7, 9, 0, 0, TAU); ctx.fill();
