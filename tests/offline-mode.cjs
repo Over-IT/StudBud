@@ -13,7 +13,7 @@ const sandbox = {
     document: {
         querySelectorAll: () => [], addEventListener() {},
         getElementById: id => {
-            if (!nodes.has(id)) nodes.set(id, { textContent: '', classList: { toggle() {}, add() {}, remove() {} }, addEventListener() {} });
+            if (!nodes.has(id)) nodes.set(id, { textContent: '', classList: { toggle() {}, add() {}, remove() {} }, addEventListener() {}, removeAttribute() {} });
             return nodes.get(id);
         }
     },

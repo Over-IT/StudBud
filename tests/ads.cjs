@@ -74,6 +74,7 @@ const settle = async () => { await Promise.resolve(); await Promise.resolve(); }
     f.setRoute('home'); f.refresh(); await settle();
     assert.deepEqual(f.pushes, ['shop', 'home']);
     const ad = f.slots[0].children.find(child => child.className === 'adsbygoogle');
+    assert.equal(f.slots[0].children[0].textContent, 'Advertisements');
     assert.equal(ad.dataset.adClient, f.window.STUDBUD_ADS.client);
     assert.equal(ad.dataset.adSlot, '111');
     assert.equal(ad.dataset.adFormat, 'horizontal');
@@ -96,5 +97,6 @@ const settle = async () => { await Promise.resolve(); await Promise.resolve(); }
     const sw = fs.readFileSync(path.join(__dirname, '..', 'service-worker.js'), 'utf8');
     assert.ok(sw.includes("'./ads.js'"));
     assert.ok(!sw.includes('googlesyndication.com'), 'ad scripts are not added to service-worker caches');
+    assert.ok(source.includes('#auth-screen,'), 'sign-in screens suppress banners even if a previous route remains active');
     console.log('Ads checks passed: collapsed defaults, lazy visible-only requests, safe navigation, no refreshes, offline/focus/dialog suppression and failure handling.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

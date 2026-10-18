@@ -149,15 +149,18 @@
             this.showAuth();
             if (this.authMode === 'signup') this.setAuthMode('signup');
             if (window.navigator?.onLine === false || localStorage.getItem('STUDBUD_LOCAL_MODE') === 'true') return this.startOffline();
-            const config = window.STUDBUD_SUPABASE_CONFIG || {};
-            if (!config.url || !config.anonKey) {
-                this.showAuth();
-                this.setConfigError('Account sync needs Supabase project settings. Add your project URL and anon key to supabase-config.js, then reload.');
+            let config;
+            try {
+                config = await this.loadAccountConfig();
+            } catch (error) {
+                console.error('[StudBudCloud] Account settings could not load:', error);
+                this.setConfigError('Sign-in connection settings could not load. Check your connection and try again, or continue as a guest. Your saved data is still on this device.');
                 return;
             }
             if (!window.supabase?.createClient) {
                 throw new Error('Supabase could not load. Check your internet connection and reload.');
             }
+            this.clearConfigError();
             this.client = window.supabase.createClient(config.url, config.anonKey);
             const { data: authListener } = this.client.auth.onAuthStateChange((event, session) => {
                 if (this.offlineMode) {
@@ -189,6 +192,17 @@
         bindAuthUI() {
             if (this.authUiBound) return;
             this.authUiBound = true;
+            document.getElementById('auth-config-retry')?.addEventListener('click', async event => {
+                const button = event.currentTarget;
+                button.disabled = true;
+                try {
+                    await this.connectOnline();
+                } catch (error) {
+                    this.reportAccountError(error);
+                } finally {
+                    button.disabled = false;
+                }
+            });
             document.getElementById('auth-switch-btn')?.addEventListener('click', () => this.setAuthMode(this.authMode === 'login' ? 'signup' : 'login'));
             document.getElementById('login-form')?.addEventListener('submit', event => this.handleLogin(event));
             document.getElementById('signup-form')?.addEventListener('submit', event => this.handleSignup(event));
@@ -357,19 +371,6 @@
             this.offlineMode = false;
             localStorage.removeItem('STUDBUD_LOCAL_MODE');
             this.updateOfflineNotice();
-            if (!this.client && this.appStarted && !window.STUDBUD_SUPABASE_CONFIG?.url) {
-                const script = document.createElement('script');
-                script.src = 'supabase-config.js';
-                try {
-                    await new Promise((resolve, reject) => {
-                        script.onload = resolve;
-                        script.onerror = () => reject(new Error('Could not load account connection settings. Your data remains saved on this device.'));
-                        document.head.appendChild(script);
-                    });
-                } finally {
-                    script.remove();
-                }
-            }
             if (!this.client) return this.bootstrap();
             const { data, error } = await this.client.auth.getSession();
             if (error) throw error;
@@ -393,12 +394,50 @@
             document.getElementById('auth-screen')?.classList.remove('hidden');
         }
 
+        async loadAccountConfig() {
+            const ready = () => window.STUDBUD_SUPABASE_CONFIG?.url && window.STUDBUD_SUPABASE_CONFIG?.anonKey;
+            if (ready()) return window.STUDBUD_SUPABASE_CONFIG;
+            if (!this.configLoading) {
+                this.configLoading = (async () => {
+                    const script = document.createElement('script');
+                    script.src = 'supabase-config.js';
+                    let timeout;
+                    try {
+                        await new Promise((resolve, reject) => {
+                            script.onload = resolve;
+                            script.onerror = () => reject(new Error('Account connection settings could not be downloaded.'));
+                            timeout = window.setTimeout(() => reject(new Error('Account connection settings timed out.')), 8000);
+                            document.head.appendChild(script);
+                        });
+                        if (!ready()) throw new Error('The account configuration is missing its project URL or publishable key.');
+                        return window.STUDBUD_SUPABASE_CONFIG;
+                    } finally {
+                        window.clearTimeout(timeout);
+                        script.remove();
+                    }
+                })();
+            }
+            try {
+                return await this.configLoading;
+            } finally {
+                this.configLoading = null;
+            }
+        }
+
+        clearConfigError() {
+            document.getElementById('auth-config-message')?.classList.add('hidden');
+            document.getElementById('auth-config-retry')?.classList.add('hidden');
+            document.querySelectorAll('#login-form button, #signup-form button').forEach(button => { button.disabled = false; });
+            document.getElementById('auth-switch-btn')?.removeAttribute('disabled');
+        }
+
         setConfigError(message) {
             const notice = document.getElementById('auth-config-message');
             if (notice) {
                 notice.textContent = message;
                 notice.classList.remove('hidden');
             }
+            document.getElementById('auth-config-retry')?.classList.remove('hidden');
             document.querySelectorAll('#login-form button, #signup-form button').forEach(button => { button.disabled = true; });
             document.getElementById('auth-switch-btn')?.setAttribute('disabled', 'true');
         }

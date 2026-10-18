@@ -14,7 +14,7 @@ window.STUDBUD_ADS = window.STUDBUD_ADS || {
     const blocked = () => navigator.onLine === false || window.StudBudCloud?.offlineMode
         || document.hidden || document.body.classList.contains('tutorial-active')
         || document.body.classList.contains('studying')
-        || [...document.querySelectorAll('#active-study-area, .mpg-overlay, .unbox-overlay, #modal-container, .user-profile-overlay, [role="dialog"]')].some(visible);
+        || [...document.querySelectorAll('#auth-screen, #active-study-area, .mpg-overlay, .unbox-overlay, #modal-container, .user-profile-overlay, [role="dialog"]')].some(visible);
     const configured = slot => /^ca-pub-\d{16}$/.test(window.STUDBUD_ADS?.client || '')
         && /^\d+$/.test(window.STUDBUD_ADS?.slots?.[slot.dataset.adPlacement] || '');
     const allowed = slot => configured(slot) && !blocked()
@@ -52,7 +52,7 @@ window.STUDBUD_ADS = window.STUDBUD_ADS || {
             if (!slot.firstElementChild) {
                 const label = document.createElement('small');
                 label.className = 'ad-slot-label';
-                label.textContent = 'Advertisement';
+                label.textContent = 'Advertisements';
                 const ad = document.createElement('ins');
                 ad.className = 'adsbygoogle';
                 ad.style.display = 'block';

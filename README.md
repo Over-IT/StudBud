@@ -35,6 +35,8 @@ On Chrome for desktop, use the install icon in the address bar or choose **Insta
 
 The app shell is cached for offline loading after the first visit. Internet access is needed for account sign-in and syncing, externally hosted fonts and icons, and chart libraries.
 
+If account connection settings fail to load, startup retries their script once. The sign-in screen then offers **Retry sign-in connection** without requiring a page reload; guest access remains available. A successful retry clears the warning and re-enables account forms. Run `node tests/cloud-config.cjs` for startup recovery, failure, retry and timeout checks.
+
 ## Ads
 
 Optional, non-sticky banner slots sit at the bottom of Home, the decks list, and the shop. They stay collapsed until configured and are hidden offline, during tutorials, study sessions, games, and dialogs. There are no interstitials, rewarded ads, videos, or automatic refreshes.
@@ -44,6 +46,8 @@ Use manual horizontal units and keep AdSense Auto ads, anchor ads and vignette a
 In `ads.js`, fill in `window.STUDBUD_ADS.client` with your AdSense publisher ID (`ca-pub-XXXXXXXXXXXXXXXX`) and `slots.home`, `slots.decks`, and/or `slots.shop` with the corresponding ad-unit slot IDs. Leave any unused slot empty. The Google script loads only when a configured banner enters the viewport. Use `window.StudBudAds.refresh()` after changing configuration at runtime. Ad blockers or network errors leave the app usable.
 
 Replace the commented example in `ads.txt` with your AdSense-authorized seller line and publish it at the **domain root** (for project-path hosting, this may require the root Pages repository or a custom domain). Follow AdSense approval, privacy/consent, and child-directed-content requirements before enabling ads; this integration does not supply a consent-management platform.
+
+Before enabling production ads, obtain site approval, configure a Google-certified CMP where required (including EEA/UK/Switzerland traffic), review the privacy notice and applicable teen/child-directed treatment, and verify the real units on desktop and mobile. Keep Auto ads off so account-level automatic placements cannot bypass the manual exclusions. Banner placement checks run with `node tests/ads.cjs`; they do not certify AdSense approval or legal compliance.
 
 ## Run locally
 
