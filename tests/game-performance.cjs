@@ -70,9 +70,13 @@ console.log('6000-frame meter DOM-query/write bounds, rounding, depleted state, 
     tick();
     assert.equal(sounds.length, 0);
     assert.equal(noticeQueries, 0, 'healthy resources do not query the notification DOM');
+    resource.value = 10.1; tick();
+    assert.equal(sounds.length, 0, 'warning does not trigger above ten energy');
+    assert.equal(noticeClasses.has('hidden'), true);
     resource.value = 10; tick();
     assert.equal(sounds.length, 1);
     assert.equal(sounds[0][0], 'lowResource');
+    assert.equal(sounds[0][2], .6, 'warning uses the quiet sound effect volume');
     assert.equal(text.textContent, 'Low energy');
     assert.equal(noticeClasses.has('hidden'), false);
     for (let i = 0; i < 600; i++) { actor.t += 1 / 60; tick(); }

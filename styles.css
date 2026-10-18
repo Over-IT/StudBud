@@ -4755,7 +4755,9 @@ input[type="button"], input[type="submit"], input[type="checkbox"], input[type="
 /* Low / empty resource warning */
 .mpg-overlay .mpg-meter.low { border: 1px solid #fbbf24; }
 .mpg-overlay .mpg-meter.low .mpg-meter-value { color: #fbbf24; }
-.mpg-overlay .mpg-recharge.mpg-resource-notice { position: absolute; z-index: 4; top: 40%; left: 50%; transform: translateX(-50%); display: grid; gap: 4px; width: max-content; max-width: min(270px, 80%); padding: 10px 16px; border: 1px solid rgba(251,191,36,.65); border-radius: 12px; background: rgba(27,23,13,.9); color: #fef3c7; font: inherit; text-align: center; cursor: pointer; pointer-events: auto; }
+.mpg-overlay .mpg-recharge.mpg-resource-notice { position: absolute; z-index: 4; top: 40%; left: 50%; transform: translateX(-50%); display: grid; gap: 4px; width: max-content; max-width: min(270px, 80%); padding: 10px 16px; border: 1px solid rgba(251,191,36,.45); border-radius: 12px; background: rgba(27,23,13,.55); color: #fef3c7; font: inherit; text-align: center; cursor: pointer; pointer-events: auto; animation: mpg-resource-pulse 2s ease-in-out 2 both; }
+@keyframes mpg-resource-pulse { 0%, 100% { opacity: 0; } 25%, 65% { opacity: .9; } }
+@media (prefers-reduced-motion: reduce) { .mpg-overlay .mpg-recharge.mpg-resource-notice { animation: none; } }
 .mpg-resource-notice span { font-size: .85rem; font-weight: 800; }
 .mpg-resource-notice small { font-size: .7rem; }
 .mpg-overlay .mpg-meter.empty { border-color: #f87171; }
