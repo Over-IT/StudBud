@@ -294,6 +294,12 @@ async function run() {
     assert.match(html, /id="mfa-login-form"/);
     assert.match(html, /id="email-login-form"/);
     assert.match(html, /id="email-settings-card"/);
+    for (const id of ['email-settings-card', 'mfa-settings-card']) {
+        const section = html.match(new RegExp(`<section id="${id}" class="([^"]+)"`));
+        assert.ok(section && section[1].includes('settings-subsection'), 'account settings use flat subsections');
+        assert.ok(!section[1].includes('glass-card'), 'account settings do not nest raised cards inside the profile card');
+    }
+    assert.ok(html.indexOf('id="school-profile-status"') < html.indexOf('id="email-settings-card"'), 'profile save feedback stays beside the profile action');
     assert.match(html, /<label>Username<input id="login-username"/, 'main sign-in field uses the simple Username label');
     const signupMarkup = html.slice(html.indexOf('<form id="signup-form"'), html.indexOf('</form>', html.indexOf('<form id="signup-form"')));
     assert.doesNotMatch(signupMarkup, /type="email"|signup-email/, 'signup has no email field, required or optional verification step');

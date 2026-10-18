@@ -1,5 +1,7 @@
 # StudBud
 
+Profile settings use flat, divider-separated email/authenticator sections instead of nested raised cards. Form groups have consistent spacing, profile save feedback stays next to Save Profile, and verification controls stack without overflow on phones.
+
 Escape to Space lobby previews rotate through checkpoint scenes without retiring scenery needed by later loops. Guest-to-account sync treats untouched app defaults as the merge baseline, while genuine concurrent edits retain explicit cloud/device recovery choices during sign-in.
 The staff-test biome selector teleports immediately on selection, rebuilding the level and bot routes so backward teleports restore scenery and simulated players follow the selected biome.
 Factory starts with a conveyor crusher/drill challenge, then mixes short reversing assembly belts, a stamping-feed belt, packing decks and lifts. City billboard catwalks/crane beams and Space meteors are solid from below and the sides, like crates and main decks. Designated ascent grates and fire escapes remain jump-through, without repeated up-arrow overlays.
