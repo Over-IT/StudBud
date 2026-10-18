@@ -8013,7 +8013,9 @@
                     const studied = item.minutesStudied ? `<small class="study-time-logged"><i class="fas fa-clock"></i> ${item.minutesStudied} min studied${item.flashcardMinutes ? ` (${item.flashcardMinutes} with flashcards)` : ''}</small>` : '';
                     const manage = id === 'planner-study-list' ? `<button type="button" class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit quiz / test</button>${this.assignmentStatusControl(item)}` : '';
                     return `<article class="study-priority-item"><span class="priority-rank">${index + 1}</span><div><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(item.courseTitle)} · ${this.escapeHTML(item.kind || 'assignment')} · ${item.sessionMinutes} min today (about ${item.remainingStudyMinutes} min remaining)</span>${studied}<small>${this.escapeHTML(item.reason)}</small><p><strong>Study method:</strong> ${this.escapeHTML(item.studyMethod)}</p><div class="study-priority-actions"><button class="secondary-btn" data-action="log-study" data-id="${this.escapeHTML(item.id)}"><i class="fas fa-stopwatch"></i> Log study session</button>${this.assessmentStudyButton(item)}${decks}${manage}</div></div></article>`;
-                }).join('') : '<div class="empty-state empty-state-cta"><p>Add an upcoming quiz or test to get study suggestions.</p><button class="primary-btn" type="button" data-action="add-quiz"><i class="fas fa-plus"></i> Add a quiz or test</button></div>';
+                }).join('') : (id === 'planner-study-list'
+                    ? '<p class="empty-state">Add an upcoming quiz or test to get study suggestions.</p>'
+                    : '<div class="empty-state empty-state-cta"><p>Add an upcoming quiz or test to get study suggestions.</p><button class="primary-btn" type="button" data-action="add-quiz"><i class="fas fa-plus"></i> Add a quiz or test</button></div>');
             }
         }
 

@@ -412,15 +412,73 @@
                 <!-- 3. Planner & Schedule View -->
                 <section id="planner-view" class="view hidden">
                     <div class="planner-grid">
-                        <div class="glass-card full-width">
-                            <h2>Assignments</h2>
-                            <p class="settings-hint">Your assignment to-do plan. Quiz and test preparation is in the separate Study section below. Time estimates are a guide, not a deadline.</p>
-                            <div id="planner-next-task" aria-live="polite"></div>
-                        </div>
-                        <div class="glass-card full-width">
-                            <h2>What needs your attention</h2>
-                            <p class="settings-hint">Open work grouped by urgency, with estimated time. Select a task to update it.</p>
-                            <p class="settings-hint">Suggested order considers due dates, the task's saved priority, and how close your class grade is to a letter-grade cutoff. It is not a percentage, grade prediction, or time estimate.</p>
+                        <section class="glass-card full-width planner-work" aria-labelledby="planner-work-heading">
+                            <header class="planner-section-header">
+                                <h2 id="planner-work-heading">Your work</h2>
+                                <p class="settings-hint">Assignments and quiz/test preparation, together in one place. Time estimates are a guide, not a deadline.</p>
+                            </header>
+                            <div class="planner-work-filters">
+                                <div id="assignment-status-summary" class="assignment-status-summary" aria-label="Work by status"></div>
+                                <div class="assignment-filters" role="search" aria-label="Filter assignments, quizzes and tests">
+                                    <label class="assignment-search-field" for="assignment-search"><i class="fas fa-search" aria-hidden="true"></i><span class="sr-only">Search assignments, quizzes and tests</span><input id="assignment-search" type="search" placeholder="Search work or classes"></label>
+                                    <label for="assignment-course-filter" class="sr-only">Filter by class</label>
+                                    <select id="assignment-course-filter"><option value="">All classes</option></select>
+                                    <label for="assignment-status-filter" class="sr-only">Filter by status</label>
+                                    <select id="assignment-status-filter">
+                                        <option value="all">All work</option>
+                                        <option value="todo" selected>To do</option>
+                                        <option value="overdue">Overdue</option>
+                                        <option value="awaiting">Done, waiting for grade</option>
+                                        <option value="graded">Graded</option>
+                                    </select>
+                                    <span id="assignment-result-count" class="assignment-result-count" aria-live="polite"></span>
+                                </div>
+                                <p class="settings-hint">Filters apply to both lists below. Next-task and study suggestions always show open work.</p>
+                            </div>
+                            <section class="planner-work-section" aria-labelledby="planner-assignment-heading">
+                                <header class="planner-section-header">
+                                    <h3 id="planner-assignment-heading">Assignments</h3>
+                                    <p class="settings-hint">Your next task and assignment list.</p>
+                                </header>
+                                <div id="planner-next-task" aria-live="polite"></div>
+                                <div class="table-scroll" tabindex="0" role="region" aria-label="Assignments table">
+                                    <table id="assignment-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Status</th>
+                                                <th>Assignment</th>
+                                                <th>Course</th>
+                                                <th>Due / Score</th>
+                                                <th>Estimated time</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="assignment-body">
+                                            <tr><td colspan="6" class="empty-state">No assignments found.</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </section>
+                            <section class="planner-work-section" aria-labelledby="planner-study-heading">
+                                <header class="planner-section-header planner-section-header-actions">
+                                    <div><h3 id="planner-study-heading">Study, quizzes &amp; tests</h3><p class="settings-hint">Suggested study sessions and quiz/test dates, completion and grades.</p></div>
+                                    <button class="secondary-btn" type="button" data-action="add-quiz"><i class="fas fa-plus" aria-hidden="true"></i> Add a quiz or test</button>
+                                </header>
+                                <div id="planner-study-list" class="study-guidance-list" aria-live="polite"></div>
+                                <div class="table-scroll" tabindex="0" role="region" aria-label="Quizzes and tests table">
+                                    <table>
+                                        <thead><tr><th>Status</th><th>Quiz / Test</th><th>Course</th><th>Due / Score</th><th>Estimated study time</th><th>Actions</th></tr></thead>
+                                        <tbody id="planner-assessment-body"><tr><td colspan="6" class="empty-state">No quizzes or tests found.</td></tr></tbody>
+                                    </table>
+                                </div>
+                            </section>
+                        </section>
+                        <section class="glass-card full-width planner-attention" aria-labelledby="planner-attention-heading">
+                            <header class="planner-section-header">
+                                <h2 id="planner-attention-heading">What needs your attention</h2>
+                                <p class="settings-hint">Open assignments grouped by urgency, with estimated time. Select a task to update it.</p>
+                                <p class="settings-hint">Suggested order considers due dates, the task's saved priority, and how close your class grade is to a letter-grade cutoff. It is not a percentage, grade prediction, or time estimate.</p>
+                            </header>
                             <div class="eisenhower-matrix">
                                 <div class="matrix-quadrant quadrant-1">
                                     <h4>Do first</h4>
@@ -442,57 +500,6 @@
                                     <p class="settings-hint">Other open work. Keep it on your list, without starting here.</p>
                                     <ul id="quad-4-list"></ul>
                                 </div>
-                            </div>
-                        </div>
-                        <div class="glass-card full-width">
-                            <h2>Assignment list</h2>
-                            <p class="settings-hint">Search, class and status filters apply to both assignments and the quiz/test list below.</p>
-                            <div id="assignment-status-summary" class="assignment-status-summary" aria-label="Assignments by status"></div>
-                            <div class="assignment-filters" role="search" aria-label="Filter assignments">
-                                <label class="assignment-search-field" for="assignment-search"><i class="fas fa-search" aria-hidden="true"></i><span class="sr-only">Search assignments</span><input id="assignment-search" type="search" placeholder="Search assignments or classes"></label>
-                                <label for="assignment-course-filter" class="sr-only">Filter by class</label>
-                                <select id="assignment-course-filter"><option value="">All classes</option></select>
-                                <label for="assignment-status-filter" class="sr-only">Filter by status</label>
-                                <select id="assignment-status-filter">
-                                    <option value="all">All work</option>
-                                    <option value="todo" selected>To do</option>
-                                    <option value="overdue">Overdue</option>
-                                    <option value="awaiting">Done, waiting for grade</option>
-                                    <option value="graded">Graded</option>
-                                </select>
-                                <span id="assignment-result-count" class="assignment-result-count" aria-live="polite"></span>
-                            </div>
-                            <div class="table-scroll" tabindex="0" role="region" aria-label="Assignments table">
-                            <table id="assignment-table">
-                                <thead>
-                                    <tr>
-                                        <th>Status</th>
-                                        <th>Assignment</th>
-                                        <th>Course</th>
-                                        <th>Due / Score</th>
-                                        <th>Estimated time</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="assignment-body">
-                                    <tr><td colspan="6" class="empty-state">No assignments found.</td></tr>
-                                </tbody>
-                            </table>
-                            </div>
-                        </div>
-                        <section class="glass-card full-width" aria-labelledby="planner-study-heading">
-                            <div class="view-header">
-                                <div><h2 id="planner-study-heading">Study</h2><p class="settings-hint">Quiz and test preparation, with suggested sessions based on your deadlines and logged study time.</p></div>
-                                <button class="secondary-btn" type="button" data-action="add-quiz"><i class="fas fa-plus" aria-hidden="true"></i> Add a quiz or test</button>
-                            </div>
-                            <div id="planner-study-list" class="study-guidance-list" aria-live="polite"></div>
-                            <h3>Quizzes and tests</h3>
-                            <p class="settings-hint">Manage assessment dates, completion and grades separately from assignments. Uses the filters above.</p>
-                            <div class="table-scroll" tabindex="0" role="region" aria-label="Quizzes and tests table">
-                                <table>
-                                    <thead><tr><th>Status</th><th>Quiz / Test</th><th>Course</th><th>Due / Score</th><th>Estimated study time</th><th>Actions</th></tr></thead>
-                                    <tbody id="planner-assessment-body"><tr><td colspan="6" class="empty-state">No quizzes or tests found.</td></tr></tbody>
-                                </table>
                             </div>
                         </section>
                     </div>

@@ -1428,6 +1428,24 @@ tbody tr:hover {
     gap: var(--spacing-lg);
 }
 
+.planner-work, .planner-work-section, .planner-attention { display: grid; gap: var(--spacing-lg); min-width: 0; }
+.planner-section-header { display: grid; gap: var(--spacing-sm); }
+.planner-section-header h2, .planner-section-header h3, .planner-section-header p { margin: 0; }
+.planner-section-header-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--spacing-md); }
+.planner-section-header-actions > div { flex: 1 1 260px; display: grid; gap: var(--spacing-sm); }
+.planner-section-header-actions > button { flex-shrink: 0; }
+.planner-work-section { border-top: 1px solid var(--border-glass); padding-top: var(--spacing-lg); }
+.planner-work-filters .assignment-status-summary { margin: 0; }
+.planner-work-filters .assignment-filters { margin-bottom: var(--spacing-sm); }
+.planner-work-filters .assignment-result-count { white-space: normal; }
+.planner-work-section .study-guidance-list { display: grid; gap: var(--spacing-md); }
+.planner-work-section .study-priority-item { gap: var(--spacing-md); padding: 0 0 var(--spacing-md); }
+.planner-work-section .study-priority-item:last-child { border-bottom: 0; padding-bottom: 0; }
+.planner-work-section .study-priority-item > div { min-width: 0; gap: var(--spacing-sm); overflow-wrap: anywhere; }
+.planner-work-section .empty-state { margin: 0; }
+.planner-attention .matrix-quadrant { gap: var(--spacing-sm); }
+.planner-attention .matrix-quadrant h4 { margin: 0; }
+
 .app-confirmation { color: var(--text-primary); background: var(--bg-base); border: 1px solid var(--quad-2-border); border-radius: var(--border-radius-sm); padding: 1.5rem; width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; margin: auto; }
 .app-confirmation::backdrop { background: rgba(0, 0, 0, .5); }
 .app-confirmation p { margin: 1rem 0; white-space: pre-wrap; overflow-wrap: anywhere; }

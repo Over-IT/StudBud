@@ -67,9 +67,25 @@ const app = sandbox.app;
     app.renderAssignments();
     assert.match(next.innerHTML, /No open tasks/);
     assert.match(elements.get('planner-study-list').innerHTML, /Add an upcoming quiz or test/);
+    assert.doesNotMatch(elements.get('planner-study-list').innerHTML, /data-action="add-quiz"/, 'planner uses its section-header add button instead of a duplicate empty-state action');
+    elements.set('study-priority-list', { innerHTML: '' });
+    app.renderStudyRecommendations('study-priority-list');
+    assert.match(elements.get('study-priority-list').innerHTML, /data-action="add-quiz"/, 'other study surfaces retain their empty-state action');
+    elements.delete('study-priority-list');
     for (const id of ['assignment-body', 'planner-assessment-body', 'planner-study-list', 'quad-1-list']) elements.delete(id);
     elements.delete('planner-next-task');
     const html = source('index.html');
+    const plannerMarkup = html.slice(html.indexOf('<section id="planner-view"'), html.indexOf('<section id="calendar-view"'));
+    assert.match(plannerMarkup, /Study, quizzes &amp; tests/);
+    assert.match(plannerMarkup, /aria-label="Filter assignments, quizzes and tests"/);
+    assert.ok(plannerMarkup.indexOf('id="assignment-status-summary"') < plannerMarkup.indexOf('id="planner-assignment-heading"'), 'shared filters precede both work sections');
+    assert.ok(plannerMarkup.indexOf('id="planner-next-task"') < plannerMarkup.indexOf('id="assignment-body"'), 'next task stays with the assignment list');
+    assert.ok(plannerMarkup.indexOf('id="assignment-body"') < plannerMarkup.indexOf('id="planner-study-heading"'), 'study directly follows assignments');
+    assert.ok(plannerMarkup.indexOf('id="planner-study-list"') < plannerMarkup.indexOf('id="planner-assessment-body"'), 'study suggestions and quiz/test management stay together');
+    assert.ok(plannerMarkup.indexOf('id="planner-assessment-body"') < plannerMarkup.indexOf('id="planner-attention-heading"'), 'urgency groups follow both work sections');
+    for (const id of ['planner-next-task', 'assignment-status-summary', 'assignment-search', 'assignment-course-filter', 'assignment-status-filter', 'assignment-result-count', 'assignment-body', 'planner-study-list', 'planner-assessment-body', 'quad-1-list', 'quad-2-list', 'quad-3-list', 'quad-4-list']) {
+        assert.equal(plannerMarkup.split(`id="${id}"`).length - 1, 1, `${id} remains unique`);
+    }
     assert.match(html, /value="todo" selected/);
     assert.match(html, /id="delete-assignment-editor-btn"[^>]*data-action="delete-assignment"/);
     assert.match(appSource, /deleteButton\.classList\.toggle\('hidden', !assignment\)/, 'delete is available only when editing saved work');
