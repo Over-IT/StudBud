@@ -38,9 +38,36 @@ const app = sandbox.app;
     assert.match(app.plannerTaskReason({ estimatedMinutes: 10 }), /short task/);
     assert.match(app.plannerTaskReason({}), /No due date/);
     assert.match(next.innerHTML, /Why this task:/);
+    for (const id of ['assignment-body', 'planner-assessment-body', 'planner-study-list', 'quad-1-list']) elements.set(id, { innerHTML: '' });
+    state.assignments.push(
+        { id: 'quiz', title: '<Quiz prep>', kind: 'quiz', estimatedMinutes: 45, dueDate: '2099-01-01' },
+        { id: 'test', title: 'Test prep', kind: 'TEST', estimatedMinutes: 90, dueDate: '2099-01-02' },
+        { id: 'graded-test', title: 'Graded test', kind: 'test', graded: true, status: 'completed', pointsEarned: 8, maxPoints: 10 }
+    );
+    app.renderAssignments();
+    assert.match(next.innerHTML, /2 to do/);
+    assert.match(next.innerHTML, /40 min estimated total/, 'assignment workload excludes study preparation');
+    assert.doesNotMatch(elements.get('assignment-body').innerHTML, /Quiz prep|Test prep|Graded test/);
+    assert.match(elements.get('assignment-body').innerHTML, /Read chapter/);
+    assert.match(elements.get('planner-assessment-body').innerHTML, /&lt;Quiz prep&gt;/);
+    assert.match(elements.get('planner-assessment-body').innerHTML, /Graded test/, 'completed assessments remain manageable');
+    assert.match(elements.get('planner-assessment-body').innerHTML, /delete-assignment/);
+    assert.match(elements.get('planner-study-list').innerHTML, /&lt;Quiz prep&gt;/);
+    assert.match(elements.get('planner-study-list').innerHTML, /Log study session/);
+    assert.match(elements.get('planner-study-list').innerHTML, /min today/);
+    assert.doesNotMatch(elements.get('planner-study-list').innerHTML, /Read chapter|Graded test/);
+    assert.doesNotMatch(elements.get('quad-1-list').innerHTML, /Quiz prep|Test prep/);
+    elements.set('assignment-search', { value: 'test prep' });
+    app.renderAssignments();
+    assert.doesNotMatch(elements.get('assignment-body').innerHTML, /Read chapter/);
+    assert.match(elements.get('planner-assessment-body').innerHTML, /Test prep/);
+    assert.doesNotMatch(elements.get('planner-assessment-body').innerHTML, /Quiz prep|Graded test/);
+    elements.delete('assignment-search');
     state.assignments = [];
     app.renderAssignments();
     assert.match(next.innerHTML, /No open tasks/);
+    assert.match(elements.get('planner-study-list').innerHTML, /Add an upcoming quiz or test/);
+    for (const id of ['assignment-body', 'planner-assessment-body', 'planner-study-list', 'quad-1-list']) elements.delete(id);
     elements.delete('planner-next-task');
     const html = source('index.html');
     assert.match(html, /value="todo" selected/);

@@ -1336,9 +1336,11 @@
                 this.renderDecks();
                 this.renderHostedGameDecks();
                 this.renderDashboard();
+                this.renderStudyRecommendations('planner-study-list');
             });
             this.EventBus.on('study:recorded', () => {
                 this.renderDashboard();
+                this.renderStudyRecommendations('planner-study-list');
                 this.refreshStudyLeaderboard(this.studyLeaderboardPeriod || 'daily');
             });
             this.EventBus.on('state:restored', () => this.renderUI());
@@ -2730,8 +2732,9 @@
             }).sort((left, right) =>
                 (left.dueDate || '9999-12-31').localeCompare(right.dueDate || '9999-12-31')
             );
-            if (body) {
-                body.innerHTML = visibleAssignments.length ? visibleAssignments.map(item => {
+            const assessmentBody = document.getElementById('planner-assessment-body');
+            const isAssessment = item => ['quiz', 'test'].includes(String(item.kind || '').toLowerCase());
+            const renderRows = items => items.map(item => {
                     const course = courses.find(entry => entry.code === item.courseCode);
                     const status = item.status || 'pending';
                     const graded = this.isGradedItem(item);
@@ -2747,9 +2750,13 @@
                             <button class="danger-btn" data-action="delete-assignment" data-id="${this.escapeHTML(item.id)}">Delete</button>
                         </td>
                     </tr>`;
-                }).join('') : `<tr><td colspan="6" class="empty-state">${assignments.length ? 'No assignments match these filters.' : 'No assignments found.'}</td></tr>`;
-            }
-            if (resultCount) resultCount.textContent = `${visibleAssignments.length} of ${assignments.length} assignment${assignments.length === 1 ? '' : 's'}`;
+                }).join('');
+            if (body) body.innerHTML = renderRows(visibleAssignments.filter(item => !isAssessment(item)))
+                || '<tr><td colspan="6" class="empty-state">No assignments match these filters.</td></tr>';
+            if (assessmentBody) assessmentBody.innerHTML = renderRows(visibleAssignments.filter(isAssessment))
+                || '<tr><td colspan="6" class="empty-state">No quizzes or tests match these filters.</td></tr>';
+            if (resultCount) resultCount.textContent = `${visibleAssignments.length} of ${assignments.length} work item${assignments.length === 1 ? '' : 's'} across both sections`;
+            this.renderStudyRecommendations('planner-study-list');
             const summary = document.getElementById('assignment-status-summary');
             if (summary) {
                 const counts = { todo: 0, overdue: 0, awaiting: 0, graded: 0 };
@@ -2770,7 +2777,7 @@
                 ).join('') : '<li class="empty-state">No upcoming tasks.</li>';
             }
 
-            const openWork = assignments.filter(item => item.status !== 'completed' && !this.isGradedItem(item))
+            const openWork = assignments.filter(item => !isAssessment(item) && item.status !== 'completed' && !this.isGradedItem(item))
                 .map(item => ({ item, priority: this.assignmentPriority(item, courses) }))
                 .sort((a, b) => b.priority.score - a.priority.score);
             const nextTask = document.getElementById('planner-next-task');
@@ -7988,21 +7995,26 @@
                 if (unweighted) unweighted.textContent = Number(gpa.unweighted).toFixed(2);
             }
             this.renderDailySchedule(new Date());
-            const priorityList = document.getElementById('study-priority-list');
             this.renderTodayStudyPlan();
             this.renderFocusSprint();
+            this.renderStudyRecommendations('study-priority-list', 5);
+            this.renderStudyProgress();
+            this.renderDailyStudyHabit();
+            this.syncTutorialUI();
+        }
+
+        renderStudyRecommendations(id, limit = Infinity) {
+            const priorityList = document.getElementById(id);
             if (priorityList) {
-                const recommendations = this.getStudyRecommendations().slice(0, 5);
+                const recommendations = this.getStudyRecommendations().slice(0, limit);
                 priorityList.innerHTML = recommendations.length ? recommendations.map((item, index) => {
                     const decks = (item.deckLinks || []).slice(0, 2).map(({ deck }) =>
                         `<button class="secondary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}"><i class="fas fa-layer-group"></i> ${this.escapeHTML(deck.title)}</button>`).join('');
                     const studied = item.minutesStudied ? `<small class="study-time-logged"><i class="fas fa-clock"></i> ${item.minutesStudied} min studied${item.flashcardMinutes ? ` (${item.flashcardMinutes} with flashcards)` : ''}</small>` : '';
-                    return `<article class="study-priority-item"><span class="priority-rank">${index + 1}</span><div><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(item.courseTitle)} · ${this.escapeHTML(item.kind || 'assignment')} · ${item.sessionMinutes} min today (about ${item.remainingStudyMinutes} min remaining)</span>${studied}<small>${this.escapeHTML(item.reason)}</small><p><strong>Study method:</strong> ${this.escapeHTML(item.studyMethod)}</p><div class="study-priority-actions"><button class="secondary-btn" data-action="log-study" data-id="${this.escapeHTML(item.id)}"><i class="fas fa-stopwatch"></i> Log study session</button>${this.assessmentStudyButton(item)}${decks}</div></div></article>`;
+                    const manage = id === 'planner-study-list' ? `<button type="button" class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit quiz / test</button>${this.assignmentStatusControl(item)}` : '';
+                    return `<article class="study-priority-item"><span class="priority-rank">${index + 1}</span><div><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(item.courseTitle)} · ${this.escapeHTML(item.kind || 'assignment')} · ${item.sessionMinutes} min today (about ${item.remainingStudyMinutes} min remaining)</span>${studied}<small>${this.escapeHTML(item.reason)}</small><p><strong>Study method:</strong> ${this.escapeHTML(item.studyMethod)}</p><div class="study-priority-actions"><button class="secondary-btn" data-action="log-study" data-id="${this.escapeHTML(item.id)}"><i class="fas fa-stopwatch"></i> Log study session</button>${this.assessmentStudyButton(item)}${decks}${manage}</div></div></article>`;
                 }).join('') : '<div class="empty-state empty-state-cta"><p>Add an upcoming quiz or test to get study suggestions.</p><button class="primary-btn" type="button" data-action="add-quiz"><i class="fas fa-plus"></i> Add a quiz or test</button></div>';
             }
-            this.renderStudyProgress();
-            this.renderDailyStudyHabit();
-            this.syncTutorialUI();
         }
 
         formatStudyDuration(seconds) {

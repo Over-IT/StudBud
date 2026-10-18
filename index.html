@@ -413,8 +413,8 @@
                 <section id="planner-view" class="view hidden">
                     <div class="planner-grid">
                         <div class="glass-card full-width">
-                            <h2>Your to-do plan</h2>
-                            <p class="settings-hint">Start with one task. Time estimates are a guide, not a deadline.</p>
+                            <h2>Assignments</h2>
+                            <p class="settings-hint">Your assignment to-do plan. Quiz and test preparation is in the separate Study section below. Time estimates are a guide, not a deadline.</p>
                             <div id="planner-next-task" aria-live="polite"></div>
                         </div>
                         <div class="glass-card full-width">
@@ -445,7 +445,8 @@
                             </div>
                         </div>
                         <div class="glass-card full-width">
-                            <h2>Your tasks</h2>
+                            <h2>Assignment list</h2>
+                            <p class="settings-hint">Search, class and status filters apply to both assignments and the quiz/test list below.</p>
                             <div id="assignment-status-summary" class="assignment-status-summary" aria-label="Assignments by status"></div>
                             <div class="assignment-filters" role="search" aria-label="Filter assignments">
                                 <label class="assignment-search-field" for="assignment-search"><i class="fas fa-search" aria-hidden="true"></i><span class="sr-only">Search assignments</span><input id="assignment-search" type="search" placeholder="Search assignments or classes"></label>
@@ -479,6 +480,21 @@
                             </table>
                             </div>
                         </div>
+                        <section class="glass-card full-width" aria-labelledby="planner-study-heading">
+                            <div class="view-header">
+                                <div><h2 id="planner-study-heading">Study</h2><p class="settings-hint">Quiz and test preparation, with suggested sessions based on your deadlines and logged study time.</p></div>
+                                <button class="secondary-btn" type="button" data-action="add-quiz"><i class="fas fa-plus" aria-hidden="true"></i> Add a quiz or test</button>
+                            </div>
+                            <div id="planner-study-list" class="study-guidance-list" aria-live="polite"></div>
+                            <h3>Quizzes and tests</h3>
+                            <p class="settings-hint">Manage assessment dates, completion and grades separately from assignments. Uses the filters above.</p>
+                            <div class="table-scroll" tabindex="0" role="region" aria-label="Quizzes and tests table">
+                                <table>
+                                    <thead><tr><th>Status</th><th>Quiz / Test</th><th>Course</th><th>Due / Score</th><th>Estimated study time</th><th>Actions</th></tr></thead>
+                                    <tbody id="planner-assessment-body"><tr><td colspan="6" class="empty-state">No quizzes or tests found.</td></tr></tbody>
+                                </table>
+                            </div>
+                        </section>
                     </div>
                 </section>
 

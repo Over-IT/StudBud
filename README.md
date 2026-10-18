@@ -37,6 +37,8 @@ The app shell is cached for offline loading after the first visit. Internet acce
 
 If account connection settings fail to load, startup retries their script once. The sign-in screen then offers **Retry sign-in connection** without requiring a page reload; guest access remains available. A successful retry clears the warning and re-enables account forms. Run `node tests/cloud-config.cjs` for startup recovery, failure, retry and timeout checks.
 
+The Planner separates assignment priorities/workload from a Study section for quiz/test preparation and suggested sessions. Quizzes and tests have their own editable records table, including completed/graded assessments; search, class and status filters apply to both records tables. Study suggestions update after logging sessions or changing linked flashcards.
+
 ## Ads
 
 Optional, non-sticky banner slots sit at the bottom of Home, the decks list, and the shop. They stay collapsed until configured and are hidden offline, during tutorials, study sessions, games, and dialogs. There are no interstitials, rewarded ads, videos, or automatic refreshes.
