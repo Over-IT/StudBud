@@ -1199,13 +1199,14 @@
             for (const crossing of this.cityCrossings) {
                 if (!lessons[crossing.kind] || taught.has(crossing.kind)) continue;
                 taught.add(crossing.kind);
-                this.mechanicSigns.push({ platform: crossing.from, lines: lessons[crossing.kind] });
+                this.mechanicSigns.push({ platform: crossing.from, kind: crossing.kind, style: 'billboard', lines: lessons[crossing.kind] });
             }
             for (const chamber of this.challenges) for (const platform of chamber.nodes) {
                 if (!lessons[platform.motif] || taught.has(platform.motif)) continue;
                 taught.add(platform.motif);
                 const index = chamber.nodes.indexOf(platform);
-                this.mechanicSigns.push({ platform: chamber.nodes[Math.max(0, index - 1)], lines: lessons[platform.motif] });
+                this.mechanicSigns.push({ platform: chamber.nodes[Math.max(0, index - 1)], kind: platform.motif,
+                    style: platform.bi === 1 ? 'factory' : 'space', lines: lessons[platform.motif] });
             }
             // purely visual rooftop clutter, placed only in free gaps (no props, spikes, springs, boxes, flags or ceilings)
             const rd = mulberry32((this.s.seed ^ 0x9e3779b1) >>> 0), DW = [80, 110, 80, 100, 110, 110, 90, 70, 100];
@@ -1890,17 +1891,57 @@
             for (const [x, y0] of [a, b]) for (let y = y0 + 14; y < y0 + 60; y += 16) { ctx.fillRect(x - 1, y, 2, 2); }
         }
 
+        mechanicSignBounds(sign) {
+            const p = sign.platform, city = sign.style === 'billboard', w = city ? 340 : 280, h = city ? 140 : 104;
+            const inset = sign.kind === 'scale' ? 130 : 24;
+            return { x: p.x + Math.max(0, p.w - w - inset), y: p.y - h - (city ? 48 : 32), w, h };
+        }
+
         drawMechanicSign(ctx, sign) {
-            const p = sign.platform, x = p.x + Math.max(0, Math.min(p.w - 240, 25)), y = p.y - 110;
+            const { x, y, w, h } = this.mechanicSignBounds(sign), base = sign.platform.y;
+            const city = sign.style === 'billboard', factory = sign.style === 'factory';
+            const accent = city ? '#f472b6' : factory ? '#facc15' : '#67e8f9';
             ctx.save();
-            ctx.fillStyle = '#64748b'; ctx.fillRect(x + 12, y + 74, 5, 36);
-            ctx.fillStyle = 'rgba(15,23,42,.92)'; roundRect(ctx, x, y, 240, 74, 8); ctx.fill();
-            ctx.strokeStyle = '#7dd3fc'; ctx.lineWidth = 1.5; ctx.stroke();
-            ctx.textAlign = 'left'; ctx.fillStyle = '#7dd3fc'; ctx.font = '900 12px system-ui';
-            ctx.fillText(sign.lines[0], x + 10, y + 19, 220);
-            ctx.fillStyle = '#f1f5f9'; ctx.font = '600 11px system-ui';
-            ctx.fillText(sign.lines[1], x + 10, y + 40, 220);
-            ctx.fillText(sign.lines[2], x + 10, y + 58, 220);
+            ctx.fillStyle = '#475569';
+            for (const sx of [x + 24, x + w - 30]) {
+                ctx.fillRect(sx, y + h, 6, base - y - h);
+                ctx.fillRect(sx - 7, base - 5, 20, 5);
+            }
+            if (city) {
+                ctx.strokeStyle = '#64748b'; ctx.lineWidth = 3; ctx.beginPath();
+                ctx.moveTo(x + 27, y + h); ctx.lineTo(x + w - 27, base - 5);
+                ctx.moveTo(x + w - 27, y + h); ctx.lineTo(x + 27, base - 5); ctx.stroke();
+            }
+            ctx.fillStyle = '#334155'; ctx.fillRect(x - 5, y - 5, w + 10, h + 10);
+            ctx.fillStyle = city ? '#312e81' : factory ? '#292524' : '#0c2538';
+            ctx.fillRect(x, y, w, h);
+            ctx.strokeStyle = accent; ctx.lineWidth = 2; ctx.strokeRect(x + 5, y + 5, w - 10, h - 10);
+            if (city) {
+                ctx.fillStyle = accent; ctx.fillRect(x + 12, y + 12, 5, h - 24);
+                ctx.fillStyle = '#fde68a';
+                for (let sx = x + 28; sx < x + w; sx += 70) {
+                    ctx.fillRect(sx - 3, y - 12, 18, 5);
+                    ctx.fillStyle = 'rgba(253,230,138,.1)'; ctx.fillRect(sx - 9, y, 30, h);
+                    ctx.fillStyle = '#fde68a';
+                }
+            } else if (factory) {
+                ctx.fillStyle = accent; ctx.fillRect(x + 10, y + 10, w - 20, 10);
+                ctx.fillStyle = '#292524';
+                for (let sx = x + 14; sx < x + w - 14; sx += 22) ctx.fillRect(sx, y + 10, 10, 10);
+            } else {
+                ctx.fillStyle = accent;
+                for (let i = 0; i < 3; i++) ctx.fillRect(x + w - 40 + i * 9, y + 13, 5, 4);
+                ctx.fillStyle = 'rgba(103,232,249,.06)';
+                for (let sy = y + 24; sy < y + h - 8; sy += 5) ctx.fillRect(x + 10, sy, w - 20, 1);
+            }
+            ctx.fillStyle = '#94a3b8';
+            for (const sx of [x + 2, x + w - 5]) for (const sy of [y + 2, y + h - 5]) ctx.fillRect(sx, sy, 3, 3);
+            const tx = x + (city ? 28 : 16), titleY = y + (city ? 45 : 43), textWidth = w - (city ? 48 : 32);
+            ctx.textAlign = 'left'; ctx.fillStyle = accent; ctx.font = `900 ${city ? 24 : 17}px system-ui`;
+            ctx.fillText(sign.lines[0], tx, titleY, textWidth);
+            ctx.fillStyle = '#f1f5f9'; ctx.font = `600 ${city ? 13 : 12}px system-ui`;
+            ctx.fillText(sign.lines[1], tx, titleY + 28, textWidth);
+            ctx.fillText(sign.lines[2], tx, titleY + 49, textWidth);
             ctx.restore();
         }
 
@@ -3193,8 +3234,9 @@
                 this.drawJumpThroughMarker(ctx, p);
             }
             if (!s.preview) for (const sign of this.mechanicSigns) {
-                const p = sign.platform;
-                if (p.x + p.w >= left && p.x <= right && p.y >= top && p.y - 110 <= bottom) this.drawMechanicSign(ctx, sign);
+                const bounds = this.mechanicSignBounds(sign);
+                if (bounds.x + bounds.w + 5 >= left && bounds.x - 5 <= right
+                    && sign.platform.y >= top && bounds.y - 12 <= bottom) this.drawMechanicSign(ctx, sign);
             }
             for (const c of this.checkpoints) {
                 if (c.x > right || c.x < left || !seen(c.y)) continue;

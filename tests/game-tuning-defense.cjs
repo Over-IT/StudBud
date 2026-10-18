@@ -128,6 +128,24 @@ function session(mode, id = 'host', ids = ['host', 'guest', 'ally', 'rival']) {
         assert.ok(signs[0].lines.slice(1).every(line => line.length > 10));
         assert.ok(g.solids.includes(signs[0].platform), 'sign stands at a real route platform');
     }
+    for (const seed of [1, 42, 12345, 7, 99, 2025]) {
+        const level = new A.games.skyline({ seed, local: { color: '#fff' }, user: { id: 'sign-test' } });
+        const wall = level.mechanicSigns.find(sign => sign.kind === 'scale');
+        const crossing = level.cityCrossings.find(crossing => crossing.kind === 'scale');
+        const bounds = level.mechanicSignBounds(wall);
+        assert.equal(wall.style, 'billboard');
+        assert.equal(wall.platform, crossing.from, 'wall-hop billboard is on the entrance rooftop');
+        assert.ok(bounds.x >= crossing.from.x && bounds.x + bounds.w <= crossing.from.x + crossing.from.w - 110,
+            'billboard remains beside, not across, the wall-hop shaft');
+        assert.ok(bounds.h >= 140 && bounds.w >= 340, 'city instructions use a full-size scenery billboard');
+        assert.equal(level.mechanicSigns.find(sign => sign.kind === 'belt-gauntlet').style, 'factory');
+        assert.equal(level.mechanicSigns.find(sign => sign.kind === 'meteor-climb').style, 'space');
+        for (const sign of level.mechanicSigns) {
+            texts.length = 0;
+            level.drawMechanicSign(ctx, sign);
+            assert.deepEqual(texts, Array.from(sign.lines), 'every themed sign retains its complete instructions');
+        }
+    }
 }
 {
     const s = session('skyline'), g = s.game;
