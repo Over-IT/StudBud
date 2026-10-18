@@ -21,6 +21,23 @@ for (const file of ['multiplayerEngine.js', 'multiplayerGames.js', 'multiplayerG
 }
 const A = sandbox.window.StudBudArcade;
 {
+    const rim = [], flatStrips = [];
+    const rockContext = new Proxy({
+        createLinearGradient: () => ({ addColorStop: noop }),
+        moveTo: (x, y) => rim.push([x, y]), lineTo: (x, y) => rim.push([x, y]),
+        fillRect: (...args) => flatStrips.push(args)
+    }, { get: (target, key) => target[key] || noop });
+    for (const seed of [1, 42, 12345]) {
+        rim.length = 0;
+        A.games.skyline.prototype.drawAsteroid.call({}, rockContext, { x: 100, y: 200, w: 180, h: 70, seed });
+        const top = rim.slice(3, 12);
+        assert.equal(top.length, 9);
+        assert.ok(new Set(top.map(point => point[1])).size >= 3, 'asteroid upper silhouette has irregular rocky facets');
+        assert.equal(top[0][1], 212, 'asteroid edge slopes down instead of ending in a flat shelf');
+    }
+    assert.equal(flatStrips.length, 0, 'asteroids do not draw a flat platform cap');
+}
+{
     const marker = A.games.skyline.prototype.drawJumpThroughMarker;
     const lines = [];
     const markerCtx = { save: noop, restore: noop, beginPath: noop, stroke: noop,
@@ -30,10 +47,15 @@ const A = sandbox.window.StudBudArcade;
     assert.deepEqual(lines[0], ['move', 180, 233], 'one centered arrow sits below a jump-through scaffold');
     assert.deepEqual(lines[1], ['line', 180, 223], 'small arrow points up toward the deck');
     assert.equal(markerCtx.strokeStyle, '#7dd3fc', 'jump-through markers are light blue');
-    for (const override of [{ oneway: false }, { stair: true }, { fireEscape: true }, { factoryStep: true }, { off: true }]) {
+    for (const override of [{ oneway: false }, { oneway: false, jt: true }, { off: true }]) {
         lines.length = 0;
         marker.call({}, markerCtx, { ...platform, ...override });
-        assert.equal(lines.length, 0, 'solid platforms, stairs and inactive decks remain unmarked');
+        assert.equal(lines.length, 0, 'solid platforms and inactive decks remain unmarked regardless of legacy flags');
+    }
+    for (const flag of ['stair', 'fireEscape', 'factoryStep']) {
+        lines.length = 0;
+        marker.call({}, markerCtx, { ...platform, [flag]: true });
+        assert.equal(lines.length, 0, 'obvious stairs and fire escapes remain arrow-free');
     }
 }
 {

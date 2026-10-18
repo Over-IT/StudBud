@@ -524,7 +524,7 @@
                     }
                     for (let i = 0; i < 3; i++) {
                         const x = d > 0 ? floor.x + 610 - i * 240 : floor.x + 170 + i * 240;
-                        nodes.push(T.add({ x, y: floor.y - 470 - i * 110, w: 160, h: 18, jt: true, grate: true, motif: 'packing-shelf' }));
+                        nodes.push(T.add({ x, y: floor.y - 470 - i * 110, w: 160, h: 18, jt: i === 0, grate: true, motif: 'packing-shelf' }));
                     }
                     return nodes;
                 },
@@ -554,7 +554,7 @@
                 catapult: (L, d, T) => {
                     const pad = T.add({ x: Math.round(ahead(L, d, 120, 180)), y: L.y - 100, w: 180, h: 24, pipe: true, motif: 'catapult' });
                     this.springs.push({ x: pad.x + 67, y: pad.y - 16, w: 46, h: 16, bi: T.b });
-                    const walk = T.add({ x: d > 0 ? pad.x + pad.w + 30 : pad.x - 30 - 380, y: pad.y - 300, w: 380, h: 18, thin: true, jt: true, catwalk: true, motif: 'catapult' });
+                    const walk = T.add({ x: d > 0 ? pad.x + pad.w + 30 : pad.x - 30 - 380, y: pad.y - 300, w: 380, h: 18, thin: true, catwalk: true, motif: 'catapult' });
                     return [pad, walk];
                 },
                 // worn grating that gives way a moment after you land
@@ -601,10 +601,10 @@
                 },
                 // A long conveyor crossing followed by a short inspection-platform climb.
                 'belt-gauntlet': (L, d, T) => {
-                    const w = 780 + Math.round(r() * 70);
+                    const w = 1180 + Math.round(r() * 70);
                     const belt = T.add(deck(ahead(L, d, 130, w), L.y - 110, w,
-                        { factoryBelt: true, belt: -d * 150, motif: 'belt-gauntlet' }));
-                    for (const [u, crusher, period] of [[.3, true, 3.2], [.7, false, 2.5]]) {
+                        { factoryBelt: true, belt: -d * 150, beltFlip: 6, motif: 'belt-gauntlet' }));
+                    for (const [u, crusher, period] of [[.18, true, 3.2], [.4, false, 2.5], [.62, true, 3.6], [.84, false, 2.8]]) {
                         const x = belt.x + belt.w * (d > 0 ? u : 1 - u);
                         drill(T, belt, x, crusher, period, r() * 3, [x - 90, x + 90]);
                     }
@@ -625,11 +625,14 @@
                     const piston = T.add({ x: ahead(previous, d, 70, 110), y: by, w: 110, h: 22, mover: true, vert: true, by, amp: 40, speed: 1.2, phase: r() * 6, piston: true, motif: 'assembly-line' });
                     return [...benches, piston, T.add(deck(ahead(piston, d, 110, 280), by - 130, 280, { motif: 'press-deck' }))];
                 },
-                // one stamping hammer guards the hopper grate
+                // A second long reversing line mixes presses and a drill before the hopper grate.
                 'stamping-feed': (L, d, T, calm) => {
-                    const w = 420;
+                    const w = 820;
                     const feed = T.add(deck(ahead(L, d, 130, w), L.y - 110, w, { factoryBelt: true, belt: d * 110, beltFlip: 5, motif: 'stamping-feed' }));
-                    drill(T, feed, feed.x + feed.w * .5, true, 3.0, r() * 3);
+                    for (const [u, crusher, period] of [[.22, true, 3], [.5, false, 2.7], [.78, true, 3.4]]) {
+                        const x = feed.x + feed.w * (d > 0 ? u : 1 - u);
+                        drill(T, feed, x, crusher, period, r() * 3, [x - 90, x + 90]);
+                    }
                     const grate = T.add({ x: ahead(feed, d, 140, 130), y: feed.y - 95, w: 130, h: 16, thin: true, crumble: !calm, grate: true, motif: 'stamping-feed' });
                     return [feed, grate, T.add(deck(ahead(grate, d, 140, 300), grate.y - 105, 300, { motif: 'landing' }))];
                 },
@@ -637,14 +640,14 @@
                     const car = T.add({ x: ahead(L, d, 100, 220), y: L.y - 90, w: 220, h: 20, mover: true, vert: true,
                         by: L.y - 150, amp: 130, speed: .65, phase: r() * 6, freight: true, motif: 'sorting-hoist' });
                     const bay = T.add(deck(ahead(car, d, 90, 420), L.y - 300, 420, { motif: 'sorting-bay' }));
-                    const shelf = T.add({ x: car.x + (d > 0 ? -90 : 90), y: bay.y - 150, w: 220, h: 18, jt: true, grate: true, motif: 'sorting-shelf' });
-                    const out = T.add({ x: bay.x, y: shelf.y - 150, w: 420, h: 18, jt: true, grate: true, motif: 'packing-deck' });
+                    const shelf = T.add({ x: car.x + (d > 0 ? -90 : 90), y: bay.y - 150, w: 220, h: 18, grate: true, motif: 'sorting-shelf' });
+                    const out = T.add({ x: bay.x, y: shelf.y - 150, w: 420, h: 18, grate: true, motif: 'packing-deck' });
                     return [car, bay, shelf, out];
                 },
                 'spring-to-crumble': (L, d, T, calm) => {
                     const pad = T.add(deck(ahead(L, d, 120, 180), L.y - 90, 180, { pipe: true, motif: 'foundry-launch' }));
                     this.springs.push({ x: pad.x + 67, y: pad.y - 16, w: 46, h: 16, bi: 1 });
-                    const grate = T.add({ x: ahead(pad, d, 90, 460), y: pad.y - 300, w: 460, h: 18, jt: true,
+                    const grate = T.add({ x: ahead(pad, d, 90, 460), y: pad.y - 300, w: 460, h: 18,
                         grate: true, crumble: !calm, motif: 'cooling-grate' });
                     // a crumbling grate gives no time to wait out steam, so vents only appear on the solid version
                     if (calm) { vent(T, grate, .3, 0); vent(T, grate, .7, 1.6); }
@@ -676,7 +679,7 @@
                 'asteroid-ferry': (L, d, T) => {
                     const a = T.add({ x: ahead(L, d, 150, 240), y: L.y - 160, w: 240, h: 32, spaceStyle: 1, dock: true, motif: 'asteroid-ferry' });
                     const laneY = a.y - 160, far = a.x + a.w / 2 + d * (850 + Math.round(r() * 150));
-                    const end = T.add({ x: far - 140, y: laneY - 180, w: 280, h: 32, spaceStyle: 1, jt: true, dock: true, motif: 'asteroid-ferry' });
+                    const end = T.add({ x: far - 140, y: laneY - 180, w: 280, h: 32, spaceStyle: 1, dock: true, motif: 'asteroid-ferry' });
                     const lane = T.lane({ y: laneY, cx: (a.x + a.w / 2 + far) / 2, size: 140, h: 60, speed: d * 160, spacing: 560, min: 2000 });
                     if (lane.x0 > Math.min(a.x, end.x) - 200 || lane.x1 < Math.max(a.x + a.w, end.x + end.w) + 200) T.fail();
                     end.via = [lane];
@@ -726,7 +729,7 @@
                 'thruster-boost': (L, d, T) => {
                     const pad = T.add({ x: Math.round(ahead(L, d, 140, 200)), y: L.y - 120, w: 200, h: 32, spaceStyle: 2, motif: 'thruster-boost' });
                     this.springs.push({ x: pad.x + 77, y: pad.y - 16, w: 46, h: 16, bi: 3 });
-                    const top = T.add({ x: d > 0 ? pad.x + pad.w + 20 : pad.x - 20 - 300, y: pad.y - 330, w: 300, h: 32, spaceStyle: 1, jt: true, motif: 'thruster-boost' });
+                    const top = T.add({ x: d > 0 ? pad.x + pad.w + 20 : pad.x - 20 - 300, y: pad.y - 330, w: 300, h: 32, spaceStyle: 1, motif: 'thruster-boost' });
                     return [pad, top];
                 },
                 // a long airlock corridor with pulsing laser gates
@@ -1867,7 +1870,7 @@
         }
 
         drawJumpThroughMarker(ctx, p) {
-            if (!(p.oneway || p.jt) || p.stair || p.fireEscape || p.factoryStep || p.off) return;
+            if (!p.oneway || p.off || p.stair || p.fireEscape || p.factoryStep) return;
             const x = p.x + p.w / 2, y = p.y + p.h + 19;
             ctx.save();
             ctx.strokeStyle = '#7dd3fc';
@@ -2594,7 +2597,13 @@
             ctx.moveTo(mx, my - ry * .7); ctx.lineTo(mx - (p.dir || 1) * 160, my); ctx.lineTo(mx, my + ry * .7); ctx.fill();
             const tone = ['#64748b', '#78716c', '#6b7280', '#57534e'][seed % 4];
             ctx.fillStyle = tone; ctx.beginPath();
-            ctx.moveTo(p.x + 6, p.y); ctx.lineTo(p.x + p.w - 6, p.y);
+            const rim = [];
+            for (let i = 0; i <= 8; i++) {
+                const x = p.x + p.w * i / 8;
+                const y = p.y + (i === 0 || i === 8 ? 12 : (ihash(seed, i + 70) % 11) - 5);
+                rim.push([x, y]);
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            }
             for (let i = 0; i <= 10; i++) {
                 const a = i / 10 * Math.PI, k = .8 + (ihash(seed, i) % 25) / 100;
                 ctx.lineTo(mx + Math.cos(a) * rx * k, p.y + 4 + Math.sin(a) * (ry * 2 - 4) * k);
@@ -2605,7 +2614,9 @@
                 const u = (ihash(seed, i + 20) % 70) / 100 + .15, v = (ihash(seed, i + 40) % 40) / 100 + .35;
                 ctx.beginPath(); ctx.ellipse(p.x + p.w * u, p.y + ry * 2 * v, 6 + ihash(seed, i) % 8, 4 + ihash(seed, i + 9) % 4, 0, 0, TAU); ctx.fill();
             }
-            ctx.fillStyle = '#cbd5e1'; ctx.fillRect(p.x + 6, p.y, p.w - 12, 4);
+            ctx.strokeStyle = 'rgba(203,213,225,.5)'; ctx.lineWidth = 2; ctx.beginPath();
+            rim.forEach(([x, y], i) => i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y));
+            ctx.stroke();
             ctx.restore();
         }
 
@@ -2987,7 +2998,7 @@
                 const bounds = this.drawBounds(p);
                 if (p.boundary || (bounds.x ?? p.x) > right || (bounds.x ?? p.x) + (bounds.w ?? p.w) < left || (p.off && !p.blink && !p.crumble) || bounds.y > bottom || bounds.y + bounds.h < top) continue;
                 const B = SKY_BIOMES[p.bi || 0];
-                if (p.blink || p.crumble) { this.drawUnstablePlatform(ctx, p, B); continue; }
+                if (p.blink || p.crumble) { this.drawUnstablePlatform(ctx, p, B); this.drawJumpThroughMarker(ctx, p); continue; }
                 if (p.cityKit) {
                     this.drawCityKit(ctx, p, p.cityKit === 'scaffold' ? 'deck' : 'all');
                 } else if (p.meteor) {

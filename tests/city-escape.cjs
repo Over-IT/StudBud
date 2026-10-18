@@ -37,8 +37,11 @@ const SEEDS = [1, 42, 12345, 67890, 45678, 0xffffffff];
     for (const platform of game.solids) {
         strokes = 0;
         game.drawJumpThroughMarker(markerContext, platform);
-        const marked = (platform.oneway || platform.jt) && !platform.stair && !platform.fireEscape && !platform.factoryStep && !platform.off;
-        assert.equal(strokes, marked ? 1 : 0, 'only active non-stair jump-through platforms get a single arrow');
+        const marked = platform.oneway && !platform.off && !platform.stair && !platform.fireEscape && !platform.factoryStep;
+        assert.equal(strokes, marked ? 1 : 0, 'active jump-through platforms get arrows except obvious stairs; solid objects never do');
+    }
+    for (const platform of game.solids.filter(p => ['sorting-shelf', 'packing-deck', 'cooling-grate', 'asteroid-ferry', 'thruster-boost', 'catapult'].includes(p.motif))) {
+        assert.equal(platform.oneway, false, `${platform.motif} does not need pass-through collision`);
     }
 }
 {
@@ -89,18 +92,21 @@ for (const seed of SEEDS) {
     assert.ok(factory.length >= 3 && space.length >= 3, 'factory and space each get a real stretch');
     assert.ok(new Set(factory.flatMap(c => c.pieces)).size >= 12, 'the factory works through its whole deck of set pieces');
     assert.ok(new Set(space.flatMap(c => c.pieces)).size >= 10, 'space works through its whole deck of set pieces');
-    assert.equal(game.drills.length, 3, 'only the conveyor pair and the single hopper hammer use timed strikes');
+    assert.equal(game.drills.length, 7, 'two long conveyor lines have four and three timed obstacles');
     assert.ok(game.drills.every(d => d.bi === 1), 'drills and presses appear only in the factory');
     assert.ok(game.drills.some(d => d.crusher) && game.drills.some(d => !d.crusher), 'factory contains both crushers and drills');
     for (const d of game.drills) {
         assert.ok(game.solids.some(p => p.chamber === d.chamber && Math.abs(p.y - d.surfaceY) < 1 && d.x >= p.x && d.x <= p.x + p.w), 'drills strike a real deck');
     }
-    assert.equal(game.solids.filter(p => p.factoryBelt && p.w >= 600).length, 1, 'one conveyor challenge appears per run');
+    assert.equal(game.solids.filter(p => p.factoryBelt && p.w >= 800).length, 2, 'two long conveyor challenges appear per run');
     assert.equal(game.solids.filter(p => p.factoryBelt).length, 5, 'factory adds three short assembly belts and one stamping-feed conveyor');
     for (const belt of game.solids.filter(p => p.factoryBelt)) {
         const machines = game.drills.filter(d => d.chamber === belt.chamber && d.surfaceY === belt.y && d.x > belt.x && d.x < belt.x + belt.w);
         if (belt.motif !== 'assembly-bench') assert.ok(machines.length >= 1, `${belt.motif}: long and stamping conveyors have timed hazards`);
-        if (belt.motif === 'belt-gauntlet') assert.equal(machines.length, 2, 'each gauntlet belt has two independently timed machines');
+        if (belt.motif === 'belt-gauntlet') {
+            assert.equal(machines.length, 4, 'long gauntlet has four independently timed machines');
+            assert.ok(belt.w >= 1180 && belt.beltFlip === 6, 'long crossing also periodically reverses direction');
+        }
         assert.ok(machines.every(d => d.x - belt.x > 70 && belt.x + belt.w - d.x > 70), 'belt entry and exit leave room to prepare the next crossing');
     }
     assert.ok(game.lasers.some(l => l.steam && l.bi === 1), 'pressure vents interrupt the factory climbs with timed hazards');
@@ -520,7 +526,9 @@ for (const game of maps) for (const fps of [30, 60, 120]) {
         const index = game.climbPath.indexOf(belt), previous = game.climbPath[index - 1];
         const direction = Math.sign(belt.x + belt.w / 2 - previous.x - previous.w / 2);
         const machines = game.drills.filter(d => d.surfaceY === belt.y && d.x > belt.x && d.x < belt.x + belt.w);
-        for (const machine of machines) {
+        const baseSpeed = belt.belt;
+        for (const polarity of [1, -1]) for (const machine of machines) {
+            belt.belt = baseSpeed * polarity;
             let crossed = false;
             for (let phase = 0; phase < 32 && !crossed; phase++) {
                 const clearance = machine.width / 2 + 13 + 20;
@@ -544,6 +552,7 @@ for (const game of maps) for (const fps of [30, 60, 120]) {
             }
             assert.ok(crossed, `${fps} FPS: each ${belt.motif} machine has a real, survivable walking window against its conveyor`);
         }
+        belt.belt = baseSpeed;
     }
 }
 console.log('All conveyor machinery has survivable timed crossings with real belt physics on six layouts at 30/60/120 FPS.');
