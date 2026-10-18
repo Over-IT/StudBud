@@ -617,7 +617,7 @@
                     let previous = L;
                     for (let i = 0; i < 3; i++) {
                         const bench = T.add(deck(ahead(previous, d, 130, 220), previous.y - 100, 220,
-                            { factoryBelt: true, belt: d * (i % 2 ? -100 : 100), motif: 'assembly-bench' }));
+                            { factoryBelt: true, belt: d * (i % 2 ? -100 : 100), beltFlip: 4, motif: 'assembly-bench' }));
                         if (i === 1) vent(T, bench, .5);
                         benches.push(bench); previous = bench;
                     }
@@ -628,7 +628,7 @@
                 // one stamping hammer guards the hopper grate
                 'stamping-feed': (L, d, T, calm) => {
                     const w = 420;
-                    const feed = T.add(deck(ahead(L, d, 130, w), L.y - 110, w, { factoryBelt: true, belt: d * 110, motif: 'stamping-feed' }));
+                    const feed = T.add(deck(ahead(L, d, 130, w), L.y - 110, w, { factoryBelt: true, belt: d * 110, beltFlip: 5, motif: 'stamping-feed' }));
                     drill(T, feed, feed.x + feed.w * .5, true, 3.0, r() * 3);
                     const grate = T.add({ x: ahead(feed, d, 140, 130), y: feed.y - 95, w: 130, h: 16, thin: true, crumble: !calm, grate: true, motif: 'stamping-feed' });
                     return [feed, grate, T.add(deck(ahead(grate, d, 140, 300), grate.y - 105, 300, { motif: 'landing' }))];
@@ -1182,6 +1182,7 @@
             }
             // Designated ascent platforms allow jump-through; stairs are recognizable without markers.
             for (const p of solids) p.oneway = !!(p.jt || p.factoryStep || p.fireEscape);
+            this.conveyors = solids.filter(p => p.factoryBelt);
             // purely visual rooftop clutter, placed only in free gaps (no props, spikes, springs, boxes, flags or ceilings)
             const rd = mulberry32((this.s.seed ^ 0x9e3779b1) >>> 0), DW = [80, 110, 80, 100, 110, 110, 90, 70, 100];
             for (const p of solids) {
@@ -1261,6 +1262,7 @@
             this.jumpPulse = 0; this.airJumpPulse = 0; this.landingPose = 0; this.dashPose = 0;
             this.snapCam = true; this.state = 0;
             this.stuckT = 0; this.stuckX = me.x; this.stuckY = me.y;
+            this.backdropArea = this.cp.id;
             this.updateHeightScore();
         }
 
@@ -1344,7 +1346,8 @@
             const ground = this.me.onGround ? this.me.ground : null;
             const area = ground && !ground.off ? SKY_ROUTE.indexOf(ground.bi) : -1;
             if (area >= 0) this.backdropArea = area;
-            const target = this.backdropArea || 0;
+            const heightArea = Math.floor(this.biomeProgress(Math.max(0, -(this.me.y + this.me.h))));
+            const target = area >= 0 ? area : Math.min(this.backdropArea || 0, heightArea);
             const current = this.backdropPosition || 0;
             this.backdropPosition = current + clamp(target - current, -dt / .9, dt / .9);
         }
@@ -1497,6 +1500,14 @@
             this.lastHazardElapsed = elapsed;
             const clock = this.hazardClock = elapsed - (this.hazardOffset || 0);
             this.clock = clock;
+            for (const belt of this.conveyors) {
+                if (!belt.beltFlip) continue;
+                belt.beltBase ??= belt.belt;
+                const phase = ((clock % (belt.beltFlip * 2)) + belt.beltFlip * 2) % (belt.beltFlip * 2);
+                belt.belt = belt.beltBase * (phase < belt.beltFlip ? 1 : -1);
+                belt.beltTravel = belt.beltBase * (phase < belt.beltFlip ? phase : belt.beltFlip * 2 - phase);
+                belt.beltWarning = belt.beltFlip - phase % belt.beltFlip < .65;
+            }
 
             for (const m of this.movers) {
                 if (freezeHazards) { m.dx = 0; m.dy = 0; continue; }
@@ -2639,7 +2650,8 @@
             ctx.fillStyle = '#1e293b'; roundRect(ctx, p.x, p.y, p.w, Math.max(20, p.h), 8); ctx.fill();
             ctx.fillStyle = '#94a3b8'; ctx.fillRect(p.x + 5, p.y + 2, p.w - 10, 5);
             ctx.fillStyle = '#0f172a'; ctx.fillRect(p.x + 8, p.y + 8, p.w - 16, 10);
-            const shift = ((this.clock || 0) * p.belt % 28 + 28) % 28;
+            const travel = p.beltTravel ?? (this.clock || 0) * p.belt;
+            const shift = (travel % 28 + 28) % 28;
             ctx.strokeStyle = '#a8a29e'; ctx.lineWidth = 3; ctx.beginPath();
             for (let x = Math.floor((left - p.x) / 28) * 28 + p.x + shift; x < right; x += 28) {
                 if (x <= p.x + 8 || x >= p.x + p.w - 8) continue;
@@ -2650,7 +2662,7 @@
                 if (x < left || x > right) continue;
                 ctx.fillStyle = '#475569'; ctx.beginPath(); ctx.arc(x, p.y + 26, 12, 0, TAU); ctx.fill();
                 ctx.strokeStyle = '#a8a29e'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, p.y + 26, 9, 0, TAU); ctx.stroke();
-                const angle = (this.clock || 0) * p.belt / 12;
+                const angle = travel / 12;
                 ctx.beginPath(); ctx.moveTo(x - Math.cos(angle) * 8, p.y + 26 - Math.sin(angle) * 8);
                 ctx.lineTo(x + Math.cos(angle) * 8, p.y + 26 + Math.sin(angle) * 8); ctx.stroke();
             }
@@ -2663,7 +2675,7 @@
                 for (let x = start; x < Math.min(right, p.x + p.w - 110); x += 110) { ctx.moveTo(x, p.y + 38); ctx.lineTo(x + 55, p.y + 67); ctx.lineTo(x + 110, p.y + 38); }
                 ctx.stroke();
             }
-            ctx.fillStyle = '#fbbf24'; ctx.beginPath();
+            ctx.fillStyle = p.beltWarning ? '#fb7185' : '#fbbf24'; ctx.beginPath();
             const center = p.x + p.w / 2, dir = Math.sign(p.belt);
             ctx.moveTo(center + dir * 13, p.y + 13); ctx.lineTo(center - dir * 5, p.y + 7); ctx.lineTo(center - dir * 5, p.y + 19); ctx.fill();
         }

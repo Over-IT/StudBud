@@ -1184,14 +1184,50 @@ for (const fps of [30, 60, 120]) {
     g.updateBackdrop(.45);
     assert.ok(Math.abs(g.backdropBlend().amount - .5) < 1e-10, 'landing in Factory starts a time-based eased transition');
     g.me.onGround = false; g.me.ground = null;
+    g.me.y = g.checkpoints[1].y - g.me.h - 100;
     for (let i = 0; i < fps; i++) g.updateBackdrop(1 / fps);
     assert.equal(g.backdropBlend().to, 1, 'jumping away from a Factory platform does not reverse the fade');
     assert.equal(g.backdropBlend().from, 1);
+    g.me.y = g.checkpoints[1].y + 100;
+    for (let i = 0; i < fps; i++) g.updateBackdrop(1 / fps);
+    assert.equal(g.backdropBlend().to, 0, 'falling into City temporarily restores City scenery before landing');
+    assert.equal(g.backdropArea, 1, 'temporary fall does not discard the reached section or change music');
+    g.me.y = g.checkpoints[1].y - g.me.h - 100;
+    for (let i = 0; i < fps; i++) g.updateBackdrop(1 / fps);
+    assert.equal(g.backdropBlend().from, 1, 'climbing back into Factory restores its scenery');
+    g.cp = g.checkpoints[1]; g.me.y = 100;
+    g.restoreCheckpoint();
+    for (let i = 0; i < fps; i++) g.updateBackdrop(1 / fps);
+    assert.equal(g.backdropBlend().from, 1, 'respawn restores checkpoint scenery without requiring a landing');
     g.me.onGround = true; g.me.ground = { bi: 0 };
     for (let i = 0; i < fps; i++) g.updateBackdrop(1 / fps);
     assert.equal(g.backdropBlend().to, 0, 'actually landing back in City restores its background');
     g.me.ground = { bi: 3 };
+    g.me.y = g.checkpoints[2].y - g.me.h;
     for (let i = 0; i < fps * 2; i++) g.updateBackdrop(1 / fps);
     assert.equal(g.backdropBlend().to, 3, 'Space scenery follows actual Space footing');
 }
 console.log('Automatic height checkpoints, safe respawns and landing-triggered stable biome fades passed at 30/60/120 FPS.');
+for (const fps of [30, 60, 120]) {
+    const s = session('skyline'), g = s.game;
+    const belt = g.conveyors.find(p => p.beltFlip);
+    assert.ok(belt, 'Factory includes periodically reversing conveyors');
+    g.updatePlayer = () => {};
+    s.startedAt = 0;
+    const originalNow = sandbox.Date.now;
+    let now = 0;
+    sandbox.Date.now = () => now;
+    try {
+        g.update(0); const speed = belt.belt;
+        now = (belt.beltFlip - .3) * 1000; g.update(1 / fps);
+        assert.equal(belt.beltWarning, true, 'arrow warns shortly before changing direction');
+        const travel = belt.beltTravel;
+        now = (belt.beltFlip + .3) * 1000; g.update(1 / fps);
+        assert.equal(belt.belt, -speed, 'conveyor reverses its actual transport velocity');
+        assert.ok(Math.abs(belt.beltTravel - travel) < .001, 'roller animation reverses continuously');
+        s.testing = true; s.testFreezeHazards = true; s.testPauseAt = now;
+        const frozen = belt.belt;
+        now += 6000; s.testPauseAt = now; g.update(1 / fps);
+        assert.equal(belt.belt, frozen, 'hazard freeze also freezes conveyor reversal timing');
+    } finally { sandbox.Date.now = originalNow; }
+}
