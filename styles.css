@@ -1811,6 +1811,8 @@ body.compact-ui .glass-card { padding: 14px; }
 .hosted-game-form { display: grid; align-content: start; gap: var(--spacing-sm); min-width: 0; padding: var(--spacing-md); border: 1px solid var(--border-glass); border-radius: var(--border-radius-sm); background: var(--bg-glass); }
 .hosted-game-form h4 { margin: 0; }
 .hosted-game-form label { display: grid; gap: 5px; color: var(--text-secondary); font-size: 0.84rem; font-weight: 600; }
+.hosted-game-form label.settings-check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.hosted-game-form .settings-check input[type="checkbox"] { flex: 0 0 auto; margin: 0; }
 .hosted-game-form button { justify-self: start; }
 .hosted-game-room { min-width: 0; padding: var(--spacing-md); border: 1px solid var(--border-glass); border-radius: var(--border-radius-sm); background: var(--bg-glass); }
 .hosted-room-heading { align-items: center; }

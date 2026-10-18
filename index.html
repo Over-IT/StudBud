@@ -808,8 +808,8 @@
                                         <label>Player name<input id="host-game-nickname" name="nickname" type="text" maxlength="20" placeholder="Your username" aria-describedby="host-game-nickname-hint"><small id="host-game-nickname-hint" class="settings-hint">Optional. Leave blank to use your username.</small></label>
                                         <label>Flashcard set<select id="host-game-deck" name="deckId" required></select></label>
                                         <input id="host-game-mode" name="mode" type="hidden" value="skyline">
-                                        <label class="settings-check"><input id="host-game-late-join" name="allowLateJoin" type="checkbox"> Allow players to join after the game starts</label>
-                                        <small class="settings-hint">Off by default. Late joiners start fresh with the remaining match time. Not available in two-player chess.</small>
+                                        <label class="settings-check"><input id="host-game-late-join" name="allowLateJoin" type="checkbox" aria-describedby="host-game-late-join-hint"> Allow late joining</label>
+                                        <small id="host-game-late-join-hint" class="settings-hint">Off by default. Late joiners start fresh with the remaining match time. Not available in two-player chess.</small>
                                         <p id="chess-setup-note" class="settings-hint hidden">1v1, no timer. Answer correctly to earn one move. Either player can move when ready; while in check, only the checked player moves.</p>
                                         <div class="multiplayer-goals">
                                             <label class="time-slider">Time limit: <strong id="host-game-time-value">5 min</strong><input id="host-game-time" name="timeLimit" type="range" min="1" max="60" step="1" value="5"></label>
