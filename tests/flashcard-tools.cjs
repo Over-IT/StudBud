@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { FlashcardTools: tools } = require('../flashcardEngine.js');
+const { FlashcardTools: tools, SM2Engine } = require('../flashcardEngine.js');
 const source = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 
 assert.equal(tools.gradeAnswer('  Photosynthesis! ', 'photosynthesis', true), true);
@@ -67,6 +67,30 @@ assert.equal(weak.practiceStats.missStreak, 4);
 tools.recordAnswer(weak, true);
 assert.equal(weak.practiceStats.correct, 3);
 assert.equal(weak.practiceStats.missStreak, 0);
+{
+    const practiced = {};
+    for (const expected of [.25, .5, .75, 1]) {
+        tools.recordAnswer(practiced, true);
+        assert.equal(tools.cardProgress(practiced).mastery, expected, 'every correct practice answer builds mastery');
+    }
+    tools.recordAnswer(practiced, false);
+    assert.equal(tools.cardProgress(practiced).mastery, .75);
+    assert.equal(tools.cardProgress(practiced).weak, false, 'exactly 75% is not weak');
+    tools.recordAnswer(practiced, false);
+    assert.equal(tools.cardProgress(practiced).weak, true);
+    const oldWeak = { practiceStats: { attempts: 100, correct: 2, missStreak: 20 } };
+    assert.equal(tools.cardProgress(oldWeak).weak, true);
+    for (let i = 0; i < 4; i++) tools.recordAnswer(oldWeak, true);
+    assert.equal(tools.cardProgress(oldWeak).mastery, 1, 'old misses do not permanently lock a recovered card at low mastery');
+    assert.equal(tools.cardProgress(oldWeak).weak, false);
+    assert.equal(oldWeak.practiceStats.attempts, 104, 'lifetime attempt counts remain intact');
+    assert.equal(oldWeak.practiceStats.recentAnswers.length, 4, 'recent-answer storage is bounded');
+    assert.ok(tools.weight(oldWeak) < tools.weight(weak), 'adaptive drills recognize recovered cards');
+    assert.equal(tools.cardProgress({ practiceStats: { attempts: 2, correct: 2 } }).mastery, .5, 'existing saved Cram/game answers count without restudying');
+    assert.equal(tools.cardProgress({ interval: 21 }).mastery, 1, 'legacy scheduled mastery remains available without answer stats');
+    assert.equal(tools.cardProgress({ repetitions: 1 }).mastery, .5);
+    assert.equal(tools.cardProgress({}).mastery, 0);
+}
 
 const nodes = new Map();
 const state = { flashcards: [{ id: 'deck', title: 'Biology', cards: [
@@ -102,6 +126,27 @@ assert.equal(app.practiceTestOptions.strict, false);
 assert.equal(app.practiceTestCards.length, 2);
 
 async function run() {
+    {
+        const original = state.flashcards;
+        const deck = { id: 'shared-progress', communitySourceId: 'public-set', title: 'Shared Spanish', cards: [{ id: 'hola', front: 'hola', back: 'hello' }] };
+        state.flashcards = [deck];
+        sandbox.window.SM2Engine = SM2Engine;
+        app.activeDeckId = deck.id;
+        const renderStudyCard = app.renderStudyCard;
+        app.renderStudyCard = () => {};
+        app.studySession = SM2Engine.createSession(deck.cards, { deck, includeAll: true });
+        app.currentStudyCard = app.studySession.next();
+        await app.rateCurrentCard(4);
+        assert.equal(app.deckMastery(state.flashcards[0]).pct, 25, 'scheduled Study immediately updates shared-deck mastery');
+        const schedule = SM2Engine.migrate(deck.cards[0]);
+        app.studySession = null; app.studyCards = [deck.cards[0]]; app.activeCardIndex = 0;
+        app.currentStudyCard = deck.cards[0];
+        await app.rateCurrentCard(4);
+        assert.equal(app.deckMastery(state.flashcards[0]).pct, 50, 'Cram adds to the same mastery');
+        assert.deepEqual(SM2Engine.migrate(deck.cards[0]), schedule, 'Cram still leaves the review schedule unchanged');
+        app.renderStudyCard = renderStudyCard;
+        state.flashcards = original;
+    }
     app.practiceTestCards = [state.flashcards[0].cards[0]];
     app.practiceTestQuestionTypes = ['written'];
     app.arcadeQuestionIndex = 0;
@@ -157,10 +202,14 @@ async function run() {
         overlay: { querySelector: () => ({ querySelectorAll: () => [], querySelector: () => ({}) }) },
         sfx() {}, closeQuestion() { this.question = null; }
     });
+    let progressSession;
+    sandbox.window.NexusApp = { saveGameProgress: async current => { progressSession = current; } };
     Session.answerQuestion.call(session, 0);
+    assert.equal(progressSession, session, 'game answers request immediate persistence without waiting for match results');
+    assert.equal(progressSession.questionHistory.length, 1, 'the answer is recorded before requesting persistence');
     assert.equal(session.questionStats.get(0).attempts, 21, 'first game answer retains historical attempts');
     assert.equal(session.questionStats.get(0).correct, 3);
-    assert.equal(progress.attempts, 20, 'session tracking leaves saved progress untouched until summary persistence');
+    assert.equal(progress.attempts, 20, 'session tracking leaves saved progress untouched until answer persistence');
     console.log('Custom and related choices, private image guards, strict/lenient grading, adaptive accuracy, study/exam feedback, missed retries and assessment/review links passed.');
 }
 run().catch(error => { console.error(error); process.exitCode = 1; });

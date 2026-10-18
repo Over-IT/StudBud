@@ -867,6 +867,52 @@ async function run() {
     app.updateGameAudio({ volume: .6, enabled: true });
     assert.equal(state.state.settings.gameAudio.volume, .6);
     assert.equal(JSON.parse(storage.get(state.STORAGE_KEY)).assignments[0].id, 'assignment');
+    {
+        const deck = { id: 'mastery-shared', title: 'Shared set', communitySourceId: 'shared-public',
+            communitySourceOwnerId: 'another-student', cards: [
+                { id: 'a', front: 'hola', back: 'hello', practiceStats: { attempts: 4, correct: 0 } },
+                { id: 'b', front: 'adios', back: 'goodbye' }
+            ] };
+        await state.saveFlashcardDeck(deck);
+        assert.deepEqual(normal(app.deckMastery(deck)), { pct: 0, starred: 0, weak: 1 });
+        const game = { testing: false, studySet: { publicId: 'shared-public' }, questionHistory: [] };
+        let refreshes = 0;
+        sandbox.EventBus.on('flashcards:updated', () => refreshes++);
+        game.questionHistory.push({ prompt: 'hola', answer: 'hello', correct: true });
+        const first = app.saveGameProgress(game);
+        game.questionHistory.push({ prompt: 'hola', answer: 'hello', correct: true });
+        const second = app.saveGameProgress(game);
+        await Promise.all([first, second]);
+        let saved = state.get('flashcards').find(item => item.id === deck.id);
+        assert.equal(saved.cards[0].practiceStats.attempts, 6, 'overlapping live game saves credit each answer once');
+        for (let i = 0; i < 2; i++) {
+            game.questionHistory.push({ prompt: 'hola', answer: 'hello', correct: true });
+            await app.saveGameProgress(game);
+        }
+        saved = state.get('flashcards').find(item => item.id === deck.id);
+        assert.deepEqual(normal(app.deckMastery(saved)), { pct: 50, starred: 0, weak: 0 }, 'mastery and weak counts update before a match finishes');
+        assert.ok(refreshes > 0, 'saved answers trigger the event that rerenders deck tiles');
+        assert.equal((await sandbox.NexusDB.getAll('flashcards')).find(item => item.id === deck.id).cards[0].practiceStats.recentAnswers.length, 4, 'progress survives storage reload');
+        await app.saveGameSummary({ ...match, ...game });
+        saved = state.get('flashcards').find(item => item.id === deck.id);
+        assert.equal(saved.cards[0].practiceStats.attempts, 8, 'finishing a match does not double-count answers already saved live');
+        game.questionHistory.push({ prompt: 'adios', answer: 'goodbye', correct: null });
+        await app.saveGameProgress(game);
+        assert.equal(state.get('flashcards').find(item => item.id === deck.id).cards[1].practiceStats, undefined, 'skips never count as practice');
+        const put = sandbox.NexusDB.put;
+        game.questionHistory.push({ prompt: 'adios', answer: 'goodbye', correct: true });
+        sandbox.NexusDB.put = async () => { throw new Error('write failed'); };
+        await assert.rejects(app.saveGameProgress(game), /write failed/);
+        assert.equal(game.studyProgressSavedThrough, 5, 'failed writes do not acknowledge unsaved answers');
+        sandbox.NexusDB.put = put;
+        await app.saveGameProgress(game);
+        saved = state.get('flashcards').find(item => item.id === deck.id);
+        assert.equal(saved.cards[1].practiceStats.attempts, 1, 'retry saves the missed answer exactly once');
+        assert.equal(app.deckMastery(saved).pct, 63);
+        await app.saveGameProgress({ ...game, testing: true, studyProgressSavedThrough: 0 });
+        assert.equal(state.get('flashcards').find(item => item.id === deck.id).cards[0].practiceStats.attempts, 8, 'staff tests remain excluded');
+        listeners.clear();
+    }
     console.log('Box eligibility/exhaustion, shuffled due-only Anki scheduling, conflict-safe cloud retries, owned decks, grades/assignments/schedules and audio persistence passed.');
     console.log('Snapshot isolation across all data, stable exports, edits during export/read/write, account-switch guards, Keep Device Data and late study acknowledgements passed.');
 }

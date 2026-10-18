@@ -2926,7 +2926,7 @@
                 return `
                 <article class="glass-card deck-card">
                     <div class="deck-card-top">
-                        <div class="deck-ring" style="--p:${mastery.pct}" title="${mastery.pct}% mastered"><span>${mastery.pct}%</span></div>
+                        <div class="deck-ring" style="--p:${mastery.pct}" title="${mastery.pct}% mastery · Study, Cram and game answers count · Four recent correct answers master a card"><span>${mastery.pct}%</span></div>
                         <div class="deck-card-title">
                             <h3>${this.escapeHTML(deck.title)}</h3>
                             ${author}
@@ -2946,7 +2946,7 @@
                         <div class="deck-stats">
                             <span><i class="fas fa-clone"></i> ${cardCount} cards</span>
                             ${mastery.starred ? `<span class="is-star" title="Starred cards"><i class="fas fa-star"></i> ${mastery.starred}</span>` : ''}
-                            ${mastery.weak ? `<span class="is-weak" title="Cards under 75% accuracy"><i class="fas fa-triangle-exclamation"></i> ${mastery.weak} weak</span>` : ''}
+                            ${mastery.weak ? `<span class="is-weak" title="Cards under 75% accuracy · Uses the last four answers once available"><i class="fas fa-triangle-exclamation"></i> ${mastery.weak} weak</span>` : ''}
                         </div>
                         ${tags}
                     </div>
@@ -3006,11 +3006,10 @@
             const cards = (deck.cards || []).filter(Boolean);
             let mastered = 0, starred = 0, weak = 0;
             for (const card of cards) {
-                if (Number(card.interval) >= 21 || Number(card.repetitions) >= 4) mastered += 1;
-                else if (Number(card.repetitions) >= 1) mastered += .5;
+                const progress = window.FlashcardTools.cardProgress(card);
+                mastered += progress.mastery;
                 if (card.starred) starred += 1;
-                const stats = card.practiceStats;
-                if (stats?.attempts > 1 && stats.correct / stats.attempts < .75) weak += 1;
+                if (progress.weak) weak += 1;
             }
             return { pct: cards.length ? Math.round(mastered / cards.length * 100) : 0, starred, weak };
         }
@@ -3247,14 +3246,14 @@
                 && (filter === 'all' || (filter === 'images' && window.FlashcardTools.imageSource(card.answerImage))
                     || (filter === 'attachments' && (card.attachments || []).some(item => window.FlashcardTools.attachmentSource(item)))
                     || (filter === 'keywords' && card.answerMode === 'keywords')
-                    || (filter === 'paused' && card.suspended) || (filter === 'starred' && card.starred) || (filter === 'weak' && card.practiceStats?.attempts > 0 && card.practiceStats.correct / card.practiceStats.attempts < .75)));
+                    || (filter === 'paused' && card.suspended) || (filter === 'starred' && card.starred) || (filter === 'weak' && window.FlashcardTools.cardProgress(card).weak)));
             document.getElementById('deck-editor-undo')?.classList.toggle('hidden', !this.deckEditorUndo?.length);
             document.getElementById('deck-editor-count').textContent = `${cards.length} of ${draft.cards.length} cards`;
             document.getElementById('deck-editor-cards').innerHTML = cards.map(card => `
                 <article class="deck-editor-card">
                     <strong>${this.escapeHTML(card.front)}</strong><p>${this.escapeHTML(card.back)}</p>
                     ${card.tags?.length ? `<small>${this.escapeHTML(card.tags.join(', '))}</small>` : ''}
-                    <small>${card.practiceStats?.attempts > 0 ? `${Math.round(card.practiceStats.correct / card.practiceStats.attempts * 100)}% accuracy · ${Number(card.practiceStats.attempts)} attempts` : 'Not practiced yet'}${card.suspended ? ' · Paused scheduled study' : ''}${window.FlashcardTools.imageSource(card.answerImage) ? ' · Private image' : ''}</small>
+                    <small>${card.practiceStats?.attempts > 0 ? `${Math.round(window.FlashcardTools.cardProgress(card).accuracy * 100)}% accuracy${card.practiceStats.recentAnswers?.length === 4 ? ' (last 4)' : ''} · ${Number(card.practiceStats.attempts)} attempts` : 'Not practiced yet'}${card.suspended ? ' · Paused scheduled study' : ''}${window.FlashcardTools.imageSource(card.answerImage) ? ' · Private image' : ''}</small>
                     <small>${card.answerMode === 'keywords' ? 'Definition keywords' : card.answerMode === 'vocabulary' ? 'Vocabulary / translation' : card.answerMode === 'exact' ? 'Exact answer' : 'Test grading default'}${card.acceptedAnswers?.length ? ` · ${card.acceptedAnswers.length} alternative answers` : ''}${card.attachments?.length ? ` · ${card.attachments.length} private attachments` : ''}</small>
                     <div class="actions">
                         <button type="button" class="secondary-btn star-toggle${card.starred ? ' is-on' : ''}" data-action="editor-star-card" data-id="${this.escapeHTML(card.id)}" aria-pressed="${card.starred ? 'true' : 'false'}" aria-label="${card.starred ? 'Unstar' : 'Star'} card"><i class="${card.starred ? 'fas' : 'far'} fa-star"></i></button>
@@ -7140,22 +7139,36 @@
             if (room.status === 'waiting') this.arcadeLeft = false;
         }
 
+        saveGameProgress(session) {
+            if (session.testing || window.StudBudCloud?.guestLobbyOpen) return Promise.resolve();
+            const save = async () => {
+                const info = session.studySet || {};
+                const deck = (AppState.get('flashcards') || []).find(item => item.id === info.deckId
+                    || (info.publicId && [item.communityDeckId, item.communitySourceId].includes(info.publicId)));
+                if (!deck) return;
+                const through = session.questionHistory.length;
+                const answers = session.questionHistory.slice(session.studyProgressSavedThrough || 0, through).filter(answer => typeof answer.correct === 'boolean');
+                if (answers.length) {
+                    const cards = deck.cards.map(card => {
+                        const next = { ...card };
+                        for (const answer of answers.filter(answer => answer.prompt === card.front && answer.answer === card.back)) {
+                            window.FlashcardTools.recordAnswer(next, answer.correct);
+                        }
+                        return next;
+                    });
+                    await AppState.saveFlashcardDeck({ ...deck, cards });
+                }
+                session.studyProgressSavedThrough = through;
+            };
+            // Serialize answer saves and retry any unsaved history after a failed write.
+            session.studyProgressSave = session.studyProgressSave ? session.studyProgressSave.then(save, save) : save();
+            return session.studyProgressSave;
+        }
+
         async saveGameSummary(session) {
             // Code-only guests have no local workspace; app guests keep summaries on this device.
             if (session.testing || window.StudBudCloud?.guestLobbyOpen) return;
-            const info = session.studySet || {};
-            const deck = (AppState.get('flashcards') || []).find(item => item.id === info.deckId
-                || (info.publicId && [item.communityDeckId, item.communitySourceId].includes(info.publicId)));
-            if (deck) {
-                const cards = deck.cards.map(card => {
-                    const next = { ...card };
-                    for (const answer of session.questionHistory.filter(answer => answer.correct !== null && answer.prompt === card.front && answer.answer === card.back)) {
-                        window.FlashcardTools.recordAnswer(next, answer.correct);
-                    }
-                    return next;
-                });
-                await AppState.saveFlashcardDeck({ ...deck, cards });
-            }
+            await this.saveGameProgress(session);
             await AppState.recordStudySession({
                 id: `match_${window.crypto.randomUUID()}`, title: `${session.practice ? 'Practice game' : 'Study game'}: ${session.game.title}`,
                 durationSec: Math.max(1, Math.round(session.t)), method: 'practice', source: session.practice ? 'solo' : 'multiplayer',

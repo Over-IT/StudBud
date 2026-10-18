@@ -1010,6 +1010,10 @@
             window.FlashcardTools.recordAnswer(progress, correct);
             this.questionStats.set(this.lastCardIndex, progress.practiceStats);
             this.questionHistory.push({ prompt: q.card.front, answer: q.card.back, chosen: q.options[index] ?? '', correct });
+            window.NexusApp?.saveGameProgress?.(this).catch(error => {
+                console.error('[Game] Could not save answer progress:', error);
+                this.toast('Your answer progress could not be saved. Keep this page open and finish the match to retry.', '#f87171');
+            });
             try { q.onAnswer?.(correct); } catch (error) { console.error(error); }
             this.sfx(correct ? 'correct' : 'wrong');
             const box = this.overlay.querySelector('.mpg-question');

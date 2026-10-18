@@ -1117,7 +1117,8 @@
         weight(card) {
             const stats = card.practiceStats || {};
             const attempts = Math.max(0, Number(stats.attempts) || 0);
-            const accuracy = (Math.max(0, Number(stats.correct) || 0) + 1) / (attempts + 2);
+            const accuracy = stats.recentAnswers?.length === 4 ? this.cardProgress(card).accuracy
+                : (Math.max(0, Number(stats.correct) || 0) + 1) / (attempts + 2);
             return 1 + (1 - accuracy) * 4 + Math.min(3, Math.max(0, Number(stats.missStreak) || 0))
                 + Math.min(2, Math.max(0, Number(card.lapses) || 0) * .25);
         },
@@ -1125,13 +1126,26 @@
             return cards.map(card => ({ card, rank: -Math.log(Math.max(Number.EPSILON, Math.random())) / this.weight(card) }))
                 .sort((a, b) => a.rank - b.rank).map(item => item.card);
         },
+        cardProgress(card) {
+            const stats = card.practiceStats || {};
+            const recent = Array.isArray(stats.recentAnswers) ? stats.recentAnswers.filter(value => typeof value === 'boolean').slice(-4) : [];
+            const attempts = Math.max(0, Number(stats.attempts) || 0);
+            const correct = Math.min(attempts, Math.max(0, Number(stats.correct) || 0));
+            const useRecent = recent.length === 4;
+            const accuracy = useRecent ? recent.filter(Boolean).length / recent.length : attempts ? correct / attempts : 0;
+            const mastery = attempts
+                ? Math.min(1, (useRecent ? recent.length : attempts) / 4) * accuracy
+                : Number(card.interval) >= 21 || Number(card.repetitions) >= 4 ? 1 : Number(card.repetitions) >= 1 ? .5 : 0;
+            return { mastery, accuracy, attempts, weak: (useRecent || attempts > 1) && accuracy < .75 };
+        },
         recordAnswer(card, correct) {
             const stats = card.practiceStats || {};
             card.practiceStats = {
                 attempts: (Number(stats.attempts) || 0) + 1,
                 correct: (Number(stats.correct) || 0) + (correct ? 1 : 0),
                 missStreak: correct ? 0 : (Number(stats.missStreak) || 0) + 1,
-                lastCorrect: Boolean(correct), lastAnswered: new Date().toISOString()
+                lastCorrect: Boolean(correct), lastAnswered: new Date().toISOString(),
+                recentAnswers: [...(Array.isArray(stats.recentAnswers) ? stats.recentAnswers.filter(value => typeof value === 'boolean') : []), Boolean(correct)].slice(-4)
             };
         },
         imageSource(value) {
