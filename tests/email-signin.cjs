@@ -229,6 +229,14 @@ async function run() {
     assert.equal(cloud.pendingAccountEmail, null);
     assert.equal(cloud.emailLinkBusy, false);
     assert.match(node('email-settings-message').textContent, /already exists/);
+    linkError = new Error('Email address "student@accounts.studbud.invalid" is invalid');
+    await cloud.linkAccountEmail(submit);
+    assert.match(node('email-settings-message').textContent, /new email was not rejected/);
+    assert.match(node('email-settings-message').textContent, /No verification was sent/);
+    assert.match(node('email-settings-message').textContent, /existing account/);
+    assert.equal(cloud.pendingAccountEmail, null, 'server-side migration errors do not start a fake verification flow');
+    assert.equal(cloud.user.email, 'student@accounts.studbud.invalid', 'client must not bypass Auth email verification');
+    assert.equal(node('email-link-btn').disabled, false);
     linkError = null;
     await cloud.linkAccountEmail(submit);
     assert.equal(cloud.pendingAccountEmail, 'new@example.com');

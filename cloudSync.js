@@ -769,7 +769,13 @@
                 document.getElementById('email-link-code')?.focus();
             } catch (error) {
                 if (this.user?.id !== userId || this.accountVersion !== version) return;
-                message.textContent = this.friendlyAuthError(error, 'Could not send email verification. Please try again.');
+                const oldEmail = this.user.email?.toLowerCase() || '';
+                const detail = String(error?.message || '').toLowerCase();
+                const invalidInternalAddress = oldEmail.endsWith('@accounts.studbud.invalid')
+                    && detail.includes(oldEmail) && detail.includes('invalid');
+                message.textContent = invalidInternalAddress
+                    ? 'Your new email was not rejected. The server could not process this account\'s old internal sign-in address. No verification was sent. A site administrator must migrate the email on your existing account through Supabase Auth after verifying ownership. You can keep signing in with your username and password.'
+                    : this.friendlyAuthError(error, 'Could not send email verification. Please try again.');
             } finally {
                 this.emailLinkBusy = false;
                 if (button) button.disabled = false;
