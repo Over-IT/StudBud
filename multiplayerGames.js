@@ -1848,6 +1848,19 @@
             for (const [x, y0] of [a, b]) for (let y = y0 + 14; y < y0 + 60; y += 16) { ctx.fillRect(x - 1, y, 2, 2); }
         }
 
+        drawJumpThroughMarker(ctx, p) {
+            if (!(p.oneway || p.jt) || p.stair || p.fireEscape || p.factoryStep || p.off) return;
+            const x = p.x + p.w / 2, y = p.y - 9;
+            ctx.save();
+            ctx.strokeStyle = 'rgba(254,243,199,.85)';
+            ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+            ctx.beginPath();
+            ctx.moveTo(x, y); ctx.lineTo(x, y - 14);
+            ctx.moveTo(x - 5, y - 9); ctx.lineTo(x, y - 14); ctx.lineTo(x + 5, y - 9);
+            ctx.stroke();
+            ctx.restore();
+        }
+
         drawPlatformSupport(ctx, p) {
             if (p.bi === 1 || p.bi === 3) { this.drawMachineSupport(ctx, p); return; }
             if (p.beams) { this.drawGirders(ctx, p); return; }
@@ -3112,6 +3125,7 @@
                 } else {
                     this.drawLedge(ctx, p, B);
                 }
+                this.drawJumpThroughMarker(ctx, p);
             }
             for (const c of this.checkpoints) {
                 if (c.x > right || c.x < left || !seen(c.y)) continue;

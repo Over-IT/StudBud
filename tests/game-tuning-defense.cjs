@@ -21,6 +21,21 @@ for (const file of ['multiplayerEngine.js', 'multiplayerGames.js', 'multiplayerG
 }
 const A = sandbox.window.StudBudArcade;
 {
+    const marker = A.games.skyline.prototype.drawJumpThroughMarker;
+    const lines = [];
+    const markerCtx = { save: noop, restore: noop, beginPath: noop, stroke: noop,
+        moveTo: (x, y) => lines.push(['move', x, y]), lineTo: (x, y) => lines.push(['line', x, y]) };
+    const platform = { x: 100, y: 200, w: 160, h: 14, oneway: true, cityKit: 'scaffold' };
+    marker.call({}, markerCtx, platform);
+    assert.deepEqual(lines[0], ['move', 180, 191], 'one centered arrow marks a jump-through scaffold');
+    assert.deepEqual(lines[1], ['line', 180, 177], 'arrow points up through the deck');
+    for (const override of [{ oneway: false }, { stair: true }, { fireEscape: true }, { factoryStep: true }, { off: true }]) {
+        lines.length = 0;
+        marker.call({}, markerCtx, { ...platform, ...override });
+        assert.equal(lines.length, 0, 'solid platforms, stairs and inactive decks remain unmarked');
+    }
+}
+{
     const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
     assert.doesNotMatch(app, /fillText\(['"]LOG RIDE['"]/, 'Crossy Road no longer displays the redundant log-riding label');
     assert.match(app, /effect\.kind === 'log-land'[\s\S]*?ctx\.ellipse/, 'log landings retain their visual ripple');
