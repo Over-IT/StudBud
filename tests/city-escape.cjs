@@ -13,6 +13,29 @@ const maps = [];
 const SEEDS = [1, 42, 12345, 67890, 45678, 0xffffffff];
 {
     const game = makeGame(42);
+    const solidObjects = game.solids.filter(p => p.cityKit === 'catwalk' || p.cityKit === 'beam' || p.meteor
+        || p.prop === 'crate' || p.factoryBelt || p.piston);
+    assert.ok(solidObjects.length > 10);
+    for (const platform of solidObjects) {
+        assert.equal(platform.oneway, false, 'ordinary objects are solid rather than unmarked jump-through surfaces');
+        const p = { ...platform, off: false, dx: 0, dy: 0 };
+        for (const fps of [30, 60, 120]) {
+            const body = { x: p.x + p.w / 2 - 13, y: p.y + p.h + 1, w: 26, h: 44, vx: 0, vy: -600 };
+            U.moveBody(body, [p], 1 / fps);
+            assert.equal(body.vy, 0, `${fps} FPS: upward jumps hit the underside of ordinary objects`);
+            assert.equal(body.y, p.y + p.h);
+        }
+    }
+    for (const p of game.solids.filter(p => p.oneway && !p.slope)) {
+        const platform = { ...p, off: false, dx: 0, dy: 0 };
+        const body = { x: p.x + p.w / 2 - 13, y: p.y + p.h + 1, w: 26, h: 44, vx: 0, vy: -600 };
+        U.moveBody(body, [platform], 1 / 60);
+        assert.equal(body.vy, -600, 'designated arrow platforms still allow upward jumps');
+    }
+    assert.equal(game.drawJumpThroughMarker, undefined, 'the repeated arrow overlay is removed entirely');
+}
+{
+    const game = makeGame(42);
     const machines = [...game.drills];
     game.cp = game.checkpoints[1];
     game.captureCheckpoint();
@@ -66,10 +89,10 @@ for (const seed of SEEDS) {
         assert.ok(game.solids.some(p => p.chamber === d.chamber && Math.abs(p.y - d.surfaceY) < 1 && d.x >= p.x && d.x <= p.x + p.w), 'drills strike a real deck');
     }
     assert.equal(game.solids.filter(p => p.factoryBelt && p.w >= 600).length, 1, 'one conveyor challenge appears per run');
-    assert.equal(game.solids.filter(p => p.factoryBelt).length, 1, 'other factory sections do not repeat conveyor gameplay');
+    assert.equal(game.solids.filter(p => p.factoryBelt).length, 5, 'factory adds three short assembly belts and one stamping-feed conveyor');
     for (const belt of game.solids.filter(p => p.factoryBelt)) {
         const machines = game.drills.filter(d => d.chamber === belt.chamber && d.surfaceY === belt.y && d.x > belt.x && d.x < belt.x + belt.w);
-        assert.ok(machines.length >= 1, `${belt.motif}: every conveyor has a real timed hazard`);
+        if (belt.motif !== 'assembly-bench') assert.ok(machines.length >= 1, `${belt.motif}: long and stamping conveyors have timed hazards`);
         if (belt.motif === 'belt-gauntlet') assert.equal(machines.length, 2, 'each gauntlet belt has two independently timed machines');
         assert.ok(machines.every(d => d.x - belt.x > 70 && belt.x + belt.w - d.x > 70), 'belt entry and exit leave room to prepare the next crossing');
     }
@@ -550,7 +573,7 @@ for (const fps of [30, 60, 120]) {
         }
     }
 }
-console.log('Every conveyor has timed machinery; crusher/drill strikes and steam warning/cooldown collisions passed at 30/60/120 FPS.');
+console.log('Main conveyors have timed machinery; crusher/drill strikes and steam warning/cooldown collisions passed at 30/60/120 FPS.');
 
 {
     for (const seed of SEEDS) {
@@ -632,7 +655,8 @@ for (const map of maps) {
         const resting = { ...pole, y: pole.by, mover: false };
         const sunk = { ...resting, y: pole.by + pole.depth };
         assert.equal(sunk.y - target.y, 220, 'a fully compressed cap leaves a 220-unit rise to the next part');
-        assert.ok(pole.depth / pole.sinkRate > 1, 'caps sink gradually rather than dropping immediately');
+        assert.equal(pole.sinkRate, 220, 'pressure plates drop at the faster 220-unit-per-second rate');
+        assert.ok(pole.depth / pole.sinkRate > .4, 'caps still allow a brief departure rather than dropping instantly');
         for (const fps of [30, 60, 120]) {
             const launch = p => ({ x: p.x + p.w - 26, y: p.y });
             const solids = [resting, target];

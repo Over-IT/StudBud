@@ -232,6 +232,7 @@
                 },
                 courses: [],
                 assignments: [],
+                calendarEvents: [],
                 gradeScenarios: [],
                 selectedGradeScenarioId: null,
                 flashcards: [],
@@ -262,6 +263,7 @@
                         settings: { ...this.state.settings, ...(parsed.settings || {}) },
                         courses: Array.isArray(parsed.courses) ? parsed.courses : this.state.courses,
                         assignments: Array.isArray(parsed.assignments) ? parsed.assignments : this.state.assignments,
+                        calendarEvents: Array.isArray(parsed.calendarEvents) ? parsed.calendarEvents : this.state.calendarEvents,
                         gradeScenarios: Array.isArray(parsed.gradeScenarios) ? parsed.gradeScenarios : this.state.gradeScenarios,
                         selectedGradeScenarioId: parsed.selectedGradeScenarioId || this.state.selectedGradeScenarioId,
                         schedule: parsed.schedule && typeof parsed.schedule === 'object'
@@ -297,6 +299,7 @@
                 profile: this.state.profile,
                 courses: this.state.courses,
                 assignments: this.state.assignments,
+                calendarEvents: this.state.calendarEvents,
                 gradeScenarios: this.state.gradeScenarios,
                 selectedGradeScenarioId: this.state.selectedGradeScenarioId,
                 settings: this.state.settings,
@@ -439,6 +442,7 @@
                 profile: this.state.profile,
                 courses: this.state.courses,
                 assignments: this.state.assignments,
+                calendarEvents: this.state.calendarEvents,
                 gradeScenarios: this.state.gradeScenarios,
                 selectedGradeScenarioId: this.state.selectedGradeScenarioId,
                 gameMetrics: this.state.gameMetrics,
@@ -477,6 +481,7 @@
                 this.state.profile = parsed.state.profile || this.state.profile;
                 this.state.courses = parsed.state.courses || [];
                 this.state.assignments = parsed.state.assignments || [];
+                this.state.calendarEvents = Array.isArray(parsed.state.calendarEvents) ? parsed.state.calendarEvents : [];
                 this.state.gradeScenarios = Array.isArray(parsed.state.gradeScenarios) ? parsed.state.gradeScenarios : [];
                 this.state.selectedGradeScenarioId = parsed.state.selectedGradeScenarioId || null;
                 this.state.gameMetrics = gameMetrics;
@@ -523,7 +528,7 @@
         'grade-scenarios': ['What-if grades', 'Try possible scores without changing your saved grades.'],
         analytics: ['Study insights', 'Grades, study time and progress.'],
         planner: ['Tasks & deadlines', 'Assignments, quizzes and tests.'],
-        calendar: ['Calendar', 'Pick a day to add work.'],
+        calendar: ['Calendar', 'Assignments, study deadlines and your own events.'],
         schedule: ['Class schedule', 'When your classes meet.'],
         flashcard: ['My study sets', 'Create sets and study whenever you want.'],
         'exam-arcade': ['Practice & tests', 'Tests, quizzes and solo games. Results stay private.'],
@@ -1311,7 +1316,7 @@
                 if (event.target.matches('#join-game-code')) {
                     event.target.value = event.target.value.toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g, '').slice(0, 6);
                 }
-                if (event.target.id === 'host-game-time') this.updateMultiplayerGoalInputs();
+                if (['host-game-time', 'solo-game-time', 'solo-game-unlimited'].includes(event.target.id)) this.updateMultiplayerGoalInputs();
                 if (event.target.matches('input[type="range"][id^="vol-"]')) this.setMixerLevel(event.target, false);
                 if (event.target.id === 'sfx-volume') {
                     const volume = Number(event.target.value) / 100;
@@ -1332,6 +1337,7 @@
             this.EventBus.on('assignments:updated', () => this.renderUI());
             this.EventBus.on('state:updated:courses', () => this.renderUI());
             this.EventBus.on('state:updated:assignments', () => this.renderUI());
+            this.EventBus.on('state:updated:calendarEvents', () => this.renderCalendar());
             this.EventBus.on('flashcards:updated', () => {
                 this.renderDecks();
                 this.renderHostedGameDecks();
@@ -2425,7 +2431,10 @@
             for (let index = 0; index < firstWeekday; index++) cells += '<span class="calendar-day calendar-day-empty" aria-hidden="true"></span>';
             for (let day = 1; day <= daysInMonth; day++) {
                 const dateKey = localDateKey(new Date(year, month, day));
-                const count = assignments.filter(item => item.dueDate === dateKey).length;
+                const due = assignments.filter(item => item.dueDate === dateKey);
+                const studyCount = due.filter(item => ['quiz', 'test'].includes(String(item.kind).toLowerCase())).length;
+                const count = due.length - studyCount;
+                const eventCount = (AppState.get('calendarEvents') || []).filter(item => item.date === dateKey).length;
                 const { pattern, entries, note } = this.getScheduleEntries(new Date(year, month, day));
                 const classCount = pattern ? entries.filter(entry => entry.periodNumber && entry.course).length : 0;
                 const classes = ['calendar-day'];
@@ -2435,9 +2444,11 @@
                 const indicators = [
                     note ? `<small class="calendar-day-note" title="${this.escapeHTML(note)}">${this.escapeHTML(note.length > 18 ? `${note.slice(0, 17)}…` : note)}</small>` : '',
                     classCount ? `<small>${classCount} ${classCount === 1 ? 'class' : 'classes'}</small>` : '',
-                    count ? `<small>${count} due</small>` : ''
+                    count ? `<small class="calendar-assignment-tag">${count} assignment${count === 1 ? '' : 's'}</small>` : '',
+                    studyCount ? `<small class="calendar-study-tag">${studyCount} quiz/test${studyCount === 1 ? '' : 's'}</small>` : '',
+                    eventCount ? `<small class="calendar-personal-tag">${eventCount} event${eventCount === 1 ? '' : 's'}</small>` : ''
                 ].join('');
-                cells += `<button class="${classes.join(' ')}" data-action="select-calendar-day" data-date="${dateKey}" aria-label="${dateKey}${note ? `, ${this.escapeHTML(note)}` : ''}, ${classCount} classes, ${count} due items"><span>${day}</span>${indicators}</button>`;
+                cells += `<button class="${classes.join(' ')}" data-action="select-calendar-day" data-date="${dateKey}" aria-label="${dateKey}${note ? `, ${this.escapeHTML(note)}` : ''}, ${classCount} classes, ${count} assignments, ${studyCount} quizzes/tests, ${eventCount} events"><span>${day}</span>${indicators}</button>`;
             }
             daysElement.innerHTML = cells;
             const selected = new Date(`${this.selectedCalendarDate}T00:00:00`);
@@ -2450,13 +2461,65 @@
             const scheduleItems = scheduleInfo.pattern
                 ? `<section class="calendar-schedule"><h4>${this.escapeHTML(scheduleInfo.pchsSchedule.title)} · Classes</h4>${dayNote}${scheduleInfo.entries.filter(entry => entry.periodNumber).map(entry => `<p><strong>${this.escapeHTML(entry.period)}:</strong> ${this.escapeHTML(entry.course?.title || 'No class assigned')} <small>${this.escapeHTML(entry.time || '')}${entry.room ? ` · Rm ${this.escapeHTML(entry.room)}` : ''}</small></p>`).join('') || '<p>No class periods listed.</p>'}</section>`
                 : `<section class="calendar-schedule"><h4>${this.escapeHTML(scheduleInfo.pchsSchedule?.title || 'Schedule')}</h4>${dayNote}<p>No classes are scheduled.</p></section>`;
-            const eventItems = events.length ? events.map(item => {
+            const recommendations = this.getStudyRecommendations();
+            const renderItems = items => items.map(item => {
                 const course = (AppState.get('courses') || []).find(entry => entry.code === item.courseCode);
-                const recommendation = this.getStudyRecommendations().find(entry => entry.id === item.id);
-                const studyNote = recommendation ? `<small>Study today: ${recommendation.sessionMinutes} min · ${this.escapeHTML(recommendation.studyMethod)}</small>` : '';
+                const recommendation = recommendations.find(entry => entry.id === item.id);
+                const studyNote = recommendation ? `<small>Suggested session: ${recommendation.sessionMinutes} min · ${this.escapeHTML(recommendation.studyMethod)}</small><button type="button" class="secondary-btn" data-action="log-study" data-id="${this.escapeHTML(item.id)}">Log study</button>${this.assessmentStudyButton(item)}` : '';
                 return `<article class="calendar-event"><div><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(course ? course.title : 'No class')} · ${this.escapeHTML(item.kind || 'assignment')}</span>${studyNote}</div><button class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit</button></article>`;
-            }).join('') : '<p class="empty-state">Nothing due this day. Add homework, a quiz, or a test.</p>';
-            agenda.innerHTML = `${scheduleItems}<h4>Due this day</h4>${eventItems}`;
+            }).join('');
+            const assessment = item => ['quiz', 'test'].includes(String(item.kind).toLowerCase());
+            const personal = (AppState.get('calendarEvents') || []).filter(item => item.date === this.selectedCalendarDate)
+                .sort((a, b) => (a.time || '').localeCompare(b.time || '') || a.title.localeCompare(b.title));
+            agenda.innerHTML = `${scheduleItems}
+                <section class="calendar-agenda-group"><h4 class="calendar-assignment-tag">Assignments due</h4>${renderItems(events.filter(item => !assessment(item))) || '<p class="settings-hint">No assignments due.</p>'}</section>
+                <section class="calendar-agenda-group"><h4 class="calendar-study-tag">Tests &amp; quizzes to study for</h4>${renderItems(events.filter(assessment)) || '<p class="settings-hint">No tests or quizzes on this day.</p>'}</section>
+                <section class="calendar-agenda-group"><h4 class="calendar-personal-tag">Your events</h4>${personal.map(item => `<article class="calendar-event"><div><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(item.time || 'All day')}</span>${item.notes ? `<small>${this.escapeHTML(item.notes)}</small>` : ''}</div><button type="button" class="secondary-btn" data-action="edit-calendar-event" data-id="${this.escapeHTML(item.id)}">Edit</button></article>`).join('') || '<p class="settings-hint">No events. Add a club meeting, reminder or study block.</p>'}</section>`;
+        }
+
+        openCalendarEvent(id = '') {
+            const item = (AppState.get('calendarEvents') || []).find(event => event.id === id);
+            if (id && !item) throw new Error('This calendar event no longer exists.');
+            document.getElementById('calendar-event-form').reset();
+            document.getElementById('calendar-event-id').value = item?.id || '';
+            document.getElementById('calendar-event-title').value = item?.title || '';
+            document.getElementById('calendar-event-date').value = item?.date || this.selectedCalendarDate || localDateKey(new Date());
+            document.getElementById('calendar-event-time').value = item?.time || '';
+            document.getElementById('calendar-event-notes').value = item?.notes || '';
+            document.getElementById('delete-calendar-event-btn').classList.toggle('hidden', !item);
+            this.openModal('calendar-event-modal');
+        }
+
+        saveCalendarEvent() {
+            const id = document.getElementById('calendar-event-id').value;
+            const title = document.getElementById('calendar-event-title').value.trim();
+            const date = document.getElementById('calendar-event-date').value;
+            const time = document.getElementById('calendar-event-time').value;
+            const notes = document.getElementById('calendar-event-notes').value.trim();
+            const parsed = new Date(`${date}T00:00:00`);
+            if (!title || title.length > 120 || !/^\d{4}-\d{2}-\d{2}$/.test(date)
+                || !Number.isFinite(parsed.getTime()) || localDateKey(parsed) !== date
+                || (time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) || notes.length > 2000) {
+                throw new Error('Enter an event title (up to 120 characters), a valid date and time, and notes up to 2,000 characters.');
+            }
+            const previous = AppState.get('calendarEvents') || [];
+            if (id && !previous.some(item => item.id === id)) throw new Error('This event was removed. Close and reopen the editor.');
+            const item = { id: id || `event_${window.crypto.randomUUID()}`, title, date, time, notes };
+            const next = id ? previous.map(event => event.id === id ? item : event) : [...previous, item];
+            this.saveCalendarEvents(next);
+            this.selectedCalendarDate = date;
+            this.calendarDate = parsed;
+            this.renderCalendar();
+        }
+
+        saveCalendarEvents(events) {
+            const previous = AppState.get('calendarEvents');
+            try {
+                AppState.set('calendarEvents', events);
+            } catch (error) {
+                AppState.state.calendarEvents = previous;
+                throw error;
+            }
         }
 
         getStudyRecommendations() {
@@ -2692,7 +2755,7 @@
                 const game = session.gameSummary;
                 const accuracy = game?.answered ? Math.round(game.correct / game.answered * 100) : 0;
                 const standings = game?.standings || [];
-                const detail = game ? `<details class="saved-game-summary"><summary>${session.source === 'solo' ? 'Practice game' : 'Game'} summary · ${game.answered ? `${accuracy}% correct` : 'No answers submitted'} · ${Number(game.answered) || 0} answered</summary><p>${Number(game.correct) || 0} correct · ${Math.max(0, Number(game.answered || 0) - Number(game.correct || 0))} incorrect · ${(game.questions || []).filter(question => question.correct === null).length} skipped</p>${standings.length ? `<ol>${standings.map(row => `<li>${this.escapeHTML(row.name)} · ${['crypto', 'market'].includes(game.mode) ? `$${this.formatNumber(game.objectiveBased ? row.goal : row.score)}` : `${this.formatNumber(game.objectiveBased ? row.goal : row.score)} ${this.escapeHTML(game.objectiveUnit || 'pts')}`}</li>`).join('')}</ol>` : ''}${window.StudBudArcade.util.questionHistoryMarkup(game.questions || [])}${game.studySet ? this.studySetMarkup(game.studySet) : ''}</details>` : '';
+                const detail = game ? `<details class="saved-game-summary"><summary>${session.source === 'solo' ? 'Singleplayer game' : 'Game'} summary · ${game.answered ? `${accuracy}% correct` : 'No answers submitted'} · ${Number(game.answered) || 0} answered</summary><p>${Number(game.correct) || 0} correct · ${Math.max(0, Number(game.answered || 0) - Number(game.correct || 0))} incorrect · ${(game.questions || []).filter(question => question.correct === null).length} skipped</p>${standings.length ? `<ol>${standings.map(row => `<li>${this.escapeHTML(row.name)} · ${['crypto', 'market'].includes(game.mode) ? `$${this.formatNumber(game.objectiveBased ? row.goal : row.score)}` : `${this.formatNumber(game.objectiveBased ? row.goal : row.score)} ${this.escapeHTML(game.objectiveUnit || 'pts')}`}</li>`).join('')}</ol>` : ''}${window.StudBudArcade.util.questionHistoryMarkup(game.questions || [])}${game.studySet ? this.studySetMarkup(game.studySet) : ''}</details>` : '';
                 return `<article class="study-history-item"><div><strong>${this.escapeHTML(session.title || 'Study session')}</strong><span>${this.formatStudyDuration(session.durationSec)} · ${this.escapeHTML(session.methodLabel || this.studyMethodLabel(session.method || 'retrieval'))}</span><small>${new Date(session.timestamp).toLocaleDateString()} · ${rated}${session.notes ? ` · ${this.escapeHTML(session.notes)}` : ''}</small></div>${detail}</article>`;
             }).join('')}` : '<p class="empty-state">Log a study session from a recommendation to help tune your future plan.</p>';
         }
@@ -3325,8 +3388,8 @@
             const select = document.getElementById('host-game-deck');
             if (!select) return;
             const previous = select.value;
-            const practiceSelect = document.getElementById('practice-multiplayer-deck');
-            const previousPracticeDeck = practiceSelect?.value;
+            const extraSelects = ['practice-multiplayer-deck', 'solo-game-deck'].map(id => document.getElementById(id)).filter(Boolean);
+            const previousExtra = extraSelects.map(extra => extra.value);
             const decks = (AppState.get('flashcards') || []).map(deck => ({
                 ...deck,
                 completeCards: (deck.cards || []).filter(card =>
@@ -3336,13 +3399,14 @@
             select.innerHTML = decks.length
                 ? decks.map(deck => `<option value="${this.escapeHTML(deck.id)}">${this.escapeHTML(deck.title)} · ${deck.completeCards.length} cards</option>`).join('')
                 : '<option value="">Add a set with at least 1 complete card</option>';
-            if (practiceSelect) {
+            extraSelects.forEach((practiceSelect, index) => {
                 practiceSelect.innerHTML = decks.length
                     ? decks.map(deck => `<option value="${this.escapeHTML(deck.id)}">${this.escapeHTML(deck.title)} · ${deck.completeCards.length} cards</option>`).join('')
                     : '<option value="">Add a set with at least 1 complete card</option>';
+                const previousPracticeDeck = previousExtra[index] || previous;
                 if (decks.some(deck => deck.id === previousPracticeDeck)) practiceSelect.value = previousPracticeDeck;
                 practiceSelect.disabled = !decks.length;
-            }
+            });
             if (decks.some(deck => deck.id === previous)) select.value = previous;
             let nickname;
             try {
@@ -4143,7 +4207,7 @@
                 return;
             }
             if (tab === 'games') {
-                status.textContent = 'Test games have infinite energy and no rewards.';
+                status.textContent = 'Test games default to unlimited energy and never award rewards.';
                 list.innerHTML = `<article class="admin-row">
                     <div><strong>Multiplayer game test bench</strong><small>Launch an arena with bots or share a room code with other testers. Test sessions do not award coins or affect leaderboards.</small></div>
                     <div class="admin-test-settings">
@@ -4157,6 +4221,8 @@
                         <label>Test mode<select id="admin-game-test-session"><option value="single">Single player (with bots)</option><option value="multiplayer">Multiplayer (other testers can join)</option></select></label>
                         <label>Simulated players (single player only)<select id="admin-game-test-bots"><option value="0">No bots</option><option value="1">1 bot</option><option value="2">2 bots</option><option value="3" selected>3 bots</option></select></label>
                         <label>Map seed (optional)<input id="admin-game-test-seed" type="number" min="0" max="4294967295" step="1" placeholder="Default map"></label>
+                        <label>Energy<select id="admin-game-test-energy"><option value="unlimited">Unlimited</option><option value="limited">Limited</option></select></label>
+                        <label id="admin-game-test-reward-label" class="hidden">Energy per question<input id="admin-game-test-reward" type="number" min="5" max="100" step="1" value="20" disabled><small>Question Chess always grants one move per answer.</small></label>
                     </div>
                     <div class="admin-actions">
                         <button type="button" class="primary-btn" data-admin-action="test-game"><i class="fas fa-flask" aria-hidden="true"></i> Launch test</button>
@@ -4237,9 +4303,12 @@
                     const seedText = document.getElementById('admin-game-test-seed').value.trim();
                     const seed = seedText ? Number(seedText) : undefined;
                     if (seed !== undefined && (!Number.isInteger(seed) || seed < 0 || seed > 4294967295)) throw new Error('Map seed must be a whole number from 0 to 4294967295.');
+                    const limitedTestEnergy = document.getElementById('admin-game-test-energy')?.value === 'limited';
+                    const questionReward = limitedTestEnergy ? Number(document.getElementById('admin-game-test-reward')?.value) : 100;
+                    if (!Number.isInteger(questionReward) || questionReward < 5 || questionReward > 100) throw new Error('Energy per question must be a whole number from 5 to 100.');
                     if (document.getElementById('admin-game-test-session')?.value === 'multiplayer') {
-                        await this.hostStaffTest(mode, seed);
-                    } else this.startPractice(mode, { testing: true, timeLimitSeconds: 0, questionReward: 100, botCount, seed });
+                        await this.hostStaffTest(mode, seed, { limitedTestEnergy, questionReward });
+                    } else this.startPractice(mode, { testing: true, limitedTestEnergy, timeLimitSeconds: 0, questionReward, botCount, seed });
                     return;
                 } else if (action === 'inspect-deck') {
                     if (!this.canModerateFlashcards) throw new Error('Flashcard moderation is available only to moderators and administrators.');
@@ -4439,6 +4508,14 @@
             const minutes = Number(document.getElementById('host-game-time')?.value || 5);
             const label = document.getElementById('host-game-time-value');
             if (label) label.textContent = minutes >= 60 ? '1 hour' : `${minutes} min`;
+            const soloTime = document.getElementById('solo-game-time');
+            const soloLabel = document.getElementById('solo-game-time-value');
+            const unlimited = document.getElementById('solo-game-unlimited')?.checked;
+            if (soloTime) soloTime.disabled = Boolean(unlimited) || Boolean(soloTime.closest('.multiplayer-goals')?.classList.contains('hidden'));
+            if (soloTime && soloLabel) {
+                const soloMinutes = Number(soloTime.value || 10);
+                soloLabel.textContent = unlimited ? 'No limit' : soloMinutes >= 60 ? '1 hour' : `${soloMinutes} min`;
+            }
         }
 
         questionRewardInfo(mode) {
@@ -4507,7 +4584,7 @@
             const controls = [
                 document.getElementById('host-game-time')?.closest('.multiplayer-goals'),
                 document.getElementById('host-game-reward')?.closest('.question-reward-control'),
-                document.getElementById('solo-game-settings')?.elements.timeLimit?.closest('label'),
+                document.getElementById('solo-game-time')?.closest('.multiplayer-goals'),
                 document.getElementById('solo-game-reward')?.closest('.question-reward-control')
             ];
             for (const control of controls.filter(Boolean)) {
@@ -4515,11 +4592,17 @@
                 control.classList.toggle('hidden', hidden);
                 control.querySelectorAll('input, select, button').forEach(input => { input.disabled = hidden; });
             }
+            const bots = document.getElementById('solo-game-bots');
+            if (bots) {
+                bots.closest('label')?.classList.toggle('hidden', chess);
+                bots.disabled = chess;
+            }
+            this.updateMultiplayerGoalInputs();
             document.getElementById('chess-setup-note')?.classList.toggle('hidden', !chess);
-            const soloNote = document.querySelector('#solo-game-settings > small');
-            if (soloNote) soloNote.textContent = chess ? 'One correct answer earns one move. No time limit. Checkmate wins; only the checked player can move while escaping check. Practice awards no multiplayer coins.'
-                : mode === 'defense' ? 'Shared team cash comes from correct answers and enemy kills. No time limit: reduce the opposing base to 0 HP. Practice awards no multiplayer coins.'
-                : 'Correct answers give the resource shown above. End game opens your summary. Practice awards no multiplayer coins.';
+            const soloNote = document.getElementById('solo-game-note');
+            if (soloNote) soloNote.textContent = chess ? 'You play a computer opponent. One correct answer earns one move. No time limit; checkmate wins.'
+                : mode === 'defense' ? 'You and computer teammates share cash from correct answers and enemy kills. No time limit: reduce the opposing base to 0 HP.'
+                : 'Same game as multiplayer, with computer players instead of a room. Correct answers earn coins when you are signed in.';
             const labels = {
                 defense: ['Team Tower Defense', 'Red vs blue, 1v1 or teams. Share cash, build and upgrade troops, send enemies to the rival path. First base to 0 HP loses; no time limit.'],
                 skyline: ['Escape to Space', 'Climb rooftop switchbacks, cross a factory and reach space. Lower routes can catch a fall.'],
@@ -4546,14 +4629,31 @@
         }
 
         setMultiplayerScreen(screen) {
-            this.multiplayerScreen = screen === 'join' ? 'join' : 'host';
-            const hosting = this.multiplayerScreen === 'host';
+            this.multiplayerScreen = ['join', 'solo'].includes(screen) ? screen : 'host';
+            const hosting = this.multiplayerScreen !== 'join';
+            const solo = this.multiplayerScreen === 'solo';
             document.getElementById('multiplayer-host-flow').classList.toggle('hidden', !hosting);
+            document.getElementById('multiplayer-host-flow').setAttribute('aria-labelledby', solo ? 'multiplayer-solo-tab' : 'multiplayer-host-tab');
             document.getElementById('multiplayer-join-flow').classList.toggle('hidden', hosting);
-            document.getElementById('multiplayer-host-tab').classList.toggle('selected', hosting);
-            document.getElementById('multiplayer-join-tab').classList.toggle('selected', !hosting);
-            document.getElementById('multiplayer-host-tab').setAttribute('aria-selected', String(hosting));
-            document.getElementById('multiplayer-join-tab').setAttribute('aria-selected', String(!hosting));
+            document.getElementById('host-game-form')?.classList.toggle('hidden', solo);
+            document.getElementById('solo-game-settings')?.classList.toggle('hidden', !solo);
+            document.getElementById('preview-solo-btn')?.classList.toggle('hidden', solo);
+            const heading = document.getElementById('multiplayer-flow-heading');
+            const subheading = document.getElementById('multiplayer-flow-subheading');
+            if (heading) heading.textContent = solo ? 'Choose a singleplayer game' : 'Choose a live game';
+            if (subheading) subheading.textContent = solo ? 'The same games as multiplayer, played on your own against computer players.' : 'Every correct answer powers a different animated challenge.';
+            const title = document.getElementById('game-club-heading');
+            const description = document.getElementById('game-club-description');
+            if (title) title.textContent = solo ? 'Singleplayer Study Club' : 'Multiplayer Study Club';
+            if (description) description.textContent = solo
+                ? 'Choose a game, your flashcards and computer opponents. No room, invite code or waiting for other players.'
+                : 'Race buds, earn coins, and customize your player. Multiplayer rewards stay separate from your school planner.';
+            document.querySelectorAll('[data-multiplayer-tab]').forEach(tab => {
+                const selected = tab.dataset.multiplayerTab === this.multiplayerScreen;
+                tab.classList.toggle('selected', selected);
+                tab.setAttribute('aria-selected', String(selected));
+            });
+            this.updateMultiplayerGoalInputs();
         }
 
         stopWaitingRunner() {
@@ -5450,11 +5550,11 @@
             });
             actor.s = {
                 game: actor, user: { id: bot.id }, local: { color: bot.color }, t: demo.clock,
-                testing: demo.session.testing, preview: demo.session.preview,
+                testing: demo.session.testing, limitedTestEnergy: demo.session.limitedTestEnergy, preview: demo.session.preview,
                 botKeys: {}, axis() { return { x: this.botKeys.x || 0 }; },
                 down(...codes) { return codes.includes('Space') && Boolean(this.botKeys.hold); },
                 pressed(...codes) { return codes.includes('Space') ? Boolean(this.botKeys.jump) : codes.includes('ShiftLeft') ? Boolean(this.botKeys.dash) : codes.includes('KeyR') ? Boolean(this.botKeys.reset) : false; },
-                spend(n) { return this.testing || this.preview || actor.res.spend(n); }, sfx() {}, toast() {}, setGoal() {}
+                spend(n) { return (this.testing && !this.limitedTestEnergy) || this.preview || actor.res.spend(n); }, sfx() {}, toast() {}, setGoal() {}
             };
             return actor;
         }
@@ -6039,9 +6139,9 @@
                 if (hazard) { dx = bot.x - hazard.x + ai.side * 55; dy = bot.y - hazard.y; }
                 this.moveBotToward(bot, dx, dy, speed, dt);
                 ai.castTimer -= dt;
-                const castCost = costs.river.cast, canCast = demo.session.testing || demo.session.preview || (ai.energy ?? 0) >= castCost;
+                const castCost = costs.river.cast, unlimited = (demo.session.testing && !demo.session.limitedTestEnergy) || demo.session.preview, canCast = unlimited || (ai.energy ?? 0) >= castCost;
                 if (ready && canCast && fish && ai.castTimer <= 0 && Math.hypot(p.x - bot.x, p.y - bot.y) < 78 + game.fishSpec(fish.type).r) {
-                    if (!demo.session.testing && !demo.session.preview) ai.energy = Math.max(0, ai.energy - castCost);
+                    if (!unlimited) ai.energy = Math.max(0, ai.energy - castCost);
                     bot.score = (bot.score || 0) + game.fishSpec(fish.type).v;
                     ai.catches = (ai.catches || 0) + 1;
                     game.away.set(fish.i, clock + 9);
@@ -6051,8 +6151,8 @@
                 bot.ex = { n: ai.castTimer > 2.2 ? 1 : 0, catches: ai.catches || 0 };
             } else if (mode === 'miner' && game.T) {
                 const TS = 48, crystalValues = { 3: 5, 4: 12, 5: 25, 7: 50, 8: 90, 9: 160 };
-                bot.w = 26; bot.h = 40; bot.fuel = demo.session.testing || demo.session.preview ? 100 : ai.fuel ?? (game.res?.value ?? 40); bot.carry = bot.carry || 0; bot.items = bot.items || 0;
-                if (!demo.session.testing && !demo.session.preview && (bot.fuel < 35 || ai.rechargeAt)) {
+                bot.w = 26; bot.h = 40; bot.fuel = (demo.session.testing && !demo.session.limitedTestEnergy) || demo.session.preview ? 100 : ai.fuel ?? (game.res?.value ?? 40); bot.carry = bot.carry || 0; bot.items = bot.items || 0;
+                if (!(demo.session.testing && !demo.session.limitedTestEnergy) && !demo.session.preview && (bot.fuel < 35 || ai.rechargeAt)) {
                     ai.rechargeAt = ai.rechargeAt || clock + 1 + ai.reaction;
                     if (clock >= ai.rechargeAt) {
                         bot.fuel += demo.session.rewardAmount();
@@ -6328,7 +6428,7 @@
         botResourceReady(demo, bot, dt, drain = 0) {
             const ai = bot.ai;
             const max = demo.game.res?.max || 100;
-            if (!demo.game.res || demo.session.testing || demo.session.preview) { ai.energy = max; ai.rechargeAt = 0; return true; }
+            if (!demo.game.res || (demo.session.testing && !demo.session.limitedTestEnergy) || demo.session.preview) { ai.energy = max; ai.rechargeAt = 0; return true; }
             ai.energy = ai.energy ?? demo.game.res?.value ?? max;
             if (ai.rechargeAt) {
                 if (demo.clock < ai.rechargeAt) return false;
@@ -6656,7 +6756,7 @@
                 throw error;
             }
             await this.updateSavedDeck(deckId, { communityPublished: true, communityDeckId: published.id });
-            window.StudBudDialogs.notify('Deck shared. Its title, class, card terms and definitions, and any source attribution are visible to signed-in StudBud users. Your linked test or quiz stays private. You can stop sharing it at any time.');
+            window.StudBudDialogs.notify('Deck shared. Its title, class, card terms and definitions, and any source attribution are visible in the public community library, including to guests. Your linked test or quiz stays private. You can stop sharing it at any time.');
         }
 
         async unpublishCommunityDeck(deckId) {
@@ -6746,7 +6846,7 @@
             this.openHostedGame(room);
         }
 
-        async hostStaffTest(mode, seed) {
+        async hostStaffTest(mode, seed, { limitedTestEnergy = false, questionReward = 100 } = {}) {
             const cloud = window.StudBudCloud;
             if (!this.canTestGames || !cloud?.user || cloud.user.is_anonymous || cloud.offlineMode) throw new Error('Game testing requires a connected tester or administrator account.');
             if (this.hostedGameRoom) throw new Error('Leave your current room before hosting a test.');
@@ -6756,7 +6856,7 @@
             for (let attempt = 0; attempt < 3; attempt++) {
                 try {
                     room = await window.StudBudCommunityGames.createRoom(this.createRoomCode(), this.gameNickname(), deck, mode,
-                        { staff_test: true, seed, time_limit_seconds: 3600, question_reward: mode === 'chess' ? 1 : 100 });
+                        { staff_test: true, limited_test_energy: limitedTestEnergy, seed, time_limit_seconds: 3600, question_reward: mode === 'chess' ? 1 : questionReward });
                     break;
                 } catch (error) {
                     if (attempt === 2 || (error.code !== '23505' && !/duplicate key|unique constraint/i.test(error.message))) throw error;
@@ -7078,7 +7178,7 @@
             const deckId = document.getElementById('practice-multiplayer-deck')?.value;
             const timeLimitSeconds = ['chess', 'defense'].includes(mode) ? 0 : Number(document.getElementById('practice-multiplayer-time')?.value);
             if (!mode || !deckId || !Number.isFinite(timeLimitSeconds) || timeLimitSeconds < 0) {
-                throw new Error('Choose a game mode, flashcard set, and practice time.');
+                throw new Error('Choose a game mode, flashcard set, and game time.');
             }
             this.startPractice(mode, { deckId, timeLimitSeconds });
         }
@@ -7100,7 +7200,7 @@
             if (!Number.isInteger(botCount) || botCount < 0 || botCount > 3) throw new Error('Choose between zero and three simulated players.');
             const selectedDeck = (AppState.get('flashcards') || []).find(item => item.id === deckId);
             if (!config.testing && !(selectedDeck?.cards || []).some(card => card.front && card.back)) {
-                throw new Error('Select a flashcard set with complete cards before starting practice.');
+                throw new Error('Select a flashcard set with complete cards before starting the game.');
             }
             const room = modeOverride
                 ? { mode: modeOverride, deck_id: deckId, state: { players: [] } }
@@ -7129,6 +7229,7 @@
             };
             const s = this.practiceSession = new arcade.Session({
                 room: fake, user, api: window.StudBudCommunityGames, isHost: false, practice: true, testing: Boolean(config.testing),
+                limitedTestEnergy: Boolean(config.limitedTestEnergy),
                 timeLimitSeconds: room.mode === 'chess' ? 0 : config.timeLimitSeconds || 0, questionReward: reward,
                 seed: config.seed,
                 fallbackCards: (roomDeck?.cards || []).filter(card => card.front && card.back),
@@ -8807,7 +8908,10 @@
             const id = target.id;
             const action = target.dataset.action;
             try {
-                if (action === 'recommended-reward') {
+                if (action === 'open-singleplayer') {
+                    Router.navigate('multiplayer');
+                    this.setMultiplayerScreen('solo');
+                } else if (action === 'recommended-reward') {
                     const input = document.getElementById(target.dataset.id);
                     const slider = document.querySelector(`[data-reward-slider="${target.dataset.id}"]`);
                     const { suggested } = this.questionRewardRecommendation(this.selectedMultiplayerMode || 'skyline');
@@ -8828,16 +8932,27 @@
                 } else if (id === 'waiting-practice-btn') {
                     this.startPractice();
                 } else if (action === 'toggle-solo-settings') {
-                    const form = document.getElementById('solo-game-settings');
-                    const open = form?.classList.toggle('hidden') === false;
-                    target.setAttribute('aria-expanded', String(open));
-                    target.innerHTML = `<i class="fas fa-gamepad" aria-hidden="true"></i> ${open ? 'Practice settings' : 'Set up practice'}`;
+                    this.setMultiplayerScreen('solo');
+                    document.getElementById('solo-game-settings')?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
                 } else if (action === 'start-solo-game') {
                     const form = document.getElementById('solo-game-settings');
-                    this.startPractice(this.selectedMultiplayerMode || 'skyline', {
-                        timeLimitSeconds: Number(form?.elements.timeLimit.value) || 0,
-                        questionReward: this.selectedMultiplayerMode === 'chess' ? 1 : this.questionRewardValue(form.elements.questionReward.value)
-                    });
+                    const status = document.getElementById('solo-game-status');
+                    const mode = this.selectedMultiplayerMode || 'skyline';
+                    try {
+                        if (form && !form.reportValidity()) return;
+                        const minutes = Number(form?.elements.timeLimit?.value) || 0;
+                        const bots = Number(form?.elements.botCount?.value);
+                        this.startPractice(mode, {
+                            deckId: form?.elements.deckId?.value || undefined,
+                            timeLimitSeconds: form?.elements.unlimited?.checked ? 0 : minutes * 60,
+                            botCount: Number.isInteger(bots) ? bots : 3,
+                            questionReward: mode === 'chess' ? 1 : this.questionRewardValue(form.elements.questionReward.value)
+                        });
+                        if (status) status.textContent = '';
+                    } catch (error) {
+                        if (status) status.textContent = `Could not start the game. ${this.friendlyErrorMessage(error)}`;
+                        else throw error;
+                    }
                 } else if (target.matches('[data-study-leaderboard-period]')) {
                     this.studyLeaderboardPeriod = target.dataset.studyLeaderboardPeriod;
                     await this.refreshStudyLeaderboard(this.studyLeaderboardPeriod);
@@ -9062,7 +9177,21 @@
                     this.selectedCalendarDate = localDateKey(new Date());
                     this.renderCalendar();
                 } else if (id === 'calendar-add-event-btn') {
+                    this.openCalendarEvent();
+                } else if (id === 'calendar-add-assignment-btn') {
                     this.openAssignmentForm(null, '', this.selectedCalendarDate);
+                } else if (id === 'calendar-add-assessment-btn') {
+                    this.openAssignmentForm(null, '', this.selectedCalendarDate, '', 'quiz');
+                } else if (action === 'edit-calendar-event') {
+                    this.openCalendarEvent(target.dataset.id);
+                } else if (id === 'delete-calendar-event-btn') {
+                    const eventId = document.getElementById('calendar-event-id').value;
+                    const events = AppState.get('calendarEvents') || [];
+                    if (!events.some(item => item.id === eventId)) throw new Error('This event no longer exists.');
+                    if (await window.StudBudDialogs.confirm('Delete this calendar event?')) {
+                        this.saveCalendarEvents(events.filter(item => item.id !== eventId));
+                        this.closeModal();
+                    }
                 } else if (id === 'study-star-btn') {
                     await this.toggleStudyStar();
                 } else if (id === 'reveal-card-btn') {
@@ -9300,6 +9429,11 @@
                 await this.searchCommunityDecks(document.getElementById('community-deck-query').value);
                 return;
             }
+            if (form.id === 'solo-game-settings') {
+                event.preventDefault();
+                form.querySelector('[data-action="start-solo-game"]')?.click();
+                return;
+            }
             if (form.id === 'practice-multiplayer-form') {
                 event.preventDefault();
                 const status = document.getElementById('practice-multiplayer-status');
@@ -9307,13 +9441,13 @@
                 if (form.dataset.starting === 'true') return;
                 form.dataset.starting = 'true';
                 if (submit) submit.disabled = true;
-                status.textContent = 'Starting practice…';
+                status.textContent = 'Starting game…';
                 try {
                     this.startMultiplayerPractice();
-                    status.textContent = 'Practice started. Your progress is local and no multiplayer coins are awarded.';
+                    status.textContent = 'Singleplayer game started.';
                 } catch (error) {
-                    console.error('[NexusApp] Multiplayer practice could not start:', error);
-                    status.textContent = `Could not start practice. ${this.friendlyErrorMessage(error)}`;
+                    console.error('[NexusApp] Singleplayer game could not start:', error);
+                    status.textContent = `Could not start the game. ${this.friendlyErrorMessage(error)}`;
                 } finally {
                     delete form.dataset.starting;
                     if (submit) submit.disabled = false;
@@ -9361,7 +9495,7 @@
                 }
                 return;
             }
-            if (!['course-form', 'assignment-form', 'card-form', 'deck-editor-form', 'schedule-form', 'study-log-form', 'grade-scenario-assignment-form'].includes(form.id)) return;
+            if (!['course-form', 'assignment-form', 'calendar-event-form', 'card-form', 'deck-editor-form', 'schedule-form', 'study-log-form', 'grade-scenario-assignment-form'].includes(form.id)) return;
             event.preventDefault();
             if (form.dataset.saving === 'true') return;
             form.dataset.saving = 'true';
@@ -9370,6 +9504,7 @@
             try {
                 if (form.id === 'course-form') await this.saveCourse();
                 if (form.id === 'assignment-form') this.saveAssignment();
+                if (form.id === 'calendar-event-form') this.saveCalendarEvent();
                 if (form.id === 'card-form') await this.saveCard();
                 if (form.id === 'deck-editor-form') await this.saveDeckEditor();
                 if (form.id === 'schedule-form') this.saveSchedule();
@@ -9386,6 +9521,12 @@
         }
 
         handleChange(event) {
+            if (event.target.id === 'admin-game-test-energy') {
+                const limited = event.target.value === 'limited';
+                document.getElementById('admin-game-test-reward-label').classList.toggle('hidden', !limited);
+                document.getElementById('admin-game-test-reward').disabled = !limited;
+                return;
+            }
             if (event.target.id === 'practice-multiplayer-mode') {
                 const time = document.getElementById('practice-multiplayer-time');
                 const chess = event.target.value === 'chess';

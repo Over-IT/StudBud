@@ -338,6 +338,29 @@
             return window.StudBudCloud.guestClient;
         }
 
+        async readPublicDecks(query = '', deckId = null) {
+            if (window.navigator?.onLine === false) throw new Error('The community library needs an internet connection. Your saved decks still work offline.');
+            const config = window.StudBudCloud?.loadAccountConfig
+                ? await window.StudBudCloud.loadAccountConfig() : window.STUDBUD_SUPABASE_CONFIG;
+            if (!config?.url || !config.anonKey || !window.supabase?.createClient) {
+                throw new Error('Community connection settings could not load. Check your connection and reload.');
+            }
+            this.publicDeckReader ||= window.supabase.createClient(config.url, config.anonKey, {
+                auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'studbud-public-library' }
+            });
+            const { data, error } = await this.publicDeckReader.rpc('studbud_read_community_decks', {
+                p_query: String(query || '').trim().slice(0, 100), p_deck_id: deckId
+            });
+            if (error) {
+                if (error.code === 'PGRST202' || error.code === '42883') {
+                    throw new Error('Guest library access needs a server update. The site owner must apply the latest community-library database setup.');
+                }
+                throw new Error(`Could not load community decks: ${error.message}`);
+            }
+            if (!Array.isArray(data)) throw new Error('The community library returned an invalid deck list. Please try again.');
+            return data;
+        }
+
         getGameClient() {
             const cloud = window.StudBudCloud;
             if (window.navigator?.onLine === false) throw new Error('Playing online needs an internet connection.');
@@ -366,6 +389,7 @@
         }
 
         async searchDecks(query = '') {
+            if (!this.hasAccount()) return this.readPublicDecks(query);
             const client = (await this.publicClient());
             const term = String(query || '').trim().replace(/[%_,()]/g, '');
             const build = withCourse => {
@@ -470,6 +494,12 @@
         }
 
         async importDeck(deckId) {
+            if (!this.hasAccount()) {
+                const [deck] = await this.readPublicDecks('', deckId);
+                if (!deck) throw new Error('This community deck is no longer available.');
+                if (!Array.isArray(deck.cards) || deck.cards.length < 2) throw new Error('This community deck no longer contains enough cards to study.');
+                return deck;
+            }
             const client = await this.publicClient();
             const load = columns => client.from('studbud_community_decks')
                 .select(columns)

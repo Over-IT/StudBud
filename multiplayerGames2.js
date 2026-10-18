@@ -441,7 +441,7 @@
             this.wakeLava(tx, ty);
             const cx = tx * TS + TS / 2, cy = ty * TS + TS / 2;
             const colors = { 1: '#a16207', 2: '#94a3b8', ...Object.fromEntries(Object.entries(CRYSTALS).map(([type, crystal]) => [type, crystal.color])) };
-            this.particles.burst(cx, cy, colors[type] || '#a16207', type >= 3 ? 12 : 7, 150, 0.48, 4);
+            this.particles.burst(cx, cy, colors[type] || '#a16207', type >= 3 ? 12 : 7, 150, 0.48, 4, true);
             if (!mined) return;
             this.s.emit({ k: 'dg', x: tx, y: ty, t: type });
             this.dig = { tx: -1, ty: -1, p: 0 };
@@ -454,11 +454,6 @@
             }
         }
 
-        miningSound(name, x, y) {
-            const distance = Math.hypot((x + .5) * TS - this.me.x - this.me.w / 2, (y + .5) * TS - this.me.y - this.me.h / 2);
-            if (distance < 450) this.s.sfx(name, 160, .3 * (1 - distance / 450) ** 2);
-        }
-
         onEvent(ev, from) {
             const tileEvent = ev.k === 'dg' && Number.isInteger(ev.x) && Number.isInteger(ev.y)
                 && ev.x > 0 && ev.x < COLS - 1 && ev.y >= 0 && ev.y < ROWS - 1;
@@ -466,7 +461,6 @@
                 const type = this.tile(ev.x, ev.y);
                 if (this.solid(type) && type !== 10) {
                     this.breakTile(ev.x, ev.y, type, false);
-                    this.miningSound(CRYSTALS[type]?.sound || 'rockBreak', ev.x, ev.y);
                 }
             }
             if (ev.k === 'lv' && Array.isArray(ev.cells)) for (const cell of ev.cells) {
@@ -1409,7 +1403,7 @@
             const axis = s.axis(), active = this.stun <= 0 && Math.hypot(axis.x, axis.y) > 0;
             const wantsSprint = s.down('ShiftLeft', 'ShiftRight') && active;
             const cost = (wantsSprint ? A.ENERGY_COSTS.market.sprint : A.ENERGY_COSTS.market.walk) * dt;
-            const unlimited = s.preview || s.testing;
+            const unlimited = s.preview || (s.testing && !s.limitedTestEnergy);
             const winded = active && !unlimited && !this.res.has(cost);
             const sprint = wantsSprint && !winded;
             if (active && !unlimited) {

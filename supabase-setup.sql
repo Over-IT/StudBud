@@ -1294,6 +1294,7 @@ begin
             'public_deck_id', (select d.id from public.studbud_community_decks d where d.id::text = p_options ->> 'public_deck_id'),
             'source_deck_id', left(p_options ->> 'source_deck_id', 100),
             'staff_test', v_staff_test,
+            'limited_test_energy', v_staff_test and coalesce((p_options ->> 'limited_test_energy')::boolean, false),
             'allow_late_join', p_mode <> 'chess' and coalesce((p_options ->> 'allow_late_join')::boolean, false),
             'seed', case when v_staff_test then (p_options ->> 'seed')::bigint else null end,
             'players', jsonb_build_array(jsonb_build_object(
@@ -1513,6 +1514,7 @@ begin
             'public_deck_id', v_room.state -> 'public_deck_id',
             'source_deck_id', v_room.state -> 'source_deck_id',
             'staff_test', coalesce((v_room.state ->> 'staff_test')::boolean, false),
+            'limited_test_energy', coalesce((v_room.state ->> 'limited_test_energy')::boolean, false),
             'allow_late_join', coalesce((v_room.state ->> 'allow_late_join')::boolean, false),
             'seed', v_room.state -> 'seed',
             'question_index', 0,
@@ -3139,6 +3141,36 @@ as $$
 $$;
 revoke all on function public.studbud_community_authors(uuid[]) from public, anon;
 grant execute on function public.studbud_community_authors(uuid[]) to authenticated;
+
+-- Public library reads need no account or anonymous Auth session. No write privileges are granted.
+create or replace function public.studbud_read_community_decks(p_query text default '', p_deck_id uuid default null)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+    select coalesce(jsonb_agg(entry.payload order by entry.study_count desc, entry.updated_at desc, entry.id), '[]'::jsonb)
+    from (
+        select d.id, d.study_count, d.updated_at,
+            jsonb_build_object(
+                'id', d.id, 'owner_id', d.owner_id, 'title', d.title, 'description', d.description,
+                'course', d.course, 'card_count', d.card_count, 'study_count', d.study_count,
+                'updated_at', d.updated_at,
+                'author_name', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student')
+            ) || case when p_deck_id is not null then jsonb_build_object('cards', d.cards) else '{}'::jsonb end as payload
+        from public.studbud_community_decks d
+        join auth.users a on a.id = d.owner_id
+        where not public.studbud_is_hidden_user(d.owner_id)
+          and (p_deck_id is null or d.id = p_deck_id)
+          and (p_deck_id is not null or position(lower(left(btrim(coalesce(p_query, '')), 100))
+              in lower(d.title || ' ' || d.course)) > 0)
+        order by d.study_count desc, d.updated_at desc, d.id
+        limit 30
+    ) entry;
+$$;
+revoke all on function public.studbud_read_community_decks(text, uuid) from public, anon, authenticated;
+grant execute on function public.studbud_read_community_decks(text, uuid) to anon, authenticated;
 
 -- Any signed-in user can open another student's public profile.
 create or replace function public.studbud_view_profile(p_user_id uuid)

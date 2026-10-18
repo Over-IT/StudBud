@@ -6,23 +6,23 @@
 
     // Original two-bar phrases played with decaying acoustic-style instruments.
     const MUSIC = {
-        summit: { name: 'Rooftop Rush', bpm: 136, drive: true, chords: [[57, 1], [53, 0], [48, 0], [55, 0]], voice: 'guitar',
-            melody: [0, 1, 2, 3, 4, null, 3, 2, 1, 2, 3, 4, 2, 1, 0, null] },
-        foundry: { name: 'Foundry Motion', bpm: 128, drive: true, chords: [[50, 1], [58, 0], [53, 0], [48, 0]], voice: 'marimba',
+        summit: { name: 'Rooftop Rush', bpm: 148, drive: true, energetic: true, chords: [[60, 0], [55, 0], [57, 1], [53, 0]], voice: 'piano',
+            melody: [0, 2, 1, 3, 2, 4, 3, null, 4, 3, 2, 4, 3, 1, 2, 0] },
+        foundry: { name: 'Foundry Motion', bpm: 128, drive: true, chordSteps: [0, 6, 10], bassSteps: [0, 3, 8, 11], chords: [[50, 1], [58, 0], [53, 0], [48, 0]], voice: 'marimba',
             melody: [0, null, 2, 0, 3, 2, null, 4, 3, 1, null, 2, 1, 0, 2, null] },
-        starlight: { name: 'Starlight Drift', bpm: 78, quiet: true, chords: [[60, 0], [55, 0], [57, 1], [53, 0]], voice: 'piano',
+        starlight: { name: 'Starlight Drift', bpm: 78, quiet: true, chordSteps: [0], bassSteps: [0], leadEvery: 4, chords: [[60, 0], [55, 0], [57, 1], [53, 0]], voice: 'piano',
             melody: [0, null, null, 3, null, 2, null, null, 4, null, null, 2, null, 1, 0, null] },
-        lagoon: { name: 'Lagoon Breeze', bpm: 88, swing: .1, chords: [[60, 0], [57, 1], [53, 0], [55, 0]], voice: 'marimba',
+        lagoon: { name: 'Lagoon Breeze', bpm: 88, swing: .1, chordSteps: [2, 10], bassSteps: [0, 7, 8], chords: [[60, 0], [57, 1], [53, 0], [55, 0]], voice: 'marimba',
             melody: [2, null, 3, 4, 2, null, 1, null, 0, 1, 2, null, 1, null, 0, null] },
-        bazaar: { name: 'Bazaar Bounce', bpm: 120, drive: true, swing: .12, chords: [[62, 0], [67, 0], [59, 1], [57, 0]], voice: 'guitar',
+        bazaar: { name: 'Bazaar Bounce', bpm: 120, drive: true, swing: .12, chordSteps: [2, 6, 10, 14], bassSteps: [0, 4, 8, 12], chords: [[62, 0], [67, 0], [59, 1], [57, 0]], voice: 'guitar',
             melody: [0, 2, null, 3, 2, 1, null, 2, 3, null, 4, 3, 2, null, 0, null] },
-        cavern: { name: 'Crystal Cavern', bpm: 76, chords: [[52, 1], [48, 0], [55, 0], [50, 1]], voice: 'piano', quiet: true,
+        cavern: { name: 'Crystal Cavern', bpm: 76, chordSteps: [0], bassSteps: [0, 12], leadEvery: 4, chords: [[52, 1], [48, 0], [55, 0], [50, 1]], voice: 'marimba', quiet: true,
             melody: [0, null, null, 2, null, 3, null, null, 4, null, 2, null, 1, null, 0, null] },
-        battle: { name: 'Battle Drive', bpm: 132, drive: true, chords: [[52, 1], [48, 0], [55, 0], [50, 0]], voice: 'piano',
+        battle: { name: 'Battle Drive', bpm: 132, drive: true, chordSteps: [0, 3, 8, 11], bassSteps: [0, 4, 6, 8, 12, 14], chords: [[52, 1], [48, 0], [55, 0], [50, 0]], voice: 'piano',
             melody: [0, 0, 2, null, 3, 2, 1, null, 2, 3, 4, null, 3, 1, 0, null] },
         neon: { name: 'Neon Exchange', bpm: 94, swing: .14, chords: [[57, 1], [53, 0], [48, 0], [55, 0]], voice: 'piano',
             melody: [2, null, 1, 0, null, 2, 3, null, 4, null, 3, 2, null, 1, 0, null] },
-        fortress: { name: 'Twin Citadels', bpm: 116, drive: true, chords: [[50, 1], [46, 0], [53, 0], [48, 0]], voice: 'guitar',
+        fortress: { name: 'Twin Citadels', bpm: 116, drive: true, chordSteps: [0, 12], bassSteps: [0, 6, 8], chords: [[50, 1], [46, 0], [53, 0], [48, 0]], voice: 'guitar',
             melody: [0, null, 2, 3, 4, null, 3, 2, 1, null, 2, null, 0, null, null, null] },
         sunrise: { name: 'Sunrise Run', bpm: 124, drive: true, chords: [[60, 0], [67, 0], [57, 1], [65, 0]], voice: 'piano',
             melody: [0, 1, 2, null, 4, 3, null, 2, 3, 4, null, 3, 2, 1, 0, null] },
@@ -34,7 +34,7 @@
             melody: [0, null, null, 2, null, null, 3, null, 2, null, 1, null, 0, null, null, null] },
         funk: { name: 'Funky Groove', bpm: 104, swing: .16, chords: [[57, 1], [62, 1], [57, 1], [64, 1]], voice: 'guitar',
             melody: [0, null, 2, 3, null, 2, 1, null, 2, null, 3, 4, null, 2, 0, null] },
-        orbit: { name: 'Orbit Station', bpm: 128, drive: true, chords: [[50, 1], [46, 0], [53, 0], [48, 0]], voice: 'piano',
+        orbit: { name: 'Orbit Station', bpm: 128, drive: true, chordSteps: [0, 6, 12], bassSteps: [0, 2, 6, 8, 10, 14], chords: [[50, 1], [46, 0], [53, 0], [48, 0]], voice: 'piano',
             melody: [0, 2, null, 3, 4, null, 3, null, 2, 1, null, 2, 0, null, null, null] },
         tropic: { name: 'Tropic Sunset', bpm: 94, swing: .1, chords: [[65, 0], [62, 1], [58, 0], [60, 0]], voice: 'marimba',
             melody: [2, null, 3, 2, 1, null, 0, null, 1, 2, null, 4, 3, 1, 0, null] },
@@ -76,6 +76,7 @@
         correct: c => { [523, 659, 784, 1046].forEach((f, i) => c.chime(f, i === 3 ? 0.35 : 0.14, 0.18, i * 0.07)); },
         wrong: c => { c.pluck(196, .3, .14); c.pluck(147, .3, .12, .12); },
         refill: c => { [330, 440, 660].forEach((f, i) => c.pluck(f, .3, .14, i * .08)); },
+        lowResource: c => { c.tone('sine', 540, 460, .12, .045); c.tone('sine', 460, 390, .14, .035, .14); },
         jump: c => { c.jumpSound(false); },
         doubleJump: c => { c.jumpSound(true); },
         spring: c => { c.springJump(); },
@@ -310,19 +311,25 @@
                 this.fxIn.connect(reverb); reverb.connect(wet); wet.connect(this.musicGain);
             }
             this.applyMusicLevel();
-            this.mus = { style, mode: MODE_STYLE[mode] ? mode : null, step: 0, next: this.ctx.currentTime + 0.15, timer: setInterval(() => this.pumpMusic(), 60) };
+            const gain = this.ctx.createGain(), t = this.ctx.currentTime;
+            gain.gain.setValueAtTime(.0001, t);
+            gain.gain.exponentialRampToValueAtTime(1, t + .65);
+            gain.connect(this.musicGain);
+            this.mus = { style, gain, mode: MODE_STYLE[mode] ? mode : null, step: 0, next: t + 0.05, timer: setInterval(() => this.pumpMusic(), 60) };
         }
 
         stopMusic() {
             if (!this.mus) return;
             clearInterval(this.mus.timer);
+            const t = this.ctx.currentTime, gain = this.mus.gain.gain;
+            gain.cancelScheduledValues(t);
+            gain.setValueAtTime(Math.max(gain.value, .0001), t);
+            gain.exponentialRampToValueAtTime(.0001, t + .6);
+            this.mus.retired = true;
+            if (!this.mus.sources?.size) this.mus.gain.disconnect();
             this.mus = null;
-            for (const source of this.musicSources || []) source.stop(this.ctx.currentTime + .03);
+            for (const source of this.musicSources || []) source.stop(t + .65);
             this.musicSources?.clear();
-            if (this.musicGain) {
-                const g = this.musicGain.gain, t = this.ctx.currentTime;
-                g.cancelScheduledValues(t); g.setValueAtTime(Math.max(g.value, 0.0001), t); g.exponentialRampToValueAtTime(0.0001, t + 0.25);
-            }
         }
 
         pumpMusic() {
@@ -333,8 +340,9 @@
             if (m.next < now - 0.3) m.next = now + 0.05;
             while (m.next < now + 0.7) {
                 if (m.mode && m.step >= 1024) {
-                    m.style = this.chooseMusic(m.mode, true);
-                    m.step = 0; delete m.lastNote;
+                    this.chooseMusic(m.mode, true);
+                    this.startMusic(m.mode);
+                    return;
                 }
                 const T = MUSIC[m.style], spb = 60 / T.bpm / 4;
                 this.musicStep(T, m.step, m.next, spb); m.next += spb; m.step++;
@@ -352,15 +360,15 @@
             const hz = n => 440 * Math.pow(2, (n - 69) / 12);
             const sparse = (section === 2 && !T.drive) || T.quiet;
             const chord = [root, root + (minor ? 3 : 4), root + 7];
-            if (s === 0 || (!sparse && s === 8)) {
+            if (T.chordSteps ? T.chordSteps.includes(s) : s === 0 || (!sparse && s === 8)) {
                 const accompaniment = section === 1 && T.voice === 'guitar' ? 'piano' : 'guitar';
-                chord.forEach((n, i) => this.acousticNote(hz(n + (section === 2 ? 12 : 0)), spb * (sparse ? 10 : 7), .065, t + i * .018, accompaniment, this.musicGain));
+                chord.forEach((n, i) => this.acousticNote(hz(n + (section === 2 ? 12 : 0)), spb * (sparse ? 10 : T.energetic || T.chordSteps?.length > 2 ? 3 : 7), .065, t + i * .018, accompaniment, this.musicGain));
             }
-            if (s === 0 || s === 8) {
-                const bass = root - 12 + (s === 8 ? section === 1 ? 12 : 7 : 0);
-                this.acousticNote(hz(bass), spb * 5, .21, t, 'bass', this.musicGain);
+            if (T.bassSteps ? T.bassSteps.includes(s) : T.energetic ? s % 2 === 0 : s === 0 || s === 8) {
+                const bass = root - 12 + (T.energetic ? [0, 7, 12, 7][(s / 2) % 4] : s === 8 ? section === 1 ? 12 : 7 : 0);
+                this.acousticNote(hz(bass), spb * (T.energetic ? 1.5 : 5), T.energetic ? .16 : .21, t, 'bass', this.musicGain);
             }
-            if (s % 2 === 0 && barIndex > 0) {
+            if (s % (T.leadEvery || 2) === 0 && barIndex > 0) {
                 const index = (barIndex % 2) * 8 + s / 2, degree = melody[index];
                 if (degree !== null) {
                     const scale = minor ? [0, 3, 5, 7, 10] : [0, 2, 4, 7, 9];
@@ -411,7 +419,7 @@
             gain.gain.setValueAtTime(0.0001, t);
             gain.gain.exponentialRampToValueAtTime(vol, t + (destination === this.musicGain ? .025 : .006));
             gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-            source.connect(gain); gain.connect(destination);
+            source.connect(gain); gain.connect(destination === this.musicGain ? this.mus?.gain || destination : destination);
             if (destination === this.musicGain && this.fxIn) {
                 const send = ctx.createGain(); send.gain.value = .12;
                 gain.connect(send); send.connect(this.fxIn);
@@ -424,7 +432,15 @@
         finishMusicSource(source, end) {
             this.musicSources ||= new Set();
             this.musicSources.add(source);
-            source.onended = () => this.musicSources.delete(source);
+            const track = this.mus;
+            if (track) { track.sources ||= new Set(); track.sources.add(source); }
+            source.onended = () => {
+                this.musicSources.delete(source);
+                if (track) {
+                    track.sources.delete(source);
+                    if (track.retired && !track.sources.size) track.gain.disconnect();
+                }
+            };
             source.stop(end);
         }
 
@@ -434,7 +450,7 @@
             gain.gain.setValueAtTime(0.0001, t);
             gain.gain.exponentialRampToValueAtTime(.12, t + .012);
             gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
-            osc.connect(gain); gain.connect(this.musicGain); osc.start(t); this.finishMusicSource(osc, t + 0.18);
+            osc.connect(gain); gain.connect(this.mus?.gain || this.musicGain); osc.start(t); this.finishMusicSource(osc, t + 0.18);
         }
 
         unlock() {
@@ -547,8 +563,10 @@
             const pitch = this.pitch;
             this.pitch = 1;
             try {
-                this.noise(.04, .025, 1500);
-                this.tone('sine', frequency, frequency, duration, .035);
+                for (const [i, ratio] of [1, 1.25, 1.5].entries()) {
+                    const note = frequency * ratio;
+                    this.tone('sine', note, note, duration + .08 + i * .025, .065 - i * .012, i * .055);
+                }
             } finally {
                 this.pitch = pitch;
             }

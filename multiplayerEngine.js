@@ -442,8 +442,8 @@
 
     class Particles {
         constructor(session) { this.items = []; this.session = session; }
-        burst(x, y, color, count = 10, speed = 160, life = 0.5, size = 4) {
-            if (!this.session?.preview) {
+        burst(x, y, color, count = 10, speed = 160, life = 0.5, size = 4, silent = false) {
+            if (!silent && !this.session?.preview) {
                 if (count >= 24) sfx('boom', 160);
                 else if (count >= 8) sfx('pop', 70);
             }
@@ -546,6 +546,7 @@
             this.finishRoom = options.finishRoom;
             this.practice = Boolean(options.practice);
             this.testing = Boolean(options.testing || this.room.state?.staff_test);
+            this.limitedTestEnergy = this.testing && Boolean(options.limitedTestEnergy ?? this.room.state?.limited_test_energy);
             this.preview = Boolean(options.preview);
             this.graphics = graphicsProfile();
             this.returnFocus = document.activeElement;
@@ -850,7 +851,7 @@
         // Spend from the game's resource; nags the player to answer a question when empty.
         spend(n) {
             const res = this.game.res;
-            if (this.preview || this.testing) return true;
+            if (this.preview || (this.testing && !this.limitedTestEnergy)) return true;
             if (res.spend(n)) return true;
             const now = performance.now();
             if (now - (this.lastNeed || 0) > 1800) {
@@ -881,10 +882,10 @@
             const res = this.game.res;
             if (!res || this.paused || this.question || this.over || this.countdown > 0) return;
             this.ask(correct => {
-                if (this.testing) return;
+                if (this.testing && !this.limitedTestEnergy) return;
                 if (correct) this.refill();
                 else if (correct === false) this.toast(`Wrong answer — no ${res.label.toLowerCase()}`, '#f87171');
-            }, this.testing ? 'Admin test question · resources are unlimited' : `Correct answer: +${this.rewardAmount()} ${res.label}`, true);
+            }, this.testing && !this.limitedTestEnergy ? 'Admin test question · resources are unlimited' : `Correct answer: +${this.rewardAmount()} ${res.label}`, true);
         }
 
         // Automatic triggers (mystery boxes, chests, pads) are blocked briefly after any question closes.
@@ -1033,7 +1034,7 @@
                         return;
                     }
                     if (e.code === 'Tab') {
-                        const targets = [this.canvas, ...this.overlay.querySelectorAll('.mpg-hud button, .mpg-hud summary, .mpg-hud input, .mpg-hud select, .mpg-touch button, .chess-panel button, .chess-panel summary')].filter(el => el.offsetWidth && el.offsetHeight);
+                        const targets = [this.canvas, ...this.overlay.querySelectorAll('.mpg-hud button, .mpg-hud summary, .mpg-hud input, .mpg-hud select, .mpg-resource-notice, .mpg-touch button, .chess-panel button, .chess-panel summary')].filter(el => el.offsetWidth && el.offsetHeight);
                         const index = targets.indexOf(document.activeElement);
                         targets[(index + (e.shiftKey ? -1 : 1) + targets.length) % targets.length]?.focus();
                         e.preventDefault(); return;
@@ -1139,7 +1140,7 @@
             overlay.innerHTML = `
                 <canvas class="mpg-canvas"></canvas>
                 <div class="mpg-top">
-                    <div class="mpg-chip"><strong class="mpg-name"></strong><span class="mpg-goal"></span>${this.testing ? '<small class="mpg-practice-indicator">Staff testing · infinite resources</small>' : this.practice ? '<small class="mpg-practice-indicator">Practice · no coins</small>' : ''}</div>
+                    <div class="mpg-chip"><strong class="mpg-name"></strong><span class="mpg-goal"></span>${this.testing ? `<small class="mpg-practice-indicator">Staff testing · ${this.limitedTestEnergy ? 'limited' : 'infinite'} resources</small>` : this.practice ? '<small class="mpg-practice-indicator">Singleplayer</small>' : ''}</div>
                     <div class="mpg-timer"></div>
                     <div class="mpg-actions">
                         ${this.mode === 'skyline' ? '<button type="button" class="mpg-checkpoint" title="Return to your last saved checkpoint (R)">Return to checkpoint</button>' : ''}
@@ -1167,6 +1168,7 @@
                 <div class="mpg-meter hidden">
                     <div class="mpg-meter-head"><span class="mpg-meter-label"></span><b class="mpg-meter-value"></b></div>
                 </div>
+                <button type="button" class="mpg-recharge mpg-resource-notice hidden"><span role="status" aria-live="polite"></span><small>Answer a question to refill · Q</small></button>
                 <div class="mpg-stick-zone" aria-hidden="true"></div>
                 <div class="mpg-touch" aria-label="Touch controls">
                     <div class="mpg-stick" role="application" aria-label="Movement joystick"><i class="mpg-knob"></i></div>
@@ -1457,8 +1459,8 @@
                     q.className = 'mpg-qbtn b-q';
                     q.dataset.q = '1';
                     const resourceName = this.game.res.label;
-                    q.setAttribute('aria-label', this.testing ? 'Test a flashcard question' : `Answer a question to refill ${resourceName.toLowerCase()}`);
-                    q.innerHTML = `<span aria-hidden="true">?</span> ${this.testing ? 'Test question' : `Refill ${esc(resourceName)}`}`;
+                    q.setAttribute('aria-label', this.testing && !this.limitedTestEnergy ? 'Test a flashcard question' : `Answer a question to refill ${resourceName.toLowerCase()}`);
+                    q.innerHTML = `<span aria-hidden="true">?</span> ${this.testing && !this.limitedTestEnergy ? 'Test question' : `Refill ${esc(resourceName)}`}`;
                     bindBtn(q);
                     overlay.querySelector('.mpg-status').appendChild(q);
                 }
@@ -1564,10 +1566,11 @@
         updateMeter() {
             if (this.preview) return;
             const res = this.game.res;
-            const hidden = !res || this.testing;
-            const value = res ? Math.round(res.value) : 0, low = Boolean(res && res.value < 1), label = res?.label || '';
+            const hidden = !res || (this.testing && !this.limitedTestEnergy);
+            this.updateResourceNotice?.(res, hidden);
+            const value = res ? Math.round(res.value) : 0, low = Boolean(res && res.value <= 10), empty = Boolean(res && res.value < 1), label = res?.label || '';
             const previous = this.meterState;
-            if (previous && previous.hidden === hidden && previous.value === value && previous.low === low && previous.label === label) return;
+            if (previous && previous.hidden === hidden && previous.value === value && previous.low === low && previous.empty === empty && previous.label === label) return;
             const elements = this.meterElements ||= (() => {
                 const box = this.overlay.querySelector('.mpg-meter');
                 return { box, label: box.querySelector('.mpg-meter-label'), value: box.querySelector('.mpg-meter-value') };
@@ -1577,8 +1580,32 @@
                 if (!previous || previous.hidden || previous.label !== label) elements.label.textContent = label;
                 if (!previous || previous.hidden || previous.value !== value) elements.value.textContent = `${value}`;
                 if (!previous || previous.hidden || previous.low !== low) elements.box.classList.toggle('low', low);
+                if (!previous || previous.hidden || previous.empty !== empty) elements.box.classList.toggle('empty', empty);
             }
-            this.meterState = { hidden, value, low, label };
+            this.meterState = { hidden, value, low, empty, label };
+        }
+
+        updateResourceNotice(res, hidden) {
+            const time = this.t || 0;
+            if (!res || res !== this.noticeResource || res.value > 15) {
+                this.lowResourceNotified = false;
+                this.lowNoticeUntil = 0;
+                this.noticeResource = res;
+            }
+            const available = !hidden && !this.question && !this.paused && !this.over && !(this.countdown > 0);
+            if (available && res.value <= 10 && !this.lowResourceNotified) {
+                this.lowResourceNotified = true;
+                this.lowNoticeUntil = time + 4;
+                this.sfx('lowResource', 1000, .6);
+            }
+            const visible = Boolean(available && res.value <= 10 && time < this.lowNoticeUntil);
+            if (visible === this.resourceNoticeVisible) return;
+            this.resourceNoticeVisible = visible;
+            if (!visible && !this.resourceNoticeElement) return;
+            const notice = this.resourceNoticeElement ||= this.overlay.querySelector('.mpg-resource-notice');
+            if (!notice) return;
+            if (visible) notice.querySelector('span').textContent = `Low ${res.label.toLowerCase()}`;
+            notice.classList.toggle('hidden', !visible);
         }
 
         practiceResultText() {
@@ -1606,7 +1633,7 @@
                     : winner ? tied ? 'First-place tie!' : `${winner.n} wins!` : 'Game over';
             panel.classList.remove('hidden');
             panel.innerHTML = `<div class="mpg-results-card">
-                <small>${this.testing ? 'Test finished' : this.practice ? 'Practice complete' : 'Match over'}</small>
+                <small>${this.testing ? 'Test finished' : this.practice ? 'Singleplayer complete' : 'Match over'}</small>
                 <h2>${esc(title)}</h2>
                 <ol>${rows.map(row => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${rows.findIndex(other => this.metric(other) === this.metric(row)) + 1}</span>${avatarMarkup(row, 'mpg-player-avatar')}<strong>${esc(row.n)} ${accountTagMarkup(row.username, row.tags)}</strong><b>${this.valueText(row)}</b><em>${!this.user.is_anonymous && this.rewards && (!this.practice || row.id === this.user.id) ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
                 <p class="mpg-accuracy">${this.answered ? `${Math.round(this.correct / this.answered * 100)}% correct` : 'No answers submitted'} · ${this.correct} correct · ${Math.max(0, this.answered - this.correct)} incorrect · ${this.answered} answered</p>
@@ -1648,9 +1675,9 @@
                     if (!this.paused) {
                         this.t += dt;
                         this.onTick?.(dt);
-                        if (this.testing && this.game.res) this.game.res.value = this.game.res.max;
+                        if (this.testing && !this.limitedTestEnergy && this.game.res) this.game.res.value = this.game.res.max;
                         this.game.update(dt);
-                        if (this.testing && this.game.res) this.game.res.value = this.game.res.max;
+                        if (this.testing && !this.limitedTestEnergy && this.game.res) this.game.res.value = this.game.res.max;
                     }
                     this.checkEnd();
                     if (!this.practice && !this.isHost && !this.over && Date.now() > this.deadline + 9000) this.finish(this.standings());

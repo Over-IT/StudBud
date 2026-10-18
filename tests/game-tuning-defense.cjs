@@ -27,15 +27,41 @@ const A = sandbox.window.StudBudArcade;
 }
 {
     const g = new A.games.skyline({ seed: 42, local: { color: '#fff' }, user: { id: 'culling-test' } });
-    const chamber = { id: -1, top: -1000, bottom: 1000, columns: Array.from({ length: 100 }, (_, i) => i * 500) };
-    for (const method of ['drawFactoryFrame', 'drawStationFrame']) {
+    const floor = g.checkpoints.find(cp => cp.biome === 1).y;
+    const chamber = { id: -1, top: floor - 1000, bottom: floor + 1000, columns: Array.from({ length: 100 }, (_, i) => i * 500) };
+    for (const method of ['drawStationFrame']) {
         drawCalls = 0;
-        g[method](ctx, chamber, -1300, 1200);
+        g[method](ctx, chamber, floor - 1300, floor + 1200);
         const full = drawCalls;
         drawCalls = 0;
-        g[method](ctx, chamber, -1300, 1200, 900, 1900);
+        g[method](ctx, chamber, floor - 1300, floor + 1200, 900, 1900);
         assert.ok(drawCalls < full * .15, `${method} skips at least 85% of draw operations outside a narrow viewport`);
     }
+    const bottoms = [], supportCtx = new Proxy({
+        fillRect: (x, y, w, h) => bottoms.push(y + h),
+        moveTo: (x, y) => bottoms.push(y), lineTo: (x, y) => bottoms.push(y),
+        arc: (x, y, r) => bottoms.push(y + r)
+    }, { get: (target, key) => target[key] || noop });
+    g.drawFactoryFrame(supportCtx, chamber, floor - 1300, floor + 1200);
+    assert.equal(bottoms.length, 0, 'unconnected factory columns and roof trusses are not drawn');
+    bottoms.length = 0;
+    g.drawMachineSupport(supportCtx, { x: 100, y: floor - 25, w: 200, h: 14, bi: 1 });
+    assert.equal(bottoms.length, 0, 'factory pads have no floating feet');
+    bottoms.length = 0;
+    g.drawMachineSupport(supportCtx, { x: 100, y: floor - 50, w: 200, h: 14, bi: 1,
+        below: { x: 100, y: floor + 300, w: 200 } });
+    assert.equal(bottoms.length, 0, 'factory supports cannot connect to nonexistent decks or cross the biome boundary');
+    const below = { x: 100, y: floor - 50, w: 200, h: 14 };
+    g.solids.push(below);
+    g.drawMachineSupport(supportCtx, { x: 100, y: floor - 200, w: 200, h: 14, bi: 1, below });
+    assert.ok(bottoms.length > 0 && bottoms.every(y => y <= below.y), 'connected factory supports end on an actual lower deck');
+    const machine = g.drills.find(d => d.gantry), factory = g.challenges[machine.chamber];
+    drawCalls = 0;
+    g.drawFactoryFrame(ctx, factory, factory.top - 300, factory.bottom + 300);
+    assert.ok(drawCalls > 0, 'frames carrying real machines remain visible');
+    drawCalls = 0;
+    g.drawFactoryFrame(ctx, factory, factory.top - 300, factory.bottom + 300, factory.right + 1000, factory.right + 2000);
+    assert.equal(drawCalls, 2, 'offscreen machine frames only save/restore context and skip their geometry');
 }
 function session(mode, id = 'host', ids = ['host', 'guest', 'ally', 'rival']) {
     const events = [], messages = [], taps = new Set();
@@ -391,6 +417,19 @@ assert.equal(admin.game.wallets[0], 0, 'admin test purchases are free rather tha
 admin.game.draw(ctx, 1280, 720);
 assert.ok(admin.game.ui.rects.filter(r => r.id.startsWith('send:')).every(r => r.on), 'admin send controls remain enabled with an empty wallet');
 assert.match(admin.game.goalText(), /unlimited test cash/);
+{
+    const limited = session('defense');
+    limited.testing = true; limited.limitedTestEnergy = true;
+    limited.game.wallets[0] = 0;
+    limited.game.request('build', { type: 1, x: 500, y: 340 });
+    assert.equal(limited.game.troops.length, 0, 'limited staff tests cannot build without cash');
+    limited.game.wallets[0] = 1000;
+    limited.game.request('build', { type: 1, x: 500, y: 340 });
+    assert.equal(limited.game.troops.length, 1);
+    assert.ok(limited.game.wallets[0] < 1000, 'limited staff tests debit the shared wallet');
+    assert.ok(limited.game.sellValue(limited.game.troops[0]) > 0, 'paid test towers retain their normal refund');
+    assert.doesNotMatch(limited.game.goalText(), /unlimited/);
+}
 console.log('Admin Tower Defense builds, upgrades and sends honor infinite test resources without changing normal paid matches.');
 {
     const ids = ['host', 'guest', 'ally', 'rival', 'blue3', 'red3', 'blue4', 'red4'];
@@ -621,9 +660,19 @@ console.log('Original-model jump, landing, eased dash, straight-leg wall brace a
     try {
         for (const [height, biome] of [[100, 0], [g.checkpoints[1].y * -1 + 100, 1], [g.checkpoints[2].y * -1 + 100, 3], [100, 0]]) {
             g.me.y = -height - g.me.h;
+            g.me.onGround = true; g.me.ground = { bi: biome };
             g.update(1 / 60);
-            assert.deepEqual(biomes.at(-1), ['skyline', biome], 'music follows the current biome rather than the highest checkpoint');
+            assert.deepEqual(biomes.at(-1), ['skyline', biome], 'music follows the landed biome rather than transient height during falls');
         }
+        g.me.onGround = false; g.me.ground = null;
+        g.me.y = g.checkpoints[2].y - 100;
+        g.update(1 / 60);
+        assert.deepEqual(biomes.at(-1), ['skyline', 0], 'crossing a biome boundary in midair does not interrupt the track');
+        g.dead = .5;
+        const beforeDeath = biomes.length;
+        g.update(1 / 60);
+        assert.equal(biomes.length, beforeDeath, 'dying does not request a soundtrack switch');
+        g.dead = 0;
         const count = biomes.length; s.preview = true; g.update(1 / 60);
         assert.equal(biomes.length, count, 'passive previews cannot change game music');
     } finally {
@@ -692,6 +741,8 @@ for (const fps of [30, 60, 120]) {
     const s = session('miner'), g = s.game, sounds = [];
     s.sfx = (...args) => sounds.push(args);
     const x = 20, y = 12, index = y * 110 + x;
+    const previousAudio = sandbox.window.StudBudSfx;
+    sandbox.window.StudBudSfx = { play: (...args) => sounds.push(args) };
     Object.assign(g.me, { x: x * 48, y: y * 48 });
     g.T[index] = 2;
     g.onEvent({ k: 'mh', x, y }, { id: 'guest' });
@@ -705,24 +756,32 @@ for (const fps of [30, 60, 120]) {
     g.onEvent({ k: 'dg', x: 100, y: 70 }, { id: 'guest' });
     assert.equal(sounds.length, 0, 'distant players do not play global block-break sounds');
     g.onEvent({ k: 'dg', x, y }, { id: 'guest' });
-    assert.equal(sounds[0][0], 'rockBreak');
-    assert.ok(sounds[0][2] > 0 && sounds[0][2] < 1, 'nearby block breaks are distance-attenuated');
+    assert.equal(sounds.length, 0, 'nearby opponents break rocks silently');
     g.T[index] = 3;
     const carry = g.carry, items = g.items, events = s.events.length;
     g.onEvent({ k: 'dg', x, y }, { id: 'guest' });
-    assert.equal(g.T[index], 0); assert.equal(sounds.at(-1)[0], 'quartzBreak');
+    assert.equal(g.T[index], 0); assert.equal(sounds.length, 0, 'remote crystal particles do not play generic pops');
     assert.equal(g.carry, carry); assert.equal(g.items, items); assert.equal(s.events.length, events, 'remote breaks neither award local loot nor rebroadcast');
     const names = new Set();
     for (const type of [3, 4, 5, 7, 8, 9]) {
         g.T[index] = type;
         g.onEvent({ k: 'dg', x, y }, { id: 'guest' });
-        const remote = sounds.at(-1)[0];
+        const before = sounds.length;
+        assert.equal(g.T[index], 0, 'remote breaks still update the shared mine');
+        assert.equal(sounds.length, names.size, 'remote crystal breaks remain silent');
         g.T[index] = type;
         g.breakTile(x, y, type, true);
-        assert.equal(sounds.at(-1)[0], remote, 'local and remote mining use the same crystal-specific cue');
-        names.add(remote);
+        assert.equal(sounds.length, before + 1, 'local mining plays exactly one crystal-specific cue, with no generic particle pop');
+        names.add(sounds.at(-1)[0]);
     }
     assert.equal(names.size, 6);
+    const beforeBot = sounds.length;
+    g.T[index] = 9;
+    const particles = g.particles.items.length;
+    g.breakTile(x, y, 9, false);
+    assert.equal(sounds.length, beforeBot, 'bot crystal breaks are silent too');
+    assert.ok(g.particles.items.length > particles, 'silent bot breaks retain visible particles');
+    sandbox.window.StudBudSfx = previousAudio;
 }
 console.log('Wall attachment/push-off and eased dash transitions at 30/60/120 FPS, break-only mining audio and remote-loot isolation passed.');
 {

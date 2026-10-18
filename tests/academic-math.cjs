@@ -19,6 +19,67 @@ vm.runInContext(appSource.slice(appSource.indexOf('    function localDateKey'), 
     + '\nglobalThis.app = Object.create(AppOrchestrator.prototype);', sandbox);
 const app = sandbox.app;
 {
+    const ids = ['calendar-days', 'calendar-month-label', 'calendar-selected-label', 'calendar-agenda-list',
+        'calendar-event-form', 'calendar-event-id', 'calendar-event-title', 'calendar-event-date', 'calendar-event-time',
+        'calendar-event-notes', 'delete-calendar-event-btn'];
+    for (const id of ids) elements.set(id, { innerHTML: '', textContent: '', value: '', reset() {}, classList: { toggle() {} } });
+    const oldSchedule = app.getScheduleEntries, oldModal = app.openModal;
+    const oldSet = sandbox.AppState.set;
+    sandbox.AppState.state = state;
+    sandbox.AppState.set = (key, value) => { state[key] = value; };
+    sandbox.window.crypto = { randomUUID: () => 'calendar-fixture' };
+    app.openModal = id => assert.equal(id, 'calendar-event-modal');
+    app.getScheduleEntries = () => ({ pattern: null, entries: [], note: '' });
+    app.calendarDate = new Date(2026, 9, 18);
+    app.selectedCalendarDate = '2026-10-18';
+    state.assignments = [
+        { id: 'work', title: 'Homework only', dueDate: '2026-10-18' },
+        { id: 'quiz', title: 'Quiz only', kind: 'quiz', dueDate: '2026-10-18' },
+        { id: 'test', title: 'Test only', kind: 'TEST', dueDate: '2026-10-18', status: 'completed' }
+    ];
+    state.calendarEvents = [];
+    app.openCalendarEvent();
+    assert.equal(elements.get('calendar-event-date').value, '2026-10-18');
+    elements.get('calendar-event-title').value = '<Club meeting>';
+    elements.get('calendar-event-time').value = '15:30';
+    elements.get('calendar-event-notes').value = '<Bring notes>';
+    app.saveCalendarEvent();
+    assert.equal(state.calendarEvents.length, 1);
+    assert.equal(state.assignments.length, 3, 'personal events never become assignments');
+    const markup = elements.get('calendar-agenda-list').innerHTML;
+    const sections = markup.split('<section class="calendar-agenda-group">');
+    assert.match(sections[1], /Homework only/);
+    assert.doesNotMatch(sections[1], /Quiz only|Test only/);
+    assert.match(sections[2], /Quiz only/);
+    assert.match(sections[2], /Log study/);
+    assert.match(sections[3], /&lt;Club meeting&gt;/);
+    assert.match(sections[3], /15:30/);
+    assert.match(sections[3], /&lt;Bring notes&gt;/);
+    assert.match(elements.get('calendar-days').innerHTML, /1 assignments, 2 quizzes\/tests, 1 events/);
+    app.openCalendarEvent(state.calendarEvents[0].id);
+    elements.get('calendar-event-title').value = 'Updated meeting';
+    elements.get('calendar-event-time').value = '';
+    app.saveCalendarEvent();
+    assert.equal(state.calendarEvents.length, 1, 'editing updates instead of duplicating an event');
+    assert.match(elements.get('calendar-agenda-list').innerHTML, /All day/);
+    elements.get('calendar-event-date').value = '2026-02-30';
+    assert.throws(() => app.saveCalendarEvent(), /valid date/);
+    elements.get('calendar-event-date').value = '2026-10-18';
+    const previous = state.calendarEvents;
+    sandbox.AppState.set = (key, value) => { state[key] = value; throw new Error('Storage full'); };
+    assert.throws(() => app.saveCalendarEvent(), /Storage full/);
+    assert.equal(state.calendarEvents, previous, 'failed saves restore the prior event list');
+    sandbox.AppState.set = (key, value) => { state[key] = value; };
+    app.saveCalendarEvents([]);
+    app.renderCalendar();
+    assert.match(elements.get('calendar-agenda-list').innerHTML, /No events/);
+    assert.throws(() => app.openCalendarEvent('missing'), /no longer exists/);
+    state.assignments = []; state.calendarEvents = [];
+    app.getScheduleEntries = oldSchedule; app.openModal = oldModal; sandbox.AppState.set = oldSet;
+    for (const id of ids) elements.delete(id);
+    console.log('Calendar assignment/assessment separation, event create/edit/delete, escaping, date validation and save-failure retention passed.');
+}
+{
     const next = { innerHTML: '' };
     elements.set('planner-next-task', next);
     state.assignments = [
@@ -75,6 +136,9 @@ const app = sandbox.app;
     for (const id of ['assignment-body', 'planner-assessment-body', 'planner-study-list', 'quad-1-list']) elements.delete(id);
     elements.delete('planner-next-task');
     const html = source('index.html');
+    const tabs = [...html.matchAll(/data-multiplayer-tab="([^"]+)"/g)].map(match => match[1]);
+    assert.deepEqual(tabs, ['host', 'join', 'solo'], 'Singleplayer stays at the end of the game tabs');
+    assert.doesNotMatch(html, /Practice settings|Start practice<\/|Practice awards no multiplayer coins/);
     const plannerMarkup = html.slice(html.indexOf('<section id="planner-view"'), html.indexOf('<section id="calendar-view"'));
     assert.match(plannerMarkup, /Study, quizzes &amp; tests/);
     assert.match(plannerMarkup, /aria-label="Filter assignments, quizzes and tests"/);

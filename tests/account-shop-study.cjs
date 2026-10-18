@@ -747,6 +747,8 @@ async function run() {
 
     state.state.courses = [{ id: 'course', code: 'course', grade: 91 }];
     state.state.assignments = [{ id: 'assignment', courseId: 'course', status: 'pending' }];
+    state.set('calendarEvents', [{ id: 'event', title: 'Club meeting', date: '2026-10-20', time: '15:30', notes: 'Bring notes' }]);
+    assert.equal(JSON.parse(storage.get(state.STORAGE_KEY)).calendarEvents[0].title, 'Club meeting', 'calendar events persist in local saves');
     state.state.gradeScenarios = [{ id: 'scenario', name: 'Final', courses: [] }];
     state.state.selectedGradeScenarioId = 'scenario';
     state.state.schedule = { all: { Monday: [{ courseId: 'course', time: '09:00' }] }, odd: {}, even: {} };
@@ -755,9 +757,11 @@ async function run() {
     await state.recordStudySession({ id: 'study', durationSec: 30, accuracy: .75, gameSummary: { questions: [{ prompt: 'Q', correct: false }] } });
     const backup = await state.exportAppState();
     state.state.courses = [];
+    state.state.calendarEvents = [];
     assert.equal(await state.importAppState(backup), true);
     assert.equal(state.state.courses[0].grade, 91);
     assert.equal(state.state.assignments[0].id, 'assignment');
+    assert.equal(state.state.calendarEvents[0].time, '15:30', 'calendar events round-trip through the account/backup snapshot');
     assert.equal(state.state.selectedGradeScenarioId, 'scenario');
     assert.equal(state.state.schedule.all.Monday[0].time, '09:00');
     assert.equal(state.state.settings.gameAudio.volume, .25);

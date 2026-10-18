@@ -1,0 +1,63 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const source = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+let created = 0, anonymousLogins = 0, response, failure;
+const calls = [];
+const config = { url: 'https://project.supabase.co', anonKey: 'public-test-key' };
+const cloud = { offlineMode: true, isGuest: () => true, loadAccountConfig: async () => config,
+    prepareGuestSession: async () => { anonymousLogins++; throw new Error('Anonymous sign-ins are disabled'); } };
+const sandbox = { window: { navigator: { onLine: true }, StudBudCloud: cloud,
+    supabase: { createClient(url, key, options) {
+        created++;
+        assert.equal(url, config.url); assert.equal(key, config.anonKey);
+        assert.equal(options.auth.persistSession, false);
+        assert.equal(options.auth.autoRefreshToken, false);
+        assert.equal(options.auth.detectSessionInUrl, false);
+        return { rpc: async (name, args) => { calls.push({ name, args }); return { data: response, error: failure }; } };
+    } } }, console, Math, Date, Map, Set };
+vm.createContext(sandbox);
+vm.runInContext(source('communityGames.js'), sandbox);
+const api = sandbox.window.StudBudCommunityGames;
+(async () => {
+    response = [{ id: 'deck', owner_id: 'author', title: 'Biology', author_name: 'Student', card_count: 2 }];
+    const rows = await api.searchDecks('bio');
+    assert.equal(rows[0].title, 'Biology');
+    assert.equal(calls[0].name, 'studbud_read_community_decks');
+    assert.equal(calls[0].args.p_query, 'bio');
+    assert.equal(calls[0].args.p_deck_id, null);
+    response = [{ ...rows[0], cards: [{ front: 'Q1', back: 'A1' }, { front: 'Q2', back: 'A2' }] }];
+    assert.equal((await api.importDeck('deck')).cards.length, 2);
+    assert.equal(calls[1].args.p_deck_id, 'deck');
+    assert.equal(created, 1, 'public deck reads reuse a session-free client');
+    assert.equal(anonymousLogins, 0, 'browsing/import never depends on Anonymous Sign-ins');
+    await assert.rejects(api.publishDeck({ id: 'private', title: 'Mine', cards: response[0].cards }), /Create a free account/);
+    await assert.rejects(api.unpublishDeck('deck'), /Create a free account/);
+    await assert.rejects(api.publicClient(), /Anonymous sign-ins are disabled/, 'multiplayer still requires its normal guest session');
+    response = [];
+    await assert.rejects(api.importDeck('deleted'), /no longer available/);
+    response = [{ id: 'broken', cards: [] }];
+    await assert.rejects(api.importDeck('broken'), /enough cards/);
+    response = null;
+    await assert.rejects(api.searchDecks(''), /invalid deck list/);
+    failure = { code: 'PGRST202', message: 'Missing function' };
+    await assert.rejects(api.searchDecks(''), /server update/);
+    failure = { message: 'Network unavailable' };
+    await assert.rejects(api.searchDecks(''), /Network unavailable/);
+    sandbox.window.navigator.onLine = false;
+    await assert.rejects(api.searchDecks(''), /internet connection/);
+    const sql = source('supabase-setup.sql');
+    const read = sql.slice(sql.indexOf('create or replace function public.studbud_read_community_decks('),
+        sql.indexOf('-- Any signed-in user can open another'));
+    assert.match(read, /security definer/);
+    assert.match(read, /set search_path = public, pg_temp/);
+    assert.match(read, /limit 30/);
+    assert.match(read, /not public\.studbud_is_hidden_user\(d\.owner_id\)/);
+    assert.match(read, /case when p_deck_id is not null then jsonb_build_object\('cards'/);
+    assert.doesNotMatch(read, /'source_deck_id'|'email'|'school'|'data'/);
+    assert.match(read, /grant execute on function public.studbud_read_community_decks\(text, uuid\) to anon, authenticated/);
+    assert.doesNotMatch(read, /grant (?:all|select|insert|update|delete) on table/i);
+    assert.match(sql, /and not public\.studbud_is_guest\(\)\s+and public\.studbud_current_user_can_publish_community_decks\(\)/);
+    console.log('Session-free guest library search/import, account-only publishing, explicit failures and read-only SQL contracts passed.');
+})().catch(error => { console.error(error); process.exitCode = 1; });

@@ -74,6 +74,9 @@ async function run() {
     nodes.set('solo-game-reward', { value: '65', dataset: { custom: 'true' } });
     checkReward('skyline', {}, 65);
     checkReward('skyline', { questionReward: 75 }, 75);
+    assert.equal(practiceOptions.limitedTestEnergy, false, 'staff tests default to unlimited energy');
+    checkReward('skyline', { limitedTestEnergy: true, questionReward: 21 }, 21);
+    assert.equal(practiceOptions.limitedTestEnergy, true, 'limited test configuration reaches the session');
     app.hostedGameRoom = { mode: 'skyline', state: { players: [], question_reward: 25 } };
     checkReward(undefined, {}, 25);
     checkReward('shooter', {}, 65);

@@ -522,8 +522,13 @@
                         <aside class="glass-card calendar-agenda">
                             <div class="view-header">
                                 <h3 id="calendar-selected-label">Selected day</h3>
-                                <button id="calendar-add-event-btn" class="primary-btn"><i class="fas fa-plus"></i> Add</button>
+                                <button id="calendar-add-event-btn" class="primary-btn" type="button"><i class="fas fa-plus"></i> Add event</button>
                             </div>
+                            <div class="calendar-add-actions">
+                                <button id="calendar-add-assignment-btn" class="secondary-btn" type="button">Add assignment</button>
+                                <button id="calendar-add-assessment-btn" class="secondary-btn" type="button">Add quiz / test</button>
+                            </div>
+                            <p class="settings-hint">Assignments, quiz/test dates and personal events are shown separately. Pick a date to see its agenda.</p>
                             <div id="calendar-agenda-list"></div>
                         </aside>
                     </div>
@@ -714,7 +719,7 @@
                     <div class="view-header">
                         <h2>Practice</h2>
                     </div>
-                    <div class="view-header"><p>Build confidence with flashcard quizzes or practice multiplayer games on your own. Practice sessions are private and do not award multiplayer coins.</p><button class="primary-btn" type="button" data-target="multiplayer-view"><i class="fas fa-users"></i> Open Multiplayer</button></div>
+                    <div class="view-header"><p>Quiz yourself with flashcards, or play Singleplayer games with computer opponents. Your school grades are never changed.</p><button class="primary-btn" type="button" data-action="open-singleplayer"><i class="fas fa-user"></i> Open Singleplayer</button></div>
                     <div class="arcade-menu">
                         <div class="glass-card arcade-game-card">
                             <i class="fas fa-layer-group game-icon"></i>
@@ -755,35 +760,10 @@
                     </div>
                     <section class="glass-card practice-multiplayer-setup" aria-labelledby="practice-multiplayer-heading">
                         <div class="view-header">
-                            <div><h3 id="practice-multiplayer-heading">Practice multiplayer games on your own</h3><p>Try any multiplayer mode with simulated players and your flashcards. No room or invite code needed.</p></div>
+                            <div><h3 id="practice-multiplayer-heading">Singleplayer games</h3><p>Play any multiplayer game on your own against computer players. No room or invite code needed.</p></div>
                         </div>
-                        <form id="practice-multiplayer-form" class="practice-multiplayer-form">
-                            <label>Game mode
-                                <select id="practice-multiplayer-mode">
-                                    <option value="skyline">Escape to Space</option>
-                                    <option value="river">River Fishing</option>
-                                    <option value="market">Package Delivery</option>
-                                    <option value="miner">Crystal Mining</option>
-                                    <option value="duel">King of the Hill</option>
-                                    <option value="shooter">Arena Shooter</option>
-                                    <option value="defense">Team Tower Defense</option>
-                                    <option value="chess">Question Chess (1v1)</option>
-                                </select>
-                            </label>
-                            <label>Flashcard set<select id="practice-multiplayer-deck" required></select></label>
-                            <label>Practice time
-                                <select id="practice-multiplayer-time">
-                                    <option value="0">No time limit</option>
-                                    <option value="300">5 minutes</option>
-                                    <option value="600" selected>10 minutes</option>
-                                    <option value="1200">20 minutes</option>
-                                    <option value="1800">30 minutes</option>
-                                    <option value="3600">60 minutes</option>
-                                </select>
-                            </label>
-                            <button class="primary-btn" type="submit"><i class="fas fa-gamepad" aria-hidden="true"></i> Start solo practice</button>
-                        </form>
-                        <p id="practice-multiplayer-status" class="community-status" role="status" aria-live="polite"></p>
+                        <p>Choose from the full game catalog with live previews, computer-player settings, game time and resources per answer.</p>
+                        <button class="primary-btn" type="button" data-action="open-singleplayer"><i class="fas fa-play" aria-hidden="true"></i> Choose a singleplayer game</button>
                     </section>
                     <div id="arcade-canvas-container" class="glass-card hidden full-width">
                         <div class="arcade-header">
@@ -796,7 +776,7 @@
 
                 <section id="multiplayer-view" class="view hidden">
                     <div class="multiplayer-topline">
-                        <div><h2>Multiplayer Study Club</h2><p>Race buds, earn coins, and customize your player. Multiplayer rewards stay separate from your school planner.</p></div>
+                        <div><h2 id="game-club-heading">Multiplayer Study Club</h2><p id="game-club-description">Race buds, earn coins, and customize your player. Multiplayer rewards stay separate from your school planner.</p></div>
                         <div class="multiplayer-wallet"><i class="fas fa-coins"></i><strong id="multiplayer-wallet-coins">0</strong><span>coins</span></div>
                     </div>
                     <div class="multiplayer-layout">
@@ -805,10 +785,11 @@
                                 <div class="multiplayer-tabs" role="tablist" aria-label="Multiplayer actions">
                                     <button id="multiplayer-host-tab" class="multiplayer-tab selected" type="button" role="tab" aria-selected="true" data-multiplayer-tab="host">Host a game</button>
                                     <button id="multiplayer-join-tab" class="multiplayer-tab" type="button" role="tab" aria-selected="false" data-multiplayer-tab="join">Join with code</button>
+                                    <button id="multiplayer-solo-tab" class="multiplayer-tab" type="button" role="tab" aria-selected="false" data-multiplayer-tab="solo"><i class="fas fa-user" aria-hidden="true"></i> Singleplayer</button>
                                 </div>
                                 <section id="multiplayer-host-flow" class="multiplayer-flow" role="tabpanel" aria-labelledby="multiplayer-host-tab">
                                     <div class="community-heading">
-                                        <div><h3>Choose a live game</h3><p>Every correct answer powers a different animated challenge.</p></div>
+                                        <div><h3 id="multiplayer-flow-heading">Choose a live game</h3><p id="multiplayer-flow-subheading">Every correct answer powers a different animated challenge.</p></div>
                                         <span id="multiplayer-identity-badge" class="community-badge">Player</span>
                                     </div>
                                     <div class="multiplayer-mode-picker" role="group" aria-label="Choose a game mode">
@@ -842,30 +823,35 @@
                                         </div>
                                                                                     <button class="primary-btn" type="submit"><i class="fas fa-door-open"></i> Create room</button>
                                     </form>
+                                    <form id="solo-game-settings" class="hosted-game-form solo-game-form hidden" novalidate>
+                                        <h4><i class="fas fa-user" aria-hidden="true"></i> Singleplayer game</h4>
+                                        <label>Flashcard set<select id="solo-game-deck" name="deckId" required></select></label>
+                                        <label>Computer players
+                                            <select id="solo-game-bots" name="botCount">
+                                                <option value="0">None · just you</option>
+                                                <option value="1">1 computer player</option>
+                                                <option value="2">2 computer players</option>
+                                                <option value="3" selected>3 computer players</option>
+                                            </select>
+                                        </label>
+                                        <div class="multiplayer-goals">
+                                            <label class="time-slider">Time limit: <strong id="solo-game-time-value">10 min</strong><input id="solo-game-time" name="timeLimit" type="range" min="1" max="60" step="1" value="10"></label>
+                                            <label class="settings-check"><input id="solo-game-unlimited" name="unlimited" type="checkbox"> No time limit</label>
+                                        </div>
+                                        <div class="question-reward-control">
+                                            <label id="solo-game-resource-label" for="solo-game-reward">Energy per correct answer</label>
+                                            <div class="question-reward-inputs"><input type="range" min="5" max="100" step="1" value="20" data-reward-slider="solo-game-reward" aria-label="Energy per correct answer slider" aria-describedby="solo-game-reward-guidance"><input id="solo-game-reward" name="questionReward" type="number" min="5" max="100" step="1" value="20" required aria-describedby="solo-game-reward-guidance"></div>
+                                            <small id="solo-game-reward-guidance" aria-live="polite"></small>
+                                            <button type="button" class="secondary-btn" data-action="recommended-reward" data-id="solo-game-reward">Use recommended amount</button>
+                                            <small>5–100 per answer, in steps of 1. More resources means fewer refill questions; it does not change the questions.</small>
+                                        </div>
+                                        <button class="primary-btn" type="button" data-action="start-solo-game"><i class="fas fa-play" aria-hidden="true"></i> Start game</button>
+                                        <small id="solo-game-note" class="settings-hint">Same game as multiplayer, with computer players instead of a room. Correct answers earn coins when you are signed in.</small>
+                                        <p id="solo-game-status" class="community-status" role="status" aria-live="polite"></p>
+                                    </form>
                                     </div>
                                     <div id="multiplayer-preview" class="multiplayer-preview">
-                                        <div class="preview-heading"><div><strong id="multiplayer-preview-title">Escape to Space</strong><span id="multiplayer-preview-description">Scale a lively rooftop course with every correct answer.</span></div><button id="preview-practice-btn" class="secondary-btn" type="button" data-action="toggle-solo-settings" aria-expanded="false"><i class="fas fa-gamepad" aria-hidden="true"></i> Set up practice</button></div>
-                                        <form id="solo-game-settings" class="solo-game-settings hidden">
-                                            <label>Game time
-                                                <select name="timeLimit">
-                                                    <option value="0">No time limit</option>
-                                                    <option value="300">5 minutes</option>
-                                                    <option value="600" selected>10 minutes</option>
-                                                    <option value="1200">20 minutes</option>
-                                                    <option value="1800">30 minutes</option>
-                                                    <option value="3600">60 minutes</option>
-                                                </select>
-                                            </label>
-                                            <div class="question-reward-control">
-                                                <label id="solo-game-resource-label" for="solo-game-reward">Energy per correct answer</label>
-                                                <div class="question-reward-inputs"><input type="range" min="5" max="100" step="1" value="20" data-reward-slider="solo-game-reward" aria-label="Energy per correct answer slider" aria-describedby="solo-game-reward-guidance"><input id="solo-game-reward" name="questionReward" type="number" min="5" max="100" step="1" value="20" required aria-describedby="solo-game-reward-guidance"></div>
-                                                <small id="solo-game-reward-guidance" aria-live="polite"></small>
-                                                <button type="button" class="secondary-btn" data-action="recommended-reward" data-id="solo-game-reward">Use recommended amount</button>
-                                                <small>Choose an amount from 5 to 100 in steps of 1. Resources accumulate without a cap.</small>
-                                            </div>
-                                            <button class="primary-btn" type="button" data-action="start-solo-game"><i class="fas fa-play" aria-hidden="true"></i> Start practice</button>
-                                            <small>Correct answers give the resource shown above. End game opens your summary. Practice awards no multiplayer coins.</small>
-                                        </form>
+                                        <div class="preview-heading"><div><strong id="multiplayer-preview-title">Escape to Space</strong><span id="multiplayer-preview-description">Scale a lively rooftop course with every correct answer.</span></div><button id="preview-solo-btn" class="secondary-btn" type="button" data-action="toggle-solo-settings"><i class="fas fa-user" aria-hidden="true"></i> Play singleplayer</button></div>
                                         <canvas id="multiplayer-game-canvas" width="900" height="360" aria-label="Animated preview of the selected multiplayer game"></canvas>
                                     </div>
                                 </section>
@@ -907,7 +893,7 @@
                                 <div><h3>Warm-up</h3><p>Hop through grassy trails, dodge traffic, ride floating logs, and watch for the express train.</p></div>
                                 <canvas id="waiting-runner-canvas" width="520" height="360" aria-label="Pregame warm-up: tap to hop forward, swipe to change lanes, and keep moving as the screen scrolls."></canvas>
                                 <div class="waiting-runner-meta"><span>Rows <strong id="waiting-runner-score">0</strong> · Best <strong id="waiting-runner-best">0</strong></span><button id="waiting-runner-start" class="secondary-btn" type="button">Start warm-up</button></div>
-                                <div class="waiting-practice"><span>Want to warm up with bots? Practice awards no coins.</span><button id="waiting-practice-btn" class="primary-btn" type="button"><i class="fas fa-gamepad" aria-hidden="true"></i> Start practice · no coins</button></div>
+                                <div class="waiting-practice"><span>Waiting for players? Play a singleplayer round in the meantime.</span><button id="waiting-practice-btn" class="primary-btn" type="button"><i class="fas fa-user" aria-hidden="true"></i> Play singleplayer</button></div>
                             </section>
                         </main>
                     </div>
@@ -1087,7 +1073,7 @@
                             <li><strong>Import from Infinite Campus:</strong> on the GPA page, bring in your classes, grades, assignments, categories, class times and school calendar in a few clicks.</li>
                             <li><strong>Planner, Calendar &amp; Schedule:</strong> track assignments, due dates and your school day.</li>
                             <li><strong>Flashcards &amp; Import Cards:</strong> create or import sets and study anytime. Learning progress helps prioritize practice; flashcards are not assignments and have no deadlines.</li>
-                            <li><strong>Practice:</strong> quiz yourself with flashcards or try multiplayer game modes solo with simulated players. Open Multiplayer to play with other students.</li>
+                            <li><strong>Singleplayer:</strong> play the same game modes on your own with computer players. Host or join a multiplayer room to play with other students. Flashcard quizzes and practice tests remain available separately.</li>
                             <li><strong>Leaderboards &amp; Shop:</strong> compete on study time and spend coins on avatar items.</li>
                             <li><strong>Settings:</strong> change your username (once a week), theme, sounds, and replay the tutorial.</li>
                         </ul>
@@ -1350,6 +1336,21 @@
 
         <!-- MODAL OVERLAYS -->
         <div id="modal-container" class="modal-overlay hidden">
+            <div id="calendar-event-modal" class="glass-card modal-content hidden">
+                <div class="modal-header"><h2>Calendar event</h2><button class="close-modal-btn icon-btn" aria-label="Close" type="button"><i class="fas fa-times"></i></button></div>
+                <div class="modal-body">
+                    <form id="calendar-event-form">
+                        <input id="calendar-event-id" type="hidden">
+                        <div class="form-group"><label for="calendar-event-title">Event title</label><input id="calendar-event-title" maxlength="120" required placeholder="Club meeting, study block, reminder..."></div>
+                        <div class="form-group"><label for="calendar-event-date">Date</label><input id="calendar-event-date" type="date" required></div>
+                        <div class="form-group"><label for="calendar-event-time">Time (optional; leave blank for all day)</label><input id="calendar-event-time" type="time"></div>
+                        <div class="form-group"><label for="calendar-event-notes">Notes (optional)</label><textarea id="calendar-event-notes" maxlength="2000" rows="3"></textarea></div>
+                        <p class="settings-hint">Events appear on your calendar, not in assignments or grades. Saved on this device and included in account sync and backups.</p>
+                        <button type="submit" class="primary-btn">Save event</button>
+                        <button id="delete-calendar-event-btn" type="button" class="danger-btn hidden">Delete event</button>
+                    </form>
+                </div>
+            </div>
             <div id="study-log-modal" class="glass-card modal-content hidden">
                 <div class="modal-header">
                     <h2>Log a study session</h2>

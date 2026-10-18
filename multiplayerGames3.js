@@ -739,13 +739,14 @@
         }
 
         get authority() { return Boolean(this.s.isHost || this.s.practice || this.s.preview); }
+        get unlimitedTestCash() { return this.s.testing === true && !this.s.limitedTestEnergy; }
         get troopTypes() { return DEFENSE_TROOPS; }
         get enemyTypes() { return DEFENSE_ENEMIES; }
         answerCash() { return this.s.rewardAmount() * 3; }
-        canAfford(team, cost) { return this.s.testing === true || this.wallets[team] >= cost; }
+        canAfford(team, cost) { return this.unlimitedTestCash || this.wallets[team] >= cost; }
         upgradeCost(troop) { return DEFENSE_TROOPS[troop.type].cost * troop.level; }
         sellValue(troop) {
-            return this.s.testing === true ? 0 : Math.floor(DEFENSE_TROOPS[troop.type].cost * (1 + troop.level * (troop.level - 1) / 2) * .75);
+            return this.unlimitedTestCash ? 0 : Math.floor(DEFENSE_TROOPS[troop.type].cost * (1 + troop.level * (troop.level - 1) / 2) * .75);
         }
         waveEnemyHealth(type, wave) {
             return DEFENSE_ENEMIES[type].hp * (1 + Math.min(2.5, Math.max(0, wave - 1) * .14));
@@ -866,7 +867,7 @@
                 return;
             } else return this.reject(id, 'Unknown defense order');
             if (!this.canAfford(team, cost)) return this.reject(id, 'Not enough team cash - answer a flashcard or defeat enemies');
-            if (this.s.testing !== true) this.wallets[team] -= cost;
+            if (!this.unlimitedTestCash) this.wallets[team] -= cost;
             execute();
             this.s.sfx(order.action === 'send' ? 'enemySend' : order.action === 'upgrade' ? 'towerUpgrade' : 'towerBuild', 80);
         }
@@ -1124,7 +1125,7 @@
             return rows[0]?.g >= 1000000 ? `${this.teamOf(rows[0].id) ? 'Red' : 'Blue'} team wins!` : 'Battle ended';
         }
         isWinner(rows, id) { return rows[0]?.g >= 1000000 && this.teamOf(rows[0].id) === this.teamOf(id); }
-        goalText() { return `${this.myTeam ? 'Red' : 'Blue'} team · Wave ${this.waveNumber} · Base ${this.health[this.myTeam]} HP · Towers ${this.troopCount(this.s.user.id)}/${this.playerTroopLimit} · Team ${this.teamTroopCount(this.myTeam)}/40 · ${this.s.testing === true ? 'unlimited test cash' : `$${this.wallets[this.myTeam]} shared`}`; }
+        goalText() { return `${this.myTeam ? 'Red' : 'Blue'} team · Wave ${this.waveNumber} · Base ${this.health[this.myTeam]} HP · Towers ${this.troopCount(this.s.user.id)}/${this.playerTroopLimit} · Team ${this.teamTroopCount(this.myTeam)}/40 · ${this.unlimitedTestCash ? 'unlimited test cash' : `$${this.wallets[this.myTeam]} shared`}`; }
         hint() { return 'WASD walk · Choose a tower for one placement · Escape/cancel clears placement · Click friendly towers for upgrades or sell your own for 75% · 40 towers per team, divided equally among active teammates · Q/E answer for shared cash'; }
         touchHint() { return 'Joystick to walk · Choose a tower, tap a free cell for one placement · Cancel clears the preview · Tap a tower for upgrades/selling · 40 team slots divided among teammates · Answer for team cash'; }
         touchLayout() { return { stick: true, buttons: [{ k: 'KeyE', label: 'Earn cash', cls: 'main' }] }; }
@@ -1301,7 +1302,7 @@
                 this.ui.addRect({ id: 'shop-panel', x: 0, y: 0, w: 320, h: 324, on: false });
                 ctx.fillStyle = '#fff'; ctx.font = '800 14px system-ui'; ctx.textAlign = 'center';
                 ctx.fillText(`BLUE ${this.health[0]} HP  |  RED ${this.health[1]} HP`, 160, 20);
-                ctx.fillStyle = DEFENSE_COLORS[this.myTeam]; ctx.fillText(`${this.myTeam ? 'RED' : 'BLUE'} TEAM CASH: ${this.s.testing === true ? 'UNLIMITED (TEST)' : `$${this.wallets[this.myTeam]}`}`, 160, 42);
+                ctx.fillStyle = DEFENSE_COLORS[this.myTeam]; ctx.fillText(`${this.myTeam ? 'RED' : 'BLUE'} TEAM CASH: ${this.unlimitedTestCash ? 'UNLIMITED (TEST)' : `$${this.wallets[this.myTeam]}`}`, 160, 42);
                 ctx.fillStyle = '#fbbf24'; ctx.font = '800 12px system-ui'; ctx.fillText(this.waveStatusText(), 160, 64);
                 this.ui.button(ctx, 'shop-build', 8, 72, 148, 26, 'Build towers', true, this.shopTab === 'build' ? '#2563eb' : '#334155');
                 this.ui.button(ctx, 'shop-send', 164, 72, 148, 26, 'Send enemies', true, this.shopTab === 'send' ? '#be123c' : '#334155');

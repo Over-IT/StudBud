@@ -456,7 +456,7 @@
                         reserved.push({ x: x0, y: band.y, w: x1 - x0, h: band.h, lane });
                         for (let k = 0; k < lane.count; k++) {
                             const rock = { x: x0, y: cfg.y, w: cfg.size, h: cfg.h, bx: x0, by: cfg.y, amp: 0, dx: 0, dy: 0, lane, k, lap: -1,
-                                meteor: true, mover: true, oneway: true, jt: true, off: true, fade: 0, seed: k, bi: b, piece: name };
+                                meteor: true, mover: true, off: true, fade: 0, seed: k, bi: b, piece: name };
                             if (id !== undefined) rock.chamber = id;
                             solids.push(rock); this.movers.push(rock); this.meteors.push(rock);
                         }
@@ -599,7 +599,7 @@
                     }
                     return nodes;
                 },
-                // one conveyor challenge per course, followed by a short inspection-platform climb
+                // A long conveyor crossing followed by a short inspection-platform climb.
                 'belt-gauntlet': (L, d, T) => {
                     const w = 780 + Math.round(r() * 70);
                     const belt = T.add(deck(ahead(L, d, 130, w), L.y - 110, w,
@@ -611,12 +611,13 @@
                     const perch = T.add(deck(ahead(belt, d, 130, 180), belt.y - 140, 180, { motif: 'inspection' }));
                     return [belt, perch, T.add(deck(ahead(perch, d, 140, 260), perch.y - 120, 260, { motif: 'landing' }))];
                 },
-                // three small workbenches lead into a piston lift instead of another long conveyor
+                // Short reversing conveyor benches lead into a piston lift.
                 'assembly-line': (L, d, T) => {
                     const benches = [];
                     let previous = L;
                     for (let i = 0; i < 3; i++) {
-                        const bench = T.add(deck(ahead(previous, d, 130, 220), previous.y - 100, 220, { motif: 'assembly-bench' }));
+                        const bench = T.add(deck(ahead(previous, d, 130, 220), previous.y - 100, 220,
+                            { factoryBelt: true, belt: d * (i % 2 ? -100 : 100), motif: 'assembly-bench' }));
                         if (i === 1) vent(T, bench, .5);
                         benches.push(bench); previous = bench;
                     }
@@ -627,7 +628,7 @@
                 // one stamping hammer guards the hopper grate
                 'stamping-feed': (L, d, T, calm) => {
                     const w = 420;
-                    const feed = T.add(deck(ahead(L, d, 130, w), L.y - 110, w, { motif: 'stamping-feed' }));
+                    const feed = T.add(deck(ahead(L, d, 130, w), L.y - 110, w, { factoryBelt: true, belt: d * 110, motif: 'stamping-feed' }));
                     drill(T, feed, feed.x + feed.w * .5, true, 3.0, r() * 3);
                     const grate = T.add({ x: ahead(feed, d, 140, 130), y: feed.y - 95, w: 130, h: 16, thin: true, crumble: !calm, grate: true, motif: 'stamping-feed' });
                     return [feed, grate, T.add(deck(ahead(grate, d, 140, 300), grate.y - 105, 300, { motif: 'landing' }))];
@@ -1022,9 +1023,9 @@
                 if (kind === 'billboard') {
                     // climb the catwalks behind a rooftop billboard, then leap from its top walkway to the next roof
                     const x1 = gapX - 24, x0 = x1 - 320, hue = Math.floor(r() * 4);
-                    const c1 = cityPut({ x: x0, y: A.y - 120, w: 125, h: 12, jt: true, cityKit: 'catwalk', board: { x0, x1, base: A.y } });
-                    const c2 = cityPut({ x: x1 - 135, y: A.y - 245, w: 135, h: 12, jt: true, cityKit: 'catwalk', board: { x0, x1, base: A.y } });
-                    const top = cityPut({ x: x0 - 10, y: A.y - 370, w: 340, h: 12, jt: true, cityKit: 'catwalk', board: { x0, x1, base: A.y, panel: true, hue } });
+                    const c1 = cityPut({ x: x0, y: A.y - 120, w: 125, h: 12, cityKit: 'catwalk', board: { x0, x1, base: A.y } });
+                    const c2 = cityPut({ x: x1 - 135, y: A.y - 245, w: 135, h: 12, cityKit: 'catwalk', board: { x0, x1, base: A.y } });
+                    const top = cityPut({ x: x0 - 10, y: A.y - 370, w: 240, h: 12, cityKit: 'catwalk', board: { x0, x1, base: A.y, panel: true, hue } });
                     return { B: tower(Math.round(gapX + 190 + r() * 40), Math.round(top.y - 30 - r() * 30), towerWidth()), pieces: [c1, c2, top] };
                 }
                 if (kind === 'crane') {
@@ -1033,7 +1034,7 @@
                     const B = tower(gapX + gap, A.y - 285, towerWidth()), jibY = B.y - 200, mastX = gapX + gap / 2;
                     const beam = (dx, yy, mast) => {
                         const p = cityPut({ x: gapX + 12 + amp + dx, y: yy, w, h: 16, mover: true, bx: gapX + 12 + amp + dx, by: yy, amp, speed: .6, phase,
-                            dx: 0, dy: 0, jt: true, crane: true, cityKit: 'beam', jibY, mastX, mast, jib: [gapX - 140, gapX + gap + 120] });
+                            dx: 0, dy: 0, crane: true, cityKit: 'beam', jibY, mastX, mast, jib: [gapX - 140, gapX + gap + 120] });
                         this.movers.push(p); return p;
                     };
                     return { B, pieces: [beam(0, A.y - 110, true), beam(off, A.y - 215, false)] };
@@ -1044,7 +1045,7 @@
                     [.2, .5, .8].forEach((u, i) => {
                         const x = Math.round(gapX + gap * u - 32), y = Math.round(tops[i]);
                         // telescoping caps sag under your weight and spring back once you jump off
-                        const pole = cityPut({ x, y, w: 64, h: 14, cityKit: 'pole', tier: i, mover: true, sinker: true, depth: 0, sunk: 0, sinkRate: 100, riseRate: 90, bx: x, by: y, amp: 0, dx: 0, dy: 0 });
+                        const pole = cityPut({ x, y, w: 64, h: 14, cityKit: 'pole', tier: i, mover: true, sinker: true, depth: 0, sunk: 0, sinkRate: 220, riseRate: 90, bx: x, by: y, amp: 0, dx: 0, dy: 0 });
                         this.movers.push(pole); poles.push(pole);
                     });
                     const B = tower(gapX + gap, Math.round(poles[2].y - 90 - r() * 30), towerWidth());
@@ -1179,7 +1180,7 @@
                 if (!q.thin || q.roof || q.prop || q.wall || q.ground || q.mover || q === this.summit) continue;
                 if (solids.some(p => p !== q && (p.roof || p.prop) && !p.slope && q.x < p.x + p.w - 4 && q.x + q.w > p.x + 4 && q.y + q.h > p.y + 4 && q.y < p.y + p.h - 4)) solids.splice(i, 1);
             }
-            // Glass arrows and open factory stair grates allow ascent; main decks remain solid from below.
+            // Designated ascent platforms allow jump-through; stairs are recognizable without markers.
             for (const p of solids) p.oneway = !!(p.jt || p.factoryStep || p.fireEscape);
             // purely visual rooftop clutter, placed only in free gaps (no props, spikes, springs, boxes, flags or ceilings)
             const rd = mulberry32((this.s.seed ^ 0x9e3779b1) >>> 0), DW = [80, 110, 80, 100, 110, 110, 90, 70, 100];
@@ -1526,8 +1527,8 @@
 
             this.updatePlayer(dt);
             this.updateBackdrop(dt);
-            if (!s.preview) {
-                const biome = SKY_ROUTE[Math.min(SKY_ROUTE.length - 1, Math.floor(this.biomeProgress(Math.max(0, -(me.y + me.h)))))];
+            if (!s.preview && this.dead <= 0) {
+                const biome = SKY_ROUTE[this.backdropArea || 0];
                 window.StudBudSfx?.setMusicBiome('skyline', biome);
             }
         }
@@ -2348,9 +2349,7 @@
             ctx.fillStyle = p.blink ? 'rgba(254,205,211,.45)' : 'rgba(165,243,252,.45)'; roundRect(ctx, p.x, p.y, p.w, p.h, 5); ctx.fill();
             ctx.fillStyle = col; ctx.fillRect(p.x, p.y, p.w, 3);
             ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.setLineDash([8, 6]); ctx.strokeRect(p.x + 1, p.y + 1, p.w - 2, p.h - 2); ctx.setLineDash([]);
-            ctx.lineWidth = 2; ctx.beginPath();
-            for (let x = p.x + 18; x < p.x + p.w - 8; x += 30) { ctx.moveTo(x - 5, p.y + p.h + 13); ctx.lineTo(x, p.y + p.h + 7); ctx.lineTo(x + 5, p.y + p.h + 13); }
-            ctx.stroke(); ctx.restore();
+            ctx.restore();
         }
 
         // A real cloud silhouette: lumpy top whose highest bumps sit exactly on the collision line,
@@ -2423,29 +2422,12 @@
             ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 4; ctx.beginPath(); surface(); ctx.stroke();
         }
 
-        // The factory hall: riveted I-beam columns, cross bracing and a roof truss, plus the press frames that carry each drill.
+        // Press frames connect each machine to its strike deck; no freestanding hall columns.
         drawFactoryFrame(ctx, c, top, bottom, left = -Infinity, right = Infinity) {
-            const y0 = c.top - 220, y1 = c.bottom + 120, upper = Math.max(y0, top - 40), lower = Math.min(y1, bottom + 40);
+            const factoryFloor = this.checkpoints.find(cp => cp.biome === 1)?.y ?? c.bottom;
+            const y0 = c.top - 220, y1 = Math.min(c.bottom, factoryFloor), upper = Math.max(y0, top - 40), lower = Math.min(y1, bottom + 40);
             if (upper >= lower) return;
             ctx.save();
-            const cols = c.columns;
-            for (const x of [cols[0], cols[cols.length - 1]]) {
-                if (x + 17 < left || x - 17 > right) continue;
-                ctx.fillStyle = '#263340'; ctx.fillRect(x - 10, upper, 20, lower - upper);
-                ctx.fillStyle = '#3b4958'; ctx.fillRect(x - 6, upper, 3, lower - upper);
-                ctx.fillRect(x + 5, upper, 3, lower - upper);
-            }
-            if (y0 > upper - 30 && y0 < lower + 30 && cols.length > 1) {
-                const a = cols[0] - 20, b = cols[cols.length - 1] + 20;
-                ctx.fillStyle = '#1e293b'; ctx.fillRect(a, y0 - 8, b - a, 12); ctx.fillRect(a, y0 + 40, b - a, 10);
-                ctx.strokeStyle = '#475569'; ctx.lineWidth = 4; ctx.beginPath();
-                const start = Number.isFinite(left) ? a + Math.max(0, Math.floor((left - 60 - a) / 60)) * 60 : a;
-                for (let x = start; x < Math.min(b - 40, right); x += 60) { ctx.moveTo(x, y0 + 44); ctx.lineTo(x + 30, y0); ctx.lineTo(x + 60, y0 + 44); }
-                ctx.stroke();
-                ctx.fillStyle = '#fbbf24';
-                const light = Number.isFinite(left) ? a + 40 + Math.max(0, Math.ceil((left - 6 - a - 40) / 360)) * 360 : a + 40;
-                for (let x = light; x < Math.min(b, right + 6); x += 360) { ctx.beginPath(); ctx.arc(x, y0 + 58, 6, 0, TAU); ctx.fill(); }
-            }
             for (const d of this.drills) {
                 if (d.chamber !== c.id || !d.gantry) continue;
                 const beamY = d.mountY - 50, [g0, g1] = d.gantry;
@@ -2493,41 +2475,45 @@
             ctx.restore();
         }
 
-        // static decks hang off the nearest hall column on a bracket; stairs and trusses get a ladder down to the step below
+        // Factory braces need a real lower deck; station brackets attach to its lattice pylons.
         drawMachineSupport(ctx, p) {
             if (p.mover || p.lane || p.prop || p.slope || p.factoryBelt) return;
             const space = p.bi === 3, c = this.challenges[p.chamber], yy = p.y + p.h;
-            if (p.below) {
-                const b = p.below, x0 = Math.max(p.x, b.x) + 10, x1 = Math.min(p.x + p.w, b.x + b.w) - 10;
+            const floor = space ? Infinity : this.checkpoints.find(cp => cp.biome === 1)?.y ?? Infinity;
+            if (yy >= floor) return;
+            if (p.below && (space || (this.solids.includes(p.below) && p.below.y > yy && p.below.y <= floor
+                && Math.min(p.x + p.w, p.below.x + p.below.w) - Math.max(p.x, p.below.x) >= 40))) {
+                const b = p.below, baseY = Math.min(b.y, floor), x0 = Math.max(p.x, b.x) + 10, x1 = Math.min(p.x + p.w, b.x + b.w) - 10;
                 const x = x0 < x1 ? (x0 + x1) / 2 : p.x + p.w / 2;
                 ctx.strokeStyle = space ? 'rgba(165,180,252,.6)' : '#475569'; ctx.lineWidth = 3; ctx.beginPath();
-                ctx.moveTo(x - 10, yy); ctx.lineTo(x - 10, b.y); ctx.moveTo(x + 10, yy); ctx.lineTo(x + 10, b.y);
-                for (let y = yy + 16; y < b.y - 4; y += 18) { ctx.moveTo(x - 10, y); ctx.lineTo(x + 10, y); }
+                ctx.moveTo(x - 10, yy); ctx.lineTo(x - 10, baseY); ctx.moveTo(x + 10, yy); ctx.lineTo(x + 10, baseY);
+                for (let y = yy + 16; y < baseY - 4; y += 18) { ctx.moveTo(x - 10, y); ctx.lineTo(x + 10, y); }
                 ctx.stroke();
             }
+            if (!space) return;
             const center = p.x + p.w / 2;
             const col = c?.columns?.length ? c.columns.reduce((best, x) => Math.abs(x - center) < Math.abs(best - center) ? x : best) : null;
             const dark = space ? '#484269' : '#4b4564', light = dark;
             if (col === null || Math.abs(col - center) > 700) {
-                // free-standing pad (checkpoints and rests between chambers): two legs into the haze
+                // Free-standing pads use short feet rather than hanging into the biome below.
                 ctx.fillStyle = dark;
                 for (const x of [p.x + 24, p.x + p.w - 38]) {
-                    ctx.fillStyle = dark; ctx.fillRect(x, yy, 4, 100);
+                    ctx.fillStyle = dark; ctx.fillRect(x, yy, 4, Math.min(space ? 100 : 40, floor - yy));
                 }
                 return;
             }
             const attach = clamp(col, p.x + 18, p.x + p.w - 18);
             ctx.strokeStyle = dark; ctx.lineWidth = 3; ctx.beginPath();
             if (Math.abs(attach - col) < 3) {
-                ctx.moveTo(col - 30, yy + 2); ctx.lineTo(col, yy + 34); ctx.lineTo(col + 30, yy + 2);
+                ctx.moveTo(col - 30, Math.min(yy + 2, floor)); ctx.lineTo(col, Math.min(yy + 34, floor)); ctx.lineTo(col + 30, Math.min(yy + 2, floor));
             } else {
                 const side = Math.sign(attach - col);
-                ctx.moveTo(col + side * 13, yy + 10); ctx.lineTo(attach, yy + 10);
-                ctx.moveTo(col + side * 13, yy + 60); ctx.lineTo(attach - side * Math.min(60, Math.abs(attach - col) * .5), yy + 10);
+                ctx.moveTo(col + side * 13, Math.min(yy + 10, floor)); ctx.lineTo(attach, Math.min(yy + 10, floor));
+                ctx.moveTo(col + side * 13, Math.min(yy + 60, floor)); ctx.lineTo(attach - side * Math.min(60, Math.abs(attach - col) * .5), Math.min(yy + 10, floor));
             }
             ctx.stroke();
             ctx.strokeStyle = light; ctx.lineWidth = 2; ctx.stroke();
-            ctx.fillStyle = light; ctx.beginPath(); ctx.arc(attach, yy + 10, 4, 0, TAU); ctx.fill();
+            ctx.fillStyle = light; ctx.beginPath(); ctx.arc(attach, Math.min(yy + 10, floor - 4), 4, 0, TAU); ctx.fill();
         }
 
         // pistons rise from a hydraulic cylinder; freight cars run in a guided shaft under a pulley head
@@ -2990,8 +2976,6 @@
                     ctx.fillStyle = '#cbd5e1'; ctx.fillRect(p.x, p.y, p.w, 4);
                     ctx.fillStyle = '#64748b';
                     for (let x = p.x + 4; x < p.x + p.w - 4; x += 12) ctx.fillRect(x, p.y + 4, 4, 10);
-                    ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 2; ctx.beginPath();
-                    ctx.moveTo(p.x + p.w / 2 - 5, p.y + 23); ctx.lineTo(p.x + p.w / 2, p.y + 18); ctx.lineTo(p.x + p.w / 2 + 5, p.y + 23); ctx.stroke();
                 } else if (p.spaceStyle !== undefined) {
                     this.drawSpaceDeck(ctx, p);
                 } else if (p.bi === 1 && !p.prop && !p.slope && !p.mover) {

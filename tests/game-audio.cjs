@@ -6,13 +6,13 @@ const noop = () => {};
 const documentHandlers = new Map();
 let now = 1000, starts = 0, intervals = 0;
 const param = () => ({
-    value: 0,
+    value: 0, ramps: [],
     setValueAtTime(value, time) { assert.ok(Number.isFinite(value) && Number.isFinite(time)); this.value = value; },
-    exponentialRampToValueAtTime(value, time) { assert.ok(value > 0 && Number.isFinite(time)); this.value = value; },
+    exponentialRampToValueAtTime(value, time) { assert.ok(value > 0 && Number.isFinite(time)); this.value = value; this.ramps.push([value, time]); },
     setTargetAtTime: noop, cancelScheduledValues: noop
 });
 const node = () => ({
-    connections: [], connect(destination) { this.connections.push(destination); },
+    connections: [], connect(destination) { this.connections.push(destination); }, disconnect() { this.connections = []; },
     frequency: param(), Q: param(), detune: param(), gain: param(), delayTime: param(), playbackRate: param(),
     start() { starts++; }, stop: noop
 });
@@ -42,6 +42,16 @@ vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'sfx.js'), 'utf8'), sandbox);
 const sfx = sandbox.window.StudBudSfx;
 {
+    const original = sfx.tone, noise = sfx.noise, layers = [];
+    try {
+        sfx.tone = (...args) => layers.push(args);
+        sfx.noise = () => assert.fail('the low-resource cue must stay soft and tonal');
+        sfx.play('lowResource', 'game', 0);
+        assert.equal(layers.length, 2);
+        assert.ok(layers.every(layer => layer[0] === 'sine' && layer[3] <= .14 && layer[4] <= .045));
+    } finally { sfx.tone = original; sfx.noise = noise; }
+}
+{
     const tone = sfx.tone, noise = sfx.noise, signatures = new Set();
     try {
         sfx.noise = () => assert.fail('laser weapons should not use noisy gunshot bursts');
@@ -56,16 +66,24 @@ const sfx = sandbox.window.StudBudSfx;
     } finally { sfx.tone = tone; sfx.noise = noise; }
 }
 {
-    const tones = [], tone = sfx.tone;
+    const tones = [], tone = sfx.tone, noise = sfx.noise;
     sfx.tone = (...args) => tones.push(args);
+    sfx.noise = () => assert.fail('collecting a crystal should sparkle, not crack or hiss');
     try {
         for (const name of ['quartzBreak', 'amethystBreak', 'emeraldBreak', 'sapphireBreak', 'rubyBreak', 'diamondBreak']) {
             now += 1000; sfx.play(name, 'game', 0);
         }
-        assert.equal(tones.length, 6, 'each crystal break uses one accent, not a jingle');
-        assert.equal(new Set(tones.map(args => args[1])).size, 6, 'all six crystals have distinct pitches');
-        assert.ok(tones.every(args => args[3] <= .12 && args[4] <= .035), 'crystal accents stay brief and quiet');
-    } finally { sfx.tone = tone; }
+        assert.equal(tones.length, 18, 'each crystal collection plays a short three-note reward sparkle');
+        assert.equal(new Set(tones.filter((_, i) => i % 3 === 0).map(args => args[1])).size, 6, 'all six crystals keep distinct root pitches');
+        for (let i = 0; i < tones.length; i += 3) {
+            const notes = tones.slice(i, i + 3);
+            assert.ok(notes[0][1] < notes[1][1] && notes[1][1] < notes[2][1], 'reward notes ascend');
+            assert.equal(notes[1][1] / notes[0][1], 1.25, 'the middle note is a warm major third');
+            assert.equal(notes[2][1] / notes[0][1], 1.5, 'the final note resolves to a perfect fifth');
+            assert.ok(notes[2][5] + notes[2][3] < .4, 'reward sparkle finishes within four tenths of a second');
+        }
+        assert.ok(tones.every(args => args[0] === 'sine' && args[4] <= .065), 'crystal rewards use soft tones instead of harsh breaking noise');
+    } finally { sfx.tone = tone; sfx.noise = noise; }
 }
 assert.ok(!documentHandlers.has('keydown') && !documentHandlers.has('input'), 'typing and slider movement never generate automatic ticking effects');
 assert.ok(!documentHandlers.has('click') && !documentHandlers.has('change'), 'ordinary buttons, tabs and menus never add automatic UI effects');
@@ -210,22 +228,34 @@ sfx.endMusic();
     sfx.setMusicBiome('skyline', 0);
     assert.equal(sfx.mus, cityTrack, 'remaining in City never restarts its song');
     sfx.setMusicBiome('skyline', 1); sfx.pumpMusic(); moods.factory = arrangement;
+    assert.equal(cityTrack.gain.gain.ramps.at(-1)[0], .0001, 'outgoing biome track fades to silence');
+    assert.equal(cityTrack.gain.gain.ramps.at(-1)[1], sfx.ctx.currentTime + .6);
+    assert.equal(sfx.mus.gain.gain.ramps.at(-1)[0], 1, 'incoming biome track fades in on its own gain');
+    assert.equal(sfx.mus.gain.gain.ramps.at(-1)[1], sfx.ctx.currentTime + .65);
+    assert.notEqual(sfx.mus.gain, cityTrack.gain, 'track crossfades use independent audio buses');
     assert.equal(sfx.mus.style, 'foundry');
     sfx.setMusicBiome('skyline', 3); sfx.pumpMusic(); moods.space = arrangement;
     assert.equal(sfx.mus.style, 'starlight');
     sfx.setMusicBiome('skyline', 0);
     assert.equal(sfx.mus.style, 'summit', 'falling back into City restores its high-energy song');
     assert.ok(moods.city.bpm >= 130 && moods.city.drive && !moods.city.quiet, 'City is explicitly upbeat rather than chill');
-    assert.equal(moods.city.voice, 'guitar', 'City returns to its softer guitar arrangement');
-    assert.equal(moods.city.bpm, 136, 'City restores the original pace instead of the intensified 144 BPM version');
+    assert.equal(moods.city.voice, 'piano', 'City uses a crisp piano lead');
+    assert.equal(moods.city.bpm, 148, 'City has a faster parkour tempo');
     for (const section of [0, 1, 2, 3]) {
         notes.length = 0;
         for (let step = section * 128; step < section * 128 + 16; step++) musicStep(moods.city, step, step * .125, .125);
-        assert.equal(notes.filter(note => note[3] === 'bass').length, 2, 'City uses the restrained bassline rather than constant eighth notes');
+        assert.equal(notes.filter(note => note[3] === 'bass').length, 8, 'City keeps a moving eighth-note bassline in every section');
+        assert.ok(notes.filter(note => note[3] === 'bass').every(note => note[1] < .25), 'City bass notes stay short rather than piling up');
         assert.ok(!notes.some(note => note[3] === 'bright'), 'City no longer uses the bright lead');
     }
     assert.ok(moods.factory.bpm >= 115 && moods.factory.drive, 'Factory keeps a driving mechanical pace');
     assert.ok(moods.space.bpm <= 80 && moods.space.quiet, 'Space uses a calm, sparse arrangement');
+    const rhythms = [moods.city, moods.factory, moods.space].map(track => {
+        notes.length = 0;
+        for (let step = 16; step < 32; step++) musicStep(track, step, step * .125, .125);
+        return notes.map(note => note[3]).join(',');
+    });
+    assert.equal(new Set(rhythms).size, 3, 'City, Factory and Space have distinct note rhythms and instrumentation');
     let kicks = 0;
     const kick = sfx.musicKick;
     sfx.musicKick = () => kicks++;

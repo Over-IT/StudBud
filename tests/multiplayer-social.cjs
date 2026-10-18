@@ -55,10 +55,26 @@ async function run() {
     app.startPractice = () => { throw Error('Multiplayer must not create local bots'); };
     await app.runAdminAction('test-game', {});
     assert.equal(created[4].staff_test, true);
+    assert.equal(created[4].limited_test_energy, false, 'multiplayer tests default to unlimited energy');
     assert.equal(created[4].seed, 42);
     assert.equal(created[4].botCount, undefined);
     assert.equal(opened.state.players.length, 1, 'real room contains only its human host');
     assert.equal(routes.at(-1), 'multiplayer');
+    node('admin-game-test-energy').value = 'limited';
+    app.handleChange({ target: { id: 'admin-game-test-energy', value: 'limited' } });
+    assert.equal(node('admin-game-test-reward').disabled, false);
+    node('admin-game-test-reward').value = '21';
+    await app.runAdminAction('test-game', {});
+    assert.equal(created[4].limited_test_energy, true);
+    assert.equal(created[4].question_reward, 21, 'multiplayer limited tests preserve one-unit reward increments');
+    const lastCreated = created;
+    node('admin-game-test-reward').value = '21.5';
+    await app.runAdminAction('test-game', {});
+    assert.equal(created, lastCreated, 'fractional energy rewards are rejected before hosting');
+    assert.match(node('admin-status').textContent, /whole number/);
+    node('admin-game-test-energy').value = 'unlimited';
+    app.handleChange({ target: { id: 'admin-game-test-energy', value: 'unlimited' } });
+    assert.equal(node('admin-game-test-reward').disabled, true);
     for (const state of [{ offlineMode: true }, { user: null }, { user: { id: 'guest', is_anonymous: true } }]) {
         const saved = { ...cloud }; Object.assign(cloud, state);
         await assert.rejects(app.hostStaffTest('skyline'), /connected tester/);
@@ -227,6 +243,20 @@ async function run() {
     assert.equal(liveTest.roster.size, 2);
     assert.equal(liveTest.spend(100000), true, 'test resources stay unlimited');
     assert.equal(connections, 1);
+    const limited = new Session({ room: { ...testingRoom, state: { ...testingRoom.state, limited_test_energy: true, question_reward: 21 } }, user: host, api: games, isHost: true });
+    assert.equal(limited.testing, true, 'limiting energy does not remove staff status or enable rewards');
+    assert.equal(limited.limitedTestEnergy, true);
+    limited.game.res = new sandbox.window.StudBudArcade.Resource('Energy', '#fff', 100, 10);
+    assert.equal(limited.spend(4), true);
+    assert.equal(limited.game.res.value, 6);
+    limited.countdown = 0;
+    limited.ask = callback => { callback(true); };
+    limited.sfx = limited.toast = () => {};
+    limited.recharge();
+    assert.equal(limited.game.res.value, 27, 'correct staff-test answers refill by the configured amount');
+    const sqlText = source('supabase-setup.sql');
+    assert.match(sqlText, /'limited_test_energy', v_staff_test and coalesce/);
+    assert.match(sqlText, /'limited_test_energy', coalesce\(\(v_room.state ->> 'limited_test_energy'\)/);
     const startedAt = new Date(Date.now() - 120000).toISOString();
     for (const reward of [6, 7, 21, 99]) {
         const lateRoom = { ...room([host, bud]), status: 'playing', started_at: startedAt,

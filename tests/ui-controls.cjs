@@ -100,8 +100,9 @@ assert.match(html, /<body class="dark-theme" data-color-scheme="studbud">/,
     'the initial page paint uses the StudBud default before app startup');
 assert.match(html, /<span>Hypothetical Grades<\/span>/);
 assert.match(html, /<span>Practice<\/span>/);
-assert.match(html, /id="practice-multiplayer-form"/);
-assert.match(html, /id="practice-multiplayer-mode"/);
+assert.match(html, /data-action="open-singleplayer"/, 'flashcard games link to the full Singleplayer setup');
+assert.match(html, /id="solo-game-settings"/);
+assert.match(html, /id="solo-game-bots"/);
 assert.match(html, /data-scenario-score-preset="100"/);
 const about = html.match(/<section id="about-view"[\s\S]*?<\/section>/)[0];
 assert.ok(about.indexOf('id="announcement-history-card"') > about.indexOf('Questions or suggestions?'),

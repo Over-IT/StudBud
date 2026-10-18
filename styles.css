@@ -1372,6 +1372,16 @@ tbody tr:hover {
 .calendar-event > div { display: grid; gap: 3px; }
 .calendar-event span, .calendar-event small { color: var(--text-secondary); font-size: 0.85rem; }
 .calendar-event button { flex-shrink: 0; }
+.calendar-add-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.calendar-agenda-group { padding-top: 16px; margin-top: 16px; border-top: 1px solid var(--border-glass); }
+.calendar-assignment-tag { color: var(--text-primary); }
+.calendar-study-tag { color: var(--accent-primary); }
+.calendar-personal-tag { color: var(--text-secondary); }
+.calendar-day small { max-width: 100%; overflow-wrap: anywhere; }
+.calendar-event { min-width: 0; gap: 10px; }
+.calendar-event > div { min-width: 0; overflow-wrap: anywhere; }
+.calendar-event small { white-space: pre-wrap; }
+#calendar-event-form textarea { width: 100%; box-sizing: border-box; resize: vertical; }
 .calendar-schedule { margin-bottom: var(--spacing-md); padding: var(--spacing-sm) var(--spacing-md); border-radius: var(--border-radius-sm); background: var(--bg-glass); }
 .calendar-schedule h4, .calendar-agenda > h4 { margin: 0 0 var(--spacing-sm); }
 .calendar-schedule p { display: flex; justify-content: space-between; gap: var(--spacing-sm); margin: 4px 0; font-size: 0.86rem; }
@@ -1788,6 +1798,16 @@ body.compact-ui .glass-card { padding: 14px; }
 #deck-grid .actions button { flex: 1 1 auto; min-width: 0; white-space: nowrap; }
 #deck-grid .glass-card { min-width: 0; overflow-wrap: anywhere; }
 .hosted-game-setup { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--spacing-md); margin-top: var(--spacing-md); }
+.hosted-game-setup:has(#host-game-form.hidden) { grid-template-columns: minmax(0, 1fr); }
+.solo-game-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 18px; padding: 20px; }
+.solo-game-form > h4, .solo-game-form > .question-reward-control, .solo-game-form > button, .solo-game-form > small, .solo-game-form > p { grid-column: 1 / -1; }
+.solo-game-form > .question-reward-control { max-width: none; }
+.solo-game-form .question-reward-inputs { grid-template-columns: minmax(0, 1fr) 90px; }
+@media (max-width: 600px) {
+    .solo-game-form { grid-template-columns: minmax(0, 1fr); padding: 14px; }
+    .calendar-day { padding: 5px; }
+    .calendar-day small { font-size: .65rem; }
+}
 .hosted-game-form { display: grid; align-content: start; gap: var(--spacing-sm); min-width: 0; padding: var(--spacing-md); border: 1px solid var(--border-glass); border-radius: var(--border-radius-sm); background: var(--bg-glass); }
 .hosted-game-form h4 { margin: 0; }
 .hosted-game-form label { display: grid; gap: 5px; color: var(--text-secondary); font-size: 0.84rem; font-weight: 600; }
@@ -4722,3 +4742,12 @@ input[type="button"], input[type="submit"], input[type="checkbox"], input[type="
 .mpg-overlay .mpg-question.is-duel .mpg-q-skip { display: none; }
 @keyframes mpg-duel-in { from { transform: scale(.85); opacity: 0; } to { transform: none; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .mpg-q-duel { animation: none; } }
+
+/* Low / empty resource warning */
+.mpg-overlay .mpg-meter.low { border: 1px solid #fbbf24; }
+.mpg-overlay .mpg-meter.low .mpg-meter-value { color: #fbbf24; }
+.mpg-overlay .mpg-recharge.mpg-resource-notice { position: absolute; z-index: 4; top: 40%; left: 50%; transform: translateX(-50%); display: grid; gap: 4px; width: max-content; max-width: min(270px, 80%); padding: 10px 16px; border: 1px solid rgba(251,191,36,.65); border-radius: 12px; background: rgba(27,23,13,.9); color: #fef3c7; font: inherit; text-align: center; cursor: pointer; pointer-events: auto; }
+.mpg-resource-notice span { font-size: .85rem; font-weight: 800; }
+.mpg-resource-notice small { font-size: .7rem; }
+.mpg-overlay .mpg-meter.empty { border-color: #f87171; }
+.mpg-overlay .mpg-meter.empty .mpg-meter-value { color: #f87171; }
