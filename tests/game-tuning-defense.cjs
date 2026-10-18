@@ -457,22 +457,28 @@ assert.equal(game.wallets[0], 120);
 order('ally', 'answer', { count: 1 });
 assert.equal(game.wallets[0], 180, 'answers credit the shared wallet');
 order('guest', 'send', { type: 0 });
+assert.equal(game.enemies.length, 0, 'purchases queue recurring enemies for the next wave, not an immediate one-off');
+assert.equal(game.reinforcements[0][0], 1);
+game.waveTimer = 0; game.simulate(0); game.simulate(0);
 const enemy = game.enemies[0];
+game.enemies = [enemy];
 assert.equal(enemy.team, 0); assert.equal(enemy.segment, 0); assert.equal(enemy.progress, 0);
 assert.equal(game.pointOnPath(enemy).x, game.paths[0][0].x, 'sent enemies start at the opposing entry');
 game.command({ seq: game.lastSeq.guest, action: 'send', type: 0 }, 'guest');
-assert.equal(game.enemies.length, 1, 'retransmitted commands cannot duplicate enemies');
+assert.equal(game.reinforcements[0][0], 1, 'retransmitted commands cannot duplicate recurring purchases');
 const earned = game.wallets[0];
+game.waveSpawnRemaining = 0; game.waveTimer = 100;
 for (let i = 0; i < 1000 && game.enemies.length; i++) game.simulate(1 / 60);
 assert.equal(game.enemies.length, 0);
 assert.equal(game.health[0], 100, 'the archer defends the path');
-assert.equal(game.wallets[0], earned + 14, 'kill bounties go to the defending team wallet');
+assert.equal(game.wallets[0], earned, 'kills do not generate team cash');
 order('host', 'upgrade', { id: game.troops[0].id });
 assert.equal(game.troops[0].level, 3);
 const finalWallet = game.wallets[0];
 order('host', 'upgrade', { id: game.troops[0].id });
 assert.equal(game.wallets[0], finalWallet, 'max-level upgrades do not consume money');
 game.troops = [];
+game.waveTimer = 0;
 order('host', 'send', { type: 2 });
 assert.equal(game.enemies.length, 0, 'unaffordable sends are rejected');
 for (let i = 2; i <= 10; i++) order('host', 'answer', { count: i });
@@ -523,7 +529,7 @@ client.game.update(.7);
 assert.ok(client.events.length >= 2, 'unacknowledged orders are retried');
 const authority = session('defense', 'host', ['host', 'guest']).game;
 for (const event of client.events) authority.onEvent(event, { id: 'guest' });
-assert.equal(authority.enemies.length, 1, 'retries execute exactly once on the host');
+assert.equal(authority.reinforcements[0][0], 1, 'retries purchase exactly one recurring enemy on the host');
 client.game.onState({ td: authority.snapshot() }, { id: 'host' });
 assert.equal(client.game.pending.length, 0, 'host acknowledgements clear pending orders');
 assert.equal(client.game.teamOf('host'), 0); assert.equal(client.game.teamOf('guest'), 1, 'two-player rooms are 1v1');
@@ -548,7 +554,7 @@ admin.game.request('upgrade', { id: admin.game.troops[0].id });
 admin.game.request('upgrade', { id: admin.game.troops[0].id });
 admin.game.request('send', { type: 2 });
 assert.equal(admin.game.troops[0].level, 3);
-assert.equal(admin.game.enemies.length, 1);
+assert.equal(admin.game.reinforcements[1][2], 1);
 assert.equal(admin.game.wallets[0], 0, 'admin test purchases are free rather than bypassing the shared wallet only visually');
 admin.game.draw(ctx, 1280, 720);
 assert.ok(admin.game.ui.rects.filter(r => r.id.startsWith('send:')).every(r => r.on), 'admin send controls remain enabled with an empty wallet');
@@ -923,7 +929,7 @@ console.log('Wall attachment/push-off and eased dash transitions at 30/60/120 FP
 {
     const idle = session('defense'), g = idle.game;
     assert.equal(g.waveNumber, 0); assert.equal(g.enemies.length, 0);
-    for (let elapsed = 0; elapsed < 25.2; elapsed += .05) g.simulate(.05);
+    for (let elapsed = 0; elapsed < 20.2; elapsed += .05) g.simulate(.05);
     assert.equal(g.waveNumber, 1, 'the first wave starts on its timer without player orders');
     assert.ok(g.enemies.length > 0, 'automatic waves spawn enemies without player action');
     assert.match(g.waveStatusText(), /WAVE 1 · DEPLOYING/);
@@ -938,7 +944,7 @@ console.log('Wall attachment/push-off and eased dash transitions at 30/60/120 FP
     let elapsed = 0;
     while (!idleBattle.finished && elapsed < 180) { idleBattle.simulate(.05); elapsed += .05; }
     assert.ok(idleBattle.finished, `an idle battle ends automatically (${elapsed.toFixed(1)} seconds)`);
-    assert.ok(elapsed >= 120 && elapsed <= 180, `idle teams lose in roughly two to three minutes (${elapsed.toFixed(1)}s)`);
+    assert.ok(elapsed >= 60 && elapsed <= 120, `idle teams lose in roughly one to two minutes (${elapsed.toFixed(1)}s)`);
     assert.ok(idleBattle.teamValue(idleBattle.winner) >= 1000000, 'the wave-driven finish records a winning result score');
     const restored = session('defense', 'guest').game;
     const state = idle.game.snapshot(); restored.applySnapshot(state);
@@ -951,7 +957,170 @@ console.log('Wall attachment/push-off and eased dash transitions at 30/60/120 FP
         assert.equal(restored.receivedSerial, serial, 'invalid wave snapshots are rejected');
     } finally { sandbox.console.error = originalError; }
 }
-console.log('Automatic waves, wave scaling, host-synchronized progress and idle match completion passed.');{
+console.log('Automatic waves, wave scaling, host-synchronized progress and idle match completion passed.');
+{
+    const s = session('defense'), g = s.game;
+    s.testing = true;
+    g.request('send', { type: 2 }); g.request('send', { type: 2 });
+    g.command({ action: 'send', seq: 1, type: 5 }, 'guest');
+    assert.equal(g.enemies.length, 0);
+    const startWave = () => { g.enemies = []; g.waveTimer = 0; g.simulate(0); };
+    const finishWave = () => {
+        const counts = [Array(6).fill(0), Array(6).fill(0)];
+        for (let tick = 0; g.waveSpawnRemaining && tick < 1000; tick++) {
+            g.simulate(.05);
+            for (const enemy of g.enemies) {
+                counts[enemy.team][enemy.type]++;
+                assert.equal(enemy.hp, g.waveEnemyHealth(enemy.type, g.waveNumber));
+            }
+            g.enemies = [];
+        }
+        assert.equal(g.waveSpawnRemaining, 0);
+        return counts;
+    };
+    startWave(); g.simulate(0);
+    assert.equal(g.enemies.filter(e => e.team === 1 && e.type === 2).length, 1);
+    g.enemies = [];
+    g.request('send', { type: 4 });
+    assert.equal(g.waveArmy[1][4], 0, 'mid-wave purchases wait until next wave');
+    const state = g.snapshot(), restored = session('defense').game;
+    restored.applySnapshot(state);
+    assert.deepEqual(JSON.parse(JSON.stringify(restored.reinforcements)), JSON.parse(JSON.stringify(g.reinforcements)));
+    assert.deepEqual(JSON.parse(JSON.stringify(restored.waveArmy)), JSON.parse(JSON.stringify(g.waveArmy)));
+    while (g.waveSpawnRemaining) { g.simulate(.05); restored.simulate(.05); }
+    assert.deepEqual(JSON.parse(JSON.stringify(restored.enemies)), JSON.parse(JSON.stringify(g.enemies)), 'restoring a partial wave neither loses nor duplicates purchases');
+    assert.equal(g.enemies.filter(e => e.team === 1 && e.type === 2).length, 1);
+    assert.equal(g.enemies.filter(e => e.team === 1 && e.type === 4).length, 0);
+    for (let wave = 2; wave <= 3; wave++) {
+        startWave();
+        const counts = finishWave();
+        assert.equal(counts[1][2], 2, 'two Brute purchases add two Brutes on every later wave');
+        assert.equal(counts[1][4], 1, 'mid-wave purchase appears on every subsequent wave');
+        assert.equal(counts[0][5], 1, 'rival purchases attack only the other lane');
+        assert.equal(counts[0][2], 0);
+        assert.equal(counts[1].reduce((a, b) => a + b, 0), 4 + wave + 3);
+    }
+    const legacy = g.snapshot();
+    delete legacy.reinforcements; delete legacy.waveArmy;
+    const old = session('defense', 'guest').game;
+    old.applySnapshot(legacy);
+    assert.equal(old.receivedSerial, legacy.serial, 'pre-purchase snapshots remain readable');
+    assert.equal(old.reinforcements.flat().reduce((a, b) => a + b, 0), 0);
+    const originalError = sandbox.console.error;
+    sandbox.console.error = noop;
+    try {
+        for (const bad of [null, [[-1, 0, 0, 0, 0, 0], Array(6).fill(0)], [[1.5, 0, 0, 0, 0, 0], Array(6).fill(0)], [[], []]]) {
+            restored.applySnapshot({ ...state, serial: state.serial + 1, reinforcements: bad });
+            assert.equal(restored.receivedSerial, state.serial);
+        }
+    } finally { sandbox.console.error = originalError; }
+}
+{
+    const s = session('defense'), g = s.game;
+    s.testing = true;
+    for (let i = 0; i < 130; i++) g.request('send', { type: 0 });
+    assert.equal(g.reinforcements[1][0], 130, 'recurring purchases have no gameplay cap');
+    g.waveTimer = 0; g.simulate(0);
+    for (let i = 0; i < 12; i++) g.simulate(.5);
+    assert.equal(g.enemies.filter(e => e.team === 1).length, 60, 'live lane limit bounds rendering/network state');
+    const pending = g.waveSpawnRemaining;
+    assert.ok(pending > 0);
+    g.simulate(.5); assert.equal(g.waveSpawnRemaining, pending, 'a full lane retains paid spawns');
+    let total = g.enemies.filter(e => e.team === 1).length;
+    g.enemies = [];
+    while (g.waveSpawnRemaining) {
+        g.simulate(.1);
+        assert.ok(g.enemies.filter(e => e.team === 1).length <= 60);
+        total += g.enemies.filter(e => e.team === 1).length;
+        g.enemies = [];
+    }
+    assert.equal(total, 135, 'large purchased waves deploy every paid enemy plus the baseline');
+}
+for (const tower of [0, 1, 4, 5, 'poison']) {
+    const g = session('defense').game, cash = [...g.wallets];
+    g.enemies = Array.from({ length: 3 }, (_, i) => ({ id: i + 2, team: 0, type: 0,
+        hp: 1, segment: 0, progress: 180 + i * 10, slow: 0,
+        ...(tower === 'poison' ? { poisonT: 1, poisonD: 9 } : {}) }));
+    if (tower !== 'poison') g.troops = [{ id: 1, team: 0, type: tower, x: 300, y: 240, level: 1, cd: 0 }];
+    g.simulate(tower === 'poison' ? .2 : 0);
+    assert.ok(g.enemies.length < 3, `${tower} fixture actually kills enemies`);
+    assert.deepEqual([...g.wallets], cash, `${tower} kills do not pay either team`);
+}
+{
+    const g = session('defense').game;
+    assert.ok(g.waveEnemyHealth(0, 40) > g.waveEnemyHealth(0, 20), 'health keeps rising beyond the old cap');
+    assert.ok(g.waveEnemyDamage({ type: 0, wave: 40 }) > g.waveEnemyDamage({ type: 0, wave: 20 }), 'base pressure keeps rising beyond the old cap');
+    for (let wave = 1; wave < 50; wave++) for (let type = 0; type < 6; type++) {
+        assert.ok(Number.isInteger(g.waveEnemyDamage({ type, wave })), 'base damage remains compatible with integer persisted health/economy');
+    }
+    const bars = [], barCtx = new Proxy({
+        fillRect(x, y, w, h) { if (x === 280 && y === 128 && h === 5 && this.fillStyle === '#4ade80') bars.push(w); }
+    }, { get: (target, key) => target[key] || ctx[key] });
+    g.seen = () => true;
+    g.enemies = [{ id: 1, team: 0, type: 0, wave: 20, hp: g.waveEnemyHealth(0, 20), segment: 0, progress: 190, slow: 0 }];
+    g.draw(barCtx, 1280, 720);
+    g.enemies[0].hp /= 2; g.draw(barCtx, 1280, 720);
+    assert.deepEqual(bars, [40, 20], 'scaled enemy health bars stay within their track and show the actual fraction');
+}
+console.log('Uncapped recurring purchases, next-wave isolation, partial-wave restore, lane backpressure and zero cash for every kill type passed.');
+{
+    const durations = {};
+    for (const scenario of ['answer-funded', 'recurring-attacks', 'maxed-defense']) {
+        const s = session('defense', 'host', ['host', 'guest']), g = s.game;
+        s.rewardAmount = () => 30;
+        const cells = [];
+        for (let x = 95; x <= 1005; x += 70) for (let y = 85; y <= 1415; y += 70) {
+            if (g.validPlacement(x, y, 0) && g.distanceToPath(x, y, 0) < 200) cells.push({ x, y });
+        }
+        // Spread coverage along the winding path rather than clustering at the entrance.
+        cells.sort((a, b) => (a.y % 280) - (b.y % 280) || a.x - b.x || a.y - b.y);
+        const order = (id, action, data = {}) => g.command({ seq: (g.lastSeq[id] || 0) + 1, action, ...data }, id);
+        const build = id => {
+            const team = g.teamOf(id), owned = g.troops.filter(t => t.team === team);
+            if (owned.length >= 40) return;
+            const type = owned.length % 6, cell = cells[owned.length];
+            if (g.canAfford(team, g.troopTypes[type].cost)) order(id, 'build', { type, x: cell.x + team * 1100, y: cell.y });
+        };
+        if (scenario === 'maxed-defense') {
+            s.testing = true;
+            for (const id of ['host', 'guest']) {
+                for (let i = 0; i < 40; i++) build(id);
+                for (const tower of g.troops.filter(t => t.owner === id)) {
+                    order(id, 'upgrade', { id: tower.id }); order(id, 'upgrade', { id: tower.id });
+                }
+            }
+            assert.equal(g.troops.length, 80);
+            s.testing = false;
+        }
+        let elapsed = 0, nextAnswer = 0;
+        while (!g.finished && elapsed < 1200) {
+            if (scenario !== 'maxed-defense' && elapsed >= nextAnswer) {
+                nextAnswer += 10;
+                for (const id of ['host', 'guest']) {
+                    order(id, 'answer', { count: (g.answers[id] || 0) + 1 });
+                    if (scenario === 'recurring-attacks' && nextAnswer % 30 === 0) order(id, 'send', { type: 2 });
+                    else build(id);
+                }
+            }
+            g.simulate(.1); elapsed += .1;
+        }
+        const maxSeconds = scenario === 'maxed-defense' ? 540 : scenario === 'recurring-attacks' ? 240 : 360;
+        assert.ok(g.finished && elapsed <= maxSeconds, `${scenario} must finish within ${maxSeconds}s, got ${elapsed.toFixed(1)}s`);
+        assert.ok(elapsed >= (scenario === 'maxed-defense' ? 360 : 120), `${scenario} must leave time to build and answer`);
+        durations[scenario] = Math.round(elapsed);
+    }
+    assert.ok(durations['recurring-attacks'] < durations['answer-funded'], 'investing in recurring attacks creates meaningful pressure');
+    console.log('Measured defense durations (seconds):', durations);
+}
+{
+    const sql = fs.readFileSync(path.join(__dirname, '..', 'supabase-setup.sql'), 'utf8');
+    const save = sql.slice(sql.indexOf('create or replace function public.studbud_save_defense_state'), sql.indexOf('revoke all on function public.studbud_save_defense_state'));
+    assert.match(save, /array\['reinforcements', 'waveArmy'\]/, 'server persistence validates both recurring rosters');
+    assert.match(save, /jsonb_array_length\(v_army\) <> 6/);
+    assert.match(save, /\.22 \* \(coalesce\(\(unit ->> 'wave'\)::numeric, 1\) - 1\)/);
+    assert.match(save, /\.04 \* power/, 'server accepts the same uncapped health scaling as the host');
+}
+{
     const s = session('defense'), g = s.game;
     assert.equal(g.troopTypes.length, 6); assert.equal(g.enemyTypes.length, 6);
     s.testing = true;
@@ -959,7 +1128,8 @@ console.log('Automatic waves, wave scaling, host-synchronized progress and idle 
         g.request('build', { type, x: 380 + type * 70, y: 340 });
         g.request('send', { type });
     }
-    assert.equal(g.troops.length, 6); assert.equal(g.enemies.length, 6);
+    assert.equal(g.troops.length, 6); assert.equal(g.enemies.length, 0);
+    assert.equal(g.reinforcements[1].reduce((a, b) => a + b, 0), 6);
     assert.ok(g.troops.every(t => (t.x - t.team * 1100 - 95) % 70 === 0 && (t.y - 85) % 70 === 0), 'all placements snap to cell centers');
     const placed = g.troops[0], cash = g.wallets[0];
     g.request('build', { type: 0, x: placed.x + 20, y: placed.y + 20 });
@@ -968,7 +1138,8 @@ console.log('Automatic waves, wave scaling, host-synchronized progress and idle 
     assert.equal(g.troops.length, 6, 'host rejects unsnapped remote placement orders');
     const restored = session('defense', 'guest').game;
     restored.applySnapshot(g.snapshot());
-    assert.equal(restored.troops[5].type, 5); assert.equal(restored.enemies[4].hp, 550);
+    assert.equal(restored.troops[5].type, 5);
+    assert.deepEqual([...restored.reinforcements[1]], [1, 1, 1, 1, 1, 1]);
     for (const troop of g.troops) {
         const current = g.troopStats(troop.type, 1), next = g.troopStats(troop.type, 2);
         assert.equal(next.range - current.range, 35);

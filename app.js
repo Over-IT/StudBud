@@ -4602,10 +4602,10 @@
             document.getElementById('chess-setup-note')?.classList.toggle('hidden', !chess);
             const soloNote = document.getElementById('solo-game-note');
             if (soloNote) soloNote.textContent = chess ? 'You play a computer opponent. One correct answer earns one move. No time limit; checkmate wins.'
-                : mode === 'defense' ? 'You and computer teammates share cash from correct answers and enemy kills. No time limit: reduce the opposing base to 0 HP.'
+                : mode === 'defense' ? 'Share cash from correct answers, not kills. Buy enemies to add +1 every wave against rivals. Reduce the opposing base to 0 HP.'
                 : 'Same game as multiplayer, with computer players instead of a room. Correct answers earn coins when you are signed in.';
             const labels = {
-                defense: ['Team Tower Defense', 'Red vs blue, 1v1 or teams. Share cash, build and upgrade troops, send enemies to the rival path. First base to 0 HP loses; no time limit.'],
+                defense: ['Team Tower Defense', 'Red vs blue, 1v1 or teams. Questions earn team cash; kills do not. Each enemy purchase adds +1 to every future wave against rivals. First base to 0 HP loses.'],
                 skyline: ['Escape to Space', 'Climb rooftop switchbacks, cross a factory and reach space. Lower routes can catch a fall.'],
                 river: ['River Fishing', 'Catch fish, surf waves or hold left to paddle through them. Nearby rivals trigger an 8-second flashcard duel: answer first to steal fish points. Whirlpools spin and launch your boat.'],
                 market: ['Package Delivery', 'Deliver packages across town and dodge cars.'],
@@ -7036,7 +7036,7 @@
             document.getElementById('multiplayer-arena').classList.toggle('hidden', inLobby);
             if (inLobby) {
                 const info = {
-                    defense: ['Red vs blue: shared cash from correct answers and kills. Build troops on your side, send enemies to the other path, and reduce the rival base to 0 HP.', 'WASD walk anywhere · Click to build/select · Buttons send/upgrade · Q/E earn cash'],
+                    defense: ['Red vs blue: only correct answers earn new team cash; kills pay nothing. Build and upgrade towers. Each enemy purchase permanently adds +1 of that type per wave against rivals, starting next wave. Waves get stronger until a base falls.', 'WASD walk · Click build/select · Buy recurring enemies · Q/E earn cash'],
                     skyline: ['Climb rooftops, machinery and low-gravity Space. At narrow wall shafts, hold toward a wall and press Space, then steer toward the opposite wall and jump again. Blue arrows mark jump-through platforms. Falls can land on lower routes; R returns to your saved checkpoint.', 'A/D run · Space jump (twice) / wall jump · Shift dash · R checkpoint'],
                     river: ['Catch fish and surf waves for points. Hold left against a wave for a moment to paddle through, or shelter in pale shallows. Nearby rivals start an 8-second flashcard duel: the first correct answer steals fish points. Whirlpools spin and launch your boat.', 'WASD steer · click cast · Q recharge · answer rival duels quickly'],
                     market: ['Deliver packages across town and dodge cars.', 'WASD move · Shift sprint · Q recharge'],

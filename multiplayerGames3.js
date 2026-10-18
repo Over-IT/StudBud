@@ -699,12 +699,12 @@
         { name: 'Venom', cost: 125, range: 240, damage: 10, rate: .9, poison: 9, color: '#a3e635', desc: 'Poison: 9 damage/sec for 3 seconds' }
     ];
     const DEFENSE_ENEMIES = [
-        { name: 'Scout', cost: 30, hp: 65, speed: 95, damage: 8, reward: 14, color: '#a3e635', desc: 'Balanced and inexpensive' },
-        { name: 'Runner', cost: 50, hp: 90, speed: 145, damage: 12, reward: 22, color: '#facc15', desc: 'Fast flanking runner' },
-        { name: 'Brute', cost: 100, hp: 330, speed: 65, damage: 25, reward: 40, color: '#c084fc', desc: 'Durable siege monster' },
-        { name: 'Swarm', cost: 15, hp: 32, speed: 120, damage: 4, reward: 7, color: '#bef264', desc: 'Cheap beetles overwhelm slow towers' },
-        { name: 'Sentinel', cost: 145, hp: 550, speed: 55, armor: .3, damage: 32, reward: 58, color: '#cbd5e1', desc: 'Armor reduces normal hits by 30%' },
-        { name: 'Wisp', cost: 80, hp: 135, speed: 175, damage: 16, reward: 32, color: '#f0abfc', desc: 'Very fast, fragile spirit' }
+        { name: 'Scout', cost: 30, hp: 65, speed: 95, damage: 8, color: '#a3e635', desc: 'Balanced and inexpensive' },
+        { name: 'Runner', cost: 50, hp: 90, speed: 145, damage: 12, color: '#facc15', desc: 'Fast flanking runner' },
+        { name: 'Brute', cost: 100, hp: 330, speed: 65, damage: 25, color: '#c084fc', desc: 'Durable siege monster' },
+        { name: 'Swarm', cost: 15, hp: 32, speed: 120, damage: 4, color: '#bef264', desc: 'Cheap beetles overwhelm slow towers' },
+        { name: 'Sentinel', cost: 145, hp: 550, speed: 55, armor: .3, damage: 32, color: '#cbd5e1', desc: 'Armor reduces normal hits by 30%' },
+        { name: 'Wisp', cost: 80, hp: 135, speed: 175, damage: 16, color: '#f0abfc', desc: 'Very fast, fragile spirit' }
     ];
     const DEFENSE_COLORS = ['#60a5fa', '#f87171'];
 
@@ -727,7 +727,10 @@
                     { x: offset + 250, y: 500 }, { x: offset + 250, y: 900 }, { x: offset + 850, y: 900 }, { x: offset + 850, y: 1310 }];
             });
             this.troops = []; this.enemies = []; this.shots = []; this.nextId = 1;
-            this.waveNumber = 0; this.waveTimer = 25; this.waveSpawnRemaining = 0; this.waveSpawnTimer = 0;
+            this.waveNumber = 0; this.waveTimer = 20; this.waveSpawnRemaining = 0; this.waveSpawnTimer = 0;
+            // Indexed by defending lane; freeze each wave's roster before deploying it.
+            this.reinforcements = [Array(DEFENSE_ENEMIES.length).fill(0), Array(DEFENSE_ENEMIES.length).fill(0)];
+            this.waveArmy = this.reinforcements.map(army => [...army]);
             this.lastSeq = {}; this.answers = {}; this.pending = []; this.sequence = 0; this.retryT = 0;
             this.answerCount = 0;
             this.ui = new Ui(s); this.buildType = null; this.selected = null;
@@ -749,13 +752,22 @@
             return this.unlimitedTestCash ? 0 : Math.floor(DEFENSE_TROOPS[troop.type].cost * (1 + troop.level * (troop.level - 1) / 2) * .75);
         }
         waveEnemyHealth(type, wave) {
-            return DEFENSE_ENEMIES[type].hp * (1 + Math.min(2.5, Math.max(0, wave - 1) * .14));
+            const n = Math.max(0, wave - 1);
+            return DEFENSE_ENEMIES[type].hp * (1 + n * .22 + n * n * .04);
         }
         waveEnemySpeed(enemy) {
             return DEFENSE_ENEMIES[enemy.type].speed * (1 + Math.min(.5, Math.max(0, (enemy.wave || 1) - 1) * .025));
         }
         waveEnemyDamage(enemy) {
-            return DEFENSE_ENEMIES[enemy.type].damage * (1 + Math.min(.6, Math.floor(Math.max(0, (enemy.wave || 1) - 1) / 4) * .1));
+            return Math.ceil(DEFENSE_ENEMIES[enemy.type].damage * (1 + Math.floor(Math.max(0, (enemy.wave || 1) - 1) / 3) * .2));
+        }
+        waveSize() { return 4 + this.waveNumber + Math.max(...this.waveArmy.map(army => army.reduce((a, b) => a + b, 0))); }
+        waveTypeFor(team, slot) {
+            for (let type = 0; type < DEFENSE_ENEMIES.length; type++) {
+                if (slot < this.waveArmy[team][type]) return type;
+                slot -= this.waveArmy[team][type];
+            }
+            return slot < 4 + this.waveNumber ? this.waveEnemyType(slot) : null;
         }
         waveEnemyType(slot) {
             if (this.waveNumber >= 8 && slot % 5 === 0) return 4;
@@ -848,9 +860,8 @@
                 cost = DEFENSE_TROOPS[type].cost;
                 execute = () => this.troops.push({ id: this.nextId++, owner: id, team, type, x: Math.round(order.x), y: Math.round(order.y), level: 1, cd: 0 });
             } else if (order.action === 'send' && Number.isInteger(type) && DEFENSE_ENEMIES[type]) {
-                if (this.enemies.filter(e => e.team === 1 - team).length >= 60) return this.reject(id, 'The enemy path is full; wait for space');
                 cost = DEFENSE_ENEMIES[type].cost;
-                execute = () => this.enemies.push({ id: this.nextId++, team: 1 - team, type, wave: 1, hp: DEFENSE_ENEMIES[type].hp, segment: 0, progress: 0, slow: 0 });
+                execute = () => { this.reinforcements[1 - team][type]++; };
             } else if (order.action === 'upgrade') {
                 const troop = this.troops.find(t => t.id === order.id && t.team === team);
                 if (!troop || troop.level >= 3) return this.reject(id, 'Select a friendly troop below level 3');
@@ -866,7 +877,7 @@
                 this.s.sfx('coin', 80);
                 return;
             } else return this.reject(id, 'Unknown defense order');
-            if (!this.canAfford(team, cost)) return this.reject(id, 'Not enough team cash - answer a flashcard or defeat enemies');
+            if (!this.canAfford(team, cost)) return this.reject(id, 'Not enough team cash - answer a flashcard');
             if (!this.unlimitedTestCash) this.wallets[team] -= cost;
             execute();
             this.s.sfx(order.action === 'send' ? 'enemySend' : order.action === 'upgrade' ? 'towerUpgrade' : 'towerBuild', 80);
@@ -889,35 +900,38 @@
             if (this.waveSpawnRemaining > 0) {
                 this.waveSpawnTimer -= dt;
                 while (this.waveSpawnRemaining > 0 && this.waveSpawnTimer <= 0) {
-                    const slot = 4 + this.waveNumber - this.waveSpawnRemaining;
-                    const type = this.waveEnemyType(slot), hp = this.waveEnemyHealth(type, this.waveNumber);
+                    const slot = this.waveSize() - this.waveSpawnRemaining;
+                    if ([0, 1].some(team => this.waveTypeFor(team, slot) !== null && this.enemies.filter(e => e.team === team && e.hp > 0).length >= 60)) {
+                        this.waveSpawnTimer = .7;
+                        break;
+                    }
                     for (const team of [0, 1]) {
-                        let teamEnemies = 0;
-                        for (const enemy of this.enemies) if (enemy.team === team) teamEnemies++;
-                        if (teamEnemies >= 60) continue;
+                        const type = this.waveTypeFor(team, slot);
+                        if (type === null) continue;
+                        const hp = this.waveEnemyHealth(type, this.waveNumber);
                         this.enemies.push({ id: this.nextId++, team, type, wave: this.waveNumber, hp,
                             segment: 0, progress: 0, slow: 0 });
                     }
                     this.waveSpawnRemaining--;
-                    if (this.waveSpawnRemaining > 0) this.waveSpawnTimer += 1.2;
-                    else { this.waveTimer = 32; this.waveSpawnTimer = 0; }
+                    if (this.waveSpawnRemaining > 0) this.waveSpawnTimer += Math.min(.7, 8 / this.waveSize());
+                    else { this.waveTimer = 20; this.waveSpawnTimer = 0; }
                 }
             } else {
                 this.waveTimer -= dt;
                 if (this.waveTimer <= 0) {
                     this.waveNumber++;
-                    this.waveSpawnRemaining = 4 + this.waveNumber;
+                    this.waveArmy = this.reinforcements.map(army => [...army]);
+                    this.waveSpawnRemaining = this.waveSize();
                     this.waveSpawnTimer = 0; this.waveTimer = 0;
                 }
             }
             for (const enemy of this.enemies) {
                 if (enemy.hp <= 0) continue;
-                const spec = DEFENSE_ENEMIES[enemy.type];
                 enemy.slow = Math.max(0, enemy.slow - dt);
                 if (enemy.poisonT > 0) {
                     const poisoned = Math.min(dt, enemy.poisonT);
                     enemy.hp -= enemy.poisonD * poisoned; enemy.poisonT -= poisoned;
-                    if (enemy.hp <= 0) { this.wallets[enemy.team] += spec.reward; continue; }
+                    if (enemy.hp <= 0) continue;
                 }
                 enemy.progress += this.waveEnemySpeed(enemy) * (enemy.slow > 0 ? .5 : 1) * dt;
                 const path = this.paths[enemy.team];
@@ -956,7 +970,6 @@
                     enemy.hp -= stats.damage * (spec.pierce ? 1 : 1 - (DEFENSE_ENEMIES[enemy.type].armor || 0));
                     if (spec.slow) enemy.slow = 1.5;
                     if (spec.poison) { enemy.poisonT = 3; enemy.poisonD = stats.poison; }
-                    if (enemy.hp <= 0) this.wallets[troop.team] += DEFENSE_ENEMIES[enemy.type].reward;
                 }
                 this.battleSounds++; this.s.sfx(spec.splash ? 'cannon' : spec.chain ? 'zap' : 'towerShot', 160);
             }
@@ -967,6 +980,7 @@
             return { serial: ++this.serial, health: [...this.health], wallets: [...this.wallets], damage: [...this.teamDamage],
                 waveNumber: this.waveNumber, waveTimer: this.waveTimer, waveSpawnRemaining: this.waveSpawnRemaining,
                 waveSpawnTimer: this.waveSpawnTimer,
+                reinforcements: this.reinforcements.map(army => [...army]), waveArmy: this.waveArmy.map(army => [...army]),
                 teams: { ...this.teams }, lastSeq: { ...this.lastSeq }, answers: { ...this.answers }, nextId: this.nextId,
                 troops: this.troops.map(t => ({ ...t })), enemies: this.enemies.map(e => ({ ...e })),
                 shots: this.shots.map(shot => ({ ...shot })), battleSounds: this.battleSounds, winner: this.winner ?? null };
@@ -975,14 +989,23 @@
             const pair = values => Array.isArray(values) && values.length === 2 && values.every(v => Number.isFinite(v) && v >= 0);
             const object = value => value && typeof value === 'object' && !Array.isArray(value);
             const teams = { ...(object(state?.teams) ? state.teams : {}), ...this.s.room?.state?.defense_teams };
-            const waveNumber = state?.waveNumber ?? 0, waveTimer = state?.waveTimer ?? 25;
+            const waveNumber = state?.waveNumber ?? 0, waveTimer = state?.waveTimer ?? 20;
             const waveSpawnRemaining = state?.waveSpawnRemaining ?? 0, waveSpawnTimer = state?.waveSpawnTimer ?? 0;
+            const reinforcements = state?.reinforcements === undefined
+                ? [Array(DEFENSE_ENEMIES.length).fill(0), Array(DEFENSE_ENEMIES.length).fill(0)] : state.reinforcements;
+            const waveArmy = state?.waveArmy === undefined
+                ? [Array(DEFENSE_ENEMIES.length).fill(0), Array(DEFENSE_ENEMIES.length).fill(0)] : state.waveArmy;
+            const validArmy = armies => Array.isArray(armies) && armies.length === 2 && armies.every(army =>
+                Array.isArray(army) && army.length === DEFENSE_ENEMIES.length && army.every(n => Number.isSafeInteger(n) && n >= 0)
+                && Number.isSafeInteger(army.reduce((a, b) => a + b, 10004)));
             if (!state || !Number.isInteger(state.serial) || !pair(state.health) || state.health.some(v => v > 100)
+                || !validArmy(reinforcements) || !validArmy(waveArmy)
+                || waveArmy.some((army, team) => army.some((n, type) => n > reinforcements[team][type]))
                 || !pair(state.wallets) || !pair(state.damage) || !object(state.teams) || !object(state.lastSeq) || !object(state.answers)
                 || ![0, 1].includes(teams[this.s.user.id]) || !Number.isInteger(state.nextId)
                 || !Number.isInteger(waveNumber) || waveNumber < 0 || waveNumber > 10000
                 || !Number.isFinite(waveTimer) || waveTimer < 0 || waveTimer > 32
-                || !Number.isInteger(waveSpawnRemaining) || waveSpawnRemaining < 0 || waveSpawnRemaining > 10004
+                || !Number.isInteger(waveSpawnRemaining) || waveSpawnRemaining < 0 || waveSpawnRemaining > 4 + waveNumber + Math.max(...waveArmy.map(army => army.reduce((a, b) => a + b, 0)))
                 || !Number.isFinite(waveSpawnTimer) || waveSpawnTimer < 0 || waveSpawnTimer > 1.2
                 || !Array.isArray(state.troops) || state.troops.length > this.teamTroopLimit * 2
                 || !Array.isArray(state.enemies) || state.enemies.length > 120
@@ -1029,6 +1052,7 @@
             this.health = [...state.health]; this.wallets = [...state.wallets]; this.teamDamage = [...state.damage];
             this.waveNumber = waveNumber; this.waveTimer = waveTimer;
             this.waveSpawnRemaining = waveSpawnRemaining; this.waveSpawnTimer = waveSpawnTimer;
+            this.reinforcements = reinforcements.map(army => [...army]); this.waveArmy = waveArmy.map(army => [...army]);
             this.teams = teams; this.lastSeq = { ...state.lastSeq }; this.answers = { ...state.answers };
             this.nextId = state.nextId; this.troops = state.troops.map(t => ({ ...t })); this.enemies = state.enemies.map(e => ({ wave: 1, ...e }));
             this.shots = (state.shots || []).map(shot => ({ ...shot })); this.winner = state.winner;
@@ -1126,7 +1150,7 @@
         }
         isWinner(rows, id) { return rows[0]?.g >= 1000000 && this.teamOf(rows[0].id) === this.teamOf(id); }
         goalText() { return `${this.myTeam ? 'Red' : 'Blue'} team · Wave ${this.waveNumber} · Base ${this.health[this.myTeam]} HP · Towers ${this.troopCount(this.s.user.id)}/${this.playerTroopLimit} · Team ${this.teamTroopCount(this.myTeam)}/40 · ${this.unlimitedTestCash ? 'unlimited test cash' : `$${this.wallets[this.myTeam]} shared`}`; }
-        hint() { return 'WASD walk · Choose a tower for one placement · Escape/cancel clears placement · Click friendly towers for upgrades or sell your own for 75% · 40 towers per team, divided equally among active teammates · Q/E answer for shared cash'; }
+        hint() { return 'WASD walk · Choose a tower for one placement · Click friendly towers to upgrade or sell your own for 75% · Enemy purchases add +1 every wave starting next wave, no purchase limit · Kills give no cash · Q/E answer for shared cash'; }
         touchHint() { return 'Joystick to walk · Choose a tower, tap a free cell for one placement · Cancel clears the preview · Tap a tower for upgrades/selling · 40 team slots divided among teammates · Answer for team cash'; }
         touchLayout() { return { stick: true, buttons: [{ k: 'KeyE', label: 'Earn cash', cls: 'main' }] }; }
         drawTroop(ctx, troop, angle = -.6) {
@@ -1266,11 +1290,11 @@
                 this.drawTroop(ctx, troop, shot ? Math.atan2(shot.ty - troop.y, shot.tx - troop.x) : -.6);
             }
             for (const enemy of this.enemies) {
-                const p = this.pointOnPath(enemy), spec = DEFENSE_ENEMIES[enemy.type];
+                const p = this.pointOnPath(enemy);
                 if (!this.seen(p.x, p.y)) continue;
                 this.drawEnemy(ctx, enemy, p.x, p.y);
                 ctx.fillStyle = '#0f172a'; ctx.fillRect(p.x - 20, p.y - 32, 40, 5);
-                ctx.fillStyle = '#4ade80'; ctx.fillRect(p.x - 20, p.y - 32, 40 * enemy.hp / spec.hp, 5);
+                ctx.fillStyle = '#4ade80'; ctx.fillRect(p.x - 20, p.y - 32, 40 * clamp(enemy.hp / this.waveEnemyHealth(enemy.type, enemy.wave || 1), 0, 1), 5);
             }
             if (this.previewPoint && !this.s.preview) {
                 const p = this.previewPoint, spec = DEFENSE_TROOPS[this.buildType];
@@ -1305,13 +1329,14 @@
                 ctx.fillStyle = DEFENSE_COLORS[this.myTeam]; ctx.fillText(`${this.myTeam ? 'RED' : 'BLUE'} TEAM CASH: ${this.unlimitedTestCash ? 'UNLIMITED (TEST)' : `$${this.wallets[this.myTeam]}`}`, 160, 42);
                 ctx.fillStyle = '#fbbf24'; ctx.font = '800 12px system-ui'; ctx.fillText(this.waveStatusText(), 160, 64);
                 this.ui.button(ctx, 'shop-build', 8, 72, 148, 26, 'Build towers', true, this.shopTab === 'build' ? '#2563eb' : '#334155');
-                this.ui.button(ctx, 'shop-send', 164, 72, 148, 26, 'Send enemies', true, this.shopTab === 'send' ? '#be123c' : '#334155');
+                this.ui.button(ctx, 'shop-send', 164, 72, 148, 26, 'Buy wave enemies', true, this.shopTab === 'send' ? '#be123c' : '#334155');
                 const catalog = this.shopTab === 'build' ? DEFENSE_TROOPS : DEFENSE_ENEMIES;
                 catalog.forEach((type, i) => {
                     const build = this.shopTab === 'build';
                     this.ui.button(ctx, `${build ? 'build' : 'send'}:${i}`, 8 + (i % 3) * 103, 106 + Math.floor(i / 3) * 50, 98, 44, type.name,
                         this.canAfford(this.myTeam, type.cost) && (!build || this.canBuild(this.s.user.id)),
-                        build ? i === this.buildType ? '#2563eb' : '#475569' : '#9f1239', `$${type.cost}`);
+                        build ? i === this.buildType ? '#2563eb' : '#475569' : '#9f1239',
+                        build ? `$${type.cost}` : `$${type.cost} · ${this.reinforcements[1 - this.myTeam][i]}/wave`);
                 });
                 const hover = this.ui.rects.find(r => this.ui.inside({ ...r, on: true }) && /^(build|send):/.test(r.id));
                 const enemyInfo = hover?.id.startsWith('send:');
@@ -1323,11 +1348,11 @@
                 if (info) {
                     ctx.fillStyle = info.color; ctx.fillText(`${info.name} · ${info.desc}`, 12, 238);
                     ctx.fillStyle = '#cbd5e1';
-                    if (enemyInfo) ctx.fillText(`HP ${info.hp} · Speed ${info.speed} · Base hit ${info.damage}`, 12, 254);
+                    if (enemyInfo) ctx.fillText(`+1 each wave from next wave · HP ${info.hp}`, 12, 254);
                     else ctx.fillText(`Damage ${info.damage} · Range ${info.range} · Fires ${info.rate.toFixed(2)}s`, 12, 254);
                 } else {
-                    ctx.fillText('Choose a tower for one placement, or select a built tower.', 12, 238);
-                    ctx.fillText('40 team slots divided equally among active teammates.', 12, 254);
+                    ctx.fillText(this.shopTab === 'send' ? 'Each purchase adds +1 enemy every wave.' : 'Choose a tower for one placement, or select a built tower.', 12, 238);
+                    ctx.fillText(this.shopTab === 'send' ? 'Starts next wave. Cash comes from questions, not kills.' : '40 team slots divided equally among active teammates.', 12, 254);
                 }
                 this.ui.button(ctx, 'earn', 8, 268, 148, 48, 'Answer for cash', !this.s.question, '#15803d', `+$${this.answerCash()} to team`);
                 this.ui.button(ctx, 'cancel', 164, 268, 148, 48, 'Cancel placement', this.buildType !== null, '#475569', this.buildType === null ? 'Nothing selected' : 'Escape also cancels');

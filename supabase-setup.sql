@@ -2084,6 +2084,8 @@ declare
     v_players jsonb;
     v_serial integer;
     v_winner text := p_state ->> 'winner';
+    v_army_key text;
+    v_army jsonb;
 begin
     select * into v_room from public.studbud_game_rooms
     where room_code = upper(btrim(p_code)) and expires_at > now() for update;
@@ -2091,6 +2093,34 @@ begin
         raise exception 'Only the Tower Defense host can save this battle.';
     end if;
     if v_room.status <> 'playing' then raise exception 'This battle is not playing.'; end if;
+    if (p_state ? 'waveNumber' and (
+        coalesce(p_state ->> 'waveNumber', '') !~ '^[0-9]{1,5}$'
+        or (p_state ->> 'waveNumber')::numeric > 10000)) then
+        raise exception 'Invalid Tower Defense wave.';
+    end if;
+    foreach v_army_key in array array['reinforcements', 'waveArmy'] loop
+        if not (p_state ? v_army_key) then continue; end if;
+        if jsonb_typeof(p_state -> v_army_key) is distinct from 'array' then
+            raise exception 'Invalid recurring enemy roster.';
+        end if;
+        if jsonb_array_length(p_state -> v_army_key) <> 2 then
+            raise exception 'Invalid recurring enemy roster.';
+        end if;
+        for v_army in select value from jsonb_array_elements(p_state -> v_army_key) loop
+            if jsonb_typeof(v_army) is distinct from 'array' then
+                raise exception 'Invalid recurring enemy roster.';
+            end if;
+            if jsonb_array_length(v_army) <> 6 or exists (
+                select 1 from jsonb_array_elements(v_army) c(value)
+                where jsonb_typeof(value) is distinct from 'number' or value::text !~ '^[0-9]{1,16}$'
+            ) then
+                raise exception 'Invalid recurring enemy roster.';
+            end if;
+            if (select sum(value::numeric) from jsonb_array_elements_text(v_army) c(value)) > 9007199254730987 then
+                raise exception 'Invalid recurring enemy roster.';
+            end if;
+        end loop;
+    end loop;
     if p_state is null or length(p_state::text) > 100000
         or coalesce(p_state ->> 'serial', '') !~ '^[0-9]{1,9}$'
         or coalesce(p_state ->> 'nextId', '') !~ '^[0-9]{1,9}$'
@@ -2145,6 +2175,9 @@ begin
                 or jsonb_typeof(unit -> 'hp') is distinct from 'number'
                 or jsonb_typeof(unit -> 'progress') is distinct from 'number'
                 or jsonb_typeof(unit -> 'slow') is distinct from 'number'
+                or (unit ? 'wave' and (coalesce(unit ->> 'wave', '') !~ '^[0-9]{1,5}$'
+                    or (unit ->> 'wave')::numeric < 1
+                    or (unit ->> 'wave')::numeric > greatest(1, coalesce((p_state ->> 'waveNumber')::numeric, 0))))
                 or (unit ? 'poisonT' and jsonb_typeof(unit -> 'poisonT') is distinct from 'number')
                 or (unit ? 'poisonD' and jsonb_typeof(unit -> 'poisonD') is distinct from 'number')) then
         raise exception 'Invalid troops or enemies.';
@@ -2167,6 +2200,8 @@ begin
         or exists (select 1 from jsonb_array_elements(p_state -> 'enemies') c(unit)
             where (unit ->> 'hp')::numeric <= 0
                 or (unit ->> 'hp')::numeric > (array[65, 90, 330, 32, 550, 135])[(unit ->> 'type')::integer + 1]
+                    * (1 + .22 * (coalesce((unit ->> 'wave')::numeric, 1) - 1)
+                        + .04 * power(coalesce((unit ->> 'wave')::numeric, 1) - 1, 2)) + .000001
                 or (unit ->> 'progress')::numeric < 0 or (unit ->> 'progress')::numeric > 740
                 or (unit ->> 'slow')::numeric < 0 or (unit ->> 'slow')::numeric > 1.5
                 or (unit ->> 'poisonT')::numeric < 0 or (unit ->> 'poisonT')::numeric > 3
