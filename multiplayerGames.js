@@ -690,7 +690,7 @@
                     let prev = L;
                     const nodes = [];
                     for (let i = 0; i < 3; i++) {
-                        const gap = 250 + Math.round(r() * 30);
+                        const gap = 380 + Math.round(r() * 70);
                         const p = T.add({ x: ahead(prev, d, gap, 200), y: prev.y - 100, w: 200, h: 32, spaceStyle: i % 2 ? 0 : 1, motif: 'debris-run' });
                         if (!calm) T.shower({ x: d > 0 ? edgeOf(prev, 1) + gap / 2 : edgeOf(prev, -1) - gap / 2, y: p.y, size: 40,
                             speed: 520 + Math.round(r() * 90), spacing: 540 + Math.round(r() * 110) });
@@ -719,10 +719,10 @@
                     let prev = L;
                     const nodes = [];
                     for (let i = 0; i < 3; i++) {
-                        prev = T.add({ x: ahead(prev, d, 170, 160), y: prev.y - 110, w: 160, h: 16, thin: true, solar: true, blink: !calm, period: 3.4, on: 2.4, phase: i * 1.1, motif: 'solar-walk' });
+                        prev = T.add({ x: ahead(prev, d, 340, 160), y: prev.y - 110, w: 160, h: 16, thin: true, solar: true, blink: !calm, period: 3.4, on: 2.4, phase: i * 1.1, motif: 'solar-walk' });
                         nodes.push(prev);
                     }
-                    nodes.push(T.add({ x: ahead(prev, d, 170, 240), y: prev.y - 110, w: 240, h: 32, spaceStyle: 1, motif: 'solar-walk' }));
+                    nodes.push(T.add({ x: ahead(prev, d, 360, 240), y: prev.y - 110, w: 240, h: 32, spaceStyle: 1, motif: 'solar-walk' }));
                     return nodes;
                 },
                 // a thruster pad launches you up to a module you can pass through from below
@@ -748,7 +748,7 @@
                     let prev = L;
                     const nodes = [];
                     for (let i = 0; i < 3; i++) {
-                        const p = T.add({ x: ahead(prev, d, 190 + Math.round(r() * 30), 200), y: prev.y - 95, w: 200, h: 32, spaceStyle: i % 2 ? 2 : 1, motif: 'laser-grid' });
+                        const p = T.add({ x: ahead(prev, d, 350 + Math.round(r() * 50), 200), y: prev.y - 95, w: 200, h: 32, spaceStyle: i % 2 ? 2 : 1, motif: 'laser-grid' });
                         if (!calm) {
                             const laser = { x: Math.round(p.x + p.w / 2 - 5), y: p.y - 220, w: 10, h: 220, period: 2.6, phase: i * .85, mounted: true, support: p, bi: 3 };
                             this.lasers.push(laser);
@@ -775,10 +775,10 @@
                     let prev = L;
                     const nodes = [];
                     for (let i = 0; i < 3; i++) {
-                        prev = T.add({ x: ahead(prev, d, 200 + Math.round(r() * 30), 150), y: prev.y - 100, w: 150, h: 16, thin: true, crumble: !calm, spaceStyle: 2, motif: 'crumble-field' });
+                        prev = T.add({ x: ahead(prev, d, 370 + Math.round(r() * 50), 150), y: prev.y - 100, w: 150, h: 16, thin: true, crumble: !calm, spaceStyle: 2, motif: 'crumble-field' });
                         nodes.push(prev);
                     }
-                    nodes.push(T.add({ x: ahead(prev, d, 170, 240), y: prev.y - 100, w: 240, h: 32, spaceStyle: 1, dock: true, motif: 'crumble-field' }));
+                    nodes.push(T.add({ x: ahead(prev, d, 360, 240), y: prev.y - 100, w: 240, h: 32, spaceStyle: 1, dock: true, motif: 'crumble-field' }));
                     return nodes;
                 },
                 // a cargo lift rides up a shaft beside a rock lane: step off at the top before the asteroids sweep through

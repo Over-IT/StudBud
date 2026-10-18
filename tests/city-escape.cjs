@@ -272,8 +272,22 @@ function reachable(from, target, solids, fps, spring = false, aimX = target.x + 
     }
     return false;
 }
+for (const map of maps) {
+    const minimumGaps = { 'debris-run': 380, 'solar-walk': 340, 'laser-grid': 350, 'crumble-field': 360 };
+    for (const [motif, minimum] of Object.entries(minimumGaps)) {
+        let crossings = 0;
+        for (const chamber of map.challenges) for (let i = 1; i < chamber.nodes.length; i++) {
+            const source = chamber.nodes[i - 1], target = chamber.nodes[i];
+            if (source.motif !== motif || target.motif !== motif) continue;
+            const gap = Math.max(target.x - source.x - source.w, source.x - target.x - target.w);
+            assert.ok(gap >= minimum, `${motif} uses a genuinely long low-gravity gap on seed ${map.s.seed}`);
+            crossings++;
+        }
+        assert.ok(crossings >= 2, `${motif} long jumps remain present rather than being removed by layout retries`);
+    }
+}
 for (const fps of [30, 60, 120]) {
-    for (const map of fps === 60 ? maps : [game]) {
+    for (const map of maps) {
         for (const c of map.challenges) {
             const stage = map.solids.filter(p => p.chamber === c.id);
             const targets = c.nodes;
