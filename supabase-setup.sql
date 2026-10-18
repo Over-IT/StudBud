@@ -578,6 +578,7 @@ language sql
 immutable
 as $$
     with priced(id, price) as (values
+        ('palette_forest', 120), ('palette_sunflower', 150),
         ('palette_ocean', 120), ('palette_sunset', 120), ('palette_violet', 120),
         ('palette_aurora', 160), ('palette_coral', 160), ('palette_midnight', 180),
         ('skin_robot', 150), ('skin_ninja', 180), ('skin_alien', 180), ('skin_ghost', 220), ('skin_lava', 300), ('skin_gold', 400),

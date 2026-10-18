@@ -145,8 +145,8 @@ async function run() {
     assert.equal(state.state.settings.colorScheme, 'studbud', 'new accounts start with the StudBud palette');
     {
         const oldAppearance = app.applyAppearance, oldProfile = app.multiplayerProfile, oldSettings = clone(state.state.settings);
-        const buttons = ['studbud', 'forest', 'ocean', 'violet'].map(scheme => ({
-            dataset: { colorScheme: scheme, ...(['ocean', 'violet'].includes(scheme) ? { shopItem: `palette_${scheme}` } : {}) },
+        const buttons = ['studbud', 'forest', 'ocean', 'violet', 'monochrome', 'sunflower'].map(scheme => ({
+            dataset: { colorScheme: scheme, ...(!['studbud', 'monochrome'].includes(scheme) ? { shopItem: `palette_${scheme}` } : {}) },
             classList: { toggle() {} }, attributes: {}, querySelector: () => null,
             setAttribute(name, value) { this.attributes[name] = value; }
         }));
@@ -162,13 +162,23 @@ async function run() {
         assert.equal(state.get('settings').colorScheme, 'studbud', 'unequipping resets an active premium scheme');
         state.state.settings.colorScheme = 'forest';
         app.renderAppearanceShopSchemes();
-        assert.equal(state.get('settings').colorScheme, 'forest', 'free schemes survive profile refreshes');
-        assert.equal(buttons[1].attributes['aria-pressed'], 'true'); assert.equal(buttons[2].attributes['aria-pressed'], 'false');
-        assert.equal(applied, 2, 'appearance is reapplied only when equipment changes the scheme');
+        assert.equal(state.get('settings').colorScheme, 'studbud', 'formerly free Forest requires a shop unlock');
+        assert.equal(buttons[1].disabled, true); assert.equal(buttons[5].disabled, true);
+        assert.equal(buttons[0].attributes['aria-pressed'], 'true'); assert.equal(buttons[2].attributes['aria-pressed'], 'false');
+        assert.equal(applied, 3, 'appearance is reapplied only when equipment changes the scheme');
+        app.multiplayerProfile.owned_items.push('palette_sunflower');
+        app.multiplayerProfile.equipped_palette = 'palette_sunflower';
+        app.renderAppearanceShopSchemes();
+        assert.equal(state.get('settings').colorScheme, 'sunflower');
+        assert.equal(buttons[5].disabled, false, 'owned Sunflower can be equipped');
+        app.multiplayerProfile.equipped_palette = null;
+        state.state.settings.colorScheme = 'monochrome';
+        app.renderAppearanceShopSchemes();
+        assert.equal(state.get('settings').colorScheme, 'monochrome', 'Black & White stays free on profile refresh');
         const updateShop = app.updateMultiplayerShop;
         const schemeBody = eventSource.slice(eventSource.indexOf('                    const scheme = target.dataset.colorScheme;'),
             eventSource.indexOf("                } else if (action === 'add-quiz')"));
-        sandbox.appearanceTestApp = app; sandbox.appearanceTarget = { dataset: { colorScheme: 'forest' } };
+        sandbox.appearanceTestApp = app; sandbox.appearanceTarget = { dataset: { colorScheme: 'monochrome' } };
         const selectScheme = () => vm.runInContext(`(async function(target) { ${schemeBody} }).call(appearanceTestApp, appearanceTarget)`, context);
         app.multiplayerProfile.equipped_palette = 'palette_ocean'; state.state.settings.colorScheme = 'ocean';
         app.updateMultiplayerShop = async () => { throw new Error('Server unavailable'); };
@@ -182,13 +192,41 @@ async function run() {
             return true;
         };
         await selectScheme();
-        assert.equal(state.get('settings').colorScheme, 'forest'); assert.equal(app.multiplayerProfile.equipped_palette, null);
+        assert.equal(state.get('settings').colorScheme, 'monochrome'); assert.equal(app.multiplayerProfile.equipped_palette, null);
         app.updateMultiplayerShop = updateShop;
         delete sandbox.appearanceTestApp; delete sandbox.appearanceTarget;
         app.applyAppearance = oldAppearance; app.multiplayerProfile = oldProfile; state.state.settings = oldSettings;
         delete sandbox.document.querySelectorAll;
     }
     window.StudBudCloud.user = { user_metadata: { username: 'student' } };
+    {
+        const appearance = vm.runInContext('Object.create(AppOrchestrator.prototype)', context);
+        appearance.ensureSchemeButtons = appearance.syncMixerControls = appearance.syncMixerDrawer = () => {};
+        const oldBody = sandbox.document.body, oldQuery = sandbox.document.querySelectorAll, oldSettings = clone(state.state.settings);
+        const properties = new Map();
+        sandbox.document.body = { dataset: {}, classList: { toggle() {} }, toggleAttribute() {},
+            style: { setProperty: (key, value) => properties.set(key, value), removeProperty: key => properties.delete(key) } };
+        sandbox.document.querySelectorAll = () => [];
+        for (const scheme of ['forest', 'sunflower']) {
+            const item = community.catalog.find(item => item.color === scheme);
+            assert.equal(item.price, scheme === 'forest' ? 300 : 375, 'shop prices include the existing multiplier');
+            state.state.settings = { ...oldSettings, colorScheme: scheme, schemePicked: true };
+            appearance.multiplayerProfile = { owned_items: [] };
+            appearance.applyAppearance();
+            assert.equal(sandbox.document.body.dataset.colorScheme, 'studbud', 'restored unowned paid themes cannot bypass ownership');
+            appearance.multiplayerProfile.owned_items.push(item.id);
+            appearance.applyAppearance();
+            assert.equal(sandbox.document.body.dataset.colorScheme, scheme, 'owned themes apply after restoration');
+            assert.equal(properties.get('--ph'), item.hue);
+        }
+        for (const scheme of ['studbud', 'monochrome']) {
+            appearance.multiplayerProfile = null;
+            state.state.settings = { ...oldSettings, colorScheme: scheme, schemePicked: true };
+            appearance.applyAppearance();
+            assert.equal(sandbox.document.body.dataset.colorScheme, scheme, 'the two free themes need no account or unlock');
+        }
+        sandbox.document.body = oldBody; sandbox.document.querySelectorAll = oldQuery; state.state.settings = oldSettings;
+    }
     state.state.profile.firstName = 'Ada';
     state.state.profile.lastName = 'Lovelace';
     assert.equal(app.multiplayerDisplayName(), 'Ada Lovelace', 'in-app multiplayer names use the saved real name');

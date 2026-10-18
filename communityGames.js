@@ -5,6 +5,8 @@
         constructor() {
             this.guestColors = ['#34d399', '#60a5fa', '#f472b6', '#fbbf24', '#a78bfa', '#f87171', '#2dd4bf', '#fb923c'];
             this.catalog = [
+                { id: 'palette_forest', name: 'Forest', color: 'forest', hue: 135, hue2: 150, price: 120, type: 'palette', description: 'Forest-green colors for your character and app theme' },
+                { id: 'palette_sunflower', name: 'Sunflower', color: 'sunflower', hue: 50, hue2: 55, price: 150, type: 'palette', description: 'Lemon-yellow accents with warm charcoal or cream surfaces for your character and app theme' },
                 { id: 'palette_ocean', name: 'Tidal Glow', color: 'ocean', hue: 205, hue2: 190, price: 120, type: 'palette', description: 'Ocean-blue and turquoise colors for your character and app theme' },
                 { id: 'palette_sunset', name: 'Heatwave', color: 'sunset', hue: 20, hue2: 350, price: 120, type: 'palette', description: 'Warm orange and pink colors for your character and app theme' },
                 { id: 'palette_violet', name: 'Nebula', color: 'violet', hue: 265, hue2: 280, price: 120, type: 'palette', description: 'Violet and purple colors for your character and app theme' },

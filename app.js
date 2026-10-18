@@ -7472,11 +7472,13 @@
             const settings = AppState.get('settings') || {};
             if (settings.gameAudio) window.StudBudSfx?.update(settings.gameAudio);
             const theme = settings.theme === 'light' ? 'light' : 'dark';
-            const knownSchemes = ['studbud', 'forest', 'ocean', 'violet', 'sunset', 'monochrome', 'aurora', 'coral', 'midnight',
-                ...(window.StudBudCommunityGames?.catalog || []).filter(item => item.type === 'palette').map(item => item.color)];
+            const palettes = (window.StudBudCommunityGames?.catalog || []).filter(item => item.type === 'palette');
+            const requestedPalette = palettes.find(item => item.color === settings.colorScheme);
+            const freeScheme = ['studbud', 'monochrome'].includes(settings.colorScheme);
+            const unlocked = requestedPalette && this.multiplayerProfile?.owned_items?.includes(requestedPalette.id);
             // The old black-and-white default moves to the new StudBud palette once; picking a scheme afterwards sticks.
             const migrated = settings.colorScheme === 'monochrome' && !settings.schemePicked;
-            const colorScheme = !migrated && knownSchemes.includes(settings.colorScheme) ? settings.colorScheme : 'studbud';
+            const colorScheme = !migrated && (freeScheme || unlocked) ? settings.colorScheme : 'studbud';
             document.body.classList.toggle('dark-theme', theme === 'dark');
             document.body.classList.toggle('light-theme', theme === 'light');
             document.body.classList.toggle('compact-ui', Boolean(settings.compactUi));

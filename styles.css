@@ -4018,6 +4018,49 @@ body[data-color-scheme="studbud"].light-theme {
 }
 .studbud-swatch { --swatch: linear-gradient(90deg, #8b7bff 0 60%, #2fd6a3 60% 100%); }
 
+body[data-color-scheme="sunflower"].dark-theme {
+    --bg-base: #19180e;
+    --bg-surface: #252315;
+    --bg-glass: #292617;
+    --bg-glass-hover: #37321b;
+    --border-glass: #62572b;
+    --text-primary: #fffbea;
+    --text-secondary: #e0d7ad;
+    --text-muted: #b9ae84;
+    --accent-primary: #facc15;
+    --accent-primary-hover: #fde047;
+    --accent-secondary: #fef08a;
+    --accent-on-primary: #282007;
+    --bg-glow-one: rgba(250, 204, 21, .14);
+    --bg-glow-two: rgba(254, 240, 138, .08);
+}
+body[data-color-scheme="sunflower"].light-theme {
+    --bg-base: #fff9d6;
+    --bg-surface: #fffef0;
+    --bg-glass: #fffef0;
+    --bg-glass-hover: #fff3b0;
+    --border-glass: #d4b94e;
+    --text-primary: #30280b;
+    --text-secondary: #62521b;
+    --text-muted: #756326;
+    --accent-primary: #786000;
+    --accent-primary-hover: #604b00;
+    --accent-secondary: #715a00;
+    --accent-on-primary: #ffffff;
+    --bg-glow-one: rgba(250, 204, 21, .2);
+    --bg-glow-two: rgba(254, 240, 138, .14);
+}
+/* Keep light-mode links dark enough to read, but give the main actions true yellow fills. */
+body[data-color-scheme="sunflower"].light-theme .primary-btn {
+    background: #facc15;
+    color: #282007;
+    box-shadow: 0 var(--edge) 0 #b4960f;
+}
+body[data-color-scheme="sunflower"].light-theme .primary-btn:hover {
+    background: #fde047;
+}
+.sunflower-swatch { --swatch: linear-gradient(90deg, #facc15 0 65%, #fff3b0 65% 100%); }
+
 body {
     font-family: var(--font-main);
     font-weight: 600;

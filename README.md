@@ -1,5 +1,7 @@
 # StudBud
 
+Appearance settings include a **Sunflower** yellow scheme for **375 coins**, separate from the shop's orange-gold Golden Hour palette. It uses lemon-yellow actions with dark labels, warm charcoal surfaces in dark mode, and cream surfaces with readable dark-gold links in light mode. **Only StudBud default and Black & White are free.** Forest costs **300 coins**; all other color schemes require their shop unlock. Prices include the existing 2.5x shop multiplier. Previously saved, unowned premium themes fall back to StudBud until unlocked. Apply the updated `studbud_shop_items()` definition in [`supabase-setup.sql`](./supabase-setup.sql) to enable the two added shop entries; frontend deployment alone cannot enable their purchases.
+
 Profile settings use flat, divider-separated sections instead of nested raised cards. Profile save feedback stays next to Save Profile. Email linking, email verification and email-code sign-in have been removed; accounts use username/password, with existing authenticator protection preserved.
 
 Gameplay WASD reclaims focus from buttons, checkboxes, sliders and selects; actual text/number editing and question/result keyboard navigation remain isolated. The lobby warm-up also accepts WASD after clicking a button. Late joining is hidden for Chess without clearing your preference for other modes. Hosting checks that the server actually saved the option and explicitly warns if the database needs the current setup SQL.

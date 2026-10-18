@@ -98,6 +98,38 @@ assert.match(html, /id="settings-last-name"/);
 assert.match(html, /id="public-show-real-name"/);
 assert.match(html, /<body class="dark-theme" data-color-scheme="studbud">/,
     'the initial page paint uses the StudBud default before app startup');
+{
+    const sunflower = html.match(/<button[^>]*data-color-scheme="sunflower"[\s\S]*?<\/button>/)?.[0];
+    assert.ok(sunflower, 'Sunflower is available in the appearance picker');
+    assert.match(sunflower, /data-shop-item="palette_sunflower"/, 'Sunflower requires its shop unlock');
+    const schemeButtons = [...html.matchAll(/<button[^>]*class="scheme-option"[^>]*>/g)].map(match => match[0]);
+    const free = schemeButtons.filter(button => !button.includes('data-shop-item')).map(button => button.match(/data-color-scheme="([^"]+)"/)[1]);
+    assert.deepEqual(free, ['studbud', 'monochrome'], 'only default and Black & White are free');
+    const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+    const luminance = hex => {
+        const rgb = hex.match(/[a-f\d]{2}/gi).map(value => {
+            const channel = parseInt(value, 16) / 255;
+            return channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4;
+        });
+        return rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722;
+    };
+    const contrast = (a, b) => (Math.max(luminance(a), luminance(b)) + .05) / (Math.min(luminance(a), luminance(b)) + .05);
+    for (const theme of ['dark', 'light']) {
+        const block = css.match(new RegExp(`body\\[data-color-scheme="sunflower"\\]\\.${theme}-theme \\{([^}]+)\\}`))[1];
+        const colors = Object.fromEntries([...block.matchAll(/--([\w-]+): (#[a-f\d]{6});/gi)].map(match => [match[1], match[2]]));
+        for (const background of ['bg-base', 'bg-surface', 'bg-glass', 'bg-glass-hover']) {
+            for (const text of ['text-primary', 'text-secondary', 'text-muted', 'accent-primary', 'accent-secondary']) {
+                assert.ok(contrast(colors[text], colors[background]) >= 4.5, `${theme} ${text} on ${background} meets normal-text contrast`);
+            }
+        }
+        assert.ok(contrast(colors['accent-on-primary'], colors['accent-primary']) >= 4.5, `${theme} selected controls have readable labels`);
+    }
+    const action = css.match(/body\[data-color-scheme="sunflower"\]\.light-theme \.primary-btn \{([^}]+)\}/)[1];
+    const fill = action.match(/background: (#[a-f\d]{6});/i)[1], text = action.match(/color: (#[a-f\d]{6});/i)[1];
+    assert.ok(contrast(fill, text) >= 4.5, 'bright yellow light-mode buttons use dark readable labels');
+    assert.match(sql, /\('palette_sunflower', 150\)/, 'the server includes the yellow theme base price before the standard multiplier');
+    assert.match(sql, /\('palette_forest', 120\)/, 'Forest is a server-priced unlock too');
+}
 assert.match(html, /<span>Hypothetical Grades<\/span>/);
 assert.match(html, /<span>Practice<\/span>/);
 assert.match(html, /data-action="open-singleplayer"/, 'flashcard games link to the full Singleplayer setup');
