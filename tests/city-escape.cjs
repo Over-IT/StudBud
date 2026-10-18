@@ -8,7 +8,7 @@ for (const file of ['multiplayerEngine.js', 'multiplayerGames.js']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), sandbox, { filename: file });
 }
 const A = sandbox.window.StudBudArcade, U = A.util;
-const makeGame = seed => new A.games.skyline({ seed, local: { color: '#fff' }, user: { id: 'test' } });
+const makeGame = seed => new A.games.skyline({ seed, local: { color: '#fff' }, user: { id: 'test' }, setGoal(n) { this.goal = n; } });
 const maps = [];
 const SEEDS = [1, 42, 12345, 67890, 45678, 0xffffffff];
 {
@@ -32,7 +32,14 @@ const SEEDS = [1, 42, 12345, 67890, 45678, 0xffffffff];
         U.moveBody(body, [platform], 1 / 60);
         assert.equal(body.vy, -600, 'designated arrow platforms still allow upward jumps');
     }
-    assert.equal(game.drawJumpThroughMarker, undefined, 'the repeated arrow overlay is removed entirely');
+    let strokes = 0;
+    const markerContext = { save() {}, restore() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() { strokes++; } };
+    for (const platform of game.solids) {
+        strokes = 0;
+        game.drawJumpThroughMarker(markerContext, platform);
+        const marked = (platform.oneway || platform.jt) && !platform.stair && !platform.fireEscape && !platform.factoryStep && !platform.off;
+        assert.equal(strokes, marked ? 1 : 0, 'only active non-stair jump-through platforms get a single arrow');
+    }
 }
 {
     const game = makeGame(42);

@@ -7328,7 +7328,7 @@
             else bots.forEach((bot, i) => this.stepAmbientBot(demo, bot, i, dt));
             for (const bot of bots) {
                 if (mode === 'skyline') {
-                    bot.goal = Math.max(bot.goal || 0, Math.round(Math.max(0, -(bot.y + bot.h)) / 40));
+                    bot.goal = Math.round(Math.max(0, -(bot.y + bot.h)) / 40);
                     bot.score = bot.goal;
                 } else if (mode === 'duel') {
                     bot.goal = Math.floor(bot.hillSecs || 0);

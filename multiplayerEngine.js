@@ -1108,7 +1108,7 @@
                 else if (target.classList.contains('mpg-hud-toggle')) {
                     this.setHudCollapsed(!this.overlay.classList.contains('hud-collapsed'));
                 }
-                else if (target.classList.contains('mpg-checkpoint') && this.mode === 'skyline' && !this.over && !this.question && !this.countdown && !this.paused) this.game.returnToCheckpoint();
+                else if (target.classList.contains('mpg-checkpoint') && this.mode === 'skyline' && !this.over && !this.question && this.countdown <= 0 && !this.paused) this.game.returnToCheckpoint();
                 else if (target.classList.contains('mpg-test-pause') && this.testing) {
                     if (this.paused) {
                         const elapsed = Date.now() - this.testPauseAt;

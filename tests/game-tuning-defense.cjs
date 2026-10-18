@@ -27,8 +27,9 @@ const A = sandbox.window.StudBudArcade;
         moveTo: (x, y) => lines.push(['move', x, y]), lineTo: (x, y) => lines.push(['line', x, y]) };
     const platform = { x: 100, y: 200, w: 160, h: 14, oneway: true, cityKit: 'scaffold' };
     marker.call({}, markerCtx, platform);
-    assert.deepEqual(lines[0], ['move', 180, 191], 'one centered arrow marks a jump-through scaffold');
-    assert.deepEqual(lines[1], ['line', 180, 177], 'arrow points up through the deck');
+    assert.deepEqual(lines[0], ['move', 180, 233], 'one centered arrow sits below a jump-through scaffold');
+    assert.deepEqual(lines[1], ['line', 180, 223], 'small arrow points up toward the deck');
+    assert.equal(markerCtx.strokeStyle, '#7dd3fc', 'jump-through markers are light blue');
     for (const override of [{ oneway: false }, { stair: true }, { fireEscape: true }, { factoryStep: true }, { off: true }]) {
         lines.length = 0;
         marker.call({}, markerCtx, { ...platform, ...override });
@@ -113,7 +114,21 @@ function session(mode, id = 'host', ids = ['host', 'guest', 'ally', 'rival']) {
         assert.equal(g.res.value, energy, 'checkpoint return neither grants nor drains energy');
         g.returnToCheckpoint();
         assert.equal(g.me.x, g.cp.x, 'button and keyboard share immediate recovery, including during flight');
+        assert.equal(s.score, Math.round(-(g.me.y + g.me.h) / 40), 'checkpoint recovery updates current score immediately');
+        assert.equal(s.goal, s.score, 'leaderboard metric matches current height after recovery');
     }
+    g.maxH = 20000;
+    Object.assign(g.me, { x: 1000, y: -4000 - g.me.h, vx: 0, vy: 0 });
+    s.testing = true; s.testFlight = true;
+    g.updatePlayer(0);
+    assert.equal(s.score, 100, 'flight uses current height rather than peak height');
+    assert.equal(s.goal, 100);
+    s.testFlight = false; g.solids = []; g.trapChecks = false;
+    Object.assign(g.me, { y: -2000 - g.me.h, onGround: false, ground: null });
+    g.updatePlayer(0);
+    assert.equal(s.score, 50, 'falling lowers current score');
+    assert.equal(s.goal, 50, 'falling lowers leaderboard rank metric');
+    assert.equal(g.maxH, 20000, 'personal best height remains available separately');
     const lines = [];
     let point;
     const frameCtx = new Proxy({

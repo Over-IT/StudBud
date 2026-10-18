@@ -1261,6 +1261,13 @@
             this.jumpPulse = 0; this.airJumpPulse = 0; this.landingPose = 0; this.dashPose = 0;
             this.snapCam = true; this.state = 0;
             this.stuckT = 0; this.stuckX = me.x; this.stuckY = me.y;
+            this.updateHeightScore();
+        }
+
+        updateHeightScore() {
+            const height = Math.max(0, -(this.me.y + this.me.h));
+            this.s.score = Math.round(height / 40);
+            this.s.setGoal(this.s.score);
         }
 
         // Which surfaces can still reach the summit, using generous jump envelopes (jump + air jump, springs, wall-jump walls,
@@ -1475,7 +1482,7 @@
             this.airJumps = 1; this.carry = null; this.stuckT = 0; this.snapCam = true; this.camInit = false;
             this.maxH = -this.cp.y; this.biomeSeen = index;
             this.backdropArea = index; this.backdropPosition = index;
-            this.s.setGoal(Math.round(this.maxH / 40)); this.s.toast(`Testing ${SKY_BIOMES[SKY_ROUTE[index]].name}`, '#67e8f9');
+            this.updateHeightScore(); this.s.toast(`Testing ${SKY_BIOMES[SKY_ROUTE[index]].name}`, '#67e8f9');
             return true;
         }
 
@@ -1552,6 +1559,7 @@
                 me.ground = null; me.onGround = false;
                 this.dead = 0; this.dash = 0; this.buffer = 0; this.kick = 0; this.wallPose = 0;
                 this.maxH = Math.max(this.maxH, -(me.y + me.h));
+                this.updateHeightScore();
                 this.captureCheckpoint();
                 this.state = 0;
                 this.particles.update(dt, 600);
@@ -1714,8 +1722,7 @@
                 }
             }
             this.maxH = Math.max(this.maxH, -(me.y + me.h));
-            s.score = Math.round(this.maxH / 40);
-            s.setGoal(Math.round(this.maxH / 40));
+            this.updateHeightScore();
             const bi = Math.min(SKY_ROUTE.length - 1, Math.floor(this.biomeProgress(this.maxH)));
             if (bi > this.biomeSeen) { this.biomeSeen = bi; s.toast(`Entering ${SKY_BIOMES[SKY_ROUTE[bi]].name}`, '#fbbf24'); s.sfx('powerup'); }
             this.state = this.dash > 0 ? 3 : !me.onGround ? 2 : Math.abs(me.vx) > 40 ? 1 : 0;
@@ -1850,13 +1857,13 @@
 
         drawJumpThroughMarker(ctx, p) {
             if (!(p.oneway || p.jt) || p.stair || p.fireEscape || p.factoryStep || p.off) return;
-            const x = p.x + p.w / 2, y = p.y - 9;
+            const x = p.x + p.w / 2, y = p.y + p.h + 19;
             ctx.save();
-            ctx.strokeStyle = 'rgba(254,243,199,.85)';
-            ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+            ctx.strokeStyle = '#7dd3fc';
+            ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
             ctx.beginPath();
-            ctx.moveTo(x, y); ctx.lineTo(x, y - 14);
-            ctx.moveTo(x - 5, y - 9); ctx.lineTo(x, y - 14); ctx.lineTo(x + 5, y - 9);
+            ctx.moveTo(x, y); ctx.lineTo(x, y - 10);
+            ctx.moveTo(x - 4, y - 6); ctx.lineTo(x, y - 10); ctx.lineTo(x + 4, y - 6);
             ctx.stroke();
             ctx.restore();
         }

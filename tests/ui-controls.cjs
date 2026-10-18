@@ -366,6 +366,18 @@ async function checkPracticeGrading() {
         session.bind();
         session.mode = 'skyline';
         session.game = { cp: { id: 2 }, testTeleport: index => { session.destination = index; } };
+        let returns = 0;
+        session.game.returnToCheckpoint = () => returns++;
+        const checkpoint = new Element(); checkpoint.classList.add('mpg-checkpoint');
+        const returnClick = () => session.overlay.handlers.click[0]({ target: { closest: () => checkpoint } });
+        session.countdown = -.013;
+        returnClick();
+        assert.equal(returns, 1, 'checkpoint button works after countdown overshoots zero');
+        for (const [flag, blocked] of [['countdown', 1], ['question', {}], ['paused', true], ['over', true]]) {
+            const previous = session[flag];
+            session[flag] = blocked; returnClick(); session[flag] = previous;
+            assert.equal(returns, 1, `${flag} still blocks checkpoint actions`);
+        }
         const select = { dataset: { testBiome: '' }, value: '0' };
         session.overlay.querySelector = selector => selector === '[data-test-biome]' ? select : null;
         const teleport = new Element(); teleport.dataset.testAction = 'checkpoint';
