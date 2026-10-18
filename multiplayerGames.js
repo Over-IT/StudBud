@@ -1874,21 +1874,16 @@
 
         mechanicSignBounds(sign) {
             const p = sign.platform, w = 340, h = 140;
-            return { x: p.x + Math.max(0, p.w - w - 130), y: p.y - h - 48, w, h };
+            return { x: p.x + Math.max(0, p.w - w - 130), y: p.y + 28, w, h };
         }
 
         drawMechanicSign(ctx, sign) {
-            const { x, y, w, h } = this.mechanicSignBounds(sign), base = sign.platform.y;
+            const { x, y, w, h } = this.mechanicSignBounds(sign);
             const accent = '#f472b6';
             ctx.save();
-            ctx.fillStyle = '#475569';
-            for (const sx of [x + 24, x + w - 30]) {
-                ctx.fillRect(sx, y + h, 6, base - y - h);
-                ctx.fillRect(sx - 7, base - 5, 20, 5);
-            }
-            ctx.strokeStyle = '#64748b'; ctx.lineWidth = 3; ctx.beginPath();
-            ctx.moveTo(x + 27, y + h); ctx.lineTo(x + w - 27, base - 5);
-            ctx.moveTo(x + w - 27, y + h); ctx.lineTo(x + 27, base - 5); ctx.stroke();
+            ctx.fillStyle = 'rgba(2,6,23,.45)'; ctx.fillRect(x + 3, y + 4, w + 10, h + 10);
+            ctx.fillStyle = '#64748b';
+            for (const sx of [x - 10, x + w - 2]) for (const sy of [y + 14, y + h - 25]) ctx.fillRect(sx, sy, 12, 12);
             ctx.fillStyle = '#334155'; ctx.fillRect(x - 5, y - 5, w + 10, h + 10);
             ctx.fillStyle = '#312e81';
             ctx.fillRect(x, y, w, h);
@@ -3240,7 +3235,7 @@
             if (!s.preview) for (const sign of this.mechanicSigns) {
                 const bounds = this.mechanicSignBounds(sign);
                 if (bounds.x + bounds.w + 5 >= left && bounds.x - 5 <= right
-                    && sign.platform.y >= top && bounds.y - 12 <= bottom) this.drawMechanicSign(ctx, sign);
+                    && bounds.y + bounds.h + 14 >= top && bounds.y - 12 <= bottom) this.drawMechanicSign(ctx, sign);
             }
             for (const c of this.checkpoints) {
                 if (c.x > right || c.x < left || !seen(c.y)) continue;

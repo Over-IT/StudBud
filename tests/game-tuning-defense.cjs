@@ -173,10 +173,18 @@ function session(mode, id = 'host', ids = ['host', 'guest', 'ally', 'rival']) {
         const wall = level.mechanicSigns.find(sign => sign.kind === 'scale');
         const crossing = level.cityCrossings.find(crossing => crossing.kind === 'scale');
         const bounds = level.mechanicSignBounds(wall);
-        assert.equal(wall.platform, crossing.from, 'wall-hop billboard is on the entrance rooftop');
+        assert.equal(wall.platform, crossing.from, 'wall-hop display is attached to the entrance building');
         assert.ok(bounds.x >= crossing.from.x && bounds.x + bounds.w <= crossing.from.x + crossing.from.w - 110,
             'billboard remains beside, not across, the wall-hop shaft');
         assert.ok(bounds.h >= 140 && bounds.w >= 340, 'city instructions use a full-size scenery billboard');
+        assert.ok(bounds.y - 12 > crossing.from.y, 'entire display and its lighting stay below the playable roofline');
+        const wallRects = [];
+        const mountCtx = new Proxy({ fillRect: (...args) => wallRects.push(args) },
+            { get: (target, key) => target[key] || ctx[key] });
+        level.drawMechanicSign(mountCtx, wall);
+        const mounting = wallRects.slice(0, 7);
+        assert.ok(mounting.every(([, y, , h]) => y >= crossing.from.y && h > 0),
+            'wall mounting never draws roof stilts or negative-height supports');
         texts.length = 0;
         level.drawMechanicSign(ctx, wall);
         assert.deepEqual(texts, ['A', 'D', 'SPACE'], 'visual demo has only control keycaps, not explanatory text');
