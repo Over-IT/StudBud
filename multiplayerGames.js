@@ -1246,8 +1246,20 @@
         }
 
         returnToCheckpoint() {
-            if (this.dead > 0 || this.finished) return;
-            this.stuckT = 0; this.hurt(true, .18);
+            if (this.finished) return;
+            this.restoreCheckpoint();
+        }
+
+        restoreCheckpoint() {
+            const me = this.me, spot = this.cp;
+            me.x = spot.x; me.y = spot.y - me.h - 2; me.vx = 0; me.vy = 0;
+            me.onGround = false; me.ground = null;
+            this.dead = 0; this.dash = 0; this.dashCd = 0; this.kick = 0;
+            this.wallDir = 0; this.wallPose = 0; this.airJumps = 1; this.sprung = false;
+            this.buffer = 0; this.coyote = 0; this.boost = 0; this.slow = 0;
+            this.jumpPulse = 0; this.airJumpPulse = 0; this.landingPose = 0; this.dashPose = 0;
+            this.snapCam = true; this.state = 0;
+            this.stuckT = 0; this.stuckX = me.x; this.stuckY = me.y;
         }
 
         // Which surfaces can still reach the summit, using generous jump envelopes (jump + air jump, springs, wall-jump walls,
@@ -1320,13 +1332,20 @@
             return index + clamp((height - start) / Math.max(1, end - start), 0, 1);
         }
 
-        backdropBlend(viewTop, viewHeight) {
-            const height = -(viewTop + Math.min(120, viewHeight * .18));
-            let to = 0;
-            for (let i = 1; i < this.checkpoints.length; i++) if (height >= -this.checkpoints[i].y) to = i;
-            const distance = height + this.checkpoints[to].y;
-            const u = to === 0 ? 1 : clamp(distance / Math.max(640, viewHeight * 1.1), 0, 1);
-            return { from: SKY_ROUTE[Math.max(0, to - 1)], to: SKY_ROUTE[to], amount: u * u * (3 - 2 * u) };
+        updateBackdrop(dt) {
+            const ground = this.me.onGround ? this.me.ground : null;
+            const area = ground && !ground.off ? SKY_ROUTE.indexOf(ground.bi) : -1;
+            if (area >= 0) this.backdropArea = area;
+            const target = this.backdropArea || 0;
+            const current = this.backdropPosition || 0;
+            this.backdropPosition = current + clamp(target - current, -dt / .9, dt / .9);
+        }
+
+        backdropBlend() {
+            const position = this.backdropPosition || 0;
+            const from = Math.floor(position), to = Math.min(SKY_ROUTE.length - 1, Math.ceil(position));
+            const u = position - from;
+            return { from: SKY_ROUTE[from], to: SKY_ROUTE[to], amount: u * u * (3 - 2 * u) };
         }
 
         captureCheckpoint() {
@@ -1454,6 +1473,7 @@
             this.dead = 0; this.finished = false; this.dash = 0; this.kick = 0; this.buffer = 0; this.coyote = 0;
             this.airJumps = 1; this.carry = null; this.stuckT = 0; this.snapCam = true; this.camInit = false;
             this.maxH = -this.cp.y; this.biomeSeen = index;
+            this.backdropArea = index; this.backdropPosition = index;
             this.s.setGoal(Math.round(this.maxH / 40)); this.s.toast(`Testing ${SKY_BIOMES[SKY_ROUTE[index]].name}`, '#67e8f9');
             return true;
         }
@@ -1505,6 +1525,7 @@
             for (const b of this.boxes) if (b.t > 0) b.t -= hazardDt;
 
             this.updatePlayer(dt);
+            this.updateBackdrop(dt);
             if (!s.preview) {
                 const biome = SKY_ROUTE[Math.min(SKY_ROUTE.length - 1, Math.floor(this.biomeProgress(Math.max(0, -(me.y + me.h)))))];
                 window.StudBudSfx?.setMusicBiome('skyline', biome);
@@ -1519,6 +1540,7 @@
             const s = this.s, me = this.me;
             const clock = this.hazardClock || 0;
             const hazardDt = s.testing === true && s.testFreezeHazards === true ? 0 : dt;
+            if (!this.finished && s.pressed('KeyR')) { this.returnToCheckpoint(); return; }
             if (s.testing === true && s.testFlight === true) {
                 const configured = Number.isFinite(s.testFlySpeed) ? clamp(s.testFlySpeed, 100, 3000) : 600;
                 const speed = configured * (s.down('ShiftLeft', 'ShiftRight') ? 11 / 6 : 1);
@@ -1538,11 +1560,7 @@
             if (this.dead > 0) {
                 this.dead -= dt;
                 if (this.dead <= 0) {
-                    const spot = this.cp;
-                    me.x = spot.x; me.y = spot.y - me.h - 2; me.vx = 0; me.vy = 0; this.dash = 0; this.kick = 0;
-                    this.snapCam = true;
-                    this.stuckT = 0; this.stuckX = me.x; this.stuckY = me.y;
-                    me.onGround = false; me.ground = null; this.airJumps = 1; this.buffer = 0;
+                    this.restoreCheckpoint();
                 }
                 this.state = 4;
                 this.particles.update(dt, 600);
@@ -1560,7 +1578,6 @@
                 if (idle && !this.stuckHinted) { this.stuckHinted = true; s.toast('Stuck? Press R to return to your checkpoint', '#fbbf24'); }
                 if (this.stuckT < 5) this.stuckHinted = false;
                 if (this.recoverIfTrapped()) return;
-                if (s.pressed('KeyR')) { this.returnToCheckpoint(); return; }
             }
             const exhausted = !this.finished && s.game.res.value < 0.5;
             if (exhausted && !this.wasExhausted) s.toast('Out of energy — no control! Press Q for a question', '#f87171');
@@ -2411,24 +2428,12 @@
             const y0 = c.top - 220, y1 = c.bottom + 120, upper = Math.max(y0, top - 40), lower = Math.min(y1, bottom + 40);
             if (upper >= lower) return;
             ctx.save();
-            const cols = c.columns, low = this.s.graphics?.low || this.s.lowDetail;
-            ctx.strokeStyle = '#4b4564'; ctx.lineWidth = 2; ctx.beginPath();
-            for (let i = 0; i + 1 < cols.length; i++) {
-                const a = cols[i] + 13, b = cols[i + 1] - 13;
-                if (b < left || a > right) continue;
-                for (let y = y0 + 60; y < y1 - 40; y += 340) {
-                    const yb = Math.min(y + 340, y1 - 40);
-                    if (yb < upper || y > lower) continue;
-                    ctx.moveTo(a, y); ctx.lineTo(b, yb); ctx.moveTo(b, y); ctx.lineTo(a, yb);
-                    ctx.moveTo(a, yb); ctx.lineTo(b, yb);
-                }
-            }
-            ctx.stroke();
+            const cols = c.columns;
             for (const x of [cols[0], cols[cols.length - 1]]) {
                 if (x + 17 < left || x - 17 > right) continue;
-                ctx.strokeStyle = '#4b4564'; ctx.lineWidth = 3; ctx.beginPath();
-                ctx.moveTo(x - 5, upper); ctx.lineTo(x - 5, lower);
-                ctx.moveTo(x + 5, upper); ctx.lineTo(x + 5, lower); ctx.stroke();
+                ctx.fillStyle = '#263340'; ctx.fillRect(x - 10, upper, 20, lower - upper);
+                ctx.fillStyle = '#3b4958'; ctx.fillRect(x - 6, upper, 3, lower - upper);
+                ctx.fillRect(x + 5, upper, 3, lower - upper);
             }
             if (y0 > upper - 30 && y0 < lower + 30 && cols.length > 1) {
                 const a = cols[0] - 20, b = cols[cols.length - 1] + 20;
@@ -2933,7 +2938,7 @@
             if (!this.camInit || this.dead > 0.9 || this.snapCam) { this.cam.x = targetX; this.cam.y = targetY; if (!this.camInit) this.camStart = targetY; this.camInit = true; this.snapCam = false; }
             this.cam.x += (targetX - this.cam.x) * k;
             this.cam.y += (targetY - this.cam.y) * k * 0.9;
-            const blend = this.backdropBlend(this.cam.y, viewH);
+            const blend = this.backdropBlend();
             climbBackdrop(ctx, w, h, this.cam, this.camStart, blend, this.hazardAnim ?? this.anim, !!s.graphics?.low);
             ctx.save();
             ctx.scale(zoom, zoom);
@@ -3870,10 +3875,10 @@
 
         weaponInfo(type = this.weapon) {
             return {
-                blaster: { name: 'Blaster', cd: 0.16, speed: 950, dmg: 25, life: 0.9, color: '#67e8f9', pellets: 1, cost: 1 },
-                shotgun: { name: 'Scattergun', cd: 0.55, speed: 820, dmg: 16, life: 0.48, color: '#fbbf24', pellets: 5, cost: 3 },
-                rapid: { name: 'Rapid pulse', cd: 0.065, speed: 1050, dmg: 16, life: 0.85, color: '#a78bfa', pellets: 1, cost: 1 },
-                rail: { name: 'Rail sniper', cd: 0.75, speed: 1900, dmg: 85, life: 0.85, color: '#f472b6', pellets: 1, cost: 4 }
+                blaster: { name: 'Blaster', sound: 'laserBlaster', cd: 0.16, speed: 950, dmg: 25, life: 0.9, color: '#67e8f9', pellets: 1, cost: 1 },
+                shotgun: { name: 'Scattergun', sound: 'laserScatter', cd: 0.55, speed: 820, dmg: 16, life: 0.48, color: '#fbbf24', pellets: 5, cost: 3 },
+                rapid: { name: 'Rapid pulse', sound: 'laserRapid', cd: 0.065, speed: 1050, dmg: 16, life: 0.85, color: '#a78bfa', pellets: 1, cost: 1 },
+                rail: { name: 'Rail sniper', sound: 'laserRail', cd: 0.75, speed: 1900, dmg: 85, life: 0.85, color: '#f472b6', pellets: 1, cost: 4 }
             }[type] || this.weaponInfo('blaster');
         }
 
@@ -3935,7 +3940,7 @@
                 const weapon = this.weaponInfo();
                 const cd = this.overdrive > 0 ? weapon.cd * 0.55 : weapon.cd;
                 if ((s.mouse.down || s.down('KeyF')) && this.fireCd <= 0 && this.jam <= 0 && s.spend(weapon.cost)) {
-                    this.fireCd = cd; s.sfx('shoot', 40);
+                    this.fireCd = cd; s.sfx(weapon.sound, 30);
                     for (let i = 0; i < weapon.pellets; i++) {
                         const spread = weapon.pellets > 1 ? (i - 2) * 0.12 : (Math.random() - 0.5) * (this.weapon === 'rail' ? 0 : 0.04);
                         const angle = me.aim + spread;
@@ -4069,6 +4074,8 @@
             const s = this.s;
             if (ev.k === 'sh') {
                 const weapon = this.weaponInfo(ev.w || 'blaster');
+                const distance = Math.hypot(ev.x - this.me.x, ev.y - this.me.y);
+                if (from.id !== s.user.id && distance < 800) s.sfx(weapon.sound, 60, .35 * (1 - distance / 800) ** 2);
                 const speed = Number.isFinite(ev.v) ? clamp(ev.v, 300, 1900) : 950;
                 const dmg = Number.isFinite(ev.dmg) ? clamp(ev.dmg, 1, 85) : 20;
                 const life = Number.isFinite(ev.life) ? clamp(ev.life, 0.1, 1.2) : 0.9;

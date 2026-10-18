@@ -394,6 +394,7 @@ console.log('Small-lip step-ups and ceiling corner correction passed.');
     g.hurt(true);
     assert.equal(g.deaths, 2, 'manual checkpoint reset still works while invincible');
     s.testFlight = true; s.startedAt = Date.now(); s.t = 0;
+    s.pressed = () => false;
     s.axis = () => ({ x: 1, y: -1 });
     s.down = (...codes) => codes.includes('KeyW');
     const before = { x: g.me.x, y: g.me.y };
@@ -691,7 +692,9 @@ for (const fps of [30, 60, 120]) {
     g.dead = 0;
     const checkpoint = g.cp;
     g.returnToCheckpoint();
-    assert.equal(g.dead, .18, 'manual checkpoint recovery uses the short respawn');
+    assert.equal(g.dead, 0, 'manual checkpoint recovery is immediate');
+    assert.equal(g.me.x, checkpoint.x);
+    assert.equal(g.me.y, checkpoint.y - g.me.h - 2);
     for (let frame = 0; frame < Math.ceil(fps / 4); frame++) g.updatePlayer(1 / fps);
     assert.ok(g.dead <= 0 && Math.abs(g.me.y + g.me.h - checkpoint.y) < 100, 'manual recovery returns control at the saved checkpoint within 250ms');
     assert.equal(g.cp, checkpoint);

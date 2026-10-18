@@ -34,6 +34,37 @@ function openRiver() {
     Object.assign(g.me, { x: 800, y: g.H / 2, vx: 0, vy: 0 });
     return s;
 }
+{
+    const create = sandbox.document.createElement, originalWarn = sandbox.console.warn;
+    const warnings = [], layers = [];
+    sandbox.console = { ...console, warn: message => warnings.push(message) };
+    sandbox.document.createElement = () => {
+        const handlers = new Map();
+        const layer = { handlers, lost: false, getContext: () => new Proxy({ ...context, isContextLost: () => layer.lost }, { get: (target, key) => target[key] || noop }),
+            addEventListener: (name, handler) => handlers.set(name, handler) };
+        layers.push(layer); return layer;
+    };
+    try {
+        const s = session('market'), g = s.game;
+        s.preview = true; g.draw(context, 900, 270);
+        const first = g.cityLayer;
+        g.draw(context, 900, 270);
+        assert.equal(g.cityLayer, first, 'ordinary preview frames reuse the town art');
+        let prevented = false;
+        first.handlers.get('contextlost')({ preventDefault() { prevented = true; } });
+        assert.ok(prevented); assert.equal(g.cityLayer, null);
+        assert.equal(warnings.length, 1, 'cache loss is surfaced explicitly');
+        g.draw(context, 900, 270);
+        assert.notEqual(g.cityLayer, first, 'a lost town layer is rebuilt instead of remaining a blank map');
+        const restored = g.cityLayer;
+        restored.handlers.get('contextrestored')();
+        g.draw(context, 900, 270);
+        assert.notEqual(g.cityLayer, restored, 'restoration invalidates cleared cached pixels too');
+        const missedEvent = g.cityLayer; missedEvent.lost = true;
+        g.draw(context, 900, 270);
+        assert.notEqual(g.cityLayer, missedEvent, 'drawing detects context loss even before its event arrives');
+    } finally { sandbox.document.createElement = create; sandbox.console = { ...console, warn: originalWarn }; }
+}
 assert.equal(A.games.sports, undefined, 'Soccer is not registered');
 const costs = A.ENERGY_COSTS;
 assert.equal(session('miner').game.res.value, 40);
@@ -69,7 +100,7 @@ for (const fps of [30, 60, 120]) {
     assert.equal(g.me.vx, 0, 'pale bank water is sheltered');
     g.me.y = g.H / 2; g.me.x = g.surgeAt(32).x;
     for (let i = 0; i < fps / 4; i++) g.update(1 / fps);
-    assert.ok(g.me.vx > 100 && g.me.vx <= 304, 'wave has smooth, bounded forward momentum');
+    assert.ok(g.me.vx > 100 && g.me.vx <= (g.W + 500) / 9 + 24 + 180, 'stronger wave carry has smooth, bounded forward momentum');
     Object.assign(g.me, { x: g.W - 10, y: g.bank + 1, vx: 700, vy: -700 });
     g.update(1 / fps);
     assert.ok(g.me.x >= g.W - 100, 'river edges do not teleport boats across the map');

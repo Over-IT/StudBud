@@ -41,7 +41,34 @@ const sandbox = {
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'sfx.js'), 'utf8'), sandbox);
 const sfx = sandbox.window.StudBudSfx;
+{
+    const tone = sfx.tone, noise = sfx.noise, signatures = new Set();
+    try {
+        sfx.noise = () => assert.fail('laser weapons should not use noisy gunshot bursts');
+        for (const name of ['laserBlaster', 'laserScatter', 'laserRapid', 'laserRail']) {
+            const layers = [];
+            sfx.tone = (...args) => layers.push(args);
+            now += 1000; sfx.play(name, 'game', 0);
+            assert.ok(layers.length > 0 && layers.every(args => args[1] > args[2]), 'each weapon produces descending laser sweeps');
+            signatures.add(JSON.stringify(layers));
+        }
+        assert.equal(signatures.size, 4, 'every weapon has its own firing signature');
+    } finally { sfx.tone = tone; sfx.noise = noise; }
+}
+{
+    const tones = [], tone = sfx.tone;
+    sfx.tone = (...args) => tones.push(args);
+    try {
+        for (const name of ['quartzBreak', 'amethystBreak', 'emeraldBreak', 'sapphireBreak', 'rubyBreak', 'diamondBreak']) {
+            now += 1000; sfx.play(name, 'game', 0);
+        }
+        assert.equal(tones.length, 6, 'each crystal break uses one accent, not a jingle');
+        assert.equal(new Set(tones.map(args => args[1])).size, 6, 'all six crystals have distinct pitches');
+        assert.ok(tones.every(args => args[3] <= .12 && args[4] <= .035), 'crystal accents stay brief and quiet');
+    } finally { sfx.tone = tone; }
+}
 assert.ok(!documentHandlers.has('keydown') && !documentHandlers.has('input'), 'typing and slider movement never generate automatic ticking effects');
+assert.ok(!documentHandlers.has('click') && !documentHandlers.has('change'), 'ordinary buttons, tabs and menus never add automatic UI effects');
 let arrangement;
 const musicStep = sfx.musicStep.bind(sfx);
 sfx.musicStep = (style, ...args) => { arrangement = style; return musicStep(style, ...args); };
@@ -86,6 +113,13 @@ assert.equal(new Set(arrangements).size, Object.keys(styles).length, 'games use 
                 sfx.pumpMusic();
                 if (mode === 'miner' || (mode === 'skyline' && biome === 3)) {
                     assert.ok(arrangement.quiet && arrangement.bpm <= 80, 'all Mining and Space playlist choices remain calm');
+                }
+                const energetic = ['duel', 'shooter', 'sports', 'frenzy', 'rush', 'survival', 'defense'].includes(mode)
+                    || (mode === 'skyline' && biome !== 3);
+                if (energetic) {
+                    const minimum = mode === 'defense' || mode === 'survival' ? 116 : 120;
+                    assert.ok(arrangement.drive && !arrangement.quiet && arrangement.bpm >= minimum,
+                        `${mode}/${biome}: every randomized playlist choice keeps an energetic pace`);
                 }
             }
             assert.ok(pool.size >= 2, `${mode} has multiple usable tracks`);
@@ -154,8 +188,7 @@ sfx.acousticNote = (...args) => { notes.push([args[0], args[1], args[2], args[4]
             assert.ok(!notes.some(note => note[0] === 170 && note[3] === 'marimba'), 'songs never add the wooden ticking backbeat');
             sfx.endMusic();
         }
-        assert.ok(percussion.length > 0);
-        assert.ok(percussion.every(([, duration, volume]) => duration >= .07 && volume <= .022), 'background percussion uses softer, less abrupt noise rather than sharp ticks');
+        assert.equal(percussion.length, 0, 'songs contain no extra snare or high-hat ticking layer');
     } finally {
         sfx.musicNoise = musicNoise;
     }
@@ -278,13 +311,13 @@ const jumps = new Map();
         sfx.noise = noise; sfx.tone = tone; sfx.chime = chime;
     }
 }
-for (const [name, key, duration] of [['jump', 'ground', .17], ['doubleJump', 'air', .21]]) {
+for (const [name, key, duration] of [['jump', 'ground', .12], ['doubleJump', 'air', .15]]) {
     now += 1000; notes.length = 0; sfx.play(name, 'game');
     const buffer = sfx.jumpBuffers.get(key), samples = buffer.getChannelData(0);
     assert.equal(notes.length, 0, 'jump uses a dedicated hop rather than a wooden musical note');
     assert.equal(samples.length, Math.floor(sfx.ctx.sampleRate * duration));
     assert.equal(samples[0], 0, 'hop starts smoothly without a click');
-    assert.ok(samples.every(value => Number.isFinite(value) && Math.abs(value) < .3), 'hop stays short and bounded');
+    assert.ok(samples.every(value => Number.isFinite(value) && Math.abs(value) < .12), 'repeated hops stay short and quiet');
     const rms = values => Math.sqrt(values.reduce((sum, value) => sum + value * value, 0) / values.length);
     assert.ok(rms(samples.slice(100, 400)) > rms(samples.slice(-200)) * 10, 'hop fades out rather than ringing like a chime');
     const crossings = (start, end) => {
@@ -292,7 +325,7 @@ for (const [name, key, duration] of [['jump', 'ground', .17], ['doubleJump', 'ai
         for (let i = start + 1; i < end; i++) if (samples[i - 1] < 0 && samples[i] >= 0) count++;
         return count;
     };
-    assert.ok(crossings(600, 1000) > crossings(80, 480), 'hop rises in pitch to convey lift');
+    assert.ok(crossings(450, 750) > crossings(80, 380), 'hop rises in pitch to convey lift');
     now += 1000; sfx.play(name, 'game');
     assert.equal(sfx.jumpBuffers.get(key), buffer, 'repeated jumps reuse the same consistent hop');
     jumps.set(name, JSON.stringify(Array.from(samples)));

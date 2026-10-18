@@ -56,6 +56,32 @@ function session(mode, id = 'host', ids = ['host', 'guest', 'ally', 'rival']) {
     s.game = new A.games[mode](s);
     return s;
 }
+{
+    const s = session('skyline'), g = s.game;
+    for (const flight of [false, true]) {
+        s.testing = flight; s.testFlight = flight; s.testInvincible = flight;
+        g.cp = g.checkpoints[1];
+        Object.assign(g.me, { x: 1, y: 300, vx: 400, vy: 900 });
+        Object.assign(g, { dead: .8, dash: .15, kick: .2, slow: 2, boost: 3, buffer: .1, sprung: true });
+        const deaths = g.deaths, energy = g.res.value;
+        s.taps.add('KeyR'); g.updatePlayer(1 / 60); s.taps.clear();
+        assert.equal(g.me.x, g.cp.x); assert.equal(g.me.y, g.cp.y - g.me.h - 2);
+        assert.equal(g.dead, 0); assert.equal(g.dash, 0); assert.equal(g.kick, 0); assert.equal(g.slow, 0);
+        assert.equal(g.me.vx, 0); assert.equal(g.me.vy, 0);
+        assert.equal(g.deaths, deaths, 'manual return is recovery, not a hazard death');
+        assert.equal(g.res.value, energy, 'checkpoint return neither grants nor drains energy');
+        g.returnToCheckpoint();
+        assert.equal(g.me.x, g.cp.x, 'button and keyboard share immediate recovery, including during flight');
+    }
+    const lines = [];
+    let point;
+    const frameCtx = new Proxy({
+        moveTo(x, y) { point = [x, y]; },
+        lineTo(x, y) { lines.push([point, [x, y]]); point = [x, y]; }
+    }, { get: (target, key) => target[key] || noop });
+    g.drawFactoryFrame(frameCtx, { top: 0, bottom: 1200, columns: [0, 500, 1000], id: -1 }, 0, 1000);
+    assert.equal(lines.length, 0, 'factory walls no longer add floating cross-braces between unsupported interior columns');
+}
 for (const fps of [30, 60, 120]) {
     const s = session('duel'), g = s.game, sounds = [];
     s.sfx = name => sounds.push(name);
@@ -210,6 +236,29 @@ for (const fps of [30, 60, 120]) {
     }
 }
 const hill = session('duel'), hg = hill.game;
+{
+    const s = session('shooter'), g = s.game, sounds = [];
+    s.sfx = (...args) => sounds.push(args);
+    g.pickups = []; g.orbs = [];
+    s.down = key => key === 'KeyF';
+    for (const [type, sound] of Object.entries({ blaster: 'laserBlaster', shotgun: 'laserScatter', rapid: 'laserRapid', rail: 'laserRail' })) {
+        g.weapon = type; g.weaponT = 20; g.fireCd = 0; g.res.value = 150;
+        sounds.length = 0;
+        g.update(1 / 60);
+        assert.equal(sounds.filter(args => args[0] === sound).length, 1, `${type} fires one cue per trigger, not per pellet`);
+        assert.ok(!sounds.some(args => args[0] === 'shoot'));
+        sounds.length = 0;
+        const event = { k: 'sh', w: type, x: g.me.x + 100, y: g.me.y, a: 0, by: 'guest' };
+        g.onEvent(event, { id: 'guest', color: '#fff' });
+        assert.equal(sounds[0][0], sound);
+        assert.ok(sounds[0][2] > 0 && sounds[0][2] < .35, 'nearby remote lasers are attenuated');
+        sounds.length = 0;
+        g.onEvent({ ...event, x: g.me.x + 900 }, { id: 'guest' });
+        g.onEvent(event, { id: s.user.id });
+        assert.equal(sounds.length, 0, 'distant shots and local echoes stay silent');
+    }
+    assert.equal(g.weaponInfo('unknown').sound, 'laserBlaster', 'legacy or unknown weapons retain the default sound');
+}
 hg.hill = () => ({ zone: { x: hg.me.x, y: hg.me.y + hg.me.h, w: 200 }, left: 20 });
 hg.specialCharge = 0; hg.updateHill(5);
 assert.equal(hg.specialCharge, 100, 'five uncontested hill seconds charge the special');
@@ -661,8 +710,19 @@ for (const fps of [30, 60, 120]) {
     g.T[index] = 3;
     const carry = g.carry, items = g.items, events = s.events.length;
     g.onEvent({ k: 'dg', x, y }, { id: 'guest' });
-    assert.equal(g.T[index], 0); assert.equal(sounds.at(-1)[0], 'crystal');
+    assert.equal(g.T[index], 0); assert.equal(sounds.at(-1)[0], 'quartzBreak');
     assert.equal(g.carry, carry); assert.equal(g.items, items); assert.equal(s.events.length, events, 'remote breaks neither award local loot nor rebroadcast');
+    const names = new Set();
+    for (const type of [3, 4, 5, 7, 8, 9]) {
+        g.T[index] = type;
+        g.onEvent({ k: 'dg', x, y }, { id: 'guest' });
+        const remote = sounds.at(-1)[0];
+        g.T[index] = type;
+        g.breakTile(x, y, type, true);
+        assert.equal(sounds.at(-1)[0], remote, 'local and remote mining use the same crystal-specific cue');
+        names.add(remote);
+    }
+    assert.equal(names.size, 6);
 }
 console.log('Wall attachment/push-off and eased dash transitions at 30/60/120 FPS, break-only mining audio and remote-loot isolation passed.');
 {
@@ -1023,16 +1083,26 @@ for (const fps of [30, 60, 120]) {
     g.update(0); assert.equal(g.cp.id, 2, 'one update crossing multiple thresholds saves the highest reached biome');
     assert.equal(g.checkpoints.length, 3, 'automatic capture does not add intermediate checkpoints');
 }
-{
+for (const fps of [30, 60, 120]) {
     const g = session('skyline').game;
-    for (const viewHeight of [360, 720, 1000]) for (const cp of g.checkpoints.slice(1)) {
-        const inset = Math.min(120, viewHeight * .18), start = cp.y - inset;
-        assert.equal(g.backdropBlend(cp.y + 1, viewHeight).to, cp.id - 1, 'next-biome scenery cannot appear while its entrance is above the screen');
-        assert.equal(g.backdropBlend(start + 1, viewHeight).to, cp.id - 1, 'the next biome must be meaningfully visible before the fade starts');
-        const span = Math.max(640, viewHeight * 1.1);
-        assert.equal(g.backdropBlend(start, viewHeight).amount, 0, 'visible boundary starts the fade continuously');
-        assert.ok(Math.abs(g.backdropBlend(start - span / 2, viewHeight).amount - .5) < 1e-10, 'fade midpoint scales with the viewport');
-        assert.equal(g.backdropBlend(start - span, viewHeight).amount, 1, 'the entire transition completes within its viewport-scaled span');
+    g.me.onGround = false;
+    for (let i = 0; i < fps; i++) {
+        g.me.y = g.checkpoints[1].y + Math.sin(i) * 300;
+        g.updateBackdrop(1 / fps);
+        assert.equal(g.backdropBlend(-100000, 720).to, 0, 'jumping or moving the camera near the next area cannot trigger its background');
     }
+    g.me.onGround = true; g.me.ground = { bi: 1 };
+    g.updateBackdrop(.45);
+    assert.ok(Math.abs(g.backdropBlend().amount - .5) < 1e-10, 'landing in Factory starts a time-based eased transition');
+    g.me.onGround = false; g.me.ground = null;
+    for (let i = 0; i < fps; i++) g.updateBackdrop(1 / fps);
+    assert.equal(g.backdropBlend().to, 1, 'jumping away from a Factory platform does not reverse the fade');
+    assert.equal(g.backdropBlend().from, 1);
+    g.me.onGround = true; g.me.ground = { bi: 0 };
+    for (let i = 0; i < fps; i++) g.updateBackdrop(1 / fps);
+    assert.equal(g.backdropBlend().to, 0, 'actually landing back in City restores its background');
+    g.me.ground = { bi: 3 };
+    for (let i = 0; i < fps * 2; i++) g.updateBackdrop(1 / fps);
+    assert.equal(g.backdropBlend().to, 3, 'Space scenery follows actual Space footing');
 }
-console.log('Automatic height checkpoints, safe respawns and viewport-scaled biome fades passed at 30/60/120 FPS.');
+console.log('Automatic height checkpoints, safe respawns and landing-triggered stable biome fades passed at 30/60/120 FPS.');

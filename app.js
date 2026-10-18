@@ -1343,6 +1343,7 @@
             });
             this.EventBus.on('state:restored', () => this.renderUI());
             this.EventBus.on('router:navigated', route => {
+                if (route !== 'sound') this.stopSettingsAudioPreview();
                 if (route === 'class') this.renderClassDetail();
                 if (route === 'calendar') this.renderCalendar();
                 if (route === 'schedule') this.renderSchedulePage();
@@ -3563,7 +3564,7 @@
                     <p class="unbox-title">${this.escapeHTML(box.name)}</p>
                     <div class="unbox-rays" aria-hidden="true"></div>
                     <button type="button" class="unbox-box" data-action="unbox-shake" aria-label="Shake box, 4 taps to open">${this.openBoxArt(this.multiplayerProfile, box, undefined, [], 'open-box-lg mystery-peek')}</button>
-                    <p class="unbox-prompt" role="status">Tap to break the seals · 0 / 4</p>
+                    <p class="unbox-prompt" role="status">Tap anywhere to break the seals · 0 / 4</p>
                     <div class="unbox-seals" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
                     <div class="unbox-reel" aria-hidden="true"><div class="unbox-strip"></div><span class="unbox-marker"></span></div>
                     <div class="unbox-result" aria-live="polite"></div>
@@ -3574,6 +3575,9 @@
             overlay.querySelector('.unbox-box').focus({ preventScroll: true });
             const state = this.unboxState = { overlay, box, skipped: false, taps: 0, startedAt: performance.now() };
             state.seals = new Promise(resolve => { state.releaseSeals = resolve; });
+            overlay.addEventListener('click', event => {
+                if (!event.target.closest('button') && overlay.classList.contains('phase-shake')) this.shakeUnboxing();
+            });
             return overlay;
         }
 
@@ -3582,16 +3586,19 @@
             if (!state || state.taps >= 4 || state.skipped) return;
             state.taps++;
             const button = state.overlay.querySelector('.unbox-box');
-            state.overlay.querySelector('.unbox-prompt').textContent = state.taps === 4 ? 'Seals broken! Opening…' : `Tap to break the seals · ${state.taps} / 4`;
+            state.overlay.querySelector('.unbox-prompt').textContent = state.taps === 4 ? 'Seals broken! Opening…' : `Tap anywhere to break the seals · ${state.taps} / 4`;
             state.overlay.querySelectorAll('.unbox-seals i').forEach((seal, i) => seal.classList.toggle('broken', i < state.taps));
             button.setAttribute('aria-label', state.taps === 4 ? 'Opening box' : `Shake box, ${4 - state.taps} taps remaining`);
             if (!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
                 state.shakeAnimation?.cancel();
                 const tilt = 5 + state.taps * 3;
                 state.shakeAnimation = button.animate([
-                    { transform: 'rotate(0) scale(1)' }, { transform: `rotate(-${tilt}deg) scale(1.08)` },
-                    { transform: `rotate(${tilt}deg) scale(1.08)` }, { transform: 'rotate(0) scale(1)' }
-                ], { duration: 300, easing: 'ease-out' });
+                    { transform: 'translateX(0) rotate(0) scale(1)' },
+                    { transform: `translateX(-10px) rotate(-${tilt}deg) scale(1.08)` },
+                    { transform: `translateX(10px) rotate(${tilt}deg) scale(1.08)` },
+                    { transform: 'translateX(-5px) rotate(-3deg) scale(1.03)' },
+                    { transform: 'translateX(0) rotate(0) scale(1)' }
+                ], { duration: 360, easing: 'ease-out' });
             }
             window.StudBudSfx?.play('coin', 'ui', 0);
             if (state.taps === 4) { button.disabled = true; state.releaseSeals(); }
@@ -5275,7 +5282,8 @@
                     list.push({ laneTarget: lane, x: lane.x0, y: lane.y, w: lane.size, h: lane.h, off: true });
                 }
                 const p = node(solid);
-                list.push(p); last = p;
+                if ((last.surface || last) !== (p.surface || p)) list.push(p);
+                last = list[list.length - 1];
                 cps.forEach((c, k) => {
                     if (k > 0 && cpNode[k] === undefined && Math.abs(p.y - c.y) < 1 && c.x + 20 >= p.x && c.x + 20 <= p.x + p.w) { cpNode[k] = list.length - 1; flags.set(list.length - 1, c.x + 20); }
                 });
@@ -5303,8 +5311,16 @@
                 actor.updatePlayer(dt);
                 if (actor.dead <= 0) {
                     st.i = route.cpNode[actor.cp.id]; st.jump = null; st.nextThink = 0;
+                    st.progressNode = st.i; st.progressAt = demo.clock;
                 }
                 b.respawn = actor.dead; st.air = !b.onGround; return;
+            }
+            if (b.onGround && b.y > actor.cp.y + 600 && b.y < 1500) {
+                actor.returnToCheckpoint();
+                st.i = route.cpNode[actor.cp.id]; st.jump = null; st.nextThink = 0;
+                st.progressNode = st.i; st.progressAt = demo.clock;
+                st.air = true; st.moving = false;
+                return;
             }
             for (const p of route.list) if (p.laneTarget) {
                 const rocks = game.meteors.filter(rock => rock.lane === p.laneTarget && !rock.off);
@@ -5314,6 +5330,9 @@
             }
             const groundIndex = b.onGround ? route.list.findIndex(p => p === b.ground || p.surface === b.ground) : -1;
             if (groundIndex >= 0 && groundIndex !== st.i) { st.i = groundIndex; st.jump = null; st.nextThink = demo.clock + (b.ground.crumble || b.ground.w < 180 ? 0 : Math.min(b.ai.reaction, .2)); }
+            if (st.progressNode === undefined || st.i > st.progressNode) {
+                st.progressNode = st.i; st.progressAt = demo.clock;
+            }
             let target = route.list[st.i + 1] || route.list[st.i];
             let crossingMachine = false;
             let waitingPoint = b.x + b.w / 2;
@@ -5335,10 +5354,19 @@
                     crossingMachine = true;
                 }
             }
-            if (b.ai.rechargeAt || actor.res.value < 5 || (actor.res.value < 30 && b.onGround && !b.ground.crumble && !b.ground.mover)) {
+            const brakingX = b.x + b.vx * Math.abs(b.vx) / (2 * (b.ground?.ice ? 420 : 3400));
+            const safeRecharge = b.onGround && b.ground.w >= 180 && !b.ground.crumble && !b.ground.mover
+                && brakingX >= b.ground.x + 4 && brakingX + b.w <= b.ground.x + b.ground.w - 4;
+            if (b.ai.rechargeAt || actor.res.value < .5 || (actor.res.value < 50 && safeRecharge)) {
                 b.ai.rechargeAt ||= demo.clock + 1.5 + b.ai.reaction;
-                if (demo.clock < b.ai.rechargeAt) { st.air = !b.onGround; st.moving = false; return; }
-                actor.res.add(demo.session.rewardAmount()); b.ai.rechargeAt = 0; st.jump = null;
+                if (demo.clock < b.ai.rechargeAt) {
+                    actor.s.botKeys = { x: b.onGround ? U.clamp(-(b.ground?.belt || 0) / 340, -1, 1) : 0, hold: !b.onGround };
+                    actor.updatePlayer(dt);
+                    b.ai.energy = actor.res.value; b.respawn = actor.dead;
+                    st.air = !b.onGround; st.moving = Math.abs(b.vx) > 35;
+                    return;
+                }
+                actor.res.add(demo.session.rewardAmount()); b.ai.rechargeAt = 0; st.jump = null; st.nextThink = 0;
             }
             const shaft = game.cityCrossings.find(c => c.kind === 'scale' && c.to === target);
             let keys = { x: 0, hold: false, jump: false, dash: false };
@@ -5385,13 +5413,14 @@
             if (st.stallX === undefined || Math.hypot(b.x - st.stallX, b.y - st.stallY) > 80 || st.stallNode !== st.i) {
                 st.stallX = b.x; st.stallY = b.y; st.stallNode = st.i; st.stallAt = demo.clock;
             }
-            if (b.onGround && demo.clock - st.stallAt > 12) {
+            if (b.onGround && (demo.clock - st.stallAt > 12 || demo.clock - st.progressAt > 45)) {
                 keys.reset = true;
-                st.stallAt = demo.clock;
+                st.stallAt = demo.clock; st.progressAt = demo.clock; st.progressNode = route.cpNode[actor.cp.id];
             }
             actor.s.botKeys = keys;
             const falling = b.vy >= 0;
             actor.updatePlayer(dt);
+            if (keys.reset) { st.i = route.cpNode[actor.cp.id]; st.jump = null; st.nextThink = 0; }
             if (falling && actor.sprung && b.vy < -500) {
                 const springNode = route.list.findIndex(p => Math.abs(p.y - b.y - b.h) < 24
                     && b.x + b.w > p.x && b.x < p.x + p.w);
@@ -5456,7 +5485,8 @@
             const b = actor.me, U = window.StudBudArcade.util;
             const frozen = actor.s.testing === true && actor.s.testFreezeHazards === true;
             const near = actor.solids.filter(p => p.x < b.x + 1100 && p.x + p.w > b.x - 1100 && p.y < b.y + 900 && p.y + p.h > b.y - 1500);
-            const obstacles = near.filter(p => p !== b.ground && !p.off && !p.wall && p.y < b.y + b.h && p.y > b.y - 180
+            const obstacles = near.filter(p => p !== b.ground && !p.off && !p.wall
+                && (p.y < b.y + b.h || (p.prop && p.y < b.y + b.h + 200)) && p.y > b.y - 180
                 && p.x < Math.max(b.x, target.x) + b.w && p.x + p.w > Math.min(b.x, target.x));
             const forward = Math.sign(target.x + target.w / 2 - b.x - b.w / 2);
             const support = near.find(p => p !== b.ground && !p.wall && !p.off && p.y >= b.y + b.h
@@ -5478,8 +5508,16 @@
             const debris = actor.debris.filter(p => nearby(p.x - p.r, p.lane.y0, p.r * 2, p.lane.y1 - p.lane.y0));
             const saws = actor.saws.filter(p => nearby(p.cx - p.r, p.cy - p.amp - p.r, p.r * 2, (p.amp + p.r) * 2));
             const balls = actor.balls.filter(p => nearby(p.px - p.len - p.r, p.py - p.len - p.r, (p.len + p.r) * 2, (p.len + p.r) * 2));
+            const overhead = target.surface || target, ground = b.ground;
+            const staging = ground && !ground.crumble && overhead !== ground && !overhead.oneway
+                && overhead.y + overhead.h < b.y + b.h && overhead.x < b.x + b.w && overhead.x + overhead.w > b.x
+                ? [overhead.x - b.w / 2 - 12, overhead.x + overhead.w + b.w / 2 + 12]
+                    .filter(x => x > ground.x + b.w / 2 && x < ground.x + ground.w - b.w / 2
+                        && Math.abs(x - b.x - b.w / 2) > 25)
+                    .map(x => ({ x: x - 20, y: ground.y, w: 40, h: ground.h, navX: x, surface: ground }))
+                : [];
             const targets = target.surface === b.ground ? [target] : [...shortcuts, target, ...obstacles.filter(p => forward * (p.x + p.w / 2 - b.x - b.w / 2) > 0)
-                .sort((a, c) => Math.abs(a.x - b.x) - Math.abs(c.x - b.x)).slice(0, 2), ...(stepDown ? [stepDown] : [])];
+                .sort((a, c) => Math.abs(a.x - b.x) - Math.abs(c.x - b.x)).slice(0, 2), ...staging, ...(stepDown ? [stepDown] : [])];
             for (const destination of targets) {
                 if (destination.off) continue;
                 const surface = destination.surface || destination;
@@ -5551,6 +5589,9 @@
                             const original = [...clones].find(([, copy]) => copy === sim.me.ground)?.[0];
                             const landedIndex = route.list.findIndex(p => p === original || p.surface === original);
                             if (original === surface || landedIndex > index) {
+                                if (surface === b.ground && Math.abs(aim - sim.me.x - sim.me.w / 2) >= 20) break;
+                                if (original === surface && surface.crumble && surface.w > 250
+                                    && Math.abs(aim - sim.me.x - sim.me.w / 2) > 80) break;
                                 if (sim.drills.some(d => d.surfaceY === sim.me.ground.y
                                     && Math.abs(d.x - sim.me.x - sim.me.w / 2) < d.width / 2 + sim.me.w / 2 + 8)) break;
                                 const safeUntil = sim.hazardClock + .4;
@@ -8704,6 +8745,15 @@
             });
         }
 
+        stopSettingsAudioPreview() {
+            clearTimeout(this.musicPreviewTimer);
+            for (const timer of this.sfxPreviewTimers || []) clearTimeout(timer);
+            this.sfxPreviewTimers = [];
+            const sfx = window.StudBudSfx;
+            if (this.settingsPreviewMusic && sfx?.mus === this.settingsPreviewMusic && !sfx.mus.mode) sfx.stopMusic();
+            this.settingsPreviewMusic = null;
+        }
+
         async handleClick(event) {
             if (!event.target.closest('.course-autocomplete')) this.hideCourseSuggestions();
             if (event.target.closest('#current-flashcard')) {
@@ -8837,16 +8887,17 @@
                 } else if (id === 'focus-assignment') {
                     this.dashboardSprintAssignmentId = target.value;
                 } else if (id === 'sfx-test-btn') {
-                    ['success', 'jump', 'shoot', 'coin'].forEach((name, i) => setTimeout(() => window.StudBudSfx.play(name, 'ui', 0), i * 260));
+                    for (const timer of this.sfxPreviewTimers || []) clearTimeout(timer);
+                    this.sfxPreviewTimers = ['success', 'jump', 'shoot', 'coin'].map((name, i) => setTimeout(() => window.StudBudSfx.play(name, 'ui', 0), i * 260));
                 } else if (id === 'music-preview-btn') {
                     const sfx = window.StudBudSfx;
                     clearTimeout(this.musicPreviewTimer);
                     if (sfx.mus) { sfx.stopMusic(); } else {
                         sfx.startMusic(sfx.settings.musicStyle === 'auto' ? 'summit' : sfx.settings.musicStyle, true);
                         const previewMusic = sfx.mus;
-                        const previewMode = sfx.activeMode;
+                        this.settingsPreviewMusic = previewMusic;
                         this.musicPreviewTimer = setTimeout(() => {
-                            if (sfx.mus === previewMusic && sfx.activeMode === previewMode) sfx.stopMusic();
+                            if (sfx.mus === previewMusic && !sfx.mus?.mode) this.stopSettingsAudioPreview();
                         }, 12000);
                     }
                 } else if (target.matches('.audio-btn[data-audio]')) {

@@ -49,6 +49,19 @@ function openRiver() {
 }
 
 // Wave riding: a boat on the crest's face is carried along at wave speed without paying steering energy.
+{
+    const s = openRiver(), g = s.game, sounds = [];
+    s.sfx = (...args) => sounds.push(args);
+    s.addScore = amount => A.Session.prototype.addScore.call(s, amount);
+    g.haul = 100; g.catches = 5; s.score = 100;
+    g.loseFish();
+    assert.equal(g.haul, 90); assert.equal(s.score, 90);
+    g.loseFish();
+    assert.equal(sounds.length, 0, 'incidental crashes retain fish losses without stacking hit sounds');
+    s.addScore(50);
+    assert.equal(s.score, 131, 'quiet river scoring still updates rewards');
+    assert.equal(sounds.length, 0, 'catch scoring leaves audio to the explicit catch cue');
+}
 for (const fps of [30, 60, 120]) {
     const s = openRiver(), g = s.game;
     const start = 28.6;
@@ -75,6 +88,15 @@ for (const fps of [30, 60, 120]) {
         s.testPauseAt = (start + 3 + frame / fps) * 1000;
         g.update(1 / fps);
     }
+    assert.ok(g.riding, 'paddling against the wave does not immediately escape its carry');
+    s.axis = () => ({ x: 0, y: 0 });
+    for (let frame = 1; frame <= fps; frame++) {
+        s.testPauseAt = (start + 5 + frame / fps) * 1000;
+        g.update(1 / fps);
+    }
+    assert.ok(g.riding, 'the wave keeps carrying without paddling');
+    g.me.y = g.bank + 50;
+    s.testPauseAt += 1000 / fps; g.update(1 / fps);
     assert.ok(s.messages.some(message => /Rode the wave/.test(message)), 'dropping off a long ride pays a surf bonus');
     assert.ok(s.score > 0 && g.haul > 0, 'surf bonus counts toward the haul');
     g.draw(context, 1280, 720);

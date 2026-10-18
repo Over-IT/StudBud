@@ -8,41 +8,41 @@
     const MUSIC = {
         summit: { name: 'Rooftop Rush', bpm: 136, drive: true, chords: [[57, 1], [53, 0], [48, 0], [55, 0]], voice: 'guitar',
             melody: [0, 1, 2, 3, 4, null, 3, 2, 1, 2, 3, 4, 2, 1, 0, null] },
-        foundry: { name: 'Foundry Motion', bpm: 120, drive: true, chords: [[50, 1], [58, 0], [53, 0], [48, 0]], voice: 'marimba',
+        foundry: { name: 'Foundry Motion', bpm: 128, drive: true, chords: [[50, 1], [58, 0], [53, 0], [48, 0]], voice: 'marimba',
             melody: [0, null, 2, 0, 3, 2, null, 4, 3, 1, null, 2, 1, 0, 2, null] },
         starlight: { name: 'Starlight Drift', bpm: 78, quiet: true, chords: [[60, 0], [55, 0], [57, 1], [53, 0]], voice: 'piano',
             melody: [0, null, null, 3, null, 2, null, null, 4, null, null, 2, null, 1, 0, null] },
         lagoon: { name: 'Lagoon Breeze', bpm: 88, swing: .1, chords: [[60, 0], [57, 1], [53, 0], [55, 0]], voice: 'marimba',
             melody: [2, null, 3, 4, 2, null, 1, null, 0, 1, 2, null, 1, null, 0, null] },
-        bazaar: { name: 'Bazaar Bounce', bpm: 110, swing: .12, chords: [[62, 0], [67, 0], [59, 1], [57, 0]], voice: 'guitar',
+        bazaar: { name: 'Bazaar Bounce', bpm: 120, drive: true, swing: .12, chords: [[62, 0], [67, 0], [59, 1], [57, 0]], voice: 'guitar',
             melody: [0, 2, null, 3, 2, 1, null, 2, 3, null, 4, 3, 2, null, 0, null] },
         cavern: { name: 'Crystal Cavern', bpm: 76, chords: [[52, 1], [48, 0], [55, 0], [50, 1]], voice: 'piano', quiet: true,
             melody: [0, null, null, 2, null, 3, null, null, 4, null, 2, null, 1, null, 0, null] },
-        battle: { name: 'Battle Drive', bpm: 116, chords: [[52, 1], [48, 0], [55, 0], [50, 0]], voice: 'piano',
+        battle: { name: 'Battle Drive', bpm: 132, drive: true, chords: [[52, 1], [48, 0], [55, 0], [50, 0]], voice: 'piano',
             melody: [0, 0, 2, null, 3, 2, 1, null, 2, 3, 4, null, 3, 1, 0, null] },
         neon: { name: 'Neon Exchange', bpm: 94, swing: .14, chords: [[57, 1], [53, 0], [48, 0], [55, 0]], voice: 'piano',
             melody: [2, null, 1, 0, null, 2, 3, null, 4, null, 3, 2, null, 1, 0, null] },
-        fortress: { name: 'Twin Citadels', bpm: 96, chords: [[50, 1], [46, 0], [53, 0], [48, 0]], voice: 'guitar',
+        fortress: { name: 'Twin Citadels', bpm: 116, drive: true, chords: [[50, 1], [46, 0], [53, 0], [48, 0]], voice: 'guitar',
             melody: [0, null, 2, 3, 4, null, 3, 2, 1, null, 2, null, 0, null, null, null] },
-        sunrise: { name: 'Sunrise Run', bpm: 108, chords: [[60, 0], [67, 0], [57, 1], [65, 0]], voice: 'piano',
+        sunrise: { name: 'Sunrise Run', bpm: 124, drive: true, chords: [[60, 0], [67, 0], [57, 1], [65, 0]], voice: 'piano',
             melody: [0, 1, 2, null, 4, 3, null, 2, 3, 4, null, 3, 2, 1, 0, null] },
         midnight: { name: 'Midnight Drive', bpm: 88, swing: .18, chords: [[57, 1], [53, 0], [60, 0], [55, 0]], voice: 'piano',
             melody: [0, null, 2, null, 3, 2, null, 1, 2, null, 4, 3, null, 1, 0, null] },
-        pixel: { name: 'Pixel Quest', bpm: 120, chords: [[60, 0], [57, 1], [53, 0], [55, 0]], voice: 'marimba',
+        pixel: { name: 'Pixel Quest', bpm: 130, drive: true, chords: [[60, 0], [57, 1], [53, 0], [55, 0]], voice: 'marimba',
             melody: [0, 2, 3, null, 4, 3, 2, null, 1, 2, 3, 1, 0, null, 0, null] },
         zen: { name: 'Zen Garden', bpm: 68, chords: [[62, 0], [59, 1], [55, 0], [57, 0]], voice: 'piano', quiet: true,
             melody: [0, null, null, 2, null, null, 3, null, 2, null, 1, null, 0, null, null, null] },
         funk: { name: 'Funky Groove', bpm: 104, swing: .16, chords: [[57, 1], [62, 1], [57, 1], [64, 1]], voice: 'guitar',
             melody: [0, null, 2, 3, null, 2, 1, null, 2, null, 3, 4, null, 2, 0, null] },
-        orbit: { name: 'Orbit Station', bpm: 102, chords: [[50, 1], [46, 0], [53, 0], [48, 0]], voice: 'piano',
+        orbit: { name: 'Orbit Station', bpm: 128, drive: true, chords: [[50, 1], [46, 0], [53, 0], [48, 0]], voice: 'piano',
             melody: [0, 2, null, 3, 4, null, 3, null, 2, 1, null, 2, 0, null, null, null] },
         tropic: { name: 'Tropic Sunset', bpm: 94, swing: .1, chords: [[65, 0], [62, 1], [58, 0], [60, 0]], voice: 'marimba',
             melody: [2, null, 3, 2, 1, null, 0, null, 1, 2, null, 4, 3, 1, 0, null] },
-        stadium: { name: 'Stadium Anthem', bpm: 112, chords: [[55, 0], [60, 0], [62, 0], [60, 0]], voice: 'piano',
+        stadium: { name: 'Stadium Anthem', bpm: 128, drive: true, chords: [[55, 0], [60, 0], [62, 0], [60, 0]], voice: 'piano',
             melody: [0, 0, 2, null, 3, null, 4, null, 4, 3, 2, null, 1, 2, 0, null] },
-        frenzy: { name: 'Feeding Frenzy', bpm: 118, swing: .08, chords: [[62, 1], [65, 0], [60, 0], [57, 1]], voice: 'marimba',
+        frenzy: { name: 'Feeding Frenzy', bpm: 132, drive: true, swing: .08, chords: [[62, 1], [65, 0], [60, 0], [57, 1]], voice: 'marimba',
             melody: [0, 2, null, 4, 3, null, 2, 1, 2, null, 3, 4, null, 2, 1, 0] },
-        survival: { name: 'Last Light', bpm: 100, chords: [[45, 1], [53, 0], [50, 1], [52, 0]], voice: 'guitar',
+        survival: { name: 'Last Light', bpm: 124, drive: true, chords: [[45, 1], [53, 0], [50, 1], [52, 0]], voice: 'guitar',
             melody: [0, null, 0, 2, null, 1, null, 3, 2, null, 4, null, 3, 1, null, 0] }
     };
     const MODE_STYLE = { skyline: 'summit', river: 'lagoon', market: 'bazaar', miner: 'cavern', duel: 'battle', shooter: 'orbit',
@@ -50,7 +50,7 @@
         classic: 'sunrise', rush: 'pixel', survival: 'survival' };
     const PLAYLISTS = {
         skyline: ['summit', 'sunrise', 'bazaar'],
-        factory: ['foundry', 'pixel', 'funk'],
+        factory: ['foundry', 'pixel', 'battle'],
         space: ['starlight', 'zen', 'cavern'],
         river: ['lagoon', 'tropic'], market: ['bazaar', 'funk', 'sunrise'],
         miner: ['cavern', 'zen', 'starlight'], duel: ['battle', 'stadium', 'foundry'],
@@ -82,6 +82,10 @@
         dash: c => { c.whoosh(); },
         act: c => { c.noise(.045, .035, 650); },
         shoot: c => { c.noise(.055, .085, 2200); c.tone('sine', 150, 65, .07, .1); },
+        laserBlaster: c => { c.tone('sine', 1200, 320, .11, .085); },
+        laserScatter: c => { c.tone('sine', 780, 180, .16, .075); c.tone('triangle', 1050, 260, .12, .025); },
+        laserRapid: c => { c.tone('sine', 1600, 650, .045, .045); },
+        laserRail: c => { c.tone('sine', 2200, 420, .23, .09); c.tone('sine', 1100, 210, .16, .035); },
         hit: c => { c.noise(.065, .075, 850); c.tone('sine', 120, 55, .1, .13); },
         burn: c => {
             c.noise(.24, .075, 1800);
@@ -119,8 +123,14 @@
         mine: c => { c.noise(.035, .16, 4200); c.noise(.11, .065, 1000, .015);
             c.tone('sine', 1280, 1280, .045, .035); c.tone('sine', 2176, 2176, .03, .018); },
         dig: c => { c.noise(.065, .13, 650); c.noise(.16, .07, 1700, .025); },
-        rockBreak: c => { c.noise(.065, .17, 3200); c.noise(.22, .1, 850, .035); c.noise(.09, .065, 1800, .1); },
-        crystal: c => { [1175, 1568, 2093].forEach((f, i) => c.chime(f, .25, .07, i * .04)); },
+        rockBreak: c => { c.noise(.045, .07, 2000); c.noise(.12, .04, 750, .015); },
+        crystal: c => { c.noise(.045, .045, 1700); c.tone('sine', 1175, 1175, .09, .035); },
+        quartzBreak: c => { c.crystalBreak(880, .075); },
+        amethystBreak: c => { c.crystalBreak(660, .11); },
+        emeraldBreak: c => { c.crystalBreak(1046, .085); },
+        sapphireBreak: c => { c.crystalBreak(1320, .1); },
+        rubyBreak: c => { c.crystalBreak(520, .095); },
+        diamondBreak: c => { c.crystalBreak(1568, .12); },
         cast: c => { c.noise(.18, .07, 2300); },
         catch: c => { c.noise(.12, .07, 1700); c.chime(784, .12, .1); c.chime(1175, .24, .1, .08); },
         wave: c => { c.noise(1.1, .17, 600); c.noise(.75, .08, 2600, .15); },
@@ -294,10 +304,6 @@
                 this.musicGain.gain.value = 0.0001;
                 const comp = this.ctx.createDynamicsCompressor();
                 this.musicGain.connect(comp); comp.connect(this.ctx.destination);
-                const length = this.ctx.sampleRate;
-                this.noiseBuf = this.ctx.createBuffer(1, length, this.ctx.sampleRate);
-                const data = this.noiseBuf.getChannelData(0);
-                for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
                 this.fxIn = this.ctx.createGain();
                 const reverb = this.makeReverb(.85, 3), wet = this.ctx.createGain();
                 wet.gain.value = .14;
@@ -370,10 +376,6 @@
                 }
             }
             if (!T.quiet && (s === 0 || (!sparse && (s === 8 || (T.drive && s % 4 === 0))))) this.musicKick(t);
-            if (!sparse && (s === 4 || s === 12)) {
-                this.musicNoise(t, .1, .022, 1100, 'bandpass');
-            }
-            if (!sparse && s % (T.drive ? 2 : 4) === (T.drive ? 1 : 2)) this.musicNoise(t, .07, .008, 2600, 'highpass');
         }
 
         acousticBuffer(voice) {
@@ -407,7 +409,7 @@
             source.buffer = this.acousticBuffer(voice);
             source.playbackRate.setValueAtTime(freq / 220, t);
             gain.gain.setValueAtTime(0.0001, t);
-            gain.gain.exponentialRampToValueAtTime(vol, t + .006);
+            gain.gain.exponentialRampToValueAtTime(vol, t + (destination === this.musicGain ? .025 : .006));
             gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
             source.connect(gain); gain.connect(destination);
             if (destination === this.musicGain && this.fxIn) {
@@ -429,19 +431,10 @@
         musicKick(t) {
             const ctx = this.ctx, osc = ctx.createOscillator(), gain = ctx.createGain();
             osc.frequency.setValueAtTime(90, t); osc.frequency.exponentialRampToValueAtTime(52, t + 0.06);
-            gain.gain.setValueAtTime(0.16, t); gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+            gain.gain.setValueAtTime(0.0001, t);
+            gain.gain.exponentialRampToValueAtTime(.12, t + .012);
+            gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
             osc.connect(gain); gain.connect(this.musicGain); osc.start(t); this.finishMusicSource(osc, t + 0.18);
-        }
-
-        musicNoise(t, dur, vol, cutoff, type) {
-            const ctx = this.ctx, src = ctx.createBufferSource(), filter = ctx.createBiquadFilter(), gain = ctx.createGain();
-            src.buffer = this.noiseBuf;
-            filter.type = type; filter.frequency.setValueAtTime(cutoff, t);
-            gain.gain.setValueAtTime(.0001, t);
-            gain.gain.exponentialRampToValueAtTime(vol, t + .008);
-            gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-            src.connect(filter); filter.connect(gain); gain.connect(this.musicGain);
-            src.start(t, Math.random() * 0.5); this.finishMusicSource(src, t + dur + 0.02);
         }
 
         unlock() {
@@ -524,7 +517,7 @@
         }
 
         jumpSound(airborne) {
-            const ctx = this.ctx, key = airborne ? 'air' : 'ground', duration = airborne ? .21 : .17;
+            const ctx = this.ctx, key = airborne ? 'air' : 'ground', duration = airborne ? .15 : .12;
             this.jumpBuffers ||= new Map();
             if (!this.jumpBuffers.has(key)) {
                 const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * duration), ctx.sampleRate);
@@ -538,8 +531,9 @@
                     air += .16 * (seed / 2147483648 - 1 - air);
                     const envelope = Math.min(1, t / .008) * Math.pow(1 - progress, 2);
                     const push = Math.sin(2 * Math.PI * 85 * t) * Math.exp(-t * 65);
-                    data[i] = envelope * (.18 * Math.sin(phase) + .045 * air + (airborne ? 0 : .07 * push));
+                    data[i] = envelope * (.075 * Math.sin(phase) + .025 * air + (airborne ? 0 : .035 * push));
                 }
+
                 this.jumpBuffers.set(key, buffer);
             }
             const source = ctx.createBufferSource();
@@ -547,6 +541,17 @@
             source.connect(this.effectOut || this.master);
             source.start(ctx.currentTime);
             source.stop(ctx.currentTime + duration);
+        }
+
+        crystalBreak(frequency, duration) {
+            const pitch = this.pitch;
+            this.pitch = 1;
+            try {
+                this.noise(.04, .025, 1500);
+                this.tone('sine', frequency, frequency, duration, .035);
+            } finally {
+                this.pitch = pitch;
+            }
         }
 
         springJump() {
@@ -627,38 +632,4 @@
     };
     ['pointerdown', 'keydown', 'touchstart'].forEach(type => window.addEventListener(type, wake, { passive: true }));
 
-    // ---- Automatic interface sounds: the kind of control decides what plays ----
-    const uiSfx = (name, gap) => { try { window.StudBudSfx.play(name, 'ui', gap); } catch (error) { /* audio is optional */ } };
-    const DANGER = /\b(delete|remove|clear|reset|discard|ban|sign out|log out|logout|wipe)\b/i;
-    const CONFIRM = /\b(save|add|create|submit|import|start|finish|done|apply|sign in|log in|login|register|sign up|change|claim|publish|generate|continue)\b/i;
-    const CLOSE = /\b(close|cancel|back|dismiss|no thanks)\b|^[×x✕]$/i;
-
-    function kindOf(el) {
-        if (el.disabled || el.getAttribute('aria-disabled') === 'true') return 'deny';
-        if (el.matches('input[type="checkbox"], input[type="radio"]')) return 'toggle';
-        const label = ((el.getAttribute('aria-label') || el.textContent || el.value || '') + ' ' + (el.dataset?.action || '') + ' ' + (el.dataset?.adminAction || '')).trim().slice(0, 80);
-        const cls = el.className && typeof el.className === 'string' ? el.className : '';
-        if (el.matches('[role="tab"]') || /\b(tab|segment|filter-chip|period-btn)\b/.test(cls)) return 'tab';
-        if (el.closest('nav, .sidebar, .nav-list, [role="navigation"]') || /\bnav/.test(cls) || el.dataset?.route || el.dataset?.view) return 'nav';
-        if (el.closest('.flashcard, .flip-card, #flashcard-container, [data-flip]') || /\bflip/i.test(label)) return 'flip';
-        if (CLOSE.test(label) || /\b(close|dismiss|modal-close)\b/.test(cls)) return 'close';
-        if (/\b(danger|destructive|delete)\b/.test(cls) || DANGER.test(label)) return 'danger';
-        if (/\bprimary/.test(cls) || CONFIRM.test(label)) return 'confirm';
-        return 'click';
-    }
-
-    document.addEventListener('click', event => {
-        const target = event.target;
-        if (!(target instanceof Element)) return;
-        const el = target.closest('button, a[href], [role="button"], [role="tab"], summary, input[type="checkbox"], input[type="radio"], label.toggle, .nav-item, .nav-link');
-        if (!el || el.closest('canvas, .mpg-pad, [data-action^="multiplayer-"]')) return;
-        if (el.tagName === 'LABEL' && el.querySelector('input')) return;
-        uiSfx(kindOf(el), 30);
-    }, true);
-
-    // Continuous controls and typing stay silent.
-    document.addEventListener('change', event => {
-        const t = event.target;
-        if (t instanceof HTMLSelectElement) uiSfx('tick', 30);
-    }, true);
 })(window);

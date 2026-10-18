@@ -64,6 +64,22 @@ async function verifyReel({ scale, width, gap, padding, seasonal, duplicate, ski
     else assert.match(result.innerHTML, /New rare drop: Winning Hat/);
 }
 (async () => {
+    const cleared = [], originalClear = sandbox.clearTimeout;
+    sandbox.clearTimeout = timer => cleared.push(timer);
+    let stopped = 0;
+    const preview = { mode: null };
+    sandbox.window.StudBudSfx = { mus: preview, stopMusic() { stopped++; } };
+    app.settingsPreviewMusic = preview; app.musicPreviewTimer = 1; app.sfxPreviewTimers = [2, 3];
+    app.stopSettingsAudioPreview();
+    assert.equal(stopped, 1); assert.deepEqual(cleared, [1, 2, 3]);
+    app.settingsPreviewMusic = preview; preview.mode = 'skyline';
+    app.stopSettingsAudioPreview();
+    assert.equal(stopped, 1, 'promoting a preview track to game music prevents navigation from stopping the game');
+    app.settingsPreviewMusic = preview; sandbox.window.StudBudSfx.mus = { mode: 'duel' };
+    app.stopSettingsAudioPreview();
+    assert.equal(stopped, 1, 'unrelated active game music is never stopped');
+    sandbox.clearTimeout = originalClear;
+    delete sandbox.window.StudBudSfx;
     const button = { disabled: false, setAttribute() {} }, prompt = {}, seals = Array.from({ length: 4 }, () => ({ classList: { toggle(name, broken) { this.broken = broken; } } }));
     let released = 0, resolved = 0, removed = 0;
     app.unboxState = { taps: 0, overlay: {

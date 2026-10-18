@@ -3765,6 +3765,7 @@ body.guest-mode [data-study-leaderboard-scope="friends"] { display: none !import
 .unbox-box { padding: 0; border: 0; background: none; color: inherit; cursor: pointer; touch-action: manipulation; }
 .unbox-box:focus-visible { outline: 3px solid #fde047; outline-offset: 12px; border-radius: 20px; }
 .unbox-box:disabled { opacity: 1; cursor: wait; }
+.unbox-overlay.phase-shake { cursor: pointer; touch-action: manipulation; }
 .unbox-prompt { margin: 0; text-align: center; font-size: .9rem; }
 .unbox-seals { display: flex; gap: 10px; }
 .unbox-seals i { width: 14px; height: 14px; border: 2px solid var(--box-accent); border-radius: 4px; background: var(--box-accent); transition: background .2s, transform .2s; }

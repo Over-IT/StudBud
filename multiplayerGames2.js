@@ -121,12 +121,12 @@
     const TS = 48, COLS = 110, ROWS = 80, MID = Math.floor(COLS / 2);
     const DIG_TIME = [0, 0.28, 0.62, 0.4, 0.55, 0.7, 0, 0.5, 9999];
     const CRYSTALS = {
-        3: { name: 'Quartz', value: 5, color: '#dbeafe' },
-        4: { name: 'Amethyst', value: 12, color: '#c084fc' },
-        5: { name: 'Emerald', value: 25, color: '#34d399' },
-        7: { name: 'Sapphire', value: 50, color: '#38bdf8' },
-        8: { name: 'Ruby', value: 90, color: '#fb7185' },
-        9: { name: 'Diamond', value: 160, color: '#fef08a' }
+        3: { name: 'Quartz', value: 5, color: '#dbeafe', sound: 'quartzBreak' },
+        4: { name: 'Amethyst', value: 12, color: '#c084fc', sound: 'amethystBreak' },
+        5: { name: 'Emerald', value: 25, color: '#34d399', sound: 'emeraldBreak' },
+        7: { name: 'Sapphire', value: 50, color: '#38bdf8', sound: 'sapphireBreak' },
+        8: { name: 'Ruby', value: 90, color: '#fb7185', sound: 'rubyBreak' },
+        9: { name: 'Diamond', value: 160, color: '#fef08a', sound: 'diamondBreak' }
     };
     const LAVA_DOWN_INTERVAL = 0.6, LAVA_SIDE_INTERVAL = 2, LAVA_SIDE_REACH = 4;
 
@@ -431,7 +431,6 @@
                 const banked = this.carry;
                 s.addScore(banked); this.banked += banked; this.carry = 0; this.items = 0;
                 s.toast(`Deposited ${banked} crystal points!`, '#fbbf24');
-                s.sfx('coin');
                 this.particles.burst(centerX, me.y + me.h, '#fbbf24', 22, 245, 0.65, 4);
             }
             s.setGoal(this.banked);
@@ -447,7 +446,7 @@
             this.s.emit({ k: 'dg', x: tx, y: ty, t: type });
             this.dig = { tx: -1, ty: -1, p: 0 };
             const crystal = CRYSTALS[type];
-            this.s.sfx(crystal ? 'crystal' : 'rockBreak', 80);
+            this.s.sfx(crystal ? crystal.sound : 'rockBreak', 120);
             if (crystal) {
                 if (this.items >= this.cap) this.s.toast('Satchel full - return to the surface depot!', '#fbbf24');
                 else { this.carry += crystal.value; this.items++; this.s.toast(`+${crystal.value} carried - ${crystal.name}`, crystal.color); }
@@ -457,7 +456,7 @@
 
         miningSound(name, x, y) {
             const distance = Math.hypot((x + .5) * TS - this.me.x - this.me.w / 2, (y + .5) * TS - this.me.y - this.me.h / 2);
-            if (distance < 900) this.s.sfx(name, 100, .65 * (1 - distance / 900) ** 2);
+            if (distance < 450) this.s.sfx(name, 160, .3 * (1 - distance / 450) ** 2);
         }
 
         onEvent(ev, from) {
@@ -467,7 +466,7 @@
                 const type = this.tile(ev.x, ev.y);
                 if (this.solid(type) && type !== 10) {
                     this.breakTile(ev.x, ev.y, type, false);
-                    this.miningSound(CRYSTALS[type] ? 'crystal' : 'rockBreak', ev.x, ev.y);
+                    this.miningSound(CRYSTALS[type]?.sound || 'rockBreak', ev.x, ev.y);
                 }
             }
             if (ev.k === 'lv' && Array.isArray(ev.cells)) for (const cell of ev.cells) {
@@ -816,14 +815,14 @@
             if (surge.warning && this.lastSurge !== surge.cycle) {
                 this.lastSurge = surge.cycle; s.toast('Wave incoming! Ride the crest or shelter in the pale shallows', '#7dd3fc'); s.sfx('wave', 1000);
             }
-            // The same curved crest drives the visible wave and its current. A boat on the face just behind the
-            // crest is carried at nearly the wave's speed; steering forward keeps you surfing, easing off drops you.
-            const separation = (me.x - (this.waveCrest(me.y, now, surge) - 40)) / 120;
+            const rideCenter = this.waveCrest(me.y, now, surge) - 40;
+            const separation = (me.x - rideCenter) / (this.riding ? 210 : 150);
             const face = separation < 0 ? Math.max(0, 1 + separation / 1.6) : Math.max(0, 1 - separation * .9);
-            const push = surge.active && !this.whirlpool ? face * face * (3 - 2 * face) * WAVE_SPEED * shelter : 0;
+            const caught = surge.active && !this.whirlpool && this.ejectT <= 0 && face > .2 && shelter > .5;
+            const push = caught ? (WAVE_SPEED + clamp((rideCenter - me.x) * 2, -100, 180)) * shelter : 0;
             this.surgePush = lerp(this.surgePush, push, 1 - Math.exp(-dt * 8));
             if (!shelter || this.whirlpool) this.surgePush = 0;
-            this.riding = push > 0 && face > .2 && shelter > .5;
+            this.riding = caught;
             if (this.riding) {
                 this.surfT += dt;
                 if (Math.random() < dt * 30) this.particles.burst(me.x + 30, me.y + (Math.random() - .5) * 50, '#e0f2fe', 2, 120, .35, 3);
@@ -833,6 +832,10 @@
                 this.surfT = 0;
             }
             const drift = { x: 24 * shelter + this.surgePush, y: 0 };
+            if (this.riding) {
+                const length = Math.hypot(axis.x, axis.y) || 1;
+                drift.x -= axis.x / length * this.baseSpeed * this.speedMul * .85;
+            }
             this.step(dt, this.ejectT > 0 ? 240 : 1800, drift, !this.aimLocked);
             this.updateLogs(now);
             this.castCd -= dt; this.hurt = Math.max(0, this.hurt - dt); this.comboT -= dt; this.poolHitCd = Math.max(0, this.poolHitCd - dt);
@@ -985,7 +988,6 @@
                 this.catches = Math.max(0, this.catches - Math.ceil(this.catches * 0.1));
                 s.toast(`Crash! Lost ${lose} fish pts`, '#f87171');
             } else s.toast('Crash!', '#f87171');
-            s.sfx('hit');
         }
 
         // Boats that bump each other face the same question; the first correct answer steals 25% of the loser's haul.
@@ -1289,6 +1291,16 @@
             const canvas = document.createElement('canvas');
             canvas.width = this.W; canvas.height = this.H;
             const c = canvas.getContext('2d'), random = mulberry32(this.s.seed ^ 4821);
+            if (!c) throw new Error('Package Delivery could not create its town drawing context.');
+            const invalidate = () => {
+                if (this.cityLayer === canvas) this.cityLayer = null;
+            };
+            canvas.addEventListener?.('contextlost', event => {
+                event.preventDefault();
+                invalidate();
+                console.warn('[Package Delivery] Town drawing context lost; rebuilding cached scenery.');
+            });
+            canvas.addEventListener?.('contextrestored', invalidate);
             c.fillStyle = '#343d49'; c.fillRect(0, 0, this.W, this.H);
             for (let i = 0; i < 24000; i++) {
                 c.fillStyle = i % 2 ? 'rgba(255,255,255,.055)' : 'rgba(0,0,0,.10)';
@@ -1468,6 +1480,7 @@
             const s = this.s, me = this.me, now = clock(s), t = this.anim;
             ctx.fillStyle = '#334155'; ctx.fillRect(0, 0, w, h);
             this.begin(ctx, w, h, w < 600 ? 640 : 820);
+            if (this.cityLayer?.getContext('2d').isContextLost?.()) this.cityLayer = null;
             if (!this.cityLayer) this.buildCityLayer();
             const cx = Math.max(0, Math.floor(this.x0)), cy = Math.max(0, Math.floor(this.y0));
             const cw = Math.min(this.W, Math.ceil(this.x1)) - cx, ch = Math.min(this.H, Math.ceil(this.y1)) - cy;

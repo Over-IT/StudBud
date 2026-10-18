@@ -720,6 +720,7 @@
 
         addScore(n) {
             this.score = Math.max(0, this.score + n);
+            if (this.mode === 'miner' || this.mode === 'river') return;
             if (n >= 40) this.sfx('coin', 120);
             else if (n > 0) this.sfx('pop', 90);
             else if (n < 0) this.sfx('hit');

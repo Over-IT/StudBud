@@ -805,6 +805,9 @@ for (const [fps, seed] of [[30, 12345], [60, 67890], [120, 45678], [30, 1], [60,
     paced.session.testing = false;
     paced.game = new paced.game.constructor(paced.session);
     paced.bots = app.initPreviewBots(paced, 'skyline', paced.game);
+    const route = app.skyRoute(paced.game).list;
+    assert.ok(route.every((node, i) => !i || (node.surface || node) !== (route[i - 1].surface || route[i - 1])),
+        'consecutive navigation stops never duplicate the same physical surface');
     const finishTimes = new Map();
     for (let i = 0; i < fps * 3600 && !paced.bots.every(bot => bot.done); i++) {
         paced.clock += 1 / fps;
