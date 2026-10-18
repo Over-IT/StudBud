@@ -93,6 +93,35 @@ console.log('6000-frame meter DOM-query/write bounds, rounding, depleted state, 
     actor.over = true; tick(); assert.equal(noticeClasses.has('hidden'), true);
 }
 const A = sandbox.window.StudBudArcade;
+{
+    const createElement = sandbox.document.createElement;
+    const context = new Proxy({}, { get: () => () => {} });
+    sandbox.document.createElement = () => ({ getContext: () => context, toDataURL: () => 'data:image/png;base64,test' });
+    const details = {}, card = { scrollTop: 12 }, exit = { focus() {} };
+    const panel = { classList: { remove() {} }, contains: () => false,
+        querySelector: selector => selector === '.mpg-summary' ? details : selector === '.mpg-results-card' ? card : exit };
+    const actor = { user: { id: 'me', is_anonymous: true }, game: { scoreGoal: false, goalUnit: 'm' },
+        metric: A.Session.prototype.metric, valueText: A.Session.prototype.valueText, answered: 0, correct: 0, t: 30,
+        overlay: { querySelector: () => panel } };
+    try {
+        for (const count of [0, 1, 2, 3, 4]) {
+            actor.standingsCache = Array.from({ length: count }, (_, i) => ({
+                id: i === 0 ? 'me' : `p${i}`, n: i === 0 ? '<Winner>' : `Player ${i}`, s: 100 - i, g: 100 - i
+            }));
+            A.Session.prototype.renderResults.call(actor);
+            assert.equal((panel.innerHTML.match(/class="mpg-podium-player /g) || []).length, Math.min(3, count));
+            assert.equal((panel.innerHTML.match(/<li /g) || []).length, count, 'podium retains full standings');
+            if (count) {
+                assert.ok(panel.innerHTML.includes('&lt;Winner&gt;'), 'podium names are escaped');
+                assert.ok(panel.innerHTML.indexOf('mpg-podium') < panel.innerHTML.indexOf('Final standings'));
+            }
+        }
+        actor.standingsCache[1].g = actor.standingsCache[0].g;
+        A.Session.prototype.renderResults.call(actor);
+        assert.equal((panel.innerHTML.match(/mpg-podium-rank">1</g) || []).length, 2, 'ties keep shared podium ranks');
+        assert.equal(card.scrollTop, 12, 'reward refresh preserves result scroll position');
+    } finally { sandbox.document.createElement = createElement; }
+}
 for (const [mode, threshold] of Object.entries({
     skyline: 15, duel: 18, miner: 20, river: 15, frenzy: 10, fishing: 10,
     market: 20, shooter: 20, defense: 45

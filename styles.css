@@ -2040,6 +2040,26 @@ body.mpg-active { overflow: hidden; }
 .mpg-results-card li em { color: #fde047; font-style: normal; font-weight: 800; min-width: 74px; text-align: right; }
 .mpg-results-card .rank { font-weight: 900; color: #94a3b8; }
 .mpg-results-card p { margin: 0; color: #94a3b8; font-size: .85rem; }
+.mpg-podium { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; gap: 8px; padding: 16px 4px 0; margin: 0 0 8px; background: radial-gradient(ellipse at 50% 80%, rgba(251,191,36,.12), transparent 70%); }
+.mpg-podium-player { --podium-color: #fbbf24; --podium-base: #705019; --podium-height: 142px; display: flex; flex-direction: column; align-items: center; min-width: 0; grid-row: 1; }
+.mpg-podium-slot-1 { grid-column: 2; }
+.mpg-podium-slot-2 { grid-column: 1; --podium-color: #cbd5e1; --podium-base: #42536d; --podium-height: 116px; }
+.mpg-podium-slot-3 { grid-column: 3; --podium-color: #fdba74; --podium-base: #75452b; --podium-height: 96px; }
+.mpg-podium-crown { width: 34px; height: 24px; color: #fbbf24; filter: drop-shadow(0 0 10px rgba(251,191,36,.4)); margin-bottom: -4px; }
+.mpg-podium-avatar { display: block; width: min(100%, 96px); height: auto; aspect-ratio: 1; object-fit: contain; margin-bottom: -6px; z-index: 1; pointer-events: none; }
+.mpg-podium-pedestal { box-sizing: border-box; width: 100%; min-height: var(--podium-height); display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 10px 5px 12px; border: 1px solid var(--podium-color); border-top: 5px solid var(--podium-color); border-radius: 8px 8px 3px 3px; background: linear-gradient(135deg, var(--podium-base), #111c34); box-shadow: inset 0 1px 14px rgba(255,255,255,.08), 0 8px 18px rgba(0,0,0,.2); }
+.mpg-podium-rank { font-size: 1.7rem; font-weight: 900; line-height: 1; color: var(--podium-color); }
+.mpg-podium-pedestal strong { max-width: 100%; font-size: .82rem; line-height: 1.3; overflow-wrap: anywhere; color: #f8fafc; }
+.mpg-podium-score { font-size: .72rem; color: #e2e8f0; overflow-wrap: anywhere; }
+.mpg-podium-you { font-size: .65rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color: var(--podium-color); }
+.mpg-podium-player.me .mpg-podium-pedestal { box-shadow: 0 0 0 2px rgba(255,255,255,.14), 0 8px 18px rgba(0,0,0,.2); }
+.mpg-standings-heading { margin: 4px 0 0; text-align: left; font-size: .85rem; color: #cbd5e1; }
+@media (max-width: 480px) {
+    .mpg-results-card { padding: 16px; }
+    .mpg-podium { gap: 5px; padding-inline: 0; }
+    .mpg-podium-avatar { width: min(100%, 76px); }
+    .mpg-podium-pedestal strong { font-size: .74rem; }
+}
 @media (max-width: 700px) { .mpg-board { display: none; } .mpg-q-options { grid-template-columns: 1fr; } }
 .scheme-option { position: relative; }
 .scheme-option .scheme-lock-note { display: block; color: var(--text-secondary); font-size: .68rem; }

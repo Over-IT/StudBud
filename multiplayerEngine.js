@@ -1670,7 +1670,16 @@
             panel.innerHTML = `<div class="mpg-results-card">
                 <small>${this.testing ? 'Test finished' : this.practice ? 'Singleplayer complete' : 'Match over'}</small>
                 <h2>${esc(title)}</h2>
-                <ol>${rows.map(row => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${rows.findIndex(other => this.metric(other) === this.metric(row)) + 1}</span>${avatarMarkup(row, 'mpg-player-avatar')}<strong>${esc(row.n)} ${accountTagMarkup(row.username, row.tags)}</strong><b>${this.valueText(row)}</b><em>${!this.user.is_anonymous && this.rewards && (!this.practice || row.id === this.user.id) ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
+                ${rows.length ? `<div class="mpg-podium" role="group" aria-label="Top players">${rows.slice(0, 3).map((row, index) => {
+                    const rank = rows.findIndex(other => this.metric(other) === this.metric(row)) + 1;
+                    return `<div class="mpg-podium-player mpg-podium-slot-${index + 1}${row.id === this.user.id ? ' me' : ''}" aria-label="${esc(row.n)}, rank ${rank}">
+                        ${index === 0 ? '<svg class="mpg-podium-crown" viewBox="0 0 48 32" aria-hidden="true"><path d="M4 7 14 16 24 3 34 16 44 7 39 27H9Z" fill="currentColor"/><path d="M10 31H38" stroke="currentColor" stroke-width="2"/></svg>' : ''}
+                        ${avatarMarkup(row, 'mpg-podium-avatar')}
+                        <div class="mpg-podium-pedestal"><span class="mpg-podium-rank">${rank}</span><strong>${esc(row.n)}</strong><span class="mpg-podium-score">${esc(this.valueText(row))}</span>${row.id === this.user.id ? '<span class="mpg-podium-you">You</span>' : ''}</div>
+                    </div>`;
+                }).join('')}</div>` : ''}
+                <h3 class="mpg-standings-heading">Final standings</h3>
+                <ol aria-label="Final standings">${rows.map(row => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${rows.findIndex(other => this.metric(other) === this.metric(row)) + 1}</span>${avatarMarkup(row, 'mpg-player-avatar')}<strong>${esc(row.n)} ${accountTagMarkup(row.username, row.tags)}</strong><b>${this.valueText(row)}</b><em>${!this.user.is_anonymous && this.rewards && (!this.practice || row.id === this.user.id) ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
                 <p class="mpg-accuracy">${this.answered ? `${Math.round(this.correct / this.answered * 100)}% correct` : 'No answers submitted'} · ${this.correct} correct · ${Math.max(0, this.answered - this.correct)} incorrect · ${this.answered} answered</p>
                 <details class="mpg-summary"><summary>Full game summary</summary>
                     <p>${Math.round(this.t)} seconds played · ${(this.questionHistory || []).filter(answer => answer.correct === null).length} skipped</p>
