@@ -75,6 +75,18 @@ assert.ok(Math.abs(40 / (.7 * costs.miner.dig + .23 * costs.miner.jet) - 10) < .
 assert.equal(40 / (.8 * costs.market.walk + .2 * costs.market.sprint), 10);
 assert.equal(30 / (costs.river.walk + costs.river.cast / 4), 10);
 for (const fps of [30, 60, 120]) {
+    {
+        const counter = openRiver(), g = counter.game;
+        counter.axis = () => ({ x: -1, y: 0 });
+        g.surgeAt = () => ({ active: true, cycle: 1, x: 840 });
+        g.waveCrest = () => 840;
+        g.res.value = 100;
+        for (let i = 0; i < Math.round(fps * .3); i++) g.update(1 / fps);
+        assert.ok(g.me.vx > 0, 'wave initially pushes a counter-paddling boat back');
+        for (let i = 0; i < fps * 2; i++) g.update(1 / fps);
+        assert.ok(g.me.vx < 0, `${fps} FPS sustained counter-paddling eventually moves against the wave`);
+        assert.ok(g.res.value < 100, 'paddling against a wave uses energy');
+    }
     const s = openRiver(), g = s.game;
     s.axis = () => ({ x: 1, y: 0 });
     g.res.value = 100;

@@ -94,6 +94,37 @@ console.log('6000-frame meter DOM-query/write bounds, rounding, depleted state, 
 }
 const A = sandbox.window.StudBudArcade;
 {
+    const now = sandbox.Date.now;
+    let time = 10000;
+    sandbox.Date.now = () => time;
+    try {
+        const host = { connected: true, cardsReady: true, user: { id: 'host' }, isHost: true,
+            readyPlayers: new Set(), roster: new Map([['host', {}], ['guest', {}]]), startedAt: 9000, deadline: 69000, countdown: 3.4 };
+        const sync = actor => A.Session.prototype.syncStart.call(actor);
+        assert.equal(sync(host), false, 'host waits for peers to load instead of playing early');
+        time += 5000; assert.equal(sync(host), false);
+        host.readyPlayers.add('guest'); sync(host);
+        assert.equal(host.countdown, 3.4, 'full countdown starts after every player is ready');
+        const guest = { ...host, user: { id: 'guest' }, isHost: false, readyPlayers: new Set(), startClockSynced: false, startedAt: 9000, deadline: 69000 };
+        time += 100; sync(guest);
+        assert.equal(guest.localStartAt, host.localStartAt, 'all initial clients use the host scheduled countdown epoch');
+        assert.equal(host.startedAt, 9000, 'loading preserves the authoritative server start time');
+        assert.equal(host.deadline, 69000, 'loading never extends the client deadline beyond the server deadline');
+        assert.equal(guest.deadline, host.deadline, 'clients retain the same server match deadline');
+        time = host.matchStartAt; sync(host); sync(guest);
+        assert.equal(host.countdown, 0); assert.equal(guest.countdown, 0);
+        const late = { ...guest, startClockSynced: false, startedAt: 9000, deadline: 69000 };
+        time += 20000; sync(late);
+        assert.equal(late.countdown, 1.2, 'late joiner gets a local countdown without restarting the match');
+        assert.equal(late.startedAt, host.startedAt);
+        assert.equal(sync({ ...host, cardsReady: false }), false, 'question loading is part of readiness');
+        assert.equal(sync({ ...host, connected: false }), false, 'network subscription is part of readiness');
+        const departed = { user: { id: 'host' }, roster: new Map([['guest', {}]]), remotes: new Map(), readyPlayers: new Set(['guest']) };
+        A.Session.prototype.updateRoster.call(departed, { state: { players: [] } });
+        assert.equal(departed.readyPlayers.size, 0, 'departed players cannot leave stale readiness behind');
+    } finally { sandbox.Date.now = now; }
+}
+{
     const createElement = sandbox.document.createElement;
     const context = new Proxy({}, { get: () => () => {} });
     sandbox.document.createElement = () => ({ getContext: () => context, toDataURL: () => 'data:image/png;base64,test' });

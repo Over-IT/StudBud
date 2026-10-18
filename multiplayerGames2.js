@@ -803,7 +803,7 @@
             this.aimLocked = Boolean(this.whirlpool) || this.ejectT > 0;
             const axis = s.axis(), steering = this.stun <= 0 && !this.aimLocked && Math.hypot(axis.x, axis.y) > 0;
             // Surfing a wave face is free: the wave does the work.
-            const canMove = !steering || this.riding || s.spend(A.ENERGY_COSTS.river.walk * dt);
+            const canMove = !steering || (this.riding && axis.x >= 0) || s.spend(A.ENERGY_COSTS.river.walk * dt);
             this.speedMul = this.whirlpool ? .22 : canMove ? 1 : .08;
             const surge = this.surgeAt(now), shelter = this.bankShelter(me.y);
             if (surge.warning && this.lastSurge !== surge.cycle) {
@@ -813,7 +813,10 @@
             const separation = (me.x - rideCenter) / (this.riding ? 210 : 150);
             const face = separation < 0 ? Math.max(0, 1 + separation / 1.6) : Math.max(0, 1 - separation * .9);
             const caught = surge.active && !this.whirlpool && this.ejectT <= 0 && face > .2 && shelter > .5;
-            const push = caught ? (WAVE_SPEED + clamp((rideCenter - me.x) * 2, -100, 180)) * shelter : 0;
+            const paddling = caught && steering && canMove && axis.x < -.3;
+            this.wavePaddleT = paddling ? Math.min(1.5, (this.wavePaddleT || 0) + dt) : Math.max(0, (this.wavePaddleT || 0) - dt * 2);
+            const resistance = this.wavePaddleT / 1.5;
+            const push = caught ? (WAVE_SPEED + clamp((rideCenter - me.x) * 2, -100, 180)) * shelter * (1 - resistance * .85) : 0;
             this.surgePush = lerp(this.surgePush, push, 1 - Math.exp(-dt * 8));
             if (!shelter || this.whirlpool) this.surgePush = 0;
             this.riding = caught;
@@ -828,7 +831,7 @@
             const drift = { x: 24 * shelter + this.surgePush, y: 0 };
             if (this.riding) {
                 const length = Math.hypot(axis.x, axis.y) || 1;
-                drift.x -= axis.x / length * this.baseSpeed * this.speedMul * .85;
+                drift.x -= axis.x / length * this.baseSpeed * this.speedMul * .85 * (1 - resistance);
             }
             this.step(dt, this.ejectT > 0 ? 240 : 1800, drift, !this.aimLocked);
             this.updateLogs(now);
@@ -1053,7 +1056,7 @@
                 x: (phase - 28) / SURGE_ACTIVE * (this.W + 500) - 250 };
         }
         touchLayout() { return { stick: true, buttons: [] }; }
-        hint() { return 'WASD steer (2 Energy/s) \u00b7 click to cast (4 Energy) \u00b7 ride wave crests for free speed and points \u00b7 Q recharge'; }
+        hint() { return 'WASD steer (2 Energy/s) · click cast (4 Energy) · surf waves for points or hold left for 1.5s to paddle through · pale shallows shelter you · nearby rivals trigger 8s question duels: first correct answer steals fish · whirlpools spin and launch you · Q recharge'; }
         ex() { return { n: this.cast ? 1 : 0 }; }
 
         draw(ctx, w, h) {

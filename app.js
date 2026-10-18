@@ -4579,7 +4579,8 @@
             const lateJoin = document.getElementById('host-game-late-join');
             if (lateJoin) {
                 lateJoin.disabled = chess;
-                if (chess) lateJoin.checked = false;
+                lateJoin.closest('label').classList.toggle('hidden', chess);
+                document.getElementById('host-game-late-join-hint')?.classList.toggle('hidden', chess);
             }
             const controls = [
                 document.getElementById('host-game-time')?.closest('.multiplayer-goals'),
@@ -4606,7 +4607,7 @@
             const labels = {
                 defense: ['Team Tower Defense', 'Red vs blue, 1v1 or teams. Share cash, build and upgrade troops, send enemies to the rival path. First base to 0 HP loses; no time limit.'],
                 skyline: ['Escape to Space', 'Climb rooftop switchbacks, cross a factory and reach space. Lower routes can catch a fall.'],
-                river: ['River Fishing', 'Steer a boat, dodge obstacles and catch fish.'],
+                river: ['River Fishing', 'Catch fish, surf waves or hold left to paddle through them. Nearby rivals trigger an 8-second flashcard duel: answer first to steal fish points. Whirlpools spin and launch your boat.'],
                 market: ['Package Delivery', 'Deliver packages across town and dodge cars.'],
                 miner: ['Crystal Mining', 'Dig crystals, bank them at base, avoid lava.'],
                 duel: ['King of the Hill', 'King of the Hill: hold the glowing zone to score and knock rivals off.'],
@@ -6845,6 +6846,9 @@
                 }
             }
             this.openHostedGame(room);
+            if (options.allow_late_join && !room.state?.allow_late_join) {
+                window.StudBudDialogs.notify('This server did not save Allow late joining. Late joining is still off. The site administrator must apply the updated supabase-setup.sql before this option can work.');
+            }
         }
 
         async hostStaffTest(mode, seed, { limitedTestEnergy = false, questionReward = 100 } = {}) {
@@ -7032,8 +7036,8 @@
             if (inLobby) {
                 const info = {
                     defense: ['Red vs blue: shared cash from correct answers and kills. Build troops on your side, send enemies to the other path, and reduce the rival base to 0 HP.', 'WASD walk anywhere · Click to build/select · Buttons send/upgrade · Q/E earn cash'],
-                    skyline: ['Climb rooftop switchbacks and moving platforms to the summit. Falls can land on lower routes; trapped landings return you to a checkpoint.', 'A/D run · Space jump (twice) · Shift dash · R checkpoint'],
-                    river: ['Steer a boat, dodge obstacles and catch fish.', 'WASD steer · click cast · Q recharge'],
+                    skyline: ['Climb rooftops, machinery and low-gravity Space. At narrow wall shafts, hold toward a wall and press Space, then steer toward the opposite wall and jump again. Blue arrows mark jump-through platforms. Falls can land on lower routes; R returns to your saved checkpoint.', 'A/D run · Space jump (twice) / wall jump · Shift dash · R checkpoint'],
+                    river: ['Catch fish and surf waves for points. Hold left against a wave for a moment to paddle through, or shelter in pale shallows. Nearby rivals start an 8-second flashcard duel: the first correct answer steals fish points. Whirlpools spin and launch your boat.', 'WASD steer · click cast · Q recharge · answer rival duels quickly'],
                     market: ['Deliver packages across town and dodge cars.', 'WASD move · Shift sprint · Q recharge'],
                     miner: ['Dig through the cavern, haul ore back to base and avoid lava.', 'WASD move · hold click dig · Q recharge'],
                     duel: ['Hold the glowing hill alone to score. Charge Thunder Hammer by holding the hill or landing attacks.', 'A/D move · Space jump · S guard · E/click swing · R charged Special (12s cooldown) · Shift dodge · Q recharge'],
@@ -9320,10 +9324,14 @@
             }
             if (Router.activeRoute === 'multiplayer'
                 && !modalActive
-                && !['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(event.target.tagName)
+                && !['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName)
                 && !document.getElementById('waiting-arcade-card').classList.contains('hidden')) {
                 const moves = { ArrowUp: [0, 1], KeyW: [0, 1], ArrowDown: [0, -1], KeyS: [0, -1], ArrowLeft: [-1, 0], KeyA: [-1, 0], ArrowRight: [1, 0], KeyD: [1, 0], Space: [0, 1] };
-                if (moves[event.code]) { event.preventDefault(); this.waitingHop(...moves[event.code]); return; }
+                if (moves[event.code] && !(event.target.tagName === 'BUTTON' && event.code === 'Space')) {
+                    event.preventDefault();
+                    document.getElementById('waiting-runner-canvas')?.focus({ preventScroll: true });
+                    this.waitingHop(...moves[event.code]); return;
+                }
             }
             if (event.target.id === 'course-search') {
                 const list = document.getElementById('course-suggestions');

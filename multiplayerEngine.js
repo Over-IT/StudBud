@@ -579,6 +579,9 @@
             this.touchHintUntil = Date.now() + 5500;
             this.ending = false;
             this.countdown = 3.4;
+            this.networkLoading = !this.practice && !this.preview;
+            this.readyPlayers = new Set();
+            this.cardsReady = false;
             this.t = 0;
             this.cards = [];
             this.questionStats = new Map();
@@ -639,7 +642,7 @@
                 const remote = this.remotes.get(player.id);
                 if (remote) { remote.cos = info.cos; remote.color = info.color; remote.name = info.nickname; }
             });
-            for (const id of [...this.roster.keys()]) if (!ids.has(id)) { this.roster.delete(id); this.remotes.delete(id); }
+            for (const id of [...this.roster.keys()]) if (!ids.has(id)) { this.roster.delete(id); this.remotes.delete(id); this.readyPlayers?.delete(id); }
             if (this.roster.has(this.user.id)) this.local = this.roster.get(this.user.id);
         }
 
@@ -667,6 +670,7 @@
         async loadCards(fallback) {
             if (this.practice) {
                 this.cards = fallback || [];
+                this.cardsReady = this.cards.length > 0;
                 return;
             }
             try {
@@ -679,6 +683,23 @@
                 const localStats = new Map(fallback.map(card => [JSON.stringify([card.front, card.back]), card.practiceStats]));
                 this.cards = this.cards.map(card => ({ ...card, practiceStats: localStats.get(JSON.stringify([card.front, card.back])) || card.practiceStats }));
             }
+            this.cardsReady = this.cards.length > 0;
+            if (!this.cardsReady) this.toast('Questions could not load. Rejoin the room to retry.', '#f87171');
+        }
+
+        syncStart() {
+            if (!this.connected || !this.cardsReady) return false;
+            this.readyPlayers.add(this.user.id);
+            if (!this.matchStartAt && this.isHost && [...this.roster.keys()].every(id => this.readyPlayers.has(id))) {
+                this.matchStartAt = Date.now() + 3400;
+            }
+            if (!this.matchStartAt) return false;
+            if (!this.startClockSynced) {
+                this.localStartAt = Math.max(this.matchStartAt, Date.now() + 1200);
+                this.startClockSynced = true;
+            }
+            this.countdown = Math.max(0, (this.localStartAt - Date.now()) / 1000);
+            return true;
         }
 
         send(payload) {
@@ -689,10 +710,10 @@
         emit(event) { if (this.outbox.length < 60) this.outbox.push(event); }
 
         sendState() {
-            if (this.over || this.countdown > 0) return;
+            if (this.over) return;
             const ev = this.outbox.splice(0, 40);
             const body = { t: 's', id: this.user.id, s: Math.round(this.score), g: Math.round(this.goal), q: this.answered,
-                d: this.done ? 1 : 0, ft: this.finishMs, ...this.game.net() };
+                d: this.done ? 1 : 0, ft: this.finishMs, ready: Boolean(this.cardsReady), startAt: this.isHost ? this.matchStartAt : undefined, ...this.game.net() };
             // Idle players (nothing changed, no events) drop to a heartbeat, cutting realtime traffic for parked or answering players.
             const sig = JSON.stringify(body), nowMs = Date.now();
             if (!ev.length && sig === this.lastSentSig && nowMs - (this.lastSentAt || 0) < 500) return;
@@ -707,6 +728,8 @@
                 return;
             }
             if (p.t !== 's' || !this.roster.has(p.id)) return;
+            if (p.ready) this.readyPlayers?.add(p.id);
+            if (p.id === this.room.host_id && Number.isFinite(p.startAt) && !this.matchStartAt) this.matchStartAt = p.startAt;
             let r = this.remotes.get(p.id);
             const info = this.roster.get(p.id);
             if (!r) { r = { id: p.id, x: p.x, y: p.y, tx: p.x, ty: p.y }; this.remotes.set(p.id, r); }
@@ -1012,7 +1035,8 @@
         down(...codes) { return codes.some(code => this.keys.has(code)); }
 
         bind() {
-            const typing = e => /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || '');
+            const typing = e => e.target?.isContentEditable || e.target?.tagName === 'TEXTAREA'
+                || (e.target?.tagName === 'INPUT' && !['checkbox', 'radio', 'range', 'button', 'submit'].includes(e.target.type));
             this.handlers = {
                 keydown: e => {
                     if (this.over) {
@@ -1047,6 +1071,12 @@
                         targets[(index + (e.shiftKey ? -1 : 1) + targets.length) % targets.length]?.focus();
                         e.preventDefault(); return;
                     }
+                    if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyR', 'ShiftLeft', 'ShiftRight'].includes(e.code)
+                        && e.target !== this.canvas) {
+                        this.canvas.focus({ preventScroll: true });
+                        e.preventDefault?.();
+                    }
+                    if (e.target?.tagName === 'SELECT' && !['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyR'].includes(e.code)) return;
                     if ((e.code === 'Enter' || e.code === 'Space') && this.overlay.contains(e.target) && e.target.closest('button, summary')) return;
                     if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
                     if (e.code === 'KeyQ' && !e.repeat && this.game?.res) { this.recharge(); return; }
@@ -1701,15 +1731,18 @@
             this.lastFrame = now;
             if (!this.over) {
                 if (this.countdown > 0) {
-                    this.countdown -= dt;
+                    const waiting = this.networkLoading && !this.syncStart();
+                    if (!this.networkLoading) this.countdown -= dt;
                     const step = this.countdown > 0.4 ? Math.ceil(this.countdown - 0.4) : 0;
-                    if (step !== this.lastCountStep) {
+                    if (!waiting && step !== this.lastCountStep) {
                         this.lastCountStep = step;
                         this.sfx(step ? 'countdown' : 'go');
                     }
                     const text = this.countdown > 0.4 ? String(Math.ceil(this.countdown - 0.4)) : 'GO!';
                     const el = this.overlay.querySelector('.mpg-countdown');
-                    el.textContent = this.countdown > -0.2 ? text : '';
+                    el.classList.toggle('is-loading', Boolean(waiting));
+                    el.textContent = waiting ? !this.connected ? 'Connecting…' : !this.cardsReady ? 'Loading questions…'
+                        : `Loading players… ${this.readyPlayers.size}/${this.roster.size}` : this.countdown > -0.2 ? text : '';
                     el.classList.toggle('hidden', this.countdown <= -0.2);
                 } else {
                     if (!this.countdownHidden) {

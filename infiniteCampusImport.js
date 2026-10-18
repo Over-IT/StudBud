@@ -853,9 +853,13 @@
     // 6. Apply the plan to StudBud state (pure: returns new collections)
     // ------------------------------------------------------------------
     function guessKind(title, categoryName) {
-        const value = `${title} ${categoryName}`.toLowerCase();
-        if (/\b(test|exam|midterm|final|summative|assessment|unit check|ccsa|eoc)\b/.test(value)) return 'test';
+        const value = String(title || '').toLowerCase();
+        if (/\b(review|practice|prep(aration)?|study guide|corrections?|retake request|worksheet|notes|project|presentation|essay|homework)\b/.test(value)) return 'assignment';
         if (/\bquiz(zes)?\b/.test(value)) return 'quiz';
+        if (/\b(tests?|exams?|midterm|final exam|summative|assessment|unit check|ccsa|eoc)\b/.test(value)) return 'test';
+        const category = String(categoryName || '').trim().toLowerCase();
+        if (/^(quizzes|quiz)$/.test(category)) return 'quiz';
+        if (/^(tests?|exams?|summative assessments?|assessments?)$/.test(category)) return 'test';
         return 'assignment';
     }
 
@@ -973,7 +977,12 @@
             }
             const id = `ic_${item.id}`;
             const current = assignments.find(entry => entry.id === id);
-            const kind = current?.kind && current.kind !== 'assignment' ? current.kind : guessKind(item.title, item.categoryName || category?.name || '');
+            const importedKind = guessKind(item.title, item.categoryName || category?.name || '');
+            const legacyValue = `${current?.title || item.title} ${item.categoryName || category?.name || ''}`.toLowerCase();
+            const legacyKind = /\b(test|exam|midterm|final|summative|assessment|unit check|ccsa|eoc)\b/.test(legacyValue)
+                ? 'test' : /\bquiz(zes)?\b/.test(legacyValue) ? 'quiz' : 'assignment';
+            const userEditedKind = current?.kind && current.kind !== (current.icKind || legacyKind);
+            const kind = userEditedKind ? current.kind : importedKind;
             const pastDue = item.dueDate && item.dueDate < today;
             let status;
             if (graded || ignored || item.turnedIn) status = 'completed';
@@ -990,6 +999,7 @@
                 maxPoints: round2(Math.max(0, possible)),
                 categoryId: category ? category.id : null,
                 kind,
+                icKind: importedKind,
                 estimatedMinutes: current?.estimatedMinutes || (kind === 'test' ? 90 : kind === 'quiz' ? 45 : 30),
                 importance: current?.importance || (kind === 'test' ? 4 : 3),
                 priority: current?.priority || 'high',

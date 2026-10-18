@@ -2000,6 +2000,7 @@ body.mpg-active { overflow: hidden; }
 .mpg-toasts div { padding: 7px 16px; border-radius: 999px; background: rgba(8,12,24,.88); border: 2px solid #e2e8f0; font-weight: 700; font-size: .85rem; animation: mpg-pop .25s ease-out; }
 @keyframes mpg-pop { from { transform: translateY(-8px) scale(.9); opacity: 0; } to { transform: none; opacity: 1; } }
 .mpg-countdown { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: clamp(5rem, 18vw, 10rem); font-weight: 900; color: #fff; text-shadow: 0 6px 40px rgba(99,102,241,.9); pointer-events: none; }
+.mpg-countdown.is-loading { padding: 24px; font-size: clamp(1.1rem, 4vw, 2rem); text-align: center; overflow-wrap: anywhere; background: rgba(2,6,16,.35); }
 .mpg-question { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(2,6,16,.62); backdrop-filter: blur(3px); z-index: 5; }
 .mpg-q-card { width: min(640px, 92vw); padding: 22px; border-radius: 18px; background: #101a33; border: 2px solid #6366f1; box-shadow: 0 20px 60px rgba(0,0,0,.6); display: grid; gap: 12px; }
 .mpg-q-card small { text-transform: uppercase; letter-spacing: .1em; color: #a5b4fc; font-weight: 800; }

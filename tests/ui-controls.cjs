@@ -311,6 +311,19 @@ assert.equal(A.games.sports, undefined, 'Soccer has been retired');
     session.handlers.keydown({ code: 'KeyQ', target: canvas });
     assert.equal(refills, 0, 'finished games never open refill questions');
     assert.equal(session.keys.size, 0, 'finished games ignore movement input');
+    session.over = false; session.game = {};
+    for (const [tagName, type] of [['BUTTON', ''], ['INPUT', 'checkbox'], ['INPUT', 'range'], ['SELECT', '']]) {
+        const control = new Element(); control.tagName = tagName; control.type = type;
+        control.closest = () => null;
+        control.focus(); session.keys.clear();
+        session.handlers.keydown({ code: 'KeyW', target: control });
+        assert.ok(session.keys.has('KeyW'), `${type || tagName} focus does not swallow WASD`);
+        assert.equal(sandbox.document.activeElement, canvas, 'movement reclaims gameplay focus');
+    }
+    const text = new Element(); text.tagName = 'INPUT'; text.type = 'number';
+    session.keys.clear();
+    session.handlers.keydown({ code: 'KeyW', target: text });
+    assert.equal(session.keys.size, 0, 'intentional text and numeric input editing remains isolated');
 }
 
 for (const reward of [5, 40, 65, 100]) {

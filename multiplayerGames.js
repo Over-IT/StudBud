@@ -1186,6 +1186,27 @@
             // Designated ascent platforms allow jump-through; stairs are recognizable without markers.
             for (const p of solids) p.oneway = !!(p.jt || p.factoryStep || p.fireEscape);
             this.conveyors = solids.filter(p => p.factoryBelt);
+            const lessons = {
+                scale: ['WALL HOP', 'Hold toward the wall + Space.', 'Steer to the opposite wall; jump again.'],
+                scaffold: ['JUMP THROUGH', 'Blue arrows: jump up through the deck.', 'Land on top to climb the scaffolding.'],
+                poles: ['SINKING PLATES', 'Jump quickly before the plate sinks.', 'Use your air jump if it drops too far.'],
+                'belt-gauntlet': ['REVERSING BELTS', 'Follow the arrow; pink warns of a flip.', 'Wait between machines for a safe opening.'],
+                'meteor-climb': ['METEOR RIDES', 'Wait on the dock, then board a rock.', 'Ride it and jump to the next lane.'],
+                'thruster-boost': ['THRUSTER JUMP', 'Land on the spring to launch upward.', 'Steer toward the next landing deck.']
+            };
+            const taught = new Set();
+            this.mechanicSigns = [];
+            for (const crossing of this.cityCrossings) {
+                if (!lessons[crossing.kind] || taught.has(crossing.kind)) continue;
+                taught.add(crossing.kind);
+                this.mechanicSigns.push({ platform: crossing.from, lines: lessons[crossing.kind] });
+            }
+            for (const chamber of this.challenges) for (const platform of chamber.nodes) {
+                if (!lessons[platform.motif] || taught.has(platform.motif)) continue;
+                taught.add(platform.motif);
+                const index = chamber.nodes.indexOf(platform);
+                this.mechanicSigns.push({ platform: chamber.nodes[Math.max(0, index - 1)], lines: lessons[platform.motif] });
+            }
             // purely visual rooftop clutter, placed only in free gaps (no props, spikes, springs, boxes, flags or ceilings)
             const rd = mulberry32((this.s.seed ^ 0x9e3779b1) >>> 0), DW = [80, 110, 80, 100, 110, 110, 90, 70, 100];
             for (const p of solids) {
@@ -1867,6 +1888,20 @@
             ctx.stroke();
             ctx.fillStyle = '#d6d3d1';
             for (const [x, y0] of [a, b]) for (let y = y0 + 14; y < y0 + 60; y += 16) { ctx.fillRect(x - 1, y, 2, 2); }
+        }
+
+        drawMechanicSign(ctx, sign) {
+            const p = sign.platform, x = p.x + Math.max(0, Math.min(p.w - 240, 25)), y = p.y - 110;
+            ctx.save();
+            ctx.fillStyle = '#64748b'; ctx.fillRect(x + 12, y + 74, 5, 36);
+            ctx.fillStyle = 'rgba(15,23,42,.92)'; roundRect(ctx, x, y, 240, 74, 8); ctx.fill();
+            ctx.strokeStyle = '#7dd3fc'; ctx.lineWidth = 1.5; ctx.stroke();
+            ctx.textAlign = 'left'; ctx.fillStyle = '#7dd3fc'; ctx.font = '900 12px system-ui';
+            ctx.fillText(sign.lines[0], x + 10, y + 19, 220);
+            ctx.fillStyle = '#f1f5f9'; ctx.font = '600 11px system-ui';
+            ctx.fillText(sign.lines[1], x + 10, y + 40, 220);
+            ctx.fillText(sign.lines[2], x + 10, y + 58, 220);
+            ctx.restore();
         }
 
         drawJumpThroughMarker(ctx, p) {
@@ -3156,6 +3191,10 @@
                     this.drawLedge(ctx, p, B);
                 }
                 this.drawJumpThroughMarker(ctx, p);
+            }
+            if (!s.preview) for (const sign of this.mechanicSigns) {
+                const p = sign.platform;
+                if (p.x + p.w >= left && p.x <= right && p.y >= top && p.y - 110 <= bottom) this.drawMechanicSign(ctx, sign);
             }
             for (const c of this.checkpoints) {
                 if (c.x > right || c.x < left || !seen(c.y)) continue;

@@ -121,6 +121,15 @@ function session(mode, id = 'host', ids = ['host', 'guest', 'ally', 'rival']) {
     return s;
 }
 {
+    const g = session('skyline').game;
+    for (const title of ['WALL HOP', 'JUMP THROUGH', 'REVERSING BELTS', 'METEOR RIDES']) {
+        const signs = g.mechanicSigns.filter(sign => sign.lines[0] === title);
+        assert.equal(signs.length, 1, `${title} is explained once at its first introduction`);
+        assert.ok(signs[0].lines.slice(1).every(line => line.length > 10));
+        assert.ok(g.solids.includes(signs[0].platform), 'sign stands at a real route platform');
+    }
+}
+{
     const s = session('skyline'), g = s.game;
     for (const flight of [false, true]) {
         s.testing = flight; s.testFlight = flight; s.testInvincible = flight;

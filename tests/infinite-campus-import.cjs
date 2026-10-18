@@ -122,6 +122,28 @@ assert.strictEqual(imported('a4').graded, false);
 assert.strictEqual(imported('a4').status, 'pending');
 assert.strictEqual(imported('a4').kind, 'quiz');
 assert.strictEqual(imported('a1').kind, 'test');
+{
+    const cases = [
+        ['Quiz 2', 'Summative Assessments', 'quiz'],
+        ['Unit Test Review', 'Tests', 'assignment'],
+        ['Quiz Corrections', 'Quizzes', 'assignment'],
+        ['Final Project', 'Summative', 'assignment'],
+        ['Exam study guide', 'Assessments', 'assignment'],
+        ['Unit 3 Exam', 'Homework', 'test'],
+        ['Chapter 5', 'Quizzes', 'quiz'],
+        ['Daily work', 'Tests and Quizzes', 'assignment']
+    ];
+    for (const [title, categoryName, kind] of cases) {
+        const changed = { ...model, assignments: [{ ...model.assignments[0], title, categoryName, categoryID: '' }] };
+        const result = IC.applyImportPlan(changed, plan, { courses: [], assignments: [], schedule: {} }, options);
+        assert.equal(result.assignments[0].kind, kind, `${title} in ${categoryName} is classified by the actual task`);
+    }
+    const correctedModel = { ...model, assignments: [{ ...model.assignments[0], title: 'Unit Test Review', categoryName: 'Tests' }] };
+    const oldRecord = { ...first.assignments.find(item => item.id === `ic_${model.assignments[0].id}`), title: 'Unit Test Review', kind: 'test' };
+    delete oldRecord.icKind;
+    const repaired = IC.applyImportPlan(correctedModel, plan, { courses: first.courses, assignments: [oldRecord], schedule: {} }, options);
+    assert.equal(repaired.assignments[0].kind, 'assignment', 'reimport repairs the legacy test-review misclassification');
+}
 assert.strictEqual(first.schedule.all['1'], calcCourse.code);
 assert.strictEqual(first.schedule.all['8'], 'KEEP', 'unrelated periods are kept');
 assert.strictEqual(first.summary.coursesAdded, 2);

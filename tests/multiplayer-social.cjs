@@ -36,6 +36,8 @@ app.adminTab = 'games';
 app.waitingRunner = { started: true };
 app.stopWaitingRunner = () => {};
 const games = sandbox.window.StudBudCommunityGames = {};
+const notices = [];
+sandbox.window.StudBudDialogs = { notify: message => notices.push(message) };
 const room = players => ({ room_code: 'ABCDEF', host_id: 'host', mode: 'skyline', deck_title: 'Test', status: 'waiting',
     goal_type: 'time', time_limit_seconds: 300, state: { players } });
 const host = { id: 'host', nickname: 'Host' }, bud = { id: 'bud', nickname: 'Joining bud' };
@@ -96,6 +98,7 @@ async function run() {
     form.elements.allowLateJoin.checked = true;
     await app.hostGame(form);
     assert.equal(created[4].allow_late_join, true);
+    assert.match(notices.at(-1), /server did not save Allow late joining/, 'old databases cannot silently ignore the checkbox');
     form.elements.mode.value = 'chess';
     await app.hostGame(form);
     assert.equal(created[4].allow_late_join, false, 'chess always locks its two seats after starting');
