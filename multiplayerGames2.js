@@ -745,7 +745,7 @@
             this.surgePush = 0; this.lastSurge = -1; this.surfT = 0; this.riding = false;
             this.figureR = 13; this.seated = true;
             this.wake = [];
-            this.res = new A.Resource('Energy', '#7dd3fc', 100, 30, 2);
+            this.res = new A.Resource('Energy', '#7dd3fc', 100, 40, 2);
         }
 
         fishPos(f, now) {
@@ -1056,7 +1056,7 @@
                 x: (phase - 28) / SURGE_ACTIVE * (this.W + 500) - 250 };
         }
         touchLayout() { return { stick: true, buttons: [] }; }
-        hint() { return 'WASD steer (2 Energy/s) · click cast (4 Energy) · surf waves for points or hold left for 1.5s to paddle through · pale shallows shelter you · nearby rivals trigger 8s question duels: first correct answer steals fish · whirlpools spin and launch you · Q recharge'; }
+        hint() { return 'WASD steer (3 Energy/s) · click cast (4 Energy) · surf waves for points or hold left for 1.5s to paddle through · pale shallows shelter you · nearby rivals trigger 8s question duels: first correct answer steals fish · whirlpools spin and launch you · Q recharge'; }
         ex() { return { n: this.cast ? 1 : 0 }; }
 
         draw(ctx, w, h) {
@@ -1280,7 +1280,7 @@
             this.scoreGoal = false; this.goalUnit = 'cash'; this.goalLabel = 'Cash earned'; this.formatValue = v => `$${Math.round(Number(v) || 0).toLocaleString()}`;
             this.me.x = this.W / 2; this.me.y = ROAD / 2 + BH + ROAD; this.cam.x = this.me.x; this.cam.y = this.me.y;
             this.baseSpeed = 245; this.boost = 0;
-            this.res = new A.Resource('Energy', '#38bdf8', 100, 40, 2);
+            this.res = new A.Resource('Energy', '#38bdf8', 100, 50, 2);
             this.pkg = null; this.deliveries = 0; this.streak = 0; this.earned = 0; this.cash = 0; this.hitCd = 0;
         }
 
@@ -1471,7 +1471,7 @@
         ex() { return { p: this.pkg ? 1 : 0 }; }
         goalText() { return `${this.deliveries} deliveries · $${this.cash} cash · streak ${this.streak}`; }
         touchLayout() { return { stick: true, buttons: [{ k: 'ShiftLeft', label: 'Sprint', cls: 'main' }] }; }
-        hint() { return 'WASD move · Shift sprint · deliver to marked houses · building recesses shelter you from traffic · Q recharge anywhere'; }
+        hint() { return 'WASD walk (4 energy/s) · Shift sprint (10/s) · Waiting is free · Deliver to marked houses · Building recesses shelter you from traffic · Q recharge anywhere'; }
 
         draw(ctx, w, h) {
             const s = this.s, me = this.me, now = clock(s), t = this.anim;

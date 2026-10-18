@@ -121,30 +121,79 @@ function session(mode, id = 'host', ids = ['host', 'guest', 'ally', 'rival']) {
     return s;
 }
 {
-    const g = session('skyline').game;
-    for (const title of ['WALL HOP', 'JUMP THROUGH', 'REVERSING BELTS', 'METEOR RIDES']) {
-        const signs = g.mechanicSigns.filter(sign => sign.lines[0] === title);
-        assert.equal(signs.length, 1, `${title} is explained once at its first introduction`);
-        assert.ok(signs[0].lines.slice(1).every(line => line.length > 10));
-        assert.ok(g.solids.includes(signs[0].platform), 'sign stands at a real route platform');
+    const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+    vm.runInContext(source.slice(source.indexOf('    class AppOrchestrator'), source.indexOf('    window.NexusApp =')), sandbox);
+    const app = vm.runInContext('Object.create(AppOrchestrator.prototype)', sandbox);
+    const costs = A.ENERGY_COSTS;
+    const rates = {
+        skyline: costs.skyline.run,
+        duel: costs.duel.swing + costs.duel.guard / 10,
+        miner: .7 * costs.miner.dig + .23 * costs.miner.jet,
+        river: costs.river.walk + costs.river.cast / 4,
+        frenzy: costs.fishing.cast / 6.5,
+        fishing: costs.fishing.cast / 6.5,
+        market: .8 * costs.market.walk + .2 * costs.market.sprint,
+        shooter: session('shooter').game.weaponInfo().cost / session('shooter').game.weaponInfo().cd
+    };
+    for (const [mode, rate] of Object.entries(rates)) {
+        const reward = app.questionRewardRecommendation(mode).suggested;
+        const seconds = reward / rate;
+        assert.ok(seconds >= 8 && seconds <= 12, `${mode}: default answer buys ${seconds.toFixed(2)} seconds of representative active play`);
     }
+    for (const fps of [30, 60, 120]) {
+        const s = session('skyline'), g = s.game;
+        const floor = { x: 0, y: -100, w: 20000, h: 100, bi: 0 };
+        g.solids = [floor];
+        for (const name of ['winds', 'drills', 'springs', 'spikes', 'saws', 'debris', 'balls', 'lasers', 'boxes']) g[name] = [];
+        Object.assign(g.me, { x: 100, y: floor.y - g.me.h, vx: 0, vy: 0, onGround: true, ground: floor });
+        assert.equal(g.res.value, 30, 'initial climb budget is one default answer, not a long free run');
+        s.axis = () => ({ x: 1, y: 0 });
+        for (let frame = 0; frame < fps * 9; frame++) g.updatePlayer(1 / fps);
+        assert.ok(Math.abs(g.res.value - 3) < 1e-7, `${fps} FPS walking spends exactly 27 energy in 9 seconds`);
+        s.axis = () => ({ x: 0, y: 0 });
+        for (let frame = 0; frame < fps; frame++) g.updatePlayer(1 / fps);
+        assert.ok(Math.abs(g.res.value - 3) < 1e-7, 'waiting at a ledge preserves energy');
+        s.axis = () => ({ x: 1, y: 0 });
+        for (let frame = 0; frame < fps; frame++) g.updatePlayer(1 / fps);
+        assert.ok(g.res.value < .5, 'ten seconds of ordinary walking reaches the question/refill threshold');
+        s.reward = 30;
+        s.rewardAmount = () => s.reward;
+        A.Session.prototype.refill.call(s);
+        assert.ok(g.res.value >= 30 && g.res.value < 30.5, 'one answer restores another ten-second walking budget');
+        g.me.onGround = false; g.me.ground = null; g.me.y -= 200;
+        const before = g.res.value;
+        g.updatePlayer(1 / fps);
+        assert.ok(Math.abs(before - g.res.value - costs.skyline.air / fps) < 1e-7, 'air steering uses its own lower continuous cost');
+    }
+}
+{
     for (const seed of [1, 42, 12345, 7, 99, 2025]) {
         const level = new A.games.skyline({ seed, local: { color: '#fff' }, user: { id: 'sign-test' } });
+        assert.equal(level.mechanicSigns.length, 1, 'self-explanatory mechanics have no extra tutorial boards');
         const wall = level.mechanicSigns.find(sign => sign.kind === 'scale');
         const crossing = level.cityCrossings.find(crossing => crossing.kind === 'scale');
         const bounds = level.mechanicSignBounds(wall);
-        assert.equal(wall.style, 'billboard');
         assert.equal(wall.platform, crossing.from, 'wall-hop billboard is on the entrance rooftop');
         assert.ok(bounds.x >= crossing.from.x && bounds.x + bounds.w <= crossing.from.x + crossing.from.w - 110,
             'billboard remains beside, not across, the wall-hop shaft');
         assert.ok(bounds.h >= 140 && bounds.w >= 340, 'city instructions use a full-size scenery billboard');
-        assert.equal(level.mechanicSigns.find(sign => sign.kind === 'belt-gauntlet').style, 'factory');
-        assert.equal(level.mechanicSigns.find(sign => sign.kind === 'meteor-climb').style, 'space');
-        for (const sign of level.mechanicSigns) {
-            texts.length = 0;
-            level.drawMechanicSign(ctx, sign);
-            assert.deepEqual(texts, Array.from(sign.lines), 'every themed sign retains its complete instructions');
-        }
+        texts.length = 0;
+        level.drawMechanicSign(ctx, wall);
+        assert.deepEqual(texts, ['A', 'D', 'SPACE'], 'visual demo has only control keycaps, not explanatory text');
+        const translates = [];
+        const visualCtx = new Proxy({ translate: (...args) => translates.push(args) },
+            { get: (target, key) => target[key] || ctx[key] });
+        const render = time => {
+            translates.length = 0; level.anim = time;
+            level.drawMechanicSign(visualCtx, wall);
+            return translates.map(point => [...point]);
+        };
+        assert.notDeepEqual(render(0), render(.6), 'demo runner visibly moves along the wall-hop path');
+        level.reducedMechanicMotion = true;
+        assert.deepEqual(render(0), render(.6), 'reduced motion keeps a static illustrated sequence');
+        level.s.overlay = { classList: { contains: name => name === 'has-touch' } };
+        texts.length = 0; level.drawMechanicSign(ctx, wall);
+        assert.deepEqual(texts, [], 'touch demo uses direction/jump icons, not keyboard-only instructions');
     }
 }
 {

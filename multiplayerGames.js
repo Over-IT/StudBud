@@ -302,7 +302,7 @@
             this.cam = { x: 0, y: 0 };
             this.coyote = 0; this.buffer = 0; this.airJumps = 1; this.dash = 0; this.dashCd = 0;
             this.boost = 0; this.slow = 0; this.dead = 0; this.maxH = 0; this.deaths = 0;
-            this.res = new A.Resource('Energy', '#facc15', 100, 50, 2);
+            this.res = new A.Resource('Energy', '#facc15', 100, 30, 2);
             this.anim = 0; this.finished = false; this.state = 0; this.carry = null;
             this.kick = 0; this.wallDir = 0;
         }
@@ -1186,28 +1186,9 @@
             // Designated ascent platforms allow jump-through; stairs are recognizable without markers.
             for (const p of solids) p.oneway = !!(p.jt || p.factoryStep || p.fireEscape);
             this.conveyors = solids.filter(p => p.factoryBelt);
-            const lessons = {
-                scale: ['WALL HOP', 'Hold toward the wall + Space.', 'Steer to the opposite wall; jump again.'],
-                scaffold: ['JUMP THROUGH', 'Blue arrows: jump up through the deck.', 'Land on top to climb the scaffolding.'],
-                poles: ['SINKING PLATES', 'Jump quickly before the plate sinks.', 'Use your air jump if it drops too far.'],
-                'belt-gauntlet': ['REVERSING BELTS', 'Follow the arrow; pink warns of a flip.', 'Wait between machines for a safe opening.'],
-                'meteor-climb': ['METEOR RIDES', 'Wait on the dock, then board a rock.', 'Ride it and jump to the next lane.'],
-                'thruster-boost': ['THRUSTER JUMP', 'Land on the spring to launch upward.', 'Steer toward the next landing deck.']
-            };
-            const taught = new Set();
-            this.mechanicSigns = [];
-            for (const crossing of this.cityCrossings) {
-                if (!lessons[crossing.kind] || taught.has(crossing.kind)) continue;
-                taught.add(crossing.kind);
-                this.mechanicSigns.push({ platform: crossing.from, kind: crossing.kind, style: 'billboard', lines: lessons[crossing.kind] });
-            }
-            for (const chamber of this.challenges) for (const platform of chamber.nodes) {
-                if (!lessons[platform.motif] || taught.has(platform.motif)) continue;
-                taught.add(platform.motif);
-                const index = chamber.nodes.indexOf(platform);
-                this.mechanicSigns.push({ platform: chamber.nodes[Math.max(0, index - 1)], kind: platform.motif,
-                    style: platform.bi === 1 ? 'factory' : 'space', lines: lessons[platform.motif] });
-            }
+            const wallHop = this.cityCrossings.find(crossing => crossing.kind === 'scale');
+            this.mechanicSigns = wallHop ? [{ platform: wallHop.from, kind: 'scale' }] : [];
+            this.reducedMechanicMotion = Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
             // purely visual rooftop clutter, placed only in free gaps (no props, spikes, springs, boxes, flags or ceilings)
             const rd = mulberry32((this.s.seed ^ 0x9e3779b1) >>> 0), DW = [80, 110, 80, 100, 110, 110, 90, 70, 100];
             for (const p of solids) {
@@ -1777,7 +1758,7 @@
             if (this.s.testing === true && this.s.testFlight === true) return { stick: true, buttons: [{ k: 'KeyW', label: 'Fly up', cls: 'main' }, { k: 'KeyS', label: 'Fly down' }, { k: 'ShiftLeft', label: 'Fast' }] };
             return { stick: true, buttons: [{ k: 'Space', label: 'Jump', cls: 'main' }, { k: 'ShiftLeft', label: 'Dash' }] };
         }
-        hint() { return 'Scale city walls, cross factory machinery and explore low-gravity space · Wait at marked ledges, board a meteor and ride it to the landing beacon · Biome checkpoints save automatically by height · A/D run · Space double jump · Shift dash · R = checkpoint · Q = recharge'; }
+        hint() { return 'A/D run (3 energy/s; air steering 2/s) · Space jump (2), air/wall jump (3) · Shift dash (8) · Waiting is free · Q answer to recharge · Wait at marked ledges and ride meteors to the landing beacon · Biome checkpoints save automatically · R = checkpoint'; }
 
         drawArchitecture(ctx, p, top, bottom) {
             const B = SKY_BIOMES[p.bi || 0], low = this.s.graphics?.low || this.s.lowDetail;
@@ -1892,56 +1873,79 @@
         }
 
         mechanicSignBounds(sign) {
-            const p = sign.platform, city = sign.style === 'billboard', w = city ? 340 : 280, h = city ? 140 : 104;
-            const inset = sign.kind === 'scale' ? 130 : 24;
-            return { x: p.x + Math.max(0, p.w - w - inset), y: p.y - h - (city ? 48 : 32), w, h };
+            const p = sign.platform, w = 340, h = 140;
+            return { x: p.x + Math.max(0, p.w - w - 130), y: p.y - h - 48, w, h };
         }
 
         drawMechanicSign(ctx, sign) {
             const { x, y, w, h } = this.mechanicSignBounds(sign), base = sign.platform.y;
-            const city = sign.style === 'billboard', factory = sign.style === 'factory';
-            const accent = city ? '#f472b6' : factory ? '#facc15' : '#67e8f9';
+            const accent = '#f472b6';
             ctx.save();
             ctx.fillStyle = '#475569';
             for (const sx of [x + 24, x + w - 30]) {
                 ctx.fillRect(sx, y + h, 6, base - y - h);
                 ctx.fillRect(sx - 7, base - 5, 20, 5);
             }
-            if (city) {
-                ctx.strokeStyle = '#64748b'; ctx.lineWidth = 3; ctx.beginPath();
-                ctx.moveTo(x + 27, y + h); ctx.lineTo(x + w - 27, base - 5);
-                ctx.moveTo(x + w - 27, y + h); ctx.lineTo(x + 27, base - 5); ctx.stroke();
-            }
+            ctx.strokeStyle = '#64748b'; ctx.lineWidth = 3; ctx.beginPath();
+            ctx.moveTo(x + 27, y + h); ctx.lineTo(x + w - 27, base - 5);
+            ctx.moveTo(x + w - 27, y + h); ctx.lineTo(x + 27, base - 5); ctx.stroke();
             ctx.fillStyle = '#334155'; ctx.fillRect(x - 5, y - 5, w + 10, h + 10);
-            ctx.fillStyle = city ? '#312e81' : factory ? '#292524' : '#0c2538';
+            ctx.fillStyle = '#312e81';
             ctx.fillRect(x, y, w, h);
             ctx.strokeStyle = accent; ctx.lineWidth = 2; ctx.strokeRect(x + 5, y + 5, w - 10, h - 10);
-            if (city) {
-                ctx.fillStyle = accent; ctx.fillRect(x + 12, y + 12, 5, h - 24);
+            ctx.fillStyle = '#fde68a';
+            for (let sx = x + 28; sx < x + w; sx += 70) {
+                ctx.fillRect(sx - 3, y - 12, 18, 5);
+                ctx.fillStyle = 'rgba(253,230,138,.06)'; ctx.fillRect(sx - 9, y, 30, h);
                 ctx.fillStyle = '#fde68a';
-                for (let sx = x + 28; sx < x + w; sx += 70) {
-                    ctx.fillRect(sx - 3, y - 12, 18, 5);
-                    ctx.fillStyle = 'rgba(253,230,138,.1)'; ctx.fillRect(sx - 9, y, 30, h);
-                    ctx.fillStyle = '#fde68a';
-                }
-            } else if (factory) {
-                ctx.fillStyle = accent; ctx.fillRect(x + 10, y + 10, w - 20, 10);
-                ctx.fillStyle = '#292524';
-                for (let sx = x + 14; sx < x + w - 14; sx += 22) ctx.fillRect(sx, y + 10, 10, 10);
-            } else {
-                ctx.fillStyle = accent;
-                for (let i = 0; i < 3; i++) ctx.fillRect(x + w - 40 + i * 9, y + 13, 5, 4);
-                ctx.fillStyle = 'rgba(103,232,249,.06)';
-                for (let sy = y + 24; sy < y + h - 8; sy += 5) ctx.fillRect(x + 10, sy, w - 20, 1);
             }
             ctx.fillStyle = '#94a3b8';
             for (const sx of [x + 2, x + w - 5]) for (const sy of [y + 2, y + h - 5]) ctx.fillRect(sx, sy, 3, 3);
-            const tx = x + (city ? 28 : 16), titleY = y + (city ? 45 : 43), textWidth = w - (city ? 48 : 32);
-            ctx.textAlign = 'left'; ctx.fillStyle = accent; ctx.font = `900 ${city ? 24 : 17}px system-ui`;
-            ctx.fillText(sign.lines[0], tx, titleY, textWidth);
-            ctx.fillStyle = '#f1f5f9'; ctx.font = `600 ${city ? 13 : 12}px system-ui`;
-            ctx.fillText(sign.lines[1], tx, titleY + 28, textWidth);
-            ctx.fillText(sign.lines[2], tx, titleY + 49, textWidth);
+            ctx.translate(x, y);
+            ctx.fillStyle = '#64748b';
+            ctx.fillRect(30, 18, 12, 106); ctx.fillRect(190, 18, 12, 106);
+            ctx.fillStyle = '#7dd3fc';
+            ctx.fillRect(40, 18, 2, 106); ctx.fillRect(190, 18, 2, 106);
+            const path = [[49, 111], [183, 83], [49, 55], [183, 27]];
+            const drawDemoRunner = (px, py, dir, alpha, motion) => {
+                ctx.save(); ctx.translate(px, py); ctx.scale(.55, .55);
+                drawRunner(ctx, -13, -22, 26, 44, { color: '#67e8f9' }, dir, 0, 2, alpha, motion);
+                ctx.restore();
+            };
+            ctx.strokeStyle = '#fde68a'; ctx.lineWidth = 2;
+            for (let i = 0; i < path.length - 1; i++) {
+                const [ax, ay] = path[i], [bx, by] = path[i + 1], dir = Math.sign(bx - ax);
+                ctx.beginPath(); ctx.moveTo(ax, ay);
+                ctx.quadraticCurveTo((ax + bx) / 2, ay - 22, bx, by); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(bx - dir * 7, by - 4); ctx.lineTo(bx, by);
+                ctx.lineTo(bx - dir * 5, by + 6); ctx.stroke();
+                drawDemoRunner(ax, ay, dir, .3, { wallAmount: 1, wallSide: -dir });
+            }
+            if (!this.reducedMechanicMotion) {
+                const phase = (this.anim || 0) % 3.6 / 1.2, i = Math.min(2, Math.floor(phase)), t = phase - i;
+                const [ax, ay] = path[i], [bx, by] = path[i + 1], dir = Math.sign(bx - ax);
+                const px = lerp(ax, bx, t), py = (1 - t) ** 2 * ay + 2 * (1 - t) * t * (ay - 22) + t * t * by;
+                drawDemoRunner(px, py, dir, 1, { kick: .22 * (1 - t), wallAmount: t > .9 ? 1 : 0, wallSide: dir });
+            }
+            const touch = this.s.overlay?.classList.contains('has-touch');
+            ctx.font = '900 16px system-ui'; ctx.textAlign = 'center';
+            for (const [kx, label, dir] of [[222, 'A', -1], [276, 'D', 1]]) {
+                ctx.fillStyle = '#1e293b'; roundRect(ctx, kx, 35, 38, 32, 5); ctx.fill();
+                ctx.strokeStyle = '#a5b4fc'; ctx.stroke();
+                if (!touch) { ctx.fillStyle = '#f1f5f9'; ctx.fillText(label, kx + 19, 57); }
+                const cy = touch ? 51 : 77;
+                ctx.strokeStyle = '#7dd3fc'; ctx.beginPath();
+                ctx.moveTo(kx + 19 - dir * 8, cy); ctx.lineTo(kx + 19 + dir * 8, cy);
+                ctx.lineTo(kx + 19 + dir * 3, cy - 5);
+                ctx.moveTo(kx + 19 + dir * 8, cy); ctx.lineTo(kx + 19 + dir * 3, cy + 5); ctx.stroke();
+            }
+            ctx.fillStyle = '#1e293b'; roundRect(ctx, 222, 92, 92, 28, 5); ctx.fill();
+            ctx.strokeStyle = '#a5b4fc'; ctx.stroke();
+            if (!touch) { ctx.fillStyle = '#f1f5f9'; ctx.font = '900 13px system-ui'; ctx.fillText('SPACE', 268, 111); }
+            else {
+                ctx.strokeStyle = '#7dd3fc'; ctx.beginPath(); ctx.moveTo(268, 114); ctx.lineTo(268, 99);
+                ctx.moveTo(262, 105); ctx.lineTo(268, 99); ctx.lineTo(274, 105); ctx.stroke();
+            }
             ctx.restore();
         }
 
@@ -3935,7 +3939,7 @@
             this.hp = 100; this.maxHp = 100; this.dead = 0; this.invuln = 2;
             this.bullets = []; this.drones = []; this.packs = []; this.spawnT = 1.5; this.fireCd = 0;
             this.dashT = 0; this.dashCd = 0; this.nova = 0; this.novaCd = 0; this.overdrive = 0; this.jam = 0; this.kills = 0; this.pk = 0; this.deaths = 0;
-            this.res = new A.Resource('Ammo', '#67e8f9', 150, 45, 3);
+            this.res = new A.Resource('Ammo', '#67e8f9', 150, 60, 3);
             this.cam = { x: this.me.x, y: this.me.y }; this.anim = 0; this.shake = 0; this.hitmark = 0; this.flash = 0; this.dx = 1; this.dy = 0;
             this.weapon = 'blaster'; this.weaponT = 0; this.damageTexts = []; this.streak = 0; this.streakT = 0; this.wave = 1;
             this.pickups = [];

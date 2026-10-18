@@ -68,12 +68,14 @@ function openRiver() {
 assert.equal(A.games.sports, undefined, 'Soccer is not registered');
 const costs = A.ENERGY_COSTS;
 assert.equal(session('miner').game.res.value, 40);
-assert.equal(session('market').game.res.value, 40);
-assert.equal(session('river').game.res.value, 30);
+assert.equal(session('market').game.res.value, 50);
+assert.equal(session('river').game.res.value, 40);
 assert.equal(session('river').game.res.label, 'Energy');
 assert.ok(Math.abs(40 / (.7 * costs.miner.dig + .23 * costs.miner.jet) - 10) < .1);
-assert.equal(40 / (.8 * costs.market.walk + .2 * costs.market.sprint), 10);
-assert.equal(30 / (costs.river.walk + costs.river.cast / 4), 10);
+assert.ok(Math.abs(50 / (.8 * costs.market.walk + .2 * costs.market.sprint) - 10) < .5);
+assert.equal(40 / (costs.river.walk + costs.river.cast / 4), 10);
+assert.ok(50 / costs.market.walk <= 12.5, 'ordinary walking cannot bypass the delivery refill cadence');
+assert.ok(40 / costs.river.walk < 14, 'ordinary steering cannot bypass the river refill cadence');
 for (const fps of [30, 60, 120]) {
     {
         const counter = openRiver(), g = counter.game;
@@ -94,7 +96,11 @@ for (const fps of [30, 60, 120]) {
         s.testPauseAt = frame / fps * 1000;
         g.update(1 / fps);
     }
-    assert.ok(Math.abs(g.res.value - 80) < 1e-8, `${fps} FPS steering costs exactly 2 energy/s`);
+    assert.ok(Math.abs(g.res.value - 70) < 1e-8, `${fps} FPS steering costs exactly 3 energy/s`);
+    s.axis = () => ({ x: 0, y: 0 });
+    g.update(1);
+    assert.ok(Math.abs(g.res.value - 70) < 1e-8, 'waiting for a fishing opportunity does not drain energy');
+    s.axis = () => ({ x: 1, y: 0 });
     const before = g.res.value;
     s.mouse.pressed = true; g.update(1 / fps); s.mouse.pressed = false;
     assert.ok(g.cast, 'a funded cast launches');
@@ -129,7 +135,10 @@ for (const fps of [30, 60, 120]) {
         market.down = () => frame % (fps * 5) >= fps * 4;
         town.update(1 / fps);
     }
-    assert.ok(town.res.value < .01, `${fps} FPS typical deliveries consume 40 energy in 10 seconds`);
+    assert.ok(town.res.value < .01, `${fps} FPS typical deliveries consume 50 energy in about 10 seconds`);
+    town.res.value = 50; market.axis = () => ({ x: 0, y: 0 });
+    town.update(1);
+    assert.equal(town.res.value, 50, 'waiting for traffic does not drain energy');
 }
 const market = session('market').game;
 assert.equal(market.cars.length, 25, 'traffic reduced by 37.5%');

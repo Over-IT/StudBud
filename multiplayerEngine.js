@@ -492,20 +492,20 @@
     // Resource costs shared by players and bots. Tuned so the recommended answer reward lasts roughly
     // 10 seconds of typical play in every mode (see questionRewardRecommendation in app.js).
     const ENERGY_COSTS = Object.freeze({
-        skyline: Object.freeze({ run: 0.5, air: 0.3, jump: 2, wallJump: 3, airJump: 3, dash: 8 }),
+        skyline: Object.freeze({ run: 3, air: 2, jump: 2, wallJump: 3, airJump: 3, dash: 8 }),
         duel: Object.freeze({ swing: 3, special: 10, guard: 5 }),
         miner: Object.freeze({ jet: 9, dig: 2.8 }),
-        river: Object.freeze({ walk: 2, cast: 4 }),
+        river: Object.freeze({ walk: 3, cast: 4 }),
         fishing: Object.freeze({ cast: 10 }),
-        market: Object.freeze({ walk: 2.5, sprint: 10 }),
+        market: Object.freeze({ walk: 4, sprint: 10 }),
         shooter: Object.freeze({ nova: 30 })
     });
 
     // Roughly half a recommended answer's resources; bait must cover at least one cast.
     // Team cash uses the defense answer's 3x payout rather than the raw reward setting.
     const LOW_RESOURCE_THRESHOLDS = Object.freeze({
-        skyline: 15, duel: 18, miner: 20, river: 15, frenzy: 10, fishing: 10,
-        market: 20, shooter: 20, defense: 45
+        skyline: 15, duel: 18, miner: 20, river: 20, frenzy: 10, fishing: 10,
+        market: 25, shooter: 30, defense: 45
     });
     const lowResourceThreshold = mode => LOW_RESOURCE_THRESHOLDS[mode] ?? 10;
 

@@ -4532,15 +4532,15 @@
 
         questionRewardRecommendation(mode) {
             const recommendations = {
-                skyline: [20, 35, 'About 6-8 seconds of climbing: jumps cost 2, air and wall jumps 3, dashes 8, plus a light running drain.'],
+                skyline: [20, 35, 'Default 30 energy buys 10 seconds of walking at 3 energy/s, or about 8-10 seconds of mixed climbing. Air steering costs 2/s, jumps 2, air/wall jumps 3 and dashes 8. Waiting is free.'],
                 duel: [25, 45, 'About 10 seconds of fighting: swings cost 3, the Special 10 and shielding 5 per second.'],
                 defense: [20, 40, 'Pays $60-120 into your shared team wallet; troops, enemies and upgrades all cost cash.'],
                 miner: [30, 45, 'About 10 seconds of active mining: 7 seconds digging at 2.8 fuel/s plus 2.3 seconds jetting at 9 fuel/s uses about 40 fuel.'],
-                river: [20, 40, 'About 10 seconds of active fishing: steering costs 2 energy/s and a net costs 4 energy; moving and casting every 4 seconds uses about 3 energy/s.'],
+                river: [30, 50, 'Default 40 energy buys about 10 seconds of moving and casting: steering costs 3 energy/s and a net costs 4 energy. Waiting and riding a wave forward remain free.'],
                 frenzy: [10, 20, 'About 10 seconds of fishing: each cast costs 10 bait and a full cast, bite and reel takes about 6-7 seconds.'],
                 fishing: [10, 20, 'About 10 seconds of fishing: each cast costs 10 bait and a full cast, bite and reel takes about 6-7 seconds.'],
-                market: [30, 50, 'About 10 seconds of active deliveries: 8 seconds walking at 2.5 energy/s plus 2 seconds sprinting at 10 energy/s uses 40 energy.'],
-                shooter: [30, 50, 'About 10 seconds of combat: basic shots cost 1 ammo; the shockwave costs 30.'],
+                market: [40, 60, 'Default 50 energy buys about 10 seconds of deliveries: walking costs 4 energy/s and sprinting 10/s. Walking without sprinting lasts 12.5 seconds; waiting is free.'],
+                shooter: [50, 70, 'Default 60 ammo buys about 10 seconds of continuous basic fire at one shot per 0.16 seconds. Rapid weapons and the 30-ammo shockwave use it faster.'],
                 crypto: [15, 30, 'Pays 120-240 research cash before analyst bonuses. Trading has no refill cycle.'],
                 hack: [10, 25, 'Pays 30-75 crypto per mining answer. This changes payouts, not question frequency.']
             };
@@ -5544,7 +5544,7 @@
         skyBotActor(demo, bot) {
             const actor = Object.create(demo.game), A = window.StudBudArcade;
             Object.assign(actor, {
-                me: bot, cp: demo.game.checkpoints[bot.st.checkpoint || 0], res: new A.Resource('Energy', '#facc15', 100, 50),
+                me: bot, cp: demo.game.checkpoints[bot.st.checkpoint || 0], res: new A.Resource('Energy', '#facc15', 100, 30),
                 dead: 0, finished: false, deaths: 0, maxH: 0, biomeSeen: 0, dash: 0, dashCd: 0,
                 kick: 0, buffer: 0, coyote: .1, airJumps: 1, sprung: false, boost: 0, slow: 0,
                 stuckT: 0, stuckX: undefined, stuckY: undefined, strandedT: 0, trapT: 0,

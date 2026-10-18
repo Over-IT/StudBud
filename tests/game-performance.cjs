@@ -154,8 +154,8 @@ const A = sandbox.window.StudBudArcade;
     } finally { sandbox.document.createElement = createElement; }
 }
 for (const [mode, threshold] of Object.entries({
-    skyline: 15, duel: 18, miner: 20, river: 15, frenzy: 10, fishing: 10,
-    market: 20, shooter: 20, defense: 45
+    skyline: 15, duel: 18, miner: 20, river: 20, frenzy: 10, fishing: 10,
+    market: 25, shooter: 30, defense: 45
 })) {
     const classes = new Map(), sounds = [];
     const notice = { classList: { toggle(name, enabled) { classes.set(name, enabled); } }, querySelector: () => ({}) };
