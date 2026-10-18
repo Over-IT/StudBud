@@ -1347,7 +1347,7 @@
             const area = ground && !ground.off ? SKY_ROUTE.indexOf(ground.bi) : -1;
             if (area >= 0) this.backdropArea = area;
             const heightArea = Math.floor(this.biomeProgress(Math.max(0, -(this.me.y + this.me.h))));
-            const target = area >= 0 ? area : Math.min(this.backdropArea || 0, heightArea);
+            const target = area >= 0 ? area : heightArea;
             const current = this.backdropPosition || 0;
             this.backdropPosition = current + clamp(target - current, -dt / .9, dt / .9);
         }

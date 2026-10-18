@@ -1176,9 +1176,9 @@ for (const fps of [30, 60, 120]) {
     const g = session('skyline').game;
     g.me.onGround = false;
     for (let i = 0; i < fps; i++) {
-        g.me.y = g.checkpoints[1].y + Math.sin(i) * 300;
+        g.me.y = g.checkpoints[1].y + 400 + Math.sin(i) * 300;
         g.updateBackdrop(1 / fps);
-        assert.equal(g.backdropBlend(-100000, 720).to, 0, 'jumping or moving the camera near the next area cannot trigger its background');
+        assert.equal(g.backdropBlend(-100000, 720).to, 0, 'camera position cannot change scenery while the player remains in City');
     }
     g.me.onGround = true; g.me.ground = { bi: 1 };
     g.updateBackdrop(.45);
@@ -1207,7 +1207,18 @@ for (const fps of [30, 60, 120]) {
     for (let i = 0; i < fps * 2; i++) g.updateBackdrop(1 / fps);
     assert.equal(g.backdropBlend().to, 3, 'Space scenery follows actual Space footing');
 }
-console.log('Automatic height checkpoints, safe respawns and landing-triggered stable biome fades passed at 30/60/120 FPS.');
+for (const fps of [30, 60, 120]) {
+    const s = session('skyline'), g = s.game;
+    s.testing = true; s.testFlight = true;
+    g.me.onGround = false; g.me.ground = null;
+    for (const [index, biome] of [[1, 1], [2, 3], [0, 0], [1, 1]]) {
+        g.me.y = g.checkpoints[index].y - g.me.h - 100;
+        for (let frame = 0; frame < fps * 2; frame++) g.updateBackdrop(1 / fps);
+        assert.equal(g.backdropBlend().from, biome, `${fps} FPS: airborne scenery follows section ${index} without landing`);
+        assert.equal(g.backdropBlend().to, biome);
+    }
+}
+console.log('Automatic checkpoints, respawn and airborne section scenery passed at 30/60/120 FPS.');
 for (const fps of [30, 60, 120]) {
     const s = session('skyline'), g = s.game;
     const belt = g.conveyors.find(p => p.beltFlip);
