@@ -93,6 +93,32 @@ console.log('6000-frame meter DOM-query/write bounds, rounding, depleted state, 
     actor.over = true; tick(); assert.equal(noticeClasses.has('hidden'), true);
 }
 const A = sandbox.window.StudBudArcade;
+for (const [mode, threshold] of Object.entries({
+    skyline: 15, duel: 18, miner: 20, river: 15, frenzy: 10, fishing: 10,
+    market: 20, shooter: 20, defense: 45
+})) {
+    const classes = new Map(), sounds = [];
+    const notice = { classList: { toggle(name, enabled) { classes.set(name, enabled); } }, querySelector: () => ({}) };
+    const meter = { classList: notice.classList, querySelector: () => ({}) };
+    const resource = { label: 'Energy', value: threshold + .1 };
+    const actor = { mode, t: 1, game: { res: resource }, sfx: (...args) => sounds.push(args),
+        overlay: { querySelector: selector => selector === '.mpg-meter' ? meter : notice },
+        updateResourceNotice: A.Session.prototype.updateResourceNotice };
+    const tick = () => A.Session.prototype.updateMeter.call(actor);
+    tick();
+    assert.equal(classes.get('low'), false, `${mode} meter stays normal above ${threshold}`);
+    assert.equal(sounds.length, 0);
+    resource.value = threshold; tick();
+    assert.equal(classes.get('low'), true, `${mode} meter and notice share the threshold`);
+    assert.equal(actor.resourceNoticeVisible, true);
+    assert.equal(sounds.length, 1, `${mode} warns at ${threshold}`);
+    resource.value = threshold + .1; tick();
+    resource.value = threshold; tick();
+    assert.equal(sounds.length, 1, `${mode} threshold fluctuations do not repeat sounds`);
+    resource.value = threshold * 1.5 + .1; tick();
+    resource.value = threshold; tick();
+    assert.equal(sounds.length, 2, `${mode} refill rearms the warning`);
+}
 {
     const reward = {}, indicator = {}, messages = [];
     const actor = {

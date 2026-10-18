@@ -501,6 +501,14 @@
         shooter: Object.freeze({ nova: 30 })
     });
 
+    // Roughly half a recommended answer's resources; bait must cover at least one cast.
+    // Team cash uses the defense answer's 3x payout rather than the raw reward setting.
+    const LOW_RESOURCE_THRESHOLDS = Object.freeze({
+        skyline: 15, duel: 18, miner: 20, river: 15, frenzy: 10, fishing: 10,
+        market: 20, shooter: 20, defense: 45
+    });
+    const lowResourceThreshold = mode => LOW_RESOURCE_THRESHOLDS[mode] ?? 10;
+
     class BaseGame {
         constructor(session) {
             this.s = session; this.particles = new Particles(session);
@@ -1594,7 +1602,7 @@
             const res = this.game.res;
             const hidden = !res || (this.testing && !this.limitedTestEnergy);
             this.updateResourceNotice?.(res, hidden);
-            const value = res ? Math.round(res.value) : 0, low = Boolean(res && res.value <= 10), empty = Boolean(res && res.value < 1), label = res?.label || '';
+            const value = res ? Math.round(res.value) : 0, low = Boolean(res && res.value <= lowResourceThreshold(this.mode)), empty = Boolean(res && res.value < 1), label = res?.label || '';
             const previous = this.meterState;
             if (previous && previous.hidden === hidden && previous.value === value && previous.low === low && previous.empty === empty && previous.label === label) return;
             const elements = this.meterElements ||= (() => {
@@ -1613,18 +1621,19 @@
 
         updateResourceNotice(res, hidden) {
             const time = this.t || 0;
-            if (!res || res !== this.noticeResource || res.value > 15) {
+            const threshold = lowResourceThreshold(this.mode);
+            if (!res || res !== this.noticeResource || res.value > threshold * 1.5) {
                 this.lowResourceNotified = false;
                 this.lowNoticeUntil = 0;
                 this.noticeResource = res;
             }
             const available = !hidden && !this.question && !this.paused && !this.over && !(this.countdown > 0);
-            if (available && res.value <= 10 && !this.lowResourceNotified) {
+            if (available && res.value <= threshold && !this.lowResourceNotified) {
                 this.lowResourceNotified = true;
                 this.lowNoticeUntil = time + 4;
                 this.sfx('lowResource', 1000, .6);
             }
-            const visible = Boolean(available && res.value <= 10 && time < this.lowNoticeUntil);
+            const visible = Boolean(available && res.value <= threshold && time < this.lowNoticeUntil);
             if (visible === this.resourceNoticeVisible) return;
             this.resourceNoticeVisible = visible;
             if (!visible && !this.resourceNoticeElement) return;
