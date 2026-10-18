@@ -12,6 +12,8 @@ StudBud is a student hub with three parts: **Plan** (classes, assignments, grade
 
 ### Multiplayer testing and buds
 
+The in-game staff **Tools** menu also includes **Unlimited energy** and **Energy per question** (5–100, increments of one). Changes apply immediately to that tester's client; local-test restarts retain them. Unlimited disables the reward input; Chess remains one move per answer. The launch-screen settings still supply the shared initial configuration for multiplayer tests.
+
 Staff Tools → Games now offers **Single player (with bots)** or **Multiplayer (other testers can join)**. Multiplayer tests create a real code-shareable lobby with no simulated players. Only testers/administrators can create or join these rooms. Energy defaults to **Unlimited**; choose **Limited** to use normal resource costs and configure energy per correct question in increments of one (5–100; Chess still grants one move). Neither setting awards coins, wins or saved study progress. An optional map seed is shared by all testers. Apply the updated room-creation/start functions in `supabase-setup.sql` before using limited-energy multiplayer tests.
 
 Escape to Space's city pressure plates now sink at 220 units per second (previously 100), while their return speed and maximum compression stay unchanged. City music uses a faster 148 BPM piano-led arrangement with short chords and a moving bassline; Factory retains its mechanical groove and Space its quieter atmosphere.

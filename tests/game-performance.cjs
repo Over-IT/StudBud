@@ -89,6 +89,35 @@ console.log('6000-frame meter DOM-query/write bounds, rounding, depleted state, 
     actor.over = true; tick(); assert.equal(noticeClasses.has('hidden'), true);
 }
 const A = sandbox.window.StudBudArcade;
+{
+    const reward = {}, indicator = {}, messages = [];
+    const actor = {
+        testing: true, limitedTestEnergy: false, mode: 'skyline', reward: 20,
+        rewardAmount: A.Session.prototype.rewardAmount,
+        game: { res: { value: 30, max: 100 } },
+        overlay: { querySelector: selector => selector === '[data-test-reward]' ? reward : indicator },
+        updateMeter() {}, layoutHud() {}, toast: message => messages.push(message)
+    };
+    const change = input => A.Session.prototype.updateTestEnergy.call(actor, input);
+    change({ dataset: { testEnergy: '' }, checked: false });
+    assert.equal(actor.limitedTestEnergy, true);
+    assert.equal(reward.disabled, false);
+    assert.equal(actor.game.res.value, 30, 'switching to limited preserves current resources');
+    change({ dataset: { testReward: '' }, value: '21' });
+    assert.equal(actor.rewardAmount(), 21);
+    const invalid = { dataset: { testReward: '' }, value: '21.5' };
+    change(invalid);
+    assert.equal(actor.rewardAmount(), 21);
+    assert.equal(invalid.value, '21');
+    assert.equal(messages.length, 1, 'invalid rewards explicitly notify the tester');
+    change({ dataset: { testEnergy: '' }, checked: true });
+    assert.equal(actor.game.res.value, 100);
+    assert.equal(reward.disabled, true);
+    assert.match(indicator.textContent, /infinite/);
+    actor.testing = false;
+    change({ dataset: { testEnergy: '' }, checked: false });
+    assert.equal(actor.limitedTestEnergy, false, 'non-staff games cannot enable test controls');
+}
 sandbox.window.matchMedia = () => ({ matches: true });
 sandbox.window.NexusApp = { AppState: { get: () => ({ gameQuality: 'low' }) } };
 const full = A.graphicsProfile();

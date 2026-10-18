@@ -3613,6 +3613,8 @@ body.compact-ui .streak-flame b { bottom: 4px; font-size: .85rem; }
 .mpg-test-range input { width: 100%; }
 .mpg-test-range output { color: #7dd3fc; }
 .mpg-test-panel select { min-width: 0; flex: 1; }
+.mpg-test-panel input[data-test-reward] { min-width: 0; width: 76px; margin-left: auto; padding: 8px; }
+.mpg-test-panel > small { display: block; margin-top: 8px; color: #cbd5e1; line-height: 1.5; }
 .mpg-test-panel > .mpg-test-teleport { margin-top: 10px; flex-wrap: wrap; }
 .mpg-test-stats { white-space: pre-wrap; font-size: .75rem; line-height: 1.6; color: #e2e8f0; }
 .mpg-overlay .mpg-hud .mpg-board { display: grid; position: static; grid-column: 2; grid-row: 2; width: 100%; max-height: min(150px, 24dvh); margin: 0; padding: 8px; background: rgba(15, 23, 42, .9); }

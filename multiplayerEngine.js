@@ -1089,6 +1089,7 @@
             canvas.addEventListener('contextmenu', e => e.preventDefault());
             this.overlay.addEventListener('change', e => {
                 if (e.target.dataset.testBiome !== undefined) this.teleportTestBiome(Number(e.target.value));
+                if (e.target.dataset.testEnergy !== undefined || e.target.dataset.testReward !== undefined) this.updateTestEnergy(e.target);
             });
             this.overlay.addEventListener('click', e => {
                 const target = e.target.closest('button');
@@ -1124,6 +1125,28 @@
             });
         }
 
+        updateTestEnergy(input) {
+            if (!this.testing) return;
+            if (input.dataset.testEnergy !== undefined) this.limitedTestEnergy = !input.checked;
+            else {
+                const reward = Number(input.value);
+                if (!Number.isInteger(reward) || reward < 5 || reward > 100) {
+                    input.value = String(this.rewardAmount());
+                    this.toast('Energy per question must be a whole number from 5 to 100', '#fbbf24');
+                    return;
+                }
+                this.reward = this.mode === 'chess' ? 1 : reward;
+            }
+            const rewardInput = this.overlay.querySelector('[data-test-reward]');
+            rewardInput.disabled = !this.limitedTestEnergy || this.mode === 'chess';
+            rewardInput.value = String(this.rewardAmount());
+            const indicator = this.overlay.querySelector('.mpg-practice-indicator');
+            indicator.textContent = `Staff testing · ${this.limitedTestEnergy ? 'limited' : 'infinite'} resources`;
+            if (!this.limitedTestEnergy && this.game.res) this.game.res.value = this.game.res.max;
+            this.updateMeter();
+            this.layoutHud();
+        }
+
         teleportTestBiome(index) {
             if (!this.testing || this.mode !== 'skyline') return;
             if (this.game.testTeleport(index) === false) return;
@@ -1152,7 +1175,10 @@
                             <label><input type="checkbox" data-audio="game" ${window.StudBudSfx?.settings.game !== false ? 'checked' : ''}> Game sounds</label>
                             <label><input type="checkbox" data-audio="music" ${window.StudBudSfx?.settings.music !== false ? 'checked' : ''}> Music</label>
                         </div></details>
-                        ${this.testing ? `<details class="mpg-test-tools"><summary>Tools</summary><div class="mpg-test-panel"><div><button type="button" class="mpg-test-pause">Pause</button>${this.onRestart ? '<button type="button" class="mpg-test-restart">Restart</button>' : ''}</div>${this.mode === 'skyline' ? `
+                        ${this.testing ? `<details class="mpg-test-tools"><summary>Tools</summary><div class="mpg-test-panel"><div><button type="button" class="mpg-test-pause">Pause</button>${this.onRestart ? '<button type="button" class="mpg-test-restart">Restart</button>' : ''}</div>
+                            <label><input type="checkbox" data-test-energy ${this.limitedTestEnergy ? '' : 'checked'}> Unlimited energy</label>
+                            <label>Energy per question <input type="number" data-test-reward min="5" max="100" step="1" value="${this.rewardAmount()}" ${!this.limitedTestEnergy || this.mode === 'chess' ? 'disabled' : ''}></label>
+                            <small>Applies to your test client. ${this.mode === 'chess' ? 'Chess grants one move per answer.' : 'Turn off unlimited energy to test normal costs and question rewards.'}</small>${this.mode === 'skyline' ? `
                             <label><input type="checkbox" data-test-cheat="flight"> Flight (W/S or Up/Down; Shift = fast)</label>
                             <label class="mpg-test-range">Fly speed <output data-test-speed-label aria-label="Selected fly speed">600 units/s</output><input type="range" min="100" max="3000" step="100" value="600" data-test-speed aria-label="Fly speed"></label>
                             <label><input type="checkbox" data-test-cheat="invincible"> Invincibility</label>

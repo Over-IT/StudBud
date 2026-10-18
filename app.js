@@ -5414,6 +5414,7 @@
             const actor = st.actor || (st.actor = this.skyBotActor(demo, b));
             actor.s.t = demo.clock;
             actor.s.testFreezeHazards = demo.session.testFreezeHazards;
+            actor.s.limitedTestEnergy = demo.session.limitedTestEnergy;
             if (actor.dead > 0) {
                 actor.updatePlayer(dt);
                 if (actor.dead <= 0) {
@@ -7235,7 +7236,10 @@
                 fallbackCards: (roomDeck?.cards || []).filter(card => card.front && card.back),
                 studySet: { deckId: roomDeck?.id, title: roomDeck?.title, publicId: roomDeck?.communityDeckId || roomDeck?.communitySourceId },
                 onLeave: () => this.closePractice(),
-                onRestart: config.testing ? () => { this.closePractice(); this.startPractice(room.mode, config); } : undefined
+                onRestart: config.testing ? () => {
+                    const nextConfig = { ...config, limitedTestEnergy: s.limitedTestEnergy, questionReward: s.rewardAmount() };
+                    this.closePractice(); this.startPractice(room.mode, nextConfig);
+                } : undefined
             });
             document.body.classList.add('mpg-active');
             this.pingPresence(true);
