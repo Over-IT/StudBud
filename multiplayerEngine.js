@@ -652,6 +652,10 @@
                 if (rewards && !this.rewards) { this.rewards = rewards; this.renderResults(); }
             }
             this.room = room;
+            if (!this.practice && room.goal_type === 'time' && !['chess', 'defense'].includes(this.mode)) {
+                const deadline = Date.parse(room.started_at) + Number(room.time_limit_seconds) * 1000;
+                if (Number.isFinite(deadline)) this.deadline = Number.isFinite(this.deadline) ? Math.max(this.deadline, deadline) : deadline;
+            }
             this.updateRoster(room);
             this.game.onRoom?.(room);
             if (room.status === 'finished' && !this.over) this.finish(this.standings());
@@ -788,7 +792,7 @@
                 if (!this.testing && !this.over && (this.game.finished || Date.now() >= this.deadline)) this.finish(this.standings());
                 return;
             }
-            if (this.over || this.ending || !this.isHost || this.countdown > 0) return;
+            if (this.over || this.ending || this.extending || !this.isHost || this.countdown > 0) return;
             const now = Date.now();
             const rows = this.standings();
             const limit = Number(this.room.point_limit);
@@ -818,6 +822,34 @@
                     this.toast('Could not finalize the match. Check your connection and end it again from the lobby.', '#f87171');
                 }
             }, 1800);
+        }
+
+        async addTime() {
+            if (!this.isHost || this.practice || this.over || this.ending || this.extending
+                || this.room.goal_type !== 'time' || ['chess', 'defense'].includes(this.mode)) return;
+            const input = this.overlay.querySelector('.mpg-add-minutes');
+            const button = this.overlay.querySelector('.mpg-add-time');
+            const minutes = Number(input.value);
+            if (!Number.isInteger(minutes) || minutes < 1 || minutes > 60) {
+                this.toast('Choose a whole number of minutes from 1 to 60.', '#f87171');
+                input.focus(); return;
+            }
+            this.extending = true; button.disabled = true;
+            const previousLimit = Number(this.room.time_limit_seconds);
+            try {
+                const room = await this.api.extendRoom(this.code, minutes);
+                if (!room || room.room_code !== this.code || Number(room.time_limit_seconds) <= previousLimit) {
+                    throw new Error('The server did not confirm the added time. Refresh the room before retrying.');
+                }
+                this.updateRoom(room);
+                this.updateHud();
+                this.toast(`Added ${minutes} minute${minutes === 1 ? '' : 's'} to the match`, '#7dd3fc');
+            } catch (error) {
+                console.error('[Arcade] Could not add time:', error);
+                this.toast(error.message || 'Could not add time. Please try again.', '#f87171');
+            } finally {
+                this.extending = false; button.disabled = false;
+            }
         }
 
         async reportScore(force) {
@@ -1160,6 +1192,7 @@
                 else if (target.classList.contains('mpg-leave') && this.practice && !this.testing && !this.over) this.finish();
                 else if (target.classList.contains('mpg-leave') || target.classList.contains('mpg-exit')) this.onLeave?.();
                 else if (target.classList.contains('mpg-end')) this.hostEnd();
+                else if (target.classList.contains('mpg-add-time')) this.addTime();
             });
         }
 
@@ -1204,6 +1237,11 @@
                     <div class="mpg-chip"><strong class="mpg-name"></strong><span class="mpg-goal"></span>${this.testing ? `<small class="mpg-practice-indicator">Staff testing · ${this.limitedTestEnergy ? 'limited' : 'infinite'} resources</small>` : this.practice ? '<small class="mpg-practice-indicator">Singleplayer</small>' : ''}</div>
                     <div class="mpg-timer"></div>
                     <div class="mpg-actions">
+                        ${this.isHost && !this.practice && this.room.goal_type === 'time' && !['chess', 'defense'].includes(this.mode) ? `<details class="mpg-audio-settings"><summary>Add time</summary><div class="mpg-audio-panel">
+                            <label>Minutes to add <input class="mpg-add-minutes" type="number" min="1" max="60" step="1" value="1"></label>
+                            <small>Maximum match length: 60 minutes.</small>
+                            <button type="button" class="mpg-add-time">Add time</button>
+                        </div></details>` : ''}
                         ${this.mode === 'skyline' ? '<button type="button" class="mpg-checkpoint" title="Return to your last saved checkpoint (R)">Return to checkpoint</button>' : ''}
                         <button type="button" class="mpg-hud-toggle" aria-expanded="true" aria-controls="mpg-match-details mpg-match-standings" aria-label="Hide match details and standings">HUD</button>
                         <details class="mpg-controls-help"><summary>Controls</summary><div class="mpg-help-panel"><div class="mpg-hint" id="mpg-controls-hint"></div></div></details>

@@ -1,4 +1,4 @@
--- Username/password signup needs Confirm email OFF. Optional email codes need SMTP and {{ .Token }} templates.
+-- Username/password signup needs the Email provider enabled with Confirm email OFF; no email delivery is used.
 -- Keep TOTP verification enabled until existing enrolled accounts have removed their factors.
 create or replace function public.studbud_name_is_blocked(p_name text)
 returns boolean
@@ -466,6 +466,7 @@ alter table public.studbud_game_rooms
     add column if not exists point_limit integer not null default 1000,
     add column if not exists time_limit_seconds integer not null default 300,
     add column if not exists started_at timestamptz,
+    add column if not exists host_last_seen_at timestamptz not null default now(),
     add column if not exists rewards_paid boolean not null default false;
 alter table public.studbud_game_rooms drop constraint if exists studbud_game_rooms_cards_check;
 alter table public.studbud_game_rooms
@@ -1469,19 +1470,27 @@ begin
     if auth.uid() is null then raise exception 'Sign in to view a game.'; end if;
     select * into v_room
     from public.studbud_game_rooms
-    where room_code = upper(btrim(p_code)) and expires_at > now();
+    where room_code = upper(btrim(p_code)) and expires_at > now()
+    for update;
     if v_room.id is null then raise exception 'You are not in this game, or the room has expired.'; end if;
-    if v_room.status = 'playing' and v_room.goal_type = 'time'
-        and now() >= v_room.started_at + make_interval(secs => v_room.time_limit_seconds) then
-        update public.studbud_game_rooms set status = 'finished', updated_at = now()
-        where id = v_room.id returning * into v_room;
-        perform public.studbud_pay_game_rewards(v_room.id);
-        select * into v_room from public.studbud_game_rooms where id = v_room.id;
-    end if;
     if not exists (
         select 1 from jsonb_array_elements(v_room.state -> 'players') as item(player)
         where player ->> 'id' = auth.uid()::text
     ) then raise exception 'You are not in this game, or the room has expired.'; end if;
+    if v_room.status <> 'finished' and (
+        v_room.host_last_seen_at < now() - interval '30 seconds'
+        or (v_room.status = 'playing' and v_room.goal_type = 'time'
+            and v_room.mode not in ('chess', 'defense')
+            and now() >= v_room.started_at + make_interval(secs => v_room.time_limit_seconds))
+    ) then
+        update public.studbud_game_rooms set status = 'finished', updated_at = now()
+        where id = v_room.id returning * into v_room;
+        perform public.studbud_pay_game_rewards(v_room.id);
+        select * into v_room from public.studbud_game_rooms where id = v_room.id;
+    elsif v_room.host_id = auth.uid() and v_room.status <> 'finished' then
+        update public.studbud_game_rooms set host_last_seen_at = now()
+        where id = v_room.id returning * into v_room;
+    end if;
     return public.studbud_game_room_view(v_room);
 end;
 $$;
@@ -1509,6 +1518,7 @@ begin
     update public.studbud_game_rooms
     set status = 'playing',
         started_at = now(),
+        host_last_seen_at = now(),
         state = jsonb_build_object(
             'players', v_players,
             'public_deck_id', v_room.state -> 'public_deck_id',
@@ -1835,6 +1845,48 @@ begin
     return public.studbud_game_room_view(v_room);
 end;
 $$;
+
+create or replace function public.studbud_extend_game_room(p_code text, p_minutes integer)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_room public.studbud_game_rooms%rowtype;
+begin
+    if p_minutes is null or p_minutes < 1 or p_minutes > 60 then
+        raise exception 'Choose a whole number of minutes from 1 to 60.';
+    end if;
+    select * into v_room from public.studbud_game_rooms
+    where room_code = upper(btrim(p_code)) and expires_at > now()
+    for update;
+    if not found or v_room.host_id is distinct from auth.uid() then
+        raise exception 'Only the host can add time.';
+    end if;
+    if v_room.status <> 'playing' or v_room.goal_type <> 'time'
+        or v_room.mode in ('chess', 'defense') then
+        raise exception 'Time can only be added to an active timed game.';
+    end if;
+    if v_room.host_last_seen_at < now() - interval '30 seconds' then
+        raise exception 'The host connection expired. Refresh the room.';
+    end if;
+    if now() >= v_room.started_at + make_interval(secs => v_room.time_limit_seconds) then
+        raise exception 'This game has already run out of time.';
+    end if;
+    if v_room.time_limit_seconds + p_minutes * 60 > 3600 then
+        raise exception 'A timed game can last at most 60 minutes in total.';
+    end if;
+    update public.studbud_game_rooms
+    set time_limit_seconds = time_limit_seconds + p_minutes * 60,
+        expires_at = greatest(expires_at, started_at + make_interval(secs => time_limit_seconds + p_minutes * 60) + interval '2 hours'),
+        host_last_seen_at = now(), updated_at = now()
+    where id = v_room.id returning * into v_room;
+    return public.studbud_game_room_view(v_room);
+end;
+$$;
+revoke all on function public.studbud_extend_game_room(text, integer) from public, anon;
+grant execute on function public.studbud_extend_game_room(text, integer) to authenticated;
 
 create or replace function public.studbud_kick_game_player(p_code text, p_player_id uuid)
 returns jsonb

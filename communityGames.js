@@ -796,6 +796,15 @@
             return data;
         }
 
+        async extendRoom(roomCode, minutes) {
+            if (!Number.isInteger(minutes) || minutes < 1 || minutes > 60) throw new Error('Choose a whole number of minutes from 1 to 60.');
+            const { data, error } = await (await this.gameClient()).rpc('studbud_extend_game_room', {
+                p_code: roomCode, p_minutes: minutes
+            });
+            if (error) throw new Error(`Could not add time: ${error.message}. If the function is missing, apply the current database setup SQL.`);
+            return data;
+        }
+
         async kickPlayer(roomCode, playerId) {
             const { data, error } = await (await this.gameClient()).rpc('studbud_kick_game_player', {
                 p_code: roomCode,

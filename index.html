@@ -30,7 +30,7 @@
             <p id="auth-config-message" class="auth-message error hidden" role="alert"></p>
             <button id="auth-config-retry" class="secondary-btn full-width hidden" type="button">Retry sign-in connection</button>
             <form id="login-form" class="auth-form">
-                <label>Username<input id="login-username" type="text" autocomplete="username" minlength="3" maxlength="254" required></label>
+                <label>Username<input id="login-username" type="text" autocomplete="username" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" required></label>
                 <label>Password<input id="login-password" type="password" autocomplete="current-password" minlength="8" required></label>
                 <button class="primary-btn full-width" type="submit">Sign in</button>
             </form>
@@ -39,33 +39,12 @@
                 <label>Password (at least 8 characters)<input id="signup-password" type="password" autocomplete="new-password" minlength="8" required></label>
                 <label>Confirm password<input id="signup-password-confirm" type="password" autocomplete="new-password" minlength="8" required></label>
                 <label>School<select id="signup-school" required><option value="">Choose your school…</option><option value="pchs">Parkway Central High School</option><option value="pnhs">Parkway North High School</option><option value="pshs">Parkway South High School</option><option value="pwhs">Parkway West High School</option><option value="other">Other / not listed</option></select></label>
-                <p class="settings-hint">No email or verification is needed to create an account. You can optionally link an email later in Settings.</p>
+                <p class="settings-hint">Create your account with a username and password. No email is needed.</p>
                 <button class="primary-btn full-width" type="submit">Create account</button>
             </form>
-            <details id="email-signin-options" class="guest-join">
-                <summary>Sign in with an email code instead</summary>
-                <p class="settings-hint">Only for accounts that have optionally linked and verified an email in Settings.</p>
-                <form id="email-signin-form" class="auth-form">
-                    <label>Email<input id="login-email" type="email" autocomplete="email" maxlength="254" required></label>
-                    <button class="secondary-btn full-width" type="submit">Send sign-in code</button>
-                </form>
-            </details>
-            <section id="email-login-prompt" class="mfa-panel hidden" aria-labelledby="email-login-title">
-                <h2 id="email-login-title">Check your email</h2>
-                <p id="email-login-description"></p>
-                <form id="email-login-form" class="mfa-code-form">
-                    <label for="email-login-code">Email code</label>
-                    <input id="email-login-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,10}" minlength="6" maxlength="10" required>
-                    <button class="primary-btn full-width" type="submit">Verify and sign in</button>
-                </form>
-                <div class="mfa-actions">
-                    <button id="email-login-resend" class="secondary-btn" type="button">Resend code</button>
-                    <button id="email-login-cancel" class="text-btn" type="button">Use a different email</button>
-                </div>
-            </section>
             <section id="mfa-login-prompt" class="mfa-panel hidden" aria-labelledby="mfa-login-title">
                 <h2 id="mfa-login-title">Verify your existing authenticator</h2>
-                <p>This account already has authenticator protection. Enter its code to sign in. You can remove it in Settings after signing in; email sign-in cannot bypass an existing second factor.</p>
+                <p>This account already has authenticator protection. Enter its code to sign in. You can remove it in Settings after signing in.</p>
                 <form id="mfa-login-form" class="mfa-code-form">
                     <label for="mfa-login-code">Authentication code</label>
                     <input id="mfa-login-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
@@ -1154,21 +1133,6 @@
                             <p class="settings-hint">Automatic term uses August–December for Semester 1 and January–July for Semester 2.</p>
                             <button id="save-profile-btn" class="primary-btn">Save Profile</button>
                             <p id="school-profile-status" class="community-status" role="status" aria-live="polite"></p>
-                            <section id="email-settings-card" class="settings-subsection mfa-settings-card hidden" aria-labelledby="email-settings-title">
-                                <h2 id="email-settings-title">Optional email verification</h2>
-                                <p id="email-settings-status" class="settings-hint" role="status" aria-live="polite"></p>
-                                <p class="settings-hint">Adding and verifying an email is optional. You can keep using StudBud without one. After linking an email, sign in with that email and your existing password, or choose an email code instead. This is not two-factor authentication.</p>
-                                <form id="email-link-form" class="auth-form">
-                                    <label>Email for sign-in<input id="account-email" type="email" autocomplete="email" maxlength="254" required></label>
-                                    <button id="email-link-btn" class="secondary-btn" type="submit">Send email verification</button>
-                                </form>
-                                <form id="email-link-verify-form" class="mfa-code-form hidden">
-                                    <label for="email-link-code">Code sent to your new email</label>
-                                    <input id="email-link-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,10}" minlength="6" maxlength="10" required>
-                                    <button class="primary-btn" type="submit">Verify email</button>
-                                </form>
-                                <p id="email-settings-message" class="community-status" role="status" aria-live="polite"></p>
-                            </section>
                             <section id="mfa-settings-card" class="settings-subsection mfa-settings-card hidden" aria-labelledby="mfa-settings-title">
                                 <h2 id="mfa-settings-title">Existing authenticator</h2>
                                 <p id="mfa-settings-status" class="settings-hint" role="status" aria-live="polite">Checking authenticator status...</p>

@@ -2033,6 +2033,7 @@ body.mpg-active { overflow: hidden; }
 .mpg-audio-panel { position: absolute; z-index: 8; top: 100%; right: 0; width: min(260px, 80vw); padding: 14px; display: grid; gap: 14px; border: 1px solid #ffffff40; border-radius: 12px; background: #12221e; box-shadow: 0 8px 24px #0008; }
 .mpg-audio-panel label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: .85rem; }
 .mpg-audio-panel input[type="range"] { width: 100%; accent-color: #70e2c0; }
+.mpg-audio-panel .mpg-add-minutes { width: 100%; min-width: 0; box-sizing: border-box; }
 .mpg-results-card ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; text-align: left; }
 .mpg-results-card li { display: grid; gap: 8px; align-items: center; padding: 8px 10px; border-radius: 10px; background: rgba(255,255,255,.06); }
 .mpg-results-card ol > li { grid-template-columns: 24px 28px minmax(0, 1fr) auto auto; }
@@ -4727,7 +4728,6 @@ body.tutorial-active .ad-slot, body.studying .ad-slot { display: none !important
 .mfa-code-form { display: grid; gap: 8px; }
 .mfa-code-form label { margin-bottom: 0; }
 .mfa-code-form input { margin-bottom: 8px; }
-#email-login-description, #email-settings-status, #email-settings-message { overflow-wrap: anywhere; }
 @media (max-width: 600px) {
     .mfa-settings-card, .mfa-panel { min-width: 0; }
     .mfa-actions { flex-direction: column; }

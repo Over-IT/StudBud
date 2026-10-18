@@ -194,9 +194,34 @@ async function run() {
     app.hostedGameRoom = { ...room([host]), room_code: 'NEWWWW' };
     resolveRoom(room([host, bud])); await refreshing;
     assert.equal(app.hostedGameRoom.room_code, 'NEWWWW', 'stale fetch cannot replace another room');
+    const realRefresh = app.refreshHostedGame;
+    let heartbeats = 0;
+    app.refreshHostedGame = () => { heartbeats++; };
+    app.hostedGameRoom = room([host, bud]);
+    sandbox.document.hidden = true;
+    cloud.user = { id: 'host' }; app.pollHostedGame();
+    assert.equal(heartbeats, 1, 'host keeps heartbeat alive in a hidden tab');
+    cloud.user = { id: 'bud' }; app.pollHostedGame();
+    assert.equal(heartbeats, 1, 'hidden guests retain polling backoff');
+    sandbox.document.hidden = false; app.refreshHostedGame = realRefresh;
+    const destroy = app.destroyArcadeSession, close = app.closePractice;
+    let destroyed = false;
+    app.destroyArcadeSession = () => { destroyed = true; };
+    app.closePractice = () => {};
+    games.leaveRoom = async () => { throw new Error('Offline'); };
+    await assert.rejects(app.leaveHostedGame(), /Offline/);
+    assert.equal(destroyed, false, 'failed leave keeps the session available for retry');
+    assert.ok(app.hostedGameRoom, 'failed leave keeps the room instead of claiming success');
+    app.destroyArcadeSession = destroy; app.closePractice = close;
 
     vm.runInContext(source('communityGames.js'), sandbox);
     const api = sandbox.window.StudBudCommunityGames;
+    const rpcCalls = [];
+    api.gameClient = async () => ({ rpc: async (name, args) => { rpcCalls.push([name, args]); return { data: room([host, bud]) }; } });
+    await api.extendRoom('ABCDEF', 3);
+    assert.deepEqual(JSON.parse(JSON.stringify(rpcCalls)), [['studbud_extend_game_room', { p_code: 'ABCDEF', p_minutes: 3 }]]);
+    for (const minutes of [0, -1, 1.5, NaN, 61]) await assert.rejects(api.extendRoom('ABCDEF', minutes), /whole number/);
+    assert.equal(rpcCalls.length, 1, 'invalid extensions never reach the server');
     const handlers = {};
     let removed = 0, tracked = 0, updates = 0, status;
     const channel = { on(event, filter, fn) { handlers[event] = fn; return this; },
@@ -227,6 +252,36 @@ async function run() {
 
     vm.runInContext(source('multiplayerEngine.js'), sandbox);
     const Session = sandbox.window.StudBudArcade.Session;
+    const start = new Date().toISOString(), deadline = Date.parse(start) + 300000;
+    const timer = Object.create(Session.prototype);
+    const minutesInput = { value: '3', focus() {} }, timeButton = { disabled: false }, timeNotices = [];
+    Object.assign(timer, { isHost: true, mode: 'skyline', code: 'ABCDEF', user: host, roster: new Map(), remotes: new Map(),
+        room: { ...room([host, bud]), started_at: start }, game: {}, deadline,
+        overlay: { querySelector: selector => selector === '.mpg-add-minutes' ? minutesInput : timeButton },
+        toast: text => timeNotices.push(text), updateHud() {} });
+    let extensions = 0, releaseExtension;
+    timer.api = { extendRoom: async () => {
+        extensions++; return new Promise(resolve => { releaseExtension = resolve; });
+    } };
+    const extending = timer.addTime();
+    assert.equal(timeButton.disabled, true);
+    await timer.addTime();
+    assert.equal(extensions, 1, 'double clicks cannot add time twice');
+    releaseExtension({ ...timer.room, status: 'playing', time_limit_seconds: 480 });
+    await extending;
+    assert.equal(timer.deadline, deadline + 180000, 'host updates authoritative deadline after confirmation');
+    assert.match(timeNotices.at(-1), /Added 3 minutes/);
+    assert.equal(timeButton.disabled, false);
+    timer.updateRoom({ ...timer.room, time_limit_seconds: 300 });
+    assert.equal(timer.deadline, deadline + 180000, 'a stale room poll cannot shorten the extended clock');
+    timer.isHost = false; await timer.addTime(); assert.equal(extensions, 1);
+    timer.isHost = true; minutesInput.value = '1.5'; await timer.addTime();
+    assert.match(timeNotices.at(-1), /whole number/);
+    minutesInput.value = '2'; timer.api.extendRoom = async () => { throw Error('Server unavailable'); };
+    const oldError = console.error; console.error = () => {};
+    try { await timer.addTime(); } finally { console.error = oldError; }
+    assert.match(timeNotices.at(-1), /Server unavailable/);
+    assert.equal(timer.deadline, deadline + 180000, 'failed requests never optimistically extend the timer');
     const session = Object.create(Session.prototype);
     Object.assign(session, { room: room([host]), user: host, roster: new Map(), remotes: new Map(), game: {} });
     session.updateRoom(room([host, bud]));
@@ -281,6 +336,24 @@ async function run() {
 
     const sql = source('supabase-setup.sql');
     const fn = name => sql.slice(sql.indexOf('create or replace function public.' + name)).split('$$;')[0];
+    assert.match(sql, /host_last_seen_at timestamptz not null default now\(\)/);
+    const getRoom = fn('studbud_get_game_room(');
+    assert.match(getRoom, /for update/);
+    assert.match(getRoom, /host_last_seen_at < now\(\) - interval '30 seconds'/);
+    assert.match(getRoom, /elsif v_room.host_id = auth.uid\(\)/, 'only the host refreshes its lease');
+    assert.ok(getRoom.indexOf('You are not in this game', getRoom.indexOf('if not exists')) < getRoom.indexOf("interval '30 seconds'"),
+        'membership is checked before changing room state');
+    assert.match(fn('studbud_leave_game_room('), /if v_room.host_id = auth.uid\(\)[\s\S]*?status = 'finished'/);
+    const extend = fn('studbud_extend_game_room(');
+    assert.match(extend, /for update/);
+    assert.match(extend, /host_id is distinct from auth.uid\(\)/);
+    assert.match(extend, /v_room.goal_type <> 'time'/);
+    assert.match(extend, /v_room.mode in \('chess', 'defense'\)/);
+    assert.match(extend, /p_minutes < 1 or p_minutes > 60/);
+    assert.match(extend, /time_limit_seconds \+ p_minutes \* 60 > 3600/);
+    assert.match(extend, /This game has already run out of time/);
+    assert.match(extend, /host_last_seen_at < now\(\) - interval '30 seconds'/, 'extending cannot revive an expired host lease');
+    assert.match(sql, /revoke all on function public.studbud_extend_game_room\(text, integer\) from public, anon/);
     assert.match(fn('studbud_create_game_room('), /v_staff_test and \(public.studbud_is_guest\(\) or not/);
     assert.match(fn('studbud_create_game_room('), /studbud_has_user_tag\(v_user_id, 'tester'\)/);
     assert.match(fn('studbud_join_game_room('), /Only testers and administrators can join staff test rooms/);

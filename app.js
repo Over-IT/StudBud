@@ -6917,9 +6917,10 @@
             this.renderHostedGameRoom(room);
         }
 
-        // Polling backs off while the tab is hidden or a live match is streaming over realtime, which cuts most room reads.
+        // The host keeps its server heartbeat alive even while its tab is hidden.
         pollHostedGame() {
-            if (document.hidden || !this.hostedGameRoom) return;
+            if (!this.hostedGameRoom) return;
+            if (document.hidden && this.hostedGameRoom.host_id !== this.gameUser().id) return;
             const session = this.arcadeSession, live = session && !session.destroyed && !session.over;
             if (live && Date.now() - (this.hostedLastFetch || 0) < 3600) return;
             this.refreshHostedGame();
@@ -7122,7 +7123,10 @@
                         fallbackCards: (deck?.cards || []).filter(card => card.front && card.back),
                         studySet: { deckId: deck?.id, title: room.deck_title || deck?.title, publicId: room.state?.public_deck_id || deck?.communityDeckId || deck?.communitySourceId },
                         finishRoom: () => api.finishRoom(room.room_code),
-                        onLeave: () => this.leaveHostedGame().catch(error => console.error(error))
+                        onLeave: () => this.leaveHostedGame().catch(error => {
+                            console.error('[NexusApp] Could not leave game:', error);
+                            window.StudBudDialogs.notify(this.friendlyErrorMessage(error, 'Could not leave the game. Please try again.'));
+                        })
                     });
                     document.body.classList.add('mpg-active');
                 } else {
@@ -7360,10 +7364,10 @@
         async leaveHostedGame() {
             if (!this.hostedGameRoom) return;
             const code = this.hostedGameRoom.room_code;
+            await window.StudBudCommunityGames.leaveRoom(code);
             this.arcadeLeft = true;
             this.destroyArcadeSession();
             this.closePractice();
-            await window.StudBudCommunityGames.leaveRoom(code);
             if (window.StudBudCloud.user) await this.renderMultiplayerProfile(true);
             if (this.hostedGameInterval) clearInterval(this.hostedGameInterval);
             this.hostedGameInterval = null;
