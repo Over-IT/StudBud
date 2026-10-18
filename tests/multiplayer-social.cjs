@@ -188,6 +188,18 @@ async function run() {
     await changed();
     assert.match(node('hosted-room-players').innerHTML, /Joining bud/, 'joiners also receive live lobby updates');
     assert.equal(closed, 1, 'opening another room removes the previous watcher');
+    {
+        const defense = { ...room([host, bud]), mode: 'defense', status: 'finished', state: {
+            players: [{ ...host, score: 1000000 }, { ...bud, score: 10000 }],
+            defense: { teams: { host: 0, bud: 1 }, damage: [100, 100], winner: 1 }
+        } };
+        app.renderHostedGameRoom(defense);
+        const board = node('hosted-room-players').innerHTML, podium = node('hosted-podium').innerHTML;
+        assert.ok(board.indexOf('Joining bud') < board.indexOf('Host'), 'the declared winner ranks first even when displayed damage is tied');
+        assert.match(board, /100 base damage/);
+        assert.match(podium, /100 base damage/);
+        assert.doesNotMatch(board + podium, /1000000|10000|team pts/, 'legacy inflated player scores do not leak into the lobby or podium');
+    }
     let resolveRoom;
     games.getRoom = () => new Promise(resolve => { resolveRoom = resolve; });
     const refreshing = app.refreshHostedGame();

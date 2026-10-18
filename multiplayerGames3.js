@@ -699,12 +699,12 @@
         { name: 'Venom', cost: 125, range: 240, damage: 10, rate: .9, poison: 9, color: '#a3e635', desc: 'Poison: 9 damage/sec for 3 seconds' }
     ];
     const DEFENSE_ENEMIES = [
-        { name: 'Scout', cost: 30, hp: 65, speed: 95, damage: 8, color: '#a3e635', desc: 'Balanced and inexpensive' },
-        { name: 'Runner', cost: 50, hp: 90, speed: 145, damage: 12, color: '#facc15', desc: 'Fast flanking runner' },
-        { name: 'Brute', cost: 100, hp: 330, speed: 65, damage: 25, color: '#c084fc', desc: 'Durable siege monster' },
-        { name: 'Swarm', cost: 15, hp: 32, speed: 120, damage: 4, color: '#bef264', desc: 'Cheap beetles overwhelm slow towers' },
-        { name: 'Sentinel', cost: 145, hp: 550, speed: 55, armor: .3, damage: 32, color: '#cbd5e1', desc: 'Armor reduces normal hits by 30%' },
-        { name: 'Wisp', cost: 80, hp: 135, speed: 175, damage: 16, color: '#f0abfc', desc: 'Very fast, fragile spirit' }
+        { name: 'Scout', cost: 90, hp: 65, speed: 95, damage: 8, color: '#a3e635', desc: 'Balanced and inexpensive' },
+        { name: 'Runner', cost: 150, hp: 90, speed: 145, damage: 12, color: '#facc15', desc: 'Fast flanking runner' },
+        { name: 'Brute', cost: 300, hp: 330, speed: 65, damage: 25, color: '#c084fc', desc: 'Durable siege monster' },
+        { name: 'Swarm', cost: 45, hp: 32, speed: 120, damage: 4, color: '#bef264', desc: 'Cheap beetles overwhelm slow towers' },
+        { name: 'Sentinel', cost: 435, hp: 550, speed: 55, armor: .3, damage: 32, color: '#cbd5e1', desc: 'Armor reduces normal hits by 30%' },
+        { name: 'Wisp', cost: 240, hp: 135, speed: 175, damage: 16, color: '#f0abfc', desc: 'Very fast, fragile spirit' }
     ];
     const DEFENSE_COLORS = ['#60a5fa', '#f87171'];
 
@@ -712,7 +712,7 @@
         constructor(s) {
             super(s, 2200, 1500);
             this.title = 'Team Tower Defense';
-            this.scoreGoal = false; this.goalUnit = 'team pts'; this.goalLabel = 'Team';
+            this.scoreGoal = false; this.goalUnit = 'base damage'; this.goalLabel = 'Team';
             this.health = [100, 100]; this.wallets = [180, 180]; this.teamDamage = [0, 0];
             const ids = [...s.roster.keys()];
             if (!ids.includes(s.user.id)) ids.unshift(s.user.id);
@@ -941,7 +941,7 @@
                     enemy.progress -= length; enemy.segment++;
                 }
                 if (enemy.segment === path.length - 1) {
-                    const damage = this.waveEnemyDamage(enemy);
+                    const damage = Math.min(this.health[enemy.team], this.waveEnemyDamage(enemy));
                     this.health[enemy.team] = Math.max(0, this.health[enemy.team] - damage);
                     this.teamDamage[1 - enemy.team] += damage; enemy.hp = 0;
                     this.s.sfx('baseHit', 240);
@@ -1142,13 +1142,13 @@
             const value = this.teamValue(this.myTeam);
             this.s.score = value; this.s.setGoal(value);
         }
-        teamValue(team) { return (this.finished && this.winner === team ? 1000000 : 0) + this.waveNumber * 100 + this.teamDamage[team]; }
+        teamValue(team) { return Math.min(100, Math.max(0, Math.floor(this.teamDamage[team]))); }
         standingValues(id) { const value = this.teamValue(this.teamOf(id) ?? this.myTeam); return { s: value, g: value }; }
-        rankMetric(row) { return row.g; }
-        resultTitle(rows) {
-            return rows[0]?.g >= 1000000 ? `${this.teamOf(rows[0].id) ? 'Red' : 'Blue'} team wins!` : 'Battle ended';
+        rankMetric(row) { return this.isWinner(null, row.id) ? 101 : row.g; }
+        resultTitle() {
+            return this.finished && [0, 1].includes(this.winner) ? `${this.winner ? 'Red' : 'Blue'} team wins!` : 'Battle ended';
         }
-        isWinner(rows, id) { return rows[0]?.g >= 1000000 && this.teamOf(rows[0].id) === this.teamOf(id); }
+        isWinner(rows, id) { return this.finished && [0, 1].includes(this.winner) && this.winner === this.teamOf(id); }
         goalText() { return `${this.myTeam ? 'Red' : 'Blue'} team · Wave ${this.waveNumber} · Base ${this.health[this.myTeam]} HP · Towers ${this.troopCount(this.s.user.id)}/${this.playerTroopLimit} · Team ${this.teamTroopCount(this.myTeam)}/40 · ${this.unlimitedTestCash ? 'unlimited test cash' : `$${this.wallets[this.myTeam]} shared`}`; }
         hint() { return 'WASD walk · Choose a tower for one placement · Click friendly towers to upgrade or sell your own for 75% · Enemy purchases add +1 every wave starting next wave, no purchase limit · Kills give no cash · Q/E answer for shared cash'; }
         touchHint() { return 'Joystick to walk · Choose a tower, tap a free cell for one placement · Cancel clears the preview · Tap a tower for upgrades/selling · 40 team slots divided among teammates · Answer for team cash'; }

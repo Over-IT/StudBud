@@ -6992,7 +6992,16 @@
             const joinLabel = room.mode !== 'chess' && state.allow_late_join ? 'Late joining allowed' : 'Joining locks at start';
             document.getElementById('hosted-room-meta').textContent = `${goalLabel} · ${players.length} / ${playerLimit} players · ${joinLabel}`;
             document.getElementById('hosted-room-code').textContent = room.room_code;
-            const rankedPlayers = players.slice().sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
+            const rankedPlayers = players.map(player => room.mode === 'defense'
+                ? { ...player, score: Math.min(100, Math.max(0, Math.floor(Number(state.defense?.damage?.[state.defense?.teams?.[player.id]] ?? player.score) || 0))) }
+                : player).sort((a, b) => {
+                    if (room.mode === 'defense' && [0, 1].includes(state.defense?.winner)) {
+                        const winner = player => Number(state.defense.teams?.[player.id] === state.defense.winner);
+                        const order = winner(b) - winner(a);
+                        if (order) return order;
+                    }
+                    return Number(b.score || 0) - Number(a.score || 0);
+                });
             const lobbyColors = window.StudBudArcade?.util?.defaultPlayerColors?.(players) || new Map();
             const avatarFor = player => this.multiplayerAvatarMarkup({ ...this.profileCosmetics(player), ...(lobbyColors.get(player.id) ? { color: lobbyColors.get(player.id) } : {}) });
             document.getElementById('hosted-leaderboard-count').textContent = `${players.length} player${players.length === 1 ? '' : 's'}`;
@@ -7004,7 +7013,8 @@
                     if (room.status === 'waiting') {
                         return `<li class="leaderboard-player lobby-player${isSelf ? ' is-self' : ''}">${avatarFor(player)}<span class="leaderboard-name">${this.escapeHTML(player.nickname)} ${this.accountTagMarkup(player.username, player.tags)}${isSelf ? ' · you' : ''}</span><span class="lobby-tag${player.id === room.host_id ? ' is-host' : ''}">${player.id === room.host_id ? '<i class="fas fa-crown"></i> Host' : 'Ready'}</span>${kick}</li>`;
                     }
-                    const progress = room.mode === 'sports' ? `${Number(player.touchdowns || 0)} goals`
+                    const progress = room.mode === 'defense' ? `${state.defense?.teams?.[player.id] ? 'Red' : 'Blue'} team · Wave ${Number(state.defense?.waveNumber || 0)} · Base ${Number(state.defense?.health?.[state.defense?.teams?.[player.id]] ?? 100)} HP`
+                        : room.mode === 'sports' ? `${Number(player.touchdowns || 0)} goals`
                         : room.mode === 'shooter' ? `${Number(player.targets || 0)} targets · wave ${Number(player.wave || 1)}`
                             : room.mode === 'skyline' ? `${Number(player.distance || 0)} / 36 nodes · checkpoint ${Number(player.checkpoint || 0)}`
                                 : room.mode === 'river' ? `${Number(player.loot || 0)} haul · ${player.last_action === 'deep_cast' ? 'deep cast' : 'shore'}`
@@ -7013,7 +7023,7 @@
                                             : room.mode === 'crypto' ? `${Number(player.loot || 0)} chips · ${player.last_action || 'ready'}`
                                                 : room.mode === 'duel' ? `${Number(player.score || 0)} pts`
                                                     : `${Number(player.score || 0)} points · ${Number(player.streak || 0)} streak`;
-                    const unit = { defense: 'team pts', sports: 'goals', shooter: 'kill pts', skyline: 'm', river: 'fish pts', market: 'cash', miner: 'crystals', duel: 'sec on hill' }[room.mode];
+                    const unit = { defense: 'base damage', sports: 'goals', shooter: 'kill pts', skyline: 'm', river: 'fish pts', market: 'cash', miner: 'crystals', duel: 'sec on hill' }[room.mode];
                     const valueLabel = room.mode === 'crypto' || room.mode === 'market' ? `$${Number(player.score || 0).toLocaleString()}` : `${Number(player.score || 0).toLocaleString()} ${unit || 'score'}`;
                     const profileBtn = `<button class="host-kick-btn" type="button" data-action="view-profile" data-id="${this.escapeHTML(player.id)}">Profile</button>`;
                     return `<li class="leaderboard-player${isSelf ? ' is-self' : ''}">${avatarFor(player)}<span class="leaderboard-name">${index + 1}. ${this.escapeHTML(player.nickname)} ${this.accountTagMarkup(player.username, player.tags)}${isSelf ? ' · you' : ''}</span><span class="leaderboard-stat"><strong>${this.escapeHTML(valueLabel)}</strong><small>${this.escapeHTML(progress)}</small></span>${profileBtn}${kick}</li>`;
@@ -7088,7 +7098,7 @@
                     : 'Game over · final scores and multiplayer coin rewards are shown below.';
                 const rewards = state.coin_rewards || {};
                 document.getElementById('hosted-podium').classList.remove('hidden');
-                const podiumUnit = { defense: 'team pts', sports: 'goals', shooter: 'kill pts', skyline: 'm', river: 'fish pts', market: '', miner: 'crystals', duel: 'sec on hill', crypto: '', chess: 'chess pts' }[room.mode] ?? 'points';
+                const podiumUnit = { defense: 'base damage', sports: 'goals', shooter: 'kill pts', skyline: 'm', river: 'fish pts', market: '', miner: 'crystals', duel: 'sec on hill', crypto: '', chess: 'chess pts' }[room.mode] ?? 'points';
                 document.getElementById('hosted-podium').innerHTML = rankedPlayers.slice(0, 3).map((player, index) =>
                     `<div class="podium-place place-${index + 1}"><span class="podium-rank">0${index + 1}</span><strong>${avatarFor(player)} ${this.escapeHTML(player.nickname)} ${this.accountTagMarkup(player.username, player.tags)}</strong><small>${room.mode === 'crypto' || room.mode === 'market' ? '$' : ''}${Number(player.score || 0).toLocaleString()} ${podiumUnit} · +${Number(rewards[player.id] || 0)} coins <button class="host-kick-btn" type="button" data-action="view-profile" data-id="${this.escapeHTML(player.id)}">Profile</button></small></div>`
                 ).join('');

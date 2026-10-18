@@ -481,11 +481,13 @@ game.troops = [];
 game.waveTimer = 0;
 order('host', 'send', { type: 2 });
 assert.equal(game.enemies.length, 0, 'unaffordable sends are rejected');
-for (let i = 2; i <= 10; i++) order('host', 'answer', { count: i });
+for (let i = 2; i <= 22; i++) order('host', 'answer', { count: i });
 for (let i = 0; i < 4; i++) order('host', 'send', { type: 2 });
 for (let i = 0; i < 6000 && !game.finished; i++) game.simulate(1 / 60);
 assert.equal(game.health[1], 0); assert.equal(game.winner, 0); assert.equal(game.finished, true);
 assert.ok(game.teamValue(0) > game.teamValue(1));
+assert.equal(game.teamValue(0), 100);
+assert.ok(game.teamDamage.every(value => value <= 100), 'overkill only credits remaining base HP');
 const snapshot = game.snapshot();
 const guest = session('defense', 'guest');
 guest.game.onState({ td: snapshot }, { id: 'rival' });
@@ -945,7 +947,9 @@ console.log('Wall attachment/push-off and eased dash transitions at 30/60/120 FP
     while (!idleBattle.finished && elapsed < 180) { idleBattle.simulate(.05); elapsed += .05; }
     assert.ok(idleBattle.finished, `an idle battle ends automatically (${elapsed.toFixed(1)} seconds)`);
     assert.ok(elapsed >= 60 && elapsed <= 120, `idle teams lose in roughly one to two minutes (${elapsed.toFixed(1)}s)`);
-    assert.ok(idleBattle.teamValue(idleBattle.winner) >= 1000000, 'the wave-driven finish records a winning result score');
+    assert.equal(idleBattle.teamValue(idleBattle.winner), 100, 'winning score is actual base damage, not a million-point bonus');
+    assert.equal(idleBattle.resultTitle(), `${idleBattle.winner ? 'Red' : 'Blue'} team wins!`);
+    assert.ok(idleBattle.isWinner([], idleBattle.winner ? 'guest' : 'host'));
     const restored = session('defense', 'guest').game;
     const state = idle.game.snapshot(); restored.applySnapshot(state);
     assert.equal(restored.waveNumber, idle.game.waveNumber);
@@ -958,6 +962,40 @@ console.log('Wall attachment/push-off and eased dash transitions at 30/60/120 FP
     } finally { sandbox.console.error = originalError; }
 }
 console.log('Automatic waves, wave scaling, host-synchronized progress and idle match completion passed.');
+{
+    const s = session('defense'), g = s.game;
+    assert.deepEqual(Array.from(g.enemyTypes, type => type.cost), [90, 150, 300, 45, 435, 240], 'all recurring prices are three times their former one-off prices');
+    for (let type = 0; type < g.enemyTypes.length; type++) {
+        const price = g.enemyTypes[type].cost, before = g.reinforcements[1][type];
+        g.wallets[0] = price - 1;
+        g.request('send', { type });
+        assert.equal(g.reinforcements[1][type], before, 'a recurring purchase must be fully funded');
+        assert.equal(g.wallets[0], price - 1);
+        g.wallets[0] = price;
+        g.request('send', { type });
+        assert.equal(g.reinforcements[1][type], before + 1);
+        assert.equal(g.wallets[0], 0, 'every accepted purchase pays the advertised price');
+    }
+    g.waveNumber = 50; g.teamDamage = [39, 75];
+    assert.equal(g.teamValue(0), 39, 'waves do not inflate the displayed base-damage score');
+    g.finished = true; g.winner = 0;
+    assert.equal(g.teamValue(0), 39, 'winning does not add a displayed bonus');
+    assert.ok(g.rankMetric({ id: 'host', g: 39 }) > g.rankMetric({ id: 'guest', g: 75 }), 'the declared winner ranks first without changing displayed scores');
+    assert.equal(g.resultTitle(), 'Blue team wins!');
+    assert.ok(g.isWinner([], 'ally')); assert.equal(g.isWinner([], 'guest'), false);
+    g.teamDamage = [1000025, 100];
+    assert.equal(g.teamValue(0), 100, 'legacy oversized damage snapshots still display at most 100');
+    g.winner = 1;
+    const rows = A.Session.prototype.standings.call({ game: g, roster: s.roster, remotes: new Map(), user: s.user,
+        metric: row => g.rankMetric(row) });
+    assert.equal(rows[0].id, 'guest', 'winner ranks ahead even when both displayed scores are tied at 100');
+    assert.ok(rows.every(row => row.s <= 100 && row.g <= 100));
+    assert.equal(g.resultTitle(rows), 'Red team wins!');
+    assert.equal(A.Session.prototype.valueText.call({ game: g }, rows[0]), '100 base damage');
+    g.finished = false; g.winner = undefined;
+    assert.equal(g.resultTitle(), 'Battle ended');
+    assert.equal(g.isWinner(rows, 'host'), false, 'an unfinished battle does not invent a winner');
+}
 {
     const s = session('defense'), g = s.game;
     s.testing = true;
@@ -1098,7 +1136,8 @@ console.log('Uncapped recurring purchases, next-wave isolation, partial-wave res
                 nextAnswer += 10;
                 for (const id of ['host', 'guest']) {
                     order(id, 'answer', { count: (g.answers[id] || 0) + 1 });
-                    if (scenario === 'recurring-attacks' && nextAnswer % 30 === 0) order(id, 'send', { type: 2 });
+                    if (scenario === 'recurring-attacks' && g.canAfford(g.teamOf(id), g.enemyTypes[2].cost)) order(id, 'send', { type: 2 });
+                    else if (scenario === 'recurring-attacks' && nextAnswer % 30 === 0) continue;
                     else build(id);
                 }
             }
@@ -1119,6 +1158,8 @@ console.log('Uncapped recurring purchases, next-wave isolation, partial-wave res
     assert.match(save, /jsonb_array_length\(v_army\) <> 6/);
     assert.match(save, /\.22 \* \(coalesce\(\(unit ->> 'wave'\)::numeric, 1\) - 1\)/);
     assert.match(save, /\.04 \* power/, 'server accepts the same uncapped health scaling as the host');
+    assert.match(save, /least\(100, \(p_state -> 'damage'/, 'persisted room scores are capped actual damage');
+    assert.doesNotMatch(save, /then 10000/, 'the server no longer adds a victory bonus to displayed scores');
 }
 {
     const s = session('defense'), g = s.game;

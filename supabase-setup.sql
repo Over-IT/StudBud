@@ -2211,8 +2211,7 @@ begin
     v_serial := (p_state ->> 'serial')::integer;
     if v_serial <= coalesce((v_room.state -> 'defense' ->> 'serial')::integer, -1) then return; end if;
     select jsonb_agg(player || jsonb_build_object('score',
-        (p_state -> 'damage' ->> (p_state -> 'teams' ->> (player ->> 'id'))::integer)::integer
-        + case when v_winner = p_state -> 'teams' ->> (player ->> 'id') then 10000 else 0 end) order by n)
+        least(100, (p_state -> 'damage' ->> (p_state -> 'teams' ->> (player ->> 'id'))::integer)::integer)) order by n)
     into v_players from jsonb_array_elements(v_room.state -> 'players') with ordinality c(player, n);
     update public.studbud_game_rooms
     set state = jsonb_set(jsonb_set(state, '{defense}', p_state), '{players}', v_players), updated_at = now()
