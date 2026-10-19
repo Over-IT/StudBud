@@ -2764,6 +2764,10 @@ body.compact-ui .nav-item { padding-top: 8px; padding-bottom: 8px; }
 .box-odds summary::-webkit-details-marker { display: none; }
 .box-odds summary::after { content: '+'; color: var(--accent-primary); font-size: 1rem; }
 .box-odds[open] summary::after { content: '-'; }
+.box-contents-scroll { max-height: 260px; max-height: min(260px, 40vh); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 4px 8px; }
+.box-contents-scroll:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: -2px; border-radius: 8px; }
+.box-odds > button { width: 100%; margin-top: 8px; }
+.box-duplicate-note { color: var(--text-secondary); font-size: .74rem; }
 .box-odds .box-chances { justify-content: center; margin-bottom: 8px; gap: 6px; }
 .box-odds .box-chances > span { font-size: .72rem; padding: 4px 7px; }
 .box-progress { font-size: .75rem; color: var(--text-secondary); margin-top: 6px; }
@@ -3782,6 +3786,7 @@ body.guest-mode [data-study-leaderboard-scope="friends"] { display: none !import
 .multiplayer-shop .box-featured > button { grid-column: 3; grid-row: 1; justify-self: end; min-width: 150px; }
 .multiplayer-shop .box-featured > .season-set-preview { grid-column: 2 / 4; }
 .multiplayer-shop .box-featured > .box-odds { grid-column: 2 / 4; }
+.multiplayer-shop .box-featured > .box-duplicate-note { grid-column: 2 / 4; }
 .multiplayer-shop .box-featured > .season-set-preview, .multiplayer-shop .box-featured > .box-odds, .multiplayer-shop .box-featured > .box-details { justify-self: stretch; width: 100%; }
 .multiplayer-shop .shop-grid > .shop-category-title { justify-content: flex-start; }
 .multiplayer-shop .season-set-item .player-avatar, .multiplayer-shop .season-set-item .shop-palette, .multiplayer-shop .season-set-item .shop-preview { width: 64px; height: 64px; min-height: 0; margin: 0; }
@@ -3811,7 +3816,7 @@ body.guest-mode [data-study-leaderboard-scope="friends"] { display: none !import
 @media (max-width: 760px) {
     .multiplayer-shop .shop-grid > .box-featured { grid-template-columns: 96px minmax(0, 1fr); }
     .multiplayer-shop .box-featured .mystery-capsule { grid-row: 1 / 2; height: 96px; }
-    .multiplayer-shop .box-featured > button, .multiplayer-shop .box-featured > .season-set-preview, .multiplayer-shop .box-featured > .box-odds { grid-column: 1 / -1; grid-row: auto; justify-self: stretch; }
+    .multiplayer-shop .box-featured > button, .multiplayer-shop .box-featured > .season-set-preview, .multiplayer-shop .box-featured > .box-odds, .multiplayer-shop .box-featured > .box-duplicate-note { grid-column: 1 / -1; grid-row: auto; justify-self: stretch; }
 }
 
 /* Unboxing */

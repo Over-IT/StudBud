@@ -459,7 +459,7 @@ for (const id of addedParticles) {
     const tuple = sql.match(new RegExp(`\\('${id}',\\s*(\\d+)\\)`));
     assert.ok(item && tuple, `${id} exists in client and server catalogs`);
     const basePrice = Number(tuple[1]);
-    assert.equal(item.price, Math.round(basePrice * 2.5 / 5) * 5, `${id} price matches server`);
+    assert.equal(item.price, Math.round(basePrice * 2.5 / 5) * 5 * 2, `${id} price matches server`);
     assert.equal(item.rarity, sandbox.window.StudBudCommunityGames.constructor.rarityForPrice(basePrice));
     assert.equal(item.type, 'effect');
     assert.ok(item.description);

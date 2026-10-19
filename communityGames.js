@@ -197,7 +197,7 @@
                             ].concat(StudBudCommunityGames.seasonalItems()).map(item => {
                                 const rarity = item.rarity || StudBudCommunityGames.rarityForItem(item);
                                 const collection = StudBudCommunityGames.permanentSets.find(set => set.items.includes(item.id));
-                                return { ...item, collection: collection?.id, collectionName: collection?.name, rarity, price: item.price == null ? null : Math.round(item.price * 2.5 / 5) * 5 };
+                                return { ...item, collection: collection?.id, collectionName: collection?.name, rarity, price: item.price == null ? null : Math.round(item.price * 2.5 / 5) * 5 * 2 };
                             });
                         }
 
@@ -434,8 +434,8 @@
                 && (!types[box.id] || types[box.id].includes(item.type)) && !owned.includes(item.id));
         }
 
-        boxChances(box, owned = []) {
-            const pool = this.boxPool(box, owned);
+        boxChances(box) {
+            const pool = this.boxPool(box);
             const weights = Object.entries(box.chances).filter(([rarity]) => pool.some(item => item.rarity === rarity));
             const total = weights.reduce((sum, [, weight]) => sum + weight, 0);
             return Object.fromEntries(weights.map(([rarity, weight]) => [rarity, Math.round(weight / total * 1000) / 10]));
@@ -651,10 +651,6 @@
             const { data, error } = await this.getClient().rpc('studbud_buy_mystery_item', { p_box: requestedBox });
             if (error && box === 'season' && /Unknown mystery box/i.test(error.message || '')) {
                 throw new Error('Seasonal boxes need the latest supabase-setup.sql. Ask the site admin to run it.');
-            }
-            if (error && /You already own every item that box can contain!?/.test(error.message)) {
-                const profile = await this.getPlayerProfile();
-                return { ...profile, collection_complete: true, completed_box: box };
             }
             if (error) throw new Error(`Could not open mystery capsule: ${error.message}`);
             return data;

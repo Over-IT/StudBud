@@ -209,7 +209,7 @@ async function run() {
         sandbox.document.querySelectorAll = () => [];
         for (const scheme of ['forest', 'sunflower']) {
             const item = community.catalog.find(item => item.color === scheme);
-            assert.equal(item.price, scheme === 'forest' ? 300 : 375, 'shop prices include the existing multiplier');
+            assert.equal(item.price, scheme === 'forest' ? 600 : 750, 'direct prices are double the former rounded shop price');
             state.state.settings = { ...oldSettings, colorScheme: scheme, schemePicked: true };
             appearance.multiplayerProfile = { owned_items: [] };
             appearance.applyAppearance();
@@ -363,14 +363,15 @@ async function run() {
         }
         assert.ok(Math.abs(Object.values(community.boxChances(box)).reduce((sum, percent) => sum + percent, 0) - 100) < .21);
         assert.equal(community.boxPool(box, pool.map(item => item.id)).length, 0);
-        assert.equal(Object.keys(community.boxChances(box, pool.map(item => item.id))).length, 0);
+        assert.deepEqual(normal(community.boxChances(box, pool.map(item => item.id))), normal(community.boxChances(box)),
+            'owning every reward does not change drop odds');
     }
     const basic = community.constructor.boxes.find(box => box.id === 'basic');
     const nonPremium = community.catalog.filter(item => !['legendary', 'mythic'].includes(item.rarity)).map(item => item.id);
     assert.equal(community.boxPool(basic, nonPremium).length, 0, 'Study Box never falls back to premium rewards');
     const rare = community.boxPool(basic).find(item => item.rarity === 'rare');
     const remainingOwned = community.boxPool(basic).filter(item => item.id !== rare.id).map(item => item.id);
-    assert.deepEqual(normal(community.boxChances(basic, remainingOwned)), { rare: 100 });
+    assert.deepEqual(normal(community.boxChances(basic, remainingOwned)), normal(community.boxChances(basic)));
     elements.set('multiplayer-shop-coins', {});
     elements.set('multiplayer-shop-items', {});
     app.escapeHTML = value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
@@ -378,7 +379,11 @@ async function run() {
     app.shopTab = 'boxes';
     app.multiplayerProfile = { coins: 99999, owned_items: community.catalog.map(item => item.id), equipped: {} };
     app.renderMultiplayerShop(app.multiplayerProfile);
-    assert.ok(elements.get('multiplayer-shop-items').innerHTML.includes('Collection complete'));
+    assert.ok(elements.get('multiplayer-shop-items').innerHTML.includes('All rewards collected'));
+    assert.ok(elements.get('multiplayer-shop-items').innerHTML.includes('data-action="multiplayer-mystery"'),
+        'fully owned boxes can still be opened');
+    assert.ok(elements.get('multiplayer-shop-items').innerHTML.includes('box-contents-scroll'));
+    assert.ok(elements.get('multiplayer-shop-items').innerHTML.includes('data-action="box-contents-close"'));
     const boxesMarkup = elements.get('multiplayer-shop-items').innerHTML;
     for (const heading of ['Permanent themed boxes', 'Item-category boxes', 'Mixed boxes']) assert.ok(boxesMarkup.includes(heading));
     for (const set of community.constructor.permanentSets) assert.ok(boxesMarkup.includes(`box-${set.id}`));
@@ -415,11 +420,11 @@ async function run() {
     assert.equal((await community.buyMysteryItem()).collection_complete, true);
     community.getClient = () => ({ rpc: async name => name === 'studbud_get_multiplayer_profile'
         ? { data: completeProfile } : { error: { message: 'You already own every item that box can contain!' } } });
-    assert.equal((await community.buyMysteryItem()).coins, 0, 'old servers refresh the authoritative profile on completion');
+    await assert.rejects(community.buyMysteryItem(), /You already own every item/, 'old server errors must not look successful');
     community.getClient = () => ({ rpc: async () => ({ error: { message: 'Insufficient funds' } }) });
     await assert.rejects(community.buyMysteryItem(), /Insufficient funds/);
     community.getClient = () => ({ rpc: async name => ({ error: { message: name === 'studbud_get_multiplayer_profile' ? 'Profile unavailable' : 'You already own every item that box can contain!' } }) });
-    await assert.rejects(community.buyMysteryItem(), /Profile unavailable/);
+    await assert.rejects(community.buyMysteryItem(), /You already own every item/);
     community.getClient = originalClient;
 
     for (let value = 5; value <= 100; value++) assert.equal(app.questionRewardValue(value), value);

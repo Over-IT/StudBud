@@ -119,7 +119,7 @@ for (const id of ['acc_blossom_effect', 'acc_bubble_effect', 'acc_comet_effect',
 }
 const fedora = catalog.find(item => item.id === 'hat_fedora');
 assert.equal(fedora.type, 'hat');
-assert.equal(fedora.price, 275);
+assert.equal(fedora.price, 550);
 assert.equal(fedora.rarity, 'uncommon');
 const hatBox = sandbox.window.StudBudCommunityGames.constructor.boxes.find(box => box.id === 'hat');
 assert.ok(sandbox.window.StudBudCommunityGames.boxPool(hatBox).some(item => item.id === fedora.id));
@@ -171,7 +171,7 @@ const sqlPrices = new Map([...pricedSql.matchAll(/\('([^']+)', (\d+)\)/g)].map((
 for (const item of catalog.filter(item => item.price != null && !item.legacy)) {
     const price = sqlPrices.get(item.id);
     assert.notEqual(price, undefined, item.id + ' exists in the server catalog');
-    assert.equal(item.price, Math.round(price * 2.5 / 5) * 5, item.id + ' has the same client/server price');
+    assert.equal(item.price, Math.round(price * 2.5 / 5) * 5 * 2, item.id + ' has the same client/server price');
     const rarity = price < 100 ? 'common' : price < 200 ? 'uncommon' : price < 350 ? 'rare' : price < 550 ? 'epic' : price < 800 ? 'legendary' : 'mythic';
     assert.equal(item.rarity, rarity, item.id + ' has the same client/server rarity');
 }

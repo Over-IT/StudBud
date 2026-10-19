@@ -47,7 +47,7 @@ async function verifyReel({ scale, width, gap, padding, seasonal, duplicate, ski
         '.unbox-reel': {}, '.unbox-skip': { remove() {} }, '.unbox-actions .primary-btn': { focus() {} } };
     const overlay = { classList: { replace() {}, remove() {}, add() {} }, querySelector: selector => nodes[selector] };
     app.unboxState = { overlay, box: { id: seasonal ? 'season' : 'basic', seasonal, season: seasonal ? { month: 10 } : undefined, price: 100 }, skipped, startedAt: clock };
-    const profile = { unlocked_item: reward.id, owned_items: [reward.id], coins: 200, duplicate, refund: duplicate ? 45 : 0 };
+    const profile = { unlocked_item: reward.id, owned_items: [reward.id], coins: 200, duplicate, refund: duplicate ? 50 : 0 };
     await app.revealUnboxing(reward, profile);
     const markerRect = marker.getBoundingClientRect();
     const center = markerRect.left + markerRect.width / 2;
@@ -60,7 +60,7 @@ async function verifyReel({ scale, width, gap, padding, seasonal, duplicate, ski
     assert.ok(Math.abs(winningRect.left + winningRect.width / 2 - center) < 0.001, 'winner is centered using actual geometry');
     assert.match(result.innerHTML, /Winning Hat/);
     assert.match(result.innerHTML, /data-id="hat_reward"/);
-    if (duplicate) assert.match(result.innerHTML, /Duplicate: Winning Hat\. 45 coins refunded/);
+    if (duplicate) assert.match(result.innerHTML, /Duplicate: Winning Hat\. Automatically sold for 50 coins\. You kept your original item/);
     else assert.match(result.innerHTML, /New rare drop: Winning Hat/);
 }
 (async () => {

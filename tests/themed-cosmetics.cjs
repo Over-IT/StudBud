@@ -10,6 +10,13 @@ const games = sandbox.window.StudBudCommunityGames, Games = games.constructor;
 const util = sandbox.window.StudBudArcade.util;
 const normalize = value => JSON.parse(JSON.stringify(value));
 const sql = read('supabase-setup.sql');
+const pricedSql = sql.match(/with priced\(id, price\) as \(values([\s\S]*?)\), pets/)[1];
+const prices = new Map([...pricedSql.matchAll(/\('([^']+)', (\d+)\)/g)].map(([, id, price]) => [id, Number(price)]));
+for (const item of games.catalog.filter(item => item.price !== null && !item.legacy)) {
+    assert.ok(prices.has(item.id), `${item.id} exists in the server catalog`);
+    assert.equal(item.price, Math.round(prices.get(item.id) * 2.5 / 5) * 5 * 2, `${item.id} costs exactly twice its former rounded price`);
+}
+assert.match(sql, /round\(priced\.price \* 2\.5 \/ 5\) \* 5 \* 2/);
 const animalSql = sql.match(/function public\.studbud_animal_items\(\)[\s\S]*?as \$\$([\s\S]*?)\$\$/)[1];
 const animalRows = [...animalSql.matchAll(/\('([^']+)', '([^']+)'\)/g)].map(([, id, rarity]) => ({ id, rarity }));
 const animals = games.catalog.filter(item => item.box === 'animal');
@@ -36,10 +43,10 @@ for (const set of Games.permanentSets) {
     assert.deepEqual(Array.from(new Set(pool.map(item => item.type))).sort(), ['accessory', 'effect', 'hat', 'palette', 'skin']);
     assert.ok(pool.every(item => !item.season && !item.legacy));
     assert.equal(games.boxPool(box, set.items).length, 0);
-    assert.deepEqual(normalize(games.boxChances(box, set.items)), {});
+    assert.deepEqual(normalize(games.boxChances(box, set.items)), normalize(games.boxChances(box)));
     for (const remaining of pool) {
         const owned = pool.filter(item => item.id !== remaining.id).map(item => item.id);
-        assert.deepEqual(normalize(games.boxChances(box, owned)), { [remaining.rarity]: 100 });
+        assert.deepEqual(normalize(games.boxChances(box, owned)), normalize(games.boxChances(box)));
     }
     if (set.id === 'animal') {
         assert.equal(box.price, 220);
@@ -66,8 +73,13 @@ for (const type of ['skin', 'hat', 'accessory', 'effect', 'palette']) {
         .some(box => games.boxPool(box).some(reward => reward.id === item.id)), `${item.id} is eligible in a mixed box`);
     const purchaseSql = sql.match(/function public\.studbud_buy_mystery_item\(p_box text default 'basic'\)[\s\S]*?\$\$;/)[0];
     assert.ok(purchaseSql.indexOf('if v_total is null then') < purchaseSql.indexOf('if v_profile.coins < v_cost then'),
-        'a complete collection returns before checking or charging coins');
-    assert.match(purchaseSql, /if v_total is null then[\s\S]*?'collection_complete', true[\s\S]*?end if;/);
+        'an empty catalog is rejected before charging');
+    assert.match(purchaseSql, /if v_total is null then\s+raise exception 'This box has no available rewards/);
+    assert.doesNotMatch(purchaseSql, /and not \(s\.id = any\(v_profile\.owned_items\)\)/);
+    assert.match(purchaseSql, /v_duplicate := v_item_id = any\(v_profile\.owned_items\);/);
+    assert.match(purchaseSql, /if v_duplicate then v_refund := v_cost \/ 2; end if;/);
+    assert.match(purchaseSql, /coins = coins - v_cost \+ v_refund/);
+    assert.match(purchaseSql, /owned_items = case when v_duplicate then owned_items else array_append\(owned_items, v_item_id\) end/);
 }
 for (const item of games.catalog.filter(item => item.collection && item.price !== null)) {
     const mixed = Games.boxes.filter(box => ['basic', 'rare', 'legendary', 'mythic'].includes(box.id));

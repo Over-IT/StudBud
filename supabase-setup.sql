@@ -676,7 +676,7 @@ as $$
         ('pet_star', 'legendary'), ('pet_planet', 'legendary'), ('pet_rainbow', 'legendary'),
         ('pet_elder', 'legendary'), ('pet_brain', 'legendary'), ('pet_trophy', 'legendary')
     )
-    select priced.id, (round(priced.price * 2.5 / 5) * 5)::integer,
+    select priced.id, (round(priced.price * 2.5 / 5) * 5 * 2)::integer,
         case when priced.price < 100 then 'common' when priced.price < 200 then 'uncommon'
              when priced.price < 350 then 'rare' when priced.price < 550 then 'epic'
              when priced.price < 800 then 'legendary' else 'mythic' end
@@ -880,7 +880,7 @@ begin
         when 'season' then '{"uncommon":35,"rare":30,"epic":27,"legendary":8}'::jsonb
         else '{"common":25,"uncommon":35,"rare":25,"epic":12,"legendary":2,"mythic":1}'::jsonb
     end;
-    -- Remove exhausted tiers, then reweight only the tiers allowed by this box.
+    -- Reweight tiers with catalog rewards; ownership does not affect duplicate-enabled rolls.
     select coalesce(jsonb_object_agg(r.key, r.value), '{}'::jsonb), sum(r.value::numeric)
     into v_chances, v_total
     from jsonb_each_text(v_chances) r
@@ -896,11 +896,9 @@ begin
           and (p_box <> 'effect' or s.id like 'acc\_%\_effect'
               or s.id in ('acc_lightning', 'acc_flame', 'acc_sparkles', 'acc_aura',
                           'acc_hearts', 'acc_stars', 'acc_snow'))
-          and not (s.id = any(v_profile.owned_items))
     );
     if v_total is null then
-        return public.studbud_get_multiplayer_profile()
-            || jsonb_build_object('collection_complete', true, 'completed_box', p_box);
+        raise exception 'This box has no available rewards. No coins were spent.';
     end if;
     if v_profile.coins < v_cost then raise exception 'You need % multiplayer coins to open that box.', v_cost; end if;
     select key into v_rarity
@@ -921,16 +919,17 @@ begin
       and (p_box <> 'effect' or s.id like 'acc\_%\_effect'
             or s.id in ('acc_lightning', 'acc_flame', 'acc_sparkles', 'acc_aura',
                         'acc_hearts', 'acc_stars', 'acc_snow'))
-      and not (s.id = any(v_profile.owned_items))
       and s.rarity = v_rarity
     order by random()
     limit 1;
     if v_item_id is null then raise exception 'The box reward could not be selected. Please try again.'; end if;
     select s.rarity into v_rarity from public.studbud_shop_items() s where s.id = v_item_id;
+    v_duplicate := v_item_id = any(v_profile.owned_items);
+    if v_duplicate then v_refund := v_cost / 2; end if;
 
     update public.studbud_multiplayer_profiles
-    set coins = coins - v_cost,
-        owned_items = array_append(owned_items, v_item_id),
+    set coins = coins - v_cost + v_refund,
+        owned_items = case when v_duplicate then owned_items else array_append(owned_items, v_item_id) end,
         updated_at = now()
     where user_id = v_user_id;
     return public.studbud_get_multiplayer_profile()

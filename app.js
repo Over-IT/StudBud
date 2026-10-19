@@ -3491,7 +3491,7 @@
         openBoxArt(profile, box, all = window.StudBudCommunityGames.boxPool(box), owned = profile?.owned_items || [], extraClass = '') {
             const order = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
             const rank = item => order.indexOf(item.rarity);
-            const pool = all.filter(item => !owned.includes(item.id));
+            const pool = all;
             const peek = (pool.length ? pool : all).slice().sort((a, b) => rank(b) - rank(a))[0];
             const preview = peek ? this.shopItemPreview(profile, peek) : `<i class="fas ${box.icon}"></i>`;
             return `<span class="shop-preview open-box${extraClass ? ` ${extraClass}` : ''}${peek ? ` peek-${peek.rarity}` : ''}" aria-hidden="true">
@@ -3509,7 +3509,7 @@
             const owned = profile.owned_items || [];
             const all = games.boxPool(box);
             const remaining = games.boxPool(box, owned).length;
-            const complete = !remaining || this.completedShopBoxes?.has(`${profile.user_id}:${box.id}:${box.season?.month || ''}`);
+            const complete = !remaining;
             const order = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
             const inside = order.filter(rarity => all.some(item => item.rarity === rarity)).map(rarity =>
                 `<li class="rarity-${rarity}"><b>${rarity}</b> ${all.filter(item => item.rarity === rarity).map(item => `<span class="${owned.includes(item.id) ? 'owned' : ''}">${owned.includes(item.id) ? '<i class="fas fa-check" aria-hidden="true"></i> ' : ''}${this.escapeHTML(item.name)}</span>`).join('')}</li>`).join('');
@@ -3518,13 +3518,14 @@
             const style = colors ? ` style="--box-accent: ${colors[0]}; --box-accent-2: ${colors[1]}"` : '';
             const now = new Date();
             const daysLeft = Math.max(1, Math.ceil((Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1) - now) / 86400000));
-            const chances = complete ? '' : `<span class="box-chances" aria-label="Rarity drop chances">${Object.entries(games.boxChances(box, owned)).map(([rarity, chance]) => `<span class="rarity-${rarity}">${rarity} <b>${chance}%</b></span>`).join('')}</span>`;
+            const chances = `<span class="box-chances" aria-label="Rarity drop chances">${Object.entries(games.boxChances(box)).map(([rarity, chance]) => `<span class="rarity-${rarity}">${rarity} <b>${chance}%</b></span>`).join('')}</span>`;
             return `<article class="multiplayer-shop-item box-card box-${box.id}${featured ? ' box-featured' : ''}${complete ? ' collection-complete' : ''}"${style} data-search="${this.escapeHTML(`${box.name} ${box.id} ${all.map(item => item.name).join(' ')}`.toLocaleLowerCase())}">
                         ${capsule}
                         <div class="box-details">${featured ? `<span class="season-badge"><i class="fas fa-hourglass-half" aria-hidden="true"></i> Limited · leaves in ${daysLeft} day${daysLeft === 1 ? '' : 's'}</span>` : ''}<strong>${this.escapeHTML(box.name)}</strong><small>${this.escapeHTML(box.odds)}</small><span class="box-progress">${complete ? 'All rewards collected' : `${all.length - remaining} / ${all.length} collected · ${remaining} left`}</span></div>
                         ${featured ? this.shopSetPreview(profile, all) : ''}
-                        <details class="box-odds"><summary>What's inside</summary>${chances}<ul class="box-contents">${inside}</ul></details>
-                        ${complete ? '<span class="box-complete"><i class="fas fa-check" aria-hidden="true"></i> Collection complete</span>' : `<button type="button" class="${featured ? 'primary-btn' : 'secondary-btn'}" data-action="multiplayer-mystery" data-id="${box.id}" ${box.seasonal ? `data-season-month="${box.season.month}"` : ''} ${profile.coins < box.price ? 'disabled' : ''}>Open · ${box.price} <i class="fas fa-coins"></i></button>`}</article>`;
+                        <details class="box-odds"><summary>What's inside</summary><div class="box-contents-scroll" tabindex="0" role="region" aria-label="${this.escapeHTML(box.name)} rewards">${chances}<ul class="box-contents">${inside}</ul></div><button type="button" class="ghost-btn" data-action="box-contents-close">Close what's inside</button></details>
+                        <small class="box-duplicate-note">Duplicates auto-sell for ${Math.floor(box.price / 2)} coins (50% of box price).</small>
+                        <button type="button" class="${featured ? 'primary-btn' : 'secondary-btn'}" data-action="multiplayer-mystery" data-id="${box.id}" ${box.seasonal ? `data-season-month="${box.season.month}"` : ''} ${profile.coins < box.price ? 'disabled' : ''}>Open · ${box.price} <i class="fas fa-coins"></i></button></article>`;
         }
 
         renderShopFrame(containerId, tabs, tab, tabAttr, body, query, label, gridClass = '') {
@@ -3574,7 +3575,7 @@
                     ${Games.boxes.filter(box => ['hat', 'accessory', 'effect', 'palette', 'skin'].includes(box.id)).map(box => this.shopBoxCard(profile, box)).join('')}
                     <h4 class="shop-category-title">Mixed boxes · all permanent themes and item types</h4>
                     ${Games.boxes.filter(box => !box.themed && !['hat', 'accessory', 'effect', 'palette', 'skin'].includes(box.id)).map(box => this.shopBoxCard(profile, box)).join('')}
-                    <p class="settings-hint">Every opening gives something new, never a duplicate. Open "What's inside" to see each box's rewards.</p>`;
+                    <p class="settings-hint">Every opening can give any listed reward, including duplicates. Duplicates auto-sell for 50% of the box price; you keep your original item. Open "What's inside" to browse rewards.</p>`;
             } else if (tab === 'sets') {
                 const current = Games.currentSeason();
                 const monthName = month => new Date(Date.UTC(2024, month - 1, 1)).toLocaleString(undefined, { month: 'long', timeZone: 'UTC' });
@@ -3711,7 +3712,7 @@
             const reward = item?.name || profile.unlocked_item || 'cosmetic';
             const rarity = item?.rarity || profile.rarity || '';
             return profile.duplicate
-                ? `Duplicate: ${reward}. ${Math.max(0, Number(profile.refund) || 0)} coins refunded.`
+                ? `Duplicate: ${reward}. Automatically sold for ${Math.max(0, Number(profile.refund) || 0)} coins. You kept your original item.`
                 : `New ${rarity} drop: ${reward}!`;
         }
 
@@ -3782,7 +3783,7 @@
             const pieces = big ? 64 : ['epic', 'rare'].includes(item.rarity) ? 40 : 22;
             overlay.querySelector('.unbox-confetti').innerHTML = reduce ? '' : Array.from({ length: pieces }, (_, index) =>
                 `<i style="--x:${(Math.random() * 2 - 1).toFixed(2)};--y:${(-Math.random() - .35).toFixed(2)};--r:${Math.round(Math.random() * 720)}deg;--d:${(index % 8) * 35}ms;--h:${Math.round(Math.random() * 360)}"></i>`).join('');
-            const again = games.boxPool(box, profile.owned_items || []).length && profile.coins >= box.price;
+            const again = games.boxPool(box).length && profile.coins >= box.price;
             winningTile?.classList?.add('is-winner');
             overlay.querySelector('.unbox-result').innerHTML = `<div class="unbox-card rarity-${item.rarity}${profile.duplicate ? ' is-duplicate' : ''}">
                     <span class="unbox-badge">${profile.duplicate ? 'Duplicate' : 'New!'}</span>
@@ -4462,14 +4463,7 @@
                 }
                 const unlockedItem = profile.unlocked_item;
                 if (profile.collection_complete) {
-                    this.completedShopBoxes ||= new Set();
-                    this.completedShopBoxes.add(`${profile.user_id}:${profile.completed_box || itemId || 'basic'}:${box?.season?.month || ''}`);
-                    this.multiplayerProfile = profile;
-                    this.lastDrop = null;
-                    this.closeUnboxing();
-                    await this.renderMultiplayerProfile(true, profile);
-                    document.getElementById('multiplayer-shop-status').textContent = 'Collection complete — you own every available reward from this box. No coins were spent.';
-                    return true;
+                    throw new Error('Duplicate-enabled boxes need the latest supabase-setup.sql. No coins were spent. Ask the site admin to run it.');
                 }
                 if (action !== 'multiplayer-mystery') window.StudBudSfx?.play(action === 'multiplayer-buy' ? 'buy' : 'success', 'ui');
                 this.multiplayerProfile = profile;
@@ -9047,6 +9041,12 @@
                     if (this.multiplayerProfile) this.renderInventory(this.multiplayerProfile);
                 } else if (action === 'unbox-shake') {
                     this.shakeUnboxing();
+                } else if (action === 'box-contents-close') {
+                    const details = target.closest('.box-odds');
+                    if (details) {
+                        details.open = false;
+                        details.querySelector('summary')?.focus();
+                    }
                 } else if (action === 'unbox-skip') {
                     if (this.unboxState) { this.unboxState.skipped = true; this.unboxState.releaseSeals?.(); clearTimeout(this.unboxState.timer); this.unboxState.resolve?.(); }
                 } else if (action === 'unbox-close') {
