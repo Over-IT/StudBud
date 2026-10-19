@@ -464,14 +464,14 @@
         }
 
         /** Rough recall probability (0-100) assuming SM-2's ~90% retention at the scheduled interval. */
-        static calculateRetrievability(card) {
+        static calculateRetrievability(card, now = Date.now()) {
             const c = SM2Engine.normalize(card);
             if (c.state === 'new' || !c.lastReviewed) return 0.0;
             const last = Date.parse(c.lastReviewed);
             const due = Date.parse(c.nextReviewDate);
             if (!Number.isFinite(last)) return 0.0;
             const spanDays = c.state === 'review' ? c.interval : Math.max(1 / 1440, (Number.isFinite(due) ? due - last : MINUTE) / DAY_MS);
-            const elapsedDays = Math.max(0, (Date.now() - last) / DAY_MS);
+            const elapsedDays = Math.max(0, (now - last) / DAY_MS);
             return parseFloat((Math.pow(0.9, elapsedDays / spanDays) * 100).toFixed(1));
         }
     }
@@ -513,7 +513,7 @@
                 if (c.state === 'new') this.newCards.push({ card, dueAt: now, position });
                 else if (c.state === 'review') {
                     if (SM2Engine.dayNumber(dueAt, this.cfg) <= this.today) this.reviews.push({ card, dueAt, position, tiebreak: Math.random() });
-                    else if (this.includeAll) this.ahead.push({ card, dueAt, position, weight: AnkiStudySession.aheadWeight(c, now) + Math.random() * 0.01 });
+                    else if (this.includeAll) this.ahead.push({ card, dueAt, position, weight: AnkiStudySession.aheadWeight(c, now) });
                 } else if (dueAt < endOfToday || this.includeAll) this.learning.push({ card, dueAt, position });
             });
 
@@ -523,8 +523,10 @@
                     [queue[i], queue[j]] = [queue[j], queue[i]];
                 }
             };
-            shuffle(this.reviews);
-            shuffle(this.newCards);
+            if (!this.includeAll) {
+                shuffle(this.reviews);
+                shuffle(this.newCards);
+            }
             this.ahead.sort((a, b) => a.weight - b.weight);
             if (!this.includeAll) {
                 this.reviews = this.reviews.slice(0, Math.max(0, this.cfg.reviewsPerDay - this.reviewsDone));
@@ -545,10 +547,36 @@
             this.learning.sort((a, b) => a.dueAt - b.dueAt || a.position - b.position);
         }
 
+        /** Numeric practice priority, independent of the three presentation labels. Higher is more useful next. */
+        static priority(card, now = Date.now()) {
+            const c = SM2Engine.normalize(card);
+            const progress = FlashcardTools.cardProgress(card);
+            const stats = card.practiceStats || {};
+            const lastPractice = Date.parse(stats.lastAnswered);
+            const elapsed = Number.isFinite(lastPractice) ? Math.max(0, now - lastPractice) / DAY_MS : 0;
+            const recall = c.state !== 'new' && Number.isFinite(Date.parse(c.lastReviewed))
+                ? SM2Engine.calculateRetrievability(c, now) / 100
+                : progress.attempts ? progress.mastery * Math.pow(.9, elapsed) : .5;
+            const missPressure = Math.min(1, Math.max(0, Number(stats.missStreak) || 0) / 3);
+            const lapsePressure = Math.min(1, c.lapses / 8);
+            return .55 * (1 - recall) + .3 * (1 - progress.mastery) + .1 * missPressure + .05 * lapsePressure;
+        }
+
         /** The card to show now, or null when the session is finished (or only waiting on learning cards when learnAheadAll is false). */
         next(now = Date.now()) {
             const learn = this.learning[0];
             if (learn && learn.dueAt <= now) return learn.card;
+            if (this.includeAll) {
+                let best = null, bestScore = -Infinity;
+                for (const entry of [...this.reviews, ...this.newCards, ...this.ahead]) {
+                    const score = AnkiStudySession.priority(entry.card, now);
+                    if (score > bestScore || (score === bestScore && entry.position < best.position)) {
+                        best = entry;
+                        bestScore = score;
+                    }
+                }
+                if (best) return best.card;
+            }
             if (this.reviews.length) return this.reviews[0].card;
             if (this.newCards.length) return this.newCards[0].card;
             if (this.ahead.length) return this.ahead[0].card;
@@ -589,8 +617,8 @@
         /** Anki's three counters: new (blue), learning (red), review (green; includes early reviews in includeAll mode). */
         counts() {
             const practiced = this.newCards.filter(({ card }) => Number(card.practiceStats?.attempts) > 0).length;
-            return { new: this.newCards.length - practiced, practiced, learning: this.learning.length,
-                review: this.reviews.length, early: this.ahead.length };
+            return { new: this.newCards.length - practiced, learning: this.learning.length + practiced,
+                review: this.reviews.length + this.ahead.length };
         }
 
         get remaining() {
@@ -604,6 +632,11 @@
         snapshot(now = Date.now()) {
             const dueLearning = this.learning.filter(e => e.dueAt <= now);
             const laterLearning = this.learning.filter(e => e.dueAt > now);
+            if (this.includeAll) {
+                const practice = [...this.reviews, ...this.newCards, ...this.ahead].sort((a, b) =>
+                    AnkiStudySession.priority(b.card, now) - AnkiStudySession.priority(a.card, now) || a.position - b.position);
+                return [...dueLearning, ...practice, ...laterLearning].map(e => e.card);
+            }
             return [...dueLearning, ...this.reviews, ...this.newCards, ...this.ahead, ...laterLearning].map(e => e.card);
         }
     }

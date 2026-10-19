@@ -72,9 +72,25 @@ async function run() {
 
     const practiced = { id: 'practiced', practiceStats: { attempts: 10, correct: 10 } };
     const session = SM2.createSession([{ id: 'unseen' }, practiced, card], { now, includeAll: true });
-    assert.deepEqual(clone(session.counts()), { new: 1, practiced: 1, learning: 0, review: 0, early: 1 });
+    assert.deepEqual(clone(session.counts()), { new: 1, learning: 1, review: 1 });
     assert.equal(SM2.normalize(practiced).state, 'new', 'recognition does not fabricate scheduled reviews');
     assert.equal(tools.cardProgress(practiced).mastery, .5);
+    const Priority = sandbox.window.AnkiStudySession;
+    assert.ok(Math.abs(Priority.priority({ id: 'unseen' }, now) - .575) < 1e-12, 'unseen priority follows the documented numeric formula');
+    const strong = { id: 'strong', state: 'review', interval: 10, lastReviewed: new Date(now).toISOString(),
+        nextReviewDate: new Date(now + 10 * 86400000).toISOString() };
+    for (let i = 0; i < 4; i++) tools.recordAnswer(strong, true, 'recall');
+    const weak = { ...clone(strong), id: 'weak', practiceStats: { attempts: 4, correct: 0, missStreak: 3,
+        recentAnswers: [false, false, false, false] } };
+    assert.ok(Priority.priority(weak, now) > Priority.priority(strong, now), 'weak evidence outranks strong recall even within the same review state');
+    assert.ok(Priority.priority(strong, now + 20 * 86400000) > Priority.priority(strong, now), 'elapsed time raises forgetting pressure');
+    const ranked = SM2.createSession([strong, weak], { now, includeAll: true });
+    assert.equal(ranked.next(now).id, 'weak', 'numeric evidence, not category or source order, chooses the next card');
+    assert.equal(ranked.snapshot(now)[0].id, ranked.next(now).id);
+    assert.equal(ranked.next(now).id, ranked.next(now).id, 'selection is deterministic at a fixed time');
+    const readyLearning = { id: 'ready', state: 'learning', step: 1, nextReviewDate: new Date(now - 1).toISOString() };
+    assert.equal(SM2.createSession([weak, readyLearning], { now, includeAll: true }).next(now).id, 'ready',
+        'learning-step timing still takes precedence');
     {
         const previousDecks = state.get('flashcards');
         const getElement = sandbox.document.getElementById;
@@ -95,9 +111,9 @@ async function run() {
         view.renderStudyCard();
         const header = nodes.get('study-progress').innerHTML;
         assert.match(header, /1 new/);
-        assert.match(header, /1 practiced/);
+        assert.match(header, /1 learning/);
         assert.match(header, /1 review/);
-        assert.doesNotMatch(header, /\bdue\b|\boverdue\b|\bearly\b|deadline/i,
+        assert.doesNotMatch(header, /\bdue\b|\boverdue\b|\bearly\b|\bpracticed\b|deadline/i,
             'study counters and tooltips never present flashcards as deadlines');
         assert.equal(view.studySession.remaining, 3, 'future review cards remain available without a date gate');
         state.state.flashcards = previousDecks;

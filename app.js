@@ -10496,7 +10496,7 @@
             if (this.studySession) {
                 const n = this.studySession.counts();
                 remaining = this.studySession.remaining;
-                progress.innerHTML = `<span class="anki-count anki-new" title="Never answered in Study, Cram or practice">${n.new} new</span> ${n.practiced ? `<span class="anki-count anki-learn" title="Practiced in Cram or games; ready to build recall with spaced study">${n.practiced} practiced</span> ` : ''}<span class="anki-count anki-learn" title="Cards you are learning through spaced practice">${n.learning} learning</span> <span class="anki-count anki-review" title="Previously learned cards available to practice anytime; spaced repetition chooses the order">${n.review + n.early} review</span>`;
+                progress.innerHTML = `<span class="anki-count anki-new" title="Never answered in Study, Cram or practice">${n.new} new</span> <span class="anki-count anki-learn" title="Cards you have started practicing and are still learning">${n.learning} learning</span> <span class="anki-count anki-review" title="Previously learned cards available anytime; numeric recall estimates and answer history choose practice order">${n.review} review</span>`;
             } else {
                 remaining = this.studyCards.length - this.activeCardIndex;
                 progress.textContent = `${remaining} left`;
