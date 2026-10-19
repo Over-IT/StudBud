@@ -572,6 +572,44 @@ as $$
 $$;
 
 -- Single source of truth for priced items and rarity (pets are box-only, so price is null).
+create or replace function public.studbud_animal_items()
+returns table (id text, rarity text)
+language sql
+immutable
+as $$
+    values
+        ('skin_animal_chicken', 'common'), ('skin_animal_cow', 'uncommon'),
+        ('skin_animal_shark', 'rare'), ('skin_animal_penguin', 'uncommon'),
+        ('hat_animal_hammerhead', 'epic'), ('hat_animal_rooster', 'rare'),
+        ('hat_animal_cow', 'uncommon'), ('hat_animal_fox', 'rare'),
+        ('acc_animal_cowbell', 'common'), ('acc_animal_shark_fin', 'uncommon'),
+        ('acc_animal_chicken_wings', 'rare'), ('acc_animal_fox_tail', 'epic'),
+        ('acc_animal_paw_effect', 'rare'), ('palette_animal_meadow', 'uncommon');
+$$;
+
+create or replace function public.studbud_theme_items()
+returns table (box text, id text)
+language sql
+immutable
+as $$
+    select theme.box, unnest(theme.items)
+    from (values
+        ('animal', array['skin_bee', 'hat_frog', 'hat_bunny', 'hat_cat', 'acc_tail']),
+        ('space', array['skin_alien', 'skin_astronaut', 'skin_cosmic', 'hat_astronaut', 'hat_cosmic',
+            'acc_jetpack', 'acc_comet_effect', 'palette_galaxy']),
+        ('fantasy', array['skin_dragon', 'skin_ice', 'hat_wizard', 'hat_unicorn', 'acc_fairy',
+            'acc_prism_effect', 'palette_royal']),
+        ('nature', array['skin_forest', 'skin_sprout', 'hat_flower', 'hat_mushroom', 'acc_lei',
+            'acc_leaf_effect', 'palette_forest', 'palette_sunflower']),
+        ('ocean', array['skin_ocean', 'skin_axolotl', 'hat_straw', 'hat_sombrero', 'acc_shades',
+            'acc_bubble_effect', 'palette_ocean', 'palette_sand']),
+        ('school', array['skin_bookworm', 'skin_robot', 'hat_grad', 'hat_cap', 'acc_backpack', 'acc_glasses',
+            'acc_music_effect', 'palette_slate'])
+    ) theme(box, items)
+    union all
+    select 'animal', animal.id from public.studbud_animal_items() animal;
+$$;
+
 create or replace function public.studbud_shop_items()
 returns table (id text, price integer, rarity text)
 language sql
@@ -645,6 +683,8 @@ as $$
     from priced
     union all
     select pets.id, null::integer, pets.rarity from pets
+    union all
+    select animal.id, null::integer, animal.rarity from public.studbud_animal_items() animal
     union all
     select seasonal.id, null::integer, seasonal.rarity from public.studbud_seasonal_items() seasonal;
 $$;
@@ -812,6 +852,10 @@ begin
         v_cost := 160; v_prefix := 'palette\_%';
     elsif p_box = 'skin' then
         v_cost := 260; v_prefix := 'skin\_%';
+    elsif p_box = 'animal' then
+        v_cost := 220;
+    elsif p_box in ('space', 'fantasy', 'nature', 'ocean', 'school') then
+        v_cost := 240;
     elsif p_box = 'mythic' then
         v_cost := 1000;
     elsif p_box = 'season' then
@@ -830,9 +874,11 @@ begin
         when 'accessory' then '{"common":40,"uncommon":32,"rare":20,"epic":7,"legendary":1}'::jsonb
         when 'effect' then '{"common":25,"uncommon":35,"rare":25,"epic":12,"legendary":2,"mythic":1}'::jsonb
         when 'palette' then '{"uncommon":50,"rare":35,"epic":13,"legendary":2}'::jsonb
-        when 'skin' then '{"uncommon":40,"rare":35,"epic":20,"legendary":5}'::jsonb
+        when 'skin' then '{"common":10,"uncommon":35,"rare":30,"epic":20,"legendary":5}'::jsonb
+        when 'animal' then '{"common":35,"uncommon":35,"rare":22,"epic":8}'::jsonb
         when 'mythic' then '{"epic":40,"legendary":45,"mythic":15}'::jsonb
         when 'season' then '{"uncommon":35,"rare":30,"epic":27,"legendary":8}'::jsonb
+        else '{"common":25,"uncommon":35,"rare":25,"epic":12,"legendary":2,"mythic":1}'::jsonb
     end;
     -- Remove exhausted tiers, then reweight only the tiers allowed by this box.
     select coalesce(jsonb_object_agg(r.key, r.value), '{}'::jsonb), sum(r.value::numeric)
@@ -841,6 +887,8 @@ begin
     where exists (
         select 1 from public.studbud_shop_items() s
         where s.rarity = r.key and s.id like v_prefix
+          and (p_box not in ('animal', 'space', 'fantasy', 'nature', 'ocean', 'school')
+              or s.id in (select t.id from public.studbud_theme_items() t where t.box = p_box))
           and s.id not like 'accessory\_%' and s.id not like 'pet\_%'
           and (case when p_box = 'season'
                 then s.id in (select z.id from public.studbud_seasonal_items() z where z.month = extract(month from now() at time zone 'utc')::integer)
@@ -865,6 +913,8 @@ begin
     select s.id into v_item_id
     from public.studbud_shop_items() s
     where s.id not like 'accessory\_%' and s.id not like 'pet\_%' and s.id like v_prefix
+      and (p_box not in ('animal', 'space', 'fantasy', 'nature', 'ocean', 'school')
+          or s.id in (select t.id from public.studbud_theme_items() t where t.box = p_box))
       and (case when p_box = 'season'
             then s.id in (select z.id from public.studbud_seasonal_items() z where z.month = extract(month from now() at time zone 'utc')::integer)
             else s.id not like '%\_seasonal\_%' end)

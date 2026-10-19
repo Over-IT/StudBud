@@ -5,6 +5,25 @@
         constructor() {
             this.guestColors = ['#34d399', '#60a5fa', '#f472b6', '#fbbf24', '#a78bfa', '#f87171', '#2dd4bf', '#fb923c'];
             this.catalog = [
+                ...[
+                    ['skin_animal_chicken', 'Chicken', 'skin', 'common', 'White feathers, a red comb, orange beak and little wings'],
+                    ['skin_animal_cow', 'Cow', 'skin', 'uncommon', 'Black-and-white patches, small horns and a pink muzzle'],
+                    ['skin_animal_shark', 'Reef Shark', 'skin', 'rare', 'Blue-gray shark suit with fins, a pale belly and a toothy head'],
+                    ['skin_animal_penguin', 'Penguin', 'skin', 'uncommon', 'A tuxedo-feathered penguin with a white belly and orange beak'],
+                    ['hat_animal_hammerhead', 'Hammerhead Shark Head', 'hat', 'epic', 'Turns your head into a wide hammerhead shark with eyes at both ends'],
+                    ['hat_animal_rooster', 'Rooster Head', 'hat', 'rare', 'A rooster head with a tall red comb, golden beak and red wattle'],
+                    ['hat_animal_cow', 'Cow Head', 'hat', 'uncommon', 'A spotted cow head with cream horns, floppy ears and a pink snout'],
+                    ['hat_animal_fox', 'Fox Hood', 'hat', 'rare', 'An orange fox head with tall ears and a white pointed muzzle'],
+                    ['acc_animal_cowbell', 'Cowbell Collar', 'accessory', 'common', 'A red collar carrying a chunky golden cowbell'],
+                    ['acc_animal_shark_fin', 'Shark Fin', 'accessory', 'uncommon', 'A blue-gray dorsal fin strapped onto your back'],
+                    ['acc_animal_chicken_wings', 'Chicken Wings', 'accessory', 'rare', 'A pair of rounded white feather wings that flap as you move'],
+                    ['acc_animal_fox_tail', 'Fluffy Fox Tail', 'accessory', 'epic', 'A big orange tail with a white tip and a gentle wag']
+                ].map(([id, name, type, rarity, description]) => ({
+                    id, name, type, rarity, description, box: 'animal', price: null,
+                    icon: type === 'hat' ? 'fa-hat-wizard' : type === 'skin' ? 'fa-paw' : 'fa-feather'
+                })),
+                { id: 'acc_animal_paw_effect', name: 'Paw Parade', type: 'effect', rarity: 'rare', box: 'animal', price: null, icon: 'fa-paw', description: 'Little golden paw prints orbit your character' },
+                { id: 'palette_animal_meadow', name: 'Wild Meadow', color: 'animal_meadow', hue: 90, hue2: 45, type: 'palette', rarity: 'uncommon', box: 'animal', price: null, description: 'Meadow greens and golden accents for your character and app theme' },
                 { id: 'palette_forest', name: 'Forest', color: 'forest', hue: 135, hue2: 150, price: 120, type: 'palette', description: 'Forest-green colors for your character and app theme' },
                 { id: 'palette_sunflower', name: 'Sunflower', color: 'sunflower', hue: 50, hue2: 55, price: 150, type: 'palette', description: 'Lemon-yellow accents with warm charcoal or cream surfaces for your character and app theme' },
                 { id: 'palette_ocean', name: 'Tidal Glow', color: 'ocean', hue: 205, hue2: 190, price: 120, type: 'palette', description: 'Ocean-blue and turquoise colors for your character and app theme' },
@@ -177,7 +196,8 @@
                                 ].map(([key, name, emoji, rarity]) => ({ id: `pet_${key}`, name, emoji, rarity, price: null, type: 'pet' }))
                             ].concat(StudBudCommunityGames.seasonalItems()).map(item => {
                                 const rarity = item.rarity || StudBudCommunityGames.rarityForItem(item);
-                                return { ...item, rarity, price: item.price == null ? null : Math.round(item.price * 2.5 / 5) * 5 };
+                                const collection = StudBudCommunityGames.permanentSets.find(set => set.items.includes(item.id));
+                                return { ...item, collection: collection?.id, collectionName: collection?.name, rarity, price: item.price == null ? null : Math.round(item.price * 2.5 / 5) * 5 };
                             });
                         }
 
@@ -299,6 +319,32 @@
                                 odds: `Limited ${season.name} set \u00b7 this month only`, chances: { uncommon: 35, rare: 30, epic: 27, legendary: 8 } };
                         }
 
+                        static get permanentSets() {
+                            return [
+                                { id: 'animal', name: 'Animals', icon: 'fa-paw', price: 220, colors: ['#fbbf24', '#65a30d'], items: [
+                                    'skin_animal_chicken', 'skin_animal_cow', 'skin_animal_shark', 'skin_animal_penguin',
+                                    'hat_animal_hammerhead', 'hat_animal_rooster', 'hat_animal_cow', 'hat_animal_fox',
+                                    'acc_animal_cowbell', 'acc_animal_shark_fin', 'acc_animal_chicken_wings', 'acc_animal_fox_tail',
+                                    'acc_animal_paw_effect', 'palette_animal_meadow',
+                                    'skin_bee', 'hat_frog', 'hat_bunny', 'hat_cat', 'acc_tail'] },
+                                { id: 'space', name: 'Space', icon: 'fa-rocket', price: 240, colors: ['#818cf8', '#38bdf8'], items: [
+                                    'skin_alien', 'skin_astronaut', 'skin_cosmic', 'hat_astronaut', 'hat_cosmic',
+                                    'acc_jetpack', 'acc_comet_effect', 'palette_galaxy'] },
+                                { id: 'fantasy', name: 'Fantasy', icon: 'fa-dragon', price: 240, colors: ['#c084fc', '#facc15'], items: [
+                                    'skin_dragon', 'skin_ice', 'hat_wizard', 'hat_unicorn', 'acc_fairy',
+                                    'acc_prism_effect', 'palette_royal'] },
+                                { id: 'nature', name: 'Nature', icon: 'fa-leaf', price: 240, colors: ['#4ade80', '#f9a8d4'], items: [
+                                    'skin_forest', 'skin_sprout', 'hat_flower', 'hat_mushroom', 'acc_lei',
+                                    'acc_leaf_effect', 'palette_forest', 'palette_sunflower'] },
+                                { id: 'ocean', name: 'Ocean', icon: 'fa-water', price: 240, colors: ['#22d3ee', '#38bdf8'], items: [
+                                    'skin_ocean', 'skin_axolotl', 'hat_straw', 'hat_sombrero', 'acc_shades',
+                                    'acc_bubble_effect', 'palette_ocean', 'palette_sand'] },
+                                { id: 'school', name: 'School', icon: 'fa-graduation-cap', price: 240, colors: ['#fbbf24', '#60a5fa'], items: [
+                                    'skin_bookworm', 'skin_robot', 'hat_grad', 'hat_cap', 'acc_backpack', 'acc_glasses',
+                                    'acc_music_effect', 'palette_slate'] }
+                            ];
+                        }
+
                         static get boxes() {
                             return [
                                 { id: 'basic', name: 'Study Box', price: 80, icon: 'fa-book-open', odds: 'A little bit of everything', chances: { common: 70, uncommon: 22, rare: 7, epic: 1 } },
@@ -308,7 +354,11 @@
                                 { id: 'accessory', name: 'Style Box', price: 140, icon: 'fa-wand-magic-sparkles', odds: 'Accessories and auras', chances: { common: 40, uncommon: 32, rare: 20, epic: 7, legendary: 1 } },
                                 { id: 'effect', name: 'Auras Box', price: 200, icon: 'fa-circle-nodes', odds: 'Auras and particles only', chances: { common: 25, uncommon: 35, rare: 25, epic: 12, legendary: 2, mythic: 1 } },
                                 { id: 'palette', name: 'Color Box', price: 160, icon: 'fa-palette', odds: 'Color palettes only', chances: { uncommon: 50, rare: 35, epic: 13, legendary: 2 } },
-                                { id: 'skin', name: 'Character Box', price: 260, icon: 'fa-user-astronaut', odds: 'Characters only', chances: { uncommon: 40, rare: 35, epic: 20, legendary: 5 } },
+                                { id: 'skin', name: 'Character Box', price: 260, icon: 'fa-user-astronaut', odds: 'Characters only', chances: { common: 10, uncommon: 35, rare: 30, epic: 20, legendary: 5 } },
+                                ...this.permanentSets.map(set => ({ ...set, name: set.id === 'animal' ? 'Animal Box' : `${set.name} Box`, themed: true,
+                                    odds: `${set.name} characters, hats, accessories, auras and colors`,
+                                    chances: set.id === 'animal' ? { common: 35, uncommon: 35, rare: 22, epic: 8 }
+                                        : { common: 25, uncommon: 35, rare: 25, epic: 12, legendary: 2, mythic: 1 } })),
                                 { id: 'mythic', name: 'Mythic Box', price: 1000, icon: 'fa-dragon', odds: 'High-tier finds', chances: { epic: 40, legendary: 45, mythic: 15 } }
                             ];
                         }
@@ -379,6 +429,7 @@
             const types = { hat: ['hat'], accessory: ['accessory', 'effect'], effect: ['effect'], palette: ['palette'], skin: ['skin'] };
             const month = box.id === 'season' ? box.season?.month : null;
             return this.catalog.filter(item => !item.legacy && item.type !== 'pet' && box.chances[item.rarity] > 0
+                && (!box.themed || box.items.includes(item.id))
                 && (month ? item.season === month : !item.season)
                 && (!types[box.id] || types[box.id].includes(item.type)) && !owned.includes(item.id));
         }

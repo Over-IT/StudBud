@@ -379,7 +379,19 @@ async function run() {
     app.multiplayerProfile = { coins: 99999, owned_items: community.catalog.map(item => item.id), equipped: {} };
     app.renderMultiplayerShop(app.multiplayerProfile);
     assert.ok(elements.get('multiplayer-shop-items').innerHTML.includes('Collection complete'));
+    const boxesMarkup = elements.get('multiplayer-shop-items').innerHTML;
+    for (const heading of ['Permanent themed boxes', 'Item-category boxes', 'Mixed boxes']) assert.ok(boxesMarkup.includes(heading));
+    for (const set of community.constructor.permanentSets) assert.ok(boxesMarkup.includes(`box-${set.id}`));
     assert.ok(!elements.get('multiplayer-shop-items').innerHTML.includes('data-action="multiplayer-buy"'));
+    app.shopTab = 'sets';
+    app.renderMultiplayerShop(app.multiplayerProfile);
+    const setsMarkup = elements.get('multiplayer-shop-items').innerHTML;
+    assert.ok(setsMarkup.includes('Seasonal sets'));
+    for (const set of community.constructor.permanentSets) {
+        assert.ok(setsMarkup.includes(`${set.name} set`));
+        for (const id of set.items) assert.ok(setsMarkup.includes(community.catalog.find(item => item.id === id).name));
+    }
+    app.shopTab = 'boxes';
     const sql = source('supabase-setup.sql');
     assert.match(sql, /show_real_name boolean not null default false/);
     assert.match(sql, /'display_name', case when coalesce\(v_pub\.show_real_name, false\)/,

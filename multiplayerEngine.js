@@ -1929,7 +1929,7 @@
     function animatedCosmetics(player) {
         const cos = playerCosmetics(player);
         return Boolean(SKINS[cos.skin]?.mythic || cos.hat === 'hat_cosmic' || COSMETIC_PARTICLES[cos.effect]
-            || ['acc_wings', 'acc_phoenix', 'acc_fairy', 'acc_jetpack', 'acc_tail'].includes(cos.acc));
+            || ['acc_wings', 'acc_phoenix', 'acc_fairy', 'acc_jetpack', 'acc_tail', 'acc_animal_chicken_wings', 'acc_animal_fox_tail'].includes(cos.acc));
     }
 
     let avatarObserver = null;
@@ -2035,7 +2035,11 @@
         skin_inferno: { body: '#991b1b', head: '#fb923c', eye: '#fef08a', trim: '#fbbf24', mythic: ['#f97316', '#ef4444'] },
         skin_bookworm: { body: '#92400e', head: '#fde7c8', eye: '#172554', trim: '#fef3c7' },
         skin_astronaut: { body: '#e2e8f0', head: '#0e7490', eye: '#67e8f9', trim: '#fb923c' },
-        skin_axolotl: { body: '#6ee7b7', head: '#fbcfe8', eye: '#831843', trim: '#f472b6' }
+        skin_axolotl: { body: '#6ee7b7', head: '#fbcfe8', eye: '#831843', trim: '#f472b6' },
+        skin_animal_chicken: { body: '#f8fafc', head: '#fff7ed', eye: '#0f172a', trim: '#f59e0b' },
+        skin_animal_cow: { body: '#f8fafc', head: '#f8fafc', eye: '#0f172a', trim: '#334155' },
+        skin_animal_shark: { body: '#64748b', head: '#94a3b8', eye: '#0f172a', trim: '#334155' },
+        skin_animal_penguin: { body: '#1e293b', head: '#1e293b', eye: '#0f172a', trim: '#f59e0b' }
     };
 
     // Shimmering aura shared by mythic skins and the Mythic Aura accessory.
@@ -2083,13 +2087,100 @@
         return { color: cos.color, skinId: cos.skin || '', skin: SKINS[cos.skin] || null, hat: LEGACY_HATS[cos.hat] || cos.hat || '', acc: cos.acc || '', effect: cos.effect || '' };
     }
 
+    function drawAnimalHead(ctx, animal, x, y, r) {
+        ctx.save(); ctx.translate(x, y); ctx.scale(r, r);
+        const oval = (color, x, y, rx, ry) => {
+            ctx.fillStyle = color; ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, TAU); ctx.fill();
+        };
+        const triangle = (color, x1, y1, x2, y2, x3, y3) => {
+            ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.lineTo(x3, y3); ctx.closePath(); ctx.fill();
+        };
+        const bird = ['chicken', 'rooster', 'penguin'].includes(animal);
+        const shark = animal === 'shark' || animal === 'hammerhead';
+        const main = shark ? '#94a3b8' : animal === 'fox' ? '#ea580c' : animal === 'penguin' ? '#1e293b' : '#f8fafc';
+        oval(main, 0, 0, 1.03, 1);
+        if (animal === 'hammerhead') {
+            oval(main, 0, -.28, 1.95, .48);
+            for (const side of [-1, 1]) {
+                oval('#64748b', side * 1.72, -.25, .28, .44);
+                oval('#0f172a', side * 1.78, -.36, .12, .16);
+                oval('#ffffff', side * 1.81, -.41, .035, .05);
+            }
+        } else if (animal === 'cow') {
+            for (const side of [-1, 1]) {
+                triangle('#fef3c7', side * .5, -.72, side * .85, -1.55, side * .9, -.58);
+                oval('#334155', side * 1.05, -.25, .45, .25);
+                oval('#fda4af', side * 1.08, -.25, .25, .12);
+            }
+            oval('#334155', -.42, -.37, .43, .42);
+            oval('#fda4af', 0, .48, .82, .43);
+            for (const side of [-1, 1]) oval('#9f1239', side * .31, .49, .1, .13);
+        } else if (animal === 'fox') {
+            for (const side of [-1, 1]) {
+                triangle(main, side * .35, -.65, side * .75, -1.65, side * 1.05, -.3);
+                triangle('#fecaca', side * .55, -.76, side * .76, -1.34, side * .89, -.55);
+                triangle('#fff7ed', side * .95, .16, 0, .97, 0, .42);
+            }
+            oval('#0f172a', 0, .65, .18, .13);
+        } else if (bird) {
+            if (animal === 'penguin') {
+                for (const side of [-1, 1]) oval('#f8fafc', side * .36, .05, .4, .66);
+            } else {
+                for (let i = -1; i <= 1; i++) oval('#dc2626', i * .27, -1 - (i === 0 ? .16 : 0), .22, animal === 'rooster' ? .5 : .28);
+                if (animal === 'rooster') oval('#dc2626', 0, .9, .19, .34);
+            }
+            triangle('#f59e0b', -.32, .3, .32, .3, 0, .73);
+        }
+        if (shark) {
+            oval('#f1f5f9', 0, .55, .72, .32);
+            ctx.strokeStyle = '#334155'; ctx.lineWidth = .08;
+            ctx.beginPath(); ctx.moveTo(-.57, .45); ctx.lineTo(.57, .45); ctx.stroke();
+            for (let i = -1; i <= 1; i++) triangle('#ffffff', i * .3 - .1, .45, i * .3 + .1, .45, i * .3, .68);
+            for (const side of [-1, 1]) {
+                ctx.beginPath(); ctx.moveTo(side * .78, .1); ctx.lineTo(side * .9, .28); ctx.stroke();
+            }
+        }
+        if (animal !== 'hammerhead') for (const side of [-1, 1]) {
+            oval('#0f172a', side * .43, -.17, .12, .16);
+            oval('#ffffff', side * .43 + .03, -.22, .035, .05);
+        }
+        ctx.restore();
+    }
+
+    function drawAnimalAccessory(ctx, id, x, y, r, time, top = false) {
+        if (!id.startsWith('acc_animal_')) return;
+        ctx.save(); ctx.translate(x, y); ctx.scale(r / 12, r / 12);
+        if (top) ctx.rotate(Math.PI / 2);
+        if (id === 'acc_animal_shark_fin') {
+            ctx.fillStyle = '#475569'; ctx.beginPath(); ctx.moveTo(-7, 8); ctx.quadraticCurveTo(-26, -5, -18, -16); ctx.quadraticCurveTo(-7, -7, -4, 5); ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 1.5; ctx.stroke();
+        } else if (id === 'acc_animal_chicken_wings') {
+            const flap = Math.sin(time * 10) * 3;
+            for (const side of [-1, 1]) for (let i = 0; i < 3; i++) {
+                ctx.fillStyle = i % 2 ? '#cbd5e1' : '#f8fafc';
+                ctx.beginPath(); ctx.ellipse(side * (11 + i * 3), -3 + i * 4 + flap, 5, 10 - i, side * .55, 0, TAU); ctx.fill();
+            }
+        } else if (id === 'acc_animal_fox_tail') {
+            const wag = Math.sin(time * 6) * 3;
+            ctx.fillStyle = '#ea580c'; ctx.beginPath(); ctx.ellipse(-16, 6 + wag, 7, 14, -.65, 0, TAU); ctx.fill();
+            ctx.fillStyle = '#fff7ed'; ctx.beginPath(); ctx.ellipse(-23, -3 + wag, 5.5, 6, -.65, 0, TAU); ctx.fill();
+        } else if (id === 'acc_animal_cowbell') {
+            ctx.fillStyle = '#dc2626'; ctx.fillRect(-10, -6, 20, 4);
+            ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.moveTo(-4, -2); ctx.lineTo(4, -2); ctx.lineTo(6, 7); ctx.lineTo(-6, 7); ctx.closePath(); ctx.fill();
+            ctx.fillStyle = '#92400e'; ctx.fillRect(-6, 6, 12, 2); ctx.fillRect(-1, 8, 2, 2);
+        }
+        ctx.restore();
+    }
+
     function drawHat(ctx, hat, cx, top, r, tilt = 0, time = 0) {
         if (!hat) return;
         ctx.save();
         ctx.translate(cx, top);
         ctx.rotate(tilt);
         const fill = (color, fn) => { ctx.fillStyle = color; ctx.beginPath(); fn(); ctx.fill(); };
-        if (SEASONAL_HATS[hat]) {
+        if (hat.startsWith('hat_animal_')) {
+            drawAnimalHead(ctx, hat.slice('hat_animal_'.length), 0, r, r);
+        } else if (SEASONAL_HATS[hat]) {
             drawSeasonalHat(ctx, SEASONAL_HATS[hat], r);
         } else if (hat === 'hat_cap') {
             fill('#ef4444', () => ctx.arc(0, r * 0.35, r * 1.02, Math.PI, TAU));
@@ -2256,6 +2347,7 @@
 
     // Side-on character. (x, y) is the top-left of the body box.
     const COSMETIC_PARTICLES = {
+        acc_animal_paw_effect: { shape: 'paw', colors: ['#fbbf24', '#f59e0b', '#fff7ed'] },
         acc_aura: { shape: 'gate', colors: ['#67e8f9', '#c4b5fd', '#fef3c7'] },
         acc_storm_effect: { shape: 'storm', colors: ['#475569', '#7dd3fc', '#fef08a'] },
         acc_blackhole_effect: { shape: 'blackhole', colors: ['#fb923c', '#c084fc', '#fef3c7'] },
@@ -2440,7 +2532,12 @@
         ctx.lineWidth = Math.max(.8, size * .3);
         ctx.strokeStyle = ctx.fillStyle;
         ctx.beginPath();
-        if (shape === 'bat') {
+        if (shape === 'paw') {
+            ctx.ellipse(0, size * .35, size * .65, size * .5, 0, 0, TAU); ctx.fill();
+            for (let i = 0; i < 4; i++) {
+                ctx.beginPath(); ctx.ellipse((i - 1.5) * size * .48, -size * (.4 + (i === 1 || i === 2 ? .25 : 0)), size * .24, size * .3, 0, 0, TAU); ctx.fill();
+            }
+        } else if (shape === 'bat') {
             ctx.moveTo(0, -size * .35);
             for (const side of [-1, 1]) {
                 ctx.lineTo(side * size * 1.5, -size);
@@ -2710,7 +2807,24 @@
         const id = c.skinId;
         ctx.save(); ctx.translate(x, y); ctx.scale(r / 12, r / 12);
         ctx.fillStyle = c.skin.trim; ctx.strokeStyle = c.skin.trim; ctx.lineWidth = 1.8;
-        if (c.skin.pattern === 'bones') {
+        if (id.startsWith('skin_animal_')) {
+            if (id === 'skin_animal_cow') {
+                ctx.fillStyle = '#334155';
+                for (const [x, y, rx, ry] of [[-5, -6, 5, 4], [5, 1, 4, 6], [-4, 8, 4, 3]]) {
+                    ctx.beginPath(); ctx.ellipse(x, y, rx, ry, .3, 0, TAU); ctx.fill();
+                }
+            } else {
+                ctx.fillStyle = id === 'skin_animal_chicken' ? '#e2e8f0' : '#f8fafc';
+                ctx.beginPath(); ctx.ellipse(0, 2, 7, 11, 0, 0, TAU); ctx.fill();
+                ctx.fillStyle = c.skin.body;
+                for (const side of [-1, 1]) {
+                    ctx.beginPath(); ctx.ellipse(side * 10, 0, 4, 9, side * -.35, 0, TAU); ctx.fill();
+                }
+                if (id === 'skin_animal_shark') {
+                    ctx.fillStyle = '#475569'; ctx.beginPath(); ctx.moveTo(-9, -3); ctx.lineTo(-17, 5); ctx.lineTo(-8, 6); ctx.fill();
+                }
+            }
+        } else if (c.skin.pattern === 'bones') {
             ctx.strokeStyle = '#f1f5f9'; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
             ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(0, 10);
             for (let i = 0; i < 3; i++) {
@@ -2787,6 +2901,11 @@
         }
         if (c.skin?.mythic) drawMythicAura(ctx, cx, y + h * 0.45, Math.max(w, h) * 0.75, c.skin.mythic, time);
         drawCosmeticParticles(ctx, c.effect, cx, y + h * .5, w * .8, h * .55, time, c.hat ? h * .45 : 0);
+        if (c.acc !== 'acc_animal_cowbell') {
+            ctx.save(); ctx.translate(cx, y + 27 + bob); ctx.scale(face, 1);
+            drawAnimalAccessory(ctx, c.acc, 0, 0, w * .5, time);
+            ctx.restore();
+        }
         if (c.acc === 'acc_wings') {
             ctx.fillStyle = 'rgba(226,232,240,.9)';
             const flap = Math.sin(time * 10) * 4;
@@ -2850,6 +2969,7 @@
         roundRect(ctx, x, y + 12 + bob, w, h - 24, 8);
         ctx.fill();
         drawSkinSignature(ctx, c, cx, y + 27 + bob, w * .42, time);
+        if (c.acc === 'acc_animal_cowbell') drawAnimalAccessory(ctx, c.acc, cx, y + 25 + bob, w * .45, time);
         if (c.acc === 'acc_scarf') { ctx.fillStyle = '#ef4444'; ctx.fillRect(x + 1, y + 12 + bob, w - 2, 5); ctx.fillRect(cx - face * 6 - 2, y + 15 + bob, 5, 12); }
         ctx.fillStyle = head;
         ctx.beginPath(); ctx.arc(cx, y + 11 + bob, 11, 0, TAU); ctx.fill();
@@ -2857,9 +2977,10 @@
         if (c.skin === SKINS.skin_ninja) { ctx.fillStyle = '#111827'; ctx.fillRect(cx - 11, y + 4 + bob, 22, 5); ctx.fillStyle = '#dc2626'; ctx.fillRect(cx - 11, y + 8 + bob, 22, 2); }
         if (!c.hat && c.skin === SKINS.skin_robot) { ctx.strokeStyle = '#475569'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx, y + bob); ctx.lineTo(cx, y - 7 + bob); ctx.stroke(); ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(cx, y - 8 + bob, 2.5, 0, TAU); ctx.fill(); }
         if (!c.hat && c.skin === SKINS.skin_alien) { ctx.strokeStyle = '#16a34a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx - 5, y + 1 + bob); ctx.lineTo(cx - 8, y - 6 + bob); ctx.moveTo(cx + 5, y + 1 + bob); ctx.lineTo(cx + 8, y - 6 + bob); ctx.stroke(); }
+        if (c.skinId?.startsWith('skin_animal_')) drawAnimalHead(ctx, c.skinId.slice('skin_animal_'.length), cx, y + 11 + bob, 11);
         drawHat(ctx, c.hat, cx, y + bob, 11, face * 0.03, time);
         ctx.fillStyle = c.skin?.eye || '#0f172a';
-        if (!['pumpkin', 'ghost', 'sunglasses'].includes(SEASONAL_HATS[c.hat]?.shape)) ctx.fillRect(cx + face * 4 - 1.5, y + 9 + bob, 3, 4);
+        if (!c.hat.startsWith('hat_animal_') && !c.skinId?.startsWith('skin_animal_') && !['pumpkin', 'ghost', 'sunglasses'].includes(SEASONAL_HATS[c.hat]?.shape)) ctx.fillRect(cx + face * 4 - 1.5, y + 9 + bob, 3, 4);
         if (c.acc === 'acc_shades') { ctx.fillStyle = '#0f172a'; ctx.fillRect(cx + face * 4 - 6, y + 8 + bob, 12, 5); }
         if (c.acc === 'acc_monocle') { ctx.strokeStyle = '#facc15'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(cx + face * 5, y + 11 + bob, 4.5, 0, TAU); ctx.stroke(); }
         if (c.acc === 'acc_eyepatch') { ctx.fillStyle = '#0f172a'; ctx.fillRect(cx + face * 4 - 3, y + 8 + bob, 6, 5); ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(cx - 11, y + 5 + bob); ctx.lineTo(cx + 11, y + 12 + bob); ctx.stroke(); }
@@ -2953,6 +3074,7 @@
         drawTopAura(ctx, c, r, time, 'over');
         ctx.save();
         ctx.rotate(aim);
+        if (c.acc !== 'acc_animal_cowbell') drawAnimalAccessory(ctx, c.acc, -r * .25, 0, r * .7, time, true);
         if (c.acc === 'acc_cape') { ctx.fillStyle = '#dc2626'; ctx.beginPath(); ctx.moveTo(-r * 0.2, -r * 0.9); ctx.lineTo(-r * 1.7, 0); ctx.lineTo(-r * 0.2, r * 0.9); ctx.fill(); }
         if (c.acc === 'acc_wings') { ctx.fillStyle = 'rgba(226,232,240,.9)'; const f = Math.sin(time * 10) * 0.12; ctx.beginPath(); ctx.ellipse(-r * 0.3, -r * 1.15, r * 0.35, r * (1 + f), 0.4, 0, TAU); ctx.ellipse(-r * 0.3, r * 1.15, r * 0.35, r * (1 + f), -0.4, 0, TAU); ctx.fill(); }
         if (c.acc === 'acc_backpack') { ctx.fillStyle = '#b45309'; roundRect(ctx, -r * 1.25, -r * 0.5, r * 0.7, r, 3); ctx.fill(); }
@@ -2970,17 +3092,23 @@
         ctx.fillStyle = c.skin?.trim || 'rgba(0,0,0,.22)';
         ctx.beginPath(); ctx.ellipse(-r * .05, 0, r * .74, r * .98, 0, -0.9, 0.9); ctx.lineTo(-r * .05, 0); ctx.fill();
         drawSkinSignature(ctx, c, 0, 0, r * .7, time);
+        if (c.acc === 'acc_animal_cowbell') drawAnimalAccessory(ctx, c.acc, -r * .5, 0, r * .6, time, true);
         if (c.acc === 'acc_scarf') { ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(0, 0, r * 0.8, 0.6, 2.6); ctx.stroke(); }
         ctx.fillStyle = head; ctx.strokeStyle = outline; ctx.lineWidth = Math.max(1, r * .08);
         ctx.beginPath(); ctx.arc(r * 0.1, 0, r * 0.6, 0, TAU); ctx.fill(); ctx.stroke();
         if (!c.hat && !c.skin) { ctx.fillStyle = body; ctx.beginPath(); ctx.arc(r * 0.1, 0, r * 0.6, Math.PI * .55, Math.PI * 1.45); ctx.fill(); }
+        if (c.skinId?.startsWith('skin_animal_')) {
+            ctx.save(); ctx.rotate(-aim);
+            drawAnimalHead(ctx, c.skinId.slice('skin_animal_'.length), Math.cos(aim) * r * .1, Math.sin(aim) * r * .1, r * .62);
+            ctx.restore();
+        }
         if (c.hat) {
             ctx.save(); ctx.rotate(-aim);
             drawHat(ctx, c.hat, Math.cos(aim) * r * 0.1, Math.sin(aim) * r * 0.1 - r * 0.62, r * 0.62, 0, time);
             ctx.restore();
         }
         ctx.fillStyle = c.skin?.eye || '#0f172a';
-        if (!['pumpkin', 'ghost', 'sunglasses'].includes(SEASONAL_HATS[c.hat]?.shape)) {
+        if (!c.hat.startsWith('hat_animal_') && !c.skinId?.startsWith('skin_animal_') && !['pumpkin', 'ghost', 'sunglasses'].includes(SEASONAL_HATS[c.hat]?.shape)) {
             ctx.beginPath(); ctx.arc(r * 0.5, -r * 0.2, r * 0.1, 0, TAU); ctx.arc(r * 0.5, r * 0.2, r * 0.1, 0, TAU); ctx.fill();
         }
         if (c.acc === 'acc_shades') { ctx.fillStyle = '#0f172a'; ctx.fillRect(r * 0.4, -r * 0.34, r * 0.26, r * 0.68); }

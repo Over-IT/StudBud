@@ -3476,8 +3476,9 @@
             else if (item.season) button = `<button type="button" class="secondary-btn" disabled>${this.escapeHTML(item.set)} box</button>`;
             else if (item.price == null) button = '<button type="button" class="secondary-btn" disabled>Box only</button>';
             else button = `<button type="button" class="secondary-btn" data-action="multiplayer-buy" data-id="${this.escapeHTML(item.id)}" ${profile.coins < item.price ? 'disabled' : ''}>Buy${price}</button>`;
-            const search = this.escapeHTML(`${item.name} ${item.rarity} ${item.description || ''} ${item.set || ''}`.toLocaleLowerCase());
-            const setTag = item.set ? `<small class="shop-set-tag"><i class="fas fa-calendar" aria-hidden="true"></i> ${this.escapeHTML(item.set)} set</small>` : '';
+            const search = this.escapeHTML(`${item.name} ${item.rarity} ${item.description || ''} ${item.set || item.collectionName || ''}`.toLocaleLowerCase());
+            const setName = item.set || item.collectionName;
+            const setTag = setName ? `<small class="shop-set-tag"><i class="fas ${item.season ? 'fa-calendar' : 'fa-box-open'}" aria-hidden="true"></i> ${this.escapeHTML(setName)} set</small>` : '';
             return `<article class="multiplayer-shop-item rarity-${item.rarity}${equipped ? ' equipped' : ''}" data-search="${search}"><span class="shop-preview" aria-hidden="true">${this.shopItemPreview(profile, item)}</span><div><strong>${this.escapeHTML(item.name)}</strong><small class="rarity-label">${item.rarity}${equipped ? ' · Equipped' : has ? ' · Owned' : ''}</small>${setTag}${item.description ? `<small>${this.escapeHTML(item.description)}</small>` : ''}</div>${button}</article>`;
         }
 
@@ -3513,7 +3514,8 @@
             const inside = order.filter(rarity => all.some(item => item.rarity === rarity)).map(rarity =>
                 `<li class="rarity-${rarity}"><b>${rarity}</b> ${all.filter(item => item.rarity === rarity).map(item => `<span class="${owned.includes(item.id) ? 'owned' : ''}">${owned.includes(item.id) ? '<i class="fas fa-check" aria-hidden="true"></i> ' : ''}${this.escapeHTML(item.name)}</span>`).join('')}</li>`).join('');
             const capsule = this.openBoxArt(profile, box, all, owned);
-            const style = box.seasonal ? ` style="--box-accent: ${box.season.colors[0]}; --box-accent-2: ${box.season.colors[1]}"` : '';
+            const colors = box.seasonal ? box.season.colors : box.colors;
+            const style = colors ? ` style="--box-accent: ${colors[0]}; --box-accent-2: ${colors[1]}"` : '';
             const now = new Date();
             const daysLeft = Math.max(1, Math.ceil((Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1) - now) / 86400000));
             const chances = complete ? '' : `<span class="box-chances" aria-label="Rarity drop chances">${Object.entries(games.boxChances(box, owned)).map(([rarity, chance]) => `<span class="rarity-${rarity}">${rarity} <b>${chance}%</b></span>`).join('')}</span>`;
@@ -3558,7 +3560,7 @@
             const games = window.StudBudCommunityGames;
             const Games = games.constructor;
             const owned = profile.owned_items || [];
-            const tabs = [['boxes', 'Boxes'], ['sets', 'Seasonal sets'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['effect', 'Auras'], ['palette', 'Colors']];
+            const tabs = [['boxes', 'Boxes'], ['sets', 'Sets'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['effect', 'Auras'], ['palette', 'Colors']];
             const tab = tabs.some(([id]) => id === this.shopTab) ? this.shopTab : 'boxes';
             const order = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
             const rank = item => { const i = order.indexOf(item.rarity); return i < 0 ? order.length : i; };
@@ -3566,14 +3568,25 @@
             if (tab === 'boxes') {
                 body = `<h4 class="shop-category-title"><i class="fas fa-calendar-day" aria-hidden="true"></i> This month only</h4>
                     ${this.shopBoxCard(profile, Games.seasonalBox, true)}
-                    <h4 class="shop-category-title">Category boxes</h4>
-                    ${Games.boxes.map(box => this.shopBoxCard(profile, box)).join('')}
+                    <h4 class="shop-category-title">Permanent themed boxes</h4>
+                    ${Games.boxes.filter(box => box.themed).map(box => this.shopBoxCard(profile, box)).join('')}
+                    <h4 class="shop-category-title">Item-category boxes · any permanent theme</h4>
+                    ${Games.boxes.filter(box => ['hat', 'accessory', 'effect', 'palette', 'skin'].includes(box.id)).map(box => this.shopBoxCard(profile, box)).join('')}
+                    <h4 class="shop-category-title">Mixed boxes · all permanent themes and item types</h4>
+                    ${Games.boxes.filter(box => !box.themed && !['hat', 'accessory', 'effect', 'palette', 'skin'].includes(box.id)).map(box => this.shopBoxCard(profile, box)).join('')}
                     <p class="settings-hint">Every opening gives something new, never a duplicate. Open "What's inside" to see each box's rewards.</p>`;
             } else if (tab === 'sets') {
                 const current = Games.currentSeason();
                 const monthName = month => new Date(Date.UTC(2024, month - 1, 1)).toLocaleString(undefined, { month: 'long', timeZone: 'UTC' });
                 const seasons = [...Games.seasons].sort((a, b) => ((a.month - current.month + 12) % 12) - ((b.month - current.month + 12) % 12));
-                body = seasons.map(season => {
+                body = `<h4 class="shop-category-title">Permanent sets · available all year</h4>` + Games.permanentSets.map(set => {
+                    const items = games.catalog.filter(item => set.items.includes(item.id));
+                    const have = items.filter(item => owned.includes(item.id)).length;
+                    return `<article class="season-set-card${have === items.length ? ' complete' : ''}" style="--box-accent: ${set.colors[0]}; --box-accent-2: ${set.colors[1]}" data-search="${this.escapeHTML(`${set.name} ${items.map(item => item.name).join(' ')}`.toLocaleLowerCase())}">
+                        <header><i class="fas ${set.icon}" aria-hidden="true"></i><div><strong>${this.escapeHTML(set.name)} set</strong><small>Always available · ${have}/${items.length} collected</small></div><button type="button" class="secondary-btn" data-shop-tab="boxes">View boxes</button></header>
+                        ${this.shopSetPreview(profile, items)}
+                    </article>`;
+                }).join('') + `<h4 class="shop-category-title">Seasonal sets</h4>` + seasons.map(season => {
                     const items = games.catalog.filter(item => item.season === season.month);
                     const have = items.filter(item => owned.includes(item.id)).length;
                     const live = season.month === current.month;
@@ -3625,9 +3638,10 @@
             overlay.setAttribute('role', 'dialog');
             overlay.setAttribute('aria-modal', 'true');
             overlay.setAttribute('aria-label', `Opening ${box.name}`);
-            if (box.seasonal) {
-                overlay.style.setProperty('--box-accent', box.season.colors[0]);
-                overlay.style.setProperty('--box-accent-2', box.season.colors[1]);
+            const colors = box.seasonal ? box.season.colors : box.colors;
+            if (colors) {
+                overlay.style.setProperty('--box-accent', colors[0]);
+                overlay.style.setProperty('--box-accent-2', colors[1]);
             }
             overlay.innerHTML = `<div class="unbox-backdrop"></div>
                 <div class="unbox-stage">
