@@ -221,6 +221,11 @@ async function run() {
     await assert.rejects(state.saveFlashcardDeck(decks[1]), /removed by moderation/, 'stale editors and game saves cannot restore removed copies');
     sandbox.window.StudBudCloud.user = { id: 'someone-else' };
     assert.equal(app.isRemovedCommunityDeck({ id: 'original' }), false, 'matching local IDs on another account are not removed');
+    sandbox.window.StudBudCloud.user = { id: 'owner' };
+    state.state.flashcards = [{ id: 'original', cards: [] }, { id: 'personal', cards: [] }];
+    await app.reconcileRemovedDecks();
+    assert.deepEqual(Array.from(state.get('flashcards'), deck => deck.id), ['personal'],
+        'an owner original without sharing metadata still checks the removal ledger');
     sandbox.window.StudBudCommunityGames.removedDecks = async () => { throw new Error('Moderation unavailable'); };
     await assert.rejects(app.reconcileRemovedDecks(), /Moderation unavailable/);
     sandbox.window.StudBudCommunityGames.removedDecks = async () => {
@@ -230,8 +235,18 @@ async function run() {
     };
     await app.reconcileRemovedDecks();
     assert.equal(app.removedDeckCheckUnavailable, true, 'missing moderation SQL is explicit but does not block private study saves or sign-in');
+    app.removedCommunityDecks = [{ id: removedId, owner_id: 'owner', source_deck_id: null }];
+    assert.equal(app.isRemovedCommunityDeck({ id: 'historical-copy', communitySourceId: removedId }), true,
+        'historical deletions can block imported copies without an original local ID');
+    assert.equal(app.isRemovedCommunityDeck({ id: null }), false, 'unknown source identity never matches an unrelated deck');
 
     const sql = read('supabase-setup.sql');
+    assert.match(sql, /alter table public\.studbud_removed_decks alter column source_deck_id drop not null/);
+    const repair = read('supabase-repair-random-spanish-100.sql');
+    assert.match(repair, /begin;[\s\S]*insert into public\.studbud_removed_decks[\s\S]*studbud_prune_removed_decks[\s\S]*commit;/);
+    assert.match(repair, /on conflict \(id\) do update/);
+    assert.match(repair, /e905f9a1-1f2a-411f-90b8-e7cce02b0c3c/);
+    assert.doesNotMatch(repair, /title\s*=/i, 'repair targets the confirmed public identity rather than a matching title');
     assert.match(sql, /create table if not exists public\.studbud_removed_decks/);
     assert.match(sql, /create trigger studbud_prune_removed_decks before insert or update of data/);
     assert.match(sql, /create trigger studbud_block_removed_decks before insert or update/);

@@ -390,7 +390,7 @@
             return window.StudBudCloud.guestClient;
         }
 
-        async readPublicDecks(query = '', deckId = null) {
+        async publicDeckClient() {
             if (window.navigator?.onLine === false) throw new Error('The community library needs an internet connection. Your saved decks still work offline.');
             const config = window.StudBudCloud?.loadAccountConfig
                 ? await window.StudBudCloud.loadAccountConfig() : window.STUDBUD_SUPABASE_CONFIG;
@@ -400,7 +400,12 @@
             this.publicDeckReader ||= window.supabase.createClient(config.url, config.anonKey, {
                 auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'studbud-public-library' }
             });
-            const { data, error } = await this.publicDeckReader.rpc('studbud_read_community_decks', {
+            return this.publicDeckReader;
+        }
+
+        async readPublicDecks(query = '', deckId = null) {
+            const client = await this.publicDeckClient();
+            const { data, error } = await client.rpc('studbud_read_community_decks', {
                 p_query: String(query || '').trim().slice(0, 100), p_deck_id: deckId
             });
             if (error) {
@@ -539,7 +544,7 @@
         }
 
         async removedDecks() {
-            const client = await this.publicClient();
+            const client = this.hasAccount() ? this.getClient() : await this.publicDeckClient();
             const { data, error } = await client.rpc('studbud_removed_deck_ids');
             if (error) {
                 const failure = new Error(`Could not check removed flashcard sets: ${error.message}`);

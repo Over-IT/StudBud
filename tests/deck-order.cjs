@@ -18,7 +18,7 @@ const storage = new Map();
 const sandbox = {
     console, Date, Math, Map, Set,
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)) },
-    window: { StudBudDialogs: { confirm: async () => true, notify() {} } },
+    window: { addEventListener() {}, StudBudDialogs: { confirm: async () => true, notify() {} } },
     document: { getElementById: () => null, querySelector: () => null, querySelectorAll: () => [] },
     CSS: { escape: value => value },
     AppState: {
@@ -84,5 +84,142 @@ const ids = list => list.map(deck => deck.id).join(',');
     const html = source('index.html');
     assert.match(html, /id="my-deck-sort"/);
     assert.match(html, /data-action="toggle-deck-reorder"/);
+
+    state.flashcards = [
+        { id: 'z', title: 'Zulu', cards: [] },
+        { id: 'a', title: 'Alpha', cards: [] },
+        { id: 'm', title: 'Mike', cards: [] }
+    ];
+    storage.set('studbud-deck-sort', 'name');
+    await app.moveDeck('z', 'a', 'after');
+    assert.equal(ids(app.visibleDecks()), 'a,z,m', 'dropping from another sort preserves the displayed order around the move');
+    assert.equal(app.deckSortMode(), 'custom', 'a drag switches to saved custom order');
+
+    const classes = () => {
+        const values = new Set();
+        return { add: (...names) => names.forEach(name => values.add(name)), remove: (...names) => names.forEach(name => values.delete(name)),
+            contains: name => values.has(name) };
+    };
+    const handlers = {}, documentHandlers = {};
+    let ghost = null, capture = null, frame, hit, scrollTop = 0;
+    const scroller = { get scrollTop() { return scrollTop; }, set scrollTop(value) { scrollTop = value; } };
+    const cards = ['z', 'a', 'm'].map((id, index) => ({
+        dataset: { deckId: id }, classList: classes(),
+        getBoundingClientRect: () => ({ left: index * 220, right: index * 220 + 200, top: 100, bottom: 300, width: 200, height: 200 }),
+        closest(selector) { return selector === '.deck-card' ? this : null; },
+        cloneNode: () => ({ classList: classes(), style: {}, setAttribute() {}, remove() { ghost = null; } })
+    }));
+    const handle = card => ({ closest: selector => selector === '.deck-drag-handle' ? handle(card) : selector === '.deck-card' ? card : null });
+    const grid = {
+        parentElement: null,
+        getBoundingClientRect: () => ({ left: 0, right: 640, top: 100, bottom: 300 }),
+        addEventListener: (name, fn) => { handlers[name] = fn; },
+        querySelectorAll: () => cards,
+        querySelector: () => null,
+        contains: card => cards.includes(card),
+        setPointerCapture: id => { capture = id; },
+        hasPointerCapture: id => capture === id,
+        releasePointerCapture: () => { capture = null; }
+    };
+    sandbox.document = {
+        getElementById: id => id === 'deck-grid' ? grid : null,
+        addEventListener: (name, fn) => { documentHandlers[name] = fn; },
+        elementFromPoint: () => hit,
+        scrollingElement: scroller,
+        body: { append: node => { ghost = node; } }
+    };
+    sandbox.window.innerHeight = 800;
+    sandbox.getComputedStyle = () => ({ gridTemplateColumns: '200px 200px 200px' });
+    sandbox.requestAnimationFrame = fn => { frame = fn; return 1; };
+    sandbox.cancelAnimationFrame = () => { frame = null; };
+    const renderDecks = app.renderDecks;
+    let renders = 0;
+    app.renderDecks = () => { renders++; };
+    app.bindDeckReorderDrag();
+    const event = (target, x = 20, y = 120, pointerType = 'touch') =>
+        ({ target, button: 0, isPrimary: true, pointerId: 7, pointerType, clientX: x, clientY: y, preventDefault() {} });
+
+    handlers.pointerdown(event(cards[0]));
+    assert.equal(capture, null, 'touch on the card body stays available for normal scrolling');
+    handlers.pointerdown(event(handle(cards[0])));
+    handlers.pointermove(event(handle(cards[0]), 23, 122));
+    assert.equal(ghost, null, 'a tap does not pick up a deck');
+    hit = cards[1];
+    handlers.pointermove(event(handle(cards[0]), 250, 140));
+    assert.ok(ghost, 'touch dragging the grip lifts a visual copy');
+    assert.ok(cards[0].classList.contains('is-dragging'));
+    assert.ok(cards[1].classList.contains('drop-before'), 'the target marks its insertion edge');
+    renderDecks.call(app);
+    renderDecks.call(app);
+    assert.ok(ghost, 'background refreshes leave the lifted card intact');
+    assert.equal(capture, 7, 'background refreshes retain the active pointer capture');
+    assert.equal(app.deckRenderPending, true, 'background refreshes are deferred until the gesture ends');
+    assert.equal(renders, 0);
+    handlers.pointermove(event(handle(cards[0]), 250, 790));
+    frame();
+    assert.ok(scrollTop > 0, 'holding near the viewport edge scrolls');
+    const beforeCancel = saves;
+    documentHandlers.keydown({ key: 'Escape' });
+    assert.equal(ghost, null);
+    assert.equal(capture, null);
+    assert.equal(saves, beforeCancel, 'Escape cancels without saving');
+    assert.equal(renders, 1, 'queued refreshes render once after cancellation');
+    assert.equal(app.deckDragActive, false);
+    assert.equal(app.deckRenderPending, false);
+
+    handlers.pointerdown(event(handle(cards[0])));
+    handlers.pointermove(event(handle(cards[0]), 250, 140));
+    handlers.pointerup(event(handle(cards[0]), 250, 140));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(ids(app.orderedDecks()), 'z,a,m', 'touch drop applies the target order');
+    assert.equal(ghost, null);
+    assert.equal(capture, null);
+
+    handlers.pointerdown(event(handle(cards[0])));
+    hit = cards[1];
+    handlers.pointermove(event(handle(cards[0]), 250, 140));
+    renderDecks.call(app);
+    hit = cards[2];
+    handlers.pointerup(event(handle(cards[0]), 620, 140));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(ids(app.orderedDecks()), 'a,m,z', 'drop resolves the release position even before the next animation frame');
+    assert.equal(app.deckRenderPending, false, 'dropping flushes a deferred refresh');
+
+    handlers.pointerdown(event(handle(cards[2])));
+    handlers.pointermove(event(handle(cards[2]), 210, 140));
+    assert.ok(cards[0].classList.contains('drop-after'), 'a drop in the horizontal gap uses the neighboring insertion edge');
+    handlers.pointerup(event(handle(cards[2]), 210, 140));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(ids(app.orderedDecks()), 'a,z,m', 'dropping in a gap saves the relative placement');
+
+    sandbox.getComputedStyle = () => ({ gridTemplateColumns: '200px' });
+    cards.forEach((card, index) => {
+        card.getBoundingClientRect = () => ({ left: 0, right: 200, top: 100 + index * 220,
+            bottom: 300 + index * 220, width: 200, height: 200 });
+    });
+    grid.getBoundingClientRect = () => ({ left: 0, right: 200, top: 100, bottom: 740 });
+    handlers.pointerdown(event(handle(cards[2])));
+    handlers.pointermove(event(handle(cards[2]), 100, 310));
+    assert.ok(cards[0].classList.contains('drop-after'), 'vertical row gaps also resolve to a relative insertion');
+    handlers.pointercancel({ pointerId: 7 });
+    handlers.pointerdown(event(handle(cards[2])));
+    handlers.pointermove(event(handle(cards[2]), 100, 70));
+    assert.ok(cards[0].classList.contains('drop-before'), 'near the grid edge permits placing before the first set');
+    handlers.pointercancel({ pointerId: 7 });
+    handlers.pointerdown(event(handle(cards[0])));
+    handlers.pointermove(event(handle(cards[0]), 500, 500));
+    assert.equal(cards.some(card => card.classList.contains('drop-before') || card.classList.contains('drop-after')), false,
+        'dragging far outside the collection does not select an accidental destination');
+    handlers.pointercancel({ pointerId: 7 });
+
+    handlers.pointerdown(event(handle(cards[0])));
+    handlers.pointermove(event(handle(cards[0]), 250, 140));
+    const beforePointerCancel = saves;
+    handlers.pointercancel({ pointerId: 8 });
+    assert.ok(ghost, 'another finger cancelling does not interrupt the active drag');
+    handlers.pointercancel({ pointerId: 7 });
+    assert.equal(ghost, null);
+    assert.equal(saves, beforePointerCancel, 'interrupted gestures do not save');
+    assert.match(source('styles.css'), /\.deck-drag-handle\s*\{[^}]*touch-action:\s*none/);
     console.log('deck-order tests passed');
 })().catch(error => { console.error(error); process.exit(1); });

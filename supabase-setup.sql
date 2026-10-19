@@ -2549,9 +2549,10 @@ $$;
 create table if not exists public.studbud_removed_decks (
     id uuid primary key,
     owner_id uuid not null,
-    source_deck_id text not null,
+    source_deck_id text,
     removed_at timestamptz not null default now()
 );
+alter table public.studbud_removed_decks alter column source_deck_id drop not null;
 alter table public.studbud_removed_decks enable row level security;
 revoke all on table public.studbud_removed_decks from public, anon, authenticated;
 
@@ -2585,6 +2586,12 @@ as $$
         else p_data end;
 $$;
 revoke all on function public.studbud_prune_removed_decks(jsonb, uuid) from public, anon, authenticated;
+
+-- Reconcile copies saved before removal enforcement was deployed.
+update public.studbud_user_data d
+set data = public.studbud_prune_removed_decks(d.data, d.user_id),
+    updated_at = greatest(clock_timestamp(), d.updated_at + interval '1 microsecond')
+where d.data is distinct from public.studbud_prune_removed_decks(d.data, d.user_id);
 
 create or replace function public.studbud_guard_removed_decks()
 returns trigger

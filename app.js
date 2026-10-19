@@ -1170,11 +1170,11 @@
             const userId = window.StudBudCloud?.user?.id;
             return (this.removedCommunityDecks || []).some(removed =>
                 [deck.communitySourceId, deck.communityDeckId].includes(removed.id)
-                || (removed.owner_id === userId && removed.source_deck_id === deck.id));
+                || (removed.source_deck_id != null && removed.owner_id === userId && removed.source_deck_id === deck.id));
         }
 
         async reconcileRemovedDecks() {
-            if (!(AppState.get('flashcards') || []).some(deck => deck.communitySourceId || deck.communityDeckId || deck.communityPublished)) return;
+            if (!(AppState.get('flashcards') || []).length) return;
             const accountId = window.StudBudCloud?.user?.id;
             let removed;
             try {
@@ -1412,6 +1412,7 @@
             });
             this.EventBus.on('state:restored', () => this.renderUI());
             this.EventBus.on('router:navigated', route => {
+                if (route !== 'flashcard') this.cancelDeckDrag?.();
                 if (route !== 'sound') this.stopSettingsAudioPreview();
                 if (route === 'class') this.renderClassDetail();
                 if (route === 'calendar') this.renderCalendar();
@@ -2990,7 +2991,7 @@
         /** Moves a deck before/after another in the saved custom order; crossing into the pinned group pins it (and vice versa). */
         async moveDeck(id, targetId, place = 'before') {
             if (id === targetId) return;
-            const ordered = this.orderedDecks(AppState.get('flashcards') || [], 'custom');
+            const ordered = this.orderedDecks();
             const moving = ordered.find(deck => deck.id === id), target = ordered.find(deck => deck.id === targetId);
             if (!moving || !target) return;
             const rest = ordered.filter(deck => deck !== moving);
@@ -3002,6 +3003,7 @@
                 if (deck === moving && Boolean(deck.pinned) !== Boolean(target.pinned)) patch.pinned = Boolean(target.pinned);
                 if (Object.keys(patch).length) patches.set(deck.id, patch);
             });
+            localStorage.setItem('studbud-deck-sort', 'custom');
             await AppState.patchFlashcardDecks(patches);
         }
 
@@ -3020,6 +3022,11 @@
         }
 
         renderDecks() {
+            // Sync and author updates must not replace the nodes holding an active pointer.
+            if (this.deckDragActive) {
+                this.deckRenderPending = true;
+                return;
+            }
             const grid = document.getElementById('deck-grid');
             if (!grid) return;
             const search = (document.getElementById('my-deck-search')?.value || '').trim().toLowerCase();
@@ -3067,13 +3074,15 @@
                 const title = this.escapeHTML(deck.title);
                 const sameGroup = other => other && Boolean(other.pinned) === pinned;
                 const pin = `<button type="button" class="deck-pin-btn${pinned ? ' is-pinned' : ''}" data-action="toggle-deck-pin" data-id="${id}" aria-pressed="${pinned}" title="${pinned ? 'Unpin' : 'Pin to the top'}" aria-label="${pinned ? 'Unpin' : 'Pin'} ${title}"><i class="fas fa-thumbtack"></i></button>`;
-                const reorder = reordering ? `<div class="deck-reorder-controls">
-                        <span class="deck-drag-handle" aria-hidden="true"><i class="fas fa-grip-vertical"></i></span>
+                const reorder = `<div class="deck-reorder-controls">
+                        <button type="button" class="deck-drag-handle" aria-label="Drag to move ${title}" title="Drag to move this set. Use Reorder for keyboard move buttons."><i class="fas fa-grip-vertical" aria-hidden="true"></i> Move</button>
+                        ${reordering ? `
                         <button type="button" class="secondary-btn" data-action="deck-move-up" data-id="${id}" ${sameGroup(decks[index - 1]) ? '' : 'disabled'} aria-label="Move ${title} up"><i class="fas fa-arrow-up"></i></button>
                         <button type="button" class="secondary-btn" data-action="deck-move-down" data-id="${id}" ${sameGroup(decks[index + 1]) ? '' : 'disabled'} aria-label="Move ${title} down"><i class="fas fa-arrow-down"></i></button>
-                    </div>` : '';
+                        ` : ''}
+                    </div>`;
                 return `
-                <article class="glass-card deck-card${pinned ? ' is-pinned' : ''}" data-deck-id="${id}"${reordering ? ' draggable="true"' : ''}>
+                <article class="glass-card deck-card${pinned ? ' is-pinned' : ''}" data-deck-id="${id}">
                     ${reorder}
                     <div class="deck-card-top">
                         <div class="deck-ring" style="--p:${mastery.pct}" title="${mastery.pct}% recall estimate · Written answers and Study/Cram self-ratings count fully; multiple-choice and matching count half · Separate from scheduled reviews"><span>${mastery.pct}%</span></div>
@@ -3123,46 +3132,137 @@
             this.renderDeckRecommendations();
         }
 
-        // Deck "more options" menus: only one open at a time; close on outside click, Escape or after choosing an item.
-        /** Desktop drag-to-reorder while Reorder is on; touch devices use the up/down buttons. */
         bindDeckReorderDrag() {
             const grid = document.getElementById('deck-grid');
-            if (!grid) return;
-            let dragId = null;
-            const clear = () => grid.querySelectorAll('.drop-before, .drop-after, .is-dragging').forEach(el => el.classList.remove('drop-before', 'drop-after', 'is-dragging'));
-            const placeFor = (card, event) => {
+            if (!grid || this.deckDragBound) return;
+            this.deckDragBound = true;
+            let drag = null, frame = null, suppressClickUntil = 0;
+            const clearMarkers = () => grid.querySelectorAll('.drop-before, .drop-after').forEach(el => el.classList.remove('drop-before', 'drop-after'));
+            const cleanup = () => {
+                if (!drag) return;
+                const previous = drag;
+                drag = null;
+                this.deckDragActive = false;
+                cancelAnimationFrame(frame);
+                previous.ghost?.remove();
+                previous.card.classList.remove('is-dragging');
+                clearMarkers();
+                if (grid.hasPointerCapture(previous.pointerId)) grid.releasePointerCapture(previous.pointerId);
+                if (this.deckRenderPending) {
+                    this.deckRenderPending = false;
+                    this.renderDecks();
+                }
+            };
+            this.cancelDeckDrag = cleanup;
+            const placeFor = (card, x, y) => {
                 const box = card.getBoundingClientRect();
                 const wide = getComputedStyle(grid).gridTemplateColumns.split(' ').length > 1;
-                return (wide ? event.clientX - box.left < box.width / 2 : event.clientY - box.top < box.height / 2) ? 'before' : 'after';
+                return (wide ? x - box.left < box.width / 2 : y - box.top < box.height / 2) ? 'before' : 'after';
             };
-            grid.addEventListener('dragstart', event => {
-                const card = event.target.closest?.('.deck-card[draggable="true"]');
-                if (!card || !grid.classList.contains('is-reordering')) return;
-                dragId = card.dataset.deckId;
-                card.classList.add('is-dragging');
-                event.dataTransfer.effectAllowed = 'move';
-                event.dataTransfer.setData('text/plain', dragId);
-            });
-            grid.addEventListener('dragover', event => {
+            const update = (schedule = true) => {
+                if (!drag?.ghost) return;
+                const { x, y, offsetX, offsetY, ghost } = drag;
+                ghost.style.transform = `translate(${x - offsetX}px, ${y - offsetY}px) rotate(2deg)`;
+                const bounds = drag.scroller === document.scrollingElement
+                    ? { top: 0, bottom: window.innerHeight } : drag.scroller.getBoundingClientRect();
+                const speed = y < bounds.top + 64 ? -12 : y > bounds.bottom - 64 ? 12 : 0;
+                if (speed) drag.scroller.scrollTop += speed;
+                const gridBox = grid.getBoundingClientRect();
+                const nearby = x >= gridBox.left - 48 && x <= gridBox.right + 48
+                    && y >= gridBox.top - 48 && y <= gridBox.bottom + 48;
+                let target = null, nearest = Infinity;
+                if (nearby) {
+                    for (const card of grid.querySelectorAll('.deck-card')) {
+                        if (card === drag.card) continue;
+                        const box = card.getBoundingClientRect();
+                        const dx = Math.max(box.left - x, 0, x - box.right);
+                        const dy = Math.max(box.top - y, 0, y - box.bottom);
+                        const distance = dx * dx + dy * dy;
+                        if (distance < nearest) { nearest = distance; target = card; }
+                    }
+                }
+                clearMarkers();
+                drag.target = target;
+                if (drag.target) {
+                    drag.place = placeFor(drag.target, x, y);
+                    drag.target.classList.add(`drop-${drag.place}`);
+                }
+                if (schedule) frame = requestAnimationFrame(() => update());
+            };
+            grid.addEventListener('pointerdown', event => {
+                if (event.button !== 0 || event.isPrimary === false || drag) return;
                 const card = event.target.closest?.('.deck-card');
-                if (!dragId || !card) return;
+                const handle = event.target.closest?.('.deck-drag-handle');
+                if (!card || (!handle && (event.pointerType !== 'mouse' || event.target.closest('button, a, input, select, textarea, summary, details')))) return;
                 event.preventDefault();
-                const place = placeFor(card, event);
-                if (card.classList.contains(`drop-${place}`)) return;
-                grid.querySelectorAll('.drop-before, .drop-after').forEach(el => el.classList.remove('drop-before', 'drop-after'));
-                if (card.dataset.deckId !== dragId) card.classList.add(`drop-${place}`);
+                const box = card.getBoundingClientRect();
+                let scroller = grid.parentElement;
+                while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+                drag = { card, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY,
+                    x: event.clientX, y: event.clientY, offsetX: event.clientX - box.left, offsetY: event.clientY - box.top,
+                    box, scroller: scroller || document.scrollingElement };
+                this.deckDragActive = true;
+                grid.setPointerCapture(event.pointerId);
             });
-            grid.addEventListener('drop', event => {
-                const card = event.target.closest?.('.deck-card');
-                const id = dragId;
-                dragId = null;
-                clear();
-                if (!id || !card || card.dataset.deckId === id) return;
+            grid.addEventListener('pointermove', event => {
+                if (!drag || event.pointerId !== drag.pointerId) return;
+                drag.x = event.clientX; drag.y = event.clientY;
+                if (!drag.ghost && Math.hypot(drag.x - drag.startX, drag.y - drag.startY) < 6) return;
                 event.preventDefault();
-                this.moveDeck(id, card.dataset.deckId, placeFor(card, event))
-                    .catch(error => AppState.setSaveStatus(`Deck order could not be saved. ${this.friendlyErrorMessage(error)}`, 'error'));
+                if (!drag.ghost) {
+                    const ghost = drag.card.cloneNode(true);
+                    ghost.classList.add('deck-drag-ghost');
+                    ghost.setAttribute('aria-hidden', 'true');
+                    ghost.inert = true;
+                    ghost.style.width = `${drag.box.width}px`;
+                    ghost.style.height = `${drag.box.height}px`;
+                    document.body.append(ghost);
+                    drag.ghost = ghost;
+                    drag.card.classList.add('is-dragging');
+                    update();
+                }
             });
-            grid.addEventListener('dragend', () => { dragId = null; clear(); });
+            grid.addEventListener('pointerup', event => {
+                if (!drag || event.pointerId !== drag.pointerId) return;
+                drag.x = event.clientX; drag.y = event.clientY;
+                update(false);
+                const { card, target, place, ghost } = drag;
+                if (ghost) suppressClickUntil = Date.now() + 400;
+                cleanup();
+                if (!ghost || !target) return;
+                this.moveDeck(card.dataset.deckId, target.dataset.deckId, place)
+                    .then(() => {
+                        this.renderDecks();
+                        grid.querySelector(`[data-deck-id="${CSS.escape(card.dataset.deckId)}"] .deck-drag-handle`)?.focus({ preventScroll: true });
+                    })
+                    .catch(error => {
+                        this.renderDecks();
+                        console.error('[NexusApp] Deck order could not be saved:', error);
+                        AppState.setSaveStatus(`Deck order could not be saved. ${this.friendlyErrorMessage(error)}`, 'error');
+                    });
+            });
+            const cancelPointer = event => { if (drag?.pointerId === event.pointerId) cleanup(); };
+            grid.addEventListener('pointercancel', cancelPointer);
+            grid.addEventListener('lostpointercapture', cancelPointer);
+            window.addEventListener('blur', cleanup);
+            grid.addEventListener('dragstart', event => event.preventDefault());
+            grid.addEventListener('click', event => {
+                if (Date.now() < suppressClickUntil) { event.preventDefault(); event.stopPropagation(); return; }
+                const handle = event.target.closest?.('.deck-drag-handle');
+                if (handle) {
+                    const id = handle.closest('.deck-card').dataset.deckId;
+                    this.deckReorderMode = true;
+                    localStorage.setItem('studbud-deck-sort', 'custom');
+                    this.renderDecks();
+                    grid.querySelector(`[data-deck-id="${CSS.escape(id)}"] .deck-reorder-controls .secondary-btn:not(:disabled)`)?.focus();
+                }
+            }, true);
+            document.addEventListener('keydown', event => {
+                if (event.key === 'Escape' && drag) {
+                    suppressClickUntil = Date.now() + 400;
+                    cleanup();
+                }
+            });
         }
 
         bindDeckMenus() {
@@ -4551,16 +4651,19 @@
                     await games.adminCall('studbud_admin_resolve_reports', { p_target_type: data.reportType, p_target_id: data.id, p_status: action === 'resolve-report' ? 'resolved' : 'dismissed' });
                     status.textContent = action === 'resolve-report' ? 'Report marked as handled.' : 'Report dismissed.';
                 } else if (action === 'delete-deck') {
-                    if (!await window.StudBudDialogs.confirm(`Delete the public deck "${data.name}"?`)) return;
+                    if (!await window.StudBudDialogs.confirm(`Remove "${data.name}" from the community and everyone's saved decks? Offline devices will remove it when they reconnect.`)) return;
                     await games.adminCall('studbud_admin_delete_deck', { p_deck_id: data.id });
+                    await this.reconcileRemovedDecks();
                     if (data.reportType === 'deck') await games.adminCall('studbud_admin_resolve_reports', { p_target_type: 'deck', p_target_id: data.id, p_status: 'resolved' }).catch(() => {});
                 } else if (action === 'remove-decks') {
-                    if (!await window.StudBudDialogs.confirm(`Remove all public decks from ${data.name}?`)) return;
+                    if (!await window.StudBudDialogs.confirm(`Remove all public decks from ${data.name}, including everyone's saved copies? Offline devices will remove them when they reconnect.`)) return;
                     await games.adminCall('studbud_admin_remove_user_decks', { p_user_id: data.id });
+                    await this.reconcileRemovedDecks();
                 } else if (action === 'ban') {
                     const reason = await window.StudBudDialogs.prompt(`Ban ${data.name}? They will lose their public decks and can't publish new ones. Reason (optional):`);
                     if (reason === null) return;
                     await games.adminCall('studbud_admin_set_ban', { p_user_id: data.id, p_banned: true, p_reason: reason });
+                    await this.reconcileRemovedDecks();
                 } else if (action === 'force-rename') {
                     if (!await window.StudBudDialogs.confirm(`Force ${data.name} to choose a new username? They'll be blocked from the app until they do.`)) return;
                     await games.adminCall('studbud_admin_force_username', { p_user_id: data.id, p_force: true });

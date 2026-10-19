@@ -321,6 +321,18 @@ End-of-game reviews group repeated questions into one row showing your accuracy 
 
 ### Community flashcards and hosted games
 
+Community deck search results scroll within a region capped at 60% of the viewport height (up to 560px), so large public libraries do not expand the page. The results region also supports keyboard scrolling; search and status stay above it.
+
+Drag a personal deck by its **Move** grip (mouse, touch or pen), or drag a non-interactive part of the card with a mouse. A lifted card follows the pointer and an insertion marker shows its destination; holding near the top or bottom scrolls the list. Drop to save a custom order, or press Escape to cancel. Moving into or out of the pinned group updates the pin too. **Reorder** still offers keyboard-accessible up/down buttons.
+
+Background deck refreshes wait until the current drag finishes so sync and author updates cannot unexpectedly release a picked-up set. Leaving the Study page or switching away from the browser cancels the gesture safely.
+
+Drops in the gaps between cards use the nearest card and insertion side, including across grid rows; the pointer does not need to land directly on a card.
+
+For the confirmed historical removal of **Random Spanish 100**, run [`supabase-repair-random-spanish-100.sql`](./supabase-repair-random-spanish-100.sql) after the latest setup. It records the verified public deck ID and owner, prunes saved cloud copies, and lets connected devices remove their copies through normal reconciliation. It is safe to rerun and does not match unrelated sets by title. If the owner's original local ID is no longer recoverable from its publication metadata, that ID remains unknown rather than guessing; imported and publication-linked copies are still removed.
+
+Moderator deck removal deletes the published set, its owner's original and imported copies from saved account data. Connected devices reconcile on startup and during the existing minute-by-minute sync checks; the moderator's local copies refresh immediately. Offline copies are removed after reconnecting. Guest removal checks do not require Anonymous Sign-ins. Apply the latest setup SQL to prune saved copies of previously recorded removals and prevent stale backups or sync writes from restoring them. A historical deletion made before the removal ledger existed cannot be identified by title alone.
+
 After deploying the latest version, run the updated [`supabase-setup.sql`](./supabase-setup.sql) in the Supabase SQL editor. It adds the private-by-default community deck library and the protected RPC functions for live game rooms. No Supabase Realtime add-on or service-role key is required; room state is polled securely while players are connected.
 
 If setup previously failed with `42710: check constraint "studbud_site_notice_message_check" already exists`, rerun the corrected full script. The announcement table now gives its nonblank-active-message constraint a distinct name from PostgreSQL's automatically named message-length constraint. The script also requests a PostgREST schema-cache reload after installing its functions. Wait a few seconds after a successful run, then refresh the app; the SQL must be run in the project configured in [`supabase-config.js`](./supabase-config.js).
