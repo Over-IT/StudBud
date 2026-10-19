@@ -10496,7 +10496,7 @@
             if (this.studySession) {
                 const n = this.studySession.counts();
                 remaining = this.studySession.remaining;
-                progress.innerHTML = `<span class="anki-count anki-new" title="Never answered in Study, Cram or practice">${n.new} new</span> ${n.practiced ? `<span class="anki-count anki-learn" title="Practiced in Cram or games, but not yet scheduled for spaced review">${n.practiced} practiced</span> ` : ''}<span class="anki-count anki-learn" title="Cards in scheduled learning steps">${n.learning} learning</span> <span class="anki-count anki-review" title="Scheduled reviews due today">${n.review} due</span>${n.early ? ` <span class="anki-count anki-review" title="Already scheduled for a future day; optional early practice">${n.early} early</span>` : ''}`;
+                progress.innerHTML = `<span class="anki-count anki-new" title="Never answered in Study, Cram or practice">${n.new} new</span> ${n.practiced ? `<span class="anki-count anki-learn" title="Practiced in Cram or games; ready to build recall with spaced study">${n.practiced} practiced</span> ` : ''}<span class="anki-count anki-learn" title="Cards you are learning through spaced practice">${n.learning} learning</span> <span class="anki-count anki-review" title="Previously learned cards available to practice anytime; spaced repetition chooses the order">${n.review + n.early} review</span>`;
             } else {
                 remaining = this.studyCards.length - this.activeCardIndex;
                 progress.textContent = `${remaining} left`;
@@ -10669,7 +10669,7 @@
             summary.innerHTML = `
                 <div class="study-summary-burst" aria-hidden="true"><i class="fas fa-trophy"></i></div>
                 <h3>${cheer}</h3>
-                <p>${this.cramMode ? 'Cram round complete' : 'All scheduled cards done for now'} · ${this.escapeHTML(deck?.title || 'Flashcards')}</p>
+                <p>${this.cramMode ? 'Cram round complete' : 'Study round complete'} · ${this.escapeHTML(deck?.title || 'Flashcards')}</p>
                 <div class="study-summary-stats">
                     <div><strong>${stats.done}</strong><span>cards</span></div>
                     <div><strong>${accuracy}%</strong><span>recalled</span></div>

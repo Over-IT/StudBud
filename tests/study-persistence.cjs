@@ -75,6 +75,34 @@ async function run() {
     assert.deepEqual(clone(session.counts()), { new: 1, practiced: 1, learning: 0, review: 0, early: 1 });
     assert.equal(SM2.normalize(practiced).state, 'new', 'recognition does not fabricate scheduled reviews');
     assert.equal(tools.cardProgress(practiced).mastery, .5);
+    {
+        const previousDecks = state.get('flashcards');
+        const getElement = sandbox.document.getElementById;
+        const nodes = new Map();
+        sandbox.document.getElementById = id => {
+            if (!nodes.has(id)) nodes.set(id, { innerHTML: '', textContent: '', style: {}, value: '',
+                classList: { contains: () => false, add() {}, remove() {}, toggle() {} } });
+            return nodes.get(id);
+        };
+        sandbox.document.querySelectorAll = () => [];
+        const view = vm.runInContext('Object.create(AppOrchestrator.prototype)', sandbox);
+        const deck = { id: 'labels', cards: [{ id: 'unseen' }, practiced, card] };
+        state.state.flashcards = [deck];
+        view.activeDeckId = deck.id;
+        view.studySession = SM2.createSession(deck.cards, { now, includeAll: true });
+        view.renderStudyFaces = view.syncStudyStar = () => {};
+        view.pickStudyReversed = () => false;
+        view.renderStudyCard();
+        const header = nodes.get('study-progress').innerHTML;
+        assert.match(header, /1 new/);
+        assert.match(header, /1 practiced/);
+        assert.match(header, /1 review/);
+        assert.doesNotMatch(header, /\bdue\b|\boverdue\b|\bearly\b|deadline/i,
+            'study counters and tooltips never present flashcards as deadlines');
+        assert.equal(view.studySession.remaining, 3, 'future review cards remain available without a date gate');
+        state.state.flashcards = previousDecks;
+        sandbox.document.getElementById = getElement;
+    }
 
     const deck = { id: 'deck', cards: [{ id: 'one', front: 'hola', back: 'hello' }] };
     state.state.flashcards = [deck];
