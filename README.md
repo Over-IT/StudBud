@@ -22,6 +22,8 @@ Factory starts with a 1,180–1,250-unit reversing conveyor with four timed crus
 
 Escape to Space leaderboards rank current height, including falls and checkpoint returns, for players and solo bots. Personal best height remains in the objective text separately. The Return to checkpoint button works once the countdown has ended, including when its timer passes below zero.
 
+Players who reach the summit rank ahead of unfinished climbers, with earlier finish times winning between summit finishers. Arrival times also determine podium ranks rather than showing equal-height finishers as tied; solo bots record arrival times too. Hosted races retain the twenty-second finish grace period so other players can finish after the host. After finishing or the match ending, gravity still settles the character onto a platform without accepting jumps/dashes, spending energy or changing final scores.
+
 Game results open with a gold, silver and bronze podium showing the top three players' equipped characters, names and final scores. First place sits highest in the center with a crown; tied scores keep their shared rank. One- and two-player matches show only the players present. Full standings, coins and the question-by-question summary remain below the podium.
 
 Space uses longer low-gravity crossings: debris platforms have 380–450-unit gaps, solar panels 340–360, laser decks 350–400, and crumbling hull fragments 360–420. Landing widths and vertical rises stay unchanged so these are longer controlled jumps rather than smaller landing targets.

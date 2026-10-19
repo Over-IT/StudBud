@@ -1278,6 +1278,15 @@
             this.s.setGoal(this.s.score);
         }
 
+        settleAfterFinish(dt) {
+            const me = this.me;
+            this.dash = 0; this.buffer = 0;
+            me.vx *= Math.exp(-dt * 12);
+            me.vy = Math.min(this.inDeepSpace() ? 650 : 1150, me.vy + (this.inDeepSpace() ? 650 : 2300) * dt);
+            moveBody(me, this.solids, dt);
+            this.state = me.onGround ? 0 : 2;
+        }
+
         // Which surfaces can still reach the summit, using generous jump envelopes (jump + air jump, springs, wall-jump walls,
         // the full sweep of moving platforms and asteroid lanes). Landing anywhere else means there is no way back up.
         escapeGraph() {
@@ -1593,7 +1602,11 @@
                 return;
             }
 
-            if (this.finished) { me.vx *= 0.9; }
+            if (this.finished) {
+                this.settleAfterFinish(dt);
+                this.particles.update(dt, 500);
+                return;
+            }
             // Failed escape attempts trigger recovery; simply waiting on a platform does not.
             if (!this.finished) {
                 this.captureCheckpoint();

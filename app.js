@@ -5861,6 +5861,7 @@
             }
             b.ai.energy = actor.res.value;
             b.respawn = actor.dead; b.done = actor.finished;
+            if (b.done && !b.ft) b.ft = Math.max(1, Math.round(demo.session.t * 1000));
             st.checkpoint = actor.cp.id;
             st.air = !b.onGround; st.moving = Math.abs(b.vx) > 35;
         }
@@ -6368,7 +6369,7 @@
                 const i = route.cpNode[game.cp.id], start = route.list[i];
                 bot.st = { i, checkpoint: game.cp.id, teleportVersion: game.testTeleportVersion, jump: null, air: false, moving: false };
                 Object.assign(bot, { x: start.x + 10 + index * 8, y: start.y - 44,
-                    vx: 0, vy: 0, onGround: true, ground: start, done: false, respawn: 0 });
+                    vx: 0, vy: 0, onGround: true, ground: start, done: false, ft: 0, respawn: 0 });
                 bot.ai.rechargeAt = 0;
             }
             if (!bot.st) {
@@ -6383,12 +6384,15 @@
                 return;
             }
             if (bot.onGround && bot.ground === game.summit) {
-                bot.done = true; bot.vx = 0; bot.vy = 0; bot.seen = now;
+                bot.done = true; bot.ft ||= Math.max(1, Math.round(demo.session.t * 1000));
+                bot.vx = 0; bot.vy = 0; bot.seen = now;
                 return;
             }
             const speed = bot.ai.speed * (0.78 + bot.ai.aggression * 0.24);
             this.skyStep(demo, game, bot, bot.st, dt, speed);
-            if (bot.onGround && bot.ground === game.summit) bot.done = true;
+            if (bot.onGround && bot.ground === game.summit) {
+                bot.done = true; bot.ft ||= Math.max(1, Math.round(demo.session.t * 1000));
+            }
             bot.f = bot.face || 1; bot.a = bot.respawn > 0 ? 4 : bot.st.air ? 2 : bot.st.moving ? 1 : 0;
             const actor = bot.st.actor;
             bot.tx = bot.x; bot.ty = bot.y;

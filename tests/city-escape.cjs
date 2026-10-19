@@ -754,3 +754,28 @@ for (const fps of [30, 60, 120]) {
     assert.equal(g.cp, checkpoint);
 }
 console.log('Reversing rooftop switchbacks, lower-route catches, saved checkpoint retention and unrestricted free fall passed at 30/60/120 FPS.');
+for (const fps of [30, 60, 120]) {
+    const g = makeGame(42), s = g.s;
+    Object.assign(s, { game: g, t: 0, startedAt: Date.now(), axis: () => ({ x: 0, y: 0 }), down: () => false,
+        pressed: () => false, spend: n => g.res.spend(n), toast() {}, sfx() {}, setGoal() {} });
+    Object.assign(g.me, { x: g.summit.x + 180, y: g.summit.y - g.me.h - 200,
+        vx: 0, vy: 0, onGround: false, ground: null });
+    for (let frame = 0; frame < fps * 3; frame++) g.updatePlayer(1 / fps);
+    assert.equal(g.me.ground, g.summit, `${fps} FPS: an idle player falls onto the visible summit rather than hovering`);
+    assert.equal(g.me.y + g.me.h, g.summit.y);
+
+    Object.assign(g.me, { x: g.summit.x + 180, y: g.summit.y - g.me.h - 200,
+        vx: 0, vy: -80, onGround: false, ground: null });
+    g.finished = true;
+    g.dash = .15; g.buffer = .13;
+    s.down = s.pressed = () => true;
+    const energy = g.res.value, score = s.score;
+    for (let frame = 0; frame < fps * 3; frame++) g.updatePlayer(1 / fps);
+    assert.equal(g.me.ground, g.summit, `${fps} FPS: finished players fall and settle even with jump/dash controls held`);
+    assert.equal(g.res.value, energy, 'post-finish settling does not spend energy');
+    assert.equal(s.score, score, 'post-finish settling does not change the final score');
+
+    Object.assign(g.me, { y: g.summit.y - g.me.h - 200, vy: 0, onGround: false, ground: null });
+    for (let frame = 0; frame < fps * 3; frame++) g.settleAfterFinish(1 / fps);
+    assert.equal(g.me.ground, g.summit, `${fps} FPS: the post-match settling path lands on the summit`);
+}

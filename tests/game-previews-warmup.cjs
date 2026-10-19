@@ -564,6 +564,7 @@ rosterSession.user = { id: 'me' };
 rosterSession.game = { scoreGoal: true };
 rosterSession.score = rosterSession.goal = 0;
 rosterSession.metric = sessionPrototype.metric;
+rosterSession.compareStandings = sessionPrototype.compareStandings;
 const taggedStandings = sessionPrototype.standings.call(rosterSession);
 assert.equal(taggedStandings.find(row => row.id === 'me').username, 'overit');
 assert.equal(A.util.accountTagMarkup(taggedStandings.find(row => row.id === 'other').username), '', 'an arbitrary multiplayer nickname cannot claim an account tag');

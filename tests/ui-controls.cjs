@@ -60,6 +60,52 @@ for (const file of ['flashcardEngine.js', 'multiplayerEngine.js', 'multiplayerGa
 }
 
 const A = sandbox.window.StudBudArcade;
+{
+    const session = Object.create(A.Session.prototype);
+    session.game = { race: true, scoreGoal: false };
+    session.user = { id: 'late' };
+    session.roster = new Map(['late', 'early', 'climbing', 'unknown'].map(id => [id, { id, nickname: id }]));
+    session.remotes = new Map([
+        ['early', { done: true, ft: 10000, goal: 900, score: 900 }],
+        ['climbing', { done: false, goal: 950, score: 950 }],
+        ['unknown', { done: true, ft: 0, goal: 900, score: 900 }]
+    ]);
+    session.done = true; session.finishMs = 12000; session.goal = session.score = 900;
+    const rows = session.standings();
+    assert.equal(rows.map(row => row.id).join(','), 'early,late,unknown,climbing',
+        'summit finishers rank by arrival, ahead of higher airborne non-finishers; unknown times do not win');
+    assert.equal(rows[1].ft, 12000, 'local finish time is retained in final standings');
+    assert.equal(session.sameRank(rows[0], rows[1]), false, 'different summit arrival times are not a podium tie');
+    assert.equal(session.sameRank(rows[0], { ...rows[0] }), true, 'identical finish times retain a true tie');
+    session.game.race = false;
+    assert.equal(session.standings()[0].id, 'climbing', 'other games retain their metric-based ranking');
+
+    session.game = { race: true, finished: true };
+    session.practice = false; session.isHost = true; session.over = false; session.countdown = -1;
+    session.room = { goal_type: 'time' }; session.deadline = Date.now() + 60000;
+    session.standings = () => [{ d: true }, { d: false }];
+    let ended = 0;
+    session.hostEnd = () => { ended++; };
+    session.checkEnd();
+    assert.equal(ended, 0, 'the host finishing does not immediately prevent other players from reaching the summit');
+    assert.ok(session.firstDone > 0, 'the finish grace period starts once');
+    session.firstDone = Date.now() - 21000;
+    session.checkEnd();
+    assert.equal(ended, 1, 'the race ends after its existing twenty-second finish grace period');
+
+    let settled = 0, updated = 0;
+    session.game = { settleAfterFinish: () => settled++, update: () => updated++ };
+    session.over = true; session.paused = false; session.lastFrame = 0;
+    session.remotes = new Map(); session.justPressed = new Set(); session.mouse = {};
+    session.mode = 'chess'; session.preview = false; session.updateMeter = () => {};
+    sandbox.requestAnimationFrame = () => 1;
+    session.frame(16);
+    assert.equal(settled, 1, 'post-match frames continue landing physics');
+    assert.equal(updated, 0, 'post-match settling does not resume gameplay or scoring');
+    session.paused = true;
+    session.frame(32);
+    assert.equal(settled, 1, 'an explicitly paused match stays paused');
+}
 const sql = fs.readFileSync(path.join(__dirname, '..', 'supabase-setup.sql'), 'utf8');
 const noticeDefinition = sql.match(/create table if not exists public\.studbud_site_notice \(([\s\S]*?)\n\);/)[1];
 assert.match(noticeDefinition, /message text not null check/);

@@ -987,6 +987,7 @@ console.log('Automatic waves, wave scaling, host-synchronized progress and idle 
     assert.equal(g.teamValue(0), 100, 'legacy oversized damage snapshots still display at most 100');
     g.winner = 1;
     const rows = A.Session.prototype.standings.call({ game: g, roster: s.roster, remotes: new Map(), user: s.user,
+        compareStandings: A.Session.prototype.compareStandings,
         metric: row => g.rankMetric(row) });
     assert.equal(rows[0].id, 'guest', 'winner ranks ahead even when both displayed scores are tied at 100');
     assert.ok(rows.every(row => row.s <= 100 && row.g <= 100));

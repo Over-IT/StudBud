@@ -772,11 +772,31 @@
                     id: info.id, n: info.nickname, username: info.username, color: info.color, cos: info.cos,
                     s: Math.round(Number(isMe ? this.score : r ? r.score : info.score) || 0),
                     g: Math.round(Number(isMe ? this.goal : r ? r.goal : (this.game?.scoreGoal === false ? info.score || 0 : 0)) || 0),
-                    d: isMe ? this.done : Boolean(r?.done)
+                    d: isMe ? this.done : Boolean(r?.done),
+                    ft: isMe ? this.finishMs : r?.ft
                 });
             }
             if (this.game?.standingValues) for (const row of rows) Object.assign(row, this.game.standingValues(row.id));
-            return rows.sort((a, b) => (this.metric(b) - this.metric(a)) || (b.s - a.s));
+            return rows.sort((a, b) => this.compareStandings(a, b));
+        }
+
+        compareStandings(a, b) {
+            if (this.game?.race) {
+                const finished = Number(Boolean(b.d)) - Number(Boolean(a.d));
+                if (finished) return finished;
+                if (a.d && b.d) {
+                    const aTime = Number.isFinite(a.ft) && a.ft > 0 ? a.ft : Infinity;
+                    const bTime = Number.isFinite(b.ft) && b.ft > 0 ? b.ft : Infinity;
+                    if (aTime !== bTime) return aTime < bTime ? -1 : 1;
+                }
+            }
+            return (this.metric(b) - this.metric(a)) || (b.s - a.s);
+        }
+
+        sameRank(a, b) {
+            if (this.game?.race && (a.d || b.d)) return Boolean(a.d) === Boolean(b.d)
+                && (Number.isFinite(a.ft) && a.ft > 0 ? a.ft : Infinity) === (Number.isFinite(b.ft) && b.ft > 0 ? b.ft : Infinity);
+            return this.metric(a) === this.metric(b);
         }
 
         metric(row) { return this.game?.rankMetric ? this.game.rankMetric(row) : this.game?.scoreGoal === false ? row.g : row.s; }
@@ -796,11 +816,12 @@
             const now = Date.now();
             const rows = this.standings();
             const limit = Number(this.room.point_limit);
-            let end = Boolean(this.game.finished) || now >= this.deadline;
+            let end = (!this.game.race && Boolean(this.game.finished)) || now >= this.deadline;
             if (!['chess', 'defense'].includes(this.mode) && this.room.goal_type !== 'time' && !this.game.race && rows.some(row => this.metric(row) >= limit)) end = true;
             if (this.game.race) {
                 if (rows.length && rows.every(row => row.d)) end = true;
                 const first = this.done && !this.firstDone ? now : this.firstDone;
+                if (first) this.firstDone = first;
                 if (first && now - first > 20000) end = true;
             }
             if (end) this.hostEnd();
@@ -1733,7 +1754,7 @@
             const summaryOpen = panel.querySelector('.mpg-summary')?.open;
             const rows = this.standingsCache || this.standings();
             const winner = rows[0];
-            const tied = winner && rows.filter(row => this.metric(row) === this.metric(winner)).length > 1;
+            const tied = winner && rows.filter(row => this.sameRank(row, winner)).length > 1;
             const title = this.game.resultTitle ? this.game.resultTitle(rows) : this.game.teamsOn && this.game.teamTd
                 ? this.game.teamTd[0] === this.game.teamTd[1] ? 'Teams tied!' : `${this.game.teamTd[0] > this.game.teamTd[1] ? 'Blue' : 'Red'} team wins!`
                 : this.mode === 'chess' && this.game.state.winner === -2 ? 'Draw!'
@@ -1743,7 +1764,7 @@
                 <small>${this.testing ? 'Test finished' : this.practice ? 'Singleplayer complete' : 'Match over'}</small>
                 <h2>${esc(title)}</h2>
                 ${rows.length ? `<div class="mpg-podium" role="group" aria-label="Top players">${rows.slice(0, 3).map((row, index) => {
-                    const rank = rows.findIndex(other => this.metric(other) === this.metric(row)) + 1;
+                    const rank = rows.findIndex(other => this.sameRank(other, row)) + 1;
                     return `<div class="mpg-podium-player mpg-podium-slot-${index + 1}${row.id === this.user.id ? ' me' : ''}" aria-label="${esc(row.n)}, rank ${rank}">
                         ${index === 0 ? '<svg class="mpg-podium-crown" viewBox="0 0 48 32" aria-hidden="true"><path d="M4 7 14 16 24 3 34 16 44 7 39 27H9Z" fill="currentColor"/><path d="M10 31H38" stroke="currentColor" stroke-width="2"/></svg>' : ''}
                         ${avatarMarkup(row, 'mpg-podium-avatar')}
@@ -1751,7 +1772,7 @@
                     </div>`;
                 }).join('')}</div>` : ''}
                 <h3 class="mpg-standings-heading">Final standings</h3>
-                <ol aria-label="Final standings">${rows.map(row => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${rows.findIndex(other => this.metric(other) === this.metric(row)) + 1}</span>${avatarMarkup(row, 'mpg-player-avatar')}<strong>${esc(row.n)} ${accountTagMarkup(row.username, row.tags)}</strong><b>${this.valueText(row)}</b><em>${!this.user.is_anonymous && this.rewards && (!this.practice || row.id === this.user.id) ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
+                <ol aria-label="Final standings">${rows.map(row => `<li class="${row.id === this.user.id ? 'me' : ''}"><span class="rank">${rows.findIndex(other => this.sameRank(other, row)) + 1}</span>${avatarMarkup(row, 'mpg-player-avatar')}<strong>${esc(row.n)} ${accountTagMarkup(row.username, row.tags)}</strong><b>${this.valueText(row)}</b><em>${!this.user.is_anonymous && this.rewards && (!this.practice || row.id === this.user.id) ? `+${Number(this.rewards[row.id] || 0)} coins` : ''}</em></li>`).join('')}</ol>
                 <p class="mpg-accuracy">${this.answered ? `${Math.round(this.correct / this.answered * 100)}% correct` : 'No answers submitted'} · ${this.correct} correct · ${Math.max(0, this.answered - this.correct)} incorrect · ${this.answered} answered</p>
                 <details class="mpg-summary"><summary>Full game summary</summary>
                     <p>${Math.round(this.t)} seconds played · ${(this.questionHistory || []).filter(answer => answer.correct === null).length} skipped</p>
@@ -1801,6 +1822,8 @@
                     this.checkEnd();
                     if (!this.practice && !this.isHost && !this.over && Date.now() > this.deadline + 9000) this.finish(this.standings());
                 }
+            } else if (!this.paused) {
+                this.game.settleAfterFinish?.(dt);
             }
             if (!this.paused) {
                 for (const r of this.remotes.values()) {
