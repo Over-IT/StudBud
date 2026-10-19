@@ -2546,6 +2546,90 @@ begin
 end;
 $$;
 
+create table if not exists public.studbud_removed_decks (
+    id uuid primary key,
+    owner_id uuid not null,
+    source_deck_id text not null,
+    removed_at timestamptz not null default now()
+);
+alter table public.studbud_removed_decks enable row level security;
+revoke all on table public.studbud_removed_decks from public, anon, authenticated;
+
+create or replace function public.studbud_removed_deck_ids()
+returns jsonb
+language sql
+security definer
+set search_path = public, pg_temp
+as $$
+    select coalesce(jsonb_agg(jsonb_build_object('id', id, 'owner_id', owner_id,
+        'source_deck_id', case when owner_id = auth.uid() then source_deck_id else null end)), '[]'::jsonb)
+    from public.studbud_removed_decks;
+$$;
+revoke all on function public.studbud_removed_deck_ids() from public;
+grant execute on function public.studbud_removed_deck_ids() to anon, authenticated;
+
+create or replace function public.studbud_prune_removed_decks(p_data jsonb, p_user_id uuid)
+returns jsonb
+language sql
+security definer
+set search_path = public, pg_temp
+as $$
+    select case when jsonb_typeof(p_data -> 'flashcards') = 'array' then
+        jsonb_set(p_data, '{flashcards}', coalesce((
+            select jsonb_agg(d.value order by d.position)
+            from jsonb_array_elements(p_data -> 'flashcards') with ordinality d(value, position)
+            where not exists (select 1 from public.studbud_removed_decks r
+                where r.id::text in (d.value ->> 'communitySourceId', d.value ->> 'communityDeckId')
+                   or (r.owner_id = p_user_id and r.source_deck_id = d.value ->> 'id'))
+        ), '[]'::jsonb))
+        else p_data end;
+$$;
+revoke all on function public.studbud_prune_removed_decks(jsonb, uuid) from public, anon, authenticated;
+
+create or replace function public.studbud_guard_removed_decks()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    if tg_table_name = 'studbud_user_data' then
+        new.data := public.studbud_prune_removed_decks(new.data, new.user_id);
+    elsif exists (select 1 from public.studbud_removed_decks r
+        where r.id = new.id or (r.owner_id = new.owner_id and r.source_deck_id = new.source_deck_id)) then
+        raise exception 'This flashcard set was removed by moderation and cannot be shared again.';
+    end if;
+    return new;
+end;
+$$;
+revoke all on function public.studbud_guard_removed_decks() from public, anon, authenticated;
+drop trigger if exists studbud_prune_removed_decks on public.studbud_user_data;
+create trigger studbud_prune_removed_decks before insert or update of data on public.studbud_user_data
+    for each row execute function public.studbud_guard_removed_decks();
+drop trigger if exists studbud_block_removed_decks on public.studbud_community_decks;
+create trigger studbud_block_removed_decks before insert or update on public.studbud_community_decks
+    for each row execute function public.studbud_guard_removed_decks();
+
+create or replace function public.studbud_remove_deck_copies(p_deck_id uuid default null, p_owner_id uuid default null)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    insert into public.studbud_removed_decks (id, owner_id, source_deck_id)
+    select id, owner_id, source_deck_id from public.studbud_community_decks
+    where id = p_deck_id or owner_id = p_owner_id
+    on conflict (id) do nothing;
+    update public.studbud_user_data d
+    set data = public.studbud_prune_removed_decks(d.data, d.user_id),
+        updated_at = greatest(clock_timestamp(), d.updated_at + interval '1 microsecond')
+    where d.data is distinct from public.studbud_prune_removed_decks(d.data, d.user_id);
+    delete from public.studbud_community_decks where id = p_deck_id or owner_id = p_owner_id;
+end;
+$$;
+revoke all on function public.studbud_remove_deck_copies(uuid, uuid) from public, anon, authenticated;
+
 create or replace function public.studbud_admin_delete_deck(p_deck_id uuid)
 returns void
 language plpgsql
@@ -2554,7 +2638,7 @@ set search_path = public, pg_temp
 as $$
 begin
     perform public.studbud_require_moderator();
-    delete from public.studbud_community_decks where id = p_deck_id;
+    perform public.studbud_remove_deck_copies(p_deck_id, null);
 end;
 $$;
 
@@ -2570,7 +2654,7 @@ begin
     if p_banned then
         insert into public.studbud_banned_users (user_id, reason) values (p_user_id, left(coalesce(p_reason, ''), 200))
         on conflict (user_id) do update set reason = excluded.reason, banned_at = now();
-        delete from public.studbud_community_decks where owner_id = p_user_id;
+        perform public.studbud_remove_deck_copies(null, p_user_id);
     else
         delete from public.studbud_banned_users where user_id = p_user_id;
     end if;
@@ -2600,7 +2684,7 @@ set search_path = public, pg_temp
 as $$
 begin
     perform public.studbud_require_account_moderation(p_user_id);
-    delete from public.studbud_community_decks where owner_id = p_user_id;
+    perform public.studbud_remove_deck_copies(null, p_user_id);
 end;
 $$;
 

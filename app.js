@@ -389,7 +389,12 @@
 
         async saveFlashcardDeck(deck) {
             if (!deck.id) deck.id = 'deck_' + Date.now();
+            if (window.NexusApp?.isRemovedCommunityDeck?.(deck)) throw new Error('This flashcard set was removed by moderation.');
             await NexusDB.put('flashcards', deck);
+            if (window.NexusApp?.isRemovedCommunityDeck?.(deck)) {
+                await NexusDB.delete('flashcards', deck.id);
+                throw new Error('This flashcard set was removed by moderation.');
+            }
             this.setSaveStatus('Flashcard deck saved on this device.');
             
             const index = this.state.flashcards.findIndex(d => d.id === deck.id);
@@ -470,6 +475,7 @@
                 if (!parsed.state || !parsed.version) {
                     throw new Error("Invalid backup format.");
                 }
+                parsed.flashcards = (parsed.flashcards || []).filter(deck => !window.NexusApp?.isRemovedCommunityDeck?.(deck));
 
                 const studyHistory = (parsed.studyHistory || []).filter(isCurrentStudySession);
                 const gameMetrics = currentGameMetrics(parsed.state.gameMetrics);
@@ -1082,6 +1088,7 @@
             if (window.StudBudCloud.initialSnapshot) {
                 await AppState.importAppState(window.StudBudCloud.initialSnapshot);
             }
+            if ((!window.StudBudCloud.offlineMode || window.StudBudCloud.isGuest?.()) && window.navigator?.onLine !== false) await this.reconcileRemovedDecks();
             this.bindUI();
             this.updateMultiplayerModeSetup(this.selectedMultiplayerMode);
             this.renderUI();
@@ -1120,7 +1127,9 @@
             const wasInert = container?.inert;
             if (container) container.inert = true;
             try {
-                if (!await AppState.importAppState(snapshot)) throw new Error('Your cloud data could not be restored. Keep this page open and retry syncing.');
+                const parsed = typeof snapshot === 'string' ? JSON.parse(snapshot) : snapshot;
+                const filtered = this.removedCommunityDecks ? { ...parsed, flashcards: (parsed.flashcards || []).filter(deck => !this.isRemovedCommunityDeck(deck)) } : parsed;
+                if (!await AppState.importAppState(filtered)) throw new Error('Your cloud data could not be restored. Keep this page open and retry syncing.');
                 this.renderUI();
                 this.setCloudChartControls();
                 this.renderGradeProgress();
@@ -1140,6 +1149,37 @@
                 });
             }
             this.renderDecks();
+        }
+
+        isRemovedCommunityDeck(deck) {
+            const userId = window.StudBudCloud?.user?.id;
+            return (this.removedCommunityDecks || []).some(removed =>
+                [deck.communitySourceId, deck.communityDeckId].includes(removed.id)
+                || (removed.owner_id === userId && removed.source_deck_id === deck.id));
+        }
+
+        async reconcileRemovedDecks() {
+            if (!(AppState.get('flashcards') || []).some(deck => deck.communitySourceId || deck.communityDeckId || deck.communityPublished)) return;
+            const accountId = window.StudBudCloud?.user?.id;
+            let removed;
+            try {
+                removed = await window.StudBudCommunityGames.removedDecks();
+            } catch (error) {
+                if (!['PGRST202', '42883'].includes(error.code)) throw error;
+                if (!this.removedDeckCheckUnavailable) console.error('[NexusApp] Set-removal checks need the updated server SQL:', error);
+                this.removedDeckCheckUnavailable = true;
+                AppState.setSaveStatus('Study saves still work, but automatic set removals need the latest supabase-setup.sql on the server.', 'error');
+                return;
+            }
+            if (accountId !== window.StudBudCloud?.user?.id) return;
+            this.removedDeckCheckUnavailable = false;
+            this.removedCommunityDecks = removed;
+            const decks = (AppState.get('flashcards') || []).filter(deck => this.isRemovedCommunityDeck(deck));
+            for (const deck of decks) {
+                if (this.activeDeckId === deck.id) this.closeStudy();
+                await AppState.deleteFlashcardDeck(deck.id);
+            }
+            if (decks.length) AppState.setSaveStatus('Moderated flashcard sets were removed from this device.');
         }
 
         async clearLocalStore(storeName) {
@@ -2926,7 +2966,7 @@
                 return `
                 <article class="glass-card deck-card">
                     <div class="deck-card-top">
-                        <div class="deck-ring" style="--p:${mastery.pct}" title="${mastery.pct}% mastery · Study, Cram and game answers count · Four recent correct answers master a card"><span>${mastery.pct}%</span></div>
+                        <div class="deck-ring" style="--p:${mastery.pct}" title="${mastery.pct}% recall estimate · Written answers and Study/Cram self-ratings count fully; multiple-choice and matching count half · Separate from scheduled reviews"><span>${mastery.pct}%</span></div>
                         <div class="deck-card-title">
                             <h3>${this.escapeHTML(deck.title)}</h3>
                             ${author}
@@ -9437,7 +9477,11 @@
                 if (revealed && quality) {
                     event.preventDefault();
                     this.studyKeyBusy = true;
-                    this.rateCurrentCard(quality).catch(error => console.error('[NexusApp] Card rating failed:', error)).finally(() => { this.studyKeyBusy = false; });
+                    this.rateCurrentCard(quality).catch(error => {
+                        console.error('[NexusApp] Card rating failed:', error);
+                        AppState.setSaveStatus(`Your card rating could not be saved. ${this.friendlyErrorMessage(error)}`, 'error');
+                        window.StudBudDialogs.notify('Your rating was not saved. Keep this card open and retry.');
+                    }).finally(() => { this.studyKeyBusy = false; });
                     return;
                 }
             }
@@ -10452,7 +10496,7 @@
             if (this.studySession) {
                 const n = this.studySession.counts();
                 remaining = this.studySession.remaining;
-                progress.innerHTML = `<span class="anki-count anki-new" title="New cards">${n.new} new</span> <span class="anki-count anki-learn" title="Cards in learning steps">${n.learning} learning</span> <span class="anki-count anki-review" title="Cards to review">${n.review} review</span>`;
+                progress.innerHTML = `<span class="anki-count anki-new" title="Never answered in Study, Cram or practice">${n.new} new</span> ${n.practiced ? `<span class="anki-count anki-learn" title="Practiced in Cram or games, but not yet scheduled for spaced review">${n.practiced} practiced</span> ` : ''}<span class="anki-count anki-learn" title="Cards in scheduled learning steps">${n.learning} learning</span> <span class="anki-count anki-review" title="Scheduled reviews due today">${n.review} due</span>${n.early ? ` <span class="anki-count anki-review" title="Already scheduled for a future day; optional early practice">${n.early} early</span>` : ''}`;
             } else {
                 remaining = this.studyCards.length - this.activeCardIndex;
                 progress.textContent = `${remaining} left`;
@@ -10550,45 +10594,63 @@
         }
 
         async rateCurrentCard(quality) {
+            if (this.studyRatingPending) return;
             const deck = this.studyDeck();
             if (!deck) throw new Error('The selected deck no longer exists.');
             const card = this.currentStudyCard;
             if (!card) return;
             if (!window.SM2Engine) throw new Error('The spaced-repetition scheduler did not load.');
-            if (this.studySession) {
-                const result = this.studySession.answer(card, quality);
-                if (result.leechTriggered) AppState.setSaveStatus('Leech: this card keeps slipping — consider rewording or splitting it.', 'error');
-            } else if (quality < 3) {
-                this.studyCards.push(card);
-            }
-            const stats = this.studyStats;
-            if (stats) {
-                stats.done += 1;
-                stats.ratings[quality] = (stats.ratings[quality] || 0) + 1;
-                stats.combo = quality >= 3 ? stats.combo + 1 : 0;
-                stats.bestCombo = Math.max(stats.bestCombo, stats.combo);
-                if (quality < 3) stats.missed.add(card.id);
-                const combo = document.getElementById('study-combo');
-                if (combo) {
-                    combo.classList.toggle('hidden', stats.combo < 3);
-                    combo.innerHTML = `<i class="fas fa-fire"></i> ${stats.combo} in a row`;
+            const saved = (deck.cards || []).find(item => item.id === card.id);
+            if (!saved) throw new Error('This card was removed. Reopen the set before continuing.');
+            const session = this.studySession;
+            this.studyRatingPending = true;
+            try {
+                const now = Date.now();
+                const scheduled = this.studySession ? window.SM2Engine.schedule(saved, quality, { ...this.studySession.options, now, deck: undefined }) : null;
+                const next = { ...saved, ...(scheduled?.fields || {}) };
+                window.FlashcardTools.recordAnswer(next, quality >= 3, 'recall');
+                const updated = { ...deck, cards: deck.cards.map(item => item.id === card.id ? next : item),
+                    studiedAt: deck.studiedAt || new Date(now).toISOString(), studiedCount: Number(deck.studiedCount || 0) + 1 };
+                if (this.studySession) updated.ankiToday = { day: this.studySession.today,
+                    newDone: this.studySession.newDone + (scheduled.previousState === 'new' ? 1 : 0),
+                    reviewsDone: this.studySession.reviewsDone + (scheduled.previousState === 'review' ? 1 : 0) };
+                await AppState.saveFlashcardDeck(updated);
+                if (this.activeDeckId !== deck.id || this.currentStudyCard !== card || this.studySession !== session) return;
+                if (this.studySession) {
+                    Object.assign(card, saved);
+                    this.studySession.deck = updated;
+                    const result = this.studySession.answer(card, quality, now);
+                    Object.assign(card, next);
+                    if (result.leechTriggered) AppState.setSaveStatus('Leech: this card keeps slipping — consider rewording or splitting it.', 'error');
+                } else if (quality < 3) {
+                    this.studyCards.push(next);
                 }
-            }
-            deck.studiedAt = deck.studiedAt || new Date().toISOString();
-            const saved = (deck.cards || []).find(item => item.id === card.id) || card;
-            window.FlashcardTools.recordAnswer(saved, quality >= 3);
-            deck.studiedCount = Number(deck.studiedCount || 0) + 1;
-            if (!this.studySession) this.activeCardIndex += 1;
-            this.renderStudyCard();
-            await AppState.saveFlashcardDeck(deck);
-            if (deck.communitySourceId && window.StudBudCommunityGames?.hasAccount?.() && deck.communitySourceOwnerId !== window.StudBudCloud.user.id && !deck.communityStudyRecorded) {
-                try {
-                    await window.StudBudCommunityGames.recordDeckStudy(deck.communitySourceId);
-                    await this.updateSavedDeck(deck.id, { communityStudyRecorded: true });
-                } catch (error) {
-                    console.error('[NexusApp] Community study count could not sync:', error);
-                    AppState.setSaveStatus(`Card progress saved, but the community study count could not sync. ${this.friendlyErrorMessage(error)}`, 'error');
+                const stats = this.studyStats;
+                if (stats) {
+                    stats.done += 1;
+                    stats.ratings[quality] = (stats.ratings[quality] || 0) + 1;
+                    stats.combo = quality >= 3 ? stats.combo + 1 : 0;
+                    stats.bestCombo = Math.max(stats.bestCombo, stats.combo);
+                    if (quality < 3) stats.missed.add(card.id);
+                    const combo = document.getElementById('study-combo');
+                    if (combo) {
+                        combo.classList.toggle('hidden', stats.combo < 3);
+                        combo.innerHTML = `<i class="fas fa-fire"></i> ${stats.combo} in a row`;
+                    }
                 }
+                if (!this.studySession) this.activeCardIndex += 1;
+                this.renderStudyCard();
+                if (deck.communitySourceId && window.StudBudCommunityGames?.hasAccount?.() && deck.communitySourceOwnerId !== window.StudBudCloud.user.id && !deck.communityStudyRecorded) {
+                    try {
+                        await window.StudBudCommunityGames.recordDeckStudy(deck.communitySourceId);
+                        await this.updateSavedDeck(deck.id, { communityStudyRecorded: true });
+                    } catch (error) {
+                        console.error('[NexusApp] Community study count could not sync:', error);
+                        AppState.setSaveStatus(`Card progress saved, but the community study count could not sync. ${this.friendlyErrorMessage(error)}`, 'error');
+                    }
+                }
+            } finally {
+                this.studyRatingPending = false;
             }
         }
 
@@ -11296,6 +11358,7 @@
             }
             form.dataset.submitted = 'true';
             if (!outcomes.length) outcomes = [{ card, correct }];
+            outcomes = outcomes.map(outcome => ({ ...outcome, kind: form.dataset.questionType === 'written' || !['matching', 'multiple-choice'].includes(form.dataset.questionType) ? 'recall' : 'recognition' }));
             try {
                 await this.updateCardSchedules(outcomes);
             } catch (error) {
@@ -11589,9 +11652,7 @@
                     const answer = answers.find(item => item.card.id === saved.id);
                     if (!answer) return saved;
                     const next = { ...saved };
-                    window.FlashcardTools.recordAnswer(next, answer.correct);
-                    const state = window.SM2Engine?.normalize(next).state;
-                    if (window.SM2Engine && (!answer.correct || state === 'new' || window.SM2Engine.isDue(next))) Object.assign(next, window.SM2Engine.evaluate(next, answer.correct ? 4 : 1));
+                    window.FlashcardTools.recordAnswer(next, answer.correct, answer.kind || 'recognition');
                     return next;
                 });
                 await AppState.saveFlashcardDeck({ ...current, cards });

@@ -945,7 +945,7 @@ async function run() {
             await app.saveGameProgress(game);
         }
         saved = state.get('flashcards').find(item => item.id === deck.id);
-        assert.deepEqual(normal(app.deckMastery(saved)), { pct: 50, starred: 0, weak: 0 }, 'mastery and weak counts update before a match finishes');
+        assert.deepEqual(normal(app.deckMastery(saved)), { pct: 25, starred: 0, weak: 0 }, 'recognition practice updates partial mastery before a match finishes');
         assert.ok(refreshes > 0, 'saved answers trigger the event that rerenders deck tiles');
         assert.equal((await sandbox.NexusDB.getAll('flashcards')).find(item => item.id === deck.id).cards[0].practiceStats.recentAnswers.length, 4, 'progress survives storage reload');
         await app.saveGameSummary({ ...match, ...game });
@@ -963,7 +963,7 @@ async function run() {
         await app.saveGameProgress(game);
         saved = state.get('flashcards').find(item => item.id === deck.id);
         assert.equal(saved.cards[1].practiceStats.attempts, 1, 'retry saves the missed answer exactly once');
-        assert.equal(app.deckMastery(saved).pct, 63);
+        assert.equal(app.deckMastery(saved).pct, 31);
         await app.saveGameProgress({ ...game, testing: true, studyProgressSavedThrough: 0 });
         assert.equal(state.get('flashcards').find(item => item.id === deck.id).cards[0].practiceStats.attempts, 8, 'staff tests remain excluded');
         listeners.clear();

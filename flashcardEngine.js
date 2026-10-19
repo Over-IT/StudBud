@@ -588,7 +588,9 @@
 
         /** Anki's three counters: new (blue), learning (red), review (green; includes early reviews in includeAll mode). */
         counts() {
-            return { new: this.newCards.length, learning: this.learning.length, review: this.reviews.length + this.ahead.length };
+            const practiced = this.newCards.filter(({ card }) => Number(card.practiceStats?.attempts) > 0).length;
+            return { new: this.newCards.length - practiced, practiced, learning: this.learning.length,
+                review: this.reviews.length, early: this.ahead.length };
         }
 
         get remaining() {
@@ -1134,18 +1136,26 @@
             const useRecent = recent.length === 4;
             const accuracy = useRecent ? recent.filter(Boolean).length / recent.length : attempts ? correct / attempts : 0;
             const mastery = attempts
-                ? Math.min(1, (useRecent ? recent.length : attempts) / 4) * accuracy
+                ? Array.isArray(stats.recentEvidence) && stats.recentEvidence.length
+                    ? stats.recentEvidence.slice(-4).reduce((sum, entry) => sum + (entry?.correct === true ? entry.weight === 1 ? 1 : .5 : 0), 0) / 4
+                    : Math.min(1, (useRecent ? recent.length : attempts) / 4) * accuracy * .5
                 : Number(card.interval) >= 21 || Number(card.repetitions) >= 4 ? 1 : Number(card.repetitions) >= 1 ? .5 : 0;
             return { mastery, accuracy, attempts, weak: (useRecent || attempts > 1) && accuracy < .75 };
         },
-        recordAnswer(card, correct) {
+        recordAnswer(card, correct, kind = 'recognition') {
             const stats = card.practiceStats || {};
+            const weight = kind === 'recall' ? 1 : .5;
+            const previous = Array.isArray(stats.recentEvidence) ? stats.recentEvidence
+                : (Array.isArray(stats.recentAnswers) ? stats.recentAnswers.filter(value => typeof value === 'boolean')
+                    : Array.from({ length: Math.min(3, Number(stats.attempts) || 0) }, (_, i) => i < (Number(stats.correct) || 0)))
+                    .map(value => ({ correct: value, weight: .5 }));
             card.practiceStats = {
                 attempts: (Number(stats.attempts) || 0) + 1,
                 correct: (Number(stats.correct) || 0) + (correct ? 1 : 0),
                 missStreak: correct ? 0 : (Number(stats.missStreak) || 0) + 1,
                 lastCorrect: Boolean(correct), lastAnswered: new Date().toISOString(),
-                recentAnswers: [...(Array.isArray(stats.recentAnswers) ? stats.recentAnswers.filter(value => typeof value === 'boolean') : []), Boolean(correct)].slice(-4)
+                recentAnswers: [...(Array.isArray(stats.recentAnswers) ? stats.recentAnswers.filter(value => typeof value === 'boolean') : []), Boolean(correct)].slice(-4),
+                recentEvidence: [...previous, { correct: Boolean(correct), weight }].slice(-4)
             };
         },
         imageSource(value) {

@@ -538,6 +538,18 @@
             return data || [];
         }
 
+        async removedDecks() {
+            const client = await this.publicClient();
+            const { data, error } = await client.rpc('studbud_removed_deck_ids');
+            if (error) {
+                const failure = new Error(`Could not check removed flashcard sets: ${error.message}`);
+                failure.code = error.code;
+                throw failure;
+            }
+            if (!Array.isArray(data)) throw new Error('The removed flashcard set list was invalid.');
+            return data;
+        }
+
         async unpublishDeck(deckId) {
             const { error } = await this.getClient().from('studbud_community_decks')
                 .delete()

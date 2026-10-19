@@ -18,7 +18,7 @@ const sandbox = {
         }
     },
     window: {
-        navigator: { onLine: false }, clearTimeout() {}, setTimeout() { timers++; return 1; },
+        navigator: { onLine: false }, clearTimeout() {}, setTimeout() { timers++; return 1; }, setInterval() {},
         addEventListener: (name, callback) => events.set(name, callback),
         NexusApp: {
             init: async () => initializations++,

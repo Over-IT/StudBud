@@ -106,6 +106,46 @@
             }
             if (equal(local, base)) return remote;
             if (equal(remote, base) || equal(local, remote)) return local;
+            if (/^account\.flashcards\.[^.]+\.cards\.[^.]+$/.test(field) && local && remote) {
+                const fields = ['state', 'step', 'easeFactor', 'interval', 'repetitions', 'reps', 'lapses', 'leech',
+                    'lastReviewed', 'nextReviewDate', 'schedulerVersion', 'stability', 'difficulty'];
+                const changed = card => fields.some(key => !equal(card?.[key], base?.[key]));
+                if (changed(local) && changed(remote)) {
+                    // A schedule is one result, not independently mergeable state/interval/due fields.
+                    const latest = (Date.parse(local.lastReviewed) || 0) >= (Date.parse(remote.lastReviewed) || 0) ? local : remote;
+                    const withoutSchedule = card => card && Object.fromEntries(Object.entries(card).filter(([key]) => !fields.includes(key)));
+                    const merged = this.mergeData(withoutSchedule(base), withoutSchedule(local), withoutSchedule(remote), field);
+                    for (const key of fields) if (latest[key] !== undefined) merged[key] = latest[key];
+                    return merged;
+                }
+            }
+            if (/^account\.flashcards\..+\.practiceStats$/.test(field) && local && remote) {
+                const latest = (Date.parse(local.lastAnswered) || 0) >= (Date.parse(remote.lastAnswered) || 0) ? local : remote;
+                const earlier = latest === local ? remote : local;
+                const delta = stats => Math.max(0, Number(stats.attempts || 0) - Number(base?.attempts || 0));
+                const additions = (stats, key) => delta(stats) ? (stats[key] || []).slice(-delta(stats)) : [];
+                const recentEvidence = [...(base?.recentEvidence || []), ...additions(earlier, 'recentEvidence'),
+                    ...additions(latest, 'recentEvidence')].slice(-4);
+                const recentAnswers = [...(base?.recentAnswers || []), ...additions(earlier, 'recentAnswers'),
+                    ...additions(latest, 'recentAnswers')].slice(-4);
+                return { ...latest,
+                    attempts: Number(base?.attempts || 0) + delta(local) + delta(remote),
+                    correct: Math.max(0, Number(local.correct || 0) + Number(remote.correct || 0) - Number(base?.correct || 0)),
+                    ...(recentEvidence.length ? { recentEvidence } : {}),
+                    ...(recentAnswers.length ? { recentAnswers } : {}) };
+            }
+            if (/^account\.flashcards\.[^.]+\.studiedCount$/.test(field)) {
+                return Math.max(0, Number(local || 0) + Number(remote || 0) - Number(base || 0));
+            }
+            if (/^account\.flashcards\.[^.]+\.studiedAt$/.test(field) && local && remote) {
+                return local < remote ? local : remote;
+            }
+            if (/^account\.flashcards\.[^.]+\.ankiToday$/.test(field) && local && remote) {
+                if (local.day !== remote.day) return local.day > remote.day ? local : remote;
+                const sameDay = base?.day === local.day ? base : {};
+                return { day: local.day, newDone: Math.max(0, local.newDone + remote.newDone - (sameDay.newDone || 0)),
+                    reviewsDone: Math.max(0, local.reviewsDone + remote.reviewsDone - (sameDay.reviewsDone || 0)) };
+            }
             if (Array.isArray(local) && Array.isArray(remote)) {
                 const key = [...local, ...remote].every(item => item && typeof item === 'object' && (item.id || item.code))
                     ? item => item.id || item.code : null;
@@ -863,6 +903,16 @@
                     this.syncNow().catch(error => this.setCloudStatus(this.friendlyAuthError(error, 'Could not sync before leaving.'), true));
                 } else if (this.accountReady) this.queueSync();
             });
+            window.setInterval(() => {
+                if (document.visibilityState === 'hidden' || window.navigator?.onLine === false) return;
+                if (this.accountReady) this.queueSync();
+                else if (this.appStarted && this.isGuest()) {
+                    window.NexusApp.reconcileRemovedDecks?.().catch(error => {
+                        console.error('[StudBudCloud] Removed sets could not be checked:', error);
+                        this.setCloudStatus(this.friendlyAuthError(error, 'Could not check removed flashcard sets.'), true);
+                    });
+                }
+            }, 60000);
         }
 
         queueSync() {
@@ -893,6 +943,7 @@
             let completedRevision = -1;
             this.syncPromise = (async () => {
                 do {
+                    await window.NexusApp.reconcileRemovedDecks?.();
                     completedRevision = this.syncRevision;
                     const backup = JSON.parse(await window.NexusApp.AppState.exportAppState());
                     if (!this.accountReady || this.user?.id !== userId || this.accountVersion !== version) return;
@@ -931,7 +982,11 @@
                     if (!saved && completedRevision === this.syncRevision) throw new Error('Your account changed on another device repeatedly. Please try syncing again.');
                     if (!this.accountReady || this.user?.id !== userId || this.accountVersion !== version) return;
                 } while (completedRevision !== this.syncRevision);
-                this.setCloudStatus(`Synced to your account · ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`);
+                if (window.NexusApp.removedDeckCheckUnavailable) {
+                    this.setCloudStatus('Study data synced. Automatic set removals need the latest supabase-setup.sql on the server.', true);
+                } else {
+                    this.setCloudStatus(`Synced to your account · ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`);
+                }
             })();
             try {
                 await this.syncPromise;

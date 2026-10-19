@@ -70,7 +70,7 @@ assert.equal(weak.practiceStats.missStreak, 0);
 {
     const practiced = {};
     for (const expected of [.25, .5, .75, 1]) {
-        tools.recordAnswer(practiced, true);
+        tools.recordAnswer(practiced, true, 'recall');
         assert.equal(tools.cardProgress(practiced).mastery, expected, 'every correct practice answer builds mastery');
     }
     tools.recordAnswer(practiced, false);
@@ -80,13 +80,19 @@ assert.equal(weak.practiceStats.missStreak, 0);
     assert.equal(tools.cardProgress(practiced).weak, true);
     const oldWeak = { practiceStats: { attempts: 100, correct: 2, missStreak: 20 } };
     assert.equal(tools.cardProgress(oldWeak).weak, true);
-    for (let i = 0; i < 4; i++) tools.recordAnswer(oldWeak, true);
+    for (let i = 0; i < 4; i++) tools.recordAnswer(oldWeak, true, 'recall');
     assert.equal(tools.cardProgress(oldWeak).mastery, 1, 'old misses do not permanently lock a recovered card at low mastery');
     assert.equal(tools.cardProgress(oldWeak).weak, false);
     assert.equal(oldWeak.practiceStats.attempts, 104, 'lifetime attempt counts remain intact');
     assert.equal(oldWeak.practiceStats.recentAnswers.length, 4, 'recent-answer storage is bounded');
     assert.ok(tools.weight(oldWeak) < tools.weight(weak), 'adaptive drills recognize recovered cards');
-    assert.equal(tools.cardProgress({ practiceStats: { attempts: 2, correct: 2 } }).mastery, .5, 'existing saved Cram/game answers count without restudying');
+    assert.equal(tools.cardProgress({ practiceStats: { attempts: 2, correct: 2 } }).mastery, .25, 'unknown legacy practice counts conservatively as recognition');
+    const recognition = {};
+    for (let i = 0; i < 8; i++) tools.recordAnswer(recognition, true, 'recognition');
+    assert.equal(tools.cardProgress(recognition).mastery, .5, 'recognition alone cannot imply full recall');
+    for (let i = 0; i < 4; i++) tools.recordAnswer(recognition, true, 'recall');
+    assert.equal(tools.cardProgress(recognition).mastery, 1, 'recent successful recall replaces recognition evidence');
+    assert.equal(recognition.practiceStats.recentEvidence.length, 4);
     assert.equal(tools.cardProgress({ interval: 21 }).mastery, 1, 'legacy scheduled mastery remains available without answer stats');
     assert.equal(tools.cardProgress({ repetitions: 1 }).mastery, .5);
     assert.equal(tools.cardProgress({}).mastery, 0);
