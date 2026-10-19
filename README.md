@@ -481,6 +481,8 @@ If hosting a room or opening the shop says the feature is not enabled on the ser
 
 The **Flashcard Importer** accepts tab-separated or other delimiter-separated term/definition rows without depending on a specific flashcard provider.
 
+To view a set's **weak cards**, click its **weak** count or choose **View weak cards** from its three-dot menu. This opens the set editor filtered to cards below 75% accuracy after at least two attempts, using the last four answers once available. The list shows terms, answers and accuracy; switch the filter to **All cards** to see the full set. Viewing cards does not change study progress.
+
 Supabase must be configured before account creation or sign-in is available. The GitHub Pages site is static, so this repository does not contain server secrets or a service-role key.
 
 ## Deployment

@@ -3099,6 +3099,7 @@
                             <summary class="deck-menu-btn" title="More options" aria-label="More options for ${this.escapeHTML(deck.title)}"><i class="fas fa-ellipsis-vertical"></i></summary>
                             <div class="deck-menu-panel" role="menu">
                                 <button class="deck-menu-item" type="button" role="menuitem" data-action="add-card" data-id="${id}"><i class="fas fa-plus"></i> Add a card</button>
+                                <button class="deck-menu-item" type="button" role="menuitem" data-action="view-weak-cards" data-id="${id}"><i class="fas fa-triangle-exclamation"></i> View weak cards (${mastery.weak})</button>
                                 ${mastery.starred ? `<button class="deck-menu-item" type="button" role="menuitem" data-action="cram-starred" data-id="${id}"><i class="fas fa-star"></i> Study starred (${mastery.starred})</button>` : ''}
                                 ${share}
                                 ${linkEditor}
@@ -3110,7 +3111,7 @@
                         <div class="deck-stats">
                             <span><i class="fas fa-clone"></i> ${cardCount} cards</span>
                             ${mastery.starred ? `<span class="is-star" title="Starred cards"><i class="fas fa-star"></i> ${mastery.starred}</span>` : ''}
-                            ${mastery.weak ? `<span class="is-weak" title="Cards under 75% accuracy · Uses the last four answers once available"><i class="fas fa-triangle-exclamation"></i> ${mastery.weak} weak</span>` : ''}
+                            ${mastery.weak ? `<button type="button" class="is-weak" data-action="view-weak-cards" data-id="${id}" aria-label="View ${mastery.weak} weak cards in ${title}" title="View cards under 75% accuracy · Uses the last four answers once available"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> ${mastery.weak} weak</button>` : ''}
                         </div>
                         ${tags}
                     </div>
@@ -3530,7 +3531,7 @@
             }
         }
 
-        openDeckEditor(deckId = '') {
+        openDeckEditor(deckId = '', initialFilter = 'all') {
             const deck = deckId ? (AppState.get('flashcards') || []).find(item => item.id === deckId)
                 : { id: `deck_${window.crypto.randomUUID()}`, title: '', cards: [] };
             if (!deck) throw new Error('The selected deck no longer exists.');
@@ -3544,7 +3545,7 @@
             document.getElementById('deck-editor-assessment').innerHTML = this.deckAssessmentOptions(link.courseCode, link.assessment?.id || '');
             document.getElementById('deck-editor-search').value = '';
             const filter = document.getElementById('deck-editor-filter');
-            if (filter) filter.value = 'all';
+            if (filter) filter.value = initialFilter;
             const bulk = document.getElementById('deck-editor-bulk');
             if (bulk) bulk.value = '';
             this.renderDeckEditorCards();
@@ -3577,7 +3578,7 @@
                         <button type="button" class="secondary-btn" data-action="editor-pause-card" data-id="${this.escapeHTML(card.id)}">${card.suspended ? 'Resume' : 'Pause'} scheduled study</button>
                         <button type="button" class="danger-btn" data-action="editor-delete-card" data-id="${this.escapeHTML(card.id)}">Delete card</button>
                     </div>
-                </article>`).join('') || `<p class="empty-state">${query || filter !== 'all' ? 'No cards match your search or filter.' : 'No cards yet. Add your first card.'}</p>`;
+                </article>`).join('') || `<p class="empty-state">${filter === 'weak' && !query ? 'No weak cards in this set. Cards appear here after at least two attempts with accuracy below 75%, using the last four answers once available.' : query || filter !== 'all' ? 'No cards match your search or filter.' : 'No cards yet. Add your first card.'}</p>`;
         }
 
         addBulkEditorCards() {
@@ -10663,6 +10664,7 @@
                 this.openCardForm(id);
             }
             if (action === 'edit-deck') this.openDeckEditor(id);
+            if (action === 'view-weak-cards') this.openDeckEditor(id, 'weak');
             if (action === 'editor-add-card') this.openCardForm(this.deckEditorDraft?.id, '', true);
             if (action === 'editor-edit-card') this.openCardForm(this.deckEditorDraft?.id, id, true);
             if (action === 'editor-bulk-add') this.addBulkEditorCards();

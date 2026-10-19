@@ -4601,10 +4601,13 @@ body.studying { overflow: hidden; }
 .deck-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .deck-meta .deck-tags { display: contents; }
 .deck-stats { display: contents; }
-.deck-stats span { display: inline-flex; gap: 5px; align-items: center; padding: 3px 9px; border-radius: 999px; background: var(--bg-glass); border: 1px solid var(--border-glass); font-size: .78rem; font-weight: 800; color: var(--text-secondary); }
+.deck-stats span, .deck-stats button { display: inline-flex; gap: 5px; align-items: center; padding: 3px 9px; border-radius: 999px; background: var(--bg-glass); border: 1px solid var(--border-glass); font-size: .78rem; font-weight: 800; color: var(--text-secondary); }
 .deck-stats .is-due { color: var(--accent-primary); border-color: color-mix(in srgb, var(--accent-primary) 50%, transparent); }
 .deck-stats .is-star { color: #f59e0b; }
 .deck-stats .is-weak { color: #f87171; }
+.deck-stats button.is-weak { font-family: inherit; cursor: pointer; }
+.deck-stats button.is-weak:hover { background: var(--bg-glass-hover); }
+.deck-stats button.is-weak:focus-visible { outline: 3px solid var(--accent-primary); outline-offset: 2px; }
 .deck-main-actions { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 46px; gap: 8px; margin-top: auto; }
 .deck-main-actions > button { min-width: 0; margin: 0; padding-inline: 10px; justify-content: center; white-space: nowrap; }
 .deck-main-actions .deck-edit-btn { padding-inline: 0; }

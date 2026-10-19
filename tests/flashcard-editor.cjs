@@ -410,6 +410,54 @@ async function privateAnswerTools() {
     assert.equal(app.deckEditorDraft.cards[0].back, 'Newer edit');
 }
 
-run().then(linksAndSharing).then(privateAnswerTools).then(() => {
+async function weakCardViewing() {
+    state.flashcards = [{ id: 'weak-set', title: 'Accuracy set', cards: [
+        { id: 'weak', front: '<Weak term>', back: 'Weak answer', practiceStats: { attempts: 4, correct: 2 } },
+        { id: 'paused-weak', front: 'Paused weak term', back: 'Paused answer', suspended: true, practiceStats: { attempts: 2, correct: 0 } },
+        { id: 'boundary', front: 'Boundary term', back: 'Boundary answer', practiceStats: { attempts: 4, correct: 3 } },
+        { id: 'new', front: 'New term', back: 'New answer' },
+        { id: 'one', front: 'Single attempt', back: 'Single answer', practiceStats: { attempts: 1, correct: 0 } },
+        { id: 'recovered', front: 'Recovered term', back: 'Recovered answer', practiceStats: {
+            attempts: 100, correct: 4, recentAnswers: [true, true, true, true] } },
+        { id: 'recent-weak', front: 'Recent weak term', back: 'Recent answer', practiceStats: {
+            attempts: 100, correct: 98, recentAnswers: [true, false, true, false] } }
+    ] }];
+    const snapshot = clone(deck());
+    value('deck-editor-search', 'stale search');
+    await app.handleDataAction('view-weak-cards', 'weak-set');
+    assert.equal(app.modal, 'deck-editor-modal');
+    assert.equal(elements.get('deck-editor-filter').value, 'weak');
+    assert.equal(elements.get('deck-editor-search').value, '');
+    assert.equal(elements.get('deck-editor-count').textContent, '3 of 7 cards');
+    const markup = elements.get('deck-editor-cards').innerHTML;
+    assert.match(markup, /&lt;Weak term&gt;/);
+    assert.match(markup, /Weak answer/);
+    assert.match(markup, /50% accuracy/);
+    assert.match(markup, /Paused weak term/);
+    assert.match(markup, /Recent weak term/);
+    assert.doesNotMatch(markup, /Boundary term|New term|Single attempt|Recovered term/);
+    value('deck-editor-search', 'paused');
+    app.renderDeckEditorCards();
+    assert.equal(elements.get('deck-editor-count').textContent, '1 of 7 cards');
+    value('deck-editor-search', 'unmatched');
+    app.renderDeckEditorCards();
+    assert.match(elements.get('deck-editor-cards').innerHTML, /No cards match/);
+    value('deck-editor-search', '');
+    value('deck-editor-filter', 'all');
+    app.renderDeckEditorCards();
+    assert.equal(elements.get('deck-editor-count').textContent, '7 of 7 cards');
+    app.closeModal();
+    assert.deepEqual(deck(), snapshot, 'viewing and filtering never writes or changes saved progress');
+    app.openDeckEditor('weak-set');
+    assert.equal(elements.get('deck-editor-filter').value, 'all', 'normal editing still opens all cards');
+    state.flashcards = [{ id: 'empty-set', title: 'Empty set', cards: [] }];
+    await app.handleDataAction('view-weak-cards', 'empty-set');
+    assert.match(elements.get('deck-editor-cards').innerHTML, /No weak cards in this set/);
+    assert.match(elements.get('deck-editor-cards').innerHTML, /at least two attempts/);
+    assert.equal(elements.get('deck-editor-count').textContent, '0 of 0 cards');
+    await assert.rejects(app.handleDataAction('view-weak-cards', 'missing'), /no longer exists/);
+}
+
+run().then(linksAndSharing).then(privateAnswerTools).then(weakCardViewing).then(() => {
     console.log('Flashcard drafts, editing/deletion, progress preservation, write failures, class/test switching and shared-set identity checks passed.');
 }).catch(error => { console.error(error); process.exitCode = 1; });
