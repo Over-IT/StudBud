@@ -404,6 +404,21 @@
             EventBus.emit('flashcards:updated', this.state.flashcards);
         }
 
+        /** Applies small field patches (pin/order) to several decks with one save notice and one re-render. */
+        async patchFlashcardDecks(patches) {
+            const changed = [];
+            this.state.flashcards = this.state.flashcards.map(deck => {
+                if (!patches.has(deck.id)) return deck;
+                const next = { ...deck, ...patches.get(deck.id) };
+                changed.push(next);
+                return next;
+            });
+            if (!changed.length) return;
+            await Promise.all(changed.map(deck => NexusDB.put('flashcards', deck)));
+            this.setSaveStatus('Deck order saved on this device.');
+            EventBus.emit('flashcards:updated', this.state.flashcards);
+        }
+
         async deleteFlashcardDeck(id) {
             await NexusDB.delete('flashcards', id);
             this.setSaveStatus('Flashcard deck deleted from this device.');
@@ -1312,6 +1327,7 @@
             });
             this.startPresence();
             this.bindDeckMenus();
+            this.bindDeckReorderDrag();
             window.addEventListener('online', () => {
                 this.syncPendingStudyTime().catch(error => {
                     console.error('[NexusApp] Pending study time could not be synced:', error);
@@ -1340,6 +1356,11 @@
                 }
                 if (event.target.matches('#assignment-search')) this.renderAssignments();
                 if (event.target.matches('#my-deck-search')) this.renderDecks();
+                if (event.target.matches('#my-deck-sort')) {
+                    localStorage.setItem('studbud-deck-sort', event.target.value);
+                    if (event.target.value !== 'custom') this.deckReorderMode = false;
+                    this.renderDecks();
+                }
                 if (event.target.matches('#deck-editor-search')) this.renderDeckEditorCards();
                 if (event.target.matches('#deck-editor-filter')) this.renderDeckEditorCards();
                 if (event.target.matches('.shop-search-input')) {
@@ -2927,15 +2948,94 @@
             return (deck.cards || []).filter(card => card && !card.suspended).length;
         }
 
+        deckSortMode() {
+            const saved = localStorage.getItem('studbud-deck-sort');
+            return ['custom', 'recent', 'test', 'name', 'weakest'].includes(saved) ? saved : 'custom';
+        }
+
+        deckUpcomingTestAt(deck) {
+            const assessment = this.deckLinkInfo(deck).assessment;
+            if (!assessment?.dueDate || assessment.status === 'completed') return Infinity;
+            const at = Date.parse(`${String(assessment.dueDate).slice(0, 10)}T00:00:00`);
+            const today = new Date(); today.setHours(0, 0, 0, 0);
+            return Number.isFinite(at) && at >= today.getTime() ? at : Infinity;
+        }
+
+        deckLastActivity(deck) {
+            let latest = Date.parse(deck.studiedAt) || 0;
+            for (const card of deck.cards || []) {
+                latest = Math.max(latest, Date.parse(card?.lastReviewed) || 0, Date.parse(card?.practiceStats?.lastAnswered) || 0);
+            }
+            return latest;
+        }
+
+        /** Pinned decks first, then the chosen sort; ties (and "custom") fall back to the saved drag order, then creation order. */
+        orderedDecks(decks = AppState.get('flashcards') || [], mode = this.deckSortMode()) {
+            const position = new Map(decks.map((deck, index) => [deck.id, index]));
+            const custom = deck => Number.isFinite(deck.sortIndex) ? deck.sortIndex : 1e6 + position.get(deck.id);
+            const keys = new Map(decks.map(deck => [deck.id,
+                mode === 'recent' ? -this.deckLastActivity(deck)
+                    : mode === 'test' ? this.deckUpcomingTestAt(deck)
+                    : mode === 'weakest' ? (deck.cards || []).length ? this.deckMastery(deck).pct : Infinity
+                    : 0]));
+            const diff = (a, b) => {
+                const x = keys.get(a.id), y = keys.get(b.id);
+                return x === y ? 0 : x < y ? -1 : 1;
+            };
+            return [...decks].sort((a, b) => (Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)))
+                || (mode === 'name' ? String(a.title || '').localeCompare(String(b.title || ''), undefined, { numeric: true, sensitivity: 'base' }) : diff(a, b))
+                || custom(a) - custom(b));
+        }
+
+        /** Moves a deck before/after another in the saved custom order; crossing into the pinned group pins it (and vice versa). */
+        async moveDeck(id, targetId, place = 'before') {
+            if (id === targetId) return;
+            const ordered = this.orderedDecks(AppState.get('flashcards') || [], 'custom');
+            const moving = ordered.find(deck => deck.id === id), target = ordered.find(deck => deck.id === targetId);
+            if (!moving || !target) return;
+            const rest = ordered.filter(deck => deck !== moving);
+            rest.splice(rest.indexOf(target) + (place === 'after' ? 1 : 0), 0, moving);
+            const patches = new Map();
+            rest.forEach((deck, sortIndex) => {
+                const patch = {};
+                if (deck.sortIndex !== sortIndex) patch.sortIndex = sortIndex;
+                if (deck === moving && Boolean(deck.pinned) !== Boolean(target.pinned)) patch.pinned = Boolean(target.pinned);
+                if (Object.keys(patch).length) patches.set(deck.id, patch);
+            });
+            await AppState.patchFlashcardDecks(patches);
+        }
+
+        visibleDecks() {
+            const search = (document.getElementById('my-deck-search')?.value || '').trim().toLowerCase();
+            return this.orderedDecks().filter(deck => !search || `${deck.title} ${this.deckLinkInfo(deck).course?.title || ''}`.toLowerCase().includes(search));
+        }
+
+        async stepDeck(id, direction) {
+            const visible = this.visibleDecks();
+            const index = visible.findIndex(deck => deck.id === id);
+            const neighbor = visible[index + direction];
+            if (index < 0 || !neighbor || Boolean(neighbor.pinned) !== Boolean(visible[index].pinned)) return;
+            await this.moveDeck(id, neighbor.id, direction < 0 ? 'before' : 'after');
+            document.querySelector(`#deck-grid [data-action="deck-move-${direction < 0 ? 'up' : 'down'}"][data-id="${CSS.escape(id)}"]`)?.focus();
+        }
+
         renderDecks() {
             const grid = document.getElementById('deck-grid');
             if (!grid) return;
-            const allDecks = AppState.get('flashcards') || [];
             const search = (document.getElementById('my-deck-search')?.value || '').trim().toLowerCase();
-            const decks = allDecks.filter(deck => !search || `${deck.title} ${this.deckLinkInfo(deck).course?.title || ''}`.toLowerCase().includes(search));
+            const decks = this.visibleDecks();
+            const sortSelect = document.getElementById('my-deck-sort');
+            if (sortSelect) sortSelect.value = this.deckSortMode();
+            const reordering = Boolean(this.deckReorderMode);
+            grid.classList.toggle('is-reordering', reordering);
+            const reorderBtn = document.getElementById('my-deck-reorder');
+            if (reorderBtn) {
+                reorderBtn.setAttribute('aria-pressed', String(reordering));
+                reorderBtn.innerHTML = reordering ? '<i class="fas fa-check"></i> Done' : '<i class="fas fa-arrows-up-down"></i> Reorder';
+            }
             this.refreshCommunityDeckActions();
             const myId = window.StudBudCloud?.user?.id;
-            grid.innerHTML = decks.length ? decks.map(deck => {
+            grid.innerHTML = decks.length ? decks.map((deck, index) => {
                 const studyCount = this.deckStudyCount(deck);
                 const id = this.escapeHTML(deck.id);
                 const cardCount = (deck.cards || []).length;
@@ -2963,14 +3063,25 @@
                             <label>Test / quiz<select data-deck-link="assessment" data-id="${this.escapeHTML(deck.id)}">${this.deckAssessmentOptions(link.courseCode, deck.assessmentId)}</select></label>
                         </div>
                     </details>`;
+                const pinned = Boolean(deck.pinned);
+                const title = this.escapeHTML(deck.title);
+                const sameGroup = other => other && Boolean(other.pinned) === pinned;
+                const pin = `<button type="button" class="deck-pin-btn${pinned ? ' is-pinned' : ''}" data-action="toggle-deck-pin" data-id="${id}" aria-pressed="${pinned}" title="${pinned ? 'Unpin' : 'Pin to the top'}" aria-label="${pinned ? 'Unpin' : 'Pin'} ${title}"><i class="fas fa-thumbtack"></i></button>`;
+                const reorder = reordering ? `<div class="deck-reorder-controls">
+                        <span class="deck-drag-handle" aria-hidden="true"><i class="fas fa-grip-vertical"></i></span>
+                        <button type="button" class="secondary-btn" data-action="deck-move-up" data-id="${id}" ${sameGroup(decks[index - 1]) ? '' : 'disabled'} aria-label="Move ${title} up"><i class="fas fa-arrow-up"></i></button>
+                        <button type="button" class="secondary-btn" data-action="deck-move-down" data-id="${id}" ${sameGroup(decks[index + 1]) ? '' : 'disabled'} aria-label="Move ${title} down"><i class="fas fa-arrow-down"></i></button>
+                    </div>` : '';
                 return `
-                <article class="glass-card deck-card">
+                <article class="glass-card deck-card${pinned ? ' is-pinned' : ''}" data-deck-id="${id}"${reordering ? ' draggable="true"' : ''}>
+                    ${reorder}
                     <div class="deck-card-top">
                         <div class="deck-ring" style="--p:${mastery.pct}" title="${mastery.pct}% recall estimate · Written answers and Study/Cram self-ratings count fully; multiple-choice and matching count half · Separate from scheduled reviews"><span>${mastery.pct}%</span></div>
                         <div class="deck-card-title">
-                            <h3>${this.escapeHTML(deck.title)}</h3>
+                            <h3>${title}</h3>
                             ${author}
                         </div>
+                        ${pin}
                         <details class="deck-menu">
                             <summary class="deck-menu-btn" title="More options" aria-label="More options for ${this.escapeHTML(deck.title)}"><i class="fas fa-ellipsis-vertical"></i></summary>
                             <div class="deck-menu-panel" role="menu">
@@ -3013,6 +3124,47 @@
         }
 
         // Deck "more options" menus: only one open at a time; close on outside click, Escape or after choosing an item.
+        /** Desktop drag-to-reorder while Reorder is on; touch devices use the up/down buttons. */
+        bindDeckReorderDrag() {
+            const grid = document.getElementById('deck-grid');
+            if (!grid) return;
+            let dragId = null;
+            const clear = () => grid.querySelectorAll('.drop-before, .drop-after, .is-dragging').forEach(el => el.classList.remove('drop-before', 'drop-after', 'is-dragging'));
+            const placeFor = (card, event) => {
+                const box = card.getBoundingClientRect();
+                const wide = getComputedStyle(grid).gridTemplateColumns.split(' ').length > 1;
+                return (wide ? event.clientX - box.left < box.width / 2 : event.clientY - box.top < box.height / 2) ? 'before' : 'after';
+            };
+            grid.addEventListener('dragstart', event => {
+                const card = event.target.closest?.('.deck-card[draggable="true"]');
+                if (!card || !grid.classList.contains('is-reordering')) return;
+                dragId = card.dataset.deckId;
+                card.classList.add('is-dragging');
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', dragId);
+            });
+            grid.addEventListener('dragover', event => {
+                const card = event.target.closest?.('.deck-card');
+                if (!dragId || !card) return;
+                event.preventDefault();
+                const place = placeFor(card, event);
+                if (card.classList.contains(`drop-${place}`)) return;
+                grid.querySelectorAll('.drop-before, .drop-after').forEach(el => el.classList.remove('drop-before', 'drop-after'));
+                if (card.dataset.deckId !== dragId) card.classList.add(`drop-${place}`);
+            });
+            grid.addEventListener('drop', event => {
+                const card = event.target.closest?.('.deck-card');
+                const id = dragId;
+                dragId = null;
+                clear();
+                if (!id || !card || card.dataset.deckId === id) return;
+                event.preventDefault();
+                this.moveDeck(id, card.dataset.deckId, placeFor(card, event))
+                    .catch(error => AppState.setSaveStatus(`Deck order could not be saved. ${this.friendlyErrorMessage(error)}`, 'error'));
+            });
+            grid.addEventListener('dragend', () => { dragId = null; clear(); });
+        }
+
         bindDeckMenus() {
             if (this.deckMenusBound || typeof document === 'undefined') return;
             this.deckMenusBound = true;
@@ -3429,7 +3581,7 @@
             const previous = select.value;
             const extraSelects = ['practice-multiplayer-deck', 'solo-game-deck'].map(id => document.getElementById(id)).filter(Boolean);
             const previousExtra = extraSelects.map(extra => extra.value);
-            const decks = (AppState.get('flashcards') || []).map(deck => ({
+            const decks = this.orderedDecks(AppState.get('flashcards') || [], 'custom').map(deck => ({
                 ...deck,
                 completeCards: (deck.cards || []).filter(card =>
                     String(card.front || '').trim() && String(card.back || '').trim()
@@ -10362,6 +10514,17 @@
                 AppState.updateCourse(course.code, { targetPct, targetGrade: this.gradeForPercentage(targetPct) });
                 this.renderClassDetail();
             }
+            if (action === 'toggle-deck-pin') {
+                const deck = (AppState.get('flashcards') || []).find(item => item.id === id);
+                if (deck) await AppState.patchFlashcardDecks(new Map([[id, { pinned: !deck.pinned }]]));
+                document.querySelector(`#deck-grid [data-action="toggle-deck-pin"][data-id="${CSS.escape(id)}"]`)?.focus();
+            }
+            if (action === 'toggle-deck-reorder') {
+                this.deckReorderMode = !this.deckReorderMode;
+                if (this.deckReorderMode) localStorage.setItem('studbud-deck-sort', 'custom');
+                this.renderDecks();
+            }
+            if (action === 'deck-move-up' || action === 'deck-move-down') await this.stepDeck(id, action === 'deck-move-up' ? -1 : 1);
             if (action === 'delete-deck' && await window.StudBudDialogs.confirm('Delete this flashcard deck and its cards?')) {
                 const deck = (AppState.get('flashcards') || []).find(item => item.id === id);
                 if (deck?.communityPublished) await window.StudBudCommunityGames.unpublishDeck(id);

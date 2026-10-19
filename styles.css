@@ -4569,6 +4569,29 @@ body.studying { overflow: hidden; }
 .deck-card:has(.deck-menu[open]) { z-index: 30; content-visibility: visible; contain: none; }
 .deck-card i { font-size: inherit; color: inherit; margin: 0; }
 .deck-card-top { display: flex; gap: 12px; align-items: flex-start; }
+.deck-pin-btn { flex: 0 0 auto; width: 40px; height: 40px; display: grid; place-items: center; padding: 0; border-radius: 12px; border: 2px solid transparent; background: transparent; color: var(--text-secondary); cursor: pointer; box-shadow: none; opacity: .55; transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast); }
+.deck-pin-btn i { transform: rotate(35deg); transition: transform var(--transition-fast); }
+.deck-pin-btn:hover, .deck-pin-btn:focus-visible { opacity: 1; background: var(--bg-glass-hover); border-color: var(--border-glass); }
+.deck-pin-btn.is-pinned { opacity: 1; color: var(--accent-primary); }
+.deck-pin-btn.is-pinned i { transform: none; }
+.deck-card.is-pinned { border-color: color-mix(in srgb, var(--accent-primary) 45%, var(--border-glass)); }
+.my-deck-tools { display: flex; gap: 8px; align-items: center; flex: 0 1 auto; }
+.my-deck-tools select { min-height: 44px; width: auto; }
+.my-deck-tools .secondary-btn { min-height: 44px; white-space: nowrap; }
+.my-deck-tools .secondary-btn[aria-pressed="true"] { border-color: var(--accent-primary); color: var(--accent-primary); }
+.deck-reorder-controls { display: flex; align-items: center; gap: 8px; padding-bottom: 10px; border-bottom: 1px dashed var(--border-glass); }
+.deck-reorder-controls .secondary-btn { min-width: 44px; min-height: 40px; padding: 6px 10px; }
+.deck-drag-handle { margin-right: auto; color: var(--text-secondary); cursor: grab; padding: 6px; }
+.deck-grid.is-reordering .deck-card[draggable="true"] { cursor: grab; }
+.deck-card.is-dragging { opacity: .45; }
+.deck-card.drop-before { box-shadow: -4px 0 0 var(--accent-primary), 0 -4px 0 var(--accent-primary); }
+.deck-card.drop-after { box-shadow: 4px 0 0 var(--accent-primary), 0 4px 0 var(--accent-primary); }
+@media (max-width: 600px) {
+    .my-deck-tools { flex: 1 1 100%; }
+    .my-deck-tools select { flex: 1 1 auto; min-width: 0; }
+    .deck-drag-handle { display: none; }
+    .deck-reorder-controls { justify-content: flex-end; }
+}
 .deck-card-title { min-width: 0; flex: 1 1 auto; display: grid; gap: 4px; align-self: center; }
 .deck-card-title h3 { margin: 0; font-size: 1.08rem; line-height: 1.25; overflow-wrap: anywhere; }
 .deck-card-title .deck-author { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; line-height: 1.3; }
