@@ -484,6 +484,8 @@
      *   4. learning cards due within the learn-ahead window, or (learnAheadAll, default) the next learning card early
      * Answered learning cards are re-queued automatically when their next step falls today.
      */
+    const PRIORITY_JITTER = .04;
+
     class AnkiStudySession {
         constructor(cards, options = {}) {
             this.cfg = { ...SM2Engine.resolveOptions(options), ...pickLimits(options) };
@@ -510,10 +512,10 @@
                 const c = SM2Engine.normalize(card, this.cfg);
                 const parsed = Date.parse(c.nextReviewDate);
                 const dueAt = Number.isFinite(parsed) ? parsed : now;
-                if (c.state === 'new') this.newCards.push({ card, dueAt: now, position });
+                if (c.state === 'new') this.newCards.push({ card, dueAt: now, position, jitter: Math.random() * PRIORITY_JITTER });
                 else if (c.state === 'review') {
-                    if (SM2Engine.dayNumber(dueAt, this.cfg) <= this.today) this.reviews.push({ card, dueAt, position, tiebreak: Math.random() });
-                    else if (this.includeAll) this.ahead.push({ card, dueAt, position, weight: AnkiStudySession.aheadWeight(c, now) });
+                    if (SM2Engine.dayNumber(dueAt, this.cfg) <= this.today) this.reviews.push({ card, dueAt, position, tiebreak: Math.random(), jitter: Math.random() * PRIORITY_JITTER });
+                    else if (this.includeAll) this.ahead.push({ card, dueAt, position, weight: AnkiStudySession.aheadWeight(c, now), jitter: Math.random() * PRIORITY_JITTER });
                 } else if (dueAt < endOfToday || this.includeAll) this.learning.push({ card, dueAt, position });
             });
 
@@ -562,6 +564,11 @@
             return .55 * (1 - recall) + .3 * (1 - progress.mastery) + .1 * missPressure + .05 * lapsePressure;
         }
 
+        // A small per-session nudge so equally-ranked cards (e.g. a fresh deck) don't always start from card #1.
+        static entryScore(entry, now) {
+            return AnkiStudySession.priority(entry.card, now) + (entry.jitter || 0);
+        }
+
         /** The card to show now, or null when the session is finished (or only waiting on learning cards when learnAheadAll is false). */
         next(now = Date.now()) {
             const learn = this.learning[0];
@@ -569,7 +576,7 @@
             if (this.includeAll) {
                 let best = null, bestScore = -Infinity;
                 for (const entry of [...this.reviews, ...this.newCards, ...this.ahead]) {
-                    const score = AnkiStudySession.priority(entry.card, now);
+                    const score = AnkiStudySession.entryScore(entry, now);
                     if (score > bestScore || (score === bestScore && entry.position < best.position)) {
                         best = entry;
                         bestScore = score;
@@ -634,7 +641,7 @@
             const laterLearning = this.learning.filter(e => e.dueAt > now);
             if (this.includeAll) {
                 const practice = [...this.reviews, ...this.newCards, ...this.ahead].sort((a, b) =>
-                    AnkiStudySession.priority(b.card, now) - AnkiStudySession.priority(a.card, now) || a.position - b.position);
+                    AnkiStudySession.entryScore(b, now) - AnkiStudySession.entryScore(a, now) || a.position - b.position);
                 return [...dueLearning, ...practice, ...laterLearning].map(e => e.card);
             }
             return [...dueLearning, ...this.reviews, ...this.newCards, ...this.ahead, ...laterLearning].map(e => e.card);

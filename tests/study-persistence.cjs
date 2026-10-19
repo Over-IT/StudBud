@@ -88,6 +88,12 @@ async function run() {
     assert.equal(ranked.next(now).id, 'weak', 'numeric evidence, not category or source order, chooses the next card');
     assert.equal(ranked.snapshot(now)[0].id, ranked.next(now).id);
     assert.equal(ranked.next(now).id, ranked.next(now).id, 'selection is deterministic at a fixed time');
+    const fresh = Array.from({ length: 12 }, (_, i) => ({ id: `fresh-${i}` }));
+    const openers = new Set(Array.from({ length: 40 }, () => SM2.createSession(fresh, { now, includeAll: true }).next(now).id));
+    assert.ok(openers.size > 1, 'a fresh deck does not always open on the same card');
+    const missed = { id: 'missed', practiceStats: { attempts: 4, correct: 0, missStreak: 3, recentAnswers: [false, false, false, false] } };
+    for (let i = 0; i < 20; i++) assert.equal(SM2.createSession([...fresh, missed], { now, includeAll: true }).next(now).id, 'missed',
+        'the light shuffle never outranks clearly weaker cards');
     const readyLearning = { id: 'ready', state: 'learning', step: 1, nextReviewDate: new Date(now - 1).toISOString() };
     assert.equal(SM2.createSession([weak, readyLearning], { now, includeAll: true }).next(now).id, 'ready',
         'learning-step timing still takes precedence');
