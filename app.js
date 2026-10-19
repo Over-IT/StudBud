@@ -1277,7 +1277,6 @@
         }
 
         bindUI() {
-            // Quiet by default: only a few controls (shop and rewards) make UI sounds, called where they happen
             document.addEventListener('click', event => this.handleClick(event));
             document.addEventListener('keydown', event => this.handleKeydown(event));
             const typingSurface = target => (target?.nodeType === 1 ? target : target?.parentElement)?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"]), code, pre, .selectable');
@@ -3029,6 +3028,11 @@
             }
             const grid = document.getElementById('deck-grid');
             if (!grid) return;
+            const previousGridBox = grid.getBoundingClientRect();
+            const previousPositions = new Map([...grid.querySelectorAll('.deck-card')].map(card => {
+                const box = card.getBoundingClientRect();
+                return [card.dataset.deckId, { left: box.left - previousGridBox.left, top: box.top - previousGridBox.top }];
+            }));
             const search = (document.getElementById('my-deck-search')?.value || '').trim().toLowerCase();
             const decks = this.visibleDecks();
             const sortSelect = document.getElementById('my-deck-sort');
@@ -3130,6 +3134,24 @@
             }
             this.syncDeckLinkSelects(document.getElementById('import-deck-course'), document.getElementById('import-deck-assessment'), false);
             this.renderDeckRecommendations();
+            this.animateDeckPositions(grid, previousPositions);
+        }
+
+        animateDeckPositions(grid, previousPositions) {
+            if (!previousPositions.size || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+            const gridBox = grid.getBoundingClientRect();
+            const moves = [...grid.querySelectorAll('.deck-card')].map(card => {
+                const previous = previousPositions.get(card.dataset.deckId);
+                if (!previous || !card.animate) return null;
+                const box = card.getBoundingClientRect();
+                return { card, x: previous.left - (box.left - gridBox.left), y: previous.top - (box.top - gridBox.top) };
+            }).filter(move => move && (Math.abs(move.x) > 1 || Math.abs(move.y) > 1));
+            for (const { card, x, y } of moves) {
+                card.animate([
+                    { transform: `translate(${x}px, ${y}px)`, opacity: .85 },
+                    { transform: 'translate(0, 0)', opacity: 1 }
+                ], { duration: 180, easing: 'cubic-bezier(0.2, 0, 0, 1)' });
+            }
         }
 
         bindDeckReorderDrag() {

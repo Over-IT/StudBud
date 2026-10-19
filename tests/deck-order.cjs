@@ -221,5 +221,20 @@ const ids = list => list.map(deck => deck.id).join(',');
     assert.equal(ghost, null);
     assert.equal(saves, beforePointerCancel, 'interrupted gestures do not save');
     assert.match(source('styles.css'), /\.deck-drag-handle\s*\{[^}]*touch-action:\s*none/);
+    const animations = [];
+    cards.forEach(card => { card.animate = (keyframes, options) => animations.push({ keyframes, options }); });
+    sandbox.window.matchMedia = () => ({ matches: false });
+    app.animateDeckPositions(grid, new Map([
+        ['z', { left: 0, top: 220 }],
+        ['a', { left: 0, top: 0 }],
+        ['m', { left: 0, top: 440 }]
+    ]));
+    assert.equal(animations.length, 2, 'only displaced sets animate; unchanged sets stay steady');
+    assert.equal(animations[0].keyframes[0].transform, 'translate(0px, 220px)');
+    assert.equal(animations[0].keyframes[1].transform, 'translate(0, 0)');
+    assert.equal(animations[0].options.duration, 180, 'placement settles with a subtle short transition');
+    sandbox.window.matchMedia = () => ({ matches: true });
+    app.animateDeckPositions(grid, new Map([['z', { left: 0, top: 220 }]]));
+    assert.equal(animations.length, 2, 'reduced motion skips reorder animations');
     console.log('deck-order tests passed');
 })().catch(error => { console.error(error); process.exit(1); });

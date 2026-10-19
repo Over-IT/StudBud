@@ -635,6 +635,17 @@
     }
 
     window.StudBudSfx = new Sfx();
+    let lastUiClick = -Infinity;
+    document.addEventListener('click', event => {
+        if (!event.isTrusted || event.defaultPrevented) return;
+        const control = event.target.closest?.('.nav-item, .deck-menu-btn, .community-deck-browser > summary, #create-deck-btn, #my-deck-reorder, [data-action="study-deck"], [data-action="cram-deck"], [data-action="edit-deck"], [data-action="toggle-deck-pin"], [data-action="deck-move-up"], [data-action="deck-move-down"]');
+        if (!control || control.disabled || control.getAttribute('aria-disabled') === 'true'
+            || control.closest('[inert], .deck-drag-ghost')) return;
+        const now = performance.now();
+        if (now - lastUiClick < 180) return;
+        lastUiClick = now;
+        window.StudBudSfx.play('click', 'ui', 180, .35);
+    });
     // Pause everything while the tab is hidden so music never plays in the background
     document.addEventListener('visibilitychange', () => {
         const c = window.StudBudSfx.ctx;

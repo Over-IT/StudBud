@@ -135,7 +135,7 @@ Spring pads use a dedicated soft, decaying coil-resonance launch sound rather th
 
 Escape to Space selects playlists by current biome: City uses **Rooftop Rush**, **Sunrise Run** and **Bazaar Bounce**; Factory uses **Foundry Motion**, **Pixel Quest** and **Funky Groove**; Space uses **Starlight Drift**, **Zen Garden** and **Crystal Cavern**. Returning to an earlier biome restores its selected song. City retains the softer 136 BPM guitar arrangement rather than the intensified bright-lead version. Crystal Mining shares the calm 68–78 BPM piano pool, while combat and timed modes draw from more rhythmic tracks. Each song keeps its own melody through its response and bridge.
 
-Music has no extra snare/high-hat ticking layer or wooden backbeat. A softened kick retains the pulse of non-quiet tracks, while musical notes have gentler attacks. Marimba melodies remain part of their songs. Landing and hit variants also avoid wooden taps, noise effects fade in briefly to prevent clicks, and ordinary buttons, tabs, menus, typing and sliders do not trigger automatic UI effects. Explicit game, reward and answer feedback remains enabled.
+Music has no extra snare/high-hat ticking layer or wooden backbeat. A softened kick retains the pulse of non-quiet tracks, while musical notes have gentler attacks. Marimba melodies remain part of their songs. Landing and hit variants also avoid wooden taps, and noise effects fade in briefly to prevent clicks. Navigation and selected study controls have quiet, throttled click feedback; typing, dragging and sliders stay silent. Explicit game, reward and answer feedback remains enabled.
 
 Crystal Mining lava damage plays an original short burn sizzle: a soft hiss with brief crackles rather than a musical cue. It triggers only on actual damage ticks, respecting the existing lava cooldown and game-audio mute setting.
 
@@ -328,6 +328,8 @@ Drag a personal deck by its **Move** grip (mouse, touch or pen), or drag a non-i
 Background deck refreshes wait until the current drag finishes so sync and author updates cannot unexpectedly release a picked-up set. Leaving the Study page or switching away from the browser cancels the gesture safely.
 
 Drops in the gaps between cards use the nearest card and insertion side, including across grid rows; the pointer does not need to land directly on a card.
+
+Reordered sets settle into place with a subtle 180ms movement/fade transition; reduced-motion preferences disable it. Navigation, deck menus and common study controls have quiet click feedback at 35% effect strength, limited to one cue per 180ms. Typing, slider movement and dragging remain silent; the existing UI-sound toggle and volume setting still apply.
 
 For the confirmed historical removal of **Random Spanish 100**, run [`supabase-repair-random-spanish-100.sql`](./supabase-repair-random-spanish-100.sql) after the latest setup. It records the verified public deck ID and owner, prunes saved cloud copies, and lets connected devices remove their copies through normal reconciliation. It is safe to rerun and does not match unrelated sets by title. If the owner's original local ID is no longer recoverable from its publication metadata, that ID remains unknown rather than guessing; imported and publication-linked copies are still removed.
 

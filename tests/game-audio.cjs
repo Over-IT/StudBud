@@ -86,7 +86,32 @@ const sfx = sandbox.window.StudBudSfx;
     } finally { sfx.tone = tone; sfx.noise = noise; }
 }
 assert.ok(!documentHandlers.has('keydown') && !documentHandlers.has('input'), 'typing and slider movement never generate automatic ticking effects');
-assert.ok(!documentHandlers.has('click') && !documentHandlers.has('change'), 'ordinary buttons, tabs and menus never add automatic UI effects');
+assert.ok(!documentHandlers.has('change'), 'sliders and settings changes do not generate automatic ticking');
+{
+    const play = sfx.play, calls = [];
+    sfx.play = (...args) => calls.push(args);
+    const control = { disabled: false, getAttribute: () => null, closest: () => null };
+    const click = documentHandlers.get('click');
+    const event = { isTrusted: true, defaultPrevented: false, target: { closest: () => control } };
+    try {
+        now += 1000;
+        click(event);
+        assert.equal(calls.length, 1);
+        assert.equal(calls[0].join(','), 'click,ui,180,0.35', 'navigation feedback is short, quiet and rate limited');
+        click(event);
+        assert.equal(calls.length, 1, 'rapid interactions do not stack UI sounds');
+        now += 200;
+        click({ ...event, defaultPrevented: true });
+        click({ ...event, isTrusted: false });
+        click({ ...event, target: { closest: () => null } });
+        control.disabled = true;
+        click(event);
+        assert.equal(calls.length, 1, 'cancelled, synthetic, unrelated and disabled interactions stay silent');
+        control.disabled = false;
+        click(event);
+        assert.equal(calls.length, 2);
+    } finally { sfx.play = play; }
+}
 let arrangement;
 const musicStep = sfx.musicStep.bind(sfx);
 sfx.musicStep = (style, ...args) => { arrangement = style; return musicStep(style, ...args); };
