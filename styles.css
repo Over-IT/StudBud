@@ -1455,6 +1455,38 @@ tbody tr:hover {
 .planner-work-section .empty-state { margin: 0; }
 .planner-attention .matrix-quadrant { gap: var(--spacing-sm); }
 .planner-attention .matrix-quadrant h4 { margin: 0; }
+.planner-page-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--spacing-md); }
+.planner-page-header > div:first-child { flex: 1 1 320px; }
+.planner-page-header h2 { margin: 0 0 .35rem; }
+.planner-page-header p { margin: 0; max-width: 65ch; }
+.planner-overview { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--spacing-lg); align-items: start; }
+.planner-focus, .planner-prep, .planner-grade-inbox { min-width: 0; display: grid; gap: var(--spacing-md); }
+.planner-prep.planner-work-section { border-top: 0; padding: var(--spacing-lg); }
+.planner-eyebrow { color: var(--accent-primary); font-size: .75rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.planner-focus .planner-workload { margin: 0 0 var(--spacing-md); font-size: .85rem; }
+.planner-focus .planner-next-card { margin: 0; }
+.planner-work-filters { padding: var(--spacing-md); background: var(--bg-glass-hover); border: 1px solid var(--border-glass); border-radius: var(--border-radius-sm); }
+.planner-work-filters > p { margin: 0; }
+.planner-work-filters .assignment-result-count { grid-column: 1 / -1; }
+.planner-work-filters .assignment-filters { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr); }
+.planner-grade-inbox .planner-awaiting-grades { padding: 0; border: 0; margin: 0; }
+.planner-grade-inbox .empty-state { text-align: left; padding: var(--spacing-md); margin: 0; }
+.planner-attention > summary, .planner-more-study > summary { cursor: pointer; font-weight: 800; }
+.planner-attention > summary { font-size: 1.05rem; }
+.planner-attention > summary span { display: block; font-weight: 400; margin: .35rem 0 0 1.1rem; }
+.planner-attention[open] > summary { margin-bottom: var(--spacing-lg); }
+.planner-attention > .planner-section-header { margin-bottom: var(--spacing-md); }
+.planner-more-study > summary { color: var(--accent-primary); padding: .6rem 0; }
+.planner-more-study .study-priority-item { margin-top: var(--spacing-md); }
+@media (max-width: 1100px) {
+    .planner-overview { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+    .planner-work-filters .assignment-filters { grid-template-columns: minmax(0, 1fr); }
+    .planner-work-filters .assignment-status-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .planner-page-header > .assignment-quick-actions { width: 100%; }
+    .planner-page-header > .assignment-quick-actions button { flex: 1 1 140px; }
+}
 
 .app-confirmation { color: var(--text-primary); background: var(--bg-base); border: 1px solid var(--quad-2-border); border-radius: var(--border-radius-sm); padding: 1.5rem; width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; margin: auto; }
 .app-confirmation::backdrop { background: rgba(0, 0, 0, .5); }

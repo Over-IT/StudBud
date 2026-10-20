@@ -2881,7 +2881,8 @@
             const awaiting = document.getElementById('planner-awaiting-grades');
             if (awaiting) {
                 const waiting = assignments.filter(item => this.assignmentState(item) === 'awaiting');
-                awaiting.innerHTML = waiting.length ? `<details open><summary>Ready to add grades (${waiting.length})</summary><p class="settings-hint">Completed work stays here until you add a grade. Includes assignments, quizzes and tests from every class.</p>${this.assignmentUpdateList(waiting)}</details>` : '';
+                awaiting.innerHTML = waiting.length ? `<details open><summary>Ready to add grades (${waiting.length})</summary><p class="settings-hint">Completed work stays here until you add a grade. Includes assignments, quizzes and tests from every class.</p>${this.assignmentUpdateList(waiting)}</details>`
+                    : '<p class="empty-state">No grades to add right now. Mark an assignment done and it will appear here.</p>';
             }
             this.renderStudyRecommendations('planner-study-list');
             const summary = document.getElementById('assignment-status-summary');
@@ -8480,13 +8481,16 @@
             const priorityList = document.getElementById(id);
             if (priorityList) {
                 const recommendations = this.getStudyRecommendations().slice(0, limit);
-                priorityList.innerHTML = recommendations.length ? recommendations.map((item, index) => {
+                const cards = recommendations.map((item, index) => {
                     const decks = (item.deckLinks || []).slice(0, 2).map(({ deck }) =>
                         `<button class="secondary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}"><i class="fas fa-layer-group"></i> ${this.escapeHTML(deck.title)}</button>`).join('');
                     const studied = item.minutesStudied ? `<small class="study-time-logged"><i class="fas fa-clock"></i> ${item.minutesStudied} min studied${item.flashcardMinutes ? ` (${item.flashcardMinutes} with flashcards)` : ''}</small>` : '';
                     const manage = `<button type="button" class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit quiz / test</button>${this.assignmentStatusControl(item)}`;
                     return `<article class="study-priority-item"><span class="priority-rank">${index + 1}</span><div><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(item.courseTitle)} · ${this.escapeHTML(item.kind || 'assignment')} · ${item.sessionMinutes} min today (about ${item.remainingStudyMinutes} min remaining)</span>${studied}<small>${this.escapeHTML(item.reason)}</small><p><strong>Study method:</strong> ${this.escapeHTML(item.studyMethod)}</p><div class="study-priority-actions"><button class="secondary-btn" data-action="log-study" data-id="${this.escapeHTML(item.id)}"><i class="fas fa-stopwatch"></i> Log study session</button>${this.assessmentStudyButton(item)}${decks}${manage}</div></div></article>`;
-                }).join('') : (id === 'planner-study-list'
+                });
+                priorityList.innerHTML = recommendations.length ? (id === 'planner-study-list' && cards.length > 2
+                    ? `${cards.slice(0, 2).join('')}<details class="planner-more-study"><summary>More study suggestions (${cards.length - 2})</summary>${cards.slice(2).join('')}</details>`
+                    : cards.join('')) : (id === 'planner-study-list'
                     ? '<p class="empty-state">Add an upcoming quiz or test to get study suggestions.</p>'
                     : '<div class="empty-state empty-state-cta"><p>Add an upcoming quiz or test to get study suggestions.</p><button class="primary-btn" type="button" data-action="add-quiz"><i class="fas fa-plus"></i> Add a quiz or test</button></div>');
             }
@@ -9462,6 +9466,8 @@
                     }
                     AppState.set('settings', { ...AppState.get('settings'), colorScheme: scheme, schemePicked: true });
                     this.applyAppearance();
+                } else if (action === 'planner-add-assignment') {
+                    this.openAssignmentForm();
                 } else if (action === 'add-quiz') {
                     this.openAssignmentForm(null, '', '', '', 'quiz');
                 } else if (action === 'friend-accept' || action === 'friend-decline' || action === 'friend-remove') {

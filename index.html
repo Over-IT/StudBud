@@ -391,10 +391,28 @@
                 <!-- 3. Planner & Schedule View -->
                 <section id="planner-view" class="view hidden">
                     <div class="planner-grid">
+                        <header class="planner-page-header">
+                            <div><h2>Make a plan. Get it done.</h2><p class="settings-hint">Start with a suggestion, manage your work below, then add grades when they come back.</p></div>
+                            <div class="assignment-quick-actions">
+                                <button type="button" class="primary-btn" data-action="planner-add-assignment"><i class="fas fa-plus" aria-hidden="true"></i> Add assignment</button>
+                                <button type="button" class="secondary-btn" data-action="add-quiz"><i class="fas fa-plus" aria-hidden="true"></i> Add quiz / test</button>
+                            </div>
+                        </header>
+                        <div class="planner-overview">
+                            <section class="glass-card planner-focus" aria-labelledby="planner-next-heading">
+                                <header class="planner-section-header"><span class="planner-eyebrow">Your next step</span><h3 id="planner-next-heading">Work on next</h3><p class="settings-hint">One assignment to start with. Suggestions are independent of the filters below.</p></header>
+                                <div id="planner-next-task" aria-live="polite"></div>
+                            </section>
+                            <section class="glass-card planner-prep planner-work-section" aria-labelledby="planner-prep-heading">
+                                <header class="planner-section-header"><span class="planner-eyebrow">Prepare ahead</span><h3 id="planner-prep-heading">Study plan</h3><p class="settings-hint">Study sessions for your open quizzes and tests.</p></header>
+                                <div id="planner-study-list" class="study-guidance-list" aria-live="polite"></div>
+                            </section>
+                        </div>
                         <section class="glass-card full-width planner-work" aria-labelledby="planner-work-heading">
                             <header class="planner-section-header">
-                                <h2 id="planner-work-heading">Your work</h2>
-                                <p class="settings-hint">Assignments and quiz/test preparation, together in one place. Time estimates are a guide, not a deadline.</p>
+                                <span class="planner-eyebrow">Your task lists</span>
+                                <h2 id="planner-work-heading">Manage your work</h2>
+                                <p class="settings-hint">Choose a status, search, or filter by class. Mark work done or update its grade right in the list.</p>
                             </header>
                             <div class="planner-work-filters">
                                 <div id="assignment-status-summary" class="assignment-status-summary" aria-label="Work by status"></div>
@@ -412,15 +430,13 @@
                                     </select>
                                     <span id="assignment-result-count" class="assignment-result-count" aria-live="polite"></span>
                                 </div>
-                                <p class="settings-hint">Filters apply to both lists below. Next-task and study suggestions always show open work.</p>
+                                <p class="settings-hint">These filters apply to the assignment and quiz/test lists below, not your suggestions or grade inbox.</p>
                             </div>
-                            <section id="planner-awaiting-grades" class="planner-awaiting-grades" aria-label="Completed work waiting for grades" aria-live="polite"></section>
                             <section class="planner-work-section" aria-labelledby="planner-assignment-heading">
                                 <header class="planner-section-header">
                                     <h3 id="planner-assignment-heading">Assignments</h3>
-                                    <p class="settings-hint">Your next task and assignment list.</p>
+                                    <p class="settings-hint">Homework, projects and other tasks to complete.</p>
                                 </header>
-                                <div id="planner-next-task" aria-live="polite"></div>
                                 <div class="table-scroll" tabindex="0" role="region" aria-label="Assignments table">
                                     <table id="assignment-table">
                                         <thead>
@@ -440,11 +456,9 @@
                                 </div>
                             </section>
                             <section class="planner-work-section" aria-labelledby="planner-study-heading">
-                                <header class="planner-section-header planner-section-header-actions">
-                                    <div><h3 id="planner-study-heading">Study, quizzes &amp; tests</h3><p class="settings-hint">Suggested study sessions and quiz/test dates, completion and grades.</p></div>
-                                    <button class="secondary-btn" type="button" data-action="add-quiz"><i class="fas fa-plus" aria-hidden="true"></i> Add a quiz or test</button>
+                                <header class="planner-section-header">
+                                    <h3 id="planner-study-heading">Quizzes &amp; tests</h3><p class="settings-hint">Assessment dates, completion and scores. Study suggestions are at the top of the page.</p>
                                 </header>
-                                <div id="planner-study-list" class="study-guidance-list" aria-live="polite"></div>
                                 <div class="table-scroll" tabindex="0" role="region" aria-label="Quizzes and tests table">
                                     <table>
                                         <thead><tr><th>Status</th><th>Quiz / Test</th><th>Course</th><th>Due / Score</th><th>Estimated study time</th><th>Actions</th></tr></thead>
@@ -453,10 +467,13 @@
                                 </div>
                             </section>
                         </section>
-                        <section class="glass-card full-width planner-attention" aria-labelledby="planner-attention-heading">
+                        <section class="glass-card planner-grade-inbox" aria-labelledby="planner-grades-heading">
+                            <header class="planner-section-header"><span class="planner-eyebrow">After you finish</span><h2 id="planner-grades-heading">Grade inbox</h2><p class="settings-hint">Completed work from every class, ready for a score. Always visible here, regardless of your task-list filters.</p></header>
+                            <section id="planner-awaiting-grades" class="planner-awaiting-grades" aria-label="Completed work waiting for grades" aria-live="polite"></section>
+                        </section>
+                        <details class="glass-card full-width planner-attention" aria-labelledby="planner-attention-heading">
+                            <summary id="planner-attention-heading">More ways to plan <span class="settings-hint">View assignments grouped by urgency</span></summary>
                             <header class="planner-section-header">
-                                <h2 id="planner-attention-heading">What needs your attention</h2>
-                                <p class="settings-hint">Open assignments grouped by urgency, with estimated time. Select a task to update it.</p>
                                 <p class="settings-hint">Suggested order considers due dates, the task's saved priority, and how close your class grade is to a letter-grade cutoff. It is not a percentage, grade prediction, or time estimate.</p>
                             </header>
                             <div class="eisenhower-matrix">
@@ -481,7 +498,7 @@
                                     <ul id="quad-4-list"></ul>
                                 </div>
                             </div>
-                        </section>
+                        </details>
                     </div>
                 </section>
 

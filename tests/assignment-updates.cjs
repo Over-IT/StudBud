@@ -84,7 +84,7 @@ async function run() {
     assert.equal(state.assignments[1].maxPoints, 20);
     assert.ok(state.assignments[1].gradedAt, 'grading records the date');
     render();
-    assert.equal(node('planner-awaiting-grades').innerHTML, '');
+    assert.match(node('planner-awaiting-grades').innerHTML, /No grades to add right now/);
     assert.doesNotMatch(node('home-widget-body').innerHTML, /Ready to add grades/);
     state.assignments.push({ id: 'missing', title: 'Missing Campus work', courseCode: 'math',
         status: 'pending', graded: true, icMissing: true, pointsEarned: 0, maxPoints: 20, dueDate: '2099-01-01' });
