@@ -4535,14 +4535,14 @@ body.compact-ui .open-box { --ob-w: 110px; }
 .roster-row { contain-intrinsic-size: auto 64px; }
 /* Low-power devices keep quick one-shot feedback but drop looping animations. */
 
-/* Workspace sub-tabs: a pill bar under the header. */
-.workspace-tabs { gap: 4px; padding: 0 var(--spacing-xl); margin-bottom: 0; border-bottom: 1px solid var(--border-glass); }
-.workspace-tab { min-height: 48px; padding: 12px 16px; border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: transparent; color: var(--text-secondary); font-weight: 700; box-shadow: none; }
+.workspace-tabs { flex-wrap: wrap; overflow: visible; gap: 4px; padding: 0 var(--spacing-xl); margin-bottom: 0; border-bottom: 1px solid var(--border-glass); }
+.workspace-tab { min-width: 0; min-height: 48px; padding: 12px 16px; border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: transparent; color: var(--text-secondary); font-weight: 700; box-shadow: none; white-space: normal; overflow-wrap: anywhere; }
 .workspace-tab:hover { color: var(--text-primary); background: var(--bg-glass-hover); }
 .workspace-tab.selected { padding: 12px 16px; border-width: 0 0 3px; text-decoration: none; color: var(--text-primary); background: transparent; border-color: var(--accent-primary); box-shadow: none; }
 @media (max-width: 768px) {
-    .workspace-tabs { flex-wrap: nowrap; overflow-x: auto; padding: 0 var(--spacing-md); scrollbar-width: thin; }
-    .workspace-tab { flex: 0 0 auto; white-space: nowrap; }
+    .workspace-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); overflow: visible; padding: 0 var(--spacing-md); }
+    .workspace-tabs[data-page-count="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .workspace-tab { white-space: normal; }
 }
 
 /* Student workspaces keep the next action prominent and detail one step away. */
@@ -4584,6 +4584,13 @@ body.compact-ui .open-box { --ob-w: 110px; }
 .student-workspace .community-deck-browser { margin-top: 28px; }
 .student-workspace .deck-card { padding: 22px; }
 .student-workspace .planner-page-header { align-items: center; }
+.planner-suggestions { min-width: 0; }
+.planner-suggestions > summary { cursor: pointer; min-height: 44px; padding: 10px 0; color: var(--text-secondary); font-weight: 700; }
+.planner-suggestions[open] > summary { margin-bottom: 12px; }
+.planner-work-filters .assignment-status-summary { grid-template-columns: repeat(auto-fit, minmax(min(125px, 100%), 1fr)); }
+.settings-grid > [data-settings-panel] { min-width: 0; }
+.settings-grid > [data-settings-panel] > .glass-card { padding: 24px; }
+.settings-grid [data-settings-panel] > label { font-size: .85rem; font-weight: 700; }
 .header-settings-button { display: none; }
 #top-header { padding-block: 18px; border-bottom-width: 1px; }
 .header-left h1 { font-size: 1.35rem; font-weight: 800; }

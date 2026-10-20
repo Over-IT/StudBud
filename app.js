@@ -561,7 +561,7 @@
         { main: 'flashcard', extraRoutes: ['importer'], tabs: [['flashcard', 'Practice'], ['study-manage', 'Manage sets'], ['study-discover', 'Discover'], ['exam-arcade', 'Tests & drills']] },
         { main: 'multiplayer', tabs: [['multiplayer', 'Games'], ['friends', 'Buds'], ['leaderboard', 'Leaderboards']] },
         { main: 'profile', tabs: [['profile', 'Profile'], ['shop', 'Shop'], ['inventory', 'Locker']] },
-        { main: 'settings', tabs: [['settings', 'Profile & data'], ['appearance', 'Appearance'], ['sound', 'Sound'], ['about', 'About']] }
+        { main: 'settings', tabs: [['settings', 'General'], ['settings-school', 'School & GPA'], ['appearance', 'Appearance'], ['sound', 'Audio'], ['settings-data', 'Data & account'], ['about', 'Help']] }
     ];
     const PAGE_GUIDES = {
         dashboard: ['Home', 'What is due today and what to study next.'],
@@ -582,7 +582,9 @@
         profile: ['Your profile', 'Your character, rewards and public profile.'],
         shop: ['Shop', 'Open boxes and buy cosmetics.'],
         inventory: ['Locker', 'Everything you own. Equip it here.'],
-        settings: ['Profile & data', 'Name, school, privacy and account settings.'],
+        settings: ['Settings', 'App preferences, study defaults and privacy shortcuts.'],
+        'settings-school': ['School & GPA', 'School details, semester and past academic credits.'],
+        'settings-data': ['Data & account', 'Save status, syncing, importing and account actions.'],
         appearance: ['Appearance & performance', 'Colors, spacing and game detail.'],
         sound: ['Sound & music', 'Interface sounds, effects and music.'],
         about: ['Help & about', 'How StudBud works.'],
@@ -594,7 +596,7 @@
         constructor() {
             this.routes = [
                 "dashboard", "gpa", "grade-scenarios", "planner", "calendar", "schedule", "flashcard",
-                "analytics", "leaderboard", "exam-arcade", "study-manage", "study-discover", "multiplayer", "profile", "shop", "inventory", "importer", "settings", "appearance", "sound", "admin", "about", "friends", "classes"
+                "analytics", "leaderboard", "exam-arcade", "study-manage", "study-discover", "multiplayer", "profile", "shop", "inventory", "importer", "settings", "settings-school", "settings-data", "appearance", "sound", "admin", "about", "friends", "classes"
             ];
             this.activeRoute = "dashboard";
         }
@@ -619,7 +621,9 @@
                 }
             }
             const routeName = rawHash.toLowerCase();
-            const targetRoute = this.routes.includes(routeName) ? routeName : "dashboard";
+            const startPage = AppState.get('settings')?.startPage;
+            const defaultRoute = ['dashboard', 'planner', 'flashcard', 'gpa'].includes(startPage) ? startPage : 'dashboard';
+            const targetRoute = this.routes.includes(routeName) ? routeName : routeName ? 'dashboard' : defaultRoute;
             this.navigate(targetRoute, false);
         }
 
@@ -638,13 +642,15 @@
             }
 
             const studyPage = ({ flashcard: 'practice', 'study-manage': 'manage', 'study-discover': 'discover' })[route];
-            const viewId = route === 'class' ? 'class-detail-view' : studyPage ? 'flashcard-view' : `${route}-view`;
+            const settingsPage = ({ settings: 'general', 'settings-school': 'school', 'settings-data': 'data' })[route];
+            const viewId = route === 'class' ? 'class-detail-view' : studyPage ? 'flashcard-view' : settingsPage ? 'settings-view' : `${route}-view`;
             const workspace = WORKSPACES.find(group => group.tabs.some(([tab]) => tab === route) || group.extraRoutes?.includes(route) || (route === 'class' && group.main === 'gpa'));
             const selectedTab = route === 'importer' ? 'study-manage' : route === 'class' ? 'gpa' : route;
             const tabs = document.getElementById('workspace-tabs');
             if (tabs) {
                 const restoreFocus = tabs.contains(document.activeElement);
                 tabs.classList.toggle('hidden', !workspace);
+                tabs.dataset.pageCount = String(workspace?.tabs.length || 0);
                 tabs.setAttribute('aria-label', workspace ? `${PAGE_GUIDES[workspace.main]?.[0] || 'Workspace'} pages` : 'Workspace pages');
                 tabs.innerHTML = workspace ? workspace.tabs.map(([tab, label]) => `<button type="button" class="workspace-tab${tab === selectedTab ? ' selected' : ''}" data-target="${tab}-view"${tab === selectedTab ? ' aria-current="page"' : ''}>${label}</button>`).join('') : '';
                 if (restoreFocus) tabs.querySelector('[aria-current="page"]')?.focus({ preventScroll: true });
@@ -655,6 +661,7 @@
                 view.classList.toggle('hidden', !isActive);
             });
             if (studyPage) window.NexusApp?.setStudyPage(studyPage);
+            if (settingsPage) window.NexusApp?.setSettingsPage(settingsPage);
 
             document.querySelectorAll('.nav-item[data-target]').forEach(item => {
                 const group = `${item.dataset.target} ${item.dataset.also || ''}`.split(' ');
@@ -1227,6 +1234,7 @@
 
         async resetForCloudAccount() {
             await this.resetAutomaticStudy();
+            this.plannerDefaultsInitialized = false;
             await AppState.resetForCloudAccount();
             this.renderUI();
         }
@@ -1317,7 +1325,13 @@
                     && event.target.closest?.('#active-study-area button')) event.preventDefault();
             });
             document.addEventListener('submit', event => this.handleSubmit(event));
-            document.addEventListener('change', event => this.handleChange(event));
+            document.addEventListener('change', event => {
+                try { this.handleChange(event); }
+                catch (error) {
+                    console.error('[NexusApp] Setting change failed:', error);
+                    window.StudBudDialogs.notify(this.friendlyErrorMessage(error, 'The change could not be saved. Try again.'));
+                }
+            });
             this.bindFlashcardInteraction();
             window.addEventListener('message', event => this.handleInfiniteCampusMessage(event));
             document.addEventListener('click', event => {
@@ -1473,6 +1487,7 @@
         }
 
         renderUI() {
+            this.syncPreferences();
             this.renderCourses();
             this.renderAssignments();
             this.renderDecks();
@@ -2939,17 +2954,30 @@
             const selectedCourse = courseFilter?.value || '';
             const selectedStatus = statusFilter?.value || 'all';
             const today = localDateKey(new Date());
-            const visibleAssignments = assignments.filter(item => {
+            const sort = AppState.get('settings')?.plannerSort || 'due';
+            const sortSelect = document.getElementById('assignment-sort');
+            if (sortSelect) sortSelect.value = sort;
+            const matchingAssignments = assignments.filter(item => {
                 const course = courses.find(entry => entry.code === item.courseCode);
                 const matchesSearch = !query || `${item.title} ${item.kind || ''} ${course?.title || item.courseCode || ''}`.toLocaleLowerCase().includes(query);
                 const matchesCourse = !selectedCourse || item.courseCode === selectedCourse;
+                return matchesSearch && matchesCourse;
+            });
+            const visibleAssignments = matchingAssignments.filter(item => {
                 const state = this.assignmentState(item);
                 const matchesStatus = selectedStatus === 'all' || state === selectedStatus
                     || (selectedStatus === 'todo' && state === 'overdue');
-                return matchesSearch && matchesCourse && matchesStatus;
-            }).sort((left, right) =>
-                (left.dueDate || '9999-12-31').localeCompare(right.dueDate || '9999-12-31')
-            );
+                return matchesStatus;
+            }).sort((left, right) => {
+                const byDate = () => (left.dueDate || '9999-12-31').localeCompare(right.dueDate || '9999-12-31');
+                if (sort === 'priority') return this.assignmentPriority(right, courses).score - this.assignmentPriority(left, courses).score || byDate();
+                if (sort === 'name') return String(left.title || '').localeCompare(String(right.title || '')) || byDate();
+                if (sort === 'class') {
+                    const title = item => courses.find(course => course.code === item.courseCode)?.title || item.courseCode || '';
+                    return title(left).localeCompare(title(right)) || byDate();
+                }
+                return byDate();
+            });
             const assessmentBody = document.getElementById('planner-assessment-body');
             const isAssessment = item => ['quiz', 'test'].includes(String(item.kind || '').toLowerCase());
             const renderRows = items => items.map(item => {
@@ -2983,10 +3011,11 @@
             this.renderStudyRecommendations('planner-study-list');
             const summary = document.getElementById('assignment-status-summary');
             if (summary) {
-                const counts = { todo: 0, overdue: 0, awaiting: 0, graded: 0 };
-                assignments.forEach(item => { counts[this.assignmentState(item)] += 1; });
+                const counts = { all: matchingAssignments.length, todo: 0, overdue: 0, awaiting: 0, graded: 0 };
+                matchingAssignments.forEach(item => { counts[this.assignmentState(item)] += 1; });
+                counts.todo += counts.overdue;
                 const chip = (state, label, icon) => `<button type="button" class="status-summary-chip is-${state}${selectedStatus === state ? ' selected' : ''}" data-action="assignment-status-filter" data-status="${state}" aria-pressed="${selectedStatus === state}"><i class="fas ${icon}" aria-hidden="true"></i><strong>${counts[state]}</strong><span>${label}</span></button>`;
-                summary.innerHTML = chip('todo', 'To do', 'fa-clock') + chip('overdue', 'Overdue', 'fa-triangle-exclamation')
+                summary.innerHTML = chip('all', 'All work', 'fa-list') + chip('todo', 'To do', 'fa-clock') + chip('overdue', 'Overdue', 'fa-triangle-exclamation')
                     + chip('awaiting', 'Waiting for grade', 'fa-hourglass-half') + chip('graded', 'Graded', 'fa-circle-check');
             }
 
@@ -3483,9 +3512,9 @@
                 panel.classList.toggle('hidden', !panel.dataset.studyPanel.split(' ').includes(page));
             });
             const copy = {
-                practice: ['Ready to study?', 'Choose a set, practice the terms needing focus, or try a test.'],
-                manage: ['Your study materials', 'Create sets, edit cards, organize your library and choose what to share.'],
-                discover: ['Learn from each other', 'Browse shared sets. Add a copy to your library to practice at your own pace.']
+                practice: ['Practice', 'Choose a set, practice the terms needing focus, or try a test.'],
+                manage: ['Manage study sets', 'Create sets, edit cards, organize your library and choose what to share.'],
+                discover: ['Community study sets', 'Browse shared sets. Add a copy to your library to practice at your own pace.']
             }[page];
             document.getElementById('study-page-title').textContent = copy[0];
             document.getElementById('study-page-description').textContent = copy[1];
@@ -7944,6 +7973,7 @@
 
 
         renderProfile() {
+            this.syncPreferences();
             const profile = AppState.get('profile') || {};
             const firstName = document.getElementById('settings-first-name');
             if (firstName) firstName.value = profile.firstName || '';
@@ -8001,6 +8031,38 @@
                 button.innerHTML = `<span class="scheme-swatch" style="--swatch: linear-gradient(90deg, hsl(${item.hue} 75% 55%), hsl(${item.hue2} 80% 68%))"></span><span>${this.escapeHTML(item.name)}</span><small class="scheme-lock-note">Unlock in multiplayer shop</small>`;
                 picker.insertBefore(button, mono || null);
             });
+        }
+
+        setSettingsPage(page) {
+            const view = document.getElementById('settings-view');
+            view.querySelectorAll('[data-settings-panel]').forEach(panel => {
+                panel.classList.toggle('hidden', panel.dataset.settingsPanel !== page);
+            });
+            const copy = {
+                general: ['General settings', 'Choose how StudBud opens and how you prefer to study.'],
+                school: ['School & GPA', 'Keep your school, semester and academic history up to date.'],
+                data: ['Data & account', 'Check saved data, connect your account or import school work.']
+            }[page];
+            document.getElementById('settings-page-title').textContent = copy[0];
+            document.getElementById('settings-page-description').textContent = copy[1];
+            this.syncPreferences();
+        }
+
+        syncPreferences() {
+            const settings = AppState.get('settings') || {};
+            const start = document.getElementById('settings-start-page');
+            if (start) start.value = settings.startPage || 'dashboard';
+            const planner = document.getElementById('settings-planner-default');
+            if (planner) planner.value = settings.plannerDefaultStatus || 'todo';
+            const mode = document.getElementById('settings-study-mode');
+            if (mode) mode.value = localStorage.getItem('studbud-type-answer') === '1' ? 'type' : 'reveal';
+            const direction = document.getElementById('settings-study-direction');
+            if (direction) direction.value = this.studyDirection();
+            const filter = document.getElementById('assignment-status-filter');
+            if (filter && !this.plannerDefaultsInitialized) {
+                filter.value = settings.plannerDefaultStatus || 'todo';
+                this.plannerDefaultsInitialized = true;
+            }
         }
 
         applyAppearance() {
@@ -8415,25 +8477,26 @@
         tutorialSteps() {
             return [
                 { title: 'A calmer way to study', text: 'Bring in your classes, choose one next task, then practice what needs attention. This tour explains the new layout and the difference between grades, study time and recall. Jump to any topic below, or finish later and replay from Settings.' },
-                { route: 'dashboard', sel: '#main-nav', title: 'Everything has a place', text: 'Home is your daily launchpad. School holds grades, Plan holds tasks, Study holds sets, and Play holds games. On a phone these live in the bottom dock; your profile and Settings are at the top. Extra class or staff tools appear in the menu when available. Swipe tabs for related tools.' },
+                { route: 'dashboard', sel: '#main-nav', title: 'Everything has a place', text: 'Home is your daily launchpad. My classes holds grades, Planner holds tasks, Study holds sets, and Games holds multiplayer and social tools. On a phone these live in the bottom dock; your profile and Settings are at the top. Related pages appear as links that fit the screen without sideways scrolling.' },
                 { route: 'gpa', sel: '#gpa-view .open-ic-import-btn', title: 'Import from Infinite Campus', text: 'Import copies your classes, grades, assignments and schedule into StudBud. It never changes Campus or asks for its password. On a phone, the easiest option is to import on a computer and sync to the same account. Phone-only website instructions and copied helper data are separate options in the import dialog. Review before saving; re-import when grades change.' },
                 { route: 'gpa', sel: '#class-card-grid .class-card, #class-card-grid', title: 'Grade bars with a real goal', text: 'The filled bar is your current class grade. The vertical line is your grade target; the message shows the percentage-point gap or Goal reached. Extra credit can extend the scale past 100%. Open class for assignments, or use Edit goal. These bars are not study completion.' },
                 { route: 'gpa', sel: '#open-target-gpa-btn', title: 'Your GPA goal calculates itself', text: 'GPA from grade targets uses your class goals, credits and course weighting. A class without a target uses its current grade. Set prior GPA and credits in Settings if needed. Use Full grade breakdown below your classes for categories and scores; What-if grades stays separate from real grades.' },
-                { route: 'planner', sel: '.planner-overview', title: 'Start with one next step', text: 'Plan suggests one task and upcoming test preparation. Below, filter your work by class or status. On a phone, each assignment becomes a readable card. Calendar shows due dates; Class schedule controls the classes shown on Home.' },
+                { route: 'planner', sel: '.planner-work', title: 'Manage your assignments', text: 'Choose a status to filter your work, search by title or class, and sort by due date, priority or name. Reset filters returns to your preferred default. Suggested next task & study plan expands when you need help deciding where to start. Calendar and Class schedule are separate pages.' },
                 { route: 'planner', sel: '.planner-work', title: 'Time progress is not task completion', text: 'Work on this selects an assignment and opens Home. Choose Edit, then Time estimate & progress to revise minutes left. The percentage compares logged time with the estimate; 100% never marks the task done. Mark it done yourself, then add its score in Grade inbox. Log offline study records work done elsewhere.' },
-                { route: 'dashboard', sel: '.focus-sprint-widget', title: 'No Start button needed', text: 'Flashcards and eligible questions track automatically. For assignments, choose the task here and stay on Home, Plan or its class page. The clock pauses when hidden, unfocused, in a dialog, or after 60 seconds without interaction. Reading quietly may pause it too; log offline or external work manually.' },
+                { route: 'dashboard', sel: '.focus-sprint-widget', title: 'No Start button needed', text: 'Flashcards and eligible questions track automatically. For assignments, choose the task here and stay on Home, Planner or its class page. The clock pauses when hidden, unfocused, in a dialog, or after 60 seconds without interaction. Reading quietly may pause it too; log offline or external work manually.' },
                 { route: 'dashboard', sel: '#automatic-study-indicator', title: 'Know when time is counting', text: 'The clock shows elapsed time and whether you are studying or paused. Games count only unlocked question-answering time, not movement, loading or results. Stop working on task ends assignment tracking; it does not delete time you already earned.' },
                 { route: 'study-manage', sel: '#create-deck-btn', title: 'Keep creating separate from practicing', text: 'Manage sets is where you create, edit, organize and share materials. Select New study set, name it and link it to a class or test. Quick add lets you type a term, press Tab, type the definition and press Enter. Import cards accepts a pasted list.' },
-                { route: 'flashcard', sel: '.my-deck-heading', title: 'Your sets come first', text: 'Search by set or class, sort by recent practice or weakest first, and pin favorites. Reorder lets you move sets with buttons or drag them. Import cards is at the top; Discover community sets is below your own library. Sets are practice, never overdue assignments.' },
+                { route: 'flashcard', sel: '.my-deck-heading', title: 'Your sets come first', text: 'Practice is just for studying: search your sets, sort by recent practice or weakest first, and pin favorites. Creating, importing and reordering live in Manage sets; community materials live in Discover. Sets are practice, never overdue assignments.' },
                 { route: 'flashcard', sel: '#deck-grid .deck-ring, #deck-grid', title: 'Practice what needs attention', text: 'Focus practice starts a session of active terms needing more recall, respecting scheduled rest. Tap a percentage to inspect the focus list. Recall uses up to four recent answers per card; written recall counts twice as much as choices. Question selection reacts to your new answers immediately, not just lifetime accuracy.' },
                 { route: 'study-discover', sel: '.community-deck-browser', title: 'Discover materials without clutter', text: 'Community sets have their own page. Search, preview and add sets here, then return to Practice to study them. Your own materials stay private until you choose to share them in Manage sets.' },
-                { route: 'flashcard', sel: '#deck-grid .deck-card, #deck-grid', title: 'Practice your way', text: 'Study prioritizes cards needing practice. Space flips, 1-4 rates, S stars and T enables typing. Cram all cards lives in the three-dot menu: it keeps the spaced-repetition schedule unchanged, but answers still inform recall. The pencil edits cards. The menu also has starred practice, class/test links, sharing and deletion.' },
+                { route: 'flashcard', sel: '#deck-grid .deck-card, #deck-grid', title: 'Practice your way', text: 'Study prioritizes cards needing practice. Space flips, 1-4 rates, S stars and T enables typing. Cram all cards lives in the three-dot menu: it keeps the spaced-repetition schedule unchanged, but answers still inform recall. Edit cards and Add card live in Manage sets. A study session fills the screen so other app tools stay out of your way.' },
                 { route: 'exam-arcade', sel: '#workspace-tabs', title: 'Practice games', text: 'Practice turns your sets into quick games: Streak Builder, Lightning Round, Survival, True or False and Memory Match. Answer with the 1\u20134 keys (T or F in True or False), build combos for bonus points and earn up to three stars. Practice Test mixes typing, choices and matching.' },
                 { route: 'multiplayer', sel: '#workspace-tabs', title: 'Play, connect and customize', text: 'Games hosts or joins a room with friends, or plays solo for coins. Buds shows who is online or in a game, with a Join button when a bud is hosting. Leaderboards compares progress, and the Shop has boxes you can open with coins to collect characters, hats and auras for your Locker.' },
-                { route: 'dashboard', sel: '.study-history-disclosure', title: 'Review without the clutter', text: 'Home keeps the next task and automatic clock up front, with schedule and GPA below. Expand Study history & weekly plan to review saved sessions, time by class and suggested practice. Completed work waiting for a score appears below; streaks and daily goals live in Play > Leaderboards.' },
+                { route: 'dashboard', sel: '.study-history-disclosure', title: 'Review without the clutter', text: 'Home keeps the next task and automatic clock up front, with schedule and GPA below. Expand Study history & weekly plan to review saved sessions, time by class and suggested practice. Completed work waiting for a score appears below; streaks and daily goals live in Games > Leaderboards.' },
                 { route: 'dashboard', sel: '#classes-nav-item:not(.hidden)', title: 'Classes for students and teachers', text: 'At a Parkway school there is nothing to join: when your teacher is on StudBud, their class and flashcard sets show up automatically for every course in your list. Teachers pick the courses they teach, then see each student\u2019s grades, missing work and study time, and publish flashcard sets the whole class can study.' },
-                { route: 'profile', sel: '#public-profile-card:not(.hidden), #guest-appearance:not(.hidden)', title: 'Keep private data private', text: 'Course discovery is off by default. Enable it in Public profile to find usernames of other opted-in students sharing a saved course at your school. Open a class in School and choose Find classmates. This is not an official roster and never shares grades, assignments or study history. Real-name and school-tag sharing have separate controls. Export your saved data from Settings.' },
-                { route: 'appearance', sel: '#ui-theme-select', title: 'Make it yours, keep it fast', text: 'Pick a color scheme and theme in Appearance. Games keep their full visuals and skip off-screen drawing to stay smooth. Open StudBud once online and it keeps working offline.' },
+                { route: 'profile', sel: '#public-profile-card:not(.hidden), #guest-appearance:not(.hidden)', title: 'Keep private data private', text: 'Course discovery is off by default and requires server support. When available, opt in from Public profile, then open a saved class and choose Find classmates. It only finds other opted-in students at your school, not an official roster, and never shares grades, assignments or study history. Real-name and school-tag sharing have separate controls. Export backups from Settings > Data & account.' },
+                { route: 'settings', sel: '#settings-view', title: 'Choose your app and study defaults', text: 'General settings choose your start page, default Planner status, typing style and question side. School & GPA, Appearance, Audio and Data & account have separate sections. Section links wrap on small screens instead of needing sideways scrolling.' },
+                { route: 'appearance', sel: '#ui-theme-select', title: 'Appearance & accessibility', text: 'Follow your device theme or choose light or dark. Set compact spacing, sound and performance options in their own settings sections. Reduced-motion preferences are respected automatically. Open StudBud once online and it keeps working offline.' },
                 { route: 'dashboard', title: 'Your first three steps', text: 'Import classes from Infinite Campus, add an upcoming quiz or assignment, then create a study set for it. Come back to Home each day to see what to work on next. Good luck!' }
             ];
         }
@@ -10016,6 +10079,39 @@
         }
 
         handleChange(event) {
+            const preference = {
+                'settings-start-page': ['startPage', ['dashboard', 'planner', 'flashcard', 'gpa']],
+                'settings-planner-default': ['plannerDefaultStatus', ['all', 'todo', 'overdue', 'awaiting', 'graded']],
+                'assignment-sort': ['plannerSort', ['due', 'priority', 'name', 'class']]
+            }[event.target.id];
+            if (preference) {
+                if (!preference[1].includes(event.target.value)) {
+                    window.StudBudDialogs.notify('Choose one of the available preferences.');
+                    return;
+                }
+                AppState.set('settings', { ...AppState.get('settings'), [preference[0]]: event.target.value });
+                if (preference[0] === 'plannerDefaultStatus') {
+                    document.getElementById('assignment-status-filter').value = event.target.value;
+                    this.plannerDefaultsInitialized = true;
+                }
+                this.renderAssignments();
+                const status = document.getElementById('preferences-save-status');
+                if (status) status.textContent = 'Preferences saved.';
+                return;
+            }
+            if (event.target.id === 'settings-study-mode' || event.target.id === 'settings-study-direction') {
+                const choices = event.target.id === 'settings-study-mode' ? ['reveal', 'type'] : ['front', 'back', 'mixed'];
+                if (!choices.includes(event.target.value)) {
+                    window.StudBudDialogs.notify('Choose one of the available study preferences.');
+                    return;
+                }
+                if (event.target.id === 'settings-study-mode') localStorage.setItem('studbud-type-answer', event.target.value === 'type' ? '1' : '0');
+                else localStorage.setItem('studbud-study-direction', event.target.value);
+                this.syncPreferences();
+                const status = document.getElementById('preferences-save-status');
+                if (status) status.textContent = 'Flashcard preferences saved on this device.';
+                return;
+            }
             if (event.target.id === 'admin-game-test-energy') {
                 const limited = event.target.value === 'limited';
                 document.getElementById('admin-game-test-reward-label').classList.toggle('hidden', !limited);
@@ -10703,6 +10799,12 @@
         async handleDataAction(action, id) {
             const courses = AppState.get('courses') || [];
             const assignments = AppState.get('assignments') || [];
+            if (action === 'clear-work-filters') {
+                document.getElementById('assignment-search').value = '';
+                document.getElementById('assignment-course-filter').value = '';
+                document.getElementById('assignment-status-filter').value = AppState.get('settings')?.plannerDefaultStatus || 'todo';
+                this.renderAssignments();
+            }
             if (action === 'open-class') {
                 Router.selectedClassCode = id;
                 Router.navigate('class');
@@ -11377,7 +11479,8 @@
         }
 
         async factoryReset() {
-            if (!await window.StudBudDialogs.confirm('Permanently delete all locally stored StudBud data?')) return;
+            if (!await window.StudBudDialogs.confirm('Clear classes, assignments, sets and study history on this device? Your online account will not be deleted, and synced data may download again.')) return;
+            await this.resetAutomaticStudy();
             await Promise.all(['flashcards', 'studyHistory', 'gameMetrics'].map(store => NexusDB.clear(store)));
             localStorage.removeItem(AppState.STORAGE_KEY);
             window.location.reload();

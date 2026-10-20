@@ -262,6 +262,30 @@ async function integration() {
     assert.deepEqual(sent, { id: 'sync', seconds: 45 });
     assert.equal(state.state.studyHistory[0].leaderboardSyncPending, false);
 
+    const cleared = [];
+    let reloaded = false, confirmed = false;
+    sandbox.window.StudBudDialogs = { confirm: async () => confirmed };
+    sandbox.window.location = { reload() { reloaded = true; } };
+    sandbox.NexusDB.clear = async table => {
+        assert.equal(app.studyTracker.sessions.size, 0, 'tracking must stop before local data is removed');
+        cleared.push(table);
+        stores.delete(table);
+    };
+    sandbox.localStorage.removeItem = key => {
+        assert.equal(cleared.length, 3);
+        storage.delete(key);
+    };
+    app.studyTracker.setContext({ key: 'clear-device', session: { source: 'flashcards' } });
+    await app.factoryReset();
+    assert.equal(cleared.length, 0, 'cancelling local removal keeps study data and tracking intact');
+    assert.equal(app.studyTracker.sessions.size, 1);
+    confirmed = true;
+    now += 1000;
+    await app.factoryReset();
+    assert.deepEqual(cleared, ['flashcards', 'studyHistory', 'gameMetrics']);
+    assert.equal(storage.has(state.STORAGE_KEY), false);
+    assert.equal(reloaded, true);
+
     assert.match(read('supabase-setup.sql'), /on conflict \(user_id, entry_id\) do update\s+set seconds = greatest\(studbud_study_time_entries.seconds, excluded.seconds\)/);
     assert.match(read('service-worker.js'), /'\.\/studyTracker\.js'/);
     assert.match(read('index.html'), /id="settings-target-gpa" readonly/);

@@ -23,8 +23,9 @@ const document = { body, documentElement: { style: {} }, activeElement: null,
     getElementById: id => elements.get(id) || null, querySelectorAll: () => [],
     querySelector: () => null, addEventListener() {} };
 const media = { matches: true, listeners: [], addEventListener(event, listener) { this.listeners.push(listener); } };
+const preferences = new Map();
 const sandbox = { console, Date, Math, Set, Map, document, setTimeout, clearTimeout,
-    localStorage: { getItem: () => null, setItem() {} }, EventBus: { emit() {} },
+    localStorage: { getItem: key => preferences.get(key) || null, setItem: (key, value) => preferences.set(key, value) }, EventBus: { emit() {} },
     Soundscape: { stopAll() {} },
     window: { FlashcardTools, SM2Engine, scrollY: 120, scrollTo() {}, matchMedia: () => media, location: { hash: '' } } };
 vm.createContext(sandbox);
@@ -86,6 +87,34 @@ for (const [route, page] of [['flashcard', 'practice'], ['study-manage', 'manage
     assert.match(elements.get('workspace-tabs').innerHTML, new RegExp(`data-target="${route}-view" aria-current="page"`));
 }
 assert.equal(renders, 3);
+const settingsView = element('settings-view'), settingsPanels = ['general', 'school', 'data'].map(page => {
+    const panel = element(); panel.dataset.settingsPanel = page; return panel;
+});
+settingsView.querySelectorAll = () => settingsPanels;
+elements.set(settingsView.id, settingsView);
+for (const id of ['settings-page-title', 'settings-page-description', 'settings-start-page',
+    'settings-planner-default', 'settings-study-mode', 'settings-study-direction']) elements.set(id, element(id));
+document.querySelectorAll = selector => selector === '.view' ? [view, settingsView] : [];
+for (const [route, panel] of [['settings', 'general'], ['settings-school', 'school'], ['settings-data', 'data']]) {
+    sandbox.Router.navigate(route);
+    assert.equal(settingsView.classList.contains('hidden'), false);
+    assert.equal(view.classList.contains('hidden'), true);
+    for (const item of settingsPanels) assert.equal(item.classList.contains('hidden'), item.dataset.settingsPanel !== panel);
+}
+app.renderAssignments = () => {};
+app.handleChange({ target: { id: 'settings-start-page', value: 'planner' } });
+sandbox.window.location.hash = '';
+sandbox.Router.handleHashChange();
+assert.equal(sandbox.Router.activeRoute, 'planner', 'a fresh launch honors the saved start page');
+sandbox.window.location.hash = '#/gpa';
+sandbox.Router.handleHashChange();
+assert.equal(sandbox.Router.activeRoute, 'gpa', 'explicit links override the start-page preference');
+app.handleChange({ target: { id: 'settings-study-mode', value: 'type' } });
+app.handleChange({ target: { id: 'settings-study-direction', value: 'back' } });
+assert.equal(preferences.get('studbud-type-answer'), '1');
+assert.equal(app.studyDirection(), 'back');
+assert.equal(elements.get('settings-study-mode').value, 'type');
+assert.equal(elements.get('workspace-tabs').dataset.pageCount, '3');
 app.ensureSchemeButtons = app.syncMixerControls = app.syncMixerDrawer = () => {};
 state.settings = { theme: 'system' };
 app.applyAppearance();

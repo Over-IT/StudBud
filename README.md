@@ -207,7 +207,7 @@ Run `node tests/infinite-campus-import.cjs` for Infinite Campus course matching 
 
 ## Import from Infinite Campus
 
-Use **Classes → Import from Infinite Campus** (also in **Settings → Data Management**) to bring in this school year's classes, academic grade categories and weights, graded work and missing assignments, class periods and times, and the school calendar. **Citizenship is a separate grade and is excluded**, along with every assignment under that grading task, even if its category is named Practice or Homework.
+Use **My classes → Import from Infinite Campus** (also in **Settings → Data & account**) to bring in this school year's classes, academic grade categories and weights, graded work and missing assignments, class periods and times, and the school calendar. **Citizenship is a separate grade and is excluded**, along with every assignment under that grading task, even if its category is named Practice or Homework.
 
 1. On a computer, drag the **StudBud Import** button to your bookmarks bar (one time only; press Ctrl+Shift+B if the bar is hidden). On a phone/tablet, open the phone instructions, choose **Copy bookmark URL**, bookmark any page as **StudBud Import**, then edit that bookmark and replace its entire address with the copied URL, including `javascript:`.
 2. Choose **Open Infinite Campus** and sign in. PCHS students get the Parkway Campus address automatically; anyone else can paste their own under **Different Campus address?**.
@@ -269,7 +269,11 @@ Choose **Continue as guest** on the sign-in screen to use StudBud without an acc
 
 Edits and study history stay in local storage/IndexedDB. Cached accounts reconnect against the last sync baseline; first-time account connections merge local-only records rather than discarding offline decks. Same-field conflicts still require an explicit cloud/device resolution. Shared-set edits made offline are queued and retried after account connection; later edits or deletion during publication cannot be overwritten by its acknowledgement. The service worker caches public shell/library assets only, never Supabase account/API responses. A fresh device needs an initial online load; `file:` URLs do not support service-worker offline installation.
 
-The main navigation separates **Today, My classes, Planner, Study, Connect & play, Profile and Settings**. Phones use a five-item bottom dock, with Profile and Settings available from the header. Secondary navigation uses straightforward page links rather than nested sidebar entries or oversized pills. Existing routes and class links remain available.
+The main navigation separates **Home, My classes, Planner, Study, Games, Profile and Settings**. Phones use a five-item bottom dock, with Profile and Settings available from the header. Secondary navigation uses straightforward page links rather than nested sidebar entries or oversized pills. Links wrap into readable rows on narrow screens instead of requiring horizontal scrolling. Existing routes and class links remain available.
+
+**Planner** keeps the work lists prominent and folds suggested next tasks/study preparation into an expandable section. Status buttons replace the duplicate status dropdown; counts follow your search and class filter, and To do includes overdue work in both its count and results. Sort by due date, suggested priority, assignment name or class name. Reset filters restores your preferred default without changing saved tasks.
+
+**Settings** separates General, School & GPA, Appearance, Audio, Data & account, and Help. General adds a saved startup page and default Planner status, plus device-local flashcard answer-style/question-side defaults that reuse the controls available during study. Opening a direct page link overrides the startup preference. School profile edits still require Save; General preferences save immediately. Local data removal is labeled separately from online account deletion.
 
 **Study** has separate **Practice**, **Manage sets**, **Discover**, and **Tests & drills** pages. Practice keeps studying first; Manage sets contains creating, editing, importing, organizing and sharing; Discover is a dedicated community library. Switching pages preserves your search and saved materials. **Focus practice** studies only active cards with incomplete recall, respects scheduler rest periods and updates the normal review schedule. The percentage ring and set menu still open the focus/weak-card lists; Cram and starred practice remain available from the set menu.
 
@@ -485,9 +489,9 @@ Apply the updated `studbud_record_study_time` function in [`supabase-setup.sql`]
 
 Reach **5 minutes per UTC day** to complete the daily goal and extend your streak. The Leaderboards page shows your streak (with a warning and countdown when it's at risk), the last 7 days, the next streak milestone, your best streak, days the goal was met and all-time study time. Study-time rankings can be viewed for **today, this week, this month or all time**, for **everyone or just you and your buds**, with each player's current streak. A "your rank" line shows where you stand and how much more study it takes to pass the next person. Usernames are visible to other signed-in students. Unsynced session times are kept locally and retried when the connection returns. Study time is recorded by the signed-in client, so leaderboard totals are intended for motivation rather than official verification.
 
-### Today and class progress
+### Home and class progress
 
-Today prioritizes the next tasks, upcoming assessments, automatic study clock, schedule and GPA. Study history and completed work awaiting a grade are available without crowding the main actions. There is no redundant in-app streak widget; streaks remain on Leaderboards.
+Home prioritizes the next tasks, upcoming assessments, automatic study clock, schedule and GPA. Study history and completed work awaiting a grade are available without crowding the main actions. There is no redundant in-app streak widget; streaks remain on Leaderboards.
 
 Class bars show the actual grade, a separate target marker, and the gap in percentage points or “Goal reached,” not a misleading percentage of the target. Extra credit above 100% remains visible. Ungraded classes do not imply a zero grade. Adding or editing a class rejects duplicate catalog codes or normalized names within the same school and overlapping semesters; separate S1/S2 classes remain distinct. Reimporting Campus work updates existing import identities rather than adding copies.
 

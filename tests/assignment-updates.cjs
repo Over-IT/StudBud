@@ -24,6 +24,7 @@ const sandbox = {
     document: { addEventListener() {}, getElementById: id => nodes.get(id) || null, querySelectorAll: () => [] },
     AppState: {
         get: key => state[key],
+        set: (key, value) => { state[key] = value; },
         updateAssignment(id, updates) {
             state.assignments = state.assignments.map(item => item.id === id ? { ...item, ...updates } : item);
         }
@@ -119,6 +120,41 @@ async function run() {
     assert.equal(state.assignments.at(-1).icMissing, false);
     assert.equal(app.assignmentState(state.assignments.at(-1)), 'graded');
     assert.match(read('index.html'), /id="planner-awaiting-grades"/);
+    state.courses.push({ code: 'biology', title: 'Biology' });
+    state.assignments = [
+        { id: 'zulu', title: 'Zulu homework', courseCode: 'math', dueDate: '2099-01-01', status: 'pending' },
+        { id: 'alpha', title: 'Alpha homework', courseCode: 'biology', dueDate: '2099-02-01', status: 'pending' },
+        { id: 'overdue', title: 'Middle homework', courseCode: 'math', dueDate: '2000-01-01', status: 'pending' }
+    ];
+    node('assignment-status-summary');
+    node('assignment-search').value = '';
+    node('assignment-course-filter').value = '';
+    node('assignment-status-filter').value = 'todo';
+    render();
+    assert.match(node('assignment-status-summary').innerHTML, /data-status="todo"[\s\S]*?<strong>3<\/strong>/,
+        'To do count includes the overdue work its filter actually shows');
+    assert.match(node('assignment-status-summary').innerHTML, /data-status="all"/);
+    app.handleChange({ target: { id: 'assignment-sort', value: 'name' } });
+    let sorted = node('assignment-body').innerHTML;
+    assert.ok(sorted.indexOf('Alpha homework') < sorted.indexOf('Middle homework'));
+    assert.ok(sorted.indexOf('Middle homework') < sorted.indexOf('Zulu homework'));
+    node('assignment-course-filter').value = 'biology';
+    render();
+    assert.match(node('assignment-status-summary').innerHTML, /data-status="all"[\s\S]*?<strong>1<\/strong>/,
+        'status counts follow the selected class and search instead of misleadingly counting other work');
+    node('assignment-course-filter').value = '';
+    app.handleChange({ target: { id: 'assignment-sort', value: 'class' } });
+    sorted = node('assignment-body').innerHTML;
+    assert.ok(sorted.indexOf('Alpha homework') < sorted.indexOf('Middle homework'));
+    state.settings.plannerDefaultStatus = 'all';
+    node('assignment-search').value = 'no match';
+    node('assignment-course-filter').value = 'math';
+    node('assignment-status-filter').value = 'graded';
+    await app.handleDataAction('clear-work-filters');
+    assert.equal(node('assignment-search').value, '');
+    assert.equal(node('assignment-course-filter').value, '');
+    assert.equal(node('assignment-status-filter').value, 'all');
+    assert.match(node('assignment-body').innerHTML, /Alpha homework/);
     console.log('Assignment updates passed: Home/Planner actions, escaped titles, waiting-grade access independent of filters, undo and saved zero grades.');
 }
 run().catch(error => { console.error(error); process.exitCode = 1; });

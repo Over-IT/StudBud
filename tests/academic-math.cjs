@@ -161,7 +161,7 @@ const app = sandbox.app;
     for (const id of ['planner-next-task', 'assignment-status-summary', 'assignment-search', 'assignment-course-filter', 'assignment-status-filter', 'assignment-result-count', 'assignment-body', 'planner-study-list', 'planner-assessment-body', 'quad-1-list', 'quad-2-list', 'quad-3-list', 'quad-4-list']) {
         assert.equal(plannerMarkup.split(`id="${id}"`).length - 1, 1, `${id} remains unique`);
     }
-    assert.match(html, /value="todo" selected/);
+    assert.match(html, /id="assignment-status-filter" type="hidden" value="todo"/);
     assert.match(html, /id="delete-assignment-editor-btn"[^>]*data-action="delete-assignment"/);
     assert.match(appSource, /deleteButton\.classList\.toggle\('hidden', !assignment\)/, 'delete is available only when editing saved work');
 }

@@ -84,7 +84,7 @@
                 <ul class="nav-links">
                     <li class="nav-section-label" aria-hidden="true">Your workspace</li>
                     <li class="nav-item active" data-target="dashboard-view" role="button" tabindex="0" aria-current="page">
-                        <i class="fas fa-home"></i> <span>Today</span>
+                        <i class="fas fa-home"></i> <span>Home</span>
                     </li>
                     <li class="nav-item" data-target="gpa-view" data-also="grade-scenarios-view analytics-view class-detail-view" role="button" tabindex="0">
                         <i class="fas fa-graduation-cap"></i> <span>My classes</span>
@@ -121,7 +121,7 @@
                     </li>
                     <li class="nav-section-label" aria-hidden="true">Community</li>
                     <li class="nav-item" data-target="multiplayer-view" data-also="friends-view leaderboard-view" role="button" tabindex="0">
-                        <i class="fas fa-users"></i> <span>Connect &amp; play</span><strong id="friend-nav-badge" class="sidebar-coin-count hidden">0</strong>
+                        <i class="fas fa-users"></i> <span>Games</span><strong id="friend-nav-badge" class="sidebar-coin-count hidden">0</strong>
                     </li>
                     <li class="nav-item" data-target="profile-view" data-also="shop-view inventory-view" role="button" tabindex="0">
                         <i class="fas fa-user-astronaut"></i> <span>Profile</span><strong id="multiplayer-sidebar-coins" class="sidebar-coin-count">0 <i class="fas fa-coins"></i></strong>
@@ -204,7 +204,7 @@
                 </div>
             </aside>
             <aside id="site-notice" class="site-notice hidden" aria-label="Site announcement">
-                <div><strong>Announcement</strong><p id="site-notice-message"></p><small id="site-notice-metadata"></small><small>Past announcements are available at the bottom of About.</small><p id="site-notice-status" role="status"></p></div>
+                <div><strong>Announcement</strong><p id="site-notice-message"></p><small id="site-notice-metadata"></small><small>Past announcements are available in Settings &gt; Help.</small><p id="site-notice-status" role="status"></p></div>
                 <button type="button" class="icon-btn" data-action="dismiss-site-notice" aria-label="Dismiss announcement"><i class="fas fa-times" aria-hidden="true"></i></button>
             </aside>
 
@@ -214,7 +214,7 @@
                 <!-- 1. Dashboard View -->
                 <section id="dashboard-view" class="view student-workspace active">
                     <div class="workspace-welcome">
-                        <div><span class="workspace-eyebrow">Your daily launchpad</span><h2>One next step. You've got this.</h2><p>Choose a task or open a set. We'll track the active study time.</p></div>
+                        <div><h2>Overview</h2><p>Your upcoming work, classes and study progress.</p></div>
                         <div class="workspace-shortcuts"><button class="primary-btn" type="button" data-target="flashcard-view"><i class="fas fa-layer-group" aria-hidden="true"></i> Study a set</button><button class="secondary-btn" type="button" data-target="planner-view"><i class="fas fa-list-check" aria-hidden="true"></i> View tasks</button></div>
                     </div>
                     <div class="dashboard-grid">
@@ -371,12 +371,14 @@
                 <section id="planner-view" class="view student-workspace hidden">
                     <div class="planner-grid">
                         <header class="planner-page-header">
-                            <div><span class="workspace-eyebrow">Less overwhelm, more progress</span><h2>Make a plan. Get it done.</h2><p class="settings-hint">Choose a next task, update the time left, and mark it done when you're finished.</p></div>
+                            <div><h2>Planner</h2><p class="settings-hint">Track assignments, prepare for tests, and update your progress.</p></div>
                             <div class="assignment-quick-actions">
                                 <button type="button" class="primary-btn" data-action="planner-add-assignment"><i class="fas fa-plus" aria-hidden="true"></i> Add assignment</button>
                                 <button type="button" class="secondary-btn" data-action="add-quiz"><i class="fas fa-plus" aria-hidden="true"></i> Add quiz / test</button>
                             </div>
                         </header>
+                        <details class="planner-suggestions">
+                            <summary>Suggested next task &amp; study plan</summary>
                         <div class="planner-overview">
                             <section class="glass-card planner-focus" aria-labelledby="planner-next-heading">
                                 <header class="planner-section-header"><span class="planner-eyebrow">Your next step</span><h3 id="planner-next-heading">Work on next</h3><p class="settings-hint">One assignment to start with. Suggestions are independent of the filters below.</p></header>
@@ -387,11 +389,11 @@
                                 <div id="planner-study-list" class="study-guidance-list" aria-live="polite"></div>
                             </section>
                         </div>
+                        </details>
                         <section class="glass-card full-width planner-work" aria-labelledby="planner-work-heading">
                             <header class="planner-section-header">
-                                <span class="planner-eyebrow">Your task lists</span>
-                                <h2 id="planner-work-heading">Manage your work</h2>
-                                <p class="settings-hint">Choose a status, search, or filter by class. Mark work done or update its grade right in the list.</p>
+                                <h2 id="planner-work-heading">Your assignments &amp; assessments</h2>
+                                <p class="settings-hint">Select a status to see matching work. Mark it done or add a grade right in the list.</p>
                             </header>
                             <div class="planner-work-filters">
                                 <div id="assignment-status-summary" class="assignment-status-summary" aria-label="Work by status"></div>
@@ -399,17 +401,12 @@
                                     <label class="assignment-search-field" for="assignment-search"><i class="fas fa-search" aria-hidden="true"></i><span class="sr-only">Search assignments, quizzes and tests</span><input id="assignment-search" type="search" placeholder="Search work or classes"></label>
                                     <label for="assignment-course-filter" class="sr-only">Filter by class</label>
                                     <select id="assignment-course-filter"><option value="">All classes</option></select>
-                                    <label for="assignment-status-filter" class="sr-only">Filter by status</label>
-                                    <select id="assignment-status-filter">
-                                        <option value="all">All work</option>
-                                        <option value="todo" selected>To do</option>
-                                        <option value="overdue">Overdue</option>
-                                        <option value="awaiting">Done, waiting for grade</option>
-                                        <option value="graded">Graded</option>
-                                    </select>
+                                    <input id="assignment-status-filter" type="hidden" value="todo">
+                                    <label for="assignment-sort" class="sr-only">Sort work</label>
+                                    <select id="assignment-sort"><option value="due">Due date</option><option value="priority">Suggested priority</option><option value="name">Assignment name</option><option value="class">Class name</option></select>
                                     <span id="assignment-result-count" class="assignment-result-count" aria-live="polite"></span>
+                                    <button type="button" class="text-btn" data-action="clear-work-filters">Reset filters</button>
                                 </div>
-                                <p class="settings-hint">These filters apply to the assignment and quiz/test lists below, not your suggestions or grade inbox.</p>
                             </div>
                             <section class="planner-work-section" aria-labelledby="planner-assignment-heading">
                                 <header class="planner-section-header">
@@ -534,7 +531,7 @@
                 <!-- 4. Flashcard Studio View -->
                 <section id="flashcard-view" class="view student-workspace hidden">
                     <div class="view-header workspace-heading">
-                        <div><span class="workspace-eyebrow">Your learning space</span><h2 id="study-page-title">Ready to study?</h2><p id="study-page-description">Choose a set, practice the terms needing focus, or try a test.</p></div>
+                        <div><h2 id="study-page-title">Practice</h2><p id="study-page-description">Choose a set, practice the terms needing focus, or try a test.</p></div>
                         <div class="actions" data-study-panel="practice"><button type="button" class="secondary-btn" data-target="study-manage-view"><i class="fas fa-folder-open" aria-hidden="true"></i> Add or edit sets</button></div>
                         <div class="actions hidden" data-study-panel="manage"><button id="create-deck-btn" class="primary-btn"><i class="fas fa-folder-plus"></i> New study set</button><button class="secondary-btn" type="button" data-target="importer-view"><i class="fas fa-file-import" aria-hidden="true"></i> Import cards</button></div>
                     </div>
@@ -547,7 +544,7 @@
                     </div>
                     <section data-study-panel="practice manage" aria-label="Your study sets">
                     <div class="my-deck-heading">
-                        <h3>Your decks</h3>
+                        <h3>Your sets</h3>
                         <label for="my-deck-search" class="sr-only">Search your decks by title or class</label>
                         <input id="my-deck-search" type="search" maxlength="100" placeholder="Search your decks or classes">
                         <div class="my-deck-tools">
@@ -569,7 +566,7 @@
                     <details class="study-library-help" data-study-panel="practice"><summary><i class="fas fa-circle-info" aria-hidden="true"></i> How recall &amp; study time work</summary><p><strong>Recall is different from time spent.</strong> Recall estimates use up to four recent answers; the clock counts active practice. Practice focus cards skips terms with full recall and respects paused cards and scheduled rest. Tap a percentage to inspect terms. Cram in the set menu goes through every card without changing review dates.</p></details>
                     <section class="glass-card community-deck-browser hidden" data-study-panel="discover" aria-label="Discover community sets">
                         <div class="community-heading">
-                            <div><h3>Community decks</h3><p>Find sets shared by StudBud students. Your own decks stay private unless you choose to share them.</p></div>
+                            <div><h3>Community sets</h3><p>Find sets shared by StudBud students. Your own sets stay private unless you choose to share them.</p></div>
                             <span class="community-badge"><i class="fas fa-users"></i> Shared library</span>
                         </div>
                         <form id="community-deck-search-form" class="community-search-form">
@@ -1062,14 +1059,14 @@
                     <div class="glass-card about-card">
                         <h3>How to use it</h3>
                         <ul class="about-list">
-                            <li><strong>Dashboard:</strong> see upcoming quizzes, study suggestions and your progress at a glance. Add a quiz or test to get a study plan.</li>
-                            <li><strong>GPA &amp; Hypothetical Grades:</strong> enter classes and assignments (decimals like 23.21/25 work), then try possible scores without changing your actual grades.</li>
-                            <li><strong>Import from Infinite Campus:</strong> on the GPA page, bring in your classes, grades, assignments, categories, class times and school calendar in a few clicks.</li>
-                            <li><strong>Planner, Calendar &amp; Schedule:</strong> track assignments, due dates and your school day.</li>
-                            <li><strong>Flashcards &amp; Import Cards:</strong> create or import sets and study anytime. Learning progress helps prioritize practice; flashcards are not assignments and have no deadlines.</li>
+                            <li><strong>Home:</strong> see upcoming work, your automatic study clock and progress at a glance. Add a quiz or test to get a study plan.</li>
+                            <li><strong>My classes:</strong> enter classes and grades (decimals like 23.21/25 work). What-if grades lets you try possible scores without changing your actual grades.</li>
+                            <li><strong>Import from Infinite Campus:</strong> open My classes to bring in grades, assignments, categories, class times and the school calendar. The import dialog includes computer and phone instructions.</li>
+                            <li><strong>Planner:</strong> filter and sort assignments, update time remaining, or use Calendar and Class schedule for dates and your school day.</li>
+                            <li><strong>Study:</strong> Practice is for studying, Manage sets is for creating and editing, and Discover is for community materials. Focus practice prioritizes terms needing recall using recent answers. Tests &amp; drills offers more ways to practice.</li>
                             <li><strong>Singleplayer:</strong> play the same game modes on your own with computer players. Host or join a multiplayer room to play with other students. Flashcard quizzes and practice tests remain available separately.</li>
                             <li><strong>Leaderboards &amp; Shop:</strong> compete on study time and spend coins on avatar items.</li>
-                            <li><strong>Settings:</strong> change your username (once a week), theme, sounds, and replay the tutorial.</li>
+                            <li><strong>Settings:</strong> choose a start page and study defaults, edit school/GPA details, adjust appearance or audio, export backups and replay the tutorial. Change your username and privacy options in Profile.</li>
                         </ul>
                     </div>
                     <div class="glass-card about-card">
@@ -1084,15 +1081,34 @@
                     </div>
                 </section>
 
-                <section id="settings-view" class="view hidden">
-                    <nav class="settings-tabs" aria-label="Settings sections">
-                        <button type="button" class="settings-tab active" data-target="settings-view"><i class="fas fa-user-cog"></i> Profile &amp; Data</button>
-                        <button type="button" class="settings-tab" data-target="appearance-view"><i class="fas fa-palette"></i> UI</button>
-                        <button type="button" class="settings-tab" data-target="sound-view"><i class="fas fa-volume-high"></i> Sound</button>
-                    </nav>
+                <section id="settings-view" class="view student-workspace hidden">
+                    <header class="view-header"><div><h2 id="settings-page-title">General settings</h2><p id="settings-page-description">Choose how StudBud opens and how you prefer to study.</p></div></header>
                     <div class="settings-grid">
-                        <div class="glass-card">
-                            <h2>Student Profile</h2>
+                        <section class="glass-card" data-settings-panel="general">
+                            <h3>App preferences</h3>
+                            <label for="settings-start-page">Open StudBud to</label>
+                            <select id="settings-start-page"><option value="dashboard">Home</option><option value="planner">Planner</option><option value="flashcard">Study</option><option value="gpa">My classes</option></select>
+                            <p class="settings-hint">Used when you open the app without a page link. Direct links still open their own page.</p>
+                            <label for="settings-planner-default">Default Planner status</label>
+                            <select id="settings-planner-default"><option value="todo">To do (including overdue)</option><option value="all">All work</option><option value="overdue">Overdue</option><option value="awaiting">Waiting for grade</option><option value="graded">Graded</option></select>
+                            <p class="settings-hint">Preferences save automatically and sync with your account.</p>
+                        </section>
+                        <section class="glass-card" data-settings-panel="general">
+                            <h3>Flashcard preferences</h3>
+                            <label for="settings-study-mode">Answer style</label>
+                            <select id="settings-study-mode"><option value="reveal">Think, then reveal</option><option value="type">Type before revealing</option></select>
+                            <label for="settings-study-direction">Ask with</label>
+                            <select id="settings-study-direction"><option value="front">Term</option><option value="back">Definition</option><option value="mixed">Mixed sides</option></select>
+                            <p class="settings-hint">Saved on this device. You can also change these during a study session.</p>
+                        </section>
+                        <section class="glass-card" data-settings-panel="general">
+                            <h3>Privacy &amp; personalization</h3>
+                            <p>Choose what other students can see, or adjust the app for your device.</p>
+                            <div class="settings-actions"><button type="button" class="secondary-btn" data-action="edit-public-profile">Public profile &amp; privacy</button><button type="button" class="secondary-btn" data-target="appearance-view">Appearance &amp; accessibility</button><button type="button" class="secondary-btn" data-target="sound-view">Audio preferences</button></div>
+                            <p id="preferences-save-status" class="settings-hint" role="status" aria-live="polite"></p>
+                        </section>
+                        <div class="glass-card hidden" data-settings-panel="school">
+                            <h3>School &amp; student details</h3>
                             <div class="form-group">
                                 <label for="settings-school">School</label>
                                 <select id="settings-school"><option value="pchs">Parkway Central High School</option><option value="pnhs">Parkway North High School</option><option value="pshs">Parkway South High School</option><option value="pwhs">Parkway West High School</option><option value="other">Other / not listed</option></select>
@@ -1172,14 +1188,14 @@
                             </div>
                         </div>
 
-                        <div class="glass-card hidden" id="tutorial-card">
+                        <div data-settings-panel="general"><div class="glass-card hidden" id="tutorial-card">
                             <h2>Tutorial</h2>
                             <p>Learn the workflow from importing classes to planning, studying and playing. Jump to any topic in the tour.</p>
                             <button class="primary-btn" type="button" data-action="start-tutorial"><i class="fas fa-circle-play"></i> Replay tutorial</button>
-                        </div>
+                        </div></div>
 
-                        <div class="glass-card">
-                            <h2>Data Management</h2>
+                        <div class="glass-card hidden" data-settings-panel="data">
+                            <h3>Account &amp; saved data</h3>
                             <p>Your classes, grades, flashcards and history are saved on this device, including offline. Connect an account to sync across devices. Offline sharing updates wait for reconnection; purchases and hosted matches require internet.</p>
                             <p id="data-save-status" class="data-save-status" role="status" aria-live="polite">Checking local save status…</p>
                             <p>Signed in as <strong id="account-name">—</strong></p>
@@ -1189,21 +1205,17 @@
                             </div>
                             <p class="settings-hint"><a href="privacy.html" target="_blank" rel="noopener">Privacy policy &amp; advertising</a></p>
                             <div class="danger-zone">
-                                <h4>Danger Zone</h4>
-                                <button id="factory-reset-btn" class="danger-btn"><i class="fas fa-trash-alt"></i> Factory Reset (Delete All Data)</button>
+                                <h4>Remove local study data</h4>
+                                <p class="settings-hint">Removes classes, assignments, sets and history on this device. Your online account is not deleted; synced data may download again.</p>
+                                <button id="factory-reset-btn" class="danger-btn"><i class="fas fa-trash-alt"></i> Clear device study data</button>
                             </div>
                         </div>
                     </div>
                 </section>
 
                 <section id="appearance-view" class="view hidden">
-                    <nav class="settings-tabs" aria-label="Settings sections">
-                        <button type="button" class="settings-tab" data-target="settings-view"><i class="fas fa-user-cog"></i> Profile &amp; Data</button>
-                        <button type="button" class="settings-tab active" data-target="appearance-view"><i class="fas fa-palette"></i> UI</button>
-                        <button type="button" class="settings-tab" data-target="sound-view"><i class="fas fa-volume-high"></i> Sound</button>
-                    </nav>
                     <div class="view-header">
-                        <div><h2>UI Settings</h2><p class="study-guidance-intro">Personalize StudBud’s colors and layout. Changes are synced to your account.</p></div>
+                        <div><h2>Appearance &amp; accessibility</h2><p class="study-guidance-intro">Adjust your theme, layout and visual preferences.</p></div>
                     </div>
                     <div class="appearance-grid">
                         <section class="glass-card">
@@ -1241,13 +1253,8 @@
                 </section>
 
                 <section id="sound-view" class="view hidden">
-                    <nav class="settings-tabs" aria-label="Settings sections">
-                        <button type="button" class="settings-tab" data-target="settings-view"><i class="fas fa-user-cog"></i> Profile &amp; Data</button>
-                        <button type="button" class="settings-tab" data-target="appearance-view"><i class="fas fa-palette"></i> UI</button>
-                        <button type="button" class="settings-tab active" data-target="sound-view"><i class="fas fa-volume-high"></i> Sound</button>
-                    </nav>
                     <div class="view-header">
-                        <div><h2>Sound Settings</h2><p class="study-guidance-intro">Control sound effects. Ambient study sounds are available while you study flashcards or play solo study games. Saved on this device.</p></div>
+                        <div><h2>Audio settings</h2><p class="study-guidance-intro">Control sound effects. Ambient study sounds are available while you study flashcards or play solo study games. Saved on this device.</p></div>
                     </div>
                     <div class="appearance-grid">
                         <section class="glass-card">
