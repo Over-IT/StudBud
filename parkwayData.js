@@ -31,6 +31,7 @@ window.PCHS_GRADUATION_REQUIREMENTS = window.PARKWAY_GRADUATION_REQUIREMENTS;
 // 2. GRADE SCALE & GPA MAPPING (Parkway School District official profile)
 // Note: Parkway utilizes a +0.5 weighting system for standard Honors/AP 
 // grades, but an A+ (formerly 'H') in an Honors/AP course receives a full 5.0.
+// A+ only exists for weighted (Honors/AP) classes; unweighted classes top out at A.
 // ============================================================================
 window.PARKWAY_GRADE_SCALE = [
     { letter: "A+", minPct: 97.0, maxPct: 120.0, unweighted: 4.0, weighted: 5.0 }, 
@@ -50,6 +51,11 @@ window.PARKWAY_GRADE_SCALE = [
 
 window.PCHS_GRADE_SCALE = window.PARKWAY_GRADE_SCALE;
 
+// Parkway scale for unweighted classes: no A+, so A covers everything from 93%.
+window.PARKWAY_UNWEIGHTED_GRADE_SCALE = window.PARKWAY_GRADE_SCALE
+    .filter(grade => grade.letter !== 'A+')
+    .map(grade => grade.letter === 'A' ? { ...grade, maxPct: window.PARKWAY_GRADE_SCALE[0].maxPct } : { ...grade });
+
 window.STUDBUD_OTHER_GRADE_SCALE = window.PARKWAY_GRADE_SCALE.map(grade => ({
     ...grade,
     weighted: Math.min(5, grade.unweighted + (grade.unweighted > 0 ? 1 : 0))
@@ -63,6 +69,25 @@ window.studbudGradeScale = () => {
         return window.STUDBUD_OTHER_GRADE_SCALE;
     }
     return window.PARKWAY_GRADE_SCALE;
+};
+
+// The letter grades a specific class can earn. Without a class, the full scale is returned.
+window.studbudGradeScaleFor = course => {
+    const scale = window.studbudGradeScale();
+    if (scale === window.PARKWAY_GRADE_SCALE && course && !course.isWeighted) return window.PARKWAY_UNWEIGHTED_GRADE_SCALE;
+    return scale;
+};
+
+window.studbudGradeForPercentage = (percentage, course) => {
+    const grade = window.studbudGradeScaleFor(course).slice().sort((a, b) => b.minPct - a.minPct).find(item => percentage >= item.minPct);
+    return grade ? grade.letter : null;
+};
+
+// Maps a saved letter to one the class can earn (a stale A+ on an unweighted Parkway class becomes A).
+window.studbudGradeLetterFor = (letter, course) => {
+    const value = String(letter || '').toUpperCase();
+    if (value === 'A+' && !window.studbudGradeScaleFor(course).some(item => item.letter === 'A+')) return 'A';
+    return value;
 };
 
 // ============================================================================

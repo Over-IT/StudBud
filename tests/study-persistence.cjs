@@ -98,6 +98,52 @@ async function run() {
     assert.equal(SM2.createSession([weak, readyLearning], { now, includeAll: true }).next(now).id, 'ready',
         'learning-step timing still takes precedence');
     {
+        const options = { now, includeAll: true, learnAheadAll: false, learnAheadMinutes: 0, fuzz: false };
+        const spaced = SM2.createSession([{ id: 'first' }, { id: 'second' }], options);
+        const first = spaced.next(now);
+        spaced.answer(first, 'good', now);
+        const second = spaced.next(now);
+        assert.notEqual(second.id, first.id, 'Good introduces another card instead of immediately repeating the first');
+        spaced.answer(second, 'hard', now);
+        assert.equal(spaced.next(now + 1000), null, 'learning delays are honored when only resting cards remain');
+        assert.equal(spaced.remaining, 2, 'resting cards remain saved and are not falsely marked graduated');
+        assert.equal(spaced.next(now + 330000).id, second.id, 'Hard returns at its actual learning step');
+        assert.equal(first.state, 'learning');
+        assert.equal(first.step, 1, 'Good advances learning without needing Easy');
+        const reloaded = SM2.createSession(clone([first, second]), options);
+        assert.equal(reloaded.next(now + 1000), null, 'reopening a set cannot bypass the learning delay');
+        const learning = Array.from({ length: 5 }, (_, i) => ({ id: `learning-${i}`, state: 'learning',
+            step: 1, nextReviewDate: new Date(now - 1).toISOString() }));
+        const balanced = SM2.createSession([...learning, { id: 'brand-new' }], options);
+        for (let i = 0; i < 2; i++) {
+            const repeat = balanced.next(now);
+            assert.match(repeat.id, /^learning-/);
+            balanced.answer(repeat, 'again', now);
+        }
+        assert.equal(balanced.next(now).id, 'brand-new', 'at most two due learning answers can precede an unseen card');
+        assert.equal(balanced.snapshot(now)[0].id, balanced.next(now).id, 'queue snapshot matches interleaved selection');
+        const freshBeforeEarly = SM2.createSession([weak, { id: 'new-before-early' }], options);
+        assert.equal(freshBeforeEarly.next(now).id, 'new-before-early', 'a weak future review never crowds out a new card');
+        freshBeforeEarly.answer(freshBeforeEarly.next(now), 'easy', now);
+        assert.equal(freshBeforeEarly.next(now).id, 'weak', 'optional early review remains available after fresh material');
+        assert.equal(spaced.next(now + 600000).id, second.id, 'earlier learning deadline wins when multiple cards become ready');
+        const restingDeck = { id: 'resting-deck', cards: [{ id: 'resting-card',
+            ...SM2.schedule({ id: 'resting-card' }, 'good', { now: Date.now(), fuzz: false }).fields }] };
+        state.state.flashcards = [restingDeck];
+        let notice = '';
+        const dialogs = sandbox.window.StudBudDialogs;
+        sandbox.window.StudBudDialogs = { notify: message => { notice = message; } };
+        const waitingApp = vm.runInContext('Object.create(AppOrchestrator.prototype)', sandbox);
+        waitingApp.activeDeckId = 'previous-deck';
+        waitingApp.studySession = 'previous-session';
+        waitingApp.startStudy(restingDeck.id);
+        assert.match(notice, /resting until.*Cram/);
+        assert.equal(waitingApp.activeDeckId, 'previous-deck', 'opening resting cards does not leave a half-started study overlay');
+        assert.equal(waitingApp.studySession, 'previous-session');
+        sandbox.window.StudBudDialogs = dialogs;
+        state.state.flashcards = [];
+    }
+    {
         const previousDecks = state.get('flashcards');
         const getElement = sandbox.document.getElementById;
         const nodes = new Map();

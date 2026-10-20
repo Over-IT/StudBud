@@ -458,7 +458,7 @@
             return new AnkiStudySession(cards, options);
         }
 
-        /** Ordered snapshot of today's queue: due learning, then reviews (limit), then new cards (limit), then learning due later today. */
+        /** Queue snapshot in session order, including learning cards that are still resting. */
         static buildQueue(cards, options = {}) {
             return new AnkiStudySession(cards, options).snapshot(options.now);
         }
@@ -479,8 +479,8 @@
     /**
      * Anki-style study session. Queue order:
      *   1. learning/relearning cards whose step is due now
-     *   2. shuffled due review cards (limited by reviewsPerDay)
-     *   3. shuffled new cards (limited by newCardsPerDay)
+     *   2. due reviews and new cards (adaptive order in includeAll mode, with a new card after two repeat/review answers)
+     *   3. optional early reviews, only after due reviews and new cards
      *   4. learning cards due within the learn-ahead window, or (learnAheadAll, default) the next learning card early
      * Answered learning cards are re-queued automatically when their next step falls today.
      */
@@ -505,6 +505,7 @@
             this.reviews = [];
             this.newCards = [];
             this.ahead = [];
+            this.nonNewStreak = 0;
             const endOfToday = SM2Engine.dayStart(this.today + 1, this.cfg);
 
             (cards || []).forEach((card, position) => {
@@ -569,24 +570,27 @@
             return AnkiStudySession.priority(entry.card, now) + (entry.jitter || 0);
         }
 
+        readyEntries(now) {
+            const learning = this.learning.filter(entry => entry.dueAt <= now);
+            if (!this.includeAll) return [...learning, ...this.reviews, ...this.newCards, ...this.ahead];
+            const compare = (a, b) => AnkiStudySession.entryScore(b, now) - AnkiStudySession.entryScore(a, now)
+                || a.position - b.position;
+            const practice = [...this.reviews, ...this.newCards].sort(compare);
+            const ready = [...learning, ...practice, ...[...this.ahead].sort(compare)];
+            // Weak or overdue cards must not indefinitely crowd out unseen material.
+            if (this.nonNewStreak >= 2 && this.newCards.length) {
+                const fresh = [...this.newCards].sort(compare)[0];
+                ready.splice(ready.indexOf(fresh), 1);
+                ready.unshift(fresh);
+            }
+            return ready;
+        }
+
         /** The card to show now, or null when the session is finished (or only waiting on learning cards when learnAheadAll is false). */
         next(now = Date.now()) {
+            const ready = this.readyEntries(now);
+            if (ready.length) return ready[0].card;
             const learn = this.learning[0];
-            if (learn && learn.dueAt <= now) return learn.card;
-            if (this.includeAll) {
-                let best = null, bestScore = -Infinity;
-                for (const entry of [...this.reviews, ...this.newCards, ...this.ahead]) {
-                    const score = AnkiStudySession.entryScore(entry, now);
-                    if (score > bestScore || (score === bestScore && entry.position < best.position)) {
-                        best = entry;
-                        bestScore = score;
-                    }
-                }
-                if (best) return best.card;
-            }
-            if (this.reviews.length) return this.reviews[0].card;
-            if (this.newCards.length) return this.newCards[0].card;
-            if (this.ahead.length) return this.ahead[0].card;
             if (learn && (this.learnAheadAll || learn.dueAt <= now + this.cfg.learnAheadMinutes * MINUTE)) return learn.card;
             return null;
         }
@@ -603,6 +607,7 @@
             Object.assign(card, result.fields);
             delete card.stability;
             delete card.difficulty;
+            this.nonNewStreak = result.previousState === 'new' ? 0 : this.nonNewStreak + 1;
             if (result.previousState === 'new') this.newDone += 1;
             else if (result.previousState === 'review') this.reviewsDone += 1;
             if (this.deck) this.deck.ankiToday = { day: this.today, newDone: this.newDone, reviewsDone: this.reviewsDone };
@@ -637,14 +642,8 @@
         }
 
         snapshot(now = Date.now()) {
-            const dueLearning = this.learning.filter(e => e.dueAt <= now);
             const laterLearning = this.learning.filter(e => e.dueAt > now);
-            if (this.includeAll) {
-                const practice = [...this.reviews, ...this.newCards, ...this.ahead].sort((a, b) =>
-                    AnkiStudySession.entryScore(b, now) - AnkiStudySession.entryScore(a, now) || a.position - b.position);
-                return [...dueLearning, ...practice, ...laterLearning].map(e => e.card);
-            }
-            return [...dueLearning, ...this.reviews, ...this.newCards, ...this.ahead, ...laterLearning].map(e => e.card);
+            return [...this.readyEntries(now), ...laterLearning].map(e => e.card);
         }
     }
 

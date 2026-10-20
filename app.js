@@ -1580,7 +1580,7 @@
             const currentGpa = this.calculateSemesterGPA(courses);
             const projectedCourses = courses.map(course => {
                 const grade = this.calculateScenarioCourseGrade(course, assignments, hypotheticalAssignments);
-                return Number.isFinite(grade) ? { ...course, targetGrade: this.gradeForPercentage(grade) } : null;
+                return Number.isFinite(grade) ? { ...course, targetGrade: this.gradeForPercentage(grade, course) } : null;
             }).filter(Boolean);
             const projectedGpa = window.GPACalculator
                 ? window.GPACalculator.calculateCurrentGPA(projectedCourses)
@@ -1717,7 +1717,7 @@
                     const classAssignments = this.semesterAssignments(assignments, [course]);
                     const categories = course.categories || [];
                     const currentGrade = this.calculateCourseGrade(course, classAssignments);
-                    const gradeLetter = currentGrade === null ? '—' : this.gradeForPercentage(currentGrade);
+                    const gradeLetter = currentGrade === null ? '—' : this.gradeForPercentage(currentGrade, course);
                     const categoryGroups = categories.map(category => ({
                         id: category.id,
                         name: category.name,
@@ -1745,7 +1745,7 @@
                                 </div>
                                 <strong class="transcript-assignment-score">${hasScore ? `${this.formatNumber(item.pointsEarned || 0)} / ${this.formatNumber(item.maxPoints || 0)}` : 'Not graded'}</strong>
                                 <div class="transcript-assignment-actions">
-                                    ${hasScore ? '' : this.assignmentStatusControl(item)}
+                                    ${hasScore && !item.icMissing ? '' : this.assignmentStatusControl(item)}
                                     ${this.assessmentStudyButton(item)}
                                     <button class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}" aria-label="Edit ${this.escapeHTML(item.title)}">Edit</button>
                                     <button class="danger-btn" data-action="delete-assignment" data-id="${this.escapeHTML(item.id)}" aria-label="Delete ${this.escapeHTML(item.title)}">Delete</button>
@@ -1853,7 +1853,7 @@
             const currentCourses = courses.map(course => {
                 const courseAssignments = assignments.filter(item => item.courseCode === course.code);
                 const grade = this.calculateCourseGrade(course, courseAssignments);
-                return Number.isFinite(grade) ? { ...course, targetGrade: this.gradeForPercentage(grade) } : null;
+                return Number.isFinite(grade) ? { ...course, targetGrade: this.gradeForPercentage(grade, course) } : null;
             }).filter(Boolean);
             return calculator.calculateCurrentGPA(currentCourses);
         }
@@ -1868,7 +1868,7 @@
             if (!calculator) return { weighted: '0.000', unweighted: '0.000', totalCredits: 0 };
             const currentCourses = courses.map(course => {
                 const grade = this.calculateCourseGrade(course);
-                return Number.isFinite(grade) ? { ...course, targetGrade: this.gradeForPercentage(grade) } : null;
+                return Number.isFinite(grade) ? { ...course, targetGrade: this.gradeForPercentage(grade, course) } : null;
             }).filter(Boolean);
             return this.withPriorGPA(calculator.calculateCurrentGPA(currentCourses));
         }
@@ -2335,12 +2335,11 @@
                 <fieldset class="ic-options">
                     <legend>Also import</legend>
                     <label><input type="checkbox" data-ic-option="categories" checked> Grade categories &amp; weights</label>
-                    <label><input type="checkbox" data-ic-option="graded" checked> Past graded work &amp; scores</label>
-                    <label><input type="checkbox" data-ic-option="upcoming" checked> Upcoming assignments</label>
+                    <label><input type="checkbox" data-ic-option="graded" checked> Graded work, scores &amp; missing assignments</label>
                     <label><input type="checkbox" data-ic-option="schedule" checked> Class periods &amp; times</label>
                     <label><input type="checkbox" data-ic-option="calendar" checked> School calendar (days off, notes)</label>
                 </fieldset>
-                <p class="settings-hint">Importing again later updates the same classes and assignments instead of duplicating them. Your study estimates and priorities are kept.</p>
+                <p class="settings-hint">Citizenship and its assignments are excluded. Only graded or missing work is imported; ungraded upcoming assignments stay unchanged. Missing work stays overdue even when Campus has given it a score. Your study estimates and priorities are kept.</p>
                 <div class="modal-footer"><button id="ic-restart-btn" class="secondary-btn" type="button"><i class="fas fa-rotate-left"></i> Start over</button><button id="ic-apply-import-btn" class="primary-btn" type="button"><i class="fas fa-file-import"></i> Import into StudBud</button></div>`;
             container.querySelectorAll('select[data-ic-class]').forEach(select => {
                 const entry = plan.classes[Number(select.dataset.icClass)];
@@ -2380,7 +2379,7 @@
                 s.coursesUpdated ? `${s.coursesUpdated} classes updated` : '',
                 s.categories ? `${s.categories} categories` : '',
                 s.gradedAdded + s.gradedUpdated ? `${s.gradedAdded + s.gradedUpdated} graded assignments` : '',
-                s.upcomingAdded + s.upcomingUpdated ? `${s.upcomingAdded + s.upcomingUpdated} upcoming assignments` : '',
+                s.upcomingAdded + s.upcomingUpdated ? `${s.upcomingAdded + s.upcomingUpdated} unscored missing assignments` : '',
                 s.periods ? `${s.periods} class periods` : '',
                 s.days ? `${s.days} calendar days` : ''
             ].filter(Boolean);
@@ -2436,8 +2435,8 @@
             const noteText = note && note !== pchsSchedule?.title ? ` · ${note}` : '';
             type.textContent = pchsSchedule ? `${pchsSchedule.title} · ${date.toLocaleDateString(undefined, { weekday: 'long' })}${noteText}` : 'School schedule unavailable';
             const todayKey = localDateKey(date);
-            const work = (AppState.get('assignments') || []).filter(item => String(item.dueDate || '').slice(0, 10) === todayKey && item.status !== 'completed' && !this.isGradedItem(item));
-            const workMarkup = items => items.length ? `<ul class="schedule-due-work">${items.map(item => `<li><span class="schedule-work-kind">${this.escapeHTML(item.kind || 'assignment')}</span><button type="button" class="schedule-work-link" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">${this.escapeHTML(item.title)}</button></li>`).join('')}</ul>` : '';
+            const work = (AppState.get('assignments') || []).filter(item => String(item.dueDate || '').slice(0, 10) === todayKey && this.isOpenAssignment(item));
+            const workMarkup = items => items.length ? `<ul class="schedule-due-work">${items.map(item => `<li><span class="schedule-work-kind">${this.escapeHTML(item.kind || 'assignment')}</span><button type="button" class="schedule-work-link" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">${this.escapeHTML(item.title)}</button>${this.assignmentStatusControl(item)}</li>`).join('')}</ul>` : '';
             const todayCourses = new Set(entries.filter(entry => entry.course).map(entry => entry.course.code));
             const otherWork = work.filter(item => !todayCourses.has(item.courseCode));
             const otherMarkup = otherWork.length ? `<li class="schedule-extra-work"><strong>Also due today</strong>${workMarkup(otherWork)}</li>` : '';
@@ -2527,7 +2526,7 @@
                 const course = (AppState.get('courses') || []).find(entry => entry.code === item.courseCode);
                 const recommendation = recommendations.find(entry => entry.id === item.id);
                 const studyNote = recommendation ? `<small>Suggested session: ${recommendation.sessionMinutes} min · ${this.escapeHTML(recommendation.studyMethod)}</small><button type="button" class="secondary-btn" data-action="log-study" data-id="${this.escapeHTML(item.id)}">Log study</button>${this.assessmentStudyButton(item)}` : '';
-                return `<article class="calendar-event"><div><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(course ? course.title : 'No class')} · ${this.escapeHTML(item.kind || 'assignment')}</span>${studyNote}</div><button class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit</button></article>`;
+                return `<article class="calendar-event"><div><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(course ? course.title : 'No class')} · ${this.escapeHTML(item.kind || 'assignment')}</span>${studyNote}</div><div class="assignment-quick-actions">${this.assignmentStatusControl(item)}<button class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit</button></div></article>`;
             }).join('');
             const assessment = item => ['quiz', 'test'].includes(String(item.kind).toLowerCase());
             const personal = (AppState.get('calendarEvents') || []).filter(item => item.date === this.selectedCalendarDate)
@@ -2596,7 +2595,7 @@
             today.setHours(0, 0, 0, 0);
             const history = AppState.get('studyHistory') || [];
             // Only quizzes and tests need studying; homework is just done and turned in
-            const recommended = assignments.filter(item => item.status !== 'completed' && !this.isGradedItem(item) && ['quiz', 'test'].includes(String(item.kind || 'assignment').toLowerCase())).map(item => {
+            const recommended = assignments.filter(item => this.isOpenAssignment(item) && ['quiz', 'test'].includes(String(item.kind || 'assignment').toLowerCase())).map(item => {
                 const course = courses.find(entry => entry.code === item.courseCode);
                 const grade = course ? this.calculateCourseGrade(course) : null;
                 const target = course ? this.effectiveCourseTarget(course, targetGpa) : NaN;
@@ -2685,11 +2684,11 @@
 
         /** Minimize the sum of class target percentages while meeting the credit-weighted GPA goal. */
         gpaTargetPlan(targetGpa, mode = 'weighted', courses = AppState.get('courses') || []) {
-            const scale = (window.studbudGradeScale?.() || window.PARKWAY_GRADE_SCALE || []).slice().sort((a, b) => a.minPct - b.minPct);
+            const scaleFor = course => (window.studbudGradeScaleFor?.(course) || window.studbudGradeScale?.() || window.PARKWAY_GRADE_SCALE || []).slice().sort((a, b) => a.minPct - b.minPct);
             const points = (item, course) => Number(mode === 'weighted' && course.isWeighted ? item.weighted : item.unweighted);
             const rows = courses.map(course => {
                 const ladder = [];
-                scale.forEach(item => {
+                scaleFor(course).forEach(item => {
                     if (!ladder.length || points(item, course) > points(ladder[ladder.length - 1], course)) ladder.push(item);
                 });
                 return { course, ladder, credits: Math.max(0, Number(course.credits) || 0) };
@@ -2860,14 +2859,13 @@
             const isAssessment = item => ['quiz', 'test'].includes(String(item.kind || '').toLowerCase());
             const renderRows = items => items.map(item => {
                     const course = courses.find(entry => entry.code === item.courseCode);
-                    const status = item.status || 'pending';
                     const graded = this.isGradedItem(item);
                     return `<tr class="assignment-row is-${this.assignmentState(item)}">
                         <td>${this.assignmentStatusControl(item)}</td>
                         <td>${this.escapeHTML(item.title)}</td>
                         <td>${this.escapeHTML(course ? course.title : item.courseCode || 'Unassigned')}</td>
                         <td>${graded ? `${this.formatNumber(item.pointsEarned || 0)} / ${this.formatNumber(item.maxPoints || 0)}` : this.escapeHTML(item.dueDate || 'No due date')}</td>
-                        <td>${graded || status === 'completed' ? '—' : `About ${this.plannerTaskMinutes(item)} min`}</td>
+                        <td>${this.isOpenAssignment(item) ? `About ${this.plannerTaskMinutes(item)} min` : '—'}</td>
                         <td class="actions">
                             ${this.assessmentStudyButton(item)}
                             <button class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit</button>
@@ -2880,6 +2878,11 @@
             if (assessmentBody) assessmentBody.innerHTML = renderRows(visibleAssignments.filter(isAssessment))
                 || '<tr><td colspan="6" class="empty-state">No quizzes or tests match these filters.</td></tr>';
             if (resultCount) resultCount.textContent = `${visibleAssignments.length} of ${assignments.length} work item${assignments.length === 1 ? '' : 's'} across both sections`;
+            const awaiting = document.getElementById('planner-awaiting-grades');
+            if (awaiting) {
+                const waiting = assignments.filter(item => this.assignmentState(item) === 'awaiting');
+                awaiting.innerHTML = waiting.length ? `<details open><summary>Ready to add grades (${waiting.length})</summary><p class="settings-hint">Completed work stays here until you add a grade. Includes assignments, quizzes and tests from every class.</p>${this.assignmentUpdateList(waiting)}</details>` : '';
+            }
             this.renderStudyRecommendations('planner-study-list');
             const summary = document.getElementById('assignment-status-summary');
             if (summary) {
@@ -2892,22 +2895,23 @@
 
             const priorityList = document.getElementById('priority-task-list');
             if (priorityList) {
-                const upcoming = assignments.filter(item => item.status !== 'completed' && !this.isGradedItem(item))
+                const upcoming = assignments.filter(item => this.isOpenAssignment(item))
                     .sort((a, b) => this.assignmentPriority(b, courses).score - this.assignmentPriority(a, courses).score)
                     .slice(0, 3);
                 priorityList.classList.toggle('empty-list', upcoming.length === 0);
                 priorityList.innerHTML = upcoming.length ? upcoming.map(item =>
-                    `<li>${this.escapeHTML(item.title)} <small>${this.escapeHTML(item.dueDate || '')}</small></li>`
+                    `<li><button type="button" class="text-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">${this.escapeHTML(item.title)}</button> <small>${this.escapeHTML(item.dueDate || '')}</small>${this.assignmentStatusControl(item)}</li>`
                 ).join('') : '<li class="empty-state">No upcoming tasks.</li>';
             }
 
-            const openWork = assignments.filter(item => !isAssessment(item) && item.status !== 'completed' && !this.isGradedItem(item))
+            const openWork = assignments.filter(item => !isAssessment(item) && this.isOpenAssignment(item))
                 .map(item => ({ item, priority: this.assignmentPriority(item, courses) }))
                 .sort((a, b) => b.priority.score - a.priority.score);
             const nextTask = document.getElementById('planner-next-task');
             if (nextTask) {
                 const total = openWork.reduce((sum, { item }) => sum + this.plannerTaskMinutes(item), 0);
-                const urgent = openWork.filter(({ item }) => item.dueDate && item.dueDate.slice(0, 10) <= today).length;
+                const urgent = openWork.filter(({ item }) => this.assignmentState(item) === 'overdue'
+                    || String(item.dueDate || '').slice(0, 10) === today).length;
                 const next = openWork[0]?.item;
                 const course = next && courses.find(entry => entry.code === next.courseCode);
                 nextTask.innerHTML = next ? `<p class="planner-workload"><strong>${openWork.length} to do</strong> · about ${total} min estimated total · ${urgent} due today or overdue</p>
@@ -2922,7 +2926,7 @@
                 const list = document.getElementById(id);
                 if (!list) return;
                 const matches = openWork.filter(({ item, priority }) => window.PlannerEngine.getEisenhowerQuadrant(priority, Number(item.estimatedMinutes) || 30).id === quadrant);
-                list.innerHTML = matches.map(({ item }) => `<li><button type="button" class="text-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">${this.escapeHTML(item.title)}</button><small>${this.escapeHTML(this.dueLabel(item.dueDate).text)} · about ${this.plannerTaskMinutes(item)} min</small><small>${this.escapeHTML(this.plannerTaskReason(item))}</small></li>`).join('') || '<li class="empty-state">No open tasks here.</li>';
+                list.innerHTML = matches.map(({ item }) => `<li><button type="button" class="text-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">${this.escapeHTML(item.title)}</button><small>${this.escapeHTML(this.dueLabel(item.dueDate).text)} · about ${this.plannerTaskMinutes(item)} min</small><small>${this.escapeHTML(this.plannerTaskReason(item))}</small>${this.assignmentStatusControl(item)}</li>`).join('') || '<li class="empty-state">No open tasks here.</li>';
             });
         }
 
@@ -2932,6 +2936,7 @@
         }
 
         plannerTaskReason(item) {
+            if (item.icMissing && item.status !== 'completed') return 'Marked missing in Infinite Campus — finish or turn it in, then update its grade.';
             const today = localDateKey(new Date());
             const tomorrow = new Date();
             tomorrow.setDate(tomorrow.getDate() + 1);
@@ -8479,7 +8484,7 @@
                     const decks = (item.deckLinks || []).slice(0, 2).map(({ deck }) =>
                         `<button class="secondary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}"><i class="fas fa-layer-group"></i> ${this.escapeHTML(deck.title)}</button>`).join('');
                     const studied = item.minutesStudied ? `<small class="study-time-logged"><i class="fas fa-clock"></i> ${item.minutesStudied} min studied${item.flashcardMinutes ? ` (${item.flashcardMinutes} with flashcards)` : ''}</small>` : '';
-                    const manage = id === 'planner-study-list' ? `<button type="button" class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit quiz / test</button>${this.assignmentStatusControl(item)}` : '';
+                    const manage = `<button type="button" class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit quiz / test</button>${this.assignmentStatusControl(item)}`;
                     return `<article class="study-priority-item"><span class="priority-rank">${index + 1}</span><div><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(item.courseTitle)} · ${this.escapeHTML(item.kind || 'assignment')} · ${item.sessionMinutes} min today (about ${item.remainingStudyMinutes} min remaining)</span>${studied}<small>${this.escapeHTML(item.reason)}</small><p><strong>Study method:</strong> ${this.escapeHTML(item.studyMethod)}</p><div class="study-priority-actions"><button class="secondary-btn" data-action="log-study" data-id="${this.escapeHTML(item.id)}"><i class="fas fa-stopwatch"></i> Log study session</button>${this.assessmentStudyButton(item)}${decks}${manage}</div></div></article>`;
                 }).join('') : (id === 'planner-study-list'
                     ? '<p class="empty-state">Add an upcoming quiz or test to get study suggestions.</p>'
@@ -8609,21 +8614,22 @@
             const courses = AppState.get('courses') || [];
             const courseTitle = code => courses.find(course => course.code === code)?.title || code || '';
             const open = (AppState.get('assignments') || [])
-                .filter(item => item.status !== 'completed' && !this.isGradedItem(item))
+                .filter(item => this.isOpenAssignment(item))
                 .sort((a, b) => (a.dueDate || '9999-12-31').localeCompare(b.dueDate || '9999-12-31'));
             const assignments = open.slice(0, Math.max(1, Number(prefs.assignmentCount) || 3)).map(item => {
                 const due = this.dueLabel(item.dueDate);
-                return { id: item.id, title: item.title || 'Untitled', course: courseTitle(item.courseCode), due: due.text, tone: due.tone };
+                return { ...item, title: item.title || 'Untitled', course: courseTitle(item.courseCode), due: due.text, tone: due.tone };
             });
             const grades = courses.map(course => {
                 const grade = this.calculateCourseGrade(course);
-                return Number.isFinite(grade) ? { code: course.code, title: course.title || course.code, percent: Math.round(grade * 10) / 10, letter: this.gradeForPercentage(grade) } : null;
+                return Number.isFinite(grade) ? { code: course.code, title: course.title || course.code, percent: Math.round(grade * 10) / 10, letter: this.gradeForPercentage(grade, course) } : null;
             }).filter(Boolean);
             const gpa = grades.length ? this.calculateTrackedGPA(courses) : null;
             const status = this.streakStatusText(st);
             const weekText = st.week.map(day => day.seconds >= st.goal ? '🔥' : day.seconds > 0 ? '◐' : '○').join(' ');
             return {
                 prefs, st, assignments, openCount: open.length, grades, gpa,
+                awaiting: (AppState.get('assignments') || []).filter(item => this.assignmentState(item) === 'awaiting'),
                 card: {
                     showStreak: Boolean(prefs.streak), showWeek: Boolean(prefs.week), showGoal: Boolean(prefs.goal),
                     showAssignments: Boolean(prefs.assignments), showGrades: Boolean(prefs.grades && grades.length),
@@ -8661,8 +8667,9 @@
             if (prefs.assignments) {
                 sections.push(`<div class="home-widget-section">
                     <div class="home-widget-section-head"><h4><i class="fas fa-list-check" aria-hidden="true"></i> Work on next</h4><button type="button" class="link-btn" data-target="planner-view">${data.openCount > data.assignments.length ? `All ${data.openCount}` : 'Planner'}</button></div>
-                    ${data.assignments.length ? `<ul class="home-widget-list">${data.assignments.map(item => `<li><div><strong>${esc(item.title)}</strong><small>${esc(item.course)}</small></div><span class="home-widget-due ${item.tone}">${esc(item.due)}</span></li>`).join('')}</ul>`
+                    ${data.assignments.length ? this.assignmentUpdateList(data.assignments)
                         : '<p class="home-widget-empty"><i class="fas fa-circle-check" aria-hidden="true"></i> Nothing to work on. Nice!</p>'}
+                    ${data.awaiting.length ? `<details open class="home-awaiting-grades"><summary>Ready to add grades (${data.awaiting.length})</summary>${this.assignmentUpdateList(data.awaiting)}</details>` : ''}
                 </div>`);
             }
             if (prefs.grades) {
@@ -9074,7 +9081,7 @@
                         const coursesAtDate = courses.map(course => {
                             const scored = datedAssignments.filter(item => item.courseCode === course.code && dateFor(item) <= date);
                             const grade = this.calculateCourseGrade(course, scored);
-                            return Number.isFinite(grade) ? { ...course, targetGrade: this.gradeForPercentage(grade) } : null;
+                            return Number.isFinite(grade) ? { ...course, targetGrade: this.gradeForPercentage(grade, course) } : null;
                         }).filter(Boolean);
                         return Number(this.withPriorGPA(window.GPACalculator.calculateCurrentGPA(coursesAtDate))[metric]);
                     }),
@@ -10257,7 +10264,7 @@
             const category = Array.from(categorySelect.options).some(option => option.value === mapped) ? mapped : 'Electives';
             categorySelect.value = category;
             document.getElementById('course-credits').value = catalogCourse.credits;
-            const weightedScale = (window.studbudGradeScale?.() || window.PARKWAY_GRADE_SCALE || []).map(item =>
+            const weightedScale = (window.studbudGradeScaleFor?.(catalogCourse) || window.PARKWAY_GRADE_SCALE || []).map(item =>
                 `${item.letter} ${catalogCourse.isWeighted ? item.weighted : item.unweighted.toFixed(2)}`
             ).join(' · ');
             document.getElementById('course-weight-label').textContent =
@@ -10265,10 +10272,23 @@
         }
 
         assignmentState(item) {
+            if (item.icMissing) return item.status === 'completed' ? 'awaiting' : 'overdue';
             if (this.isGradedItem(item)) return 'graded';
             if (item.status === 'completed') return 'awaiting';
             const due = String(item.dueDate || '').slice(0, 10);
             return due && due < localDateKey(new Date()) ? 'overdue' : 'todo';
+        }
+
+        isOpenAssignment(item) {
+            return item.status !== 'completed' && (item.icMissing || !this.isGradedItem(item));
+        }
+
+        assignmentUpdateList(items) {
+            const courses = AppState.get('courses') || [];
+            return `<ul class="assignment-update-list">${items.map(item => {
+                const course = courses.find(course => course.code === item.courseCode);
+                return `<li><div><button type="button" class="text-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">${this.escapeHTML(item.title)}</button><small>${this.escapeHTML(course?.title || item.courseCode || 'Unassigned')} · ${this.escapeHTML(this.dueLabel(item.dueDate).text)}</small></div><div class="assignment-quick-actions">${this.assignmentStatusControl(item)}<button type="button" class="secondary-btn compact-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}" aria-label="Edit ${this.escapeHTML(item.title)}">Edit</button></div></li>`;
+            }).join('')}</ul>`;
         }
 
         assignmentStatusControl(item) {
@@ -10276,15 +10296,15 @@
             const state = this.assignmentState(item);
             const pills = {
                 graded: '<span class="status-pill is-graded"><i class="fas fa-circle-check" aria-hidden="true"></i> Graded</span>',
-                awaiting: '<span class="status-pill is-awaiting"><i class="fas fa-hourglass-half" aria-hidden="true"></i> Done ? awaiting grade</span>',
+                awaiting: '<span class="status-pill is-awaiting"><i class="fas fa-hourglass-half" aria-hidden="true"></i> Done, awaiting grade</span>',
                 overdue: '<span class="status-pill is-overdue"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> Overdue</span>',
                 todo: '<span class="status-pill is-todo"><i class="fas fa-clock" aria-hidden="true"></i> To do</span>'
             };
             const name = this.escapeHTML(item.title || 'assignment');
-            const buttons = state === 'graded' ? ''
+            const buttons = state === 'graded' ? `<button type="button" class="secondary-btn compact-btn" data-action="grade-assignment" data-id="${id}" aria-label="Update grade for ${name}">Update grade</button>`
                 : state === 'awaiting'
                     ? `<button type="button" class="primary-btn compact-btn" data-action="grade-assignment" data-id="${id}" aria-label="Add grade for ${name}"><i class="fas fa-pen" aria-hidden="true"></i> Add grade</button><button type="button" class="link-btn" data-action="toggle-assignment" data-id="${id}" aria-label="Mark ${name} as not done">Undo</button>`
-                    : `<button type="button" class="secondary-btn compact-btn" data-action="toggle-assignment" data-id="${id}" aria-label="Mark ${name} as done"><i class="fas fa-check" aria-hidden="true"></i> Mark done</button>`;
+                    : `<button type="button" class="secondary-btn compact-btn" data-action="toggle-assignment" data-id="${id}" aria-label="Mark ${name} as done"><i class="fas fa-check" aria-hidden="true"></i> Mark done</button><button type="button" class="link-btn" data-action="grade-assignment" data-id="${id}" aria-label="${this.isGradedItem(item) ? 'Update' : 'Add'} grade for ${name}">${this.isGradedItem(item) ? 'Update' : 'Add'} grade</button>`;
             return `<div class="assignment-status-cell">${pills[state]}${buttons}</div>`;
         }
 
@@ -10313,7 +10333,8 @@
             document.getElementById('assignment-kind').value = assignment ? assignment.kind || 'assignment' : (kind || 'assignment');
             document.getElementById('assignment-size').value = assignment ? assignment.estimatedMinutes || 30 : 30;
             document.getElementById('assignment-importance').value = assignment ? assignment.importance || 3 : 3;
-            const formState = graded ? 'graded' : assignment?.status === 'completed' ? 'done' : 'todo';
+            const formState = assignment?.icMissing ? (assignment.status === 'completed' ? 'done' : 'todo')
+                : graded ? 'graded' : assignment?.status === 'completed' ? 'done' : 'todo';
             form.querySelector(`input[name="assignment-state"][value="${formState}"]`).checked = true;
             document.getElementById('assignment-course-group').classList.toggle('hidden', false);
             if (!assignment && !(AppState.get('courses') || []).length && typeof document.getElementById('assignment-course')?.querySelectorAll === 'function') {
@@ -10367,8 +10388,9 @@
             if ((course?.categories || []).some(category => category.id === selected)) select.value = selected;
         }
 
-        gradeForPercentage(percentage) {
-            const scale = window.studbudGradeScale?.() || window.PARKWAY_GRADE_SCALE || [];
+        /** Letter grade for a percentage. Pass the class so unweighted Parkway classes cap at A (A+ is weighted-only). */
+        gradeForPercentage(percentage, course) {
+            const scale = window.studbudGradeScaleFor?.(course) || window.studbudGradeScale?.() || window.PARKWAY_GRADE_SCALE || [];
             const grade = scale.slice().sort((a, b) => b.minPct - a.minPct).find(item => percentage >= item.minPct);
             return grade ? grade.letter : (percentage >= 90 ? 'A-' : percentage >= 80 ? 'B-' : percentage >= 70 ? 'C-' : percentage >= 60 ? 'D-' : 'F');
         }
@@ -10427,24 +10449,28 @@
             const id = document.getElementById('assignment-id').value || `asgn_${Date.now()}`;
             const current = (AppState.get('assignments') || []).find(item => item.id === id);
             const formState = document.querySelector('input[name="assignment-state"]:checked')?.value || 'todo';
-            const graded = formState === 'graded';
+            const gradingNow = formState === 'graded';
+            const keepCampusScore = Boolean(current?.icMissing && current.graded && !gradingNow);
+            const graded = gradingNow || keepCampusScore;
             const kind = document.getElementById('assignment-kind').value;
             const maxPoints = Math.round((Number(document.getElementById('assignment-max-points').value) || 100) * 100) / 100;
-            const pointsEarned = graded ? Math.round(Math.max(0, Number(document.getElementById('assignment-points').value) || 0) * 100) / 100 : 0;
+            const pointsEarned = keepCampusScore ? current.pointsEarned
+                : graded ? Math.round(Math.max(0, Number(document.getElementById('assignment-points').value) || 0) * 100) / 100 : 0;
             const assignment = {
                 id,
                 title: document.getElementById('assignment-name').value.trim(),
                 courseCode: document.getElementById('assignment-course').value,
-                dueDate: graded ? (current?.dueDate || '') : document.getElementById('assignment-due-date').value,
+                dueDate: gradingNow ? (current?.dueDate || '') : document.getElementById('assignment-due-date').value,
                 pointsEarned,
-                maxPoints,
+                maxPoints: keepCampusScore ? current.maxPoints : maxPoints,
                 categoryId: document.getElementById('assignment-category').value || null,
                 kind,
                 estimatedMinutes: Number(document.getElementById('assignment-size').value) || 30,
                 importance: Number(document.getElementById('assignment-importance').value) || 3,
                 priority: current ? current.priority : 'high',
                 graded,
-                status: graded || formState === 'done' ? 'completed' : 'pending',
+                icMissing: Boolean(current?.icMissing && !gradingNow),
+                status: formState === 'todo' ? 'pending' : 'completed',
                 gradedAt: graded ? (current?.gradedAt || localDateKey(new Date())) : null
             };
             if (current) AppState.updateAssignment(id, assignment);
@@ -10641,7 +10667,7 @@
                     window.StudBudDialogs.notify('Enter a target between 0 and 100%.');
                     return;
                 }
-                AppState.updateCourse(course.code, { targetPct, targetGrade: this.gradeForPercentage(targetPct) });
+                AppState.updateCourse(course.code, { targetPct, targetGrade: this.gradeForPercentage(targetPct, course) });
                 this.renderClassDetail();
             }
             if (action === 'toggle-deck-pin') {
@@ -10713,19 +10739,25 @@
                 return;
             }
             if (window.SM2Engine?.migrateDeck?.(deck)) AppState.saveFlashcardDeck(deck).catch(error => console.error('[NexusApp] Deck migration could not be saved:', error));
+            let session = null;
+            if (mode === 'scheduled') {
+                if (!window.SM2Engine?.createSession) throw new Error('The spaced-repetition scheduler did not load. Reload before studying.');
+                session = window.SM2Engine.createSession(cards, { deck, includeAll: true, learnAheadAll: false, learnAheadMinutes: 0 });
+                if (!session || !session.remaining) throw new Error('No study cards could be loaded. Check this set in the editor.');
+                if (!session.next()) {
+                    const time = new Date(session.nextLearningDueAt()).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+                    window.StudBudDialogs.notify(`These learning cards are resting until ${time}. Your progress is saved. Come back then, or use Cram for extra practice.`);
+                    return;
+                }
+            }
             this.activeDeckId = deckId;
             this.cramMode = mode !== 'scheduled';
             this.studyMode = mode;
-            this.studySession = null;
+            this.studySession = session;
             this.studyCards = [];
             if (this.cramMode) {
                 // Cram walks every card once (missed cards come back later) without touching the review schedule.
                 this.studyCards = window.FlashcardTools.adaptiveOrder ? window.FlashcardTools.adaptiveOrder([...cards]) : [...cards].sort(() => Math.random() - .5);
-            } else {
-                if (!window.SM2Engine?.createSession) throw new Error('The spaced-repetition scheduler did not load. Reload before studying.');
-                const session = window.SM2Engine.createSession(cards, { deck, includeAll: true });
-                if (!session || !session.remaining) throw new Error('No study cards could be loaded. Check this set in the editor.');
-                this.studySession = session;
             }
             this.activeCardIndex = 0;
             this.currentStudyCard = null;
@@ -10964,6 +10996,7 @@
                 <div class="study-summary-burst" aria-hidden="true"><i class="fas fa-trophy"></i></div>
                 <h3>${cheer}</h3>
                 <p>${this.cramMode ? 'Cram round complete' : 'Study round complete'} · ${this.escapeHTML(deck?.title || 'Flashcards')}</p>
+                ${this.studySession?.remaining ? `<p class="settings-hint">${this.studySession.remaining} learning card${this.studySession.remaining === 1 ? '' : 's'} resting until ${this.escapeHTML(new Date(this.studySession.nextLearningDueAt()).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }))}. Reopen Study then to continue; your progress is saved.</p>` : ''}
                 <div class="study-summary-stats">
                     <div><strong>${stats.done}</strong><span>cards</span></div>
                     <div><strong>${accuracy}%</strong><span>recalled</span></div>

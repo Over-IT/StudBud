@@ -3609,7 +3609,7 @@ body.compact-ui .streak-flame b { bottom: 4px; font-size: .85rem; }
 .modal-header h2, .modal-header h3 { min-width: 0; overflow-wrap: anywhere; }
 .daily-period-class { min-width: 0; flex: 1; text-align: right; overflow-wrap: anywhere; }
 .schedule-due-work, .schedule-next-day ul { list-style: none; margin: 6px 0 0; padding: 0; }
-.schedule-due-work li { display: flex; align-items: baseline; gap: 6px; justify-content: flex-end; }
+.schedule-due-work li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; justify-content: flex-end; }
 .schedule-work-kind { color: var(--accent-primary); font-size: .72rem; text-transform: capitalize; flex: none; }
 .schedule-work-link { padding: 3px 0; border: 0; background: transparent; color: var(--text-primary); font: inherit; font-size: .8rem; text-align: inherit; cursor: pointer; overflow-wrap: anywhere; }
 .schedule-work-link:hover { text-decoration: underline; }
@@ -3944,6 +3944,16 @@ body.guest-mode [data-study-leaderboard-scope="friends"] { display: none !import
 .assignment-row.is-graded td, .transcript-assignment.is-graded { opacity: .92; }
 .assignment-state-toggle { grid-template-columns: repeat(3, 1fr); }
 .assignment-state-toggle span { font-size: .86rem; padding: 8px 6px; }
+.assignment-update-list { list-style: none; margin: .6rem 0 0; padding: 0; display: grid; gap: .6rem; }
+.assignment-update-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .6rem; padding: .75rem; border: 1px solid var(--border-glass); border-radius: 12px; background: var(--bg-glass-hover); }
+.assignment-update-list li > div { min-width: 0; }
+.assignment-update-list .text-btn { text-align: left; overflow-wrap: anywhere; }
+.assignment-update-list small { display: block; color: var(--text-secondary); margin-top: .25rem; }
+.assignment-quick-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.assignment-update-list button, .matrix-quadrant .assignment-status-cell button { min-height: 40px; }
+.planner-awaiting-grades:not(:empty) { padding: 1rem; margin: 0 0 1rem; border: 1px solid var(--border-glass); border-radius: 12px; }
+.home-awaiting-grades { margin-top: 1rem; }
+.planner-awaiting-grades summary, .home-awaiting-grades summary { cursor: pointer; font-weight: 700; }
 
 /* =====================================================================
    STUDBUD DESIGN LAYER — "Chunky & friendly"

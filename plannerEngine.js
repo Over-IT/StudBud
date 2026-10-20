@@ -54,7 +54,8 @@
 
             // 1. Due date proximity 'd' in days
             const diffMs = dueDate.getTime() - today.getTime();
-            const d = Number.isFinite(diffMs) ? Math.max(0, Math.round(diffMs / (1000 * 60 * 60 * 24))) : 7;
+            const d = assignment.icMissing && assignment.status !== 'completed' ? 0
+                : Number.isFinite(diffMs) ? Math.max(0, Math.round(diffMs / (1000 * 60 * 60 * 24))) : 7;
 
             // 2. Weight 'w'
             const weightMap = { 'none': 0.4, 'low': 0.8, 'medium': 1.0, 'high': 1.5, 'critical': 2.0 };

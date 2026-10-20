@@ -34,6 +34,16 @@ Checkpoint cleanup retains machinery by its actual strike-deck height. Covered l
 
 StudBud is a student hub with three parts: **Plan** (classes, assignments, grades, calendar), **Study** (flashcards, focus sessions, study streaks and leaderboards) and **Play** (live multiplayer games and arcade modes powered by your own flashcards, with a coin shop for characters, hats and accessories). Flashcards are study material, not assignments: every non-suspended card is available whenever you want, without due counts or daily study limits. Anki's SM-2 learning/relearning steps, Again/Hard/Good/Easy interval adjustments and leech detection still prioritize practice. Cram updates mastery and accuracy without changing the review schedule. Only linked tests and quizzes have deadlines. Quiz and game questions are randomized independently.
 
+### Assignment updates and balanced flashcard study
+
+Home's **Work on next**, priority tasks, Planner, calendar, today's schedule and study recommendations offer assignment updates without opening a class. Use **Mark done** for completed but ungraded work, **Add grade** to enter a score, or **Edit** for other changes. Marking work done does not count it as a zero grade. Home and Planner keep a separate **Ready to add grades** list for completed assignments, quizzes and tests; Planner's list remains accessible even when its main tables are filtered to **To do**. **Undo** reopens ungraded completed work, and **Update grade** edits an existing score.
+
+Flashcard Study introduces new material alongside review: after at most two learning/review answers, a new card gets a turn if any remain. Weak future reviews come after new cards and currently due practice, rather than crowding them out. Again, Hard and Good honor their learning-step delays instead of immediately replaying cards early; Good advances the learning steps and does not require choosing Easy to make progress. When only resting learning cards remain, the summary shows when to return. Reopening Study preserves that wait; **Cram** remains available for immediate extra practice without changing the schedule.
+
+For Parkway classes, the letter scale now follows the class's weighting: regular classes top out at **A** (93% and above), while weighted classes can earn **A+** at 97%. Existing regular-class A+ values display as A without changing the saved percentage. Home, transcripts, class summaries and GPA target suggestions use the same class-aware scale; custom scales for other schools are unchanged. Infinite Campus import no longer automatically matches a regular class to an AP/Honors/IB catalog course just because the rest of its name is similar. Unmatched Campus titles recognize weighted abbreviations such as HON and H. Review the suggested class match before importing; re-import if an older import selected the wrong class.
+
+Run `node tests\assignment-updates.cjs`, `node tests\academic-math.cjs` and `node tests\study-persistence.cjs` for assignment actions, grade-entry access, balanced queues, learning delays and progress persistence.
+
 ### Multiplayer testing and buds
 
 The in-game staff **Tools** menu also includes **Unlimited energy** and **Energy per question** (5–100, increments of one). Changes apply immediately to that tester's client; local-test restarts retain them. Unlimited disables the reward input; Chess remains one move per answer. The launch-screen settings still supply the shared initial configuration for multiplayer tests.
@@ -197,7 +207,7 @@ Run `node tests/infinite-campus-import.cjs` for Infinite Campus course matching 
 
 ## Import from Infinite Campus
 
-Use **Classes → Import from Infinite Campus** (also in **Settings → Data Management**) to bring in this school year's classes, grade categories and weights, all graded and upcoming assignments, class periods and times, and the school calendar.
+Use **Classes → Import from Infinite Campus** (also in **Settings → Data Management**) to bring in this school year's classes, academic grade categories and weights, graded work and missing assignments, class periods and times, and the school calendar. **Citizenship is a separate grade and is excluded**, along with every assignment under that grading task, even if its category is named Practice or Homework.
 
 1. On a computer, drag the **StudBud Import** button to your bookmarks bar (one time only; press Ctrl+Shift+B if the bar is hidden). On a phone/tablet, open the phone instructions, choose **Copy bookmark URL**, bookmark any page as **StudBud Import**, then edit that bookmark and replace its entire address with the copied URL, including `javascript:`.
 2. Choose **Open Infinite Campus** and sign in. PCHS students get the Parkway Campus address automatically; anyone else can paste their own under **Different Campus address?**.
@@ -206,7 +216,13 @@ Use **Classes → Import from Infinite Campus** (also in **Settings → Data Man
 
 The app tour introduces this importer at step 3, before dashboard explanations and manual class setup, and the About page lists it. Mobile setup instructions open automatically on touch/narrow screens.
 
-Importing again updates the same classes and assignments instead of duplicating them, and keeps your study estimates and priorities. Imported class times, school days off, and day notes appear on the dashboard schedule and calendar. Remove them from the Schedule page at any time; your class periods stay saved.
+Importing again updates graded work in place and keeps your study estimates and priorities. Ungraded upcoming work is neither added nor modified; existing manually entered and previously imported upcoming tasks stay unchanged. An assignment becoming graded in Campus updates its existing imported record. Re-import also removes previously imported Citizenship assignments when the new payload positively identifies them.
+
+Academic category identities stay linked to their grading terms, so reused category IDs and different semester weights do not overwrite one another. Points-based categories preserve raw points and multipliers; percent-based categories normalize to 100 points before applying the multiplier. Exempt, dropped, not-graded and excluded-category work is not imported as graded work; previously imported scored records that now have those exclusions are removed on re-import.
+
+Campus **Missing** marks an assignment overdue regardless of its due date, including assignments already scored zero or partial credit. The actual numeric score still counts toward the class grade; an unscored missing assignment does not invent a zero. **Mark done** keeps the existing score and puts the assignment in **Ready to add grades**; save the updated grade to clear the missing flag. A later import reflects Campus's current score and missing flag again.
+
+Imported class times, school days off, and day notes appear on the dashboard schedule and calendar. Remove them from the Schedule page at any time; your class periods stay saved.
 
 ## Username/password sign-in
 

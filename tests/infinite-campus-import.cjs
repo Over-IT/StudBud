@@ -117,10 +117,8 @@ assert.deepStrictEqual(plain(calcCourse.categories.map(category => [category.nam
 const imported = id => first.assignments.find(item => item.id === `ic_${id}`);
 assert.deepStrictEqual(plain([imported('a1').pointsEarned, imported('a1').maxPoints, imported('a1').graded]), [90, 100, true], 'multiplier scales points');
 assert.deepStrictEqual(plain([imported('a2').pointsEarned, imported('a2').maxPoints]), [80, 100], 'percent categories score out of 100');
-assert.strictEqual(imported('a3').graded, false, 'exempt work does not count');
-assert.strictEqual(imported('a4').graded, false);
-assert.strictEqual(imported('a4').status, 'pending');
-assert.strictEqual(imported('a4').kind, 'quiz');
+assert.strictEqual(imported('a3'), undefined, 'exempt work is not imported');
+assert.strictEqual(imported('a4'), undefined, 'ungraded upcoming work is not imported');
 assert.strictEqual(imported('a1').kind, 'test');
 {
     const cases = [
@@ -167,16 +165,155 @@ for (const isWeighted of [undefined, false]) {
 }
 
 // Re-importing updates in place and keeps the student's own edits
-const edited = first.assignments.map(item => item.id === 'ic_a4' ? { ...item, estimatedMinutes: 120, kind: 'test' } : item);
+const upcomingQuiz = { id: 'ic_a4', title: 'My upcoming quiz', courseCode: calcCourse.code,
+    dueDate: '2026-02-11', graded: false, status: 'pending', estimatedMinutes: 120, kind: 'test' };
+const edited = [...first.assignments, upcomingQuiz];
 const replan = IC.buildImportPlan(model, { courses: first.courses }, { school: 'pchs', catalog });
 assert.ok(replan.classes.every(entry => entry.existingCode));
 const second = IC.applyImportPlan(model, replan, { courses: first.courses, assignments: edited, schedule: first.schedule }, options);
 assert.strictEqual(second.courses.length, first.courses.length);
-assert.strictEqual(second.assignments.length, first.assignments.length);
+assert.strictEqual(second.assignments.length, edited.length);
 assert.strictEqual(second.courses.find(course => course.code === calcCourse.code).categories.length, 3);
 const keptQuiz = second.assignments.find(item => item.id === 'ic_a4');
 assert.deepStrictEqual(plain([keptQuiz.estimatedMinutes, keptQuiz.kind]), [120, 'test']);
+assert.deepStrictEqual(plain(keptQuiz), upcomingQuiz, 'reimport leaves the entire upcoming assignment unchanged');
 assert.strictEqual(second.summary.coursesUpdated, 2);
+
+// Citizenship is a separate grading task, not an academic category.
+{
+    const academicPayload = plain(payload);
+    academicPayload.roster = academicPayload.roster.filter(section => section.sectionID === 501);
+    academicPayload.grades = [{ calendarID: 77, endYear: 2026, courses: [{
+        sectionID: 501, courseName: 'AP CALC AB', gradingTasks: [
+            { termID: 1, taskID: 1, taskName: 'Progress', progressPercent: 74.67, progressScore: 'C' },
+            { termID: 1, taskID: 9, taskName: 'Citizenship', progressPercent: 100, progressScore: 'S' }
+        ]
+    }] }];
+    academicPayload.details = { 501: { details: [
+        { task: { taskID: 1, taskName: 'Progress', termID: 1 }, categories: [
+            { groupID: 10, name: 'Tests', weight: 60, isWeighted: true, assignments: [
+                { objectSectionID: 'test', assignmentName: 'Unit test', scorePoints: 8, totalPoints: 10, multiplier: 2 }
+            ] },
+            { groupID: 20, name: 'Homework', weight: 40, isWeighted: true, usePercent: true, assignments: [
+                { objectSectionID: 'homework1', assignmentName: 'Homework 1', scorePoints: 10, totalPoints: 20, multiplier: 2 },
+                { objectSectionID: 'homework2', assignmentName: 'Homework 2', scorePoints: 10, totalPoints: 10 }
+            ] }
+        ] },
+        { task: { taskID: 9, taskName: '(1) Citizenship', termID: 1 }, categories: [
+            { groupID: 99, name: 'Practice', weight: 100, isWeighted: true, assignments: [
+                { objectSectionID: 'citizen', assignmentName: 'Safety Contract and Syllabus', scorePoints: 10, totalPoints: 10 }
+            ] },
+            { groupID: 20, name: 'Homework', weight: 100, assignments: [
+                { objectSectionID: 'citizen-shared-group', assignmentName: 'Behavior task', scorePoints: 10, totalPoints: 10 }
+            ] }
+        ] }
+    ] } };
+    academicPayload.assignments = [
+        { sectionID: 501, objectSectionID: 'citizen', assignmentName: 'Safety Contract and Syllabus', scorePoints: 10, totalPoints: 10 },
+        { sectionID: 501, objectSectionID: 'citizen-shared-group', groupID: 20, assignmentName: 'Behavior task', scorePoints: 10, totalPoints: 10 },
+        { sectionID: 501, objectSectionID: 'citizen-list', groupID: 99, assignmentName: 'Citizenship list-only work', scorePoints: 10, totalPoints: 10 },
+        { sectionID: 501, objectSectionID: 'citizen-task', taskID: 9, assignmentName: 'Task-only work', scorePoints: 10, totalPoints: 10 },
+        { sectionID: 501, objectSectionID: 'future', assignmentName: 'Upcoming quiz', dueDate: '2026-02-10', totalPoints: 20 },
+        { sectionID: 501, objectSectionID: 'past', assignmentName: 'Old unscored work', dueDate: '2025-09-01', totalPoints: 20, turnedIn: true }
+    ];
+    const academicModel = IC.parsePayload(academicPayload);
+    assert.deepStrictEqual(plain(academicModel.assignments.map(item => item.id).sort()),
+        ['future', 'homework1', 'homework2', 'past', 'test']);
+    assert.deepStrictEqual(plain(academicModel.sections[0].grades.map(grade => grade.task)), ['Progress']);
+    assert.deepStrictEqual(plain(academicModel.sections[0].categories.map(category => [category.name, category.weight])), [['Tests', 60], ['Homework', 40]]);
+    const academicPlan = IC.buildImportPlan(academicModel, {}, { school: 'pchs', catalog });
+    const academic = IC.applyImportPlan(academicModel, academicPlan, {}, options);
+    assert.equal(academic.assignments.length, 3, 'only academic graded assignments are imported');
+    const homework = academic.assignments.find(item => item.id === 'ic_homework1');
+    assert.deepStrictEqual(plain([homework.pointsEarned, homework.maxPoints]), [100, 200],
+        'percent-based categories preserve assignment multipliers');
+    const academicCourse = academic.courses[0];
+    for (const item of academic.assignments) {
+        assert.equal(academicCourse.categories.find(category => category.id === item.categoryId).name,
+            item.id === 'ic_test' ? 'Tests' : 'Homework');
+    }
+    const gradeSandbox = { console, Date, Math, window: {}, localDateKey: () => options.today,
+        AppState: { get: key => ({ courses: academic.courses, assignments: academic.assignments }[key]) } };
+    vm.createContext(gradeSandbox);
+    const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+    vm.runInContext(appSource.slice(appSource.indexOf('    class AppOrchestrator'), appSource.indexOf('    window.NexusApp =')), gradeSandbox);
+    const app = vm.runInContext('Object.create(AppOrchestrator.prototype)', gradeSandbox);
+    assert.ok(Math.abs(app.calculateCourseGrade(academicCourse) - (80 * .6 + (200 / 300 * 100) * .4)) < 1e-9,
+        'the actual app computes Campus category weighting and percent/multiplier totals correctly');
+    const oldCitizen = { id: 'ic_citizen', source: 'infinite-campus', courseCode: academicCourse.code,
+        categoryId: 'category_ic_99', graded: true, pointsEarned: 10, maxPoints: 10 };
+    const oldCourse = { ...academicCourse, categories: [...academicCourse.categories,
+        { id: 'category_ic_99', name: 'Practice', weight: 100 }] };
+    const savedFuture = { id: 'ic_future', source: 'infinite-campus', courseCode: oldCourse.code,
+        title: 'My title', dueDate: '2026-03-01', status: 'completed', graded: false, notes: 'Keep all of this', categoryId: oldCourse.categories[0].id };
+    const ownTask = { ...savedFuture, id: 'manual', title: 'My own task' };
+    const repairedPlan = IC.buildImportPlan(academicModel, { courses: [oldCourse] }, { school: 'pchs', catalog });
+    const repaired = IC.applyImportPlan(academicModel, repairedPlan, { courses: [oldCourse],
+        assignments: [...academic.assignments, oldCitizen, savedFuture, ownTask] }, { ...options, upcoming: true });
+    assert.ok(!repaired.assignments.some(item => item.id === 'ic_citizen'), 'reimport removes positively identified old Citizenship work');
+    assert.ok(!repaired.courses[0].categories.some(category => category.id === 'category_ic_99'), 'unused old Citizenship weights are removed');
+    assert.deepStrictEqual(plain(repaired.assignments.find(item => item.id === 'ic_future')), savedFuture);
+    assert.deepStrictEqual(plain(repaired.assignments.find(item => item.id === 'manual')), ownTask);
+    assert.ok(!repaired.assignments.some(item => item.id === 'ic_past'), 'an old due date does not invent completed work');
+    const exemptModel = plain(academicModel);
+    exemptModel.assignments.find(item => item.id === 'test').exempt = true;
+    const exemptResult = IC.applyImportPlan(exemptModel,
+        IC.buildImportPlan(exemptModel, { courses: academic.courses }, { school: 'pchs', catalog }), academic, options);
+    assert.equal(exemptResult.assignments.find(item => item.id === 'ic_test'), undefined,
+        'a newly exempt Campus score is removed from graded work after reimport');
+    assert.ok(Math.abs(app.calculateCourseGrade(exemptResult.courses[0], exemptResult.assignments) - 200 / 300 * 100) < 1e-9);
+
+    const missingPayload = plain(academicPayload);
+    missingPayload.details[501].details[0].categories[0].assignments.push(
+        { objectSectionID: 'missing-zero', assignmentName: 'Missing zero', scorePoints: 0, totalPoints: 10, missing: true, dueDate: '2099-01-01' },
+        { objectSectionID: 'missing-partial', assignmentName: 'Missing partial', scorePoints: 4, totalPoints: 10, missing: true },
+        { objectSectionID: 'missing-unscored', assignmentName: 'Missing without score', totalPoints: 10, missing: true }
+    );
+    const missingModel = IC.parsePayload(missingPayload);
+    const missingPlan = IC.buildImportPlan(missingModel, {}, { school: 'pchs', catalog });
+    const missing = IC.applyImportPlan(missingModel, missingPlan, {}, options);
+    for (const id of ['missing-zero', 'missing-partial', 'missing-unscored']) {
+        const item = missing.assignments.find(item => item.id === `ic_${id}`);
+        assert.equal(item.status, 'pending');
+        assert.equal(item.icMissing, true);
+        assert.equal(app.assignmentState(item), 'overdue', 'Campus missing overrides date and scored state');
+        assert.equal(app.isOpenAssignment(item), true);
+    }
+    assert.equal(missing.assignments.find(item => item.id === 'ic_missing-zero').graded, true);
+    assert.equal(missing.assignments.find(item => item.id === 'ic_missing-partial').pointsEarned, 4);
+    assert.equal(missing.assignments.find(item => item.id === 'ic_missing-unscored').graded, false,
+        'missing without a Campus score never fabricates a graded zero');
+    assert.ok(Math.abs(app.calculateCourseGrade(missing.courses[0], missing.assignments) - (50 * .6 + (200 / 300 * 100) * .4)) < 1e-9,
+        'scored missing work counts in the academic grade while unscored missing work does not');
+    const resolvedModel = plain(missingModel);
+    resolvedModel.assignments.forEach(item => { item.missing = false; });
+    const resolved = IC.applyImportPlan(resolvedModel, IC.buildImportPlan(resolvedModel, { courses: missing.courses }, { school: 'pchs', catalog }),
+        missing, options);
+    assert.equal(resolved.assignments.find(item => item.id === 'ic_missing-zero').icMissing, false);
+    assert.equal(resolved.assignments.find(item => item.id === 'ic_missing-zero').status, 'completed');
+
+    const termPayload = plain(academicPayload);
+    termPayload.details[501].details.push({ task: { taskID: 1, taskName: 'Progress', termID: 2 }, categories: [
+        { groupID: 10, name: 'Tests', weight: 80, isWeighted: true, assignments: [
+            { objectSectionID: 's2test', assignmentName: 'Semester 2 Test', scorePoints: 9, totalPoints: 10 }
+        ] },
+        { groupID: 20, name: 'Homework', weight: 20, isWeighted: true, assignments: [
+            { objectSectionID: 's2hw', assignmentName: 'Semester 2 Homework', scorePoints: 5, totalPoints: 10 }
+        ] }
+    ] });
+    const termModel = IC.parsePayload(termPayload);
+    const termPlan = IC.buildImportPlan(termModel, {}, { school: 'pchs', catalog });
+    const termResult = IC.applyImportPlan(termModel, termPlan, {}, options);
+    const termCourse = termResult.courses[0];
+    const s1Test = termResult.assignments.find(item => item.id === 'ic_test');
+    const s2Test = termResult.assignments.find(item => item.id === 'ic_s2test');
+    assert.notEqual(s1Test.categoryId, s2Test.categoryId, 'same-named categories with reused Campus IDs keep their grading-term identity');
+    assert.equal(termCourse.categories.find(category => category.id === s1Test.categoryId).weight, 60);
+    assert.equal(termCourse.categories.find(category => category.id === s2Test.categoryId).weight, 80);
+    const s2Work = termResult.assignments.filter(item => item.id.startsWith('ic_s2'));
+    assert.ok(Math.abs(app.calculateCourseGrade(termCourse, s2Work) - 82) < 1e-9,
+        'semester 2 uses its own 80/20 weights instead of the semester 1 weights');
+}
 
 // Overrides: skip a class or keep the Campus name
 const skipped = IC.applyImportPlan(model, plan, { courses: [], assignments: [], schedule: {} }, { ...options, overrides: { [health.key]: 'skip', [calc.key]: '' } });
@@ -295,6 +432,46 @@ async function mobileImport() {
     assert.strictEqual(JSON.parse(manualData.value).format, IC.FORMAT);
     showButton.handlers.click();
     assert.strictEqual(box.children.filter(child => child.tag === 'textarea').length, 1, 'showing data again reuses the copy field');
-    console.log('Infinite Campus import, early tutorial, mobile bookmark setup, clipboard/file fallbacks and scrollable collector tests passed.');
+    // Regression: Parkway only gives A+ in weighted (Honors/AP) classes. A regular Campus class must not
+// auto-match a weighted catalog course, and its 97%+ grade must show as A.
+{
+    const regular = IC.matchCourse('', 'FRENCH 4', catalog);
+    assert.strictEqual(regular.course, null, `FRENCH 4 must not auto-match ${regular.course?.title}`);
+    assert.ok(regular.suggestions.some(course => course.title === 'Honors French 4'), 'the Honors course is still offered as a suggestion');
+    assert.strictEqual(IC.matchCourse('', 'HONORS DRAWING', catalog).course, null, 'an Honors Campus class must not match a regular catalog course');
+    assert.ok(IC.looksWeighted('ENGLISH 10 HON') && IC.looksWeighted('CHEM H') && IC.looksWeighted('AP SEMINAR') && IC.looksWeighted('DUAL CREDIT ENG'));
+    assert.ok(!IC.looksWeighted('FRENCH 4') && !IC.looksWeighted('HEALTH') && !IC.looksWeighted('CHEMISTRY'));
+
+    const regularPayload = {
+        ...payload,
+        roster: [
+            { sectionID: 801, calendarID: 77, endYear: 2026, courseNumber: '', courseName: 'FRENCH 4', teacherDisplay: 'Roy, A', sectionPlacements: [{ termID: 1, periodName: '3' }] },
+            { sectionID: 802, calendarID: 77, endYear: 2026, courseNumber: '', courseName: 'HONORS DRAWING', teacherDisplay: 'Fox, B', sectionPlacements: [{ termID: 1, periodName: '4' }] }
+        ],
+        grades: [], details: {},
+        assignments: [
+            { objectSectionID: 'r1', sectionID: 801, assignmentName: 'Quiz 1', dueDate: '2025-09-10', scorePoints: '98', totalPoints: '100' },
+            { objectSectionID: 'r2', sectionID: 802, assignmentName: 'Sketch 1', dueDate: '2025-09-10', scorePoints: '98', totalPoints: '100' }
+        ]
+    };
+    const regularModel = IC.parsePayload(regularPayload);
+    const regularPlan = IC.buildImportPlan(regularModel, { courses: [] }, { school: 'pchs', catalog });
+    const imported = IC.applyImportPlan(regularModel, regularPlan, { courses: [], assignments: [], schedule: {} }, options);
+    const french = imported.courses.find(course => course.icSectionIDs.includes('801'));
+    const drawing = imported.courses.find(course => course.icSectionIDs.includes('802'));
+    assert.strictEqual(french.catalogCode, '');
+    assert.strictEqual(french.isWeighted, false, 'a regular Campus class imports unweighted');
+    assert.strictEqual(drawing.isWeighted, true, 'an Honors Campus class imports weighted');
+    assert.strictEqual(sandbox.studbudGradeForPercentage(98, french), 'A', 'unweighted Parkway classes cap at A');
+    assert.strictEqual(sandbox.studbudGradeForPercentage(98, drawing), 'A+', 'weighted Parkway classes can earn A+');
+    assert.strictEqual(sandbox.studbudGradeForPercentage(98, calcCourse), 'A+');
+
+    // Choosing the Honors catalog course in the preview still marks the class weighted.
+    const chosen = IC.applyImportPlan(regularModel, regularPlan, { courses: [], assignments: [], schedule: {} },
+        { ...options, overrides: { [regularPlan.classes.find(entry => entry.sectionIDs.includes('801')).key]: catalog.find(course => course.title === 'Honors French 4').code } });
+    assert.strictEqual(chosen.courses.find(course => course.icSectionIDs.includes('801')).isWeighted, true);
+}
+
+console.log('Infinite Campus import, early tutorial, mobile bookmark setup, clipboard/file fallbacks and scrollable collector tests passed.');
 }
 mobileImport().catch(error => { console.error(error); process.exitCode = 1; });

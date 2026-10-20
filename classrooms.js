@@ -696,16 +696,16 @@
             if (!course) return null;
             const today = todayKey();
             const work = (AppState.get('assignments') || []).filter(entry => entry.courseCode === course.code);
-            const open = work.filter(entry => entry.status !== 'completed' && !this.app.isGradedItem(entry));
+            const open = work.filter(entry => this.app.isOpenAssignment(entry));
             const dueKey = entry => String(entry.dueDate || '').slice(0, 10);
-            const overdue = open.filter(entry => dueKey(entry) && dueKey(entry) < today);
-            const missing = work.filter(entry => entry.icMissing || (entry.status !== 'completed' && !this.app.isGradedItem(entry) && dueKey(entry) && dueKey(entry) < today));
-            const upcoming = open.filter(entry => !dueKey(entry) || dueKey(entry) >= today)
+            const overdue = open.filter(entry => entry.icMissing || (dueKey(entry) && dueKey(entry) < today));
+            const missing = overdue;
+            const upcoming = open.filter(entry => !entry.icMissing && (!dueKey(entry) || dueKey(entry) >= today))
                 .sort((a, b) => (dueKey(a) || '9999').localeCompare(dueKey(b) || '9999'));
             const grade = this.app.calculateCourseGrade(course);
             return {
                 grade_pct: grade === null || !Number.isFinite(grade) ? null : Math.round(grade * 10) / 10,
-                letter: grade === null || !Number.isFinite(grade) ? '' : this.app.gradeForPercentage(grade),
+                letter: grade === null || !Number.isFinite(grade) ? '' : this.app.gradeForPercentage(grade, course),
                 missing: missing.length,
                 overdue: overdue.length,
                 upcoming: upcoming.length,

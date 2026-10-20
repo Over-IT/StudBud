@@ -142,7 +142,8 @@ assert.match(sqlFunction('studbud_my_classes'), /studbud_user_tags where user_id
         const app = { userTags: teacher ? ['teacher'] : [], currentSchool: () => 'pchs', isParkwaySchool: () => true,
             AppState: { get: key => state[key] }, EventBus: { on: (event, fn) => { events[event] = fn; } },
             friendlyErrorMessage: error => error.message, schoolCatalog: () => [],
-            calculateCourseGrade: () => 90, gradeForPercentage: () => 'A', isGradedItem: () => false };
+            calculateCourseGrade: () => 90, gradeForPercentage: () => 'A', isGradedItem: () => false,
+            isOpenAssignment: entry => entry.status !== 'completed' && (entry.icMissing || !entry.graded) };
         vm.runInNewContext(classroomsSource, { window: win, document: doc, console,
             setInterval: fn => { timers.push(fn); return timers.length; },
             setTimeout: fn => { timers.push(fn); return timers.length; }, clearTimeout() {} });
@@ -198,6 +199,14 @@ assert.match(sqlFunction('studbud_my_classes'), /studbud_user_tags where user_id
     assert.equal(snapshot.overdue, 1);
     assert.equal(snapshot.upcoming, 1);
     assert.equal(snapshot.next_due[0].title, 'Future lab', 'only this course shares upcoming assignments');
+    markup.state.assignments.push(
+        { courseCode: 'BIO', title: 'Scored missing lab', status: 'pending', icMissing: true, graded: true, pointsEarned: 0, dueDate: '2999-01-01' },
+        { courseCode: 'BIO', title: 'Completed missing lab', status: 'completed', icMissing: true, graded: true, pointsEarned: 0 }
+    );
+    const scoredMissing = markup.client.snapshotFor('BIO');
+    assert.equal(scoredMissing.missing, 2, 'a scored missing item remains missing until completed');
+    assert.equal(scoredMissing.overdue, 2, 'Campus missing is overdue even with a future due date');
+    assert.equal(scoredMissing.upcoming, 1, 'scored missing work is not an upcoming task');
 
     const failure = harness();
     failure.client.call = async fn => {

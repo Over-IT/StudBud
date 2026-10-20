@@ -86,7 +86,7 @@
                 const credits = parseFloat(course.credits) || 0;
                 totalCredits += credits;
                 
-                const gradeToUse = course.targetGrade || 'B'; // Fallback if no grade set
+                const gradeToUse = window.studbudGradeLetterFor ? window.studbudGradeLetterFor(course.targetGrade || 'B', course) : course.targetGrade || 'B'; // Fallback if no grade set
                 
                 unweightedPoints += this.getGradePoints(gradeToUse, false) * credits;
                 weightedPoints += this.getGradePoints(gradeToUse, course.isWeighted) * credits;

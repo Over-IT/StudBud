@@ -88,7 +88,7 @@
         const list = value => Array.isArray(value) ? value : [];
         const ASSIGNMENT_KEYS = ['objectSectionID', 'assignmentID', 'sectionID', 'assignmentName', 'courseName', 'dueDate', 'assignedDate',
             'scorePoints', 'score', 'scorePercentage', 'totalPoints', 'multiplier', 'missing', 'late', 'incomplete', 'dropped', 'exempt',
-            'notGraded', 'turnedIn', 'categoryName', 'categoryID', 'groupID', 'termIDs', 'scoreModifiedDate'];
+            'notGraded', 'turnedIn', 'categoryName', 'categoryID', 'groupID', 'termIDs', 'termID', 'taskID', 'taskName', 'scoreModifiedDate'];
         const TASK_KEYS = ['termID', 'termName', 'taskID', 'taskName', 'score', 'percent', 'progressScore', 'progressPercent', 'progressPointsEarned', 'progressTotalPoints'];
         const pickCourse = course => ({
             ...pick(course, ['sectionID', 'courseID', 'courseName', 'courseNumber', 'teacherDisplay', 'roomName', 'dropped']),
@@ -391,6 +391,10 @@
         return normalizePayload(data);
     }
 
+    function isCitizenship(value) {
+        return /\bcitizenship\b/i.test(String(value || ''));
+    }
+
     function normalizeAssignment(item, fallbackSectionID, category) {
         const sectionID = idText(item.sectionID ?? fallbackSectionID);
         const name = text(item.assignmentName, 120);
@@ -409,6 +413,8 @@
             multiplier: multiplier !== null && multiplier > 0 ? multiplier : null,
             categoryID: idText(category?.groupID ?? item.groupID ?? item.categoryID),
             categoryName: text(category?.name ?? item.categoryName, 60),
+            categoryKey: category?.key || '',
+            termIDs: [...new Set([...list(item.termIDs).map(idText), idText(item.termID)].filter(Boolean))],
             missing: bool(item.missing),
             late: bool(item.late),
             dropped: bool(item.dropped),
@@ -483,6 +489,7 @@
             });
         });
 
+        const excludedTasks = new Set();
         const addGradeCourse = (course, term, calendarID) => {
             const section = sectionFor(course, calendarID);
             if (!section) return;
@@ -493,6 +500,10 @@
                 if (termID) section.termIDs.add(termID);
             }
             list(course.gradingTasks).forEach(task => {
+                if (isCitizenship(task.taskName)) {
+                    if (task.taskID) excludedTasks.add(`${section.id}|${idText(task.taskID)}`);
+                    return;
+                }
                 const percent = num(task.progressPercent ?? task.percent);
                 const score = text(task.progressScore ?? task.score, 8);
                 if (percent === null && !score) return;
@@ -507,6 +518,9 @@
         });
 
         const assignments = new Map();
+        const excludedAssignmentIDs = new Set();
+        const excludedGroups = new Set();
+        const academicGroups = new Set();
         const addAssignment = (item, sectionID, category) => {
             const normalized = normalizeAssignment(item, sectionID, category);
             if (!normalized || !sections.has(normalized.sectionID)) return;
@@ -519,6 +533,7 @@
             Object.entries(normalized).forEach(([key, value]) => {
                 if (value === '' || value === null) return;
                 if ((key === 'categoryID' || key === 'categoryName') && existing[key]) return;
+                if (key === 'termIDs' && !value.length) return;
                 existing[key] = typeof value === 'boolean' ? existing[key] || value : value;
             });
         };
@@ -526,27 +541,52 @@
             const section = sections.get(idText(sectionID));
             if (!section) return;
             list(detail?.details).forEach(entry => {
+                const citizenship = isCitizenship(entry.task?.taskName);
+                if (citizenship && entry.task?.taskID) excludedTasks.add(`${section.id}|${idText(entry.task.taskID)}`);
                 if (entry.task?.termID) section.termIDs.add(idText(entry.task.termID));
                 list(entry.categories).forEach(category => {
                     const name = text(category.name, 60);
                     if (!name) return;
-                    const key = idText(category.groupID) || slug(name);
+                    const groupID = idText(category.groupID) || slug(name);
+                    if (citizenship || isCitizenship(name)) {
+                        excludedGroups.add(`${section.id}|${groupID}`);
+                        list(category.assignments).forEach(item => {
+                            const normalized = normalizeAssignment(item, section.id, category);
+                            if (normalized) excludedAssignmentIDs.add(normalized.id);
+                        });
+                        return;
+                    }
+                    academicGroups.add(`${section.id}|${groupID}`);
+                    const termID = idText(entry.task?.termID);
+                    const key = termID ? `${termID}_${groupID}` : groupID;
                     const rawWeight = num(category.weight);
                     const weighted = category.isWeighted === undefined ? rawWeight !== null : bool(category.isWeighted);
                     const weight = weighted && rawWeight !== null ? round2(Math.max(0, Math.min(100, rawWeight))) : null;
                     const existing = section.categories.get(key);
-                    if (!existing || (!existing.weight && weight)) {
+                    if (!existing || (existing.weight === null && weight !== null)) {
                         section.categories.set(key, {
-                            id: key, name, weight,
+                            id: key, groupID, termID, name, weight,
                             excluded: category.isExcluded === undefined ? false : bool(category.isExcluded),
                             usePercent: bool(category.usePercent)
                         });
                     }
-                    list(category.assignments).forEach(item => addAssignment(item, section.id, { groupID: key, name }));
+                    list(category.assignments).forEach(item => addAssignment(item, section.id, { groupID, name, key }));
                 });
             });
         });
-        list(data.assignments).forEach(item => addAssignment(item, item.sectionID));
+        list(data.assignments).forEach(item => {
+            const group = `${idText(item.sectionID)}|${idText(item.groupID ?? item.categoryID)}`;
+            const normalized = normalizeAssignment(item, item.sectionID);
+            if (!normalized) return;
+            if (isCitizenship(item.taskName) || isCitizenship(item.categoryName)
+                || excludedTasks.has(`${normalized.sectionID}|${idText(item.taskID)}`)
+                || (excludedAssignmentIDs.has(normalized.id) && !assignments.has(normalized.id))
+                || (excludedGroups.has(group) && !academicGroups.has(group))) {
+                excludedAssignmentIDs.add(normalized.id);
+                return;
+            }
+            addAssignment(item, item.sectionID);
+        });
 
         const calendars = {};
         Object.entries(data.days && typeof data.days === 'object' ? data.days : {}).forEach(([calendarID, days]) => {
@@ -574,6 +614,7 @@
                 categories: [...section.categories.values()]
             })),
             assignments: [...assignments.values()].map(item => ({ ...item, multiplier: item.multiplier ?? 1 })),
+            excludedAssignmentIDs: [...excludedAssignmentIDs].filter(id => !assignments.has(id)),
             calendars,
             warnings: list(data.warnings).map(item => text(item, 200)).slice(0, 20)
         };
@@ -670,9 +711,11 @@
         // Infinite Campus names are often abbreviated or cut off, so covering its words matters most
         let score = 0.5 * recall + 0.2 * precision + 0.3 * charScore;
         const has = (tokens, flag) => tokens.includes(flag);
+        // A missing/extra AP, IB or Honors marker changes the class's weighting, so it must stay below the
+        // auto-match threshold; otherwise a regular class could import as weighted (or vice versa).
         if (has(a, 'ap') !== has(b, 'ap')) score *= 0.5;
-        if (has(a, 'ib') !== has(b, 'ib')) score *= 0.6;
-        if (has(a, 'honors') !== has(b, 'honors')) score *= 0.65;
+        if (has(a, 'ib') !== has(b, 'ib')) score *= 0.5;
+        if (has(a, 'honors') !== has(b, 'honors')) score *= 0.5;
         const numbersA = a.filter(token => /^\d+$/.test(token)).join(' ');
         const numbersB = b.filter(token => /^\d+$/.test(token)).join(' ');
         if (numbersA && numbersB && numbersA !== numbersB) score *= 0.55;
@@ -680,6 +723,12 @@
         const special = ['ell', 'dhh', 'alt', 'parallel', 'mentor', 'ipbl', 'semester', 'esl', 'keys'];
         if (special.some(token => has(b, token) && !has(a, token))) score *= 0.7;
         return Math.max(0, Math.min(1, score));
+    }
+
+    // Weighting for classes imported under their Campus name (no catalog course): AP/IB/Honors/dual credit markers.
+    function looksWeighted(name) {
+        const tokens = titleTokens(name);
+        return ['ap', 'ib', 'honors', 'dual'].some(token => tokens.includes(token));
     }
 
     function normalizeCourseNumber(value) {
@@ -867,7 +916,6 @@
         const include = {
             categories: options.categories !== false,
             graded: options.graded !== false,
-            upcoming: options.upcoming !== false,
             schedule: options.schedule !== false,
             calendar: options.calendar !== false
         };
@@ -877,7 +925,9 @@
         const now = Number(options.now) || Date.now();
         const school = plan.school;
         const courses = list(state.courses).map(course => ({ ...course, categories: list(course.categories).map(category => ({ ...category })) }));
-        const assignments = list(state.assignments).map(item => ({ ...item }));
+        const excludedIDs = new Set(list(model.excludedAssignmentIDs).map(id => `ic_${id}`));
+        const assignments = list(state.assignments).filter(item => !excludedIDs.has(item.id) || item.source !== 'infinite-campus')
+            .map(item => ({ ...item }));
         const schedule = { all: {}, odd: {}, even: {}, ...(state.schedule || {}) };
         const sectionsById = new Map(model.sections.map(section => [section.id, section]));
         const summary = { coursesAdded: 0, coursesUpdated: 0, categories: 0, gradedAdded: 0, gradedUpdated: 0, upcomingAdded: 0, upcomingUpdated: 0, periods: 0, days: 0, skipped: 0 };
@@ -919,7 +969,7 @@
                 term: entry.term,
                 credits: catalogCourse ? Number(catalogCourse.credits) : Number(course.credits) || (entry.term === 'FY' ? 1 : 0.5),
                 category: catalogCourse ? SUBJECT_MAP[catalogCourse.category] || 'Electives' : course.category || guessSubject(name),
-                isWeighted: catalogCourse ? Boolean(catalogCourse.isWeighted) : (isNew ? /\b(ap|honors?|ib|dual|hnrs?)\b/i.test(name) : Boolean(course.isWeighted)),
+                isWeighted: catalogCourse ? Boolean(catalogCourse.isWeighted) : (isNew ? looksWeighted(name) : Boolean(course.isWeighted)),
                 icSectionIDs: [...new Set([...list(course.icSectionIDs).map(String), ...entry.sectionIDs])],
                 icCourseNumber: entry.courseNumbers.join(', '),
                 icName: name,
@@ -929,25 +979,31 @@
             touchedCodes.push(course.code);
             entry.sectionIDs.forEach(id => sectionToCourse.set(id, course));
 
-            const byName = new Map(course.categories.map(category => [String(category.name).toLowerCase(), category]));
+            const categoryNameKey = category => `${category.icTermID || ''}|${String(category.name).trim().toLowerCase()}`;
+            const byName = new Map(course.categories.map(category => [categoryNameKey(category), category]));
             sections.forEach(section => section.categories.forEach(category => {
                 const lookupKey = `${section.id}|${category.id}`;
-                let target = byName.get(category.name.toLowerCase());
+                const nameKey = `${category.termID || ''}|${category.name.trim().toLowerCase()}`;
+                let target = byName.get(nameKey);
+                // Reuse legacy imported categories when upgrading to term-specific category identities.
+                if (!target) target = course.categories.find(item => !item.icTermID
+                    && item.name.trim().toLowerCase() === category.name.trim().toLowerCase());
                 if (!target && include.categories) {
                     let id = `category_ic_${slug(category.id)}`;
                     while (course.categories.some(item => item.id === id)) id = `${id}_${course.categories.length}`;
-                    target = { id, name: category.name, weight: category.excluded ? 0 : category.weight, excluded: category.excluded };
+                    target = { id, name: category.name, weight: category.excluded ? 0 : category.weight, excluded: category.excluded,
+                        icTermID: category.termID || '' };
                     course.categories.push(target);
-                    byName.set(category.name.toLowerCase(), target);
+                    byName.set(nameKey, target);
                     summary.categories++;
                 } else if (target && include.categories && !target.icUpdated) {
                     target.weight = category.excluded ? 0 : category.weight;
                     target.excluded = category.excluded;
+                    target.icTermID = category.termID || '';
                     target.icUpdated = true;
+                    byName.set(nameKey, target);
                 }
                 if (target) categoryLookup.set(lookupKey, { category: target, source: category });
-                const nameKey = `${section.id}|name:${category.name.toLowerCase()}`;
-                if (target) categoryLookup.set(nameKey, { category: target, source: category });
             }));
             course.categories.forEach(category => { delete category.icUpdated; });
         });
@@ -955,40 +1011,53 @@
         model.assignments.forEach(item => {
             const course = sectionToCourse.get(item.sectionID);
             if (!course) return;
-            const resolved = categoryLookup.get(`${item.sectionID}|${item.categoryID}`)
-                || categoryLookup.get(`${item.sectionID}|name:${item.categoryName.toLowerCase()}`);
+            const section = sectionsById.get(item.sectionID);
+            const sourceCategories = (section?.categories || []).filter(category =>
+                category.groupID === item.categoryID || category.name.toLowerCase() === item.categoryName.toLowerCase());
+            const sourceCategory = sourceCategories.find(category => category.id === item.categoryKey)
+                || sourceCategories.find(category => item.termIDs?.includes(category.termID))
+                || (sourceCategories.length === 1 ? sourceCategories[0] : null);
+            const resolved = sourceCategory ? categoryLookup.get(`${item.sectionID}|${sourceCategory.id}`) : null;
             const category = resolved?.category
-                || course.categories.find(entry => item.categoryName && entry.name.toLowerCase() === item.categoryName.toLowerCase())
+                || (!sourceCategory && course.categories.find(entry => item.categoryName && entry.name.toLowerCase() === item.categoryName.toLowerCase()))
                 || null;
-            const excluded = Boolean(resolved?.source?.excluded);
+            const excluded = Boolean(sourceCategory?.excluded);
             const ignored = item.dropped || item.exempt || item.notGraded || excluded;
             const scored = item.scorePoints !== null;
             const graded = scored && !ignored;
-            if (graded && !include.graded) return;
-            if (!graded && !include.upcoming) return;
+            if (!include.graded) return;
+            const id = `ic_${item.id}`;
+            const current = assignments.find(entry => entry.id === id);
+            if (ignored) {
+                if (current?.source === 'infinite-campus' && current.graded) {
+                    assignments.splice(assignments.indexOf(current), 1);
+                    summary.gradedUpdated++;
+                }
+                return;
+            }
+            if (!graded && !item.missing) return;
+            if (sourceCategories.length > 1 && !sourceCategory) {
+                throw new Error(`Could not determine the grading term for "${item.title}". Recollect the Campus grade details before importing.`);
+            }
+            if (include.categories && sourceCategory && !category) {
+                throw new Error(`Could not match the grade category for "${item.title}". Preview the import again.`);
+            }
             let earned = scored ? item.scorePoints : 0;
             let possible = item.totalPoints ?? 0;
-            if (resolved?.source?.usePercent && scored && possible > 0) {
-                earned = earned / possible * 100;
-                possible = 100;
+            if (sourceCategory?.usePercent && possible > 0) {
+                earned = earned / possible * 100 * item.multiplier;
+                possible = 100 * item.multiplier;
             } else if (item.multiplier !== 1) {
                 earned *= item.multiplier;
                 possible *= item.multiplier;
             }
-            const id = `ic_${item.id}`;
-            const current = assignments.find(entry => entry.id === id);
             const importedKind = guessKind(item.title, item.categoryName || category?.name || '');
             const legacyValue = `${current?.title || item.title} ${item.categoryName || category?.name || ''}`.toLowerCase();
             const legacyKind = /\b(test|exam|midterm|final|summative|assessment|unit check|ccsa|eoc)\b/.test(legacyValue)
                 ? 'test' : /\bquiz(zes)?\b/.test(legacyValue) ? 'quiz' : 'assignment';
             const userEditedKind = current?.kind && current.kind !== (current.icKind || legacyKind);
             const kind = userEditedKind ? current.kind : importedKind;
-            const pastDue = item.dueDate && item.dueDate < today;
-            let status;
-            if (graded || ignored || item.turnedIn) status = 'completed';
-            else if (item.missing) status = 'pending';
-            else if (current?.status === 'completed') status = 'completed';
-            else status = pastDue ? 'completed' : 'pending';
+            const status = item.missing ? 'pending' : 'completed';
             const assignment = {
                 ...(current || {}),
                 id,
@@ -1007,7 +1076,7 @@
                 status,
                 gradedAt: graded ? (item.gradedAt || current?.gradedAt || item.dueDate || today) : null,
                 source: 'infinite-campus',
-                icMissing: item.missing && !scored,
+                icMissing: item.missing,
                 icLate: item.late,
                 icExcused: ignored && !graded
             };
@@ -1016,6 +1085,18 @@
             const bucket = graded ? 'graded' : 'upcoming';
             summary[`${bucket}${current ? 'Updated' : 'Added'}`]++;
         });
+
+        if (include.categories) {
+            touchedCodes.forEach(code => {
+                const course = courses.find(course => course.code === code);
+                const entrySections = model.sections.filter(section => sectionToCourse.get(section.id)?.code === code);
+                if (!entrySections.some(section => section.categories.length)
+                    && !list(model.excludedAssignmentIDs).length) return;
+                const active = new Set([...categoryLookup.values()].map(value => value.category.id));
+                course.categories = course.categories.filter(category => !category.id.startsWith('category_ic_')
+                    || active.has(category.id) || assignments.some(item => item.courseCode === code && item.categoryId === category.id));
+            });
+        }
 
         if (include.schedule || include.calendar) {
             const sections = [];
@@ -1149,6 +1230,7 @@
         parsePayload,
         normalizePayload,
         matchCourse,
+        looksWeighted,
         titleSimilarity,
         buildImportPlan,
         applyImportPlan,

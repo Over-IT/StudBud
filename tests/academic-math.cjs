@@ -181,6 +181,34 @@ assert.equal(mixed.totalCredits, 1.5);
 assert.equal(app.gradeForPercentage(89.999), 'B+');
 assert.equal(app.gradeForPercentage(96.999), 'A');
 assert.equal(app.gradeForPercentage(100.5), 'A+');
+// Parkway: A+ is only possible in weighted classes; unweighted classes cap at A.
+{
+    const regular = { code: 'REG', credits: 1, isWeighted: false };
+    const honors = { code: 'HON', credits: 1, isWeighted: true };
+    assert.equal(app.gradeForPercentage(100.5, regular), 'A');
+    assert.equal(app.gradeForPercentage(97, regular), 'A');
+    assert.equal(app.gradeForPercentage(93, regular), 'A');
+    assert.equal(app.gradeForPercentage(92.99, regular), 'A-');
+    assert.equal(app.gradeForPercentage(97, honors), 'A+');
+    assert.equal(app.gradeForPercentage(96.99, honors), 'A');
+    assert.ok(!sandbox.window.studbudGradeScaleFor(regular).some(item => item.letter === 'A+'));
+    assert.equal(sandbox.window.studbudGradeScaleFor(regular).find(item => item.letter === 'A').maxPct, 120);
+    assert.equal(sandbox.window.PARKWAY_GRADE_SCALE.length, 13, 'the shared Parkway scale is not mutated');
+    assert.equal(sandbox.window.studbudGradeLetterFor('A+', regular), 'A', 'a stale saved A+ on a regular class is read as A');
+    assert.equal(sandbox.window.studbudGradeLetterFor('A+', honors), 'A+');
+    const stale = gpa.calculateCurrentGPA([{ ...regular, targetGrade: 'A+' }, { ...honors, targetGrade: 'A+' }]);
+    close(stale.weighted, 4.5);
+    close(stale.unweighted, 4);
+    const plan = app.gpaTargetPlan(4.5, 'weighted', [regular, honors]);
+    assert.equal(plan.byCode.get('REG').letter, 'A-', 'the GPA solver never asks a regular class for an A+ (A- already earns 4.0)');
+    assert.equal(plan.byCode.get('HON').letter, 'A+');
+    const nexus = sandbox.window.NexusApp;
+    sandbox.window.NexusApp = { AppState: sandbox.AppState };
+    state.profile = { school: 'other' };
+    assert.equal(app.gradeForPercentage(98, regular), 'A+', 'non-Parkway scales are unchanged');
+    state.profile = {};
+    sandbox.window.NexusApp = nexus;
+}
 assert.equal(app.formatNumber(87.123456), '87.12');
 assert.equal(app.formatGpaChange(3.0001, 3.0002), '0.00 GPA points');
 
