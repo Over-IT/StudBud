@@ -10,14 +10,14 @@ const state = {
         { id: 'waiting', title: 'Completed quiz', courseCode: 'math', kind: 'quiz', status: 'completed', graded: false },
         { id: 'graded', title: 'Returned test', courseCode: 'math', status: 'completed', graded: true, pointsEarned: 0, maxPoints: 10 }
     ],
-    settings: { homeWidget: { streak: false, week: false, goal: false, grades: false } }
+    settings: {}
 };
 const nodes = new Map();
 const node = id => {
     if (!nodes.has(id)) nodes.set(id, { innerHTML: '', value: '', classList: { toggle() {} } });
     return nodes.get(id);
 };
-for (const id of ['home-widget-body', 'assignment-body', 'planner-assessment-body', 'planner-awaiting-grades', 'priority-task-list', 'quad-1-list']) node(id);
+for (const id of ['home-grade-inbox', 'assignment-body', 'planner-assessment-body', 'planner-awaiting-grades', 'priority-task-list', 'quad-1-list']) node(id);
 node('assignment-status-filter').value = 'todo';
 const sandbox = {
     console, Date, Math, window: {},
@@ -35,18 +35,18 @@ const source = read('app.js');
 vm.runInContext(source.slice(source.indexOf('    function localDateKey'), source.indexOf('    window.NexusApp ='))
     + '\nglobalThis.app = Object.create(AppOrchestrator.prototype);', sandbox);
 const app = sandbox.app;
-app.renderStudyRecommendations = app.updateAppBadge = () => {};
+app.renderStudyRecommendations = () => {};
 app.calculateCourseGrade = () => null;
-const streak = { week: [], msLeft: 0, goal: 600, today: 0, streak: 0, loaded: false };
-const render = () => { app.renderAssignments(); app.renderHomeWidget(streak); };
+const render = () => { app.renderAssignments(); app.renderHomeGradeInbox(); };
 
 async function run() {
     render();
-    const home = node('home-widget-body').innerHTML;
-    assert.match(home, /&lt;Homework&gt;/);
-    assert.doesNotMatch(home, /<Homework>/, 'titles cannot inject markup');
-    assert.match(home, /data-action="toggle-assignment" data-id="todo"/);
-    assert.match(home, /data-action="edit-assignment" data-id="todo"/);
+    const home = node('home-grade-inbox').innerHTML;
+    const tasks = node('priority-task-list').innerHTML;
+    assert.match(tasks, /&lt;Homework&gt;/);
+    assert.doesNotMatch(tasks, /<Homework>/, 'titles cannot inject markup');
+    assert.match(tasks, /data-action="toggle-assignment" data-id="todo"/);
+    assert.match(tasks, /data-action="edit-assignment" data-id="todo"/);
     assert.match(home, /Ready to add grades \(1\)/);
     assert.match(home, /data-action="grade-assignment" data-id="waiting"/);
     assert.doesNotMatch(home, /Returned test/);
@@ -61,7 +61,7 @@ async function run() {
     assert.equal(state.assignments[0].status, 'completed');
     assert.equal(state.assignments[0].graded, false, 'marking done does not invent a zero grade');
     render();
-    assert.match(node('home-widget-body').innerHTML, /Ready to add grades \(2\)/);
+    assert.match(node('home-grade-inbox').innerHTML, /Ready to add grades \(2\)/);
     assert.doesNotMatch(node('assignment-body').innerHTML, /&lt;Homework&gt;/);
     assert.match(node('planner-awaiting-grades').innerHTML, /data-action="grade-assignment" data-id="todo"/);
 
@@ -69,7 +69,7 @@ async function run() {
     assert.equal(state.assignments[0].status, 'pending');
     render();
     assert.match(node('assignment-body').innerHTML, /&lt;Homework&gt;/);
-    assert.match(node('home-widget-body').innerHTML, /Ready to add grades \(1\)/);
+    assert.match(node('home-grade-inbox').innerHTML, /Ready to add grades \(1\)/);
 
     const inputs = {
         'assignment-id': 'waiting', 'assignment-name': 'Completed quiz', 'assignment-course': 'math',
@@ -85,13 +85,13 @@ async function run() {
     assert.ok(state.assignments[1].gradedAt, 'grading records the date');
     render();
     assert.match(node('planner-awaiting-grades').innerHTML, /No grades to add right now/);
-    assert.doesNotMatch(node('home-widget-body').innerHTML, /Ready to add grades/);
+    assert.equal(node('home-grade-inbox').innerHTML, '', 'empty inbox takes no space on Home');
     state.assignments.push({ id: 'missing', title: 'Missing Campus work', courseCode: 'math',
         status: 'pending', graded: true, icMissing: true, pointsEarned: 0, maxPoints: 20, dueDate: '2099-01-01' });
     render();
     assert.equal(app.assignmentState(state.assignments.at(-1)), 'overdue', 'a missing tag overrides a future due date and a scored zero');
     assert.equal(app.assignmentPriority(state.assignments.at(-1)).daysRemaining, 0, 'missing work gets urgent planner priority without changing its actual due date');
-    assert.match(node('home-widget-body').innerHTML, /Missing Campus work/);
+    assert.match(node('priority-task-list').innerHTML, /Missing Campus work/);
     assert.match(node('assignment-body').innerHTML, /Missing Campus work/);
     assert.match(app.assignmentStatusControl(state.assignments.at(-1)), /Update grade/);
     node('assignment-id').value = 'missing';
@@ -109,7 +109,7 @@ async function run() {
     assert.equal(app.assignmentState(completedMissing), 'awaiting', 'completed missing work stays accessible for entering its new grade');
     render();
     assert.match(node('planner-awaiting-grades').innerHTML, /Missing Campus work/);
-    assert.match(node('home-widget-body').innerHTML, /Ready to add grades \(1\)/);
+    assert.match(node('home-grade-inbox').innerHTML, /Ready to add grades \(1\)/);
     node('assignment-id').value = 'missing';
     node('assignment-name').value = 'Missing Campus work';
     node('assignment-points').value = '18';

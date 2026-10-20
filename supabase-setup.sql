@@ -187,6 +187,7 @@ as $$
 declare
     v_user_id uuid := auth.uid();
     v_inserted integer;
+    v_recorded_seconds integer;
 begin
     if public.studbud_is_guest() then raise exception 'Create a free account to use this. Your guest data comes with you.'; end if;
     if v_user_id is null then raise exception 'Sign in to record study time.'; end if;
@@ -206,9 +207,11 @@ begin
 
     insert into public.studbud_study_time_entries (user_id, entry_id, study_date, seconds)
     values (v_user_id, btrim(p_entry_id), p_study_date, p_seconds)
-    on conflict (user_id, entry_id) do nothing;
+    on conflict (user_id, entry_id) do update
+        set seconds = greatest(studbud_study_time_entries.seconds, excluded.seconds)
+    returning seconds into v_recorded_seconds;
     get diagnostics v_inserted = row_count;
-    return jsonb_build_object('recorded', v_inserted > 0);
+    return jsonb_build_object('recorded', v_inserted > 0, 'seconds', v_recorded_seconds);
 end;
 $$;
 
@@ -3107,6 +3110,7 @@ alter table public.studbud_public_profiles add column if not exists last_name te
 alter table public.studbud_public_profiles add column if not exists show_real_name boolean not null default false;
 alter table public.studbud_public_profiles add column if not exists school text not null default 'pchs';
 alter table public.studbud_public_profiles add column if not exists show_school boolean not null default false;
+alter table public.studbud_public_profiles add column if not exists show_classmates boolean not null default false;
 -- Parkway Central (pchs), North (pnhs), South (pshs) and West (pwhs) each have their own school tag.
 alter table public.studbud_public_profiles drop constraint if exists studbud_public_profiles_school_check;
 alter table public.studbud_public_profiles add constraint studbud_public_profiles_school_check check (school in ('pchs', 'pnhs', 'pshs', 'pwhs', 'other'));
@@ -3209,12 +3213,14 @@ begin
         'grade_level', coalesce(v.grade_level, ''), 'study_goal', coalesce(v.study_goal, ''),
         'show_real_name', coalesce(v.show_real_name, false), 'show_stats', coalesce(v.show_stats, true),
         'school', coalesce(v.school, (select a.raw_user_meta_data ->> 'school' from auth.users a where a.id = auth.uid()), 'pchs'),
-        'show_school', coalesce(v.show_school, false));
+        'show_school', coalesce(v.show_school, false),
+        'show_classmates', coalesce(v.show_classmates, false));
 end;
 $$;
 
 drop function if exists public.studbud_set_public_profile(text, text, text, text, boolean);
 drop function if exists public.studbud_set_public_profile(text, text, text, text, text, text, boolean, boolean);
+drop function if exists public.studbud_set_public_profile(text, text, text, text, text, text, boolean, boolean, boolean);
 create or replace function public.studbud_set_public_profile(
     p_bio text,
     p_favorite_subject text,
@@ -3224,7 +3230,8 @@ create or replace function public.studbud_set_public_profile(
     p_last_name text,
     p_show_real_name boolean,
     p_show_school boolean,
-    p_show_stats boolean
+    p_show_stats boolean,
+    p_show_classmates boolean default null
 )
 returns jsonb
 language plpgsql
@@ -3238,16 +3245,17 @@ begin
         raise exception 'Name contains inappropriate language. Please choose a different name.';
     end if;
     insert into public.studbud_public_profiles (
-        user_id, bio, favorite_subject, grade_level, study_goal, first_name, last_name, show_real_name, show_school, show_stats, updated_at
+        user_id, bio, favorite_subject, grade_level, study_goal, first_name, last_name, show_real_name, show_school, show_stats, show_classmates, updated_at
     )
     values (auth.uid(), left(trim(coalesce(p_bio, '')), 160), left(trim(coalesce(p_favorite_subject, '')), 40),
         left(trim(coalesce(p_grade_level, '')), 20), left(trim(coalesce(p_study_goal, '')), 80),
         left(trim(coalesce(p_first_name, '')), 60), left(trim(coalesce(p_last_name, '')), 60),
-        coalesce(p_show_real_name, false), coalesce(p_show_school, false), coalesce(p_show_stats, true), now())
+        coalesce(p_show_real_name, false), coalesce(p_show_school, false), coalesce(p_show_stats, true), coalesce(p_show_classmates, false), now())
     on conflict (user_id) do update set bio = excluded.bio, favorite_subject = excluded.favorite_subject,
         grade_level = excluded.grade_level, study_goal = excluded.study_goal, first_name = excluded.first_name,
         last_name = excluded.last_name, show_real_name = excluded.show_real_name,
-        show_school = excluded.show_school, show_stats = excluded.show_stats, updated_at = now();
+        show_school = excluded.show_school, show_stats = excluded.show_stats,
+        show_classmates = coalesce(p_show_classmates, studbud_public_profiles.show_classmates), updated_at = now();
     return public.studbud_get_public_profile();
 end;
 $$;
@@ -3271,8 +3279,8 @@ $$;
 
 revoke all on function public.studbud_get_public_profile() from public, anon;
 grant execute on function public.studbud_get_public_profile() to authenticated;
-revoke all on function public.studbud_set_public_profile(text, text, text, text, text, text, boolean, boolean, boolean) from public, anon;
-grant execute on function public.studbud_set_public_profile(text, text, text, text, text, text, boolean, boolean, boolean) to authenticated;
+revoke all on function public.studbud_set_public_profile(text, text, text, text, text, text, boolean, boolean, boolean, boolean) from public, anon;
+grant execute on function public.studbud_set_public_profile(text, text, text, text, text, text, boolean, boolean, boolean, boolean) to authenticated;
 revoke all on function public.studbud_set_school(text) from public, anon;
 grant execute on function public.studbud_set_school(text) to authenticated;
 revoke all on function public.studbud_has_user_tag(uuid, text) from public, anon, authenticated;
@@ -3882,6 +3890,65 @@ as $$
     );
 $$;
 revoke all on function public.studbud_course_matches(jsonb, text, text) from public, anon, authenticated;
+
+-- Discovery is mutual opt-in and returns usernames, never private class progress.
+create or replace function public.studbud_classmates(p_course_code text, p_semester text)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_uid uuid := auth.uid();
+    v_school text;
+    v_course jsonb;
+    v_data jsonb;
+    v_visible boolean;
+begin
+    if v_uid is null or public.studbud_is_guest() then raise exception 'Sign in to discover students sharing a course.'; end if;
+    if public.studbud_is_hidden_user(v_uid) then raise exception 'Course discovery is unavailable for this account.'; end if;
+    if p_course_code is null or char_length(btrim(p_course_code)) not between 1 and 200
+        or p_semester is null or p_semester not in ('S1', 'S2') then raise exception 'Choose a valid class and semester.'; end if;
+    select coalesce(pp.show_classmates, false), d.data into v_visible, v_data
+    from auth.users a
+    left join public.studbud_public_profiles pp on pp.user_id = a.id
+    left join public.studbud_user_data d on d.user_id = a.id
+    where a.id = v_uid;
+    if not coalesce(v_visible, false) then return jsonb_build_object('visible', false, 'students', '[]'::jsonb); end if;
+    v_school := v_data #>> '{state,profile,school}';
+    if v_school is null or v_school not in ('pchs', 'pnhs', 'pshs', 'pwhs') then raise exception 'Choose a supported school and sync your classes first.'; end if;
+    select c.value into v_course
+    from jsonb_array_elements(coalesce(v_data #> '{state,courses}', '[]'::jsonb)) c(value)
+    where public.studbud_course_matches(c.value, p_course_code, '')
+      and coalesce(c.value ->> 'term', 'FY') in ('FY', p_semester)
+    limit 1;
+    if v_course is null then raise exception 'Sync this class to your account before finding classmates.'; end if;
+    return jsonb_build_object('visible', true, 'students', coalesce((
+        select jsonb_agg(jsonb_build_object('user_id', classmates.user_id, 'username', classmates.username)
+            order by lower(classmates.username), classmates.user_id)
+        from (
+            select pp.user_id, coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student') as username
+            from public.studbud_public_profiles pp
+            join auth.users a on a.id = pp.user_id
+            join public.studbud_user_data d on d.user_id = pp.user_id
+            where pp.show_classmates and pp.user_id <> v_uid
+              and d.data #>> '{state,profile,school}' = v_school
+              and not coalesce(a.is_anonymous, false)
+              and not public.studbud_is_hidden_user(pp.user_id)
+              and exists (
+                  select 1 from jsonb_array_elements(coalesce(d.data #> '{state,courses}', '[]'::jsonb)) c(value)
+                  where public.studbud_course_matches(c.value, coalesce(nullif(v_course ->> 'catalogCode', ''), v_course ->> 'code'), v_course ->> 'title')
+                    and coalesce(c.value ->> 'term', 'FY') in ('FY', p_semester)
+              )
+            order by lower(coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student')), pp.user_id
+            limit 50
+        ) classmates
+    ), '[]'::jsonb));
+end;
+$$;
+revoke all on function public.studbud_classmates(text, text) from public, anon;
+grant execute on function public.studbud_classmates(text, text) to authenticated;
 
 -- Reconcile only this teacher's rosters. Never expose students' saved course lists to clients.
 -- A teacher must not undo a student's new enrollment using an older cloud snapshot.

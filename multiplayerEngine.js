@@ -1015,6 +1015,7 @@
             bar.classList.toggle('hidden', !this.question?.deadline);
             bar.style.setProperty('--left', '1');
             box.classList.remove('hidden');
+            window.NexusApp?.refreshAutomaticStudy?.();
             box.querySelector('[data-q]')?.focus({ preventScroll: true });
             this.sfx('question');
             return true;
@@ -1024,6 +1025,7 @@
             const q = this.question;
             if (!q || q.locked) return;
             q.locked = true;
+            window.NexusApp?.refreshAutomaticStudy?.();
             const correct = index >= 0 && index < q.options.length && normalizeChoiceText(q.options[index]) === normalizeChoiceText(q.card.back);
             this.answered++;
             if (correct) this.correct++;
@@ -1060,6 +1062,7 @@
 
         closeQuestion(resume) {
             this.question = null;
+            window.NexusApp?.refreshAutomaticStudy?.();
             this.askCooldownUntil = performance.now() + 1000;
             const box = this.overlay.querySelector('.mpg-question');
             const restoreFocus = box.contains(document.activeElement);
@@ -1307,6 +1310,7 @@
                     <div class="mpg-q-card">
                         <div class="mpg-q-duel hidden" aria-live="assertive"><i class="fas fa-bolt"></i><strong>DUEL</strong><span>First correct answer wins</span></div>
                         <small>Question</small>
+                        <div class="mpg-study-time"><span class="focus-time-display">00:00</span> active study · <span class="auto-study-state">Automatic</span></div>
                         <div class="mpg-q-timer hidden" aria-hidden="true"><i></i></div>
                         <h3 class="mpg-q-prompt"></h3>
                         <div class="mpg-q-options"></div>

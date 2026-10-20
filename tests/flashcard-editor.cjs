@@ -450,10 +450,20 @@ async function weakCardViewing() {
     assert.deepEqual(deck(), snapshot, 'viewing and filtering never writes or changes saved progress');
     app.openDeckEditor('weak-set');
     assert.equal(elements.get('deck-editor-filter').value, 'all', 'normal editing still opens all cards');
+    await app.handleDataAction('view-focus-cards', 'weak-set');
+    app.deckEditorDraft.cards.push({ id: 'full-recall', front: 'Full recall term', back: 'Full recall answer',
+        practiceStats: { attempts: 4, correct: 4, recentAnswers: [true, true, true, true],
+            recentEvidence: Array.from({ length: 4 }, () => ({ correct: true, weight: 1 })) } });
+    app.renderDeckEditorCards();
+    assert.equal(elements.get('deck-editor-filter').value, 'focus');
+    assert.equal(elements.get('deck-editor-count').textContent, '7 of 8 cards');
+    assert.match(elements.get('deck-editor-cards').innerHTML, /not practiced yet/);
+    assert.match(elements.get('deck-editor-cards').innerHTML, /Focus: recent misses/);
+    assert.doesNotMatch(elements.get('deck-editor-cards').innerHTML, /Full recall term/);
     state.flashcards = [{ id: 'empty-set', title: 'Empty set', cards: [] }];
     await app.handleDataAction('view-weak-cards', 'empty-set');
     assert.match(elements.get('deck-editor-cards').innerHTML, /No weak cards in this set/);
-    assert.match(elements.get('deck-editor-cards').innerHTML, /at least two attempts/);
+    assert.match(elements.get('deck-editor-cards').innerHTML, /at least two recent answers/);
     assert.equal(elements.get('deck-editor-count').textContent, '0 of 0 cards');
     await assert.rejects(app.handleDataAction('view-weak-cards', 'missing'), /no longer exists/);
 }

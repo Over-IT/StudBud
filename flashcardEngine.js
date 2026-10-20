@@ -1158,7 +1158,7 @@
         weight(card) {
             const stats = card.practiceStats || {};
             const attempts = Math.max(0, Number(stats.attempts) || 0);
-            const accuracy = stats.recentAnswers?.length === 4 ? this.cardProgress(card).accuracy
+            const accuracy = Array.isArray(stats.recentAnswers) && stats.recentAnswers.some(value => typeof value === 'boolean') ? this.cardProgress(card).accuracy
                 : (Math.max(0, Number(stats.correct) || 0) + 1) / (attempts + 2);
             return 1 + (1 - accuracy) * 4 + Math.min(3, Math.max(0, Number(stats.missStreak) || 0))
                 + Math.min(2, Math.max(0, Number(card.lapses) || 0) * .25);
@@ -1172,14 +1172,14 @@
             const recent = Array.isArray(stats.recentAnswers) ? stats.recentAnswers.filter(value => typeof value === 'boolean').slice(-4) : [];
             const attempts = Math.max(0, Number(stats.attempts) || 0);
             const correct = Math.min(attempts, Math.max(0, Number(stats.correct) || 0));
-            const useRecent = recent.length === 4;
+            const useRecent = recent.length > 0;
             const accuracy = useRecent ? recent.filter(Boolean).length / recent.length : attempts ? correct / attempts : 0;
             const mastery = attempts
                 ? Array.isArray(stats.recentEvidence) && stats.recentEvidence.length
                     ? stats.recentEvidence.slice(-4).reduce((sum, entry) => sum + (entry?.correct === true ? entry.weight === 1 ? 1 : .5 : 0), 0) / 4
                     : Math.min(1, (useRecent ? recent.length : attempts) / 4) * accuracy * .5
                 : Number(card.interval) >= 21 || Number(card.repetitions) >= 4 ? 1 : Number(card.repetitions) >= 1 ? .5 : 0;
-            return { mastery, accuracy, attempts, weak: (useRecent || attempts > 1) && accuracy < .75 };
+            return { mastery, accuracy, attempts, recentAttempts: recent.length, weak: (useRecent ? recent.length > 1 : attempts > 1) && accuracy < .75 };
         },
         recordAnswer(card, correct, kind = 'recognition') {
             const stats = card.practiceStats || {};

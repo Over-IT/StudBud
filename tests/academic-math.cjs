@@ -114,7 +114,7 @@ const app = sandbox.app;
     assert.match(elements.get('planner-assessment-body').innerHTML, /Graded test/, 'completed assessments remain manageable');
     assert.match(elements.get('planner-assessment-body').innerHTML, /delete-assignment/);
     assert.match(elements.get('planner-study-list').innerHTML, /&lt;Quiz prep&gt;/);
-    assert.match(elements.get('planner-study-list').innerHTML, /Log study session/);
+    assert.match(elements.get('planner-study-list').innerHTML, /Log offline study/);
     assert.match(elements.get('planner-study-list').innerHTML, /min today/);
     assert.doesNotMatch(elements.get('planner-study-list').innerHTML, /Read chapter|Graded test/);
     assert.doesNotMatch(elements.get('quad-1-list').innerHTML, /Quiz prep|Test prep/);

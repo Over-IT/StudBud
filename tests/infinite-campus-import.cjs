@@ -352,7 +352,8 @@ async function mobileImport() {
         setSelectionRange(start, end) { this.selection = [start, end]; }
     });
     for (const id of ['ic-bookmarklet-link', 'ic-bookmarklet-url', 'ic-mobile-instructions',
-        'ic-district-url', 'ic-import-modal', 'ic-import-status', 'ic-import-textarea']) elements.set(id, element());
+        'ic-mobile-recommendation', 'ic-website-method', 'ic-district-url', 'ic-import-modal',
+        'ic-import-status', 'ic-import-textarea']) elements.set(id, element());
     sandbox.document = { getElementById: id => elements.get(id) || null };
     sandbox.localStorage = { getItem: () => null };
     sandbox.location = { protocol: 'https:', origin: 'https://studbud.example' };
@@ -366,6 +367,12 @@ async function mobileImport() {
     app.openModal = () => {};
     app.openInfiniteCampusImport();
     assert.strictEqual(elements.get('ic-mobile-instructions').open, true, 'phone setup instructions open automatically');
+    assert.strictEqual(elements.get('ic-mobile-recommendation').open, true, 'phones first explain the easier computer-and-sync alternative');
+    assert.strictEqual(elements.get('ic-website-method').open, false, 'technical steps do not overwhelm the phone introduction');
+    sandbox.matchMedia = () => ({ matches: false });
+    app.openInfiniteCampusImport();
+    assert.strictEqual(elements.get('ic-website-method').open, true, 'desktop users see the working website import steps');
+    assert.strictEqual(elements.get('ic-mobile-recommendation').open, false);
     assert.strictEqual(elements.get('ic-bookmarklet-url').value, bookmarklet);
     await app.copyInfiniteCampusBookmarklet();
     assert.strictEqual(sandbox.copied, bookmarklet, 'phone users copy the runnable bookmark URL, not a console-only script');

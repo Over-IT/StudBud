@@ -741,7 +741,8 @@
         async friendCall(fn, args = {}) {
             const { data, error } = await this.getClient().rpc(fn, args);
             if (error) throw new Error(error.message.includes('Could not find the function')
-                ? 'Friends are not set up yet. Re-run supabase-setup.sql in Supabase.' : error.message);
+                ? fn === 'studbud_classmates' ? 'Course discovery needs a server update. Re-run supabase-setup.sql in Supabase.'
+                    : 'Friends are not set up yet. Re-run supabase-setup.sql in Supabase.' : error.message);
             return data;
         }
 

@@ -82,17 +82,18 @@
 
             <nav id="main-nav">
                 <ul class="nav-links">
+                    <li class="nav-section-label" aria-hidden="true">Your workspace</li>
                     <li class="nav-item active" data-target="dashboard-view" role="button" tabindex="0" aria-current="page">
-                        <i class="fas fa-home"></i> <span>Home</span>
+                        <i class="fas fa-home"></i> <span>Today</span>
                     </li>
                     <li class="nav-item" data-target="gpa-view" data-also="grade-scenarios-view analytics-view class-detail-view" role="button" tabindex="0">
-                        <i class="fas fa-graduation-cap"></i> <span>School</span>
+                        <i class="fas fa-graduation-cap"></i> <span>My classes</span>
                     </li>
                     <li class="nav-item workspace-child" data-target="grade-scenarios-view" role="button" tabindex="0">
                         <i class="fas fa-flask"></i> <span>Hypothetical Grades</span>
                     </li>
                     <li class="nav-item" data-target="planner-view" data-also="calendar-view schedule-view" role="button" tabindex="0">
-                        <i class="fas fa-calendar-check"></i> <span>Plan</span>
+                        <i class="fas fa-calendar-check"></i> <span>Planner</span>
                     </li>
                     <li class="nav-item workspace-child" data-target="calendar-view" role="button" tabindex="0">
                         <i class="fas fa-calendar-days"></i> <span>Calendar</span>
@@ -100,7 +101,7 @@
                     <li class="nav-item workspace-child" data-target="schedule-view" role="button" tabindex="0">
                         <i class="fas fa-clock"></i> <span>Class Schedule</span>
                     </li>
-                    <li class="nav-item" data-target="flashcard-view" data-also="exam-arcade-view importer-view" role="button" tabindex="0">
+                    <li class="nav-item" data-target="flashcard-view" data-also="study-manage-view study-discover-view exam-arcade-view importer-view" role="button" tabindex="0">
                         <i class="fas fa-layer-group"></i> <span>Study</span>
                     </li>
                     <li class="nav-item workspace-child" data-target="analytics-view" role="button" tabindex="0">
@@ -118,8 +119,9 @@
                     <li class="nav-item workspace-child" data-target="shop-view" role="button" tabindex="0">
                         <i class="fas fa-store"></i> <span>Shop</span>
                     </li>
+                    <li class="nav-section-label" aria-hidden="true">Community</li>
                     <li class="nav-item" data-target="multiplayer-view" data-also="friends-view leaderboard-view" role="button" tabindex="0">
-                        <i class="fas fa-users"></i> <span>Play</span><strong id="friend-nav-badge" class="sidebar-coin-count hidden">0</strong>
+                        <i class="fas fa-users"></i> <span>Connect &amp; play</span><strong id="friend-nav-badge" class="sidebar-coin-count hidden">0</strong>
                     </li>
                     <li class="nav-item" data-target="profile-view" data-also="shop-view inventory-view" role="button" tabindex="0">
                         <i class="fas fa-user-astronaut"></i> <span>Profile</span><strong id="multiplayer-sidebar-coins" class="sidebar-coin-count">0 <i class="fas fa-coins"></i></strong>
@@ -130,8 +132,9 @@
                     <li class="nav-item workspace-child" data-target="importer-view" role="button" tabindex="0">
                         <i class="fas fa-file-import"></i> <span>Import Cards</span>
                     </li>
+                    <li class="nav-section-label" aria-hidden="true">More</li>
                     <li id="classes-nav-item" class="nav-item hidden" data-target="classes-view" role="button" tabindex="0">
-                        <i class="fas fa-school"></i> <span>Classes</span>
+                        <i class="fas fa-school"></i> <span>Teacher classes</span>
                     </li>
                     <li id="admin-nav-item" class="nav-item hidden" data-target="admin-view" role="button" tabindex="0">
                         <i class="fas fa-user-shield"></i> <span>Staff tools</span>
@@ -157,6 +160,11 @@
                 </div>
                 
                 <div class="header-right">
+                    <div class="header-badge glass-card" id="automatic-study-indicator" title="Counts active study only. Pauses when hidden, unfocused or inactive for 60 seconds.">
+                        <i class="fas fa-stopwatch" aria-hidden="true"></i>
+                        <span class="focus-time-display">00:00</span>
+                        <span class="auto-study-state">Not studying</span>
+                    </div>
                     <!-- Burnout Warning Indicator -->
                     <div id="burnout-indicator" class="header-badge warning hidden">
                         <i class="fas fa-fire-alt"></i>
@@ -184,6 +192,7 @@
                     <button id="theme-toggle" class="icon-btn" aria-label="Switch light and dark mode" title="Switch light and dark mode">
                         <i class="fas fa-sun"></i>
                     </button>
+                    <button class="icon-btn header-settings-button" type="button" data-target="settings-view" aria-label="Open settings" title="Settings"><i class="fas fa-gear" aria-hidden="true"></i></button>
                 </div>
             </header>
             <nav id="workspace-tabs" class="workspace-tabs hidden" aria-label="Workspace sections"></nav>
@@ -203,44 +212,17 @@
             <div id="view-container">
                 
                 <!-- 1. Dashboard View -->
-                <section id="dashboard-view" class="view active">
+                <section id="dashboard-view" class="view student-workspace active">
+                    <div class="workspace-welcome">
+                        <div><span class="workspace-eyebrow">Your daily launchpad</span><h2>One next step. You've got this.</h2><p>Choose a task or open a set. We'll track the active study time.</p></div>
+                        <div class="workspace-shortcuts"><button class="primary-btn" type="button" data-target="flashcard-view"><i class="fas fa-layer-group" aria-hidden="true"></i> Study a set</button><button class="secondary-btn" type="button" data-target="planner-view"><i class="fas fa-list-check" aria-hidden="true"></i> View tasks</button></div>
+                    </div>
                     <div class="dashboard-grid">
                         <section id="tutorial-banner" class="glass-card widget full-width tutorial-banner hidden" aria-labelledby="tutorial-banner-title">
                             <div class="tutorial-banner-icon" aria-hidden="true"><i class="fas fa-wand-magic-sparkles"></i></div>
                             <div class="tutorial-banner-text"><h3 id="tutorial-banner-title">New to StudBud? Take the quick tour</h3><p class="study-guidance-intro">Import classes, plan your work, make a study set and practice. Jump straight to the topic you need.</p></div>
                             <div class="tutorial-banner-actions"><button class="primary-btn" type="button" data-action="start-tutorial"><i class="fas fa-play"></i> Start tour</button><button class="secondary-btn" type="button" data-action="dismiss-tutorial">Maybe later</button></div>
                         </section>
-                        <section class="glass-card widget full-width daily-study-card home-widget" aria-labelledby="daily-study-heading">
-                            <div class="home-widget-head">
-                                <h3 id="daily-study-heading"><i class="fas fa-fire-flame-curved" aria-hidden="true"></i> Today at a glance</h3>
-                                <div class="home-widget-head-actions">
-                                    <button class="secondary-btn" type="button" data-action="toggle-home-widget-settings" aria-expanded="false" aria-controls="home-widget-settings"><i class="fas fa-sliders" aria-hidden="true"></i> <span>Customize</span></button>
-                                </div>
-                            </div>
-                            <div id="home-widget-settings" class="home-widget-settings hidden">
-                                <p class="study-guidance-intro">Choose what this card shows.</p>
-                                <div class="home-widget-options">
-                                    <label class="settings-check"><input type="checkbox" data-home-widget-pref="streak"> Streak</label>
-                                    <label class="settings-check"><input type="checkbox" data-home-widget-pref="week"> This week</label>
-                                    <label class="settings-check"><input type="checkbox" data-home-widget-pref="goal"> Daily goal</label>
-                                    <label class="settings-check"><input type="checkbox" data-home-widget-pref="assignments"> Assignments to work on</label>
-                                    <label class="settings-check"><input type="checkbox" data-home-widget-pref="grades"> Grades &amp; GPA</label>
-                                    <label class="settings-check"><input type="checkbox" data-home-widget-pref="badge"> Show streak on the app icon</label>
-                                    <label class="settings-check">Assignments to show
-                                        <select data-home-widget-pref="assignmentCount" aria-label="Number of assignments to show"><option value="2">2</option><option value="3">3</option><option value="5">5</option><option value="8">8</option></select>
-                                    </label>
-                                </div>
-                            </div>
-                            <div id="home-widget-body" class="home-widget-body"><p class="study-guidance-intro">Loading today's progress…</p></div>
-                            <p id="daily-study-note" class="sr-only" role="status" aria-live="polite"></p>
-                        </section>
-                        <div class="glass-card widget schedule-widget">
-                            <div class="view-header">
-                                <div><h3 id="daily-schedule-title">Today's Schedule</h3><p id="daily-schedule-type" class="schedule-day-type"></p></div>
-                                <button id="daily-schedule-edit" class="secondary-btn" data-target="schedule-view">Set Schedule</button>
-                            </div>
-                            <ul id="daily-schedule-list" class="empty-list"></ul>
-                        </div>
                         <div class="glass-card widget priority-widget">
                             <h3>Work on next</h3>
                             <ul id="priority-task-list" class="empty-list">
@@ -249,43 +231,38 @@
                             <button id="quick-add-task-btn" class="primary-btn"><i class="fas fa-plus"></i> Add Assignment</button>
                         </div>
 
+                        <div class="glass-card widget focus-sprint-widget">
+                            <div class="view-header">
+                                <div><h3><i class="fas fa-stopwatch"></i> Automatic study time</h3><p class="study-guidance-intro">Flashcards and questions track automatically. Select a task below to work on an assignment here.</p></div>
+                                <span id="focus-sprint-clock" class="focus-sprint-clock">00:00</span>
+                            </div>
+                            <div class="focus-sprint-controls">
+                                <label for="focus-assignment">Work on this</label>
+                                <select id="focus-assignment"><option value="">No assignment selected</option></select>
+                                <button id="focus-sprint-reset-btn" class="secondary-btn" type="button">Stop working on task</button>
+                            </div>
+                            <p id="focus-sprint-status" class="study-guidance-intro" role="status">Pauses after 60 seconds without interaction or when StudBud is hidden or unfocused. Log offline work manually.</p>
+                        </div>
+                        <div class="glass-card widget full-width upcoming-assessments-widget">
+                            <div class="view-header"><h3>Upcoming quizzes &amp; tests</h3><button class="secondary-btn" type="button" data-action="add-quiz"><i class="fas fa-plus"></i> Add quiz or test</button></div>
+                            <div id="study-priority-list" class="study-guidance-list"></div>
+                        </div>
+                        <div class="glass-card widget schedule-widget">
+                            <div class="view-header">
+                                <div><h3 id="daily-schedule-title">Today's Schedule</h3><p id="daily-schedule-type" class="schedule-day-type"></p></div>
+                                <button id="daily-schedule-edit" class="secondary-btn" data-target="schedule-view">Set Schedule</button>
+                            </div>
+                            <ul id="daily-schedule-list" class="empty-list"></ul>
+                        </div>
                         <div class="glass-card widget gpa-widget">
-                            <h3>GPA Snapshot</h3>
+                            <div class="view-header"><h3>GPA Snapshot</h3><button class="text-btn" type="button" data-target="gpa-view">View classes <i class="fas fa-arrow-right" aria-hidden="true"></i></button></div>
                             <div class="gpa-stats">
                                 <div><span class="stat-number" id="dash-weighted-gpa">0.00</span><span class="stat-label">Weighted</span></div>
                                 <div><span class="stat-number" id="dash-unweighted-gpa">0.00</span><span class="stat-label">Unweighted</span></div>
                             </div>
-                        </div>                        <div class="glass-card widget full-width focus-sprint-widget">
-                            <div class="view-header">
-                                <div><h3><i class="fas fa-stopwatch"></i> Focus sprint</h3><p class="study-guidance-intro">Pick a task and start the timer.</p></div>
-                                <span id="focus-sprint-clock" class="focus-sprint-clock" aria-live="polite">25:00</span>
-                            </div>
-                            <div class="focus-sprint-controls">
-                                <label for="focus-assignment">Studying for</label>
-                                <select id="focus-assignment"><option value="">Choose a quiz or test</option></select>
-                                <label for="focus-duration">Focus</label>
-                                <select id="focus-duration">
-                                    <option value="5">5 min (quick burst)</option>
-                                    <option value="10">10 min</option>
-                                    <option value="15">15 min</option>
-                                    <option value="20">20 min</option>
-                                    <option value="25" selected>25 min (classic Pomodoro)</option>
-                                    <option value="30">30 min</option>
-                                    <option value="45">45 min</option>
-                                    <option value="50">50 min</option>
-                                    <option value="60">60 min</option>
-                                    <option value="90">90 min (deep work)</option>
-                                </select>
-                                <button id="focus-sprint-start-btn" class="primary-btn" type="button"><i class="fas fa-play"></i> Start</button>
-                                <button id="focus-sprint-reset-btn" class="secondary-btn" type="button">Reset</button>
-                            </div>
-                            <p id="focus-sprint-status" class="study-guidance-intro" role="status" aria-live="polite">Pick a task, then press Start.</p>
                         </div>
-                        <div class="glass-card widget full-width">
-                            <div class="view-header"><h3>Upcoming quizzes &amp; tests</h3><button class="secondary-btn" type="button" data-action="add-quiz"><i class="fas fa-plus"></i> Add quiz or test</button></div>
-                            <div id="study-priority-list" class="study-guidance-list"></div>
-                        </div>
-                        <div class="glass-card widget full-width">
+                        <details class="glass-card widget full-width study-history-disclosure">
+                            <summary>Study history &amp; weekly plan <span>Review your time and suggested practice</span></summary>
                             <div class="view-header">
                                 <div><h3><i class="fas fa-stopwatch"></i> Study plan</h3><p id="today-study-total" class="study-guidance-intro"></p></div>
                             </div>
@@ -293,15 +270,16 @@
                             <p id="study-week-summary" class="study-guidance-intro"></p>
                             <div id="study-progress-summary" class="study-progress-summary"></div>
                             <div id="study-history-list" class="study-history-list"></div>
-                        </div>
+                        </details>
+                        <div id="home-grade-inbox" class="full-width"></div>
                     </div>
                     <aside class="ad-slot" data-ad-placement="home" aria-label="Advertisement" hidden></aside>
                 </section>
 
                 <!-- 2. GPA & Transcript View -->
-                <section id="gpa-view" class="view hidden">
+                <section id="gpa-view" class="view student-workspace hidden">
                     <div class="view-header">
-                        <h2>My Classes & Grades</h2>
+                        <div><span class="workspace-eyebrow">School overview</span><h2>Classes &amp; grade goals</h2><p>See where you stand, then open a class to plan your next move.</p></div>
                         <label class="school-semester-switcher">
                             <i class="fas fa-calendar-week" aria-hidden="true"></i>
                             <span>Showing</span>
@@ -311,17 +289,18 @@
                             </select>
                         </label>
                         <div class="actions">
-                            <button id="add-course-btn" class="primary-btn"><i class="fas fa-plus"></i> Add Class</button>
-                            <button id="open-target-gpa-btn" class="secondary-btn"><i class="fas fa-bullseye"></i> Target GPA Solver</button>
-                            <button class="secondary-btn open-ic-import-btn" type="button"><i class="fas fa-cloud-arrow-down"></i> Import from Infinite Campus</button>
+                            <button id="add-course-btn" class="secondary-btn"><i class="fas fa-plus"></i> Add Class</button>
+                            <button id="open-target-gpa-btn" class="secondary-btn"><i class="fas fa-bullseye"></i> GPA from grade targets</button>
+                            <button class="primary-btn open-ic-import-btn" type="button"><i class="fas fa-cloud-arrow-down"></i> Import from Infinite Campus</button>
                         </div>
                     </div>
                     <div id="cumulative-gpa-summary" class="gpa-summary-grid"></div>
+                    <div class="section-heading"><div><h3>Your classes</h3><p>Bars show the current grade, not study completion. The vertical line marks your goal.</p></div></div>
                     <div id="class-card-grid" class="class-card-grid"></div>
-                    <div id="transcript-section" class="glass-card full-width">
-                        <div class="transcript-heading"><div><h3>Class Transcript</h3><p>Expand a class to review categories, grades, and assignments.</p></div></div>
+                    <details id="transcript-section" class="glass-card full-width workspace-disclosure">
+                        <summary>Full grade breakdown <span>Categories, scores and assignments for every class</span></summary>
                         <div id="transcript-body" class="transcript-list"></div>
-                    </div>
+                    </details>
                 </section>
 
                 <section id="grade-scenarios-view" class="view hidden">
@@ -380,7 +359,7 @@
                     </div>
                 </section>
 
-                <section id="class-detail-view" class="view hidden">
+                <section id="class-detail-view" class="view student-workspace hidden">
                     <div class="view-header">
                         <button id="back-to-classes-btn" class="secondary-btn"><i class="fas fa-arrow-left"></i> All Classes</button>
                         <button id="class-add-assignment-btn" class="primary-btn"><i class="fas fa-plus"></i> Add Assignment</button>
@@ -389,10 +368,10 @@
                 </section>
 
                 <!-- 3. Planner & Schedule View -->
-                <section id="planner-view" class="view hidden">
+                <section id="planner-view" class="view student-workspace hidden">
                     <div class="planner-grid">
                         <header class="planner-page-header">
-                            <div><h2>Make a plan. Get it done.</h2><p class="settings-hint">Start with a suggestion, manage your work below, then add grades when they come back.</p></div>
+                            <div><span class="workspace-eyebrow">Less overwhelm, more progress</span><h2>Make a plan. Get it done.</h2><p class="settings-hint">Choose a next task, update the time left, and mark it done when you're finished.</p></div>
                             <div class="assignment-quick-actions">
                                 <button type="button" class="primary-btn" data-action="planner-add-assignment"><i class="fas fa-plus" aria-hidden="true"></i> Add assignment</button>
                                 <button type="button" class="secondary-btn" data-action="add-quiz"><i class="fas fa-plus" aria-hidden="true"></i> Add quiz / test</button>
@@ -553,31 +532,20 @@
                 </section>
 
                 <!-- 4. Flashcard Studio View -->
-                <section id="flashcard-view" class="view hidden">
-                    <div class="view-header">
-                        <h2>Study Decks</h2>
-                        <button id="create-deck-btn" class="primary-btn"><i class="fas fa-folder-plus"></i> New study set</button>
+                <section id="flashcard-view" class="view student-workspace hidden">
+                    <div class="view-header workspace-heading">
+                        <div><span class="workspace-eyebrow">Your learning space</span><h2 id="study-page-title">Ready to study?</h2><p id="study-page-description">Choose a set, practice the terms needing focus, or try a test.</p></div>
+                        <div class="actions" data-study-panel="practice"><button type="button" class="secondary-btn" data-target="study-manage-view"><i class="fas fa-folder-open" aria-hidden="true"></i> Add or edit sets</button></div>
+                        <div class="actions hidden" data-study-panel="manage"><button id="create-deck-btn" class="primary-btn"><i class="fas fa-folder-plus"></i> New study set</button><button class="secondary-btn" type="button" data-target="importer-view"><i class="fas fa-file-import" aria-hidden="true"></i> Import cards</button></div>
                     </div>
-                    <p class="study-guidance-intro">Flashcards are practice, not assignments, and are never due. Study any set anytime; spaced repetition uses your answers to choose which cards to practice next. Any linked date is the quiz or test date, not a flashcard deadline. Cram, quizzes and games can use every card too.</p>
-                    <details class="glass-card community-deck-browser">
-                        <summary>Browse community decks</summary>
-                        <div class="community-heading">
-                            <div><h3>Community decks</h3><p>Find sets shared by StudBud students. Your own decks stay private unless you choose to share them.</p></div>
-                            <span class="community-badge"><i class="fas fa-users"></i> Shared library</span>
-                        </div>
-                        <form id="community-deck-search-form" class="community-search-form">
-                            <label class="sr-only" for="community-deck-query">Search community decks</label>
-                            <input id="community-deck-query" type="search" maxlength="100" placeholder="Search public deck titles">
-                            <button class="secondary-btn" type="submit"><i class="fas fa-search"></i> Search</button>
-                        </form>
-                        <p id="community-deck-status" class="community-status" role="status" aria-live="polite">Search for a set, or browse the most-studied decks.</p>
-                        <div id="community-deck-results" class="community-deck-results" role="region" aria-label="Community deck results" tabindex="0"></div>
-                    </details>
+                    <div data-study-panel="practice">
                     <section id="deck-recommendations" class="glass-card deck-recommendations hidden" aria-labelledby="deck-recommendations-title">
                         <h3 id="deck-recommendations-title"><i class="fas fa-bullseye"></i> Recommended for upcoming tests</h3>
                         <p class="settings-hint">Tag a deck with a class or test to see it here.</p>
                         <div id="deck-recommendation-list" class="deck-recommendation-list"></div>
                     </section>
+                    </div>
+                    <section data-study-panel="practice manage" aria-label="Your study sets">
                     <div class="my-deck-heading">
                         <h3>Your decks</h3>
                         <label for="my-deck-search" class="sr-only">Search your decks by title or class</label>
@@ -591,24 +559,39 @@
                                 <option value="name">Name (A–Z)</option>
                                 <option value="weakest">Weakest first</option>
                             </select>
-                            <button id="my-deck-reorder" type="button" class="secondary-btn" data-action="toggle-deck-reorder" aria-pressed="false"><i class="fas fa-arrows-up-down"></i> Reorder</button>
+                            <button id="my-deck-reorder" type="button" class="secondary-btn hidden" data-study-panel="manage" data-action="toggle-deck-reorder" aria-pressed="false"><i class="fas fa-arrows-up-down"></i> Reorder</button>
                         </div>
                     </div>
                     <div id="deck-grid" class="deck-grid">
                         <div class="empty-state glass-card full-width">No decks available. Create one or import flashcards.</div>
                     </div>
+                    </section>
+                    <details class="study-library-help" data-study-panel="practice"><summary><i class="fas fa-circle-info" aria-hidden="true"></i> How recall &amp; study time work</summary><p><strong>Recall is different from time spent.</strong> Recall estimates use up to four recent answers; the clock counts active practice. Practice focus cards skips terms with full recall and respects paused cards and scheduled rest. Tap a percentage to inspect terms. Cram in the set menu goes through every card without changing review dates.</p></details>
+                    <section class="glass-card community-deck-browser hidden" data-study-panel="discover" aria-label="Discover community sets">
+                        <div class="community-heading">
+                            <div><h3>Community decks</h3><p>Find sets shared by StudBud students. Your own decks stay private unless you choose to share them.</p></div>
+                            <span class="community-badge"><i class="fas fa-users"></i> Shared library</span>
+                        </div>
+                        <form id="community-deck-search-form" class="community-search-form">
+                            <label class="sr-only" for="community-deck-query">Search community decks</label>
+                            <input id="community-deck-query" type="search" maxlength="100" placeholder="Search public deck titles">
+                            <button class="secondary-btn" type="submit"><i class="fas fa-search"></i> Search</button>
+                        </form>
+                        <p id="community-deck-status" class="community-status" role="status" aria-live="polite">Search for a set, or browse the most-studied decks.</p>
+                        <div id="community-deck-results" class="community-deck-results" role="region" aria-label="Community deck results" tabindex="0"></div>
+                    </section>
                     
                     <aside class="ad-slot" data-ad-placement="decks" aria-label="Advertisement" hidden></aside>
 
                     <!-- Active Study Area (Hidden until a deck is opened) -->
-                    <div id="active-study-area" class="glass-card full-width hidden">
+                    <div id="active-study-area" class="glass-card full-width hidden" role="dialog" aria-modal="true" aria-labelledby="study-deck-title" tabindex="-1">
                         <div class="study-header">
                             <h3 id="study-deck-title">Deck Name</h3>
                             <span id="study-progress">Card 1 / 10</span>
                             <div class="focus-timer-control">
                                 <i class="fas fa-stopwatch"></i>
-                                <span class="focus-time-display">25:00</span>
-                                <button class="focus-play-btn" aria-label="Start study timer"><i class="fas fa-play"></i></button>
+                                <span class="focus-time-display">00:00</span>
+                                <span class="auto-study-state">Automatic</span>
                             </div>
                             <button id="exit-study-btn" class="icon-btn" aria-label="Close study session"><i class="fas fa-times"></i></button>
                         </div>
@@ -960,6 +943,9 @@
                             <div class="form-group"><label for="public-goal">Study goal</label><input type="text" id="public-goal" maxlength="80" autocomplete="off" placeholder="e.g. Get an A in Chemistry"></div>
                             <label class="settings-check"><input type="checkbox" id="public-show-real-name"> Show my first and last name on my public profile</label>
                             <label class="settings-check"><input type="checkbox" id="public-show-school"> Show my school tag on my public profile</label>
+                            <label class="settings-check"><input type="checkbox" id="public-show-classmates" disabled> Let students sharing a course find my username</label>
+                            <p id="public-classmates-availability" class="settings-hint" role="status">Checking course-discovery availability…</p>
+                            <p class="settings-hint">Off by default. Course discovery reveals your username and shared course to other opted-in students at your school. It does not reveal grades, assignments, study time or your full course list. Shared courses may have different teachers or periods.</p>
                             <small class="settings-hint">Only Parkway high schools have a public school tag. Other schools are never shown publicly.</small>
                             <label class="settings-check"><input type="checkbox" id="public-show-stats" checked> Show my study time, streak and match wins</label>
                             <p id="public-profile-status" class="community-status" role="status" aria-live="polite"></p>
@@ -1133,7 +1119,8 @@
                             </div>
                             <div class="form-group">
                                 <label for="settings-target-gpa">Target Cumulative GPA</label>
-                                <input type="number" id="settings-target-gpa" min="0" max="5" step="0.01" value="3.8">
+                                <input type="text" id="settings-target-gpa" readonly aria-describedby="settings-target-gpa-hint">
+                                <p id="settings-target-gpa-hint" class="settings-hint">Calculated from your class grade targets, credits and weighting, including past GPA. Classes without a target use their current grade.</p>
                             </div>
                             <fieldset class="settings-prior-gpa">
                                 <legend>Past credits (optional)</legend>
@@ -1240,9 +1227,11 @@
                             <div class="form-group">
                                 <label for="ui-theme-select">Appearance</label>
                                 <select id="ui-theme-select">
+                                    <option value="system">Use device setting (automatic)</option>
                                     <option value="dark">Dark</option>
                                     <option value="light">Light</option>
                                 </select>
+                                <p class="settings-hint">New accounts follow your device's light or dark setting. A manual choice stays in effect until you select automatic again.</p>
                             </div>
                             <label class="setting-toggle"><input type="checkbox" id="ui-compact-mode"> <span>Compact spacing</span></label>
                             <p class="settings-hint">Compact mode fits more information on smaller displays.</p>
@@ -1525,12 +1514,18 @@
                                 </div>
                             </div>
                         </div>
-                        <details class="assignment-more hidden" id="assignment-study-options">
-                            <summary>Study options</summary>
+                        <details class="assignment-more" id="assignment-study-options">
+                            <summary>Time estimate &amp; progress</summary>
                             <div class="form-group row-group">
                                 <div class="half-width">
-                                    <label for="assignment-size">Study time (minutes)</label>
-                                    <input type="number" id="assignment-size" min="5" step="5" value="30">
+                                    <label for="assignment-size">Total estimated time (minutes)</label>
+                                    <input type="number" id="assignment-size" min="5" max="10080" step="5" value="30">
+                                </div>
+                                <div class="form-group">
+                                    <label for="assignment-remaining">Time remaining (minutes, optional)</label>
+                                    <input type="number" id="assignment-remaining" min="0" max="10080" step="1" placeholder="Automatic from estimated time and study history">
+                                    <p class="settings-hint">Set a new estimate of work left, including for large assignments. Future active study reduces it automatically. Reaching 100% of estimated time does not mark the work done.</p>
+                                    <p id="assignment-time-progress" class="settings-hint"></p>
                                 </div>
                                 <div class="half-width">
                                     <label for="assignment-importance">Importance (1–5)</label>
@@ -1575,7 +1570,7 @@
                     <div class="deck-editor-toolbar">
                         <label for="deck-editor-search">Find a card</label>
                         <input id="deck-editor-search" type="search" placeholder="Search terms, answers or tags">
-                        <select id="deck-editor-filter" aria-label="Filter cards"><option value="all">All cards</option><option value="weak">Accuracy below 75%</option><option value="images">With answer images</option><option value="attachments">With private attachments</option><option value="keywords">Definition keyword answers</option><option value="paused">Paused scheduled study</option><option value="starred">Starred</option></select>
+                        <select id="deck-editor-filter" aria-label="Filter cards"><option value="all">All cards</option><option value="focus">Needs more recall practice</option><option value="weak">Accuracy below 75%</option><option value="images">With answer images</option><option value="attachments">With private attachments</option><option value="keywords">Definition keyword answers</option><option value="paused">Paused scheduled study</option><option value="starred">Starred</option></select>
                         <button type="button" class="secondary-btn" data-action="editor-add-card">Add card</button>
                         <button id="deck-editor-undo" type="button" class="secondary-btn hidden" data-action="editor-undo-delete">Undo deletion</button>
                     </div>
@@ -1665,14 +1660,14 @@
             <!-- Target GPA Solver Modal -->
             <div id="target-gpa-modal" class="glass-card modal-content hidden">
                 <div class="modal-header">
-                    <h2>Target GPA Solver</h2>
+                    <h2>GPA from grade targets</h2>
                     <button class="close-modal-btn icon-btn"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="modal-body">
-                    <p>Enter your desired Cumulative GPA to calculate what grades you need in your current active courses.</p>
+                    <p>Your cumulative GPA goal is calculated from each class's grade target, credits and weighting, plus past GPA. Classes without targets use their current grade; ungraded classes without targets are excluded.</p>
                     <div class="form-group">
                         <label for="desired-gpa">Target GPA</label>
-                        <input type="number" id="desired-gpa" step="0.01" min="0" max="5.0" placeholder="e.g. 3.85">
+                        <input type="text" id="desired-gpa" readonly>
                     </div>
                     <div class="form-group">
                         <label>Calculation Mode</label>
@@ -1682,7 +1677,7 @@
                         </select>
                     </div>
                     <div id="solver-results" class="solver-results-box hidden">
-                        <h4>Required Average Grade:</h4>
+                        <h4>Calculated GPA goal:</h4>
                         <span id="solver-output-percentage" class="stat-number">--%</span>
                     </div>
                 </div>
@@ -1699,10 +1694,26 @@
                     <button class="close-modal-btn icon-btn" type="button" aria-label="Close"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="modal-body">
-                    <p class="settings-hint">Imports classes, grades, assignments and schedule. StudBud never sees your password.</p>
+                    <div class="ic-intro">
+                        <span class="workspace-eyebrow">Campus &rarr; StudBud</span>
+                        <h3>Your school information, without retyping it</h3>
+                        <p>Copy your classes, scored assignments, grade categories and schedule <strong>into StudBud</strong>. You'll review the class matches and import options before anything is saved.</p>
+                        <p class="ic-safety-note"><i class="fas fa-shield-halved" aria-hidden="true"></i> One-way only. Nothing in Campus is changed. StudBud never asks for your Campus password.</p>
+                    </div>
+                    <div class="ic-methods" aria-label="Choose how to import">
+                        <details id="ic-mobile-recommendation" class="ic-method ic-mobile-recommendation">
+                            <summary><i class="fas fa-mobile-screen" aria-hidden="true"></i> Using your phone? Start here</summary>
+                            <p><strong>Easiest:</strong> import on a computer once, then sign in to the same StudBud account on your phone. Your synced classes and assignments follow you. Re-import from the computer when grades change.</p>
+                            <p><strong>Phone only?</strong> The Campus native app cannot share its signed-in data with StudBud. You can use the Campus website in Safari or Chrome and follow the guided bookmark steps below instead. There is no direct account connection or background refresh.</p>
+                            <p>No computer or bookmark setup? Add classes and assignments manually; every other StudBud feature still works.</p>
+                            <button class="secondary-btn" type="button" data-action="campus-add-manually">Add a class manually</button>
+                        </details>
+                        <details id="ic-website-method" class="ic-method">
+                            <summary><i class="fas fa-laptop" aria-hidden="true"></i> Import from the Campus website <span>Full import &middot; one-time helper setup</span></summary>
+                            <p class="settings-hint">A small helper runs only when you choose it on your signed-in Campus website. It reads the information available to you and passes a copy back here for review.</p>
                     <ol class="ic-steps">
                         <li>
-                            <strong>Get the StudBud Import button (one time only).</strong>
+                            <strong>Save the import helper (one time only).</strong>
                             <div class="ic-row">
                                 <a id="ic-bookmarklet-link" class="primary-btn ic-bookmarklet" href="#" draggable="true" title="Drag me to your bookmarks bar"><i class="fas fa-bookmark"></i> StudBud Import</a>
                                 <span class="ic-drag-hint"><i class="fas fa-arrow-up"></i> Drag this up to your bookmarks bar</span>
@@ -1738,19 +1749,29 @@
                             </details>
                         </li>
                         <li>
-                            <strong>Nothing showed up here?</strong>
-                            <small>On a phone, tabs may not send data directly. In the Campus helper, tap Copy data, then return here and paste it. If copying is blocked, use Show data to select and copy it manually, or download the .json file.</small>
-                            <div class="ic-row">
-                                <button id="ic-paste-clipboard-btn" class="secondary-btn" type="button"><i class="fas fa-paste"></i> Paste data from Campus</button>
-                                <label class="secondary-btn ic-file-label"><i class="fas fa-file-arrow-up"></i> Choose .json file<input id="ic-import-file" type="file" accept=".json,application/json" hidden></label>
-                            </div>
-                            <details class="ic-more">
-                                <summary>Paste it by hand</summary>
-                                <textarea id="ic-import-textarea" rows="3" placeholder="Paste the copied Infinite Campus data here..."></textarea>
-                                <div class="ic-row"><button id="ic-preview-btn" class="secondary-btn" type="button"><i class="fas fa-eye"></i> Preview</button></div>
-                            </details>
+                            <strong>Return here to review and save.</strong>
+                            <small>Review your class matches and import options, then choose Import. If data didn't arrive automatically, open Already copied or downloaded helper data below.</small>
                         </li>
                     </ol>
+                        </details>
+                        <details id="ic-transfer-method" class="ic-method">
+                            <summary><i class="fas fa-file-arrow-up" aria-hidden="true"></i> Already copied or downloaded helper data? <span>Transfer a StudBud helper export</span></summary>
+                            <p class="settings-hint">Use the Copy data or Download buttons in the StudBud helper on the Campus website. This accepts that helper's JSON data, not screenshots, report-card PDFs or a Campus password.</p>
+                            <div id="ic-transfer-controls">
+                                <p class="settings-hint">On a phone, tabs may not send data directly. In the Campus helper, tap Copy data, then return here and paste it. If copying is blocked, use Show data to select and copy it manually, or download the .json file.</p>
+                                <div class="ic-row">
+                                    <button id="ic-paste-clipboard-btn" class="secondary-btn" type="button"><i class="fas fa-paste"></i> Paste helper data</button>
+                                    <label class="secondary-btn ic-file-label"><i class="fas fa-file-arrow-up"></i> Choose .json file<input id="ic-import-file" type="file" accept=".json,application/json" hidden></label>
+                                </div>
+                                <details class="ic-more">
+                                    <summary>Paste it by hand</summary>
+                                    <label class="sr-only" for="ic-import-textarea">Copied StudBud Campus helper data</label>
+                                    <textarea id="ic-import-textarea" rows="3" placeholder="Paste the copied helper data here..."></textarea>
+                                    <div class="ic-row"><button id="ic-preview-btn" class="secondary-btn" type="button"><i class="fas fa-eye"></i> Preview</button></div>
+                                </details>
+                            </div>
+                        </details>
+                    </div>
                     <p id="ic-import-status" class="ic-import-status" role="status" aria-live="polite"></p>
                     <div id="ic-import-preview" class="ic-import-preview hidden"></div>
                 </div>
@@ -1774,6 +1795,7 @@
     <script src="gpaCalculator.js" defer></script>
     <script src="plannerEngine.js" defer></script>
     <script src="flashcardEngine.js" defer></script>
+    <script src="studyTracker.js" defer></script>
     <script src="analyticsEngine.js" defer></script>
     <script src="practiceExamEngine.js" defer></script>
     <script src="nameModeration.js" defer></script>

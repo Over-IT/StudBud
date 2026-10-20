@@ -18,7 +18,7 @@ window.StudBudSfx = { settings: {}, update(patch) { Object.assign(this.settings,
 const sandbox = {
     window, console, Math: math, Date, setTimeout, clearTimeout,
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
-    document: { documentElement: { dataset: {} }, getElementById: id => elements.get(id) || null, querySelector: () => null },
+    document: { documentElement: { dataset: {}, style: {} }, getElementById: id => elements.get(id) || null, querySelector: () => null },
     EventBus: {
         on(name, handler) { if (!listeners.has(name)) listeners.set(name, []); listeners.get(name).push(handler); },
         emit(name, data) { events.push({ name, data }); for (const handler of listeners.get(name) || []) handler(data); }
@@ -91,7 +91,7 @@ async function run() {
     assert.equal(emptySnapshot.state.profile.graduationYear, 2026);
     assert.equal(emptySnapshot.state.currentView, undefined);
     emptySnapshot.state.settings.theme = 'light';
-    assert.equal(state.emptyCloudSnapshot().state.settings.theme, 'dark', 'guest merge defaults are independent fresh state');
+    assert.equal(state.emptyCloudSnapshot().state.settings.theme, 'system', 'guest merge defaults follow the device and remain independent fresh state');
     let gradeRefreshes = 0;
     const originalRenderUI = app.renderUI;
     app.renderUI = () => gradeRefreshes++;
@@ -177,7 +177,7 @@ async function run() {
         assert.equal(state.get('settings').colorScheme, 'monochrome', 'Black & White stays free on profile refresh');
         const updateShop = app.updateMultiplayerShop;
         const schemeBody = eventSource.slice(eventSource.indexOf('                    const scheme = target.dataset.colorScheme;'),
-            eventSource.indexOf("                } else if (action === 'add-quiz')"));
+            eventSource.indexOf("                } else if (action === 'planner-add-assignment')"));
         sandbox.appearanceTestApp = app; sandbox.appearanceTarget = { dataset: { colorScheme: 'monochrome' } };
         const selectScheme = () => vm.runInContext(`(async function(target) { ${schemeBody} }).call(appearanceTestApp, appearanceTarget)`, context);
         app.multiplayerProfile.equipped_palette = 'palette_ocean'; state.state.settings.colorScheme = 'ocean';
@@ -259,9 +259,11 @@ async function run() {
         ['public-bio', { value: '' }], ['public-subject', { value: '' }], ['public-grade', { value: '' }],
         ['public-goal', { value: '' }], ['settings-first-name', { value: 'Ada' }], ['settings-last-name', { value: 'Lovelace' }],
         ['public-show-real-name', { checked: true }], ['public-show-school', { checked: false }], ['public-show-stats', { checked: false }],
+        ['public-show-classmates', { checked: false }],
         ['public-profile-status', { textContent: '' }]
     ]) elements.set(id, value);
     let publicProfileArgs;
+    app.classmateDiscoveryAvailable = true;
     const friendCall = community.friendCall;
     community.friendCall = async (name, args) => { publicProfileArgs = { name, args }; };
     await app.savePublicProfile();
@@ -270,8 +272,13 @@ async function run() {
     assert.equal(publicProfileArgs.args.p_last_name, 'Lovelace');
     assert.equal(publicProfileArgs.args.p_show_real_name, true);
     assert.equal(publicProfileArgs.args.p_show_school, false);
+    assert.equal(publicProfileArgs.args.p_show_classmates, false, 'course discovery is an explicit opt-in');
+    app.classmateDiscoveryAvailable = false;
+    await app.savePublicProfile();
+    assert.equal(Object.hasOwn(publicProfileArgs.args, 'p_show_classmates'), false, 'older servers can still save all existing profile fields');
+    assert.match(elements.get('public-profile-status').textContent, /needs a server update/);
     community.friendCall = friendCall;
-    for (const id of ['public-bio', 'public-subject', 'public-grade', 'public-goal', 'settings-first-name', 'settings-last-name', 'public-show-real-name', 'public-show-school', 'public-show-stats', 'public-profile-status']) elements.delete(id);
+    for (const id of ['public-bio', 'public-subject', 'public-grade', 'public-goal', 'settings-first-name', 'settings-last-name', 'public-show-real-name', 'public-show-school', 'public-show-stats', 'public-show-classmates', 'public-profile-status']) elements.delete(id);
 
     state.state.profile.school = 'other';
     state.state.profile.gradeScale = clone(window.STUDBUD_OTHER_GRADE_SCALE);
@@ -402,7 +409,7 @@ async function run() {
     assert.match(sql, /'display_name', case when coalesce\(v_pub\.show_real_name, false\)/,
         'public profile APIs disclose real names only after explicit opt-in');
     assert.match(sql, /studbud_set_public_profile\([\s\S]*?p_first_name text,[\s\S]*?p_last_name text,[\s\S]*?p_show_real_name boolean/);
-    assert.match(sql, /grant execute on function public\.studbud_set_public_profile\(text, text, text, text, text, text, boolean, boolean, boolean\) to authenticated;/);
+    assert.match(sql, /grant execute on function public\.studbud_set_public_profile\(text, text, text, text, text, text, boolean, boolean, boolean, boolean\) to authenticated;/);
     assert.match(sql, /tag text not null check \(tag in \('teacher', 'tester', 'moderator'\)\)/);
     assert.match(sql, /revoke all on function public\.studbud_has_user_tag\(uuid, text\) from public, anon, authenticated/);
     assert.match(sql, /profile\.user_id = p_user_id and profile\.school in \('pchs', 'pnhs', 'pshs', 'pwhs'\) and profile\.show_school/);

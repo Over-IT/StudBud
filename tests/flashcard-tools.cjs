@@ -86,6 +86,19 @@ assert.equal(weak.practiceStats.missStreak, 0);
     assert.equal(oldWeak.practiceStats.attempts, 104, 'lifetime attempt counts remain intact');
     assert.equal(oldWeak.practiceStats.recentAnswers.length, 4, 'recent-answer storage is bounded');
     assert.ok(tools.weight(oldWeak) < tools.weight(weak), 'adaptive drills recognize recovered cards');
+    const recovered = { practiceStats: { attempts: 1000, correct: 0 } };
+    const declining = { practiceStats: { attempts: 1000, correct: 1000 } };
+    tools.recordAnswer(recovered, true, 'recall');
+    tools.recordAnswer(declining, false, 'recall');
+    assert.equal(tools.cardProgress(recovered).accuracy, 1, 'recent progress matters immediately, before four new answers');
+    assert.equal(tools.cardProgress(declining).accuracy, 0, 'a recent miss is not hidden by a long successful history');
+    assert.ok(tools.weight(declining) > tools.weight(recovered), 'question selection responds immediately to recent performance');
+    tools.recordAnswer(declining, false, 'recall');
+    assert.equal(tools.cardProgress(declining).weak, true, 'two recent misses flag a previously strong term');
+    for (let i = 0; i < 4; i++) tools.recordAnswer(declining, true, 'recall');
+    assert.equal(tools.cardProgress(declining).weak, false, 'recovery removes the weak flag while retaining lifetime totals');
+    assert.equal(declining.practiceStats.attempts, 1006);
+    assert.equal(tools.cardProgress({ practiceStats: { attempts: 100, correct: 90, recentAnswers: ['bad', false] } }).accuracy, 0);
     assert.equal(tools.cardProgress({ practiceStats: { attempts: 2, correct: 2 } }).mastery, .25, 'unknown legacy practice counts conservatively as recognition');
     const recognition = {};
     for (let i = 0; i < 8; i++) tools.recordAnswer(recognition, true, 'recognition');
@@ -113,7 +126,7 @@ class Element {
 nodes.set('arcade-game-title', new Element('h3'));
 nodes.set('arcade-game-content', new Element('div'));
 const sandbox = {
-    console, Math, Date, Map, Set, setTimeout: callback => callback(), window: { FlashcardTools: tools },
+    console, Math, Date, Map, Set, setTimeout: callback => callback(), window: { FlashcardTools: tools, crypto: require('node:crypto').webcrypto },
     FormData: class { constructor(form) { this.data = form.values; } get(key) { return this.data[key] ?? null; } },
     document: { getElementById: id => nodes.get(id), createElement: tag => new Element(tag), addEventListener() {} },
     AppState: { get: key => state[key], saveFlashcardDeck: async deck => { state.flashcards[0] = deck; } }

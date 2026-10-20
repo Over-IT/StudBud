@@ -89,7 +89,11 @@
                                 ...r,
                                 ...l,
                                 durationSec: Math.max(Number(l.durationSec) || 0, Number(r.durationSec) || 0),
-                                leaderboardSyncPending: Boolean(l.leaderboardSyncPending && r.leaderboardSyncPending),
+                                leaderboardSyncPending: l.autoTracked || r.autoTracked
+                                    ? Math.max(Number(l.durationSec) || 0, Number(r.durationSec) || 0) >
+                                        Math.max(Number(l.leaderboardSyncedSeconds) || 0, Number(r.leaderboardSyncedSeconds) || 0)
+                                    : Boolean(l.leaderboardSyncPending && r.leaderboardSyncPending),
+                                leaderboardSyncedSeconds: Math.max(Number(l.leaderboardSyncedSeconds) || 0, Number(r.leaderboardSyncedSeconds) || 0),
                                 leaderboardSyncedAt: l.leaderboardSyncedAt || r.leaderboardSyncedAt || null,
                                 ...(gameSummary ? { gameSummary } : {})
                             });
@@ -1011,7 +1015,10 @@
         async signOut() {
             if (this.offlineMode) return this.connectOnline().catch(error => this.reportAccountError(error));
             if (!await window.StudBudDialogs.confirm('Sign out of StudBud on this device? Your synced account data will remain in the cloud.')) return;
-            try { await this.syncNow(); }
+            try {
+                await window.NexusApp?.flushAutomaticStudy?.();
+                await this.syncNow();
+            }
             catch (error) {
                 console.error('[StudBudCloud] Could not save before sign-out:', error);
                 this.setCloudStatus(this.friendlyAuthError(error, 'Save failed. Stay signed in and retry syncing before signing out.'), true);

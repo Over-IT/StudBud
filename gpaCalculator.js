@@ -227,7 +227,7 @@
             const gpaData = this.calculateCurrentGPA(courses);
             const auditData = this.auditTranscript(courses);
             const honors = this.getLatinHonors(gpaData.weighted);
-            const targetProfileGpa = this.appState.get('profile').targetGpa || 4.0;
+            const targetProfileGpa = Number(global.NexusApp?.calculateTargetGPA(courses).weighted) || 0;
             
             // Assume student has 14 completed credits prior to this year for solver demo
             const completedCredits = 14.0; 

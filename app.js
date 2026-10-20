@@ -227,7 +227,6 @@
             this.state = {
                 profile: {
                     graduationYear: 2026,
-                    targetGpa: 3.8,
                     currentTerm: "auto",
                 },
                 courses: [],
@@ -239,7 +238,7 @@
                 studyHistory: [],
                 gameMetrics: freshGameMetrics(),
                 settings: {
-                    theme: "dark",
+                    theme: "system",
                     colorScheme: "studbud",
                     audioVolume: 0.70,
                     audioLevels: { lofi: 0.5, rain: 0.5, white: 0.3, binaural: 0.6 },
@@ -335,6 +334,7 @@
         }
 
         addCourse(course) {
+            if (this.findDuplicateCourse(course)) throw new Error('That class is already saved for an overlapping semester. Open it from My classes instead.');
             this.state.courses.push(course);
             this.saveToLocalStorage();
             EventBus.emit('courses:updated', this.state.courses);
@@ -360,10 +360,25 @@
         updateCourse(code, updatedData) {
             const index = this.state.courses.findIndex(c => c.code === code);
             if (index !== -1) {
-                this.state.courses[index] = { ...this.state.courses[index], ...updatedData };
+                const next = { ...this.state.courses[index], ...updatedData };
+                if (this.findDuplicateCourse(next, code)) throw new Error('That class is already saved for an overlapping semester. Open the existing class from My classes instead.');
+                this.state.courses[index] = next;
                 this.saveToLocalStorage();
                 EventBus.emit('courses:updated', this.state.courses);
             }
+        }
+
+        findDuplicateCourse(course, ignoreCode = '') {
+            const normalize = text => String(text || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
+            const codes = item => normalize(item.catalogCode || item.code).split(/\s*\/\s*/).filter(Boolean);
+            const candidateCodes = codes(course);
+            return this.state.courses.find(existing => existing.code !== ignoreCode
+                && (existing.code === course.code
+                    || ((existing.school || this.state.profile.school) === (course.school || this.state.profile.school)
+                        && (existing.term === course.term || !['S1', 'S2'].includes(existing.term) || !['S1', 'S2'].includes(course.term))
+                        && (codes(existing).some(code => candidateCodes.includes(code))
+                            || ((!existing.catalogCode || !course.catalogCode) && normalize(course.title)
+                                && normalize(existing.title) === normalize(course.title))))));
         }
 
         addAssignment(assignment) {
@@ -428,22 +443,27 @@
 
         async recordStudySession(session) {
             if (!session.id) session.id = 'session_' + Date.now();
+            const previous = this.state.studyHistory.find(item => item.id === session.id);
+            session = { ...previous, ...session };
             session.timestamp = session.timestamp || new Date().toISOString();
-            session.leaderboardSyncPending = true;
+            if (session.autoTracked) session.durationSec = Math.max(Number(previous?.durationSec) || 0, Number(session.durationSec) || 0);
+            session.leaderboardSyncPending = Number(session.durationSec) > 0;
 
             await NexusDB.put('studyHistory', session);
             const sessionIndex = this.state.studyHistory.findIndex(item => item.id === session.id);
             if (sessionIndex >= 0) this.state.studyHistory[sessionIndex] = session;
             else this.state.studyHistory.push(session);
 
-            const minutes = Math.max(1, Math.round((session.durationSec || 60) / 60));
-            this.state.gameMetrics.xp += (minutes * 10);
+            const earnedXp = entry => entry ? entry.autoTracked
+                ? Math.floor(Math.max(0, Number(entry.durationSec) || 0) / 6)
+                : Math.max(1, Math.round((entry.durationSec || 60) / 60)) * 10 : 0;
+            this.state.gameMetrics.xp += Math.max(0, earnedXp(session) - earnedXp(previous));
             this.state.gameMetrics.level = Math.floor(this.state.gameMetrics.xp / 500) + 1;
 
             await NexusDB.put('gameMetrics', { id: 'user_metrics', ...this.state.gameMetrics });
             this.setSaveStatus('Study session and progress saved on this device.');
 
-            if (session.assignmentId) {
+            if (session.assignmentId && !session.autoTracked) {
                 const updatedAssignment = this.state.assignments.find(item => item.id === session.assignmentId);
                 if (updatedAssignment) this.updateAssignment(updatedAssignment.id, { lastStudiedAt: session.timestamp });
             }
@@ -538,7 +558,7 @@
     const WORKSPACES = [
         { main: 'gpa', tabs: [['gpa', 'Grades & GPA'], ['grade-scenarios', 'What-if grades'], ['analytics', 'Analytics']] },
         { main: 'planner', tabs: [['planner', 'Tasks'], ['calendar', 'Calendar'], ['schedule', 'Class schedule']] },
-        { main: 'flashcard', tabs: [['flashcard', 'My sets'], ['exam-arcade', 'Practice'], ['importer', 'Import cards']] },
+        { main: 'flashcard', extraRoutes: ['importer'], tabs: [['flashcard', 'Practice'], ['study-manage', 'Manage sets'], ['study-discover', 'Discover'], ['exam-arcade', 'Tests & drills']] },
         { main: 'multiplayer', tabs: [['multiplayer', 'Games'], ['friends', 'Buds'], ['leaderboard', 'Leaderboards']] },
         { main: 'profile', tabs: [['profile', 'Profile'], ['shop', 'Shop'], ['inventory', 'Locker']] },
         { main: 'settings', tabs: [['settings', 'Profile & data'], ['appearance', 'Appearance'], ['sound', 'Sound'], ['about', 'About']] }
@@ -551,7 +571,9 @@
         planner: ['Tasks & deadlines', 'Assignments, quizzes and tests.'],
         calendar: ['Calendar', 'Assignments, study deadlines and your own events.'],
         schedule: ['Class schedule', 'When your classes meet.'],
-        flashcard: ['My study sets', 'Create sets and study whenever you want.'],
+        flashcard: ['Study', 'Choose a set and focus on learning.'],
+        'study-manage': ['Manage study sets', 'Create, organize and edit your study materials.'],
+        'study-discover': ['Discover study sets', 'Find community materials to add to your library.'],
         'exam-arcade': ['Practice & tests', 'Tests, quizzes and solo games. Results stay private.'],
         importer: ['Import flashcards', 'Paste rows or build a set by hand.'],
         multiplayer: ['Multiplayer games', 'Pick a game and a set, then host or join.'],
@@ -572,7 +594,7 @@
         constructor() {
             this.routes = [
                 "dashboard", "gpa", "grade-scenarios", "planner", "calendar", "schedule", "flashcard",
-                "analytics", "leaderboard", "exam-arcade", "multiplayer", "profile", "shop", "inventory", "importer", "settings", "appearance", "sound", "admin", "about", "friends", "classes"
+                "analytics", "leaderboard", "exam-arcade", "study-manage", "study-discover", "multiplayer", "profile", "shop", "inventory", "importer", "settings", "appearance", "sound", "admin", "about", "friends", "classes"
             ];
             this.activeRoute = "dashboard";
         }
@@ -615,13 +637,16 @@
                     : `/${route}`;
             }
 
-            const viewId = route === 'class' ? 'class-detail-view' : `${route}-view`;
-            const workspace = WORKSPACES.find(group => group.tabs.some(([tab]) => tab === route) || (route === 'class' && group.main === 'gpa'));
+            const studyPage = ({ flashcard: 'practice', 'study-manage': 'manage', 'study-discover': 'discover' })[route];
+            const viewId = route === 'class' ? 'class-detail-view' : studyPage ? 'flashcard-view' : `${route}-view`;
+            const workspace = WORKSPACES.find(group => group.tabs.some(([tab]) => tab === route) || group.extraRoutes?.includes(route) || (route === 'class' && group.main === 'gpa'));
+            const selectedTab = route === 'importer' ? 'study-manage' : route === 'class' ? 'gpa' : route;
             const tabs = document.getElementById('workspace-tabs');
             if (tabs) {
                 const restoreFocus = tabs.contains(document.activeElement);
                 tabs.classList.toggle('hidden', !workspace);
-                tabs.innerHTML = workspace ? workspace.tabs.map(([tab, label]) => `<button type="button" class="workspace-tab${tab === route ? ' selected' : ''}" data-target="${tab}-view"${tab === route ? ' aria-current="page"' : ''}>${label}</button>`).join('') : '';
+                tabs.setAttribute('aria-label', workspace ? `${PAGE_GUIDES[workspace.main]?.[0] || 'Workspace'} pages` : 'Workspace pages');
+                tabs.innerHTML = workspace ? workspace.tabs.map(([tab, label]) => `<button type="button" class="workspace-tab${tab === selectedTab ? ' selected' : ''}" data-target="${tab}-view"${tab === selectedTab ? ' aria-current="page"' : ''}>${label}</button>`).join('') : '';
                 if (restoreFocus) tabs.querySelector('[aria-current="page"]')?.focus({ preventScroll: true });
             }
             document.querySelectorAll('.view').forEach(view => {
@@ -629,6 +654,7 @@
                 view.classList.toggle('active', isActive);
                 view.classList.toggle('hidden', !isActive);
             });
+            if (studyPage) window.NexusApp?.setStudyPage(studyPage);
 
             document.querySelectorAll('.nav-item[data-target]').forEach(item => {
                 const group = `${item.dataset.target} ${item.dataset.also || ''}`.split(' ');
@@ -655,7 +681,7 @@
             const guide = document.getElementById('page-guide');
             if (guide) guide.textContent = PAGE_GUIDES[route]?.[1] || 'Manage this class’s grades, assignments and study sets.';
 
-            const studyRoute = viewId === 'flashcard-view' || viewId === 'exam-arcade-view';
+            const studyRoute = route === 'flashcard' || route === 'exam-arcade';
             const ambience = document.getElementById('study-ambience');
             ambience?.classList.toggle('hidden', !studyRoute);
             document.getElementById('ambience-panel')?.classList.add('hidden');
@@ -1040,10 +1066,6 @@
             this.AppState = AppState;
             this.Router = Router;
             this.Soundscape = Soundscape;
-            this.timerInterval = null;
-            this.timerSeconds = 25 * 60;
-            this.dashboardSprintInterval = null;
-            this.dashboardSprintSeconds = null;
             this.dashboardSprintAssignmentId = '';
             this.activeDeckId = null;
             this.activeStudyStartedAt = null;
@@ -1108,6 +1130,7 @@
             this.updateMultiplayerModeSetup(this.selectedMultiplayerMode);
             this.renderUI();
             Router.init();
+            this.initAutomaticStudy();
             if (window.StudBudCloud.isGuest?.()) {
                 this.refreshGuestFeatures();
             } else if (!window.StudBudCloud.offlineMode) {
@@ -1198,10 +1221,12 @@
         }
 
         async clearLocalStore(storeName) {
+            if (storeName === 'studyHistory') await this.resetAutomaticStudy();
             await NexusDB.clear(storeName);
         }
 
         async resetForCloudAccount() {
+            await this.resetAutomaticStudy();
             await AppState.resetForCloudAccount();
             this.renderUI();
         }
@@ -1406,8 +1431,8 @@
             });
             this.EventBus.on('study:recorded', () => {
                 this.renderDashboard();
+                this.renderAssignments();
                 this.renderStudyRecommendations('planner-study-list');
-                this.refreshStudyLeaderboard(this.studyLeaderboardPeriod || 'daily');
             });
             this.EventBus.on('state:restored', () => this.renderUI());
             this.EventBus.on('router:navigated', route => {
@@ -1433,17 +1458,17 @@
                     this.renderMultiplayerProfile(true);
                     this.startMultiplayerAnimation();
                 }
-                if (route === 'flashcard') {
+                if (['flashcard', 'study-manage', 'study-discover'].includes(route)) {
                     this.renderHostedGameDecks();
-                    if (!document.getElementById('community-deck-results').dataset.loaded) this.searchCommunityDecks('');
+                    if (route === 'study-discover' && !document.getElementById('community-deck-results').dataset.loaded) this.searchCommunityDecks('');
                 }
-                if (!['class', 'flashcard'].includes(route)) this.stopFocusTimer();
                 if (route !== 'flashcard' && this.activeDeckId) this.closeStudy();
                 if (route !== 'exam-arcade' && this.arcadeStudyStartedAt) this.closeArcade();
                 if (route !== 'multiplayer') {
                     this.stopWaitingRunner();
                     this.stopMultiplayerAnimation();
                 }
+                this.refreshAutomaticStudy();
             });
         }
 
@@ -1786,13 +1811,19 @@
             }
             if (cards) {
                 cards.innerHTML = courses.length ? courses.map(course => {
-                    const grade = this.calculateSemesterCourseGrade(course);
-                    const target = course.targetPct === null || course.targetPct === undefined ? NaN : Number(course.targetPct);
+                    const progress = this.classGradeProgress(course);
+                    const { grade, target, scale, reached, status } = progress;
+                    const title = this.escapeHTML(course.title);
                     return `<article class="glass-card class-card">
-                        <div><h3>${this.escapeHTML(course.title)}</h3><span class="class-term">${this.escapeHTML(this.termLabel(course.term))}</span></div>
-                        <p>Current grade <strong>${grade === null ? 'Not graded' : `${grade.toFixed(2)}%`}</strong> · Goal <strong>${Number.isFinite(target) ? `${target.toFixed(2)}%` : 'Not set'}</strong></p>
-                        <div class="class-grade-track"><span style="width:${Math.max(0, Math.min(100, grade || 0))}%"></span></div>
-                        <button class="primary-btn" data-action="open-class" data-id="${this.escapeHTML(course.code)}">Open class</button>
+                        <div class="class-card-heading"><span class="class-term">${this.escapeHTML(this.termLabel(course.term))}</span><h3>${title}</h3></div>
+                        <div class="class-card-metrics"><div><small>Current grade</small><strong>${grade === null ? 'Not graded' : `${grade.toFixed(2)}%`}</strong></div><div><small>Grade target</small><strong>${target === null ? 'Not set' : `${target.toFixed(2)}%`}</strong></div></div>
+                        <div class="class-grade-track${reached ? ' is-reached' : ''}" ${grade === null ? `role="img" aria-label="${title}: no grade recorded"` : `role="meter" aria-label="${title}: current grade" aria-valuemin="0" aria-valuemax="${scale}" aria-valuenow="${Math.max(0, grade)}" aria-valuetext="${grade.toFixed(2)}%. ${status}"`}>
+                            <span style="width:${progress.fill}%"></span>
+                            ${target === null ? '' : `<i class="class-goal-marker" style="left:${progress.marker}%" aria-hidden="true"></i>`}
+                        </div>
+                        <div class="class-grade-scale" aria-hidden="true"><span>0%</span><span>${scale}%</span></div>
+                        <p class="class-goal-status${reached ? ' is-reached' : ''}"><i class="fas fa-${reached ? 'circle-check' : target === null ? 'bullseye' : 'arrow-trend-up'}" aria-hidden="true"></i> ${status}</p>
+                        <div class="class-card-actions"><button class="primary-btn" data-action="open-class" data-id="${this.escapeHTML(course.code)}" aria-label="Open ${title}">Open class <i class="fas fa-arrow-right" aria-hidden="true"></i></button><button class="text-btn" data-action="edit-course" data-id="${this.escapeHTML(course.code)}" aria-label="Edit grade target for ${title}">${target === null ? 'Set goal' : 'Edit goal'}</button></div>
                     </article>`;
                 }).join('') : `<p class="empty-state glass-card">No classes for ${this.escapeHTML(this.termLabel(semester))} yet. Switch semesters or add a class.</p>`;
             }
@@ -1806,6 +1837,21 @@
                 if (allCourses.some(course => course.code === selected)) options.value = selected;
             }
             if (!catalog.length) console.error('[StudBud] Parkway course catalog did not load.');
+        }
+
+        classGradeProgress(course) {
+            const current = this.calculateSemesterCourseGrade(course);
+            const grade = Number.isFinite(current) ? current : null;
+            const target = this.hasCourseTarget(course) ? Number(course.targetPct) : null;
+            const scale = Math.max(100, grade ?? 0, target ?? 0);
+            const reached = grade !== null && target !== null && grade >= target;
+            const status = grade === null ? 'Add a grade to see your progress'
+                : target === null ? 'Set a grade target to compare'
+                : reached ? 'Goal reached'
+                : `${(target - grade).toFixed(2)} percentage points to goal`;
+            return { grade, target, scale, reached, status,
+                fill: Math.max(0, (grade ?? 0) / scale * 100),
+                marker: target === null ? null : Math.max(0, target / scale * 100) };
         }
 
         termLabel(term) {
@@ -1873,6 +1919,16 @@
             return this.withPriorGPA(calculator.calculateCurrentGPA(currentCourses));
         }
 
+        calculateTargetGPA(courses = AppState.get('courses') || [], profile = AppState.get('profile') || {}) {
+            const calculator = window.GPACalculator;
+            if (!calculator) return { weighted: '0', unweighted: '0', totalCredits: 0 };
+            const targets = courses.map(course => {
+                const grade = this.hasCourseTarget(course) ? Number(course.targetPct) : this.calculateCourseGrade(course);
+                return Number.isFinite(grade) ? { ...course, targetGrade: this.gradeForPercentage(grade, course) } : null;
+            }).filter(Boolean);
+            return this.withPriorGPA(calculator.calculateCurrentGPA(targets), profile);
+        }
+
         /** Credits and GPA earned before the classes tracked in StudBud (from Settings). */
         priorGPA(profile = AppState.get('profile') || {}) {
             const read = value => value === '' || value === null || value === undefined ? NaN : Number(value);
@@ -1884,8 +1940,8 @@
         }
 
         /** Blends past credits into a GPA result, weighting each side by its credits. */
-        withPriorGPA(result) {
-            const prior = this.priorGPA();
+        withPriorGPA(result, profile = AppState.get('profile') || {}) {
+            const prior = this.priorGPA(profile);
             const trackedCredits = Number(result?.totalCredits) || 0;
             if (!prior) return { ...result, trackedCredits, priorCredits: 0 };
             const totalCredits = trackedCredits + prior.credits;
@@ -1974,15 +2030,16 @@
                 </div>`;
             }).join('');
             const workRows = assignments.length ? assignments.map(item => `
-                <tr>
-                    <td>${this.assignmentStatusControl(item)}</td>
-                    <td>${this.escapeHTML(item.title)}</td>
-                    <td>${this.escapeHTML((categories.find(category => category.id === item.categoryId) || {}).name || 'Uncategorized')}</td>
-                    <td>${this.escapeHTML(item.kind || 'assignment')}</td>
-                    <td>${this.isGradedItem(item) ? '—' : this.escapeHTML(item.dueDate || 'No date')}</td>
-                    <td>${this.isGradedItem(item) ? `${this.formatNumber(item.pointsEarned ?? 0)} / ${this.formatNumber(item.maxPoints ?? 100)}` : 'Not graded'}</td>
-                    <td class="actions">
+                <tr class="assignment-row">
+                    <td data-label="Status">${this.assignmentStatusControl(item)}</td>
+                    <td data-label="Item" class="assignment-title-cell">${this.escapeHTML(item.title)}${this.assignmentTimeMarkup(item)}</td>
+                    <td data-label="Category">${this.escapeHTML((categories.find(category => category.id === item.categoryId) || {}).name || 'Uncategorized')}</td>
+                    <td data-label="Type">${this.escapeHTML(item.kind || 'assignment')}</td>
+                    <td data-label="Due">${this.isGradedItem(item) ? '—' : this.escapeHTML(item.dueDate || 'No date')}</td>
+                    <td data-label="Score">${this.isGradedItem(item) ? `${this.formatNumber(item.pointsEarned ?? 0)} / ${this.formatNumber(item.maxPoints ?? 100)}` : 'Not graded'}</td>
+                    <td class="actions" data-label="Actions">
                         ${this.assessmentStudyButton(item)}
+                        ${this.isOpenAssignment(item) ? `<button type="button" class="secondary-btn" data-action="work-on-assignment" data-id="${this.escapeHTML(item.id)}">Work on this</button>` : ''}
                         <button class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit</button>
                         <button class="danger-btn" data-action="delete-assignment" data-id="${this.escapeHTML(item.id)}">Delete</button>
                     </td>
@@ -1997,17 +2054,17 @@
                     <section class="glass-card">
                         <h3>Grade targets</h3>
                         <label for="class-target-percent">Target grade (%)</label>
-                        <div class="inline-form"><input id="class-target-percent" type="number" min="0" max="100" step="0.01" value="${Number.isFinite(target) ? Number(target.toFixed(2)) : ''}" placeholder="${Number.isFinite(this.effectiveCourseTarget(course)) ? `${this.formatNumber(this.effectiveCourseTarget(course))} (from GPA goal)` : 'e.g. 90'}"><button class="primary-btn" data-action="save-class-target">Save target</button></div>
+                        <div class="inline-form"><input id="class-target-percent" type="number" min="0" max="100" step="0.01" value="${Number.isFinite(target) ? Number(target.toFixed(2)) : ''}" placeholder="e.g. 90"><button class="primary-btn" data-action="save-class-target">Save target</button></div>
                         <p>${(() => {
                             const goal = this.effectiveCourseTarget(course);
-                            if (!Number.isFinite(goal)) return 'Set a target here or a target GPA in your profile.';
-                            const source = Number.isFinite(target) ? 'class target' : `${goal.toFixed(2)}% needed for your target GPA`;
+                            if (!Number.isFinite(goal)) return 'Set a class target here. Your GPA goal is calculated from class targets.';
+                            const source = 'class target';
                             if (grade === null) return `No graded work yet. Aim for at least ${goal.toFixed(2)}% (${source}).`;
                             return grade >= goal ? `You are currently meeting your ${source}.` : `You are ${(goal - grade).toFixed(2)} points below your ${source}.`;
                         })()}</p>
                     </section>
-                    <section class="glass-card">
-                        <h3>Optional grade categories</h3>
+                    <details class="glass-card workspace-disclosure">
+                        <summary>Grade categories &amp; weights <span>Only needed for category-weighted grading</span></summary>
                         <p>Weights are percentages. Category averages use earned points / possible points; categories without scores are left out until work is graded. Uncategorized scores use any remaining weight. When categories total 100%, assign scored work to a category to include it in the weighted grade.</p>
                         <div class="category-list">${categoryRows || '<p class="empty-state">No categories. Your graded assignments will use a points-based average.</p>'}</div>
                         <p class="${this.usesCategoryWeights(course) && Math.abs(sumWeights - 100) >= 0.01 ? 'weight-note' : 'weight-valid'}">${this.usesCategoryWeights(course) ? `Category weights total ${sumWeights.toFixed(2)}%${Math.abs(sumWeights - 100) >= 0.01 ? ' (recommended total: 100%)' : ''}` : 'Unweighted: all scored work counts by points, regardless of category.'}</p>
@@ -2016,22 +2073,69 @@
                             <input id="new-category-weight" type="number" aria-label="Category weight (%)" min="0" max="100" step="0.1" placeholder="Weight %">
                             <button class="secondary-btn" data-action="add-category">Add category</button>
                         </div>
-                    </section>
+                    </details>
                 </div>
                 <section class="glass-card full-width class-work-section">
                     <h3>Assignments, quizzes & tests</h3>
                     <div class="table-responsive" tabindex="0" role="region" aria-label="Class assignments table"><table><thead><tr><th>Status</th><th>Item</th><th>Category</th><th>Type</th><th>Due</th><th>Score</th><th>Actions</th></tr></thead><tbody>${workRows}</tbody></table></div>
                 </section>
                 <section class="glass-card class-focus-panel">
-                    <div><h3>Study this class</h3><p>Start a 25-minute focus session for this class.</p></div>
+                    <div><h3>Study this class</h3><p>Flashcards track automatically. Select Work on this for an assignment to track active work.</p></div>
                     <div class="focus-timer-control">
                         <i class="fas fa-stopwatch"></i>
-                        <span class="focus-time-display">25:00</span>
-                        <button class="focus-play-btn" aria-label="Start class focus timer"><i class="fas fa-play"></i></button>
+                        <span class="focus-time-display">00:00</span>
+                        <span class="auto-study-state">Automatic</span>
                     </div>
                 </section>
-                <section class="glass-card"><h3>Study guidance</h3><div class="study-guidance-list">${this.getStudyRecommendations().filter(item => item.courseCode === course.code).slice(0, 4).map(item => `<p><strong>${this.escapeHTML(item.title)}</strong> — ${item.sessionMinutes} min today (about ${item.totalStudyMinutes} min total). ${this.escapeHTML(item.reason)} <strong>Method:</strong> ${this.escapeHTML(item.studyMethod)}</p>`).join('') || '<p>No quizzes or tests to study for in this class right now.</p>'}</div></section>`;
-            this.updateFocusTimerDisplay();
+                <section class="glass-card"><h3>Study guidance</h3><div class="study-guidance-list">${this.getStudyRecommendations().filter(item => item.courseCode === course.code).slice(0, 4).map(item => `<p><strong>${this.escapeHTML(item.title)}</strong> — ${item.sessionMinutes} min today (about ${item.totalStudyMinutes} min total). ${this.escapeHTML(item.reason)} <strong>Method:</strong> ${this.escapeHTML(item.studyMethod)}</p>`).join('') || '<p>No quizzes or tests to study for in this class right now.</p>'}</div></section>
+                <section class="glass-card classmates-panel">
+                    <div class="view-header"><div><h3>People sharing this course</h3><p>Find opted-in students at your school. Courses are self-reported and may have different teachers or periods.</p></div><button type="button" class="secondary-btn" data-action="load-classmates" data-id="${this.escapeHTML(course.code)}"><i class="fas fa-users" aria-hidden="true"></i> Find classmates</button></div>
+                    <div id="classmate-list" data-course="${this.escapeHTML(course.code)}" aria-live="polite"><p class="settings-hint">Private by default. Discovery shares usernames only, never grades or assignments.</p></div>
+                </section>`;
+            this.updateAutomaticStudyDisplay();
+        }
+
+        async loadClassmates(button) {
+            const list = document.getElementById('classmate-list');
+            if (!list || list.dataset.course !== button.dataset.id) return;
+            const cloud = window.StudBudCloud;
+            if (!cloud?.user || cloud.offlineMode || cloud.isGuest?.() || !this.isParkwaySchool()) {
+                list.innerHTML = '<p class="community-status">Sign in and choose a supported school in Settings to discover shared courses. This feature needs an internet connection.</p>';
+                return;
+            }
+            const course = (AppState.get('courses') || []).find(item => item.code === button.dataset.id);
+            if (!course) throw new Error('This class no longer exists. Return to your class list.');
+            const userId = cloud.user.id, semester = this.schoolSemester();
+            const request = this.classmateRequest = (this.classmateRequest || 0) + 1;
+            const current = () => request === this.classmateRequest && cloud.user?.id === userId
+                && !cloud.offlineMode && list.isConnected && this.schoolSemester() === semester;
+            button.disabled = true;
+            list.setAttribute('aria-busy', 'true');
+            list.textContent = 'Finding opted-in students…';
+            try {
+                const result = await window.StudBudCommunityGames.friendCall('studbud_classmates', {
+                    p_course_code: course.catalogCode || course.code, p_semester: semester
+                });
+                if (!current()) return;
+                if (!result || typeof result.visible !== 'boolean' || !Array.isArray(result.students)
+                    || result.students.some(student => !student || typeof student.user_id !== 'string' || typeof student.username !== 'string')) {
+                    throw new Error('Course discovery returned an invalid response. Refresh and try again.');
+                }
+                if (!result.visible) {
+                    list.innerHTML = '<p class="settings-hint">Course discovery is off. To find others, enable “Let students sharing a course find my username” in Profile. This also makes your username and shared course visible to other opted-in students at your school.</p><button type="button" class="secondary-btn" data-action="edit-public-profile">Review privacy settings</button>';
+                } else {
+                    list.innerHTML = result.students.length
+                        ? `<ul class="classmate-list">${result.students.map(student => `<li><span class="classmate-initial" aria-hidden="true">${this.escapeHTML(student.username.slice(0, 1).toUpperCase())}</span><strong>${this.escapeHTML(student.username)}</strong><button type="button" class="secondary-btn" data-action="view-profile" data-id="${this.escapeHTML(student.user_id)}" aria-label="View ${this.escapeHTML(student.username)}'s profile">View profile</button></li>`).join('')}</ul><p class="settings-hint">Showing up to 50 opted-in students with this course saved for ${this.escapeHTML(this.termLabel(semester))}. This is not an official class roster.</p>`
+                        : '<p class="settings-hint">No other opted-in students found yet. They need to enable course discovery and sync this course to their account.</p>';
+                }
+            } catch (error) {
+                if (current()) list.textContent = this.friendlyErrorMessage(error, 'Could not load classmates. Try again.');
+            } finally {
+                if (request === this.classmateRequest) {
+                    if (list.isConnected) list.removeAttribute('aria-busy');
+                    if (button.isConnected) button.disabled = false;
+                }
+            }
         }
 
         getSchoolSchedule(date) {
@@ -2121,7 +2225,12 @@
             const bookmarkUrl = document.getElementById('ic-bookmarklet-url');
             if (bookmarkUrl) bookmarkUrl.value = window.StudBudIC.buildBookmarklet(origin);
             const mobileInstructions = document.getElementById('ic-mobile-instructions');
-            if (mobileInstructions && window.matchMedia('(pointer: coarse), (max-width: 680px)').matches) mobileInstructions.open = true;
+            const mobile = window.matchMedia('(pointer: coarse), (max-width: 680px)').matches;
+            if (mobileInstructions && mobile) mobileInstructions.open = true;
+            const phoneAdvice = document.getElementById('ic-mobile-recommendation');
+            if (phoneAdvice) phoneAdvice.open = mobile;
+            const websiteMethod = document.getElementById('ic-website-method');
+            if (websiteMethod) websiteMethod.open = !mobile;
             const urlInput = document.getElementById('ic-district-url');
             if (urlInput && !urlInput.value) urlInput.value = localStorage.getItem('studbud-ic-url') || (this.isParkwaySchool() ? PARKWAY_CAMPUS_URL : '');
             const moreAddress = urlInput?.closest('details');
@@ -2585,8 +2694,7 @@
         getStudyRecommendations() {
             const courses = AppState.get('courses') || [];
             const assignments = AppState.get('assignments') || [];
-            const profile = AppState.get('profile') || {};
-            const targetGpa = Number(profile.targetGpa || 0);
+            const targetGpa = Number(this.calculateTargetGPA(courses).weighted);
             const trackedGpa = this.calculateTrackedGPA(courses);
             const currentWeightedGpa = Number(trackedGpa.weighted);
             const gpaGap = Number(trackedGpa.totalCredits) > 0 && Number.isFinite(currentWeightedGpa) && targetGpa > 0
@@ -2598,22 +2706,13 @@
             const recommended = assignments.filter(item => this.isOpenAssignment(item) && ['quiz', 'test'].includes(String(item.kind || 'assignment').toLowerCase())).map(item => {
                 const course = courses.find(entry => entry.code === item.courseCode);
                 const grade = course ? this.calculateCourseGrade(course) : null;
-                const target = course ? this.effectiveCourseTarget(course, targetGpa) : NaN;
-                const targetFromGpa = course && !this.hasCourseTarget(course) && Number.isFinite(target);
+                const target = course ? this.effectiveCourseTarget(course) : NaN;
                 const gradeGap = Number.isFinite(grade) && Number.isFinite(target) ? Math.max(0, target - grade) : 0;
                 const due = item.dueDate ? new Date(`${item.dueDate}T00:00:00`) : null;
                 const daysUntilDue = due && Number.isFinite(due.getTime()) ? Math.round((due - today) / 86400000) : 7;
                 const urgency = daysUntilDue < 0 ? 2 : 1 / Math.max(1, daysUntilDue + 1);
                 const importance = Math.min(5, Math.max(1, Number(item.importance || 3)));
                 const kind = String(item.kind || 'assignment').toLowerCase();
-                const title = String(item.title || '').toLowerCase();
-                let minimumMinutes = kind === 'test' ? 90 : kind === 'quiz' ? 45 : 30;
-                if (/\b(essay|paper|lab|project|presentation)\b/.test(title)) minimumMinutes = Math.max(minimumMinutes, 90);
-                if (/\b(reading|chapter|vocabulary)\b/.test(title)) minimumMinutes = Math.max(minimumMinutes, 45);
-                let totalStudyMinutes = Math.max(minimumMinutes, Number(item.estimatedMinutes || 30));
-                if (importance >= 4) totalStudyMinutes += 15;
-                if (gradeGap >= 5) totalStudyMinutes += 15;
-                if (gpaGap >= 0.25) totalStudyMinutes += 15;
                 const taskSessions = history.filter(session => session.assignmentId === item.id)
                     .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
                 const minutesStudied = Math.round(taskSessions.reduce((sum, session) =>
@@ -2622,12 +2721,12 @@
                 const averageEffectiveness = recentRatings.length
                     ? recentRatings.reduce((sum, rating) => sum + rating, 0) / recentRatings.length
                     : null;
-                if (averageEffectiveness !== null && averageEffectiveness <= 2) totalStudyMinutes += 15;
-                totalStudyMinutes = Math.min(240, Math.round(totalStudyMinutes / 5) * 5);
-                const remainingStudyMinutes = Math.max(15, totalStudyMinutes - minutesStudied);
+                const timeProgress = this.assignmentTimeProgress(item);
+                const totalStudyMinutes = timeProgress.totalMinutes;
+                const remainingStudyMinutes = Math.ceil(timeProgress.remainingMinutes);
                 const planningDays = daysUntilDue <= 0 ? 1 : Math.min(3, daysUntilDue);
                 const sessionMinutes = Math.min(remainingStudyMinutes, 60, Math.max(15, Math.ceil(remainingStudyMinutes / planningDays / 5) * 5));
-                const sessionCount = Math.ceil(remainingStudyMinutes / sessionMinutes);
+                const sessionCount = sessionMinutes ? Math.ceil(remainingStudyMinutes / sessionMinutes) : 0;
                 const size = Math.sqrt(remainingStudyMinutes / 30);
                 const assessmentBoost = kind === 'test' ? 1.5 : kind === 'quiz' ? 1.25 : 1;
                 const studyCoverage = Math.min(1, minutesStudied / totalStudyMinutes);
@@ -2638,7 +2737,7 @@
                     daysUntilDue <= 1 ? 'Due very soon; give it priority today.' :
                     `${daysUntilDue} days until due; split the work into ${sessionCount} focused session${sessionCount === 1 ? '' : 's'}.`;
                 if (minutesStudied) reason += ` You have logged ${minutesStudied} min; about ${remainingStudyMinutes} min remain in the estimate.`;
-                if (gradeGap > 0) reason += ` ${gradeGap.toFixed(2)} points below the ${target.toFixed(2)}% ${targetFromGpa ? `needed in this class for your ${targetGpa.toFixed(2)} GPA goal` : 'class target'}.`;
+                if (gradeGap > 0) reason += ` ${gradeGap.toFixed(2)} points below the ${target.toFixed(2)}% class target.`;
                 if (gpaGap > 0) reason += ` Your current weighted GPA (${currentWeightedGpa.toFixed(2)}) is below your ${targetGpa.toFixed(2)} target.`;
                 const deckLinks = this.decksForAssessment(item);
                 const flashcardMinutes = Math.round(taskSessions.filter(session => session.source === 'flashcards')
@@ -2653,6 +2752,7 @@
                     score,
                     totalStudyMinutes,
                     remainingStudyMinutes,
+                    completionPct: timeProgress.pct,
                     minutesStudied,
                     sessionMinutes,
                     sessionCount,
@@ -2672,14 +2772,9 @@
             return course && course.targetPct !== null && course.targetPct !== undefined && course.targetPct !== '' && Number.isFinite(Number(course.targetPct));
         }
 
-        /** The class's own target %, or the % this class needs in the cheapest plan that reaches the target GPA. */
-        effectiveCourseTarget(course, targetGpa = Number((AppState.get('profile') || {}).targetGpa || 0)) {
+        effectiveCourseTarget(course) {
             if (this.hasCourseTarget(course)) return Number(course.targetPct);
-            if (!(targetGpa > 0)) return NaN;
-            const courses = AppState.get('courses') || [];
-            const plan = this.gpaTargetPlan(targetGpa, 'weighted', courses.some(item => item.code === course.code) ? courses : [course]);
-            const entry = plan.byCode.get(course.code);
-            return entry ? Number(entry.minPct) : NaN;
+            return NaN;
         }
 
         /** Minimize the sum of class target percentages while meeting the credit-weighted GPA goal. */
@@ -2800,7 +2895,7 @@
             const weekStart = new Date(now);
             weekStart.setDate(now.getDate() - ((now.getDay() + 6) % 7));
             weekStart.setHours(0, 0, 0, 0);
-            const sessions = (AppState.get('studyHistory') || []).filter(session => Number(session.durationSec) > 0)
+            const sessions = (AppState.get('studyHistory') || []).filter(session => Number(session.durationSec) > 0 || session.gameSummary)
                 .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
             const thisWeek = sessions.filter(session => new Date(session.timestamp) >= weekStart);
             const minutes = Math.round(thisWeek.reduce((sum, session) => sum + Number(session.durationSec || 0), 0) / 60);
@@ -2861,13 +2956,14 @@
                     const course = courses.find(entry => entry.code === item.courseCode);
                     const graded = this.isGradedItem(item);
                     return `<tr class="assignment-row is-${this.assignmentState(item)}">
-                        <td>${this.assignmentStatusControl(item)}</td>
-                        <td>${this.escapeHTML(item.title)}</td>
-                        <td>${this.escapeHTML(course ? course.title : item.courseCode || 'Unassigned')}</td>
-                        <td>${graded ? `${this.formatNumber(item.pointsEarned || 0)} / ${this.formatNumber(item.maxPoints || 0)}` : this.escapeHTML(item.dueDate || 'No due date')}</td>
-                        <td>${this.isOpenAssignment(item) ? `About ${this.plannerTaskMinutes(item)} min` : '—'}</td>
-                        <td class="actions">
+                        <td data-label="Status">${this.assignmentStatusControl(item)}</td>
+                        <td data-label="Assignment" class="assignment-title-cell">${this.escapeHTML(item.title)}</td>
+                        <td data-label="Class">${this.escapeHTML(course ? course.title : item.courseCode || 'Unassigned')}</td>
+                        <td data-label="${graded ? 'Score' : 'Due'}">${graded ? `${this.formatNumber(item.pointsEarned || 0)} / ${this.formatNumber(item.maxPoints || 0)}` : this.escapeHTML(item.dueDate || 'No due date')}</td>
+                        <td data-label="Time progress">${this.assignmentTimeMarkup(item)}</td>
+                        <td class="actions" data-label="Actions">
                             ${this.assessmentStudyButton(item)}
+                            ${this.isOpenAssignment(item) ? `<button type="button" class="secondary-btn" data-action="work-on-assignment" data-id="${this.escapeHTML(item.id)}">Work on this</button>` : ''}
                             <button class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit</button>
                             <button class="danger-btn" data-action="delete-assignment" data-id="${this.escapeHTML(item.id)}">Delete</button>
                         </td>
@@ -2932,8 +3028,59 @@
         }
 
         plannerTaskMinutes(item) {
-            const minutes = Number(item.estimatedMinutes);
-            return Number.isFinite(minutes) && minutes > 0 ? Math.ceil(minutes) : 30;
+            return Math.ceil(this.assignmentTimeProgress(item).remainingMinutes);
+        }
+
+        assignmentStudySeconds(assignmentId) {
+            if (!assignmentId) return 0;
+            const saved = (AppState.get('studyHistory') || []).filter(session => session.assignmentId === assignmentId);
+            let seconds = saved.reduce((sum, session) => sum + Math.max(0, Number(session.durationSec) || 0), 0);
+            for (const session of this.studyTracker?.sessions.values() || []) {
+                if (session.assignmentId !== assignmentId) continue;
+                const recorded = saved.find(item => item.id === session.id);
+                seconds += Math.max(0, Math.floor(session.milliseconds / 1000) - (Number(recorded?.durationSec) || 0));
+            }
+            return seconds;
+        }
+
+        assignmentEstimateMinutes(item) {
+            const base = Number(item.estimatedMinutes) > 0 ? Number(item.estimatedMinutes) : 30;
+            const kind = String(item.kind || '').toLowerCase();
+            if (!['quiz', 'test'].includes(kind)) return base;
+            const course = (AppState.get('courses') || []).find(entry => entry.code === item.courseCode);
+            const grade = course ? this.calculateCourseGrade(course) : null;
+            const target = course ? this.effectiveCourseTarget(course) : NaN;
+            const targetGpa = Number(this.calculateTargetGPA().weighted);
+            const tracked = this.calculateTrackedGPA();
+            let estimate = Math.max(kind === 'test' ? 90 : 45, base);
+            if (/\b(essay|paper|lab|project|presentation)\b/i.test(item.title || '')) estimate = Math.max(estimate, 90);
+            if (Number(item.importance || 3) >= 4) estimate += 15;
+            if (Number.isFinite(grade) && Number.isFinite(target) && target - grade >= 5) estimate += 15;
+            if (Number(tracked.totalCredits) > 0 && targetGpa - Number(tracked.weighted) >= .25) estimate += 15;
+            const ratings = (AppState.get('studyHistory') || []).filter(session => session.assignmentId === item.id)
+                .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp))).slice(0, 3)
+                .map(session => Number(session.effectiveness)).filter(rating => rating >= 1 && rating <= 5);
+            if (ratings.length && ratings.reduce((sum, value) => sum + value, 0) / ratings.length <= 2) estimate += 15;
+            return Math.min(240, Math.round(estimate / 5) * 5);
+        }
+
+        assignmentTimeProgress(item, estimate = this.assignmentEstimateMinutes(item)) {
+            const studiedMinutes = this.assignmentStudySeconds(item.id) / 60;
+            const overridden = item.remainingEstimateMinutes !== null && item.remainingEstimateMinutes !== undefined
+                && Number.isFinite(Number(item.remainingEstimateMinutes));
+            const totalMinutes = overridden
+                ? Math.max(0, Number(item.remainingEstimateStudiedSeconds) || 0) / 60 + Math.max(0, Number(item.remainingEstimateMinutes))
+                : estimate;
+            const complete = !this.isOpenAssignment(item);
+            const remainingMinutes = complete ? 0 : Math.max(0, totalMinutes - studiedMinutes);
+            const pct = complete || (totalMinutes === 0 && overridden) ? 100
+                : totalMinutes > 0 ? Math.min(100, Math.floor(studiedMinutes / totalMinutes * 100)) : 0;
+            return { totalMinutes, studiedMinutes, remainingMinutes, pct };
+        }
+
+        assignmentTimeMarkup(item) {
+            const progress = this.assignmentTimeProgress(item);
+            return `<div class="assignment-time-progress"><span>${progress.pct}% of estimated time</span><progress max="100" value="${progress.pct}" aria-label="Estimated time completion for ${this.escapeHTML(item.title)}">${progress.pct}%</progress><small>${Math.ceil(progress.remainingMinutes)} min left · ${Math.floor(progress.studiedMinutes)} min studied</small></div>`;
         }
 
         plannerTaskReason(item) {
@@ -3052,6 +3199,7 @@
             }
             this.refreshCommunityDeckActions();
             const myId = window.StudBudCloud?.user?.id;
+            const managing = document.getElementById('flashcard-view')?.dataset?.studyPage === 'manage';
             grid.innerHTML = decks.length ? decks.map((deck, index) => {
                 const studyCount = this.deckStudyCount(deck);
                 const id = this.escapeHTML(deck.id);
@@ -3095,7 +3243,7 @@
                 <article class="glass-card deck-card${pinned ? ' is-pinned' : ''}" data-deck-id="${id}">
                     ${reorder}
                     <div class="deck-card-top">
-                        <div class="deck-ring" style="--p:${mastery.pct}" title="${mastery.pct}% recall estimate · Written answers and Study/Cram self-ratings count fully; multiple-choice and matching count half · Separate from scheduled reviews"><span>${mastery.pct}%</span></div>
+                        <button type="button" class="deck-ring" data-action="view-focus-cards" data-id="${id}" style="--p:${mastery.pct}" aria-label="${mastery.pct}% recall estimate for ${title}. View cards needing focus" title="${mastery.pct}% recall estimate · Average of card progress from the last four answers. Written answers and Study/Cram self-ratings count fully; choices count half. Click for terms needing focus."><span>${mastery.pct}%</span></button>
                         <div class="deck-card-title">
                             <h3>${title}</h3>
                             ${author}
@@ -3105,7 +3253,9 @@
                             <summary class="deck-menu-btn" title="More options" aria-label="More options for ${this.escapeHTML(deck.title)}"><i class="fas fa-ellipsis-vertical"></i></summary>
                             <div class="deck-menu-panel" role="menu">
                                 <button class="deck-menu-item" type="button" role="menuitem" data-action="add-card" data-id="${id}"><i class="fas fa-plus"></i> Add a card</button>
+                                <button class="deck-menu-item" type="button" role="menuitem" data-action="cram-deck" data-id="${id}" ${cardCount ? '' : 'disabled'}><i class="fas fa-bolt"></i> Cram all cards</button>
                                 <button class="deck-menu-item" type="button" role="menuitem" data-action="view-weak-cards" data-id="${id}"><i class="fas fa-triangle-exclamation"></i> View weak cards (${mastery.weak})</button>
+                                <button class="deck-menu-item" type="button" role="menuitem" data-action="view-focus-cards" data-id="${id}"><i class="fas fa-bullseye"></i> Cards needing focus</button>
                                 ${mastery.starred ? `<button class="deck-menu-item" type="button" role="menuitem" data-action="cram-starred" data-id="${id}"><i class="fas fa-star"></i> Study starred (${mastery.starred})</button>` : ''}
                                 ${share}
                                 ${linkEditor}
@@ -3117,17 +3267,19 @@
                         <div class="deck-stats">
                             <span><i class="fas fa-clone"></i> ${cardCount} cards</span>
                             ${mastery.starred ? `<span class="is-star" title="Starred cards"><i class="fas fa-star"></i> ${mastery.starred}</span>` : ''}
-                            ${mastery.weak ? `<button type="button" class="is-weak" data-action="view-weak-cards" data-id="${id}" aria-label="View ${mastery.weak} weak cards in ${title}" title="View cards under 75% accuracy · Uses the last four answers once available"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> ${mastery.weak} weak</button>` : ''}
+                            ${mastery.weak ? `<button type="button" class="is-weak" data-action="view-weak-cards" data-id="${id}" aria-label="View ${mastery.weak} weak cards in ${title}" title="View cards under 75% accuracy · Uses up to four most recent answers"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> ${mastery.weak} weak</button>` : ''}
                         </div>
                         ${tags}
                     </div>
                     <div class="deck-main-actions">
-                        <button class="primary-btn" data-action="study-deck" data-id="${id}" ${studyCount ? '' : 'disabled'}><i class="fas fa-play"></i> Study</button>
-                        <button class="secondary-btn" data-action="cram-deck" data-id="${id}" ${cardCount ? '' : 'disabled'} title="Go through every card without changing your learning progress"><i class="fas fa-bolt"></i> Cram</button>
-                        <button class="secondary-btn deck-edit-btn" data-action="edit-deck" data-id="${id}" title="Edit set" aria-label="Edit set"><i class="fas fa-pen"></i></button>
+                        ${managing
+                            ? `<button class="primary-btn" data-action="edit-deck" data-id="${id}"><i class="fas fa-pen" aria-hidden="true"></i> Edit cards</button><button class="secondary-btn" data-action="add-card" data-id="${id}"><i class="fas fa-plus" aria-hidden="true"></i> Add card</button>`
+                            : `<button class="primary-btn" data-action="study-deck" data-id="${id}" ${studyCount ? '' : 'disabled'}><i class="fas fa-play" aria-hidden="true"></i> Study</button><button class="secondary-btn" data-action="study-focus" data-id="${id}" ${studyCount ? '' : 'disabled'}><i class="fas fa-bullseye" aria-hidden="true"></i> Focus practice</button>`}
                     </div>
                 </article>`;
-            }).join('') : `<div class="empty-state glass-card full-width">${search ? 'No decks match your search. Try a different title or class.' : 'No decks yet. Create a deck, import flashcards, or browse community decks above.'}</div>`;
+            }).join('') : `<div class="empty-state glass-card full-width empty-state-cta">${search
+                ? '<strong>No matching sets</strong><p>Try a different title or class, or clear your search.</p><button type="button" class="secondary-btn" data-action="clear-deck-search">Clear search</button>'
+                : '<i class="fas fa-layer-group" aria-hidden="true"></i><strong>Your next study session starts here</strong><p>Create your first set, import cards, or find a shared set in Discover.</p><div class="settings-actions"><button type="button" class="primary-btn" data-action="create-deck">Create a study set</button><button type="button" class="secondary-btn" data-target="study-discover-view">Discover sets</button></div>'}</div>`;
             const missingAuthors = decks.filter(deck => deck.communitySourceOwnerId && !deck.communitySourceAuthor);
             if (missingAuthors.length && myId && !this.deckAuthorBackfillStarted) {
                 this.deckAuthorBackfillStarted = true;
@@ -3219,6 +3371,7 @@
                 if (schedule) frame = requestAnimationFrame(() => update());
             };
             grid.addEventListener('pointerdown', event => {
+                if (document.getElementById('flashcard-view')?.dataset?.studyPage === 'practice') return;
                 if (event.button !== 0 || event.isPrimary === false || drag) return;
                 const card = event.target.closest?.('.deck-card');
                 const handle = event.target.closest?.('.deck-drag-handle');
@@ -3321,6 +3474,23 @@
                 open.open = false;
                 open.querySelector('summary')?.focus();
             });
+        }
+
+        setStudyPage(page) {
+            const view = document.getElementById('flashcard-view');
+            view.dataset.studyPage = page;
+            view.querySelectorAll('[data-study-panel]').forEach(panel => {
+                panel.classList.toggle('hidden', !panel.dataset.studyPanel.split(' ').includes(page));
+            });
+            const copy = {
+                practice: ['Ready to study?', 'Choose a set, practice the terms needing focus, or try a test.'],
+                manage: ['Your study materials', 'Create sets, edit cards, organize your library and choose what to share.'],
+                discover: ['Learn from each other', 'Browse shared sets. Add a copy to your library to practice at your own pace.']
+            }[page];
+            document.getElementById('study-page-title').textContent = copy[0];
+            document.getElementById('study-page-description').textContent = copy[1];
+            if (page !== 'manage') this.deckReorderMode = false;
+            this.renderDecks();
         }
 
         deckMastery(deck) {
@@ -3567,14 +3737,18 @@
                 && (filter === 'all' || (filter === 'images' && window.FlashcardTools.imageSource(card.answerImage))
                     || (filter === 'attachments' && (card.attachments || []).some(item => window.FlashcardTools.attachmentSource(item)))
                     || (filter === 'keywords' && card.answerMode === 'keywords')
-                    || (filter === 'paused' && card.suspended) || (filter === 'starred' && card.starred) || (filter === 'weak' && window.FlashcardTools.cardProgress(card).weak)));
+                    || (filter === 'paused' && card.suspended) || (filter === 'starred' && card.starred)
+                    || (filter === 'focus' && window.FlashcardTools.cardProgress(card).mastery < 1)
+                    || (filter === 'weak' && window.FlashcardTools.cardProgress(card).weak)));
+            if (filter === 'focus') cards.sort((a, b) => window.AnkiStudySession.priority(b) - window.AnkiStudySession.priority(a));
             document.getElementById('deck-editor-undo')?.classList.toggle('hidden', !this.deckEditorUndo?.length);
             document.getElementById('deck-editor-count').textContent = `${cards.length} of ${draft.cards.length} cards`;
             document.getElementById('deck-editor-cards').innerHTML = cards.map(card => `
                 <article class="deck-editor-card">
                     <strong>${this.escapeHTML(card.front)}</strong><p>${this.escapeHTML(card.back)}</p>
                     ${card.tags?.length ? `<small>${this.escapeHTML(card.tags.join(', '))}</small>` : ''}
-                    <small>${card.practiceStats?.attempts > 0 ? `${Math.round(window.FlashcardTools.cardProgress(card).accuracy * 100)}% accuracy${card.practiceStats.recentAnswers?.length === 4 ? ' (last 4)' : ''} · ${Number(card.practiceStats.attempts)} attempts` : 'Not practiced yet'}${card.suspended ? ' · Paused scheduled study' : ''}${window.FlashcardTools.imageSource(card.answerImage) ? ' · Private image' : ''}</small>
+                    <small>${card.practiceStats?.attempts > 0 ? `${Math.round(window.FlashcardTools.cardProgress(card).accuracy * 100)}% accuracy${window.FlashcardTools.cardProgress(card).recentAttempts ? ` (last ${window.FlashcardTools.cardProgress(card).recentAttempts})` : ' (lifetime)'} · ${Number(card.practiceStats.attempts)} total attempts` : 'Not practiced yet'}${card.suspended ? ' · Paused scheduled study' : ''}${window.FlashcardTools.imageSource(card.answerImage) ? ' · Private image' : ''}</small>
+                    <small>${Math.round(window.FlashcardTools.cardProgress(card).mastery * 100)}% recall estimate · ${this.cardFocusReason(card)}</small>
                     <small>${card.answerMode === 'keywords' ? 'Definition keywords' : card.answerMode === 'vocabulary' ? 'Vocabulary / translation' : card.answerMode === 'exact' ? 'Exact answer' : 'Test grading default'}${card.acceptedAnswers?.length ? ` · ${card.acceptedAnswers.length} alternative answers` : ''}${card.attachments?.length ? ` · ${card.attachments.length} private attachments` : ''}</small>
                     <div class="actions">
                         <button type="button" class="secondary-btn star-toggle${card.starred ? ' is-on' : ''}" data-action="editor-star-card" data-id="${this.escapeHTML(card.id)}" aria-pressed="${card.starred ? 'true' : 'false'}" aria-label="${card.starred ? 'Unstar' : 'Star'} card"><i class="${card.starred ? 'fas' : 'far'} fa-star"></i></button>
@@ -3584,7 +3758,15 @@
                         <button type="button" class="secondary-btn" data-action="editor-pause-card" data-id="${this.escapeHTML(card.id)}">${card.suspended ? 'Resume' : 'Pause'} scheduled study</button>
                         <button type="button" class="danger-btn" data-action="editor-delete-card" data-id="${this.escapeHTML(card.id)}">Delete card</button>
                     </div>
-                </article>`).join('') || `<p class="empty-state">${filter === 'weak' && !query ? 'No weak cards in this set. Cards appear here after at least two attempts with accuracy below 75%, using the last four answers once available.' : query || filter !== 'all' ? 'No cards match your search or filter.' : 'No cards yet. Add your first card.'}</p>`;
+                </article>`).join('') || `<p class="empty-state">${filter === 'focus' && !query ? 'No cards need more recall practice based on your current answers. Come back later for spaced review.' : filter === 'weak' && !query ? 'No weak cards in this set. Cards appear here after at least two recent answers with accuracy below 75%. Older sets use lifetime accuracy until you practice again.' : query || filter !== 'all' ? 'No cards match your search or filter.' : 'No cards yet. Add your first card.'}</p>`;
+        }
+
+        cardFocusReason(card) {
+            const progress = window.FlashcardTools.cardProgress(card);
+            if (progress.weak) return 'Focus: recent misses; recall this term without choices.';
+            if (!progress.attempts && !card.lastReviewed && !card.repetitions) return 'Focus: not practiced yet.';
+            if (progress.mastery < 1) return 'Focus: build consistent recall; written answers and Study/Cram ratings count fully, choices count half.';
+            return 'Recall goal reached; continue spaced review to retain it.';
         }
 
         addBulkEditorCards() {
@@ -4362,6 +4544,15 @@
                 document.getElementById('public-goal').value = p.study_goal || '';
                 document.getElementById('public-show-real-name').checked = p.show_real_name === true;
                 document.getElementById('public-show-school').checked = p.show_school === true;
+                const classmates = document.getElementById('public-show-classmates');
+                this.classmateDiscoveryAvailable = typeof p.show_classmates === 'boolean';
+                if (classmates) {
+                    classmates.checked = p.show_classmates === true;
+                    classmates.disabled = !this.classmateDiscoveryAvailable;
+                }
+                const availability = document.getElementById('public-classmates-availability');
+                if (availability) availability.textContent = this.classmateDiscoveryAvailable ? ''
+                    : 'Course discovery needs a server update. Other profile settings still work.';
                 document.getElementById('public-show-stats').checked = p.show_stats !== false;
                 const profile = AppState.get('profile') || {};
                 const school = this.isKnownSchool(p.school) ? p.school : 'pchs';
@@ -4391,9 +4582,11 @@
                     p_last_name: document.getElementById('settings-last-name').value.trim(),
                     p_show_real_name: document.getElementById('public-show-real-name').checked,
                     p_show_school: document.getElementById('public-show-school').checked,
-                    p_show_stats: document.getElementById('public-show-stats').checked
+                    p_show_stats: document.getElementById('public-show-stats').checked,
+                    ...(this.classmateDiscoveryAvailable ? { p_show_classmates: document.getElementById('public-show-classmates').checked } : {})
                 });
-                status.textContent = 'Saved. Your buds will see this on your profile.';
+                status.textContent = this.classmateDiscoveryAvailable ? 'Saved your public profile and course-discovery preferences.'
+                    : 'Saved your public profile. Course discovery needs a server update before it can be enabled.';
             } catch (error) {
                 status.textContent = this.friendlyErrorMessage(error, 'Could not save your profile.');
             }
@@ -7515,9 +7708,11 @@
             // Code-only guests have no local workspace; app guests keep summaries on this device.
             if (session.testing || window.StudBudCloud?.guestLobbyOpen) return;
             await this.saveGameProgress(session);
+            if (session.studyTimeId) await this.studyTracker?.stop(session.studyTimeId);
             await AppState.recordStudySession({
-                id: `match_${window.crypto.randomUUID()}`, title: `${session.practice ? 'Practice game' : 'Study game'}: ${session.game.title}`,
-                durationSec: Math.max(1, Math.round(session.t)), method: 'practice', source: session.practice ? 'solo' : 'multiplayer',
+                id: session.studyTimeId || (session.studyTimeId = this.studyTimeKey()), title: `${session.practice ? 'Practice game' : 'Study game'}: ${session.game.title}`,
+                durationSec: this.studyTracker?.seconds(session.studyTimeId) || 0,
+                autoTracked: true, method: 'practice', source: session.practice ? 'solo' : 'multiplayer',
                 gameSummary: {
                     mode: session.mode, score: session.score, answered: session.answered, correct: session.correct,
                     studySet: session.studySet,
@@ -7529,12 +7724,14 @@
         }
 
         destroyArcadeSession() {
+            if (this.arcadeSession?.studyTimeId) this.studyTracker?.stop(this.arcadeSession.studyTimeId);
             if (this.arcadeSession) this.arcadeSession.destroy();
             this.arcadeSession = null;
             document.body.classList.remove('mpg-active');
         }
 
         closePractice() {
+            if (this.practiceSession?.studyTimeId) this.studyTracker?.stop(this.practiceSession.studyTimeId);
             if (this.practiceSession) this.practiceSession.destroy();
             this.practiceSession = null;
             if (!this.arcadeSession) document.body.classList.remove('mpg-active');
@@ -7755,7 +7952,10 @@
             const year = document.getElementById('settings-grad-year');
             if (year && profile.graduationYear) year.value = String(profile.graduationYear);
             const targetGpa = document.getElementById('settings-target-gpa');
-            if (targetGpa) targetGpa.value = String(Number.isFinite(Number(profile.targetGpa)) && profile.targetGpa !== '' && profile.targetGpa !== null ? Number(Number(profile.targetGpa).toFixed(2)) : 3.8);
+            if (targetGpa) {
+                const goal = this.calculateTargetGPA();
+                targetGpa.value = Number(goal.totalCredits) > 0 ? Number(goal.weighted).toFixed(2) : 'Add class targets or grades';
+            }
             const currentTermSetting = document.getElementById('settings-current-term');
             if (currentTermSetting) currentTermSetting.value = profile.currentTerm || 'auto';
             const priorFields = { 'settings-prior-credits': 'priorCredits', 'settings-prior-weighted': 'priorWeightedGpa', 'settings-prior-unweighted': 'priorUnweightedGpa' };
@@ -7807,7 +8007,14 @@
             this.ensureSchemeButtons();
             const settings = AppState.get('settings') || {};
             if (settings.gameAudio) window.StudBudSfx?.update(settings.gameAudio);
-            const theme = settings.theme === 'light' ? 'light' : 'dark';
+            if (!this.systemThemeQuery && window.matchMedia) {
+                this.systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)');
+                this.systemThemeQuery.addEventListener?.('change', () => {
+                    if (!['light', 'dark'].includes(AppState.get('settings')?.theme)) this.applyAppearance();
+                });
+            }
+            const preference = ['light', 'dark'].includes(settings.theme) ? settings.theme : 'system';
+            const theme = preference === 'system' ? (this.systemThemeQuery?.matches ? 'dark' : 'light') : preference;
             const palettes = (window.StudBudCommunityGames?.catalog || []).filter(item => item.type === 'palette');
             const requestedPalette = palettes.find(item => item.color === settings.colorScheme);
             const freeScheme = ['studbud', 'monochrome'].includes(settings.colorScheme);
@@ -7817,6 +8024,9 @@
             const colorScheme = !migrated && (freeScheme || unlocked) ? settings.colorScheme : 'studbud';
             document.body.classList.toggle('dark-theme', theme === 'dark');
             document.body.classList.toggle('light-theme', theme === 'light');
+            document.documentElement.style.colorScheme = theme;
+            const themeColor = document.querySelector('meta[name="theme-color"]');
+            if (themeColor) themeColor.content = theme === 'dark' ? '#111827' : '#f8fafc';
             document.body.classList.toggle('compact-ui', Boolean(settings.compactUi));
             document.body.classList.toggle('sidebar-collapsed', Boolean(settings.sidebarCollapsed));
             document.body.dataset.colorScheme = colorScheme;
@@ -7830,7 +8040,7 @@
                 document.body.style.removeProperty('--pa');
             }
             const themeSelect = document.getElementById('ui-theme-select');
-            if (themeSelect) themeSelect.value = theme;
+            if (themeSelect) themeSelect.value = preference;
             const compact = document.getElementById('ui-compact-mode');
             if (compact) compact.checked = Boolean(settings.compactUi);
             document.querySelectorAll('.scheme-option').forEach(button => {
@@ -7922,7 +8132,8 @@
         }
 
         syncTutorialUI() {
-            const seen = Boolean(AppState.get('settings')?.tutorialSeen);
+            const settings = AppState.get('settings') || {};
+            const seen = Boolean(settings.tutorialSeen && settings.tutorialVersion === 2);
             document.getElementById('tutorial-banner')?.classList.toggle('hidden', seen);
             document.getElementById('tutorial-card')?.classList.toggle('hidden', !seen);
         }
@@ -8202,20 +8413,26 @@
         }
 
         tutorialSteps() {
-            const nav = view => `.nav-item:not(.workspace-child)[data-target="${view}-view"], .nav-item:not(.workspace-child)[data-also~="${view}-view"]`;
             return [
-                { title: 'Welcome to StudBud!', text: 'This quick tour follows a real week: bring in your classes, plan the next deadline, build a study set and practice it. Use the topic menu to jump around, and replay the tour any time from Settings.' },
-                { route: 'dashboard', sel: '#sidebar', title: 'Your menu', text: 'Six workspaces keep things simple: Home, School, Plan, Study, Play and Settings. Related tools show up as pill tabs above each page. On a phone, swipe the menu or the tabs sideways.' },
-                { route: 'gpa', sel: '#gpa-view .open-ic-import-btn', title: 'Import from Infinite Campus', text: 'Skip the typing: import your classes, grades, assignments, categories, class times and school calendar. On a computer, drag StudBud Import to your bookmarks bar. On a phone, follow the phone/tablet instructions to save the import bookmark. Run it on the signed-in Campus website, check the class matches and press Import. Re-import any time to update.' },
-                { route: 'gpa', sel: '#workspace-tabs', title: 'Your school, your course list', text: 'Pick Parkway Central, North, South or West in Settings and the class search only shows that school\u2019s course catalog. Choose Other to type your classes yourself or import them from Infinite Campus. What-if grades is a safe sandbox that never touches your real scores.' },
-                { route: 'planner', sel: '#workspace-tabs', title: 'Plan the next deadline', text: 'Tasks is your work list, Calendar shows the same due dates by month and Class schedule controls which classes appear on Home. Add a quiz or test to get a suggested study plan.' },
-                { route: 'dashboard', sel: '.focus-sprint-widget', title: 'Choose what to do today', text: 'Home brings together today\u2019s classes and urgent work. Pick a quiz or test in Focus sprint, then start a timer. Finished focus time is logged automatically and keeps your streak alive.' },
-                { route: 'flashcard', sel: '#create-deck-btn', title: 'Make a study set in seconds', text: 'Select New study set, name it and link it to a class or test. In the editor, Quick add lets you type a term, press Tab, type the definition and press Enter, over and over. Paste a whole list with bulk import, or star the tricky cards.' },
-                { route: 'flashcard', sel: '#deck-grid .deck-card, #deck-grid', title: 'Study, cram or drill stars', text: 'Flashcards are practice, not assignments: study any set whenever you want. Study prioritizes cards that need practice: press Space to flip, 1\u20134 to rate, S to star and T to type your answer. Cram goes through every card without changing learning progress, and the pencil opens the editor. The \u22ee menu on each set adds a card, drills starred cards, links a class or test, shares or deletes it.' },
+                { title: 'A calmer way to study', text: 'Bring in your classes, choose one next task, then practice what needs attention. This tour explains the new layout and the difference between grades, study time and recall. Jump to any topic below, or finish later and replay from Settings.' },
+                { route: 'dashboard', sel: '#main-nav', title: 'Everything has a place', text: 'Home is your daily launchpad. School holds grades, Plan holds tasks, Study holds sets, and Play holds games. On a phone these live in the bottom dock; your profile and Settings are at the top. Extra class or staff tools appear in the menu when available. Swipe tabs for related tools.' },
+                { route: 'gpa', sel: '#gpa-view .open-ic-import-btn', title: 'Import from Infinite Campus', text: 'Import copies your classes, grades, assignments and schedule into StudBud. It never changes Campus or asks for its password. On a phone, the easiest option is to import on a computer and sync to the same account. Phone-only website instructions and copied helper data are separate options in the import dialog. Review before saving; re-import when grades change.' },
+                { route: 'gpa', sel: '#class-card-grid .class-card, #class-card-grid', title: 'Grade bars with a real goal', text: 'The filled bar is your current class grade. The vertical line is your grade target; the message shows the percentage-point gap or Goal reached. Extra credit can extend the scale past 100%. Open class for assignments, or use Edit goal. These bars are not study completion.' },
+                { route: 'gpa', sel: '#open-target-gpa-btn', title: 'Your GPA goal calculates itself', text: 'GPA from grade targets uses your class goals, credits and course weighting. A class without a target uses its current grade. Set prior GPA and credits in Settings if needed. Use Full grade breakdown below your classes for categories and scores; What-if grades stays separate from real grades.' },
+                { route: 'planner', sel: '.planner-overview', title: 'Start with one next step', text: 'Plan suggests one task and upcoming test preparation. Below, filter your work by class or status. On a phone, each assignment becomes a readable card. Calendar shows due dates; Class schedule controls the classes shown on Home.' },
+                { route: 'planner', sel: '.planner-work', title: 'Time progress is not task completion', text: 'Work on this selects an assignment and opens Home. Choose Edit, then Time estimate & progress to revise minutes left. The percentage compares logged time with the estimate; 100% never marks the task done. Mark it done yourself, then add its score in Grade inbox. Log offline study records work done elsewhere.' },
+                { route: 'dashboard', sel: '.focus-sprint-widget', title: 'No Start button needed', text: 'Flashcards and eligible questions track automatically. For assignments, choose the task here and stay on Home, Plan or its class page. The clock pauses when hidden, unfocused, in a dialog, or after 60 seconds without interaction. Reading quietly may pause it too; log offline or external work manually.' },
+                { route: 'dashboard', sel: '#automatic-study-indicator', title: 'Know when time is counting', text: 'The clock shows elapsed time and whether you are studying or paused. Games count only unlocked question-answering time, not movement, loading or results. Stop working on task ends assignment tracking; it does not delete time you already earned.' },
+                { route: 'study-manage', sel: '#create-deck-btn', title: 'Keep creating separate from practicing', text: 'Manage sets is where you create, edit, organize and share materials. Select New study set, name it and link it to a class or test. Quick add lets you type a term, press Tab, type the definition and press Enter. Import cards accepts a pasted list.' },
+                { route: 'flashcard', sel: '.my-deck-heading', title: 'Your sets come first', text: 'Search by set or class, sort by recent practice or weakest first, and pin favorites. Reorder lets you move sets with buttons or drag them. Import cards is at the top; Discover community sets is below your own library. Sets are practice, never overdue assignments.' },
+                { route: 'flashcard', sel: '#deck-grid .deck-ring, #deck-grid', title: 'Practice what needs attention', text: 'Focus practice starts a session of active terms needing more recall, respecting scheduled rest. Tap a percentage to inspect the focus list. Recall uses up to four recent answers per card; written recall counts twice as much as choices. Question selection reacts to your new answers immediately, not just lifetime accuracy.' },
+                { route: 'study-discover', sel: '.community-deck-browser', title: 'Discover materials without clutter', text: 'Community sets have their own page. Search, preview and add sets here, then return to Practice to study them. Your own materials stay private until you choose to share them in Manage sets.' },
+                { route: 'flashcard', sel: '#deck-grid .deck-card, #deck-grid', title: 'Practice your way', text: 'Study prioritizes cards needing practice. Space flips, 1-4 rates, S stars and T enables typing. Cram all cards lives in the three-dot menu: it keeps the spaced-repetition schedule unchanged, but answers still inform recall. The pencil edits cards. The menu also has starred practice, class/test links, sharing and deletion.' },
                 { route: 'exam-arcade', sel: '#workspace-tabs', title: 'Practice games', text: 'Practice turns your sets into quick games: Streak Builder, Lightning Round, Survival, True or False and Memory Match. Answer with the 1\u20134 keys (T or F in True or False), build combos for bonus points and earn up to three stars. Practice Test mixes typing, choices and matching.' },
                 { route: 'multiplayer', sel: '#workspace-tabs', title: 'Play, connect and customize', text: 'Games hosts or joins a room with friends, or plays solo for coins. Buds shows who is online or in a game, with a Join button when a bud is hosting. Leaderboards compares progress, and the Shop has boxes you can open with coins to collect characters, hats and auras for your Locker.' },
+                { route: 'dashboard', sel: '.study-history-disclosure', title: 'Review without the clutter', text: 'Home keeps the next task and automatic clock up front, with schedule and GPA below. Expand Study history & weekly plan to review saved sessions, time by class and suggested practice. Completed work waiting for a score appears below; streaks and daily goals live in Play > Leaderboards.' },
                 { route: 'dashboard', sel: '#classes-nav-item:not(.hidden)', title: 'Classes for students and teachers', text: 'At a Parkway school there is nothing to join: when your teacher is on StudBud, their class and flashcard sets show up automatically for every course in your list. Teachers pick the courses they teach, then see each student\u2019s grades, missing work and study time, and publish flashcard sets the whole class can study.' },
-                { route: 'profile', sel: '#public-profile-card:not(.hidden), #guest-appearance:not(.hidden)', title: 'Keep private data private', text: 'Your real name stays inside the app. Public profiles show your username; your real name and school appear only if you choose to share them. Settings \u2192 Data lets you export your saved data.' },
+                { route: 'profile', sel: '#public-profile-card:not(.hidden), #guest-appearance:not(.hidden)', title: 'Keep private data private', text: 'Course discovery is off by default. Enable it in Public profile to find usernames of other opted-in students sharing a saved course at your school. Open a class in School and choose Find classmates. This is not an official roster and never shares grades, assignments or study history. Real-name and school-tag sharing have separate controls. Export your saved data from Settings.' },
                 { route: 'appearance', sel: '#ui-theme-select', title: 'Make it yours, keep it fast', text: 'Pick a color scheme and theme in Appearance. Games keep their full visuals and skip off-screen drawing to stay smooth. Open StudBud once online and it keeps working offline.' },
                 { route: 'dashboard', title: 'Your first three steps', text: 'Import classes from Infinite Campus, add an upcoming quiz or assignment, then create a study set for it. Come back to Home each day to see what to work on next. Good luck!' }
             ];
@@ -8227,8 +8444,9 @@
             this.tutorialStep = 0;
             const root = document.createElement('div');
             root.id = 'tutorial-root';
-            root.innerHTML = `<div class="tutorial-spot" hidden></div><div class="tutorial-card" role="dialog" aria-modal="true" aria-labelledby="tutorial-title" aria-describedby="tutorial-description"><div class="tutorial-brand"><span class="tutorial-brand-icon"><i class="fas fa-compass" aria-hidden="true"></i></span><span class="tutorial-brand-copy"><strong>STUDBUD GUIDE</strong><small>A quick tour of your study hub</small></span></div><div class="tutorial-progress"><span class="tutorial-progress-bar"></span></div><div class="tutorial-head"><small class="tutorial-count"></small><label class="tutorial-jump"><span class="sr-only">Jump to a topic</span><select aria-label="Jump to a topic">${this.tutorialSteps().map((step, index) => `<option value="${index}">${index + 1}. ${this.escapeHTML(step.title)}</option>`).join('')}</select></label></div><h3 id="tutorial-title"></h3><p id="tutorial-description" class="tutorial-text"></p><div class="tutorial-buttons"><button type="button" class="text-btn" data-tour="skip">Finish later</button><span class="tutorial-spacer"></span><button type="button" class="secondary-btn" data-tour="back">Back</button><button type="button" class="primary-btn" data-tour="next">Next</button></div></div>`;
+            root.innerHTML = `<div class="tutorial-spot" hidden></div><div class="tutorial-card" role="dialog" aria-modal="true" aria-labelledby="tutorial-title" aria-describedby="tutorial-description"><div class="tutorial-brand"><span class="tutorial-brand-icon"><i class="fas fa-compass" aria-hidden="true"></i></span><span class="tutorial-brand-copy"><strong>STUDBUD GUIDE</strong><small>A quick tour of your study hub</small></span><button type="button" class="icon-btn tutorial-close" data-tour="skip" aria-label="Close tutorial"><i class="fas fa-times" aria-hidden="true"></i></button></div><div class="tutorial-progress" role="progressbar" aria-label="Tour progress" aria-valuemin="0" aria-valuemax="${this.tutorialSteps().length}"><span class="tutorial-progress-bar"></span></div><div class="tutorial-head"><small class="tutorial-count"></small><label class="tutorial-jump"><span class="sr-only">Jump to a topic</span><select aria-label="Jump to a topic">${this.tutorialSteps().map((step, index) => `<option value="${index}">${index + 1}. ${this.escapeHTML(step.title)}</option>`).join('')}</select></label></div><div class="tutorial-copy" aria-live="polite" aria-atomic="true"><h3 id="tutorial-title"></h3><p id="tutorial-description" class="tutorial-text"></p></div><div class="tutorial-buttons"><button type="button" class="text-btn" data-tour="skip">Finish later</button><span class="tutorial-spacer"></span><button type="button" class="secondary-btn" data-tour="back">Back</button><button type="button" class="primary-btn" data-tour="next">Next</button></div></div>`;
             document.body.appendChild(root);
+            this.refreshAutomaticStudy();
             root.querySelector('select').addEventListener('change', event => this.showTutorialStep(Number(event.target.value)));
             root.addEventListener('click', event => {
                 const button = event.target.closest('[data-tour]');
@@ -8267,6 +8485,11 @@
             window.addEventListener('resize', this.tutorialResize);
             window.addEventListener('scroll', this.tutorialResize, { capture: true, passive: true });
             document.body.classList.add('tutorial-active');
+            this.tutorialBackground = document.getElementById('app-container');
+            if (this.tutorialBackground) {
+                this.tutorialBackgroundWasInert = this.tutorialBackground.inert;
+                this.tutorialBackground.inert = true;
+            }
             this.showTutorialStep(0);
         }
 
@@ -8279,12 +8502,22 @@
             if (step.route) Router.navigate(step.route);
             root.querySelector('.tutorial-count').textContent = `Step ${this.tutorialStep + 1} of ${steps.length}`;
             root.querySelector('.tutorial-progress-bar').style.width = `${((this.tutorialStep + 1) / steps.length) * 100}%`;
+            root.querySelector('.tutorial-progress').setAttribute('aria-valuenow', String(this.tutorialStep + 1));
             root.querySelector('#tutorial-title').textContent = step.title;
             root.querySelector('.tutorial-text').textContent = step.text;
             root.querySelector('select').value = String(this.tutorialStep);
             root.querySelector('[data-tour="back"]').hidden = this.tutorialStep === 0;
             root.querySelector('[data-tour="next"]').textContent = this.tutorialStep === steps.length - 1 ? 'Finish' : 'Next';
-            root.querySelector('[data-tour="skip"]').hidden = this.tutorialStep === steps.length - 1;
+            root.querySelector('.tutorial-buttons [data-tour="skip"]').hidden = this.tutorialStep === steps.length - 1;
+            const copy = root.querySelector('.tutorial-copy');
+            this.tutorialCopyAnimation?.cancel();
+            if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                this.tutorialCopyAnimation = copy.animate?.([
+                    { opacity: 0, transform: 'translateY(8px)' },
+                    { opacity: 1, transform: 'translateY(0)' }
+                ], { duration: 240, easing: 'cubic-bezier(.2,.8,.2,1)' });
+            }
+            root.querySelector('.tutorial-card').scrollTop = 0;
             this.tutorialSel = step.sel || '';
             root.querySelector('.tutorial-spot').hidden = true;
             this.tutorialPreparing = true;
@@ -8423,6 +8656,10 @@
         }
 
         endTutorialUI() {
+            this.tutorialCopyAnimation?.cancel();
+            this.tutorialCopyAnimation = null;
+            if (this.tutorialBackground) this.tutorialBackground.inert = this.tutorialBackgroundWasInert;
+            this.tutorialBackground = null;
             document.getElementById('tutorial-root')?.remove();
             cancelAnimationFrame(this.tutorialFrame);
             this.tutorialFrame = null;
@@ -8448,17 +8685,18 @@
                 ? this.tutorialReturnFocus : document.querySelector('#workspace-tabs [aria-current="page"], #sidebar .nav-item.active');
             focusTarget?.focus({ preventScroll: true });
             this.tutorialReturnFocus = null;
+            this.refreshAutomaticStudy();
         }
 
         finishTutorial() {
             this.endTutorialUI();
-            AppState.set('settings', { ...AppState.get('settings'), tutorialSeen: true });
+            AppState.set('settings', { ...AppState.get('settings'), tutorialSeen: true, tutorialVersion: 2 });
             this.syncTutorialUI();
         }
 
         renderDashboard() {
             this.loadSiteNotice();
-            this.renderHomeWidget();
+            this.renderHomeGradeInbox();
             const courses = AppState.get('courses') || [];
             const calculator = window.GPACalculator;
             if (calculator) {
@@ -8486,7 +8724,7 @@
                         `<button class="secondary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}"><i class="fas fa-layer-group"></i> ${this.escapeHTML(deck.title)}</button>`).join('');
                     const studied = item.minutesStudied ? `<small class="study-time-logged"><i class="fas fa-clock"></i> ${item.minutesStudied} min studied${item.flashcardMinutes ? ` (${item.flashcardMinutes} with flashcards)` : ''}</small>` : '';
                     const manage = `<button type="button" class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit quiz / test</button>${this.assignmentStatusControl(item)}`;
-                    return `<article class="study-priority-item"><span class="priority-rank">${index + 1}</span><div><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(item.courseTitle)} · ${this.escapeHTML(item.kind || 'assignment')} · ${item.sessionMinutes} min today (about ${item.remainingStudyMinutes} min remaining)</span>${studied}<small>${this.escapeHTML(item.reason)}</small><p><strong>Study method:</strong> ${this.escapeHTML(item.studyMethod)}</p><div class="study-priority-actions"><button class="secondary-btn" data-action="log-study" data-id="${this.escapeHTML(item.id)}"><i class="fas fa-stopwatch"></i> Log study session</button>${this.assessmentStudyButton(item)}${decks}${manage}</div></div></article>`;
+                    return `<article class="study-priority-item"><span class="priority-rank">${index + 1}</span><div><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(item.courseTitle)} · ${this.escapeHTML(item.kind || 'assignment')} · ${item.sessionMinutes} min today (about ${item.remainingStudyMinutes} min remaining)</span><div class="assignment-time-progress"><span>${item.completionPct}% of estimated study time</span><progress max="100" value="${item.completionPct}" aria-label="Estimated study time completion">${item.completionPct}%</progress></div>${studied}<small>${this.escapeHTML(item.reason)}</small><p><strong>Study method:</strong> ${this.escapeHTML(item.studyMethod)}</p><div class="study-priority-actions"><button type="button" class="secondary-btn" data-action="work-on-assignment" data-id="${this.escapeHTML(item.id)}">Work on this</button><button class="secondary-btn" data-action="log-study" data-id="${this.escapeHTML(item.id)}"><i class="fas fa-stopwatch"></i> Log offline study</button>${this.assessmentStudyButton(item)}${decks}${manage}</div></div></article>`;
                 });
                 priorityList.innerHTML = recommendations.length ? (id === 'planner-study-list' && cards.length > 2
                     ? `${cards.slice(0, 2).join('')}<details class="planner-more-study"><summary>More study suggestions (${cards.length - 2})</summary>${cards.slice(2).join('')}</details>`
@@ -8590,17 +8828,6 @@
             }).join('')}</ol>`;
         }
 
-        homeWidgetPrefs() {
-            const defaults = { streak: true, week: true, goal: true, assignments: true, assignmentCount: 3, grades: true, badge: true };
-            return { ...defaults, ...(AppState.get('settings')?.homeWidget || {}) };
-        }
-
-        saveHomeWidgetPrefs(patch) {
-            const settings = AppState.get('settings') || {};
-            AppState.set('settings', { ...settings, homeWidget: { ...this.homeWidgetPrefs(), ...patch } });
-            this.renderHomeWidget();
-        }
-
         dueLabel(dateKey) {
             if (!dateKey) return { text: 'No due date', tone: '' };
             const today = new Date(`${localDateKey(new Date())}T00:00:00`);
@@ -8614,91 +8841,18 @@
             return { text: `Due ${due.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`, tone: '' };
         }
 
-        homeWidgetData(st = this.studyStreakState(), prefs = this.homeWidgetPrefs()) {
-            const courses = AppState.get('courses') || [];
-            const courseTitle = code => courses.find(course => course.code === code)?.title || code || '';
-            const open = (AppState.get('assignments') || [])
-                .filter(item => this.isOpenAssignment(item))
-                .sort((a, b) => (a.dueDate || '9999-12-31').localeCompare(b.dueDate || '9999-12-31'));
-            const assignments = open.slice(0, Math.max(1, Number(prefs.assignmentCount) || 3)).map(item => {
-                const due = this.dueLabel(item.dueDate);
-                return { ...item, title: item.title || 'Untitled', course: courseTitle(item.courseCode), due: due.text, tone: due.tone };
-            });
-            const grades = courses.map(course => {
-                const grade = this.calculateCourseGrade(course);
-                return Number.isFinite(grade) ? { code: course.code, title: course.title || course.code, percent: Math.round(grade * 10) / 10, letter: this.gradeForPercentage(grade, course) } : null;
-            }).filter(Boolean);
-            const gpa = grades.length ? this.calculateTrackedGPA(courses) : null;
-            const status = this.streakStatusText(st);
-            const weekText = st.week.map(day => day.seconds >= st.goal ? '🔥' : day.seconds > 0 ? '◐' : '○').join(' ');
-            return {
-                prefs, st, assignments, openCount: open.length, grades, gpa,
-                awaiting: (AppState.get('assignments') || []).filter(item => this.assignmentState(item) === 'awaiting'),
-                card: {
-                    showStreak: Boolean(prefs.streak), showWeek: Boolean(prefs.week), showGoal: Boolean(prefs.goal),
-                    showAssignments: Boolean(prefs.assignments), showGrades: Boolean(prefs.grades && grades.length),
-                    streak: st.streak, streakLabel: `${st.streak} day streak · best ${st.best}`, status, weekText,
-                    goalText: `${Math.floor(st.today / 60)} of ${Math.round(st.goal / 60)} min studied today`,
-                    assignments: assignments.map(item => ({ title: item.title, due: item.due })),
-                    gpaText: gpa ? `GPA ${Number(gpa.weighted).toFixed(2)} weighted · ${Number(gpa.unweighted).toFixed(2)} unweighted` : 'No grades yet',
-                    grades: grades.slice(0, 4).map(item => ({ title: item.title, grade: `${item.letter} (${item.percent}%)` })),
-                    updated: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-                }
-            };
-        }
-
-        renderHomeWidget(st = this.studyStreakState()) {
-            const prefs = this.homeWidgetPrefs();
-            document.querySelectorAll('[data-home-widget-pref]').forEach(input => {
-                const value = prefs[input.dataset.homeWidgetPref];
-                if (input.type === 'checkbox') input.checked = Boolean(value);
-                else input.value = String(value);
-            });
-            const data = this.homeWidgetData(st, prefs);
-            this.updateAppBadge(prefs.badge && st.loaded ? st.streak : 0);
-            const body = document.getElementById('home-widget-body');
-            if (!body) return;
-            const esc = value => this.escapeHTML(String(value ?? ''));
-            const habit = [];
-            if (prefs.streak) habit.push(this.streakHeroMarkup(st));
-            if (prefs.week) habit.push(this.streakWeekMarkup(st));
-            if (prefs.goal) {
-                habit.push(`<div class="home-widget-goal"><div class="daily-study-stats"><strong>${this.formatStudyDuration(st.today)}</strong><span>of ${Math.round(st.goal / 60)} min today</span></div>
-                    <progress class="daily-study-progress" max="${st.goal}" value="${Math.min(st.today, st.goal)}" aria-label="${Math.floor(st.today / 60)} of ${Math.round(st.goal / 60)} study minutes completed today"></progress></div>`);
-            }
-            const sections = [];
-            if (habit.length) sections.push(`<div class="home-widget-section home-widget-habit">${habit.join('')}</div>`);
-            if (prefs.assignments) {
-                sections.push(`<div class="home-widget-section">
-                    <div class="home-widget-section-head"><h4><i class="fas fa-list-check" aria-hidden="true"></i> Work on next</h4><button type="button" class="link-btn" data-target="planner-view">${data.openCount > data.assignments.length ? `All ${data.openCount}` : 'Planner'}</button></div>
-                    ${data.assignments.length ? this.assignmentUpdateList(data.assignments)
-                        : '<p class="home-widget-empty"><i class="fas fa-circle-check" aria-hidden="true"></i> Nothing to work on. Nice!</p>'}
-                    ${data.awaiting.length ? `<details open class="home-awaiting-grades"><summary>Ready to add grades (${data.awaiting.length})</summary>${this.assignmentUpdateList(data.awaiting)}</details>` : ''}
-                </div>`);
-            }
-            if (prefs.grades) {
-                sections.push(`<div class="home-widget-section">
-                    <div class="home-widget-section-head"><h4><i class="fas fa-graduation-cap" aria-hidden="true"></i> Grades</h4><button type="button" class="link-btn" data-target="gpa-view">Classes</button></div>
-                    ${data.grades.length ? `<div class="home-widget-gpa"><div><b>${Number(data.gpa.weighted).toFixed(2)}</b><small>Weighted GPA</small></div><div><b>${Number(data.gpa.unweighted).toFixed(2)}</b><small>Unweighted</small></div></div>
-                        <ul class="home-widget-list home-widget-grades">${data.grades.slice(0, 5).map(item => `<li><a href="#/class/${encodeURIComponent(item.code)}">${esc(item.title)}</a><span class="home-widget-grade grade-${esc(item.letter.charAt(0).toLowerCase())}">${esc(item.letter)} · ${item.percent}%</span></li>`).join('')}</ul>`
-                        : '<p class="home-widget-empty">Add graded work to a class to see your grades here.</p>'}
-                </div>`);
-            }
-            body.innerHTML = sections.length
-                ? `<div class="home-widget-grid">${sections.join('')}</div>`
-                : '<p class="home-widget-empty">Everything is hidden. Tap Customize to choose what this widget shows.</p>';
-        }
-
-        updateAppBadge(count) {
-            if (!('setAppBadge' in navigator)) return;
-            const request = count > 0 ? navigator.setAppBadge(count) : navigator.clearAppBadge();
-            Promise.resolve(request).catch(() => { });
+        renderHomeGradeInbox() {
+            const inbox = document.getElementById('home-grade-inbox');
+            if (!inbox) return;
+            const awaiting = (AppState.get('assignments') || []).filter(item => this.assignmentState(item) === 'awaiting');
+            inbox.innerHTML = awaiting.length
+                ? `<details class="glass-card workspace-disclosure"><summary>Ready to add grades (${awaiting.length})<span>Finished work waiting for a score</span></summary>${this.assignmentUpdateList(awaiting)}</details>`
+                : '';
         }
 
         renderDailyStudyHabit() {
             const st = this.studyStreakState();
             const { today: seconds, goal } = st;
-            const note = document.getElementById('daily-study-note');
             const boardTime = document.getElementById('leaderboard-today-time');
             const boardProgress = document.getElementById('leaderboard-study-progress');
             const boardNote = document.getElementById('leaderboard-goal-note');
@@ -8713,7 +8867,6 @@
             const goalNote = seconds >= goal
                 ? 'Daily goal complete. Come back tomorrow to keep your streak growing.'
                 : `${Math.ceil((goal - seconds) / 60)} more minute${Math.ceil((goal - seconds) / 60) === 1 ? '' : 's'} to reach today’s ${Math.round(goal / 60)}-minute goal.`;
-            if (note) note.textContent = this.studyLeaderboardError || goalNote;
             if (boardNote) boardNote.textContent = this.studyLeaderboardError || goalNote;
             if (hero) hero.innerHTML = this.streakHeroMarkup(st) + this.streakWeekMarkup(st);
             if (stats) {
@@ -8725,7 +8878,6 @@
                 ];
                 stats.innerHTML = items.map(([icon, label, value]) => `<div class="streak-stat"><i class="fas ${icon}" aria-hidden="true"></i><b>${this.escapeHTML(value)}</b><small>${label}</small></div>`).join('');
             }
-            this.renderHomeWidget(st);
         }
 
         renderStudyLeaderboard() {
@@ -8822,12 +8974,17 @@
 
         async syncStudyTimeEntry(session, refreshBoard = true) {
             if (!session?.leaderboardSyncPending || !window.StudBudCloud?.user) return;
+            if (Number(session.durationSec) <= 0) return;
             const seconds = Math.min(21600, Math.max(1, Math.round(Number(session.durationSec) || 0)));
             try {
-                await window.StudBudCommunityGames.recordStudyTime(session.id, seconds, session.timestamp);
+                const result = await window.StudBudCommunityGames.recordStudyTime(session.id, seconds, session.timestamp);
+                if (session.autoTracked && !(Number(result?.seconds) >= seconds)) {
+                    throw new Error('Automatic study-time syncing needs the updated studbud_record_study_time function from supabase-setup.sql. Your time remains saved on this device.');
+                }
                 const current = AppState.state.studyHistory.find(item => item.id === session.id);
                 if (!current) throw new Error('This study session was removed before its time finished syncing.');
-                const synced = { ...current, leaderboardSyncPending: false, leaderboardSyncedAt: new Date().toISOString() };
+                const synced = { ...current, leaderboardSyncPending: Number(current.durationSec) > seconds, leaderboardSyncedAt: new Date().toISOString(),
+                    leaderboardSyncedSeconds: Math.max(Number(current.leaderboardSyncedSeconds) || 0, seconds) };
                 await NexusDB.put('studyHistory', synced);
                 const index = AppState.state.studyHistory.findIndex(item => item.id === session.id);
                 if (index >= 0) AppState.state.studyHistory[index] = synced;
@@ -8851,95 +9008,22 @@
         renderFocusSprint() {
             const select = document.getElementById('focus-assignment');
             if (!select) return;
-            const recommendations = this.getStudyRecommendations().slice(0, 12);
-            const currentId = this.dashboardSprintAssignmentId || select.value;
-            select.innerHTML = '<option value="">Choose a quiz or test</option>' + recommendations.map(item =>
-                `<option value="${this.escapeHTML(item.id)}">${this.escapeHTML(item.title)} · ${this.escapeHTML(item.courseTitle)}</option>`
+            const tasks = (AppState.get('assignments') || []).filter(item => this.isOpenAssignment(item));
+            const currentId = this.dashboardSprintAssignmentId || '';
+            select.innerHTML = '<option value="">No assignment selected</option>' + tasks.map(item =>
+                `<option value="${this.escapeHTML(item.id)}">${this.escapeHTML(item.title)}</option>`
             ).join('');
-            if (recommendations.some(item => item.id === currentId)) {
-                select.value = currentId;
-            } else {
-                select.value = recommendations[0]?.id || '';
-            }
+            select.value = tasks.some(item => item.id === currentId) ? currentId : '';
             this.dashboardSprintAssignmentId = select.value;
-            select.disabled = Boolean(this.dashboardSprintInterval);
-            document.getElementById('focus-duration').disabled = Boolean(this.dashboardSprintInterval);
-            const startButton = document.getElementById('focus-sprint-start-btn');
-            startButton.innerHTML = this.dashboardSprintInterval ? '<i class="fas fa-pause"></i> Pause' : '<i class="fas fa-play"></i> Start';
-            startButton.disabled = !select.value;
-            this.updateFocusSprintDisplay();
-            const status = document.getElementById('focus-sprint-status');
-            if (!recommendations.length) status.innerHTML = 'Add an upcoming quiz or test to start a focused study session. <button class="text-btn" type="button" data-action="add-quiz">Add one now</button>';
-            else if (!this.dashboardSprintInterval && status.querySelector('[data-action="add-quiz"]')) status.textContent = 'Pick a task, then press Start.';
-        }
-
-        updateFocusSprintDisplay() {
-            const duration = Number(document.getElementById('focus-duration')?.value || 25);
-            const seconds = this.dashboardSprintSeconds ?? duration * 60;
-            const clock = document.getElementById('focus-sprint-clock');
-            if (clock) clock.textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
-        }
-
-        toggleFocusSprint() {
-            const status = document.getElementById('focus-sprint-status');
-            if (this.dashboardSprintInterval) {
-                clearInterval(this.dashboardSprintInterval);
-                this.dashboardSprintInterval = null;
-                document.getElementById('focus-assignment').disabled = false;
-                document.getElementById('focus-duration').disabled = false;
-                document.getElementById('focus-sprint-start-btn').innerHTML = '<i class="fas fa-play"></i> Resume';
-                status.textContent = 'Paused. Resume when you are ready.';
-                return;
-            }
-            const assignmentId = document.getElementById('focus-assignment').value;
-            const assignment = (AppState.get('assignments') || []).find(item => item.id === assignmentId && item.status !== 'completed');
-            if (!assignment) throw new Error('Choose an incomplete assignment before starting a focus sprint.');
-            this.dashboardSprintAssignmentId = assignmentId;
-            if (this.dashboardSprintSeconds === null) {
-                this.dashboardSprintSeconds = Number(document.getElementById('focus-duration').value || 25) * 60;
-            }
-            if (this.dashboardSprintSeconds <= 0) {
-                this.dashboardSprintSeconds = Number(document.getElementById('focus-duration').value || 25) * 60;
-            }
-            status.textContent = `Focused time for “${assignment.title}”. Silence notifications and work on one small step.`;
-            document.getElementById('focus-assignment').disabled = true;
-            document.getElementById('focus-duration').disabled = true;
-            document.getElementById('focus-sprint-start-btn').innerHTML = '<i class="fas fa-pause"></i> Pause';
-            this.dashboardSprintInterval = setInterval(() => {
-                this.dashboardSprintSeconds = Math.max(0, this.dashboardSprintSeconds - 1);
-                this.updateFocusSprintDisplay();
-                if (this.dashboardSprintSeconds === 0) this.completeFocusSprint();
-            }, 1000);
-        }
-
-        completeFocusSprint() {
-            if (this.dashboardSprintInterval) clearInterval(this.dashboardSprintInterval);
-            this.dashboardSprintInterval = null;
-            document.getElementById('focus-assignment').disabled = false;
-            document.getElementById('focus-duration').disabled = false;
-            document.getElementById('focus-sprint-start-btn').innerHTML = '<i class="fas fa-play"></i> Start';
-            const assignmentId = this.dashboardSprintAssignmentId;
-            const status = document.getElementById('focus-sprint-status');
-            status.textContent = 'Sprint complete. Log your session to update your study plan.';
-            try {
-                this.openStudyLog(assignmentId);
-                document.getElementById('study-log-minutes').value = String(Math.max(1, Math.round(Number(document.getElementById('focus-duration').value || 25))));
-                document.getElementById('study-log-notes').value = 'Completed a focused study sprint.';
-            } catch (error) {
-                console.error('[NexusApp] Could not open the completed focus session:', error);
-                window.StudBudDialogs.notify(`Focus sprint finished, but the session could not be logged. ${this.friendlyErrorMessage(error)}`);
-            }
+            this.updateAutomaticStudyDisplay();
         }
 
         resetFocusSprint() {
-            if (this.dashboardSprintInterval) clearInterval(this.dashboardSprintInterval);
-            this.dashboardSprintInterval = null;
-            this.dashboardSprintSeconds = null;
-            document.getElementById('focus-assignment').disabled = false;
-            document.getElementById('focus-duration').disabled = false;
-            document.getElementById('focus-sprint-start-btn').innerHTML = '<i class="fas fa-play"></i> Start';
-            document.getElementById('focus-sprint-status').textContent = 'Timer reset. Choose a task and start when ready.';
-            this.updateFocusSprintDisplay();
+            this.studyTracker?.stop(this.assignmentStudyTimeId);
+            this.dashboardSprintAssignmentId = '';
+            this.assignmentStudyTimeId = null;
+            this.renderFocusSprint();
+            this.refreshAutomaticStudy();
         }
 
         renderTodayStudyPlan() {
@@ -8999,7 +9083,8 @@
                 const cards = deck.cards || [];
                 const reviewed = cards.filter(card => card.lastReviewed || Number(card.reps || card.repetitions) > 0).length;
                 const lapses = cards.reduce((sum, card) => sum + Number(card.lapses || 0), 0);
-                return `<article><strong>${this.escapeHTML(deck.title)}</strong><span>${cards.length} cards · Study anytime</span><small>${reviewed} reviewed · ${lapses} lapses</small></article>`;
+                const mastery = this.deckMastery(deck);
+                return `<article><strong>${this.escapeHTML(deck.title)}</strong><span>${cards.length} cards · ${mastery.pct}% recall estimate</span><small>${reviewed} reviewed · ${lapses} lapses</small><button type="button" class="secondary-btn" data-action="view-focus-cards" data-id="${this.escapeHTML(deck.id)}">Cards needing focus</button></article>`;
             }).join('') : '<p class="empty-state">Create a deck and log some study sessions to see your activity here.</p>';
         }
 
@@ -9072,8 +9157,8 @@
                     <article><span>Scored assignments</span><strong>${scoredCount}</strong></article>
                     <article><span>${selectedCourse ? 'Grade target' : 'GPA goal'}</span><strong>${(() => {
                         if (!selectedCourse) {
-                            const goal = Number((AppState.get('profile') || {}).targetGpa);
-                            return goal > 0 ? goal.toFixed(2) : 'Not set';
+                            const goal = this.calculateTargetGPA();
+                            return Number(goal.totalCredits) > 0 ? Number(goal.weighted).toFixed(2) : 'Not set';
                         }
                         const target = this.effectiveCourseTarget(selectedCourse);
                         return Number.isFinite(target) ? `${target.toFixed(2)}%` : 'Not set';
@@ -9337,10 +9422,6 @@
                 } else if (target.matches('[data-study-leaderboard-scope]')) {
                     this.studyLeaderboardScope = target.dataset.studyLeaderboardScope === 'friends' ? 'friends' : 'global';
                     await this.refreshStudyLeaderboard(this.studyLeaderboardPeriod);
-                } else if (action === 'toggle-home-widget-settings') {
-                    const panel = document.getElementById('home-widget-settings');
-                    const open = panel?.classList.toggle('hidden') === false;
-                    target.setAttribute('aria-expanded', String(open));
                 } else if (action === 'dismiss-site-notice') {
                     await this.dismissSiteNotice();
                 } else if (action === 'copy-hosted-room-code') {
@@ -9393,12 +9474,8 @@
                     this.startWaitingRunner();
                 } else if (action === 'select-course') {
                     this.selectCatalogCourse(target.dataset.id);
-                } else if (id === 'focus-sprint-start-btn') {
-                    this.toggleFocusSprint();
                 } else if (id === 'focus-sprint-reset-btn') {
                     this.resetFocusSprint();
-                } else if (id === 'focus-assignment') {
-                    this.dashboardSprintAssignmentId = target.value;
                 } else if (id === 'sfx-test-btn') {
                     for (const timer of this.sfxPreviewTimers || []) clearTimeout(timer);
                     this.sfxPreviewTimers = ['success', 'jump', 'shoot', 'coin'].map((name, i) => setTimeout(() => window.StudBudSfx.play(name, 'ui', 0), i * 260));
@@ -9507,6 +9584,10 @@
                     this.startTutorial();
                 } else if (action === 'dismiss-tutorial') {
                     this.finishTutorial();
+                } else if (action === 'campus-add-manually') {
+                    this.openCourseForm();
+                } else if (action === 'load-classmates') {
+                    await this.loadClassmates(target);
                 } else if (action === 'log-study') {
                     this.openStudyLog(target.dataset.id);
                 } else if (action === 'publish-community-deck') {
@@ -9533,21 +9614,22 @@
                     this.openAssignmentForm(null, target.dataset.course, '', target.dataset.category || '');
                 } else if (id === 'add-course-btn') {
                     this.openCourseForm();
-                } else if (id === 'create-deck-btn') {
+                } else if (action === 'clear-deck-search') {
+                    const search = document.getElementById('my-deck-search');
+                    search.value = '';
+                    this.renderDecks();
+                    search.focus();
+                } else if (id === 'create-deck-btn' || action === 'create-deck') {
                     this.openDeckEditor();
                 } else if (id === 'open-target-gpa-btn') {
                     this.openModal('target-gpa-modal');
-                    const desired = document.getElementById('desired-gpa');
-                    const goal = Number((AppState.get('profile') || {}).targetGpa);
-                    if (desired && !desired.value && Number.isFinite(goal) && goal > 0) desired.value = String(goal);
+                    this.solveTargetGPA();
                 } else if (id === 'run-gpa-solver-btn') {
                     this.solveTargetGPA();
                 } else if (id === 'drawer-toggle-btn' || id === 'mobile-mixer-toggle-btn' || id === 'close-drawer-btn') {
                     const drawer = document.getElementById('sound-drawer');
                     if (drawer) drawer.classList.toggle('collapsed');
                     this.syncMixerDrawer();
-                } else if (target.matches('.focus-play-btn')) {
-                    this.toggleFocusTimer();
                 } else if (id === 'exit-study-btn') {
                     this.closeStudy();
                 } else if (id === 'back-to-classes-btn') {
@@ -9671,6 +9753,7 @@
         }
 
         handleKeydown(event) {
+            if (document.getElementById('tutorial-root')) return;
             if (document.body.classList.contains('mpg-active')) return;
             if (document.getElementById('arcade-game-content')?.offsetParent) this.handleArcadeKey(event);
             if (event.defaultPrevented) return;
@@ -9681,6 +9764,24 @@
             }
             const modalOverlay = document.getElementById('modal-container');
             const modalActive = modalOverlay && !modalOverlay.classList.contains('hidden');
+            if (!modalActive && this.studyFocusBackground) {
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    this.closeStudy();
+                    return;
+                }
+                if (event.key === 'Tab') {
+                    const area = document.getElementById('active-study-area');
+                    const controls = [...area.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], summary, [tabindex="0"]')]
+                        .filter(element => element.getClientRects().length);
+                    const index = controls.indexOf(document.activeElement);
+                    const next = index < 0 ? event.shiftKey ? controls.length - 1 : 0
+                        : (index + (event.shiftKey ? -1 : 1) + controls.length) % controls.length;
+                    controls[next]?.focus();
+                    event.preventDefault();
+                    return;
+                }
+            }
             if (modalActive) {
                 const modal = modalOverlay.querySelector('.modal-content:not(.hidden)');
                 if (event.key === 'Tab') {
@@ -9940,12 +10041,6 @@
                 this.renderUI();
                 return;
             }
-            const widgetPref = event.target.dataset?.homeWidgetPref;
-            if (widgetPref) {
-                const value = event.target.type === 'checkbox' ? event.target.checked : Number(event.target.value) || 3;
-                this.saveHomeWidgetPrefs({ [widgetPref]: value });
-                return;
-            }
             if (event.target.id === 'import-deck-course' || event.target.id === 'import-deck-assessment') {
                 this.syncDeckLinkSelects(document.getElementById('import-deck-course'), document.getElementById('import-deck-assessment'), event.target.id === 'import-deck-assessment');
                 return;
@@ -9968,14 +10063,12 @@
                 this.setMixerLevel(event.target, true);
                 return;
             }
-            if (event.target.id === 'focus-assignment' && !this.dashboardSprintInterval) {
+            if (event.target.id === 'gpa-solver-mode') this.solveTargetGPA();
+            if (event.target.id === 'focus-assignment') {
+                this.studyTracker?.stop(this.assignmentStudyTimeId);
                 this.dashboardSprintAssignmentId = event.target.value;
-                this.dashboardSprintSeconds = null;
-                this.updateFocusSprintDisplay();
-            }
-            if (event.target.id === 'focus-duration' && !this.dashboardSprintInterval) {
-                this.dashboardSprintSeconds = null;
-                this.updateFocusSprintDisplay();
+                this.assignmentStudyTimeId = null;
+                this.refreshAutomaticStudy();
             }
             if (['analytics-metric-select', 'analytics-course-select', 'analytics-chart-type'].includes(event.target.id)) {
                 this.renderGradeProgress();
@@ -10338,6 +10431,15 @@
             document.getElementById('assignment-max-points').value = assignment ? Number(Number(assignment.maxPoints ?? 100).toFixed(2)) : 100;
             document.getElementById('assignment-kind').value = assignment ? assignment.kind || 'assignment' : (kind || 'assignment');
             document.getElementById('assignment-size').value = assignment ? assignment.estimatedMinutes || 30 : 30;
+            const remaining = document.getElementById('assignment-remaining');
+            if (remaining) {
+                remaining.value = assignment?.remainingEstimateMinutes != null
+                    ? String(Math.ceil(this.assignmentTimeProgress(assignment).remainingMinutes)) : '';
+                remaining.dataset.original = remaining.value;
+            }
+            const timeProgress = document.getElementById('assignment-time-progress');
+            if (timeProgress) timeProgress.textContent = assignment
+                ? `${this.assignmentTimeProgress(assignment).pct}% of estimated time complete. ${Math.ceil(this.assignmentTimeProgress(assignment).remainingMinutes)} minutes left.` : '';
             document.getElementById('assignment-importance').value = assignment ? assignment.importance || 3 : 3;
             const formState = assignment?.icMissing ? (assignment.status === 'completed' ? 'done' : 'todo')
                 : graded ? 'graded' : assignment?.status === 'completed' ? 'done' : 'todo';
@@ -10372,7 +10474,7 @@
             const kind = document.getElementById('assignment-kind').value;
             document.getElementById('assignment-todo-fields').classList.toggle('hidden', graded);
             document.getElementById('assignment-graded-fields').classList.toggle('hidden', !graded);
-            document.getElementById('assignment-study-options').classList.toggle('hidden', graded || kind === 'assignment');
+            document.getElementById('assignment-study-options').classList.toggle('hidden', graded);
             document.getElementById('assignment-due-date').required = !graded;
             document.getElementById('assignment-max-points').required = graded;
             document.getElementById('assignment-points').required = graded;
@@ -10462,6 +10564,15 @@
             const maxPoints = Math.round((Number(document.getElementById('assignment-max-points').value) || 100) * 100) / 100;
             const pointsEarned = keepCampusScore ? current.pointsEarned
                 : graded ? Math.round(Math.max(0, Number(document.getElementById('assignment-points').value) || 0) * 100) / 100 : 0;
+            const remaining = document.getElementById('assignment-remaining');
+            const remainingRaw = remaining?.value.trim() || '';
+            if (remainingRaw && (!Number.isInteger(Number(remainingRaw)) || Number(remainingRaw) < 0 || Number(remainingRaw) > 10080)) {
+                throw new Error('Remaining time must be a whole number from 0 to 10,080 minutes.');
+            }
+            const estimatedMinutes = Number(document.getElementById('assignment-size').value);
+            if (!Number.isFinite(estimatedMinutes) || estimatedMinutes < 5 || estimatedMinutes > 10080) {
+                throw new Error('Estimated time must be from 5 to 10,080 minutes.');
+            }
             const assignment = {
                 id,
                 title: document.getElementById('assignment-name').value.trim(),
@@ -10471,7 +10582,11 @@
                 maxPoints: keepCampusScore ? current.maxPoints : maxPoints,
                 categoryId: document.getElementById('assignment-category').value || null,
                 kind,
-                estimatedMinutes: Number(document.getElementById('assignment-size').value) || 30,
+                estimatedMinutes,
+                ...(remaining && remainingRaw !== (remaining.dataset.original || '') ? {
+                    remainingEstimateMinutes: remainingRaw === '' ? null : Number(remainingRaw),
+                    remainingEstimateStudiedSeconds: remainingRaw === '' ? null : this.assignmentStudySeconds(id)
+                } : {}),
                 importance: Number(document.getElementById('assignment-importance').value) || 3,
                 priority: current ? current.priority : 'high',
                 graded,
@@ -10491,6 +10606,8 @@
             document.getElementById('assignment-id').value = '';
             document.getElementById('assignment-name').value = '';
             document.getElementById('assignment-points').value = 0;
+            const remaining = document.getElementById('assignment-remaining');
+            if (remaining) { remaining.value = ''; remaining.dataset.original = ''; }
             document.getElementById('assignment-modal-title').textContent = `Added "${title}" — add another`;
             document.getElementById('assignment-name').focus();
         }
@@ -10696,7 +10813,18 @@
                 this.openCardForm(id);
             }
             if (action === 'edit-deck') this.openDeckEditor(id);
+            if (action === 'work-on-assignment') {
+                const item = (AppState.get('assignments') || []).find(item => item.id === id && this.isOpenAssignment(item));
+                if (!item) throw new Error('Choose an incomplete assignment to work on.');
+                this.studyTracker?.stop(this.assignmentStudyTimeId);
+                this.dashboardSprintAssignmentId = id;
+                this.assignmentStudyTimeId = null;
+                Router.navigate('dashboard');
+                this.renderFocusSprint();
+                this.refreshAutomaticStudy();
+            }
             if (action === 'view-weak-cards') this.openDeckEditor(id, 'weak');
+            if (action === 'view-focus-cards') this.openDeckEditor(id, 'focus');
             if (action === 'editor-add-card') this.openCardForm(this.deckEditorDraft?.id, '', true);
             if (action === 'editor-edit-card') this.openCardForm(this.deckEditorDraft?.id, id, true);
             if (action === 'editor-bulk-add') this.addBulkEditorCards();
@@ -10729,6 +10857,7 @@
                 }
             }
             if (action === 'study-deck') this.startStudy(id);
+            if (action === 'study-focus') this.startStudy(id, 'focus');
             if (action === 'cram-deck') this.startStudy(id, 'cram');
             if (action === 'cram-starred') this.startStudy(id, 'starred');
             if (action === 'study-missed') this.studyMissedCards();
@@ -10739,14 +10868,17 @@
             const deck = (AppState.get('flashcards') || []).find(item => item.id === deckId);
             if (!deck) throw new Error('The selected deck no longer exists.');
             const active = (deck.cards || []).filter(card => card && !card.suspended);
-            const cards = mode === 'starred' ? (deck.cards || []).filter(card => card && card.starred) : mode === 'cram' ? (deck.cards || []).filter(Boolean) : active;
+            const cards = mode === 'focus' ? active.filter(card => window.FlashcardTools.cardProgress(card).mastery < 1)
+                : mode === 'starred' ? (deck.cards || []).filter(card => card && card.starred) : mode === 'cram' ? (deck.cards || []).filter(Boolean) : active;
             if (!cards.length) {
-                window.StudBudDialogs.notify(mode === 'starred' ? 'Star some cards first (press S while studying, or use the set editor).' : 'This deck has no cards yet.');
+                window.StudBudDialogs.notify(mode === 'focus' ? 'No active cards need more recall practice. Use Study to review the full set, or unpause cards in the editor.'
+                    : mode === 'starred' ? 'Star some cards first (press S while studying, or use the set editor).'
+                    : (deck.cards || []).length ? 'All cards are paused. Unpause cards in the editor, or use Cram.' : 'This deck has no cards yet.');
                 return;
             }
             if (window.SM2Engine?.migrateDeck?.(deck)) AppState.saveFlashcardDeck(deck).catch(error => console.error('[NexusApp] Deck migration could not be saved:', error));
             let session = null;
-            if (mode === 'scheduled') {
+            if (mode === 'scheduled' || mode === 'focus') {
                 if (!window.SM2Engine?.createSession) throw new Error('The spaced-repetition scheduler did not load. Reload before studying.');
                 session = window.SM2Engine.createSession(cards, { deck, includeAll: true, learnAheadAll: false, learnAheadMinutes: 0 });
                 if (!session || !session.remaining) throw new Error('No study cards could be loaded. Check this set in the editor.');
@@ -10756,8 +10888,11 @@
                     return;
                 }
             }
+            if (AppState.get('currentView') !== 'flashcard') Router.navigate('flashcard');
+            this.recordFlashcardTime();
+            this.flashcardStudyTimeId = this.studyTimeKey();
             this.activeDeckId = deckId;
-            this.cramMode = mode !== 'scheduled';
+            this.cramMode = mode !== 'scheduled' && mode !== 'focus';
             this.studyMode = mode;
             this.studySession = session;
             this.studyCards = [];
@@ -10776,11 +10911,44 @@
             document.getElementById('study-summary').classList.add('hidden');
             area.classList.remove('show-summary');
             document.body.classList.add('studying');
+            this.enterStudyFocus();
             const toggle = document.getElementById('study-type-toggle');
             if (toggle) toggle.checked = localStorage.getItem('studbud-type-answer') === '1';
             const direction = document.getElementById('study-direction');
             if (direction) direction.value = this.studyDirection();
             this.renderStudyCard();
+        }
+
+        enterStudyFocus() {
+            if (this.studyFocusBackground) return;
+            const area = document.getElementById('active-study-area');
+            this.studyReturnFocus = document.activeElement;
+            this.studyReturnAction = document.activeElement?.dataset?.action;
+            this.studyReturnScroll = window.scrollY || 0;
+            this.studyFocusBackground = [];
+            for (let node = area; node?.parentElement && node !== document.body; node = node.parentElement) {
+                for (const element of node.parentElement.children) {
+                    if (element === node || element.id === 'modal-container') continue;
+                    this.studyFocusBackground.push({ element, inert: element.inert });
+                    element.inert = true;
+                }
+            }
+            area.focus?.({ preventScroll: true });
+        }
+
+        exitStudyFocus(deckId) {
+            this.studyFocusBackground?.forEach(({ element, inert }) => { element.inert = inert; });
+            this.studyFocusBackground = null;
+            if (Router.activeRoute === 'flashcard') {
+                const buttons = [...document.querySelectorAll('#deck-grid [data-action]')].filter(element => element.dataset.id === deckId);
+                const button = buttons.find(element => element.dataset.action === this.studyReturnAction)
+                    || buttons.find(element => element.dataset.action === 'study-deck');
+                const target = button || (this.studyReturnFocus?.isConnected ? this.studyReturnFocus : null);
+                target?.focus({ preventScroll: true });
+                window.scrollTo?.({ top: this.studyReturnScroll || 0, behavior: 'instant' });
+            }
+            this.studyReturnFocus = null;
+            this.studyReturnAction = null;
         }
 
         studyDirection() {
@@ -10822,7 +10990,7 @@
             this.currentStudyCard = card || null;
             if (!card) return this.showStudySummary();
             const deck = this.studyDeck();
-            document.getElementById('study-deck-title').textContent = `${deck?.title || 'Flashcards'}${this.studyMode === 'starred' ? ' · Starred' : this.cramMode ? ' · Cram' : ''}`;
+            document.getElementById('study-deck-title').textContent = `${deck?.title || 'Flashcards'}${this.studyMode === 'focus' ? ' · Focus practice' : this.studyMode === 'starred' ? ' · Starred' : this.cramMode ? ' · Cram' : ''}`;
             const progress = document.getElementById('study-progress');
             let remaining;
             if (this.studySession) {
@@ -10856,6 +11024,7 @@
             input.value = '';
             input.disabled = false;
             if (typing) input.focus({ preventScroll: true });
+            this.refreshAutomaticStudy();
         }
 
         syncStudyStar(card = this.currentStudyCard) {
@@ -10992,7 +11161,8 @@
             const summary = document.getElementById('study-summary');
             if (!stats || !stats.done || !summary) return this.closeStudy();
             area.classList.add('show-summary');
-            const seconds = Math.max(1, Math.round((Date.now() - (this.activeStudyStartedAt || Date.now())) / 1000));
+            const seconds = this.studyTracker?.seconds(this.flashcardStudyTimeId) || 0;
+            this.studyTracker?.stop(this.flashcardStudyTimeId);
             const good = stats.ratings[3] + stats.ratings[4] + stats.ratings[5];
             const accuracy = Math.round(good / Math.max(1, stats.done) * 100);
             const cheer = accuracy >= 90 ? 'Outstanding!' : accuracy >= 70 ? 'Great session!' : accuracy >= 50 ? 'Nice work, keep going!' : 'Every rep counts!';
@@ -11038,6 +11208,7 @@
             this.studyCards = (deck.cards || []).filter(card => ids.has(card.id)).sort(() => Math.random() - .5);
             this.activeCardIndex = 0;
             this.activeStudyStartedAt = Date.now();
+            this.flashcardStudyTimeId = this.studyTimeKey();
             this.studyStats = { total: this.studyCards.length, done: 0, ratings: { 1: 0, 3: 0, 4: 0, 5: 0 }, combo: 0, bestCombo: 0, typed: 0, typedRight: 0, missed: new Set() };
             const area = document.getElementById('active-study-area');
             area.classList.add('is-cram');
@@ -11047,31 +11218,12 @@
         }
 
         recordFlashcardTime() {
-            const startedAt = this.activeStudyStartedAt;
+            this.studyTracker?.stop(this.flashcardStudyTimeId);
             this.activeStudyStartedAt = null;
-            if (!startedAt) return;
-            const durationSec = Math.min(21600, Math.floor((Date.now() - startedAt) / 1000));
-            if (durationSec <= 0) return;
-            const studiedDeck = this.studyDeck();
-            const link = studiedDeck ? this.deckLinkInfo(studiedDeck) : {};
-            const target = link.assessment && link.assessment.status !== 'completed' ? link.assessment : null;
-            AppState.recordStudySession({
-                id: `flashcards_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-                title: target ? `Flashcards: ${studiedDeck.title} → ${target.title}` : `Flashcards: ${studiedDeck?.title || 'study'}`,
-                assignmentId: target ? target.id : undefined,
-                courseCode: target?.courseCode || link.courseCode || undefined,
-                durationSec,
-                method: 'flashcards',
-                methodLabel: 'Flashcards / spaced review',
-                source: 'flashcards'
-            }).catch(error => {
-                console.error('[NexusApp] Flashcard study time could not be saved:', error);
-                AppState.setSaveStatus(`Flashcard progress is saved, but study time could not be recorded. ${this.friendlyErrorMessage(error)}`, 'error');
-            });
         }
 
         closeStudy() {
-            this.stopFocusTimer();
+            const deckId = this.activeDeckId;
             document.getElementById('active-study-area').classList.add('hidden');
             document.getElementById('study-summary')?.classList.add('hidden');
             document.getElementById('study-combo')?.classList.add('hidden');
@@ -11085,16 +11237,15 @@
             this.cramMode = false;
             this.renderDashboard();
             this.renderDecks();
+            this.exitStudyFocus(deckId);
         }
 
         solveTargetGPA() {
-            const target = Number(document.getElementById('desired-gpa').value);
             const mode = document.getElementById('gpa-solver-mode').value;
-            if (!Number.isFinite(target) || target < 0 || target > 5) {
-                window.StudBudDialogs.notify('Enter a target GPA between 0 and 5.');
-                return;
-            }
             const courses = AppState.get('courses') || [];
+            const goal = this.calculateTargetGPA(courses);
+            const target = Number(goal[mode === 'weighted' ? 'weighted' : 'unweighted']);
+            document.getElementById('desired-gpa').value = Number(goal.totalCredits) > 0 ? target.toFixed(2) : '';
             const output = document.getElementById('solver-output-percentage');
             const results = document.getElementById('solver-results');
             let detail = document.getElementById('solver-course-breakdown');
@@ -11112,31 +11263,22 @@
             }
             const tracked = this.calculateTrackedGPA(courses);
             const current = Number(mode === 'weighted' ? tracked.weighted : tracked.unweighted);
-            const plan = this.gpaTargetPlan(target, mode, courses);
-            const reachable = plan.reachable;
             const rows = courses.map(course => {
-                const needed = plan.byCode.get(course.code);
+                const needed = this.effectiveCourseTarget(course);
                 const grade = this.calculateCourseGrade(course);
                 const gradeText = grade === null ? 'no grades yet' : `now ${grade.toFixed(2)}%`;
-                const status = !needed ? 'no target' : grade === null ? `aim for ${needed.minPct}%+ (${needed.letter})`
-                    : grade >= needed.minPct ? `on track (${needed.letter} needs ${needed.minPct}%+)` : `need ${needed.minPct}%+ (${needed.letter}), ${(needed.minPct - grade).toFixed(2)} pts to go`;
+                const status = !Number.isFinite(needed) ? 'no class target; current grade used when available'
+                    : `target ${needed.toFixed(2)}% (${this.gradeForPercentage(needed, course)})`;
                 return `<li><strong>${this.escapeHTML(course.title || course.code)}</strong><span>${this.escapeHTML(gradeText)} · ${this.escapeHTML(status)}</span></li>`;
             });
             const currentText = Number(tracked.totalCredits) > 0 ? `Current ${mode} GPA ${current.toFixed(2)}` : 'No graded classes yet';
-            output.textContent = reachable ? `${currentText} → target ${target.toFixed(2)}` : `${target.toFixed(2)} is above the best possible ${mode} GPA (${plan.gpa.toFixed(2)}) for these classes`;
+            output.textContent = Number(goal.totalCredits) > 0 ? `${currentText} → target ${target.toFixed(2)}` : 'Set a class grade target to calculate your GPA goal';
             detail.innerHTML = rows.join('');
-            // Keep the profile target in sync so study priorities use it
-            const profile = AppState.get('profile') || {};
-            if (Number(profile.targetGpa) !== target) AppState.set('profile', { ...profile, targetGpa: target });
         }
 
         async saveProfile() {
-            const targetGpa = Number(document.getElementById('settings-target-gpa').value);
             const graduationYear = Number(document.getElementById('settings-grad-year').value);
             const school = document.getElementById('settings-school').value;
-            if (!Number.isFinite(targetGpa) || targetGpa < 0 || targetGpa > 5) {
-                throw new Error('Target GPA must be between 0 and 5.');
-            }
             if (!Number.isInteger(graduationYear) || graduationYear < 2026 || graduationYear > 2030) {
                 throw new Error('Graduation year must be between 2026 and 2030.');
             }
@@ -11165,12 +11307,12 @@
                 firstName: document.getElementById('settings-first-name').value.trim(),
                 lastName: document.getElementById('settings-last-name').value.trim(),
                 graduationYear,
-                targetGpa,
                 priorCredits: priorCredits > 0 ? priorCredits : 0,
                 priorWeightedGpa: priorCredits > 0 ? priorWeightedGpa : null,
                 priorUnweightedGpa: priorCredits > 0 ? priorUnweightedGpa : null,
                 currentTerm: document.getElementById('settings-current-term').value
             };
+            delete profile.targetGpa;
             this.semesterView = null;
             AppState.set('profile', profile);
             const savedSchoolSelect = document.getElementById('settings-school');
@@ -11363,41 +11505,150 @@
             });
         }
 
-        toggleFocusTimer() {
-            if (this.timerInterval) {
-                this.stopFocusTimer();
-                return;
-            }
-            this.timerInterval = setInterval(() => {
-                this.timerSeconds -= 1;
-                this.updateFocusTimerDisplay();
-                if (this.timerSeconds <= 0) {
-                    this.stopFocusTimer(true);
-                    window.StudBudDialogs.notify('Focus session complete.');
+        initAutomaticStudy() {
+            this.studyTracker = new window.ActiveStudyTracker({
+                save: session => AppState.recordStudySession(session),
+                onError: error => {
+                    console.error('[NexusApp] Automatic study time could not be saved:', error);
+                    AppState.setSaveStatus(`Study time could not be saved. Keep this page open to retry. ${this.friendlyErrorMessage(error)}`, 'error');
                 }
-            }, 1000);
-            document.querySelectorAll('.focus-play-btn').forEach(item => {
-                item.innerHTML = '<i class="fas fa-pause"></i>';
-                item.setAttribute('aria-label', 'Pause focus timer');
             });
+            const activity = event => {
+                if (!event.isTrusted) return;
+                this.studyTracker.activity();
+                this.refreshAutomaticStudy();
+            };
+            ['pointerdown', 'pointermove', 'keydown', 'input', 'scroll'].forEach(type =>
+                document.addEventListener(type, activity, { passive: true, capture: true }));
+            const visibility = () => {
+                this.studyTracker.setAvailable(!document.hidden && document.hasFocus());
+                this.refreshAutomaticStudy();
+                this.studyTracker.checkpoint();
+            };
+            document.addEventListener('visibilitychange', visibility);
+            window.addEventListener('blur', () => {
+                this.studyTracker.setAvailable(false);
+                this.studyTracker.checkpoint();
+                this.updateAutomaticStudyDisplay();
+            });
+            window.addEventListener('focus', visibility);
+            window.addEventListener('pagehide', () => {
+                this.studyTracker.setAvailable(false);
+                this.studyTracker.checkpoint();
+            });
+            this.automaticStudyInterval = window.setInterval(() => this.refreshAutomaticStudy(), 1000);
+            visibility();
         }
 
-        updateFocusTimerDisplay() {
-            const time = `${String(Math.floor(this.timerSeconds / 60)).padStart(2, '0')}:${String(this.timerSeconds % 60).padStart(2, '0')}`;
-            document.querySelectorAll('.focus-time-display').forEach(display => display.textContent = time);
-        }
-
-        stopFocusTimer(reset = false) {
-            if (this.timerInterval) {
-                clearInterval(this.timerInterval);
-                this.timerInterval = null;
+        async flushAutomaticStudy() {
+            if (!this.studyTracker) return;
+            this.studyTracker.tick();
+            await this.studyTracker.checkpoint();
+            if ([...this.studyTracker.sessions.values()].some(session =>
+                session.savedSeconds < Math.floor(session.milliseconds / 1000))) {
+                throw new Error('Active study time has not saved yet. Keep this page open and retry before signing out.');
             }
-            if (reset) this.timerSeconds = 25 * 60;
-            this.updateFocusTimerDisplay();
-            document.querySelectorAll('.focus-play-btn').forEach(button => {
-                button.innerHTML = '<i class="fas fa-play"></i>';
-                button.setAttribute('aria-label', 'Start focus timer');
-            });
+        }
+
+        async resetAutomaticStudy() {
+            if (this.studyFocusBackground) {
+                document.getElementById('active-study-area')?.classList.add('hidden');
+                document.body.classList.remove('studying');
+                this.exitStudyFocus();
+            }
+            if (!this.studyTracker) return;
+            await this.studyTracker.stop();
+            this.studyTracker.sessions.clear();
+            this.lastStudyTimeKey = null;
+            this.flashcardStudyTimeId = null;
+            this.arcadeStudyTimeId = null;
+            this.assignmentStudyTimeId = null;
+            this.dashboardSprintAssignmentId = '';
+            this.activeDeckId = null;
+            this.activeStudyStartedAt = null;
+            this.arcadeStudyStartedAt = null;
+            if (this.arcadeSession) this.destroyArcadeSession();
+            if (this.practiceSession) this.closePractice();
+        }
+
+        studyTimeKey() {
+            return `active_${window.crypto.randomUUID()}`;
+        }
+
+        deckStudyTimeContext(deck, source, key, title) {
+            const link = deck ? this.deckLinkInfo(deck) : {};
+            const target = link.assessment && this.isOpenAssignment(link.assessment) ? link.assessment : null;
+            return { key, session: {
+                title, source, method: source === 'flashcards' ? 'flashcards' : 'practice',
+                deckId: deck?.id, assignmentId: target?.id,
+                courseCode: target?.courseCode || link.courseCode || undefined
+            } };
+        }
+
+        automaticStudyContext() {
+            if (document.getElementById('tutorial-root')) return null;
+            if (window.StudBudCloud?.guestLobbyOpen) return null;
+            const auth = document.getElementById('auth-screen');
+            if (auth && !auth.classList.contains('hidden')) return null;
+            if (document.querySelector('#modal-container .modal-content:not(.hidden), dialog.app-confirmation[open]')) return null;
+            const game = this.arcadeSession || this.practiceSession;
+            if (game && !game.destroyed) {
+                if (game.testing || game.over || game.rewards || !game.question || game.question.locked) return null;
+                game.studyTimeId ||= this.studyTimeKey();
+                const info = game.studySet || {};
+                const deck = (AppState.get('flashcards') || []).find(item => item.id === info.deckId
+                    || (info.publicId && [item.communityDeckId, item.communitySourceId].includes(info.publicId)));
+                return this.deckStudyTimeContext(deck, game.practice ? 'solo' : 'multiplayer', game.studyTimeId, `Study game: ${game.game.title}`);
+            }
+            const route = AppState.get('currentView');
+            if (route === 'flashcard' && this.activeDeckId && this.currentStudyCard
+                && !document.getElementById('active-study-area')?.classList.contains('show-summary')) {
+                this.flashcardStudyTimeId ||= this.studyTimeKey();
+                const deck = this.studyDeck();
+                return this.deckStudyTimeContext(deck, 'flashcards', this.flashcardStudyTimeId, `Flashcards: ${deck?.title || 'study'}`);
+            }
+            if (route === 'exam-arcade' && this.arcadeStudyStartedAt && !this.arcadeStudyRecorded) {
+                const content = document.getElementById('arcade-game-content');
+                if (this.arcadeAnswerPending) return null;
+                const answering = content?.querySelector('#practice-test-answer-form:not([data-submitted="true"]), [data-action="arcade-answer"]:not(:disabled), .memory-card:not(:disabled)');
+                if (!answering) return null;
+                this.arcadeStudyTimeId ||= this.studyTimeKey();
+                const decks = new Set((this.arcadeCards || []).map(card => this.arcadeCardDeck?.get(card)).filter(Boolean));
+                const deck = this.arcadeMode === 'test'
+                    ? (AppState.get('flashcards') || []).find(item => item.id === this.practiceTestDeckId)
+                    : decks.size === 1 ? [...decks][0] : null;
+                return this.deckStudyTimeContext(deck, 'arcade', this.arcadeStudyTimeId, `Study game: ${document.getElementById('arcade-game-title')?.textContent || 'Practice'}`);
+            }
+            if (['dashboard', 'planner', 'class'].includes(route) && this.dashboardSprintAssignmentId) {
+                const item = (AppState.get('assignments') || []).find(item => item.id === this.dashboardSprintAssignmentId && this.isOpenAssignment(item));
+                if (item) {
+                    this.assignmentStudyTimeId ||= this.studyTimeKey();
+                    return { key: this.assignmentStudyTimeId, session: {
+                        title: `Assignment: ${item.title}`, source: 'assignment', method: this.getStudyMethodKey(item),
+                        assignmentId: item.id, courseCode: item.courseCode
+                    } };
+                }
+            }
+            return null;
+        }
+
+        refreshAutomaticStudy() {
+            if (!this.studyTracker) return;
+            const context = this.automaticStudyContext();
+            if (context) this.lastStudyTimeKey = context.key;
+            this.studyTracker.setContext(context);
+            this.updateAutomaticStudyDisplay();
+        }
+
+        updateAutomaticStudyDisplay() {
+            if (!this.studyTracker) return;
+            const seconds = this.studyTracker.seconds(this.studyTracker.context?.key || this.lastStudyTimeKey);
+            const time = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+            document.querySelectorAll('.focus-time-display, #focus-sprint-clock').forEach(node => { node.textContent = time; });
+            const state = seconds >= 21600 ? 'Session limit (6 hr)' : this.studyTracker.running ? 'Studying' : this.studyTracker.context ? 'Paused' : 'Not studying';
+            document.querySelectorAll('.auto-study-state').forEach(node => { node.textContent = state; });
+            const status = document.getElementById('focus-sprint-status');
+            if (status) status.textContent = `${state}. Active time saves automatically. Pauses after 60 seconds without interaction or when hidden / unfocused.`;
         }
 
         startArcade(game) {
@@ -11431,6 +11682,7 @@
             }
             this.arcadeStudyStartedAt = Date.now();
             this.arcadeStudyRecorded = false;
+            this.arcadeStudyTimeId = this.studyTimeKey();
             this.arcadeQuestionIndex = 0;
             this.arcadeScore = 0;
             this.arcadeStreak = 0;
@@ -11566,6 +11818,7 @@
             this.arcadeScore = 0;
             this.arcadeStudyStartedAt = Date.now();
             this.arcadeStudyRecorded = false;
+            this.arcadeStudyTimeId = this.studyTimeKey();
             document.getElementById('arcade-game-title').textContent = `${deck.title} · Practice Test`;
             this.renderPracticeTestQuestion();
         }
@@ -11655,6 +11908,7 @@
             submit.textContent = this.practiceTestOptions?.exam ? 'Submit answer' : 'Check answer';
             form.append(submit);
             content.append(progress, question, form);
+            this.refreshAutomaticStudy();
             if (questionType === 'written') document.getElementById('practice-test-written-answer').focus();
         }
 
@@ -11690,6 +11944,7 @@
                 correct = window.FlashcardTools.gradeCard(givenAnswer, card, this.practiceTestOptions?.strict !== false);
             }
             form.dataset.submitted = 'true';
+            this.refreshAutomaticStudy();
             if (!outcomes.length) outcomes = [{ card, correct }];
             outcomes = outcomes.map(outcome => ({ ...outcome, kind: form.dataset.questionType === 'written' || !['matching', 'multiple-choice'].includes(form.dataset.questionType) ? 'recall' : 'recognition' }));
             try {
@@ -11770,6 +12025,7 @@
             this.arcadeScore = 0;
             this.arcadeStudyStartedAt = Date.now();
             this.arcadeStudyRecorded = false;
+            this.arcadeStudyTimeId = this.studyTimeKey();
             this.renderPracticeTestQuestion();
         }
 
@@ -11829,6 +12085,7 @@
                 grid.append(button);
             });
             content.append(progress, grid);
+            this.refreshAutomaticStudy();
         }
 
         pickMemoryCard(index) {
@@ -11933,6 +12190,7 @@
                     `<button type="button" class="arcade-option ${cls}" data-action="arcade-answer" data-index="${index}"><kbd>${key}</kbd><span>${label}</span></button>`).join('')}</div>
                 <div id="arcade-feedback" class="arcade-feedback" aria-live="polite"></div>
             </div>`;
+            this.refreshAutomaticStudy();
         }
 
         shuffleCards(cards) {
@@ -12002,6 +12260,7 @@
                 ? this.arcadeOptions[index] === this.arcadeCurrentIsTrue
                 : this.arcadeOptions[index] === correctCard;
             this.arcadeAnswerPending = true;
+            this.refreshAutomaticStudy();
             try { await this.updateCardSchedule(correctCard, correct); }
             finally { this.arcadeAnswerPending = false; }
             this.arcadeAnswered = (this.arcadeAnswered || 0) + 1;
@@ -12087,22 +12346,8 @@
             if (!this.arcadeStudyStartedAt || this.arcadeStudyRecorded) return;
             this.arcadeStudyRecorded = true;
             this.awardSoloCoins();
-            const durationSec = Math.min(21600, Math.floor((Date.now() - this.arcadeStudyStartedAt) / 1000));
             this.arcadeStudyStartedAt = null;
-            if (!durationSec) return;
-            try {
-                await AppState.recordStudySession({
-                    id: `arcade_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-                    title: `Study game: ${document.getElementById('arcade-game-title')?.textContent || 'Practice'}`,
-                    durationSec,
-                    method: 'practice',
-                    methodLabel: 'Practice problems / timed questions',
-                    source: 'arcade'
-                });
-            } catch (error) {
-                console.error('[NexusApp] Arcade study time could not be saved:', error);
-                AppState.setSaveStatus(`Your game progress is complete, but study time could not be recorded. ${this.friendlyErrorMessage(error)}`, 'error');
-            }
+            if (this.arcadeStudyTimeId) await this.studyTracker?.stop(this.arcadeStudyTimeId);
         }
 
         closeArcade() {
