@@ -3664,20 +3664,26 @@ $$;
 revoke all on function public.studbud_admin_delete_site_notice(bigint) from public, anon;
 grant execute on function public.studbud_admin_delete_site_notice(bigint) to authenticated;
 
--- Content reports: students flag public flashcard sets or profiles for moderator review.
+-- Private reports: shared content, player behavior, bugs and general concerns.
 create table if not exists public.studbud_content_reports (
     id bigint generated always as identity primary key,
     reporter_id uuid not null references auth.users (id) on delete cascade,
-    target_type text not null check (target_type in ('deck', 'profile')),
+    target_type text not null check (target_type in ('deck', 'profile', 'bug', 'other')),
     target_id uuid not null,
     reason text not null check (reason in ('inappropriate', 'wrong', 'spam', 'copyright', 'harassment', 'other')),
-    details text not null default '' check (char_length(details) <= 500),
+    details text not null default '' check (char_length(details) <= 2000),
+    subject text not null default '' check (char_length(subject) <= 120),
     status text not null default 'open' check (status in ('open', 'resolved', 'dismissed')),
     created_at timestamptz not null default now(),
     resolved_by uuid references auth.users (id) on delete set null,
     resolved_at timestamptz,
     unique (reporter_id, target_type, target_id)
 );
+alter table public.studbud_content_reports add column if not exists subject text not null default '' check (char_length(subject) <= 120);
+alter table public.studbud_content_reports drop constraint if exists studbud_content_reports_target_type_check;
+alter table public.studbud_content_reports add constraint studbud_content_reports_target_type_check check (target_type in ('deck', 'profile', 'bug', 'other'));
+alter table public.studbud_content_reports drop constraint if exists studbud_content_reports_details_check;
+alter table public.studbud_content_reports add constraint studbud_content_reports_details_check check (char_length(details) <= 2000);
 create index if not exists studbud_content_reports_status_idx on public.studbud_content_reports (status, created_at desc);
 alter table public.studbud_content_reports enable row level security;
 revoke all on table public.studbud_content_reports from anon, authenticated;
@@ -3699,12 +3705,16 @@ begin
         raise exception 'That profile no longer exists.';
     end if;
     if p_target_type = 'profile' and p_target_id = auth.uid() then raise exception 'You cannot report your own profile.'; end if;
+    if char_length(btrim(coalesce(p_details, ''))) not between 10 and 500 then
+        raise exception 'Explain what happened in 10 to 500 characters.';
+    end if;
+    perform pg_advisory_xact_lock(hashtextextended(auth.uid()::text, 0));
     if (select count(*) from public.studbud_content_reports
         where reporter_id = auth.uid() and created_at > now() - interval '1 day') >= 20 then
         raise exception 'You have sent a lot of reports today. Please try again tomorrow.';
     end if;
     insert into public.studbud_content_reports (reporter_id, target_type, target_id, reason, details)
-    values (auth.uid(), p_target_type, p_target_id, p_reason, left(coalesce(btrim(p_details), ''), 500))
+    values (auth.uid(), p_target_type, p_target_id, p_reason, btrim(p_details))
     on conflict (reporter_id, target_type, target_id) do update
         set reason = excluded.reason, details = excluded.details, status = 'open',
             created_at = now(), resolved_by = null, resolved_at = null;
@@ -3712,6 +3722,49 @@ end;
 $$;
 revoke all on function public.studbud_report_content(text, uuid, text, text) from public, anon;
 grant execute on function public.studbud_report_content(text, uuid, text, text) to authenticated;
+
+create or replace function public.studbud_submit_report(p_type text, p_subject text, p_details text, p_username text default null)
+returns bigint
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_target uuid;
+    v_id bigint;
+    v_subject text := btrim(coalesce(p_subject, ''));
+    v_details text := btrim(coalesce(p_details, ''));
+begin
+    if auth.uid() is null then raise exception 'Sign in or connect as a guest to send a report.'; end if;
+    if p_type is null or p_type not in ('bug', 'player', 'other') then raise exception 'Choose a report type.'; end if;
+    if char_length(v_subject) not between 3 and 120 then raise exception 'Enter a summary from 3 to 120 characters.'; end if;
+    if char_length(v_details) not between 10 and 2000 then raise exception 'Explain what happened in 10 to 2,000 characters.'; end if;
+    if p_type = 'player' then
+        if char_length(btrim(coalesce(p_username, ''))) not between 1 and 50 then raise exception 'Enter the player''s exact username.'; end if;
+        select u.id into v_target from auth.users u
+            where lower(u.raw_user_meta_data ->> 'username') = lower(regexp_replace(btrim(p_username), '^@', ''));
+        if v_target is null then raise exception 'That username was not found. Check the spelling or report Other and include the name you saw.'; end if;
+        if v_target = auth.uid() then raise exception 'You cannot report your own account.'; end if;
+    else
+        v_target := gen_random_uuid();
+    end if;
+    perform pg_advisory_xact_lock(hashtextextended(auth.uid()::text, 0));
+    if (select count(*) from public.studbud_content_reports
+        where reporter_id = auth.uid() and created_at > now() - interval '1 day') >= 20 then
+        raise exception 'You have sent a lot of reports today. Please try again tomorrow.';
+    end if;
+    insert into public.studbud_content_reports (reporter_id, target_type, target_id, reason, subject, details)
+    values (auth.uid(), case when p_type = 'player' then 'profile' else p_type end, v_target,
+        case when p_type = 'player' then 'harassment' else 'other' end, v_subject, v_details)
+    on conflict (reporter_id, target_type, target_id) do update
+        set subject = excluded.subject, details = excluded.details, reason = excluded.reason,
+            status = 'open', created_at = now(), resolved_by = null, resolved_at = null
+    returning id into v_id;
+    return v_id;
+end;
+$$;
+revoke all on function public.studbud_submit_report(text, text, text, text) from public, anon;
+grant execute on function public.studbud_submit_report(text, text, text, text) to authenticated;
 
 create or replace function public.studbud_admin_list_reports(p_status text default 'open')
 returns jsonb
@@ -3728,14 +3781,15 @@ begin
                 count(*)::int as report_count,
                 max(cr.created_at) as latest,
                 array_agg(distinct cr.reason) as reasons,
-                (select jsonb_agg(jsonb_build_object('id', x.id, 'reason', x.reason, 'details', x.details, 'created_at', x.created_at,
+                (select jsonb_agg(jsonb_build_object('id', x.id, 'reason', x.reason, 'subject', x.subject, 'details', x.details, 'created_at', x.created_at,
                         'reporter', coalesce(nullif(ru.raw_user_meta_data ->> 'username', ''), 'Student')) order by x.created_at desc)
                     from public.studbud_content_reports x left join auth.users ru on ru.id = x.reporter_id
                     where x.target_type = cr.target_type and x.target_id = cr.target_id and x.status = coalesce(nullif(p_status, ''), 'open')) as reports,
                 case when cr.target_type = 'deck' then (select d.title from public.studbud_community_decks d where d.id = cr.target_id)
-                    else (select coalesce(nullif(u.raw_user_meta_data ->> 'username', ''), 'Student') from auth.users u where u.id = cr.target_id) end as target_name,
+                    when cr.target_type = 'profile' then (select coalesce(nullif(u.raw_user_meta_data ->> 'username', ''), 'Student') from auth.users u where u.id = cr.target_id)
+                    else coalesce(max(nullif(cr.subject, '')), 'General report') end as target_name,
                 case when cr.target_type = 'deck' then (select d.owner_id from public.studbud_community_decks d where d.id = cr.target_id)
-                    else cr.target_id end as owner_id
+                    when cr.target_type = 'profile' then cr.target_id else null end as owner_id
             from public.studbud_content_reports cr
             where cr.status = coalesce(nullif(p_status, ''), 'open')
             group by cr.target_type, cr.target_id

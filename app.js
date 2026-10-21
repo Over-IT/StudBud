@@ -333,6 +333,21 @@
             EventBus.emit('state:changed', { key, value });
         }
 
+        saveGradeGoals(courses, preferences = this.state.settings) {
+            const previousCourses = this.state.courses, previousSettings = this.state.settings;
+            this.state.courses = courses;
+            this.state.settings = preferences;
+            try { this.saveToLocalStorage(); }
+            catch (error) {
+                this.state.courses = previousCourses;
+                this.state.settings = previousSettings;
+                throw error;
+            }
+            EventBus.emit('state:updated:courses', courses);
+            EventBus.emit('state:changed', { key: 'courses', value: courses });
+            EventBus.emit('state:changed', { key: 'settings', value: preferences });
+        }
+
         addCourse(course) {
             if (this.findDuplicateCourse(course)) throw new Error('That class is already saved for an overlapping semester. Open it from My classes instead.');
             this.state.courses.push(course);
@@ -557,7 +572,7 @@
     // ============================================================================
     const WORKSPACES = [
         { main: 'gpa', tabs: [['gpa', 'Grades & GPA'], ['grade-scenarios', 'What-if grades'], ['analytics', 'Analytics']] },
-        { main: 'planner', tabs: [['planner', 'Tasks'], ['calendar', 'Calendar'], ['schedule', 'Class schedule']] },
+        { main: 'planner', tabs: [['planner', 'Planner'], ['tasks', 'Tasks'], ['calendar', 'Calendar'], ['schedule', 'Class schedule']] },
         { main: 'flashcard', extraRoutes: ['importer'], tabs: [['flashcard', 'Practice'], ['study-manage', 'Manage sets'], ['study-discover', 'Discover'], ['exam-arcade', 'Tests & drills']] },
         { main: 'multiplayer', tabs: [['multiplayer', 'Games'], ['friends', 'Buds'], ['leaderboard', 'Leaderboards']] },
         { main: 'profile', tabs: [['profile', 'Profile'], ['shop', 'Shop'], ['inventory', 'Locker']] },
@@ -568,7 +583,8 @@
         gpa: ['Classes & grades', 'Import from Infinite Campus or add a class.'],
         'grade-scenarios': ['What-if grades', 'Try possible scores without changing your saved grades.'],
         analytics: ['Study insights', 'Grades, study time and progress.'],
-        planner: ['Tasks & deadlines', 'Assignments, quizzes and tests.'],
+        planner: ['Planner', 'Know what to work on today, and make room for what is next.'],
+        tasks: ['Tasks', 'Manage assignments, assessments, completion and grades.'],
         calendar: ['Calendar', 'Assignments, study deadlines and your own events.'],
         schedule: ['Class schedule', 'When your classes meet.'],
         flashcard: ['Study', 'Choose a set and focus on learning.'],
@@ -595,7 +611,7 @@
     class RouterEngine {
         constructor() {
             this.routes = [
-                "dashboard", "gpa", "grade-scenarios", "planner", "calendar", "schedule", "flashcard",
+                "dashboard", "gpa", "grade-scenarios", "planner", "tasks", "calendar", "schedule", "flashcard",
                 "analytics", "leaderboard", "exam-arcade", "study-manage", "study-discover", "multiplayer", "profile", "shop", "inventory", "importer", "settings", "settings-school", "settings-data", "appearance", "sound", "admin", "about", "friends", "classes"
             ];
             this.activeRoute = "dashboard";
@@ -643,7 +659,7 @@
 
             const studyPage = ({ flashcard: 'practice', 'study-manage': 'manage', 'study-discover': 'discover' })[route];
             const settingsPage = ({ settings: 'general', 'settings-school': 'school', 'settings-data': 'data' })[route];
-            const viewId = route === 'class' ? 'class-detail-view' : studyPage ? 'flashcard-view' : settingsPage ? 'settings-view' : `${route}-view`;
+            const viewId = route === 'class' ? 'class-detail-view' : studyPage ? 'flashcard-view' : settingsPage ? 'settings-view' : route === 'tasks' ? 'planner-view' : `${route}-view`;
             const workspace = WORKSPACES.find(group => group.tabs.some(([tab]) => tab === route) || group.extraRoutes?.includes(route) || (route === 'class' && group.main === 'gpa'));
             const selectedTab = route === 'importer' ? 'study-manage' : route === 'class' ? 'gpa' : route;
             const tabs = document.getElementById('workspace-tabs');
@@ -662,6 +678,7 @@
             });
             if (studyPage) window.NexusApp?.setStudyPage(studyPage);
             if (settingsPage) window.NexusApp?.setSettingsPage(settingsPage);
+            if (route === 'planner' || route === 'tasks') window.NexusApp?.setPlannerPage(route);
 
             document.querySelectorAll('.nav-item[data-target]').forEach(item => {
                 const group = `${item.dataset.target} ${item.dataset.also || ''}`.split(' ');
@@ -1235,6 +1252,9 @@
         async resetForCloudAccount() {
             await this.resetAutomaticStudy();
             this.plannerDefaultsInitialized = false;
+            this.plannerDate = '';
+            this.plannerScope = 'day';
+            this.gpaGoalDraft = null;
             await AppState.resetForCloudAccount();
             this.renderUI();
         }
@@ -1436,7 +1456,10 @@
             this.EventBus.on('assignments:updated', () => this.renderUI());
             this.EventBus.on('state:updated:courses', () => this.renderUI());
             this.EventBus.on('state:updated:assignments', () => this.renderUI());
-            this.EventBus.on('state:updated:calendarEvents', () => this.renderCalendar());
+            this.EventBus.on('state:updated:calendarEvents', () => {
+                this.renderCalendar();
+                this.renderDailyPlanner();
+            });
             this.EventBus.on('flashcards:updated', () => {
                 this.renderDecks();
                 this.renderHostedGameDecks();
@@ -1450,6 +1473,7 @@
             });
             this.EventBus.on('state:restored', () => this.renderUI());
             this.EventBus.on('router:navigated', route => {
+                if (route === 'planner' || route === 'tasks') this.renderDailyPlanner();
                 if (route !== 'flashcard') this.cancelDeckDrag?.();
                 if (route !== 'sound') this.stopSettingsAudioPreview();
                 if (route === 'class') this.renderClassDetail();
@@ -2070,6 +2094,8 @@
                         <h3>Grade targets</h3>
                         <label for="class-target-percent">Target grade (%)</label>
                         <div class="inline-form"><input id="class-target-percent" type="number" min="0" max="100" step="0.01" value="${Number.isFinite(target) ? Number(target.toFixed(2)) : ''}" placeholder="e.g. 90"><button class="primary-btn" data-action="save-class-target">Save target</button></div>
+                        ${AppState.get('settings')?.gradeGoalSource === 'gpa' ? '<p class="settings-hint">Saving a target locks this class and rebalances the other class targets for your GPA goal. Clear it to unlock.</p>' : ''}
+                        <button type="button" class="text-btn" data-action="open-grade-goals">Manage grade &amp; GPA goals</button>
                         <p>${(() => {
                             const goal = this.effectiveCourseTarget(course);
                             if (!Number.isFinite(goal)) return 'Set a class target here. Your GPA goal is calculated from class targets.';
@@ -2792,40 +2818,76 @@
             return NaN;
         }
 
-        /** Minimize the sum of class target percentages while meeting the credit-weighted GPA goal. */
+        /** Meet the GPA goal with targets close to one common grade, keeping explicit locks unchanged. */
         gpaTargetPlan(targetGpa, mode = 'weighted', courses = AppState.get('courses') || []) {
+            if (!Number.isFinite(targetGpa) || targetGpa < 0 || !['weighted', 'unweighted'].includes(mode)) {
+                throw new Error('Enter a valid GPA goal and calculation mode.');
+            }
             const scaleFor = course => (window.studbudGradeScaleFor?.(course) || window.studbudGradeScale?.() || window.PARKWAY_GRADE_SCALE || []).slice().sort((a, b) => a.minPct - b.minPct);
             const points = (item, course) => Number(mode === 'weighted' && course.isWeighted ? item.weighted : item.unweighted);
             const rows = courses.map(course => {
-                const ladder = [];
-                scaleFor(course).forEach(item => {
-                    if (!ladder.length || points(item, course) > points(ladder[ladder.length - 1], course)) ladder.push(item);
-                });
-                return { course, ladder, credits: Math.max(0, Number(course.credits) || 0) };
+                const ladder = scaleFor(course);
+                const target = this.hasCourseTarget(course) ? Number(course.targetPct) : null;
+                if (course.targetLocked && (target === null || target < 0 || target > 100)) {
+                    throw new Error(`Set a valid target before locking ${course.title || course.code}.`);
+                }
+                const gradeAt = pct => scaleFor(course).filter(grade => grade.minPct <= pct).at(-1) || ladder[0];
+                const locked = course.targetLocked ? { ...gradeAt(target), minPct: target } : null;
+                return { course, ladder, locked, credits: Math.max(0, Number(course.credits) || 0) };
             });
             const prior = this.priorGPA();
             const priorCredits = prior ? prior.credits : 0;
             const totalCredits = rows.reduce((sum, row) => sum + row.credits, 0) + priorCredits;
-            let plans = [{ earned: prior ? Math.round(prior[mode === 'weighted' ? 'weighted' : 'unweighted'] * priorCredits * 1e9) / 1e9 : 0, cost: 0, grades: [] }];
+            const priorEarned = prior ? Math.round(prior[mode === 'weighted' ? 'weighted' : 'unweighted'] * priorCredits * 1e9) / 1e9 : 0;
+            const interpolatedPoints = (row, pct) => {
+                if (row.locked) return points(row.locked, row.course);
+                const lower = row.ladder.filter(grade => grade.minPct <= pct).at(-1) || row.ladder[0];
+                const upper = row.ladder.find(grade => grade.minPct > pct);
+                if (!upper) return points(lower, row.course);
+                const fraction = (pct - lower.minPct) / (upper.minPct - lower.minPct);
+                return points(lower, row.course) + fraction * (points(upper, row.course) - points(lower, row.course));
+            };
+            let low = 0, high = 100;
+            for (let iteration = 0; iteration < 40; iteration++) {
+                const mid = (low + high) / 2;
+                const earned = priorEarned + rows.reduce((sum, row) => sum + interpolatedPoints(row, mid) * row.credits, 0);
+                if (earned < targetGpa * totalCredits) low = mid;
+                else high = mid;
+            }
+            const centerPct = (low + high) / 2;
+            let plans = [{ earned: priorEarned, cost: 0, grades: [] }];
             for (const row of rows) {
-                const options = row.credits > 0 ? row.ladder : row.ladder.slice(0, 1);
+                const options = row.locked ? [row.locked] : row.credits > 0 ? row.ladder
+                    : [row.ladder.reduce((best, grade) => Math.abs(grade.minPct - centerPct) < Math.abs(best.minPct - centerPct) ? grade : best)];
                 const next = new Map();
                 for (const plan of plans) for (const grade of options) {
                     const earned = Math.round((plan.earned + points(grade, row.course) * row.credits) * 1e9) / 1e9;
-                    const cost = plan.cost + grade.minPct;
+                    const cost = plan.cost + (row.locked || row.credits === 0 ? 0 : (grade.minPct - centerPct) ** 2);
                     if (!next.has(earned) || cost < next.get(earned).cost) next.set(earned, { earned, cost, grades: [...plan.grades, grade] });
                 }
                 let cheapest = Infinity;
                 plans = [...next.values()].sort((a, b) => b.earned - a.earned).filter(plan => {
-                    if (plan.cost >= cheapest) return false;
-                    cheapest = plan.cost;
+                    if (plan.cost > cheapest + 1e-9) return false;
+                    cheapest = Math.min(cheapest, plan.cost);
                     return true;
                 });
             }
             const reachablePlans = plans.filter(plan => plan.earned >= targetGpa * totalCredits - 1e-9);
             const best = reachablePlans.sort((a, b) => a.cost - b.cost || a.earned - b.earned)[0] || plans[0];
             const byCode = new Map(rows.map((row, i) => [row.course.code, best.grades[i]]));
-            return { byCode, gpa: totalCredits > 0 ? best.earned / totalCredits : 0, reachable: totalCredits - priorCredits > 0 && reachablePlans.length > 0 };
+            return { byCode, gpa: totalCredits > 0 ? best.earned / totalCredits : 0, centerPct, cost: best.cost,
+                reachable: totalCredits - priorCredits > 0 && reachablePlans.length > 0 };
+        }
+
+        rebalanceGradeGoals(courses) {
+            const settings = AppState.get('settings') || {};
+            if (settings.gradeGoalSource !== 'gpa') return courses;
+            const plan = this.gpaTargetPlan(Number(settings.gradeGoalGpa), settings.gradeGoalWeight || 'weighted', courses);
+            if (!plan.reachable) throw new Error(`That change cannot meet your GPA goal with the other locked targets. Open Grade & GPA goals to lower the goal or unlock a class.`);
+            return courses.map(course => course.targetLocked || !(Number(course.credits) > 0) ? course : {
+                ...course, targetPct: plan.byCode.get(course.code).minPct,
+                targetGrade: plan.byCode.get(course.code).letter
+            });
         }
 
         /** Decks linked to a quiz/test first, then decks tagged with the same class. */
@@ -2953,7 +3015,6 @@
             const query = (search?.value || '').trim().toLocaleLowerCase();
             const selectedCourse = courseFilter?.value || '';
             const selectedStatus = statusFilter?.value || 'all';
-            const today = localDateKey(new Date());
             const sort = AppState.get('settings')?.plannerSort || 'due';
             const sortSelect = document.getElementById('assignment-sort');
             if (sortSelect) sortSelect.value = sort;
@@ -2965,7 +3026,7 @@
             });
             const visibleAssignments = matchingAssignments.filter(item => {
                 const state = this.assignmentState(item);
-                const matchesStatus = selectedStatus === 'all' || state === selectedStatus
+                const matchesStatus = (selectedStatus === 'all' && state !== 'dismissed') || state === selectedStatus
                     || (selectedStatus === 'todo' && state === 'overdue');
                 return matchesStatus;
             }).sort((left, right) => {
@@ -2985,13 +3046,14 @@
                     const graded = this.isGradedItem(item);
                     return `<tr class="assignment-row is-${this.assignmentState(item)}">
                         <td data-label="Status">${this.assignmentStatusControl(item)}</td>
-                        <td data-label="Assignment" class="assignment-title-cell">${this.escapeHTML(item.title)}</td>
+                        <td data-label="Assignment" class="assignment-title-cell">${this.escapeHTML(item.title)}${item.plannedDate ? `<small class="planner-work-date">Work on ${this.escapeHTML(item.plannedDate)}</small>` : ''}</td>
                         <td data-label="Class">${this.escapeHTML(course ? course.title : item.courseCode || 'Unassigned')}</td>
                         <td data-label="${graded ? 'Score' : 'Due'}">${graded ? `${this.formatNumber(item.pointsEarned || 0)} / ${this.formatNumber(item.maxPoints || 0)}` : this.escapeHTML(item.dueDate || 'No due date')}</td>
                         <td data-label="Time progress">${this.assignmentTimeMarkup(item)}</td>
                         <td class="actions" data-label="Actions">
                             ${this.assessmentStudyButton(item)}
                             ${this.isOpenAssignment(item) ? `<button type="button" class="secondary-btn" data-action="work-on-assignment" data-id="${this.escapeHTML(item.id)}">Work on this</button>` : ''}
+                            ${this.isOpenAssignment(item) ? `<button type="button" class="text-btn" data-action="planner-add-to-day" data-id="${this.escapeHTML(item.id)}">Add to selected day</button>` : ''}
                             <button class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit</button>
                             <button class="danger-btn" data-action="delete-assignment" data-id="${this.escapeHTML(item.id)}">Delete</button>
                         </td>
@@ -3011,12 +3073,13 @@
             this.renderStudyRecommendations('planner-study-list');
             const summary = document.getElementById('assignment-status-summary');
             if (summary) {
-                const counts = { all: matchingAssignments.length, todo: 0, overdue: 0, awaiting: 0, graded: 0 };
+                const counts = { all: matchingAssignments.filter(item => !item.dismissed).length, todo: 0, overdue: 0, awaiting: 0, graded: 0, dismissed: 0 };
                 matchingAssignments.forEach(item => { counts[this.assignmentState(item)] += 1; });
                 counts.todo += counts.overdue;
                 const chip = (state, label, icon) => `<button type="button" class="status-summary-chip is-${state}${selectedStatus === state ? ' selected' : ''}" data-action="assignment-status-filter" data-status="${state}" aria-pressed="${selectedStatus === state}"><i class="fas ${icon}" aria-hidden="true"></i><strong>${counts[state]}</strong><span>${label}</span></button>`;
                 summary.innerHTML = chip('all', 'All work', 'fa-list') + chip('todo', 'To do', 'fa-clock') + chip('overdue', 'Overdue', 'fa-triangle-exclamation')
-                    + chip('awaiting', 'Waiting for grade', 'fa-hourglass-half') + chip('graded', 'Graded', 'fa-circle-check');
+                    + chip('awaiting', 'Waiting for grade', 'fa-hourglass-half') + chip('graded', 'Graded', 'fa-circle-check')
+                    + chip('dismissed', 'Dismissed', 'fa-box-archive');
             }
 
             const priorityList = document.getElementById('priority-task-list');
@@ -3030,30 +3093,184 @@
                 ).join('') : '<li class="empty-state">No upcoming tasks.</li>';
             }
 
-            const openWork = assignments.filter(item => !isAssessment(item) && this.isOpenAssignment(item))
-                .map(item => ({ item, priority: this.assignmentPriority(item, courses) }))
-                .sort((a, b) => b.priority.score - a.priority.score);
-            const nextTask = document.getElementById('planner-next-task');
-            if (nextTask) {
-                const total = openWork.reduce((sum, { item }) => sum + this.plannerTaskMinutes(item), 0);
-                const urgent = openWork.filter(({ item }) => this.assignmentState(item) === 'overdue'
-                    || String(item.dueDate || '').slice(0, 10) === today).length;
-                const next = openWork[0]?.item;
-                const course = next && courses.find(entry => entry.code === next.courseCode);
-                nextTask.innerHTML = next ? `<p class="planner-workload"><strong>${openWork.length} to do</strong> · about ${total} min estimated total · ${urgent} due today or overdue</p>
-                    <article class="planner-next-card"><span class="status-pill is-todo">Start here · about ${this.plannerTaskMinutes(next)} min</span>
-                    <h3>${this.escapeHTML(next.title)}</h3><p>${this.escapeHTML(course?.title || next.courseCode || 'Unassigned')} · ${this.escapeHTML(this.dueLabel(next.dueDate).text)}</p>
-                    <p><strong>Why this task:</strong> ${this.escapeHTML(this.plannerTaskReason(next))}</p>
-                    <button type="button" class="primary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(next.id)}">Open task</button>
-                    ${this.assignmentStatusControl(next)}</article>` : '<p class="empty-state">You’re caught up! No open tasks. Add an assignment when you have new work.</p>';
-            }
-            const matrixGroups = [['quad-1-list', 'doFirst'], ['quad-2-list', 'schedule'], ['quad-3-list', 'quickFinish'], ['quad-4-list', 'lowPriority']];
-            matrixGroups.forEach(([id, quadrant]) => {
-                const list = document.getElementById(id);
-                if (!list) return;
-                const matches = openWork.filter(({ item, priority }) => window.PlannerEngine.getEisenhowerQuadrant(priority, Number(item.estimatedMinutes) || 30).id === quadrant);
-                list.innerHTML = matches.map(({ item }) => `<li><button type="button" class="text-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">${this.escapeHTML(item.title)}</button><small>${this.escapeHTML(this.dueLabel(item.dueDate).text)} · about ${this.plannerTaskMinutes(item)} min</small><small>${this.escapeHTML(this.plannerTaskReason(item))}</small>${this.assignmentStatusControl(item)}</li>`).join('') || '<li class="empty-state">No open tasks here.</li>';
+            this.renderDailyPlanner();
+        }
+
+        selectedPlannerDate() {
+            return Number.isFinite(window.PlannerEngine.dateNumber(this.plannerDate))
+                ? this.plannerDate : localDateKey(new Date());
+        }
+
+        setPlannerPage(page) {
+            document.querySelectorAll('[data-planner-panel]').forEach(panel =>
+                panel.classList.toggle('hidden', panel.dataset.plannerPanel !== (page === 'tasks' ? 'tasks' : 'plan')));
+            document.getElementById('planner-page-title').textContent = page === 'tasks' ? 'Tasks' : 'Planner';
+            document.getElementById('planner-page-description').textContent = page === 'tasks'
+                ? 'All your work in one place. Update tasks, mark them done, or record grades.'
+                : 'Your schedule, deadlines, and a clear idea of what to work on.';
+            document.getElementById('planner-library').open = true;
+        }
+
+        plannerTasks(history = []) {
+            const minutesFor = id => history.filter(session => session.assignmentId === id)
+                .reduce((sum, session) => sum + Math.max(0, Number(session.durationSec) || 0) / 60, 0);
+            const courses = AppState.get('courses') || [];
+            return (AppState.get('assignments') || []).filter(item => !item.dismissed).map(item => ({
+                ...item, open: this.isOpenAssignment(item),
+                courseTitle: courses.find(course => course.code === item.courseCode)?.title || item.courseCode || 'Unassigned',
+                remainingMinutes: this.plannerTaskMinutes(item), dayMinutes: minutesFor(item.id),
+                score: this.assignmentPriority(item, courses).score
+            }));
+        }
+
+        dailyPlannerModel() {
+            const date = this.selectedPlannerDate();
+            const today = localDateKey(new Date());
+            const history = (AppState.get('studyHistory') || []).filter(session => {
+                const at = new Date(session.timestamp);
+                return Number.isFinite(at.getTime()) && localDateKey(at) === date;
             });
+            const tasks = this.plannerTasks(history);
+            return { ...window.PlannerEngine.dailyPlan(tasks, {
+                date, today, budget: AppState.get('settings')?.plannerDailyMinutes ?? 90,
+                studiedMinutes: history.reduce((sum, session) => sum + Math.max(0, Number(session.durationSec) || 0) / 60, 0)
+            }), tasks };
+        }
+
+        renderPlannerPeriod(tasks = this.plannerTasks()) {
+            const panel = document.getElementById('planner-period');
+            if (!panel) return;
+            const scope = this.plannerScope || 'day', date = this.selectedPlannerDate();
+            const today = localDateKey(new Date());
+            const daily = scope === 'day' && date >= today;
+            document.getElementById('planner-daily-layout').classList.toggle('hidden', !daily);
+            document.getElementById('planner-day-summary').classList.toggle('hidden', !daily);
+            document.querySelector('.planner-budget').classList.toggle('hidden', !daily);
+            panel.classList.toggle('hidden', daily);
+            document.querySelectorAll('[data-action="planner-scope"]').forEach(button =>
+                button.setAttribute('aria-pressed', String(button.dataset.id === scope)));
+            const agenda = window.PlannerEngine.agenda(tasks, AppState.get('calendarEvents') || [], { date, today, scope });
+            const displayDate = value => new Date(`${value}T12:00:00`);
+            const taskMarkup = (task, planned = false) => `<li class="planner-agenda-entry${task.open ? '' : ' is-complete'}">
+                <span class="planner-entry-type">${planned ? 'Work on' : task.open ? 'Due' : 'Done'}</span>
+                <button type="button" class="text-btn" data-action="edit-assignment" data-id="${this.escapeHTML(task.id)}" title="${this.escapeHTML(task.title)}">${this.escapeHTML(task.title)}</button>
+                <small>${this.escapeHTML(task.courseTitle)}</small></li>`;
+            const eventMarkup = event => `<li class="planner-agenda-entry is-event"><span class="planner-entry-type">${this.escapeHTML(event.time || 'All day')}</span>
+                <button type="button" class="text-btn" data-action="edit-calendar-event" data-id="${this.escapeHTML(event.id)}" title="${this.escapeHTML(event.title)}">${this.escapeHTML(event.title)}</button>
+                ${scope !== 'month' && event.notes ? `<small>${this.escapeHTML(event.notes)}</small>` : ''}</li>`;
+            const schedule = this.getScheduleEntries(displayDate(date));
+            const classes = schedule.entries.filter(entry => entry.course && entry.periodNumber);
+            const schedulePanel = document.getElementById('planner-day-schedule');
+            schedulePanel.innerHTML = `<h3>On your schedule</h3>
+                ${classes.length ? `<details><summary>${classes.length} classes today</summary><ul class="planner-schedule-classes">${classes.map(entry => `<li><strong>${this.escapeHTML(entry.course.title)}</strong><small>${this.escapeHTML(entry.time || entry.period)}</small></li>`).join('')}</ul></details>` : ''}
+                ${schedule.note ? `<p class="settings-hint">${this.escapeHTML(schedule.note)}</p>` : ''}
+                <ul class="planner-agenda-items">${agenda.days.find(day => day.date === date)?.events.map(eventMarkup).join('') || '<li class="settings-hint">No personal events.</li>'}</ul>
+                <button type="button" class="text-btn" data-action="planner-add-event">Add an event or study block</button>`;
+            if (daily) return;
+            const rangeLabel = scope === 'month' ? displayDate(agenda.start).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
+                : scope === 'day' ? displayDate(date).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
+                    : `${displayDate(agenda.start).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${displayDate(agenda.end).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+            const emptyCells = scope === 'month' ? (displayDate(agenda.start).getDay() + 6) % 7 : 0;
+            const dueCount = agenda.days.reduce((sum, day) => sum + day.due.filter(task => task.open).length, 0);
+            const eventCount = agenda.days.reduce((sum, day) => sum + day.events.length, 0);
+            panel.innerHTML = `<header class="planner-period-header"><div><h3 id="planner-period-heading" tabindex="-1">${this.escapeHTML(rangeLabel)}</h3>
+                <p class="settings-hint">${dueCount} open deadline${dueCount === 1 ? '' : 's'} · ${eventCount} event${eventCount === 1 ? '' : 's'}. Work dates do not change deadlines.</p></div>
+                <button type="button" class="secondary-btn" data-action="planner-show-library">Manage tasks</button></header>
+                ${agenda.focus.length ? `<section class="glass-card planner-period-focus"><h4>What to work on ${scope === 'month' ? 'this month' : scope === 'week' ? 'this week' : 'first'}</h4>
+                    <p class="settings-hint">${agenda.overdue.length ? `${agenda.overdue.length} missing or overdue. ` : ''}Start with these, then pick a day below to make a realistic work plan.</p>
+                    <ol>${agenda.focus.slice(0, 3).map(task => `<li><div><strong>${this.escapeHTML(task.title)}</strong><small>${this.escapeHTML(task.courseTitle)} · ${task.icMissing ? 'Missing' : task.dueDate ? `Due ${this.escapeHTML(String(task.dueDate).slice(0, 10))}` : 'No deadline'} · ${task.remainingMinutes} min left</small></div>
+                        <button type="button" class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(task.id)}">Choose work date</button></li>`).join('')}</ol>
+                    ${agenda.overdue.length > 3 ? `<details><summary>All missing &amp; overdue work (${agenda.overdue.length})</summary><ul class="planner-agenda-items">${agenda.overdue.map(task => taskMarkup(task)).join('')}</ul></details>` : ''}
+                    ${agenda.focus.length > 3 ? `<p class="settings-hint">${agenda.focus.length - 3} more open tasks to consider. This period's deadlines are in the agenda below; Tasks includes unscheduled work too.</p>` : ''}</section>` : ''}
+                <div class="planner-agenda-grid planner-agenda-${scope}">
+                    ${scope === 'month' ? ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => `<span class="planner-month-weekday" aria-hidden="true">${day}</span>`).join('') : ''}
+                    ${'<span class="planner-month-spacer" aria-hidden="true"></span>'.repeat(emptyCells)}
+                    ${agenda.days.map(day => {
+                        const items = [...day.events.map(eventMarkup), ...day.due.map(task => taskMarkup(task)), ...day.planned.map(task => taskMarkup(task, true))];
+                        const visible = scope === 'month' ? items.slice(0, 2) : items;
+                        return `<section class="planner-agenda-day${day.date === today ? ' is-today' : ''}">
+                            <h4><button type="button" class="text-btn" data-action="planner-open-day" data-id="${day.date}" aria-label="Open ${day.date}">${this.escapeHTML(displayDate(day.date).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' }))}${day.date === today ? ' · Today' : ''}</button></h4>
+                            <ul class="planner-agenda-items">${visible.join('') || '<li class="settings-hint">Nothing scheduled</li>'}</ul>
+                            <button type="button" class="text-btn planner-open-day" data-action="planner-open-day" data-id="${day.date}">${items.length > visible.length ? `+${items.length - visible.length} more · ` : ''}${day.date < today ? 'View day' : 'Plan day'} <i class="fas fa-arrow-right" aria-hidden="true"></i></button></section>`;
+                    }).join('')}
+                </div>`;
+        }
+
+        renderDailyPlanner() {
+            const queue = document.getElementById('planner-day-queue');
+            if (!queue) return;
+            const focused = document.activeElement;
+            const restoreFocus = focused?.closest?.('#planner-day-queue, #planner-upcoming-list, #planner-active-work');
+            const focusAction = focused?.dataset?.action, focusId = focused?.dataset?.id;
+            const plan = this.dailyPlannerModel();
+            const today = localDateKey(new Date());
+            const isToday = plan.date === today;
+            const date = new Date(`${plan.date}T12:00:00`);
+            const title = `${isToday ? 'Today' : date.toLocaleDateString(undefined, { weekday: 'long' })} · ${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+            const dateInput = document.getElementById('planner-date');
+            dateInput.value = plan.date;
+            const scope = this.plannerScope || 'day';
+            document.querySelector('[data-action="planner-previous-day"]').setAttribute('aria-label', `Previous ${scope}`);
+            document.querySelector('[data-action="planner-next-day"]').setAttribute('aria-label', `Next ${scope}`);
+            document.getElementById('planner-daily-minutes').value = plan.budget;
+            document.getElementById('planner-day-heading').textContent = title;
+            document.getElementById('planner-day-description').textContent = isToday
+                ? 'Start at the top. Deadlines stay visible even if the day is full. Suggestions adjust as you work.'
+                : 'A preview using your current unfinished work, not a second copy of it. Completed work drops out automatically.';
+            const formatMinutes = minutes => {
+                const rounded = Math.ceil(minutes);
+                return rounded >= 60 ? `${Math.floor(rounded / 60)}h${rounded % 60 ? ` ${rounded % 60}m` : ''}` : `${rounded}m`;
+            };
+            document.getElementById('planner-day-summary').innerHTML = `
+                <div><strong>${plan.urgentCount}</strong><span>missing or due by this day</span></div>
+                <div><strong>${formatMinutes(plan.remainingMinutes)}</strong><span>work left in this plan</span></div>
+                <div><strong>${formatMinutes(plan.studiedMinutes)}</strong><span>study time saved this day</span></div>
+                <p class="${plan.overBudget ? 'planner-overloaded' : ''}">${plan.overBudget
+                    ? `About ${formatMinutes(plan.overBudget)} over your available time. Deadlines are not hidden: revise estimates, move flexible work, or ask for more time.`
+                    : `${formatMinutes(Math.max(0, plan.budget - plan.studiedMinutes - plan.remainingMinutes))} unallocated. Leave room for breaks and anything unexpected.`}</p>`;
+            const renderCard = (task, index) => {
+                const id = this.escapeHTML(task.id), name = this.escapeHTML(task.title);
+                const due = task.dueDate ? `Due ${this.escapeHTML(String(task.dueDate).slice(0, 10))}` : 'No deadline';
+                const badge = task.icMissing ? 'Missing' : task.days < 0 ? 'Past due' : task.days === 0 ? 'Due this day'
+                    : task.scheduled ? 'Your plan' : task.missedPlan ? 'Carried forward' : task.assessment ? 'Study block' : 'Suggested';
+                const block = task.minutes === 0 ? 'Check progress'
+                    : task.minutes < task.remaining ? `${formatMinutes(task.minutes)} block · ${formatMinutes(task.remaining)} total left`
+                    : `About ${formatMinutes(task.minutes)} left`;
+                return `<li class="planner-day-card${index === 0 ? ' planner-start-card' : ''}${task.urgent ? ' is-urgent' : ''}">
+                    <div class="planner-card-top"><span class="planner-card-order">${index + 1}</span><span class="planner-card-badge">${index === 0 ? 'Start here · ' : ''}${badge}</span><span>${this.escapeHTML(block)}</span></div>
+                    <h4>${task.assessment ? 'Prepare: ' : ''}${name}</h4><p class="planner-card-meta">${this.escapeHTML(task.courseTitle)} · ${due}</p>
+                    <p class="planner-card-reason">${this.escapeHTML(task.reason)}</p>
+                    ${task.minutes === 0 ? `<p class="settings-hint">${task.assessment ? 'Estimated study time is covered. Check readiness; mark done only after the assessment.' : 'Estimated time is covered. Check the work and turn it in before marking done.'}</p>` : ''}
+                    <div class="planner-card-actions">${isToday ? `<button type="button" class="${index === 0 ? 'primary' : 'secondary'}-btn" data-action="planner-start-work" data-id="${id}" aria-label="Work on ${name}">Work on this</button>${this.assessmentStudyButton(task)}` : ''}
+                    <button type="button" class="secondary-btn" data-action="edit-assignment" data-id="${id}">Edit / move</button>
+                    <button type="button" class="text-btn" data-action="toggle-assignment" data-id="${id}" aria-label="Mark ${name} as done">Mark done</button>
+                    ${this.assignmentState(task) === 'overdue' ? `<button type="button" class="text-btn" data-action="dismiss-assignment" data-id="${id}" aria-label="Dismiss ${name}">Dismiss</button>` : ''}</div>
+                    <details class="planner-card-details"><summary>Time progress &amp; options</summary>${this.assignmentTimeMarkup(task)}
+                    <div class="planner-card-actions"><button type="button" class="text-btn" data-action="log-study" data-id="${id}">Log offline work</button>
+                    ${task.plannedDate ? `<button type="button" class="text-btn" data-action="planner-clear-date" data-id="${id}">Use automatic work dates</button>` : ''}</div></details>
+                </li>`;
+            };
+            queue.innerHTML = plan.queue.length ? `<ol class="planner-day-list">${plan.queue.map(renderCard).join('')}</ol>`
+                : `<div class="glass-card planner-day-empty"><h4>${plan.later.length ? 'No more suggested work for this day' : 'You are caught up'}</h4><p>${plan.later.length ? 'Your time is covered or the remaining work is planned for later. You can still add something from Coming up, or adjust available time.' : 'No unfinished assignments or assessments. Add your next task when you get it.'}</p><button type="button" class="secondary-btn" data-action="planner-add-assignment">Add assignment</button></div>`;
+            const laterCard = task => `<li><div><strong>${this.escapeHTML(task.title)}</strong><small>${this.escapeHTML(task.courseTitle)} · ${task.dueDate ? `Due ${this.escapeHTML(String(task.dueDate).slice(0, 10))}` : 'No deadline'}${task.plannedDate ? ` · Work on ${this.escapeHTML(task.plannedDate)}` : ''}</small></div>
+                <div class="planner-card-actions"><button type="button" class="secondary-btn" data-action="planner-add-to-day" data-id="${this.escapeHTML(task.id)}">Add to this day</button><button type="button" class="text-btn" data-action="edit-assignment" data-id="${this.escapeHTML(task.id)}">Edit</button></div></li>`;
+            document.getElementById('planner-upcoming-list').innerHTML = plan.later.length
+                ? `<ul class="planner-later-list">${plan.later.slice(0, 5).map(laterCard).join('')}</ul>${plan.later.length > 5 ? `<p class="settings-hint">${plan.later.length - 5} more on the Tasks page.</p>` : ''}`
+                : '<p class="settings-hint">No other open work. Everything unfinished is in your plan.</p>';
+            const completed = (AppState.get('assignments') || []).filter(item => !this.isOpenAssignment(item) && item.completedAt === plan.date);
+            document.getElementById('planner-day-completed').innerHTML = completed.length
+                ? `<details class="planner-completed"><summary>Finished this day (${completed.length})</summary>${this.assignmentUpdateList(completed)}</details>` : '';
+            const active = (AppState.get('assignments') || []).find(item => item.id === this.dashboardSprintAssignmentId && this.isOpenAssignment(item));
+            const activePanel = document.getElementById('planner-active-work');
+            activePanel.classList.toggle('hidden', !active || !isToday);
+            activePanel.innerHTML = active ? `<strong>Working on: ${this.escapeHTML(active.title)}</strong><p>Active time saves automatically while you work here. The header clock shows when it is counting or paused.</p><button type="button" class="secondary-btn" data-action="planner-stop-work">Stop working on task</button>` : '';
+            document.getElementById('planner-library-count').textContent = `${(AppState.get('assignments') || []).length} saved`;
+            this.renderPlannerPeriod(plan.tasks);
+            if (restoreFocus) {
+                const replacement = [...document.querySelectorAll('#planner-view button[data-action]')]
+                    .find(button => button.dataset.action === focusAction && button.dataset.id === focusId);
+                (replacement || document.getElementById('planner-day-heading')).focus({ preventScroll: true });
+            }
         }
 
         plannerTaskMinutes(item) {
@@ -3100,7 +3317,7 @@
             const totalMinutes = overridden
                 ? Math.max(0, Number(item.remainingEstimateStudiedSeconds) || 0) / 60 + Math.max(0, Number(item.remainingEstimateMinutes))
                 : estimate;
-            const complete = !this.isOpenAssignment(item);
+            const complete = item.status === 'completed' || (this.isGradedItem(item) && !item.icMissing);
             const remainingMinutes = complete ? 0 : Math.max(0, totalMinutes - studiedMinutes);
             const pct = complete || (totalMinutes === 0 && overridden) ? 100
                 : totalMinutes > 0 ? Math.min(100, Math.floor(studiedMinutes / totalMinutes * 100)) : 0;
@@ -3137,7 +3354,7 @@
 
         deckUpcomingTestAt(deck) {
             const assessment = this.deckLinkInfo(deck).assessment;
-            if (!assessment?.dueDate || assessment.status === 'completed') return Infinity;
+            if (!assessment?.dueDate || assessment.dismissed || assessment.status === 'completed') return Infinity;
             const at = Date.parse(`${String(assessment.dueDate).slice(0, 10)}T00:00:00`);
             const today = new Date(); today.setHours(0, 0, 0, 0);
             return Number.isFinite(at) && at >= today.getTime() ? at : Infinity;
@@ -3571,7 +3788,7 @@
 
         deckAssessmentOptionsIds() {
             const today = localDateKey(new Date());
-            return this.deckAssessments().filter(item => item.status !== 'completed' && (!item.dueDate || String(item.dueDate).slice(0, 10) >= today)).map(item => String(item.id));
+            return this.deckAssessments().filter(item => !item.dismissed && item.status !== 'completed' && (!item.dueDate || String(item.dueDate).slice(0, 10) >= today)).map(item => String(item.id));
         }
 
         deckAssessmentLabel(item) {
@@ -3592,7 +3809,7 @@
         }
 
         assessmentStudyButton(item) {
-            if (!['quiz', 'test'].includes(String(item.kind).toLowerCase())) return '';
+            if (item.dismissed || !['quiz', 'test'].includes(String(item.kind).toLowerCase())) return '';
             const linked = (AppState.get('flashcards') || []).some(deck => String(deck.assessmentId) === String(item.id));
             return `<button type="button" class="secondary-btn" data-action="assessment-study-set" data-id="${this.escapeHTML(item.id)}">${linked ? 'Open study set' : 'Create study set'}</button>`;
         }
@@ -3634,10 +3851,10 @@
             // Upcoming quizzes/tests for the chosen class (or all classes); keep the current pick even if it has passed.
             const items = this.deckAssessments().filter(item =>
                 (!courseCode || item.courseCode === courseCode) &&
-                (String(item.id) === String(selected) || (item.status !== 'completed' && (!item.dueDate || String(item.dueDate).slice(0, 10) >= today))));
+                (String(item.id) === String(selected) || (!item.dismissed && item.status !== 'completed' && (!item.dueDate || String(item.dueDate).slice(0, 10) >= today))));
             const classTitle = code => courses.find(course => course.code === code)?.title || code || '';
             return `<option value="">${items.length ? 'No test or quiz' : 'No upcoming tests or quizzes'}</option>${items.map(item =>
-                `<option value="${this.escapeHTML(item.id)}"${String(item.id) === String(selected) ? ' selected' : ''}>${this.escapeHTML(`${courseCode ? '' : `${classTitle(item.courseCode)} – `}${this.deckAssessmentLabel(item)}${item.status === 'completed' ? ' (completed)' : item.dueDate && String(item.dueDate).slice(0, 10) < today ? ' (past)' : ''}`)}</option>`).join('')}`;
+                `<option value="${this.escapeHTML(item.id)}"${String(item.id) === String(selected) ? ' selected' : ''}>${this.escapeHTML(`${courseCode ? '' : `${classTitle(item.courseCode)} – `}${this.deckAssessmentLabel(item)}${item.dismissed ? ' (dismissed)' : item.status === 'completed' ? ' (completed)' : item.dueDate && String(item.dueDate).slice(0, 10) < today ? ' (past)' : ''}`)}</option>`).join('')}`;
         }
 
         syncDeckLinkSelects(courseSelect, assessmentSelect, assessmentChanged) {
@@ -4735,7 +4952,7 @@
             this.adminTab = tab;
             document.getElementById('admin-search-form')?.classList.toggle('hidden', ['games', 'notices', 'reports'].includes(tab));
             if (tab === 'reports') {
-                status.textContent = 'Loading reports?';
+                status.textContent = 'Loading reports...';
                 try {
                     const rows = await window.StudBudCommunityGames.adminCall('studbud_admin_list_reports', { p_status: 'open' });
                     const esc = value => this.escapeHTML(String(value ?? ''));
@@ -4743,12 +4960,13 @@
                     status.textContent = rows.length ? `${rows.length} reported item${rows.length === 1 ? '' : 's'} waiting for review.` : 'No open reports. Nice and quiet.';
                     list.innerHTML = rows.map(row => {
                         const isDeck = row.target_type === 'deck';
+                        const category = ({ deck: 'Flashcard set', profile: 'Player', bug: 'Bug', other: 'Other' })[row.target_type] || 'Report';
                         const gone = !row.target_name;
                         return `<article class="admin-row report-row">
-                        <div><strong>${isDeck ? '<i class="fas fa-layer-group" aria-hidden="true"></i>' : '<i class="fas fa-user" aria-hidden="true"></i>'} ${esc(row.target_name || (isDeck ? 'Deleted set' : 'Deleted account'))}</strong>
+                        <div><span class="deck-chip">${esc(category)}</span><strong>${esc(row.target_name || (isDeck ? 'Deleted set' : 'Deleted account'))}</strong>
                             <span class="admin-badge">${Number(row.report_count)} report${Number(row.report_count) === 1 ? '' : 's'}</span>
                             ${(row.reasons || []).map(reason => `<span class="deck-chip">${esc(reasonLabel[reason] || reason)}</span>`).join(' ')}
-                            <ul class="report-details">${(row.reports || []).slice(0, 5).map(r => `<li><small>${esc(r.reporter)} ? ${esc(new Date(r.created_at).toLocaleString())}</small>${r.details ? `<p>${esc(r.details)}</p>` : ''}</li>`).join('')}</ul></div>
+                            <ul class="report-details">${(row.reports || []).map(r => `<li><small>${esc(r.reporter)} · ${esc(new Date(r.created_at).toLocaleString())}</small>${r.subject ? `<h4>${esc(r.subject)}</h4>` : ''}${r.details ? `<p>${esc(r.details)}</p>` : ''}</li>`).join('')}</ul></div>
                         <div class="admin-actions">
                             ${isDeck && !gone ? `<button type="button" class="secondary-btn" data-admin-action="inspect-deck" data-id="${esc(row.target_id)}">Inspect cards</button>` : ''}
                             ${row.owner_id && !gone ? `<button type="button" class="secondary-btn" data-admin-action="profile" data-id="${esc(row.owner_id)}">${isDeck ? 'Author profile' : 'View profile'}</button>` : ''}
@@ -8007,9 +8225,6 @@
             if (accountName) accountName.innerHTML = `${this.escapeHTML(displayName)} ${this.accountTagMarkup(window.StudBudCloud?.user?.user_metadata?.username, this.userTags)}`;
             const grade = document.getElementById('header-grade-level');
             if (grade) grade.textContent = `Class of ${classYear}`;
-            const selectedTerm = this.configuredSemester();
-            const termDisplay = document.getElementById('current-term-display');
-            if (termDisplay) termDisplay.textContent = this.termLabel(selectedTerm);
             const saveStatus = document.getElementById('data-save-status');
             if (saveStatus && !saveStatus.textContent.trim()) saveStatus.textContent = 'Your classes, assignments, profile, and settings sync automatically to your account.';
             this.applyAppearance();
@@ -8195,7 +8410,7 @@
 
         syncTutorialUI() {
             const settings = AppState.get('settings') || {};
-            const seen = Boolean(settings.tutorialSeen && settings.tutorialVersion === 2);
+            const seen = Boolean(settings.tutorialSeen && settings.tutorialVersion === 3);
             document.getElementById('tutorial-banner')?.classList.toggle('hidden', seen);
             document.getElementById('tutorial-card')?.classList.toggle('hidden', !seen);
         }
@@ -8387,35 +8602,60 @@
             return `<button type="button" class="link-btn report-btn" data-action="report-content" data-report-type="${type}" data-id="${this.escapeHTML(id)}" data-name="${this.escapeHTML(name || '')}" title="Report this ${type === 'deck' ? 'set' : 'profile'} to moderators"><i class="fas fa-flag" aria-hidden="true"></i> Report</button>`;
         }
 
-        openReportDialog(type, id, name) {
-            if (!window.StudBudCloud?.user) { window.StudBudDialogs.notify('Sign in or continue as a guest to report content.'); return; }
-            document.getElementById('report-overlay')?.remove();
-            const overlay = document.createElement('div');
+        openReportDialog(type, id, name, previous = document.activeElement) {
+            if (document.getElementById('report-overlay')?.open) return;
+            const overlay = document.createElement('dialog');
             overlay.id = 'report-overlay';
-            overlay.className = 'user-profile-overlay report-overlay';
+            overlay.className = 'app-confirmation report-modal';
+            overlay.setAttribute('aria-labelledby', 'report-title');
             const reasons = [['inappropriate', 'Inappropriate or offensive'], ['wrong', 'Wrong or misleading answers'], ['spam', 'Spam or nonsense'], ['copyright', 'Copied from a test or copyrighted'], ['harassment', 'Bullying or harassment'], ['other', 'Something else']];
-            const label = type === 'deck' ? 'flashcard set' : 'profile';
-            overlay.innerHTML = `<form class="user-profile-modal glass-card report-modal" role="dialog" aria-modal="true" aria-labelledby="report-title">
-                <h3 id="report-title"><i class="fas fa-flag" aria-hidden="true"></i> Report ${this.escapeHTML(label)}</h3>
-                <p class="settings-hint">?${this.escapeHTML(name || 'Untitled')}? will be reviewed by a moderator. Your report is private.</p>
-                <fieldset class="report-reasons"><legend>What's wrong?</legend>${reasons.map(([value, text], index) => `<label><input type="radio" name="reason" value="${value}"${index === 0 ? ' checked' : ''}> ${text}</label>`).join('')}</fieldset>
-                <label>Details (optional)<textarea name="details" rows="3" maxlength="500" placeholder="Which card or what should a moderator look at?"></textarea></label>
+            const content = type === 'deck' || type === 'profile';
+            const label = type === 'deck' ? 'flashcard set' : 'player';
+            overlay.innerHTML = `<form>
+                <h2 id="report-title"><i class="fas fa-flag" aria-hidden="true"></i> ${content ? `Report ${label}` : 'Report a problem'}</h2>
+                <p class="settings-hint">${content ? `${this.escapeHTML(name || 'This item')} will be reviewed by staff.` : 'Tell us about a bug, player behavior, or another concern.'} Reports are private to staff, not posted publicly. Guests can report too; sending requires an internet connection.</p>
+                ${content ? `<fieldset class="report-reasons"><legend>What's wrong?</legend>${reasons.map(([value, text], index) => `<label><input type="radio" name="reason" value="${value}"${index === 0 ? ' checked' : ''}> ${text}</label>`).join('')}</fieldset>`
+                    : `<label for="report-category">Report type<select id="report-category" name="category"><option value="bug">Bug or broken feature</option><option value="player">Player behavior</option><option value="other">Other concern or feedback</option></select></label>
+                    <label for="report-username" class="hidden" id="report-player-field">Player username<input id="report-username" name="username" maxlength="50" autocomplete="off" placeholder="Their exact StudBud username"></label>
+                    <label for="report-subject">Short summary<input id="report-subject" name="subject" required minlength="3" maxlength="120" placeholder="What is the problem?"></label>`}
+                <label for="report-description">${type === 'profile' ? 'What did this player do?' : 'What happened?'}<textarea id="report-description" name="details" rows="5" required minlength="10" maxlength="${content ? 500 : 2000}" placeholder="${type === 'profile' ? 'Explain what they did, where it happened, and roughly when.' : 'For a bug: what you did, what you expected, and what happened instead. For a player: what they did, where, and roughly when.'}"></textarea></label>
+                <small>Please include enough detail to investigate. Do not include passwords or sensitive personal information.</small>
                 <p class="report-status" role="status"></p>
-                <div class="admin-actions"><button type="submit" class="danger-btn">Send report</button><button type="button" class="secondary-btn" data-report-cancel>Cancel</button></div>
+                <div class="admin-actions"><button type="submit" class="primary-btn">Send report</button><button type="button" class="secondary-btn" data-report-cancel>Cancel</button><a class="text-btn" data-report-email href="mailto:villareala8873@parkwayschools.net">Email support instead</a></div>
             </form>`;
             const form = overlay.firstElementChild;
-            const close = () => overlay.remove();
-            overlay.addEventListener('click', event => { if (event.target === overlay || event.target.closest('[data-report-cancel]')) close(); });
-            overlay.addEventListener('keydown', event => { if (event.key === 'Escape') close(); });
+            const close = () => {
+                overlay.close();
+                overlay.remove();
+                if (previous?.isConnected) previous.focus({ preventScroll: true });
+            };
+            overlay.addEventListener('cancel', event => { event.preventDefault(); close(); });
+            overlay.addEventListener('keydown', event => event.stopPropagation());
+            overlay.addEventListener('click', event => {
+                if (event.target.closest('[data-report-cancel]')) close();
+                if (event.target.closest('[data-report-email]')) {
+                    const subject = content ? `Report ${label}: ${name || id}` : form.elements.subject.value.trim() || 'StudBud report';
+                    const body = `${content ? `Type: ${type}\nItem: ${id}` : `Type: ${form.elements.category.value}\nPlayer: ${form.elements.username.value.trim()}`}\n\n${form.elements.details.value.trim()}`;
+                    event.target.closest('a').href = `mailto:villareala8873@parkwayschools.net?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+                }
+            });
+            form.addEventListener('change', event => {
+                if (event.target.name !== 'category') return;
+                const player = event.target.value === 'player';
+                form.querySelector('#report-player-field').classList.toggle('hidden', !player);
+                form.elements.username.required = player;
+            });
             form.addEventListener('submit', async event => {
                 event.preventDefault();
+                if (!form.reportValidity()) return;
                 const status = form.querySelector('.report-status');
                 const button = form.querySelector('[type="submit"]');
                 button.disabled = true;
-                status.textContent = 'Sending?';
+                status.textContent = 'Sending report...';
                 try {
-                    await window.StudBudCommunityGames.reportContent(type, id, form.elements.reason.value, form.elements.details.value.trim());
-                    form.innerHTML = `<h3><i class="fas fa-circle-check" aria-hidden="true"></i> Thanks for reporting</h3><p>A moderator will review this ${this.escapeHTML(label)}. You don't need to do anything else.</p><div class="admin-actions"><button type="button" class="primary-btn" data-report-cancel>Done</button></div>`;
+                    if (content) await window.StudBudCommunityGames.reportContent(type, id, form.elements.reason.value, form.elements.details.value.trim());
+                    else await window.StudBudCommunityGames.reportProblem(form.elements.category.value, form.elements.subject.value.trim(), form.elements.details.value.trim(), form.elements.username.value.trim());
+                    form.innerHTML = '<h2>Report sent</h2><p>Thank you. Your explanation has been sent to staff for review.</p><div class="admin-actions"><button type="button" class="primary-btn" data-report-cancel>Done</button></div>';
                     form.querySelector('[data-report-cancel]')?.focus();
                 } catch (error) {
                     status.textContent = this.friendlyErrorMessage(error, 'Could not send the report. Please try again.');
@@ -8423,7 +8663,8 @@
                 }
             });
             document.body.appendChild(overlay);
-            form.querySelector('input[name="reason"]')?.focus();
+            overlay.showModal();
+            form.querySelector('input[name="reason"], select[name="category"]')?.focus();
         }
 
         async openUserProfile(userId) {
@@ -8476,60 +8717,67 @@
 
         tutorialSteps() {
             return [
-                { title: 'A calmer way to study', text: 'Bring in your classes, choose one next task, then practice what needs attention. This tour explains the new layout and the difference between grades, study time and recall. Jump to any topic below, or finish later and replay from Settings.' },
-                { route: 'dashboard', sel: '#main-nav', title: 'Everything has a place', text: 'Home is your daily launchpad. My classes holds grades, Planner holds tasks, Study holds sets, and Games holds multiplayer and social tools. On a phone these live in the bottom dock; your profile and Settings are at the top. Related pages appear as links that fit the screen without sideways scrolling.' },
-                { route: 'gpa', sel: '#gpa-view .open-ic-import-btn', title: 'Import from Infinite Campus', text: 'Import copies your classes, grades, assignments and schedule into StudBud. It never changes Campus or asks for its password. On a phone, the easiest option is to import on a computer and sync to the same account. Phone-only website instructions and copied helper data are separate options in the import dialog. Review before saving; re-import when grades change.' },
-                { route: 'gpa', sel: '#class-card-grid .class-card, #class-card-grid', title: 'Grade bars with a real goal', text: 'The filled bar is your current class grade. The vertical line is your grade target; the message shows the percentage-point gap or Goal reached. Extra credit can extend the scale past 100%. Open class for assignments, or use Edit goal. These bars are not study completion.' },
-                { route: 'gpa', sel: '#open-target-gpa-btn', title: 'Your GPA goal calculates itself', text: 'GPA from grade targets uses your class goals, credits and course weighting. A class without a target uses its current grade. Set prior GPA and credits in Settings if needed. Use Full grade breakdown below your classes for categories and scores; What-if grades stays separate from real grades.' },
-                { route: 'planner', sel: '.planner-work', title: 'Manage your assignments', text: 'Choose a status to filter your work, search by title or class, and sort by due date, priority or name. Reset filters returns to your preferred default. Suggested next task & study plan expands when you need help deciding where to start. Calendar and Class schedule are separate pages.' },
-                { route: 'planner', sel: '.planner-work', title: 'Time progress is not task completion', text: 'Work on this selects an assignment and opens Home. Choose Edit, then Time estimate & progress to revise minutes left. The percentage compares logged time with the estimate; 100% never marks the task done. Mark it done yourself, then add its score in Grade inbox. Log offline study records work done elsewhere.' },
-                { route: 'dashboard', sel: '.focus-sprint-widget', title: 'No Start button needed', text: 'Flashcards and eligible questions track automatically. For assignments, choose the task here and stay on Home, Planner or its class page. The clock pauses when hidden, unfocused, in a dialog, or after 60 seconds without interaction. Reading quietly may pause it too; log offline or external work manually.' },
-                { route: 'dashboard', sel: '#automatic-study-indicator', title: 'Know when time is counting', text: 'The clock shows elapsed time and whether you are studying or paused. Games count only unlocked question-answering time, not movement, loading or results. Stop working on task ends assignment tracking; it does not delete time you already earned.' },
-                { route: 'study-manage', sel: '#create-deck-btn', title: 'Keep creating separate from practicing', text: 'Manage sets is where you create, edit, organize and share materials. Select New study set, name it and link it to a class or test. Quick add lets you type a term, press Tab, type the definition and press Enter. Import cards accepts a pasted list.' },
-                { route: 'flashcard', sel: '.my-deck-heading', title: 'Your sets come first', text: 'Practice is just for studying: search your sets, sort by recent practice or weakest first, and pin favorites. Creating, importing and reordering live in Manage sets; community materials live in Discover. Sets are practice, never overdue assignments.' },
-                { route: 'flashcard', sel: '#deck-grid .deck-ring, #deck-grid', title: 'Practice what needs attention', text: 'Focus practice starts a session of active terms needing more recall, respecting scheduled rest. Tap a percentage to inspect the focus list. Recall uses up to four recent answers per card; written recall counts twice as much as choices. Question selection reacts to your new answers immediately, not just lifetime accuracy.' },
-                { route: 'study-discover', sel: '.community-deck-browser', title: 'Discover materials without clutter', text: 'Community sets have their own page. Search, preview and add sets here, then return to Practice to study them. Your own materials stay private until you choose to share them in Manage sets.' },
-                { route: 'flashcard', sel: '#deck-grid .deck-card, #deck-grid', title: 'Practice your way', text: 'Study prioritizes cards needing practice. Space flips, 1-4 rates, S stars and T enables typing. Cram all cards lives in the three-dot menu: it keeps the spaced-repetition schedule unchanged, but answers still inform recall. Edit cards and Add card live in Manage sets. A study session fills the screen so other app tools stay out of your way.' },
-                { route: 'exam-arcade', sel: '#workspace-tabs', title: 'Practice games', text: 'Practice turns your sets into quick games: Streak Builder, Lightning Round, Survival, True or False and Memory Match. Answer with the 1\u20134 keys (T or F in True or False), build combos for bonus points and earn up to three stars. Practice Test mixes typing, choices and matching.' },
-                { route: 'multiplayer', sel: '#workspace-tabs', title: 'Play, connect and customize', text: 'Games hosts or joins a room with friends, or plays solo for coins. Buds shows who is online or in a game, with a Join button when a bud is hosting. Leaderboards compares progress, and the Shop has boxes you can open with coins to collect characters, hats and auras for your Locker.' },
-                { route: 'dashboard', sel: '.study-history-disclosure', title: 'Review without the clutter', text: 'Home keeps the next task and automatic clock up front, with schedule and GPA below. Expand Study history & weekly plan to review saved sessions, time by class and suggested practice. Completed work waiting for a score appears below; streaks and daily goals live in Games > Leaderboards.' },
-                { route: 'dashboard', sel: '#classes-nav-item:not(.hidden)', title: 'Classes for students and teachers', text: 'At a Parkway school there is nothing to join: when your teacher is on StudBud, their class and flashcard sets show up automatically for every course in your list. Teachers pick the courses they teach, then see each student\u2019s grades, missing work and study time, and publish flashcard sets the whole class can study.' },
-                { route: 'profile', sel: '#public-profile-card:not(.hidden), #guest-appearance:not(.hidden)', title: 'Keep private data private', text: 'Course discovery is off by default and requires server support. When available, opt in from Public profile, then open a saved class and choose Find classmates. It only finds other opted-in students at your school, not an official roster, and never shares grades, assignments or study history. Real-name and school-tag sharing have separate controls. Export backups from Settings > Data & account.' },
-                { route: 'settings', sel: '#settings-view', title: 'Choose your app and study defaults', text: 'General settings choose your start page, default Planner status, typing style and question side. School & GPA, Appearance, Audio and Data & account have separate sections. Section links wrap on small screens instead of needing sideways scrolling.' },
-                { route: 'appearance', sel: '#ui-theme-select', title: 'Appearance & accessibility', text: 'Follow your device theme or choose light or dark. Set compact spacing, sound and performance options in their own settings sections. Reduced-motion preferences are respected automatically. Open StudBud once online and it keeps working offline.' },
-                { route: 'dashboard', title: 'Your first three steps', text: 'Import classes from Infinite Campus, add an upcoming quiz or assignment, then create a study set for it. Come back to Home each day to see what to work on next. Good luck!' }
+                { title: 'Set up your next school day', text: 'Use your own schoolwork: save a deadline, plan a work block, then answer a flashcard. The path checks off real progress, not button clicks. Skip anything you do not need.' },
+                { route: 'gpa', sel: '#gpa-view .open-ic-import-btn', title: 'Save your classes', text: 'Import from Infinite Campus using the computer or phone instructions. Review the results and save them. You can also use Add class. This checks off once a class is saved.', action: '#gpa-view .open-ic-import-btn', goal: 'classes' },
+                { route: 'planner', sel: '[data-action="planner-add-assignment"]', title: 'Save one real deadline', text: 'Add an assignment you actually need to finish. Choose its class, enter its due date, then save. You can edit all your deadlines later in Tasks.', action: '[data-action="planner-add-assignment"]', goal: 'assignment' },
+                { route: 'planner', sel: '.planner-day-controls', title: 'Set your time for today', text: 'How many minutes can you study today? Enter that in Daily available time. Your planner puts deadlines first and breaks the rest into smaller blocks.', change: '#planner-daily-minutes', goal: 'budget' },
+                { route: 'planner', sel: '#planner-day-queue', title: 'Start one work block', text: 'Choose Work on this for a task you can do now. Keep this page open while you work. Time pauses when you leave or go idle. Mark done only when finished.', action: '[data-action="planner-start-work"]', goal: 'work' },
+                { route: 'study-manage', sel: '#create-deck-btn', title: 'Save three useful flashcards', text: 'Make a New study set for your next quiz. Give it a topic, add at least three terms with answers, and save. Importing a set works too.', action: '#create-deck-btn', goal: 'deck' },
+                { route: 'flashcard', sel: '#deck-grid', title: 'Answer and rate one card', text: 'Choose Study on a set. Think of the answer, reveal it, then choose Again, Hard, Good or Easy honestly. Opening a set alone does not finish this step. Close study to return here.', action: '[data-action="study-deck"], [data-action="study-focus"]', goal: 'answer' },
+                { route: 'settings', sel: '#settings-start-page', title: 'Choose your starting page', text: 'Choose the page you want to see when you open StudBud. Planner is for deciding what to work on; Tasks is your full list of deadlines. Your choice saves automatically.', change: '#settings-start-page', goal: 'preference' }
             ];
         }
 
         startTutorial() {
+            this.plannerScope = 'day';
+            this.plannerDate = '';
             this.endTutorialUI();
             this.tutorialReturnFocus = document.activeElement;
             this.tutorialStep = 0;
             const root = document.createElement('div');
             root.id = 'tutorial-root';
-            root.innerHTML = `<div class="tutorial-spot" hidden></div><div class="tutorial-card" role="dialog" aria-modal="true" aria-labelledby="tutorial-title" aria-describedby="tutorial-description"><div class="tutorial-brand"><span class="tutorial-brand-icon"><i class="fas fa-compass" aria-hidden="true"></i></span><span class="tutorial-brand-copy"><strong>STUDBUD GUIDE</strong><small>A quick tour of your study hub</small></span><button type="button" class="icon-btn tutorial-close" data-tour="skip" aria-label="Close tutorial"><i class="fas fa-times" aria-hidden="true"></i></button></div><div class="tutorial-progress" role="progressbar" aria-label="Tour progress" aria-valuemin="0" aria-valuemax="${this.tutorialSteps().length}"><span class="tutorial-progress-bar"></span></div><div class="tutorial-head"><small class="tutorial-count"></small><label class="tutorial-jump"><span class="sr-only">Jump to a topic</span><select aria-label="Jump to a topic">${this.tutorialSteps().map((step, index) => `<option value="${index}">${index + 1}. ${this.escapeHTML(step.title)}</option>`).join('')}</select></label></div><div class="tutorial-copy" aria-live="polite" aria-atomic="true"><h3 id="tutorial-title"></h3><p id="tutorial-description" class="tutorial-text"></p></div><div class="tutorial-buttons"><button type="button" class="text-btn" data-tour="skip">Finish later</button><span class="tutorial-spacer"></span><button type="button" class="secondary-btn" data-tour="back">Back</button><button type="button" class="primary-btn" data-tour="next">Next</button></div></div>`;
+            root.innerHTML = `<svg class="tutorial-connector" aria-hidden="true"><path></path><circle r="4"></circle></svg><div class="tutorial-spot" hidden></div><section class="tutorial-card" aria-label="Quick start guide"><div class="tutorial-brand"><span class="tutorial-brand-icon"><i class="fas fa-route" aria-hidden="true"></i></span><span class="tutorial-brand-copy"><strong>QUICK START</strong><small>Try it yourself</small></span><button type="button" class="icon-btn" data-tour="collapse" aria-label="Hide guide details" aria-expanded="true"><i class="fas fa-minus" aria-hidden="true"></i></button><button type="button" class="icon-btn tutorial-close" data-tour="skip" aria-label="Close tutorial"><i class="fas fa-times" aria-hidden="true"></i></button></div><ol class="tutorial-path" aria-label="Tutorial steps">${this.tutorialSteps().map((step, index) => `<li><button type="button" data-tour-step="${index}" aria-label="${index + 1}. ${this.escapeHTML(step.title)}">${index + 1}</button></li>`).join('')}</ol><div class="tutorial-head"><small class="tutorial-count"></small></div><div class="tutorial-copy" aria-live="polite" aria-atomic="true"><h3 id="tutorial-title"></h3><p id="tutorial-description" class="tutorial-text"></p></div><p class="tutorial-task-status" role="status"></p><div class="tutorial-buttons"><button type="button" class="secondary-btn" data-tour="back">Back</button><button type="button" class="secondary-btn" data-tour="try">Try it</button><button type="button" class="primary-btn" data-tour="next">Next</button></div></section>`;
             document.body.appendChild(root);
             this.refreshAutomaticStudy();
-            root.querySelector('select').addEventListener('change', event => this.showTutorialStep(Number(event.target.value)));
+            this.tutorialCompletedSteps = new Set();
+            this.tutorialInitialAnswers = new Map((AppState.get('flashcards') || []).flatMap(deck =>
+                (deck.cards || []).map(card => [`${deck.id}/${card.id}`, Number(card.practiceStats?.attempts) || 0])));
+            this.tutorialUnsubscribers = ['state:changed', 'courses:updated', 'assignments:updated', 'flashcards:updated'].map(name =>
+                EventBus.on(name, () => this.checkTutorialProgress()));
+            this.tutorialCollapsed = false;
             root.addEventListener('click', event => {
+                const stepButton = event.target.closest('[data-tour-step]');
+                if (stepButton) { this.showTutorialStep(Number(stepButton.dataset.tourStep)); return; }
                 const button = event.target.closest('[data-tour]');
                 if (!button) return;
                 event.stopPropagation();
                 const kind = button.dataset.tour;
                 if (kind === 'skip') this.finishTutorial();
+                else if (kind === 'collapse') this.toggleTutorialCollapsed(!this.tutorialCollapsed);
+                else if (kind === 'try') {
+                    const step = this.tutorialSteps()[this.tutorialStep];
+                    const target = document.querySelector(step.action || step.change);
+                    if (target && !target.disabled) { target.focus({ preventScroll: true }); if (step.action) target.click(); }
+                    else root.querySelector('.tutorial-task-status').textContent = 'Nothing to try here yet. Skip this step and come back after adding your materials.';
+                }
                 else if (kind === 'back') this.showTutorialStep(this.tutorialStep - 1);
                 else if (this.tutorialStep >= this.tutorialSteps().length - 1) this.finishTutorial();
                 else this.showTutorialStep(this.tutorialStep + 1);
             });
             this.tutorialKeys = event => {
-                if (event.key === 'Escape') { this.finishTutorial(); return; }
-                if (event.key !== 'Tab') return;
-                const controls = [...root.querySelectorAll('button, select')].filter(node => !node.hidden);
-                const first = controls[0], last = controls[controls.length - 1];
-                if ((event.shiftKey && document.activeElement === first) || (!event.shiftKey && document.activeElement === last) || !root.contains(document.activeElement)) {
-                    event.preventDefault(); (event.shiftKey ? last : first).focus();
-                }
+                if (event.key === 'Escape' && !event.defaultPrevented
+                    && document.getElementById('modal-container')?.classList.contains('hidden')) this.finishTutorial();
             };
+            this.tutorialAction = event => {
+                if (root.contains(event.target)) return;
+                const step = this.tutorialSteps()[this.tutorialStep];
+                const selector = event.type === 'change' ? step.change : step.action;
+                if (!selector || !event.target.closest(selector)) return;
+                if (event.type === 'click') this.toggleTutorialCollapsed(true);
+                queueMicrotask(() => this.checkTutorialProgress());
+            };
+            document.addEventListener('click', this.tutorialAction);
+            document.addEventListener('change', this.tutorialAction);
             this.tutorialResize = () => this.refreshTutorialGeometry();
             this.tutorialObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(this.tutorialResize) : null;
             this.tutorialObserver?.observe(root.querySelector('.tutorial-card'));
@@ -8548,30 +8796,72 @@
             window.addEventListener('resize', this.tutorialResize);
             window.addEventListener('scroll', this.tutorialResize, { capture: true, passive: true });
             document.body.classList.add('tutorial-active');
-            this.tutorialBackground = document.getElementById('app-container');
-            if (this.tutorialBackground) {
-                this.tutorialBackgroundWasInert = this.tutorialBackground.inert;
-                this.tutorialBackground.inert = true;
-            }
             this.showTutorialStep(0);
+        }
+
+        completeTutorialAction(index) {
+            this.tutorialCompletedSteps.add(index);
+            const root = document.getElementById('tutorial-root');
+            root.querySelector('.tutorial-task-status').textContent = 'Done! Continue when you are ready.';
+            root.querySelector(`[data-tour-step="${index}"]`).classList.add('is-tried');
+            root.querySelector(`[data-tour-step="${index}"]`).setAttribute('aria-label', `${index + 1}. ${this.tutorialSteps()[index].title} (done)`);
+            root.querySelector('[data-tour="next"]').textContent = index === this.tutorialSteps().length - 1 ? 'Finish' : 'Next';
+        }
+
+        checkTutorialProgress() {
+            if (!document.getElementById('tutorial-root') || this.tutorialCompletedSteps?.has(this.tutorialStep)) return;
+            const goal = this.tutorialSteps()[this.tutorialStep]?.goal;
+            const settings = AppState.get('settings') || {};
+            const decks = AppState.get('flashcards') || [];
+            const completed = goal === 'classes' ? (AppState.get('courses') || []).length > 0
+                : goal === 'assignment' ? (AppState.get('assignments') || []).some(item => !item.dismissed && item.title && item.dueDate && item.courseCode)
+                : goal === 'budget' ? Number.isFinite(settings.plannerDailyMinutes) && settings.plannerDailyMinutes >= 15 && settings.plannerDailyMinutes <= 480
+                : goal === 'work' ? Boolean(this.dashboardSprintAssignmentId)
+                : goal === 'deck' ? decks.some(deck => (deck.cards || []).filter(card => card.front?.trim() && card.back?.trim()).length >= 3)
+                : goal === 'answer' ? decks.some(deck => (deck.cards || []).some(card =>
+                    Number(card.practiceStats?.attempts) > (this.tutorialInitialAnswers.get(`${deck.id}/${card.id}`) || 0)))
+                : goal === 'preference' ? ['dashboard', 'planner', 'study-hub', 'flashcard', 'gpa', 'calendar'].includes(settings.startPage)
+                : false;
+            if (completed) this.completeTutorialAction(this.tutorialStep);
+        }
+
+        toggleTutorialCollapsed(collapsed) {
+            this.tutorialCollapsed = collapsed;
+            const root = document.getElementById('tutorial-root');
+            root.querySelector('.tutorial-card').classList.toggle('is-collapsed', collapsed);
+            const button = root.querySelector('[data-tour="collapse"]');
+            button.setAttribute('aria-label', collapsed ? 'Show guide details' : 'Hide guide details');
+            button.setAttribute('aria-expanded', String(!collapsed));
+            button.innerHTML = `<i class="fas fa-${collapsed ? 'plus' : 'minus'}" aria-hidden="true"></i>`;
+            this.refreshTutorialGeometry();
+            this.refreshAutomaticStudy();
         }
 
         showTutorialStep(index) {
             const steps = this.tutorialSteps();
             const root = document.getElementById('tutorial-root');
             if (!root) return;
+            if (document.querySelector('#modal-container:not(.hidden) .modal-content:not(.hidden)')) {
+                root.querySelector('.tutorial-task-status').textContent = 'Finish or close the open window first. Your form has not been discarded.';
+                return;
+            }
             this.tutorialStep = Math.max(0, Math.min(steps.length - 1, index));
             const step = steps[this.tutorialStep];
+            this.toggleTutorialCollapsed(false);
             if (step.route) Router.navigate(step.route);
             root.querySelector('.tutorial-count').textContent = `Step ${this.tutorialStep + 1} of ${steps.length}`;
-            root.querySelector('.tutorial-progress-bar').style.width = `${((this.tutorialStep + 1) / steps.length) * 100}%`;
-            root.querySelector('.tutorial-progress').setAttribute('aria-valuenow', String(this.tutorialStep + 1));
             root.querySelector('#tutorial-title').textContent = step.title;
             root.querySelector('.tutorial-text').textContent = step.text;
-            root.querySelector('select').value = String(this.tutorialStep);
+            root.querySelectorAll('[data-tour-step]').forEach((button, stepIndex) => {
+                if (stepIndex === this.tutorialStep) button.setAttribute('aria-current', 'step');
+                else button.removeAttribute('aria-current');
+            });
             root.querySelector('[data-tour="back"]').hidden = this.tutorialStep === 0;
-            root.querySelector('[data-tour="next"]').textContent = this.tutorialStep === steps.length - 1 ? 'Finish' : 'Next';
-            root.querySelector('.tutorial-buttons [data-tour="skip"]').hidden = this.tutorialStep === steps.length - 1;
+            const tried = this.tutorialCompletedSteps.has(this.tutorialStep);
+            root.querySelector('[data-tour="next"]').textContent = this.tutorialStep === steps.length - 1 ? 'Finish' : !tried && (step.action || step.change) ? 'Skip step' : 'Next';
+            root.querySelector('[data-tour="try"]').hidden = !step.action && !step.change;
+            root.querySelector('.tutorial-task-status').textContent = tried ? 'Done! Continue when you are ready.' : '';
+            this.checkTutorialProgress();
             const copy = root.querySelector('.tutorial-copy');
             this.tutorialCopyAnimation?.cancel();
             if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -8633,7 +8923,7 @@
             const card = root?.querySelector('.tutorial-card');
             if (!spot || !card) return;
             const view = this.tutorialViewport();
-            const el = this.tutorialTarget();
+            const el = this.tutorialCollapsed ? null : this.tutorialTarget();
             if (el !== this.tutorialObservedTarget) {
                 if (this.tutorialObservedTarget) this.tutorialObserver?.unobserve(this.tutorialObservedTarget);
                 this.tutorialObservedTarget = el;
@@ -8677,12 +8967,12 @@
                 const bottom = Math.ceil(Math.min(view.bottom, bounds.bottom + pad) * dpr) / dpr;
                 Object.assign(spot.style, { left: left + 'px', top: top + 'px', width: (right - left) + 'px', height: (bottom - top) + 'px' });
             }
-            const width = Math.max(0, Math.min(500, view.width - margin * 2));
+            const width = Math.max(0, Math.min(this.tutorialCollapsed ? 240 : 360, view.width - margin * 2));
             const maxHeight = Math.max(0, view.height - margin * 2);
             // Measure intrinsic content without expanding a scrolled card and resetting its scroll position.
             let cardWidth = width, cardHeight = Math.min(maxHeight, card.scrollHeight ? card.scrollHeight + 2 : card.getBoundingClientRect().height);
             let chosen = null;
-            let left = view.left + (view.width - cardWidth) / 2, top = view.top + (view.height - cardHeight) / 2;
+            let left = view.right - cardWidth - margin, top = view.bottom - cardHeight - margin;
             if (bounds) {
                 const spaces = [
                     { side: 'right', width: view.right - bounds.right - gap - margin, height: maxHeight },
@@ -8701,7 +8991,7 @@
             }
             Object.assign(card.style, { width: Math.min(width, chosen?.width ?? width) + 'px', maxHeight: Math.min(maxHeight, chosen?.height ?? maxHeight) + 'px' });
             cardWidth = card.getBoundingClientRect().width; cardHeight = card.getBoundingClientRect().height;
-            left = view.left + (view.width - cardWidth) / 2; top = view.top + (view.height - cardHeight) / 2;
+            left = view.right - cardWidth - margin; top = view.bottom - cardHeight - margin;
             if (bounds && chosen) {
                 const best = chosen;
                 left = bounds.left + (bounds.right - bounds.left - cardWidth) / 2;
@@ -8716,6 +9006,26 @@
             left = Math.max(view.left + margin, Math.min(left, view.right - margin - cardWidth));
             top = Math.max(view.top + margin, Math.min(top, view.bottom - margin - cardHeight));
             Object.assign(card.style, { left: left + 'px', top: top + 'px' });
+            const connector = root.querySelector('.tutorial-connector');
+            if (connector?.querySelector) {
+                connector.classList.toggle('hidden', !bounds || spot.hidden || this.tutorialCollapsed);
+                if (bounds) {
+                    const box = card.getBoundingClientRect();
+                    const centerX = (bounds.left + bounds.right) / 2;
+                    const centerY = (bounds.top + bounds.bottom) / 2;
+                    const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+                    const horizontal = box.left >= bounds.right || box.right <= bounds.left;
+                    const startX = horizontal ? (box.left >= bounds.right ? box.left : box.right) : clamp(centerX, box.left + 12, box.right - 12);
+                    const startY = horizontal ? clamp(centerY, box.top + 12, box.bottom - 12) : (box.top >= bounds.bottom ? box.top : box.bottom);
+                    const endX = horizontal ? (box.left >= bounds.right ? bounds.right : bounds.left) : centerX;
+                    const endY = horizontal ? centerY : (box.top >= bounds.bottom ? bounds.bottom : bounds.top);
+                    const bendX = horizontal ? (startX + endX) / 2 : startX;
+                    const bendY = horizontal ? startY : (startY + endY) / 2;
+                    connector.querySelector('path').setAttribute('d', `M ${startX} ${startY} Q ${bendX} ${bendY} ${endX} ${endY}`);
+                    connector.querySelector('circle').setAttribute('cx', String(endX));
+                    connector.querySelector('circle').setAttribute('cy', String(endY));
+                }
+            }
         }
 
         endTutorialUI() {
@@ -8727,6 +9037,9 @@
             cancelAnimationFrame(this.tutorialFrame);
             this.tutorialFrame = null;
             this.tutorialPreparing = false;
+            this.tutorialUnsubscribers?.forEach(unsubscribe => unsubscribe());
+            this.tutorialUnsubscribers = null;
+            this.tutorialInitialAnswers = null;
             this.tutorialObserver?.disconnect();
             this.tutorialObserver = this.tutorialObservedTarget = this.tutorialScrollTarget = null;
             if (this.tutorialTransition) {
@@ -8735,6 +9048,11 @@
                 this.tutorialTransition = null;
             }
             if (this.tutorialKeys) document.removeEventListener('keydown', this.tutorialKeys);
+            if (this.tutorialAction) {
+                document.removeEventListener('click', this.tutorialAction);
+                document.removeEventListener('change', this.tutorialAction);
+                this.tutorialAction = null;
+            }
             if (this.tutorialResize) {
                 window.removeEventListener('resize', this.tutorialResize);
                 window.removeEventListener('orientationchange', this.tutorialResize);
@@ -8753,7 +9071,7 @@
 
         finishTutorial() {
             this.endTutorialUI();
-            AppState.set('settings', { ...AppState.get('settings'), tutorialSeen: true, tutorialVersion: 2 });
+            AppState.set('settings', { ...AppState.get('settings'), tutorialSeen: true, tutorialVersion: 3 });
             this.syncTutorialUI();
         }
 
@@ -9036,7 +9354,7 @@
         }
 
         async syncStudyTimeEntry(session, refreshBoard = true) {
-            if (!session?.leaderboardSyncPending || !window.StudBudCloud?.user) return;
+            if (!session?.leaderboardSyncPending || !window.StudBudCloud?.user || !window.StudBudCloud.accountReady) return;
             if (Number(session.durationSec) <= 0) return;
             const seconds = Math.min(21600, Math.max(1, Math.round(Number(session.durationSec) || 0)));
             try {
@@ -9062,7 +9380,7 @@
 
         async syncPendingStudyTime() {
             if (window.StudBudCloud?.offlineMode || window.navigator?.onLine === false) return;
-            if (!window.StudBudCloud?.user || !window.StudBudCommunityGames) return;
+            if (!window.StudBudCloud?.user || !window.StudBudCloud.accountReady || !window.StudBudCommunityGames) return;
             const pending = (await NexusDB.getAll('studyHistory')).filter(session => session.leaderboardSyncPending);
             for (const session of pending) await this.syncStudyTimeEntry(session, false);
             if (pending.length) await this.refreshStudyLeaderboard(this.studyLeaderboardPeriod || 'daily');
@@ -9592,10 +9910,6 @@
                             : item
                     );
                     this.saveGradeScenarioItems(scenarios);
-                } else if (id === 'theme-toggle') {
-                    const settings = { ...AppState.get('settings'), theme: document.body.classList.contains('dark-theme') ? 'light' : 'dark' };
-                    AppState.set('settings', settings);
-                    this.applyAppearance();
                 } else if (target.matches('.scheme-option[data-color-scheme]')) {
                     const scheme = target.dataset.colorScheme;
                     const shopItem = target.dataset.shopItem;
@@ -9607,9 +9921,12 @@
                     AppState.set('settings', { ...AppState.get('settings'), colorScheme: scheme, schemePicked: true });
                     this.applyAppearance();
                 } else if (action === 'planner-add-assignment') {
-                    this.openAssignmentForm();
+                    this.openAssignmentForm(null, '', Router.activeRoute === 'planner' ? this.selectedPlannerDate() : '');
+                } else if (action === 'planner-add-event') {
+                    this.selectedCalendarDate = this.selectedPlannerDate();
+                    this.openCalendarEvent();
                 } else if (action === 'add-quiz') {
-                    this.openAssignmentForm(null, '', '', '', 'quiz');
+                    this.openAssignmentForm(null, '', Router.activeRoute === 'planner' ? this.selectedPlannerDate() : '', '', 'quiz');
                 } else if (action === 'friend-accept' || action === 'friend-decline' || action === 'friend-remove') {
                     await this.friendAction(action, target.dataset.id, target.dataset.name);
                 } else if (action === 'assignment-status-filter') {
@@ -9617,7 +9934,9 @@
                     if (filter) filter.value = filter.value === target.dataset.status ? 'all' : target.dataset.status;
                     this.renderAssignments();
                 } else if (action === 'report-content') {
-                    this.openReportDialog(target.dataset.reportType, target.dataset.id, target.dataset.name);
+                    this.openReportDialog(target.dataset.reportType, target.dataset.id, target.dataset.name, target);
+                } else if (action === 'report-problem') {
+                    this.openReportDialog('bug', '', '', target);
                 } else if (action === 'view-profile') {
                     await this.openUserProfile(target.dataset.id);
                 } else if (action === 'view-my-profile') {
@@ -9685,10 +10004,12 @@
                 } else if (id === 'create-deck-btn' || action === 'create-deck') {
                     this.openDeckEditor();
                 } else if (id === 'open-target-gpa-btn') {
+                    this.openGradeGoals();
                     this.openModal('target-gpa-modal');
-                    this.solveTargetGPA();
                 } else if (id === 'run-gpa-solver-btn') {
                     this.solveTargetGPA();
+                } else if (id === 'apply-grade-goals-btn') {
+                    this.applyGradeGoals();
                 } else if (id === 'drawer-toggle-btn' || id === 'mobile-mixer-toggle-btn' || id === 'close-drawer-btn') {
                     const drawer = document.getElementById('sound-drawer');
                     if (drawer) drawer.classList.toggle('collapsed');
@@ -9816,7 +10137,7 @@
         }
 
         handleKeydown(event) {
-            if (document.getElementById('tutorial-root')) return;
+            if (document.getElementById('tutorial-root') && !this.tutorialCollapsed) return;
             if (document.body.classList.contains('mpg-active')) return;
             if (document.getElementById('arcade-game-content')?.offsetParent) this.handleArcadeKey(event);
             if (event.defaultPrevented) return;
@@ -10079,6 +10400,57 @@
         }
 
         handleChange(event) {
+            if (event.target.matches?.('[data-goal-grade], [data-goal-lock]')) {
+                const code = event.target.dataset.goalGrade || event.target.dataset.goalLock;
+                const draft = this.gpaGoalDraft?.get(code);
+                if (!draft) throw new Error('Reopen grade goals before editing this class.');
+                if (event.target.dataset.goalGrade) {
+                    const raw = event.target.value.trim();
+                    if (!event.target.checkValidity()) {
+                        this.solveTargetGPA();
+                        return;
+                    }
+                    draft.targetPct = raw === '' ? null : Number(raw);
+                    if (document.getElementById('grade-goal-source').value === 'gpa') draft.targetLocked = raw !== '';
+                    if (raw === '') draft.targetLocked = false;
+                } else {
+                    if (event.target.checked && draft.targetPct === null) {
+                        event.target.checked = false;
+                        throw new Error('Enter a class target before locking it.');
+                    }
+                    draft.targetLocked = event.target.checked;
+                }
+                this.solveTargetGPA();
+                [...document.querySelectorAll('[data-goal-grade], [data-goal-lock]')]
+                    .find(input => input.dataset.goalGrade === event.target.dataset.goalGrade
+                        && input.dataset.goalLock === event.target.dataset.goalLock)?.focus({ preventScroll: true });
+                return;
+            }
+            if (['grade-goal-source', 'desired-gpa', 'gpa-solver-mode'].includes(event.target.id)) {
+                this.solveTargetGPA();
+                return;
+            }
+            if (event.target.id === 'planner-date') {
+                const value = event.target.value;
+                if (!Number.isFinite(window.PlannerEngine.dateNumber(value))) {
+                    event.target.value = this.selectedPlannerDate();
+                    throw new Error('Choose a valid planner date.');
+                }
+                this.plannerDate = value;
+                this.renderDailyPlanner();
+                return;
+            }
+            if (event.target.id === 'planner-daily-minutes') {
+                const minutes = Number(event.target.value);
+                if (!Number.isInteger(minutes) || minutes < 15 || minutes > 480) {
+                    event.target.value = AppState.get('settings')?.plannerDailyMinutes ?? 90;
+                    throw new Error('Available time must be a whole number from 15 to 480 minutes.');
+                }
+                AppState.set('settings', { ...AppState.get('settings'), plannerDailyMinutes: minutes });
+                this.renderDailyPlanner();
+                document.getElementById('planner-plan-status').textContent = 'Daily available time saved. Deadlines remain in your plan even when they exceed this time.';
+                return;
+            }
             const preference = {
                 'settings-start-page': ['startPage', ['dashboard', 'planner', 'flashcard', 'gpa']],
                 'settings-planner-default': ['plannerDefaultStatus', ['all', 'todo', 'overdue', 'awaiting', 'graded']],
@@ -10159,7 +10531,6 @@
                 this.setMixerLevel(event.target, true);
                 return;
             }
-            if (event.target.id === 'gpa-solver-mode') this.solveTargetGPA();
             if (event.target.id === 'focus-assignment') {
                 this.studyTracker?.stop(this.assignmentStudyTimeId);
                 this.dashboardSprintAssignmentId = event.target.value;
@@ -10467,6 +10838,7 @@
         }
 
         assignmentState(item) {
+            if (item.dismissed) return 'dismissed';
             if (item.icMissing) return item.status === 'completed' ? 'awaiting' : 'overdue';
             if (this.isGradedItem(item)) return 'graded';
             if (item.status === 'completed') return 'awaiting';
@@ -10475,7 +10847,7 @@
         }
 
         isOpenAssignment(item) {
-            return item.status !== 'completed' && (item.icMissing || !this.isGradedItem(item));
+            return !item.dismissed && item.status !== 'completed' && (item.icMissing || !this.isGradedItem(item));
         }
 
         assignmentUpdateList(items) {
@@ -10493,14 +10865,17 @@
                 graded: '<span class="status-pill is-graded"><i class="fas fa-circle-check" aria-hidden="true"></i> Graded</span>',
                 awaiting: '<span class="status-pill is-awaiting"><i class="fas fa-hourglass-half" aria-hidden="true"></i> Done, awaiting grade</span>',
                 overdue: '<span class="status-pill is-overdue"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> Overdue</span>',
-                todo: '<span class="status-pill is-todo"><i class="fas fa-clock" aria-hidden="true"></i> To do</span>'
+                todo: '<span class="status-pill is-todo"><i class="fas fa-clock" aria-hidden="true"></i> To do</span>',
+                dismissed: '<span class="status-pill is-dismissed"><i class="fas fa-box-archive" aria-hidden="true"></i> Dismissed</span>'
             };
             const name = this.escapeHTML(item.title || 'assignment');
-            const buttons = state === 'graded' ? `<button type="button" class="secondary-btn compact-btn" data-action="grade-assignment" data-id="${id}" aria-label="Update grade for ${name}">Update grade</button>`
+            const buttons = state === 'dismissed' ? `<button type="button" class="secondary-btn compact-btn" data-action="restore-assignment" data-id="${id}" aria-label="Restore ${name}">Restore</button>`
+                : state === 'graded' ? `<button type="button" class="secondary-btn compact-btn" data-action="grade-assignment" data-id="${id}" aria-label="Update grade for ${name}">Update grade</button>`
                 : state === 'awaiting'
                     ? `<button type="button" class="primary-btn compact-btn" data-action="grade-assignment" data-id="${id}" aria-label="Add grade for ${name}"><i class="fas fa-pen" aria-hidden="true"></i> Add grade</button><button type="button" class="link-btn" data-action="toggle-assignment" data-id="${id}" aria-label="Mark ${name} as not done">Undo</button>`
                     : `<button type="button" class="secondary-btn compact-btn" data-action="toggle-assignment" data-id="${id}" aria-label="Mark ${name} as done"><i class="fas fa-check" aria-hidden="true"></i> Mark done</button><button type="button" class="link-btn" data-action="grade-assignment" data-id="${id}" aria-label="${this.isGradedItem(item) ? 'Update' : 'Add'} grade for ${name}">${this.isGradedItem(item) ? 'Update' : 'Add'} grade</button>`;
-            return `<div class="assignment-status-cell">${pills[state]}${buttons}</div>`;
+            const dismiss = state === 'overdue' ? `<button type="button" class="link-btn" data-action="dismiss-assignment" data-id="${id}" aria-label="Dismiss ${name}">Dismiss</button>` : '';
+            return `<div class="assignment-status-cell">${pills[state]}${buttons}${dismiss}</div>`;
         }
 
         isGradedItem(item) {
@@ -10523,6 +10898,8 @@
             const onlyCourse = (AppState.get('courses') || []).length === 1 ? AppState.get('courses')[0].code : '';
             document.getElementById('assignment-course').value = assignment ? assignment.courseCode : (courseCode || onlyCourse);
             document.getElementById('assignment-due-date').value = assignment ? (assignment.dueDate || '').slice(0, 10) : (dueDate || localDateKey(new Date()));
+            const plannedDate = document.getElementById('assignment-planned-date');
+            if (plannedDate) plannedDate.value = assignment?.plannedDate || (!assignment && Router.activeRoute === 'planner' ? this.selectedPlannerDate() : '');
             document.getElementById('assignment-points').value = assignment ? Number(Number(assignment.pointsEarned ?? 0).toFixed(2)) : 0;
             document.getElementById('assignment-max-points').value = assignment ? Number(Number(assignment.maxPoints ?? 100).toFixed(2)) : 100;
             document.getElementById('assignment-kind').value = assignment ? assignment.kind || 'assignment' : (kind || 'assignment');
@@ -10631,6 +11008,9 @@
                 throw new Error('That class code is already in use. Choose another code.');
             }
             const targetValue = document.getElementById('course-target-grade').value;
+            if (targetValue !== '' && (!Number.isFinite(Number(targetValue)) || Number(targetValue) < 0 || Number(targetValue) > 100)) {
+                throw new Error('Enter a class target from 0 to 100%, or leave it blank.');
+            }
             const course = {
                 code,
                 school,
@@ -10645,7 +11025,14 @@
             if (existingCourse) {
                 course.categories = existingCourse.categories || [];
             }
-            if (AppState.get('courses').some(item => item.code === code)) AppState.updateCourse(code, course);
+            if (AppState.get('settings')?.gradeGoalSource === 'gpa') {
+                if (AppState.findDuplicateCourse(course, oldCode)) throw new Error('That class is already saved for an overlapping semester.');
+                course.targetLocked = course.targetPct !== (existingCourse?.targetPct ?? null)
+                    ? course.targetPct !== null : Boolean(existingCourse?.targetLocked);
+                const next = existingCourse ? AppState.get('courses').map(item => item.code === oldCode ? { ...item, ...course } : item)
+                    : [...AppState.get('courses'), course];
+                AppState.saveGradeGoals(this.rebalanceGradeGoals(next));
+            } else if (AppState.get('courses').some(item => item.code === code)) AppState.updateCourse(code, course);
             else AppState.addCourse(course);
         }
 
@@ -10669,6 +11056,10 @@
             if (!Number.isFinite(estimatedMinutes) || estimatedMinutes < 5 || estimatedMinutes > 10080) {
                 throw new Error('Estimated time must be from 5 to 10,080 minutes.');
             }
+            const plannedDate = document.getElementById('assignment-planned-date')?.value || '';
+            if (plannedDate && !Number.isFinite(window.PlannerEngine.dateNumber(plannedDate))) {
+                throw new Error('Choose a valid work date, or leave it blank for automatic planning.');
+            }
             const assignment = {
                 id,
                 title: document.getElementById('assignment-name').value.trim(),
@@ -10679,6 +11070,7 @@
                 categoryId: document.getElementById('assignment-category').value || null,
                 kind,
                 estimatedMinutes,
+                plannedDate,
                 ...(remaining && remainingRaw !== (remaining.dataset.original || '') ? {
                     remainingEstimateMinutes: remainingRaw === '' ? null : Number(remainingRaw),
                     remainingEstimateStudiedSeconds: remainingRaw === '' ? null : this.assignmentStudySeconds(id)
@@ -10686,8 +11078,10 @@
                 importance: Number(document.getElementById('assignment-importance').value) || 3,
                 priority: current ? current.priority : 'high',
                 graded,
+                dismissed: formState === 'todo' ? Boolean(current?.dismissed) : false,
                 icMissing: Boolean(current?.icMissing && !gradingNow),
                 status: formState === 'todo' ? 'pending' : 'completed',
+                completedAt: formState === 'todo' ? null : current?.completedAt || localDateKey(new Date()),
                 gradedAt: graded ? (current?.gradedAt || localDateKey(new Date())) : null
             };
             if (current) AppState.updateAssignment(id, assignment);
@@ -10799,6 +11193,52 @@
         async handleDataAction(action, id) {
             const courses = AppState.get('courses') || [];
             const assignments = AppState.get('assignments') || [];
+            if (action === 'open-grade-goals') {
+                this.openGradeGoals();
+                this.openModal('target-gpa-modal');
+            }
+            if (['planner-previous-day', 'planner-next-day', 'planner-today'].includes(action)) {
+                this.plannerDate = action === 'planner-today' ? ''
+                    : window.PlannerEngine.shiftPeriod(this.selectedPlannerDate(), this.plannerScope || 'day', action === 'planner-previous-day' ? -1 : 1);
+                this.renderDailyPlanner();
+            }
+            if (action === 'planner-scope') {
+                if (!['day', 'week', 'month'].includes(id)) throw new Error('Choose Day, Week or Month.');
+                this.plannerScope = id;
+                this.renderDailyPlanner();
+            }
+            if (action === 'planner-open-day') {
+                if (!Number.isFinite(window.PlannerEngine.dateNumber(id))) throw new Error('Choose a valid planner date.');
+                this.plannerDate = id;
+                this.plannerScope = 'day';
+                Router.navigate('planner');
+                document.getElementById('planner-date').focus({ preventScroll: true });
+            }
+            if (action === 'planner-show-library') {
+                Router.navigate('tasks');
+                document.getElementById('assignment-search').focus({ preventScroll: true });
+            }
+            if (action === 'planner-add-to-day' || action === 'planner-clear-date') {
+                const item = assignments.find(item => item.id === id && this.isOpenAssignment(item));
+                if (!item) throw new Error('This work is no longer open. Refresh your plan.');
+                if (action === 'planner-add-to-day' && this.selectedPlannerDate() < localDateKey(new Date())) {
+                    throw new Error('Choose today or a future day to plan unfinished work.');
+                }
+                AppState.updateAssignment(id, { plannedDate: action === 'planner-clear-date' ? '' : this.selectedPlannerDate() });
+                this.renderAssignments();
+                document.getElementById('planner-plan-status').textContent = action === 'planner-clear-date'
+                    ? 'Work date cleared. Automatic suggestions are enabled for this task.'
+                    : `Added to ${this.selectedPlannerDate()}. Its due date has not changed.`;
+            }
+            if (action === 'planner-stop-work') {
+                await this.flushAutomaticStudy();
+                await this.studyTracker?.stop(this.assignmentStudyTimeId);
+                this.dashboardSprintAssignmentId = '';
+                this.assignmentStudyTimeId = null;
+                this.refreshAutomaticStudy();
+                this.renderFocusSprint();
+                this.renderDailyPlanner();
+            }
             if (action === 'clear-work-filters') {
                 document.getElementById('assignment-search').value = '';
                 document.getElementById('assignment-course-filter').value = '';
@@ -10848,8 +11288,29 @@
                     const status = assignment.status === 'completed' ? 'pending' : 'completed';
                     AppState.updateAssignment(id, {
                         status,
+                        dismissed: false,
+                        completedAt: status === 'completed' ? localDateKey(new Date()) : null,
                         graded: assignment.graded ?? Number(assignment.pointsEarned) > 0
                     });
+                }
+            }
+            if (action === 'dismiss-assignment' || action === 'restore-assignment') {
+                const assignment = assignments.find(item => item.id === id);
+                if (!assignment) {
+                    window.StudBudDialogs.notify('That assignment no longer exists. Refresh Tasks and try again.');
+                    return;
+                }
+                const dismissing = action === 'dismiss-assignment';
+                if (dismissing && this.assignmentState(assignment) !== 'overdue') {
+                    window.StudBudDialogs.notify('Only overdue work can be dismissed.');
+                    return;
+                }
+                if (dismissing && !await window.StudBudDialogs.confirm('Dismiss this overdue assignment? It will leave your to-do list and study recommendations, but its grade will not change. Restore it anytime from Tasks → Dismissed.')) return;
+                if (dismissing && this.dashboardSprintAssignmentId === id) await this.flushAutomaticStudy();
+                AppState.updateAssignment(id, { dismissed: dismissing });
+                if (dismissing && this.dashboardSprintAssignmentId === id) {
+                    this.dashboardSprintAssignmentId = '';
+                    this.refreshAutomaticStudy();
                 }
             }
             if (action === 'add-category') {
@@ -10883,7 +11344,10 @@
                 const course = courses.find(item => item.code === Router.selectedClassCode);
                 const input = document.getElementById('class-target-percent');
                 if (course && String(input.value).trim() === '') {
-                    AppState.updateCourse(course.code, { targetPct: null, targetGrade: null });
+                    if (AppState.get('settings')?.gradeGoalSource === 'gpa') {
+                        AppState.saveGradeGoals(this.rebalanceGradeGoals(courses.map(item => item.code === course.code
+                            ? { ...item, targetPct: null, targetGrade: null, targetLocked: false } : item)));
+                    } else AppState.updateCourse(course.code, { targetPct: null, targetGrade: null, targetLocked: false });
                     this.renderClassDetail();
                     return;
                 }
@@ -10892,7 +11356,10 @@
                     window.StudBudDialogs.notify('Enter a target between 0 and 100%.');
                     return;
                 }
-                AppState.updateCourse(course.code, { targetPct, targetGrade: this.gradeForPercentage(targetPct, course) });
+                if (AppState.get('settings')?.gradeGoalSource === 'gpa') {
+                    AppState.saveGradeGoals(this.rebalanceGradeGoals(courses.map(item => item.code === course.code
+                        ? { ...item, targetPct, targetGrade: this.gradeForPercentage(targetPct, course), targetLocked: true } : item)));
+                } else AppState.updateCourse(course.code, { targetPct, targetGrade: this.gradeForPercentage(targetPct, course) });
                 this.renderClassDetail();
             }
             if (action === 'toggle-deck-pin') {
@@ -10915,14 +11382,19 @@
                 this.openCardForm(id);
             }
             if (action === 'edit-deck') this.openDeckEditor(id);
-            if (action === 'work-on-assignment') {
+            if (action === 'work-on-assignment' || action === 'planner-start-work') {
                 const item = (AppState.get('assignments') || []).find(item => item.id === id && this.isOpenAssignment(item));
                 if (!item) throw new Error('Choose an incomplete assignment to work on.');
                 this.studyTracker?.stop(this.assignmentStudyTimeId);
                 this.dashboardSprintAssignmentId = id;
                 this.assignmentStudyTimeId = null;
-                Router.navigate('dashboard');
+                if (action === 'planner-start-work') {
+                    this.plannerScope = 'day';
+                    this.plannerDate = '';
+                }
+                Router.navigate(action === 'planner-start-work' ? 'planner' : 'dashboard');
                 this.renderFocusSprint();
+                this.renderDailyPlanner();
                 this.refreshAutomaticStudy();
             }
             if (action === 'view-weak-cards') this.openDeckEditor(id, 'weak');
@@ -11342,40 +11814,103 @@
             this.exitStudyFocus(deckId);
         }
 
+        openGradeGoals() {
+            const courses = AppState.get('courses') || [], settings = AppState.get('settings') || {};
+            this.gpaGoalDraft = new Map(courses.map(course => [course.code, {
+                targetPct: this.hasCourseTarget(course) ? Number(course.targetPct) : null,
+                targetLocked: Boolean(course.targetLocked)
+            }]));
+            this.gpaGoalCourseSnapshot = JSON.stringify(courses);
+            document.getElementById('solver-course-breakdown').innerHTML = '';
+            document.getElementById('grade-goal-source').value = settings.gradeGoalSource || 'grades';
+            document.getElementById('gpa-solver-mode').value = settings.gradeGoalWeight || 'weighted';
+            const current = this.calculateTargetGPA(courses);
+            document.getElementById('desired-gpa').value = settings.gradeGoalGpa ?? (Number(current.totalCredits) > 0 ? Number(current.weighted).toFixed(2) : '3.5');
+            this.solveTargetGPA();
+        }
+
         solveTargetGPA() {
             const mode = document.getElementById('gpa-solver-mode').value;
-            const courses = AppState.get('courses') || [];
-            const goal = this.calculateTargetGPA(courses);
-            const target = Number(goal[mode === 'weighted' ? 'weighted' : 'unweighted']);
-            document.getElementById('desired-gpa').value = Number(goal.totalCredits) > 0 ? target.toFixed(2) : '';
+            const source = document.getElementById('grade-goal-source').value;
+            const courses = (AppState.get('courses') || []).map(course => ({ ...course, ...this.gpaGoalDraft.get(course.code) }));
+            const input = document.getElementById('desired-gpa');
+            input.readOnly = source === 'grades';
+            const requested = input.value === '' ? NaN : Number(input.value);
+            const apply = document.getElementById('apply-grade-goals-btn');
+            this.gpaGoalPreview = null;
+            apply.disabled = true;
             const output = document.getElementById('solver-output-percentage');
             const results = document.getElementById('solver-results');
-            let detail = document.getElementById('solver-course-breakdown');
-            if (!detail) {
-                detail = document.createElement('ul');
-                detail.id = 'solver-course-breakdown';
-                detail.className = 'solver-course-breakdown';
-                results.append(detail);
-            }
+            const detail = document.getElementById('solver-course-breakdown');
             results.classList.remove('hidden');
+            const invalid = [...document.querySelectorAll('#target-gpa-modal [data-goal-grade]')].find(field => !field.checkValidity());
+            if (invalid) {
+                invalid.setAttribute('aria-invalid', 'true');
+                output.textContent = 'Class targets must be from 0 to 100%, with at most two decimal places. Correct the highlighted target before applying.';
+                return;
+            }
             if (!courses.length) {
                 output.textContent = 'Add classes first';
                 detail.innerHTML = '';
                 return;
             }
+            let plan;
+            if (source === 'gpa') {
+                if (!Number.isFinite(requested) || requested < 0 || requested > 5) {
+                    output.textContent = 'Enter a GPA from 0 to 5.';
+                    return;
+                }
+                plan = this.gpaTargetPlan(requested, mode, courses);
+                courses.forEach(course => {
+                    if (!course.targetLocked && Number(course.credits) > 0) {
+                        course.targetPct = plan.byCode.get(course.code).minPct;
+                        this.gpaGoalDraft.get(course.code).targetPct = course.targetPct;
+                    }
+                });
+            }
+            const goal = this.calculateTargetGPA(courses);
+            const target = Number(goal[mode]);
+            if (source === 'grades') input.value = Number(goal.totalCredits) > 0 ? target.toFixed(3) : '';
             const tracked = this.calculateTrackedGPA(courses);
-            const current = Number(mode === 'weighted' ? tracked.weighted : tracked.unweighted);
+            const current = Number(tracked[mode]);
             const rows = courses.map(course => {
-                const needed = this.effectiveCourseTarget(course);
                 const grade = this.calculateCourseGrade(course);
                 const gradeText = grade === null ? 'no grades yet' : `now ${grade.toFixed(2)}%`;
-                const status = !Number.isFinite(needed) ? 'no class target; current grade used when available'
-                    : `target ${needed.toFixed(2)}% (${this.gradeForPercentage(needed, course)})`;
-                return `<li><strong>${this.escapeHTML(course.title || course.code)}</strong><span>${this.escapeHTML(gradeText)} · ${this.escapeHTML(status)}</span></li>`;
+                const code = this.escapeHTML(course.code), name = this.escapeHTML(course.title || course.code);
+                return `<li><div><strong>${name}</strong><small>${this.escapeHTML(gradeText)} · ${this.formatNumber(Number(course.credits) || 0)} credits${course.isWeighted ? ' · weighted' : ''}</small></div>
+                    <label class="goal-grade-input"><span>Target %</span><input type="number" min="0" max="100" step="0.01" data-goal-grade="${code}" value="${course.targetPct ?? ''}" placeholder="Current grade" aria-label="Target percentage for ${name}"></label>
+                    <span class="goal-letter">${course.targetPct === null || course.targetPct === undefined ? 'Auto' : this.escapeHTML(this.gradeForPercentage(course.targetPct, course))}</span>
+                    <label class="goal-lock"><input type="checkbox" data-goal-lock="${code}" ${course.targetLocked ? 'checked' : ''}> Keep fixed<span class="sr-only"> for ${name}</span></label></li>`;
             });
             const currentText = Number(tracked.totalCredits) > 0 ? `Current ${mode} GPA ${current.toFixed(2)}` : 'No graded classes yet';
-            output.textContent = Number(goal.totalCredits) > 0 ? `${currentText} → target ${target.toFixed(2)}` : 'Set a class grade target to calculate your GPA goal';
+            output.textContent = source === 'gpa' && !plan.reachable
+                ? `Not reachable with these locks and credits. Maximum ${mode} GPA: ${plan.gpa.toFixed(3)}. Lower your goal or unlock a class.`
+                : Number(goal.totalCredits) > 0 ? `${currentText} → planned ${mode} GPA ${target.toFixed(3)}` : 'Set class targets to calculate your GPA goal.';
             detail.innerHTML = rows.join('');
+            this.gpaGoalPreview = { courses, source, mode, requested, reachable: source !== 'gpa' || plan.reachable };
+            apply.disabled = !this.gpaGoalPreview.reachable;
+        }
+
+        applyGradeGoals() {
+            for (const input of document.querySelectorAll('[data-goal-grade]')) {
+                if (!input.reportValidity()) throw new Error('Check the class target percentages before applying.');
+            }
+            if (JSON.stringify(AppState.get('courses') || []) !== this.gpaGoalCourseSnapshot) {
+                throw new Error('Your classes changed while this window was open. Close and reopen grade goals to use the latest data.');
+            }
+            this.solveTargetGPA();
+            const preview = this.gpaGoalPreview;
+            if (!preview?.reachable) throw new Error('Choose a reachable GPA goal before applying targets.');
+            const courses = preview.courses.map(course => ({
+                ...course, targetGrade: this.hasCourseTarget(course) ? this.gradeForPercentage(course.targetPct, course) : null
+            }));
+            AppState.saveGradeGoals(courses, { ...AppState.get('settings'),
+                gradeGoalSource: preview.source, gradeGoalWeight: preview.mode,
+                gradeGoalGpa: preview.source === 'gpa' ? preview.requested : null
+            });
+            this.gpaGoalDraft = null;
+            this.closeModal();
+            this.renderUI();
         }
 
         async saveProfile() {
@@ -11689,7 +12224,7 @@
         }
 
         automaticStudyContext() {
-            if (document.getElementById('tutorial-root')) return null;
+            if (document.getElementById('tutorial-root') && !this.tutorialCollapsed) return null;
             if (window.StudBudCloud?.guestLobbyOpen) return null;
             const auth = document.getElementById('auth-screen');
             if (auth && !auth.classList.contains('hidden')) return null;
@@ -12475,6 +13010,10 @@
 
     const start = () => window.StudBudCloud.bootstrap().catch(error => {
         console.error('[NexusApp] Startup failed:', error);
+        if (window.StudBudCloud.pendingConflict) {
+            window.StudBudCloud.reportAccountError(error);
+            return;
+        }
         const status = document.getElementById('auth-status');
         if (status) {
             status.textContent = `StudBud could not start. ${window.NexusApp.friendlyErrorMessage(error, 'Reload the page and try again.')}`;

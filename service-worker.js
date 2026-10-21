@@ -1,4 +1,4 @@
-const CACHE_NAME = 'studbud-shell-v176';
+const CACHE_NAME = 'studbud-shell-v177';
 let offlineNavigation = false;
 const PUBLIC_DEPENDENCIES = [
     'https://cdn.jsdelivr.net/npm/chart.js',
@@ -11,6 +11,9 @@ const PUBLIC_DEPENDENCIES = [
 const APP_FILES = [
     './',
     './index.html',
+    './join/',
+    './join/index.html',
+    './join.js',
     './styles.css',
     './assets/fonts/nunito-latin.woff2',
     './manifest.webmanifest',
@@ -98,19 +101,22 @@ self.addEventListener('fetch', event => {
     }
 
     if (request.mode === 'navigate') {
+        const joinPath = new URL('join/', self.registration.scope).pathname;
+        const shell = [joinPath, joinPath.slice(0, -1), `${joinPath}index.html`].includes(url.pathname)
+            ? './join/index.html' : './index.html';
         event.respondWith(
             fetchWithTimeout(request)
                 .then(response => {
                     offlineNavigation = false;
                     if (response.ok) {
                         const copy = response.clone();
-                        caches.open(CACHE_NAME).then(cache => cache.put('./index.html', copy));
+                        event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.put(shell, copy)));
                     }
                     return response;
                 })
                 .catch(async () => {
                     offlineNavigation = true;
-                    return (await caches.match('./index.html')) || new Response('The offline app is not cached. Reconnect and open StudBud once.', { status: 503 });
+                    return (await caches.match(shell)) || new Response('The offline page is not cached. Reconnect and open StudBud once.', { status: 503 });
                 })
         );
         return;

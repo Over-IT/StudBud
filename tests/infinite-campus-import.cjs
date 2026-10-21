@@ -393,9 +393,12 @@ async function mobileImport() {
     await app.previewInfiniteCampusFromInput();
     assert.strictEqual(preview.sections.length, 3, 'downloaded JSON works through the phone file picker');
     const steps = app.tutorialSteps();
-    assert.strictEqual(steps[2].title, 'Import from Infinite Campus', 'Campus import is step 3, before manual setup and dashboard explanations');
-    assert.strictEqual(steps.filter(step => step.title === 'Import from Infinite Campus').length, 1);
-    assert.match(steps[2].text, /phone/);
+    assert.strictEqual(steps[1].title, 'Save your classes', 'Campus import is early in the shorter hands-on guide');
+    assert.strictEqual(steps.filter(step => step.action?.includes('open-ic-import')).length, 1);
+    assert.match(steps[1].text, /phone/);
+    assert.equal(steps.length, 8, 'the basic guide stays short');
+    assert.ok(steps.every(step => step.text.length <= 210), 'each step gives one short instruction');
+    assert.equal(steps.filter(step => step.action || step.change).length, 7, 'steps point to actions rather than pages of explanation');
 
     class HelperElement {
         constructor(tag) { this.tag = tag; this.children = []; this.handlers = {}; this.style = {}; }

@@ -35,6 +35,124 @@
         // 1. MULTI-VARIABLE PRIORITY CALCULUS ENGINE
         // ============================================================================
 
+        dateNumber(value) {
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return NaN;
+            const time = Date.parse(`${value}T00:00:00Z`);
+            return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === value
+                ? time / 86400000 : NaN;
+        }
+
+        period(date, scope = 'day') {
+            const day = this.dateNumber(date);
+            if (!Number.isFinite(day) || !['day', 'week', 'month'].includes(scope)) {
+                throw new Error('Choose a valid planner date and Day, Week or Month.');
+            }
+            const at = new Date(day * 86400000);
+            const start = scope === 'week' ? day - (at.getUTCDay() + 6) % 7
+                : scope === 'month' ? day - at.getUTCDate() + 1 : day;
+            const length = scope === 'week' ? 7 : scope === 'month'
+                ? new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + 1, 0)).getUTCDate() : 1;
+            const days = Array.from({ length }, (_, index) => new Date((start + index) * 86400000).toISOString().slice(0, 10));
+            return { scope, start: days[0], end: days[days.length - 1], days };
+        }
+
+        shiftPeriod(date, scope, direction) {
+            const period = this.period(date, scope);
+            if (![-1, 1].includes(direction)) throw new Error('Choose the previous or next period.');
+            if (scope !== 'month') {
+                return new Date((this.dateNumber(date) + direction * period.days.length) * 86400000).toISOString().slice(0, 10);
+            }
+            const at = new Date(`${date}T00:00:00Z`);
+            const next = new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + direction, 1));
+            next.setUTCDate(Math.min(at.getUTCDate(), new Date(Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 1, 0)).getUTCDate()));
+            return next.toISOString().slice(0, 10);
+        }
+
+        agenda(tasks, events, { date, today, scope = 'day' }) {
+            const period = this.period(date, scope);
+            if (!Number.isFinite(this.dateNumber(today))) throw new Error('Choose a valid current date.');
+            const inPeriod = value => Number.isFinite(this.dateNumber(value)) && value >= period.start && value <= period.end;
+            const dueDate = task => String(task.dueDate || '').slice(0, 10);
+            const overdue = tasks.filter(task => task.open && (task.icMissing || dueDate(task) < today && Number.isFinite(this.dateNumber(dueDate(task)))));
+            const overdueSet = new Set(overdue);
+            const focus = period.end < today ? [] : tasks.filter(task => task.open
+                && (overdueSet.has(task) || inPeriod(dueDate(task)) || inPeriod(task.plannedDate)))
+                .sort((a, b) => Number(overdueSet.has(b)) - Number(overdueSet.has(a))
+                    || (dueDate(a) || '9999').localeCompare(dueDate(b) || '9999')
+                    || (Number(b.score) || 0) - (Number(a.score) || 0));
+            return {
+                ...period, focus, overdue: period.end < today ? [] : overdue,
+                days: period.days.map(date => ({
+                    date,
+                    due: tasks.filter(task => dueDate(task) === date),
+                    planned: tasks.filter(task => task.open && task.plannedDate === date && dueDate(task) !== date),
+                    events: events.filter(event => event.date === date)
+                        .sort((a, b) => (a.time || '').localeCompare(b.time || '') || String(a.title).localeCompare(String(b.title)))
+                }))
+            };
+        }
+
+        dailyPlan(tasks, { date, today, budget = 90, studiedMinutes = 0 }) {
+            const day = this.dateNumber(date);
+            if (!Number.isFinite(day) || !Number.isFinite(this.dateNumber(today))) {
+                throw new Error('Choose a valid day for your plan.');
+            }
+            if (!Number.isInteger(budget) || budget < 15 || budget > 480) {
+                throw new Error('Daily available time must be a whole number from 15 to 480 minutes.');
+            }
+            const candidates = tasks.filter(task => task.open).map(task => {
+                const due = this.dateNumber(String(task.dueDate || '').slice(0, 10));
+                const planned = this.dateNumber(task.plannedDate);
+                const days = due - day;
+                const urgent = task.icMissing || days <= 0;
+                const scheduled = planned === day;
+                const missedPlan = planned < day && day === this.dateNumber(today);
+                const remaining = Math.max(0, Math.ceil(Number(task.remainingMinutes) || 0));
+                const assessment = ['quiz', 'test'].includes(String(task.kind || '').toLowerCase());
+                // Daily study blocks include work already logged on this day, so a checkpoint cannot create a new block.
+                const logged = Math.max(0, Number(task.dayMinutes) || 0);
+                const dailyTarget = Math.min(remaining + logged, 60,
+                    Math.max(15, Math.ceil((remaining + logged) / Math.max(1, Math.min(5, days || 1)) / 5) * 5));
+                const minutes = urgent ? remaining
+                    : assessment || remaining > 60 ? Math.max(0, Math.ceil(dailyTarget - logged)) : remaining;
+                let reason = task.icMissing ? 'Marked missing. Check what needs to be finished or turned in.'
+                    : days < 0 ? 'Past due. Finish or turn it in first.'
+                    : days === 0 ? 'Due this day. Finish or turn it in before moving on.'
+                    : scheduled ? 'You chose to work on this day.'
+                    : missedPlan ? 'Planned for an earlier day and still unfinished.'
+                    : days === 1 ? 'Due tomorrow. Get it ready before the deadline.'
+                    : assessment ? 'Prepare a little at a time before the assessment.'
+                    : remaining > 60 ? 'Start a manageable block instead of leaving a big task until the last day.'
+                    : !Number.isFinite(due) ? 'No deadline yet. Use spare time, or add a due date.'
+                    : 'Get ahead while there is time.';
+                if (Number.isFinite(planned) && planned > day && urgent) reason += ' Your later work date does not move the deadline.';
+                return { ...task, days, remaining, assessment, urgent, scheduled, missedPlan, minutes, reason,
+                    rank: urgent ? 0 : scheduled || missedPlan ? 1 : days === 1 ? 2 : assessment ? 3 : 4 };
+            }).sort((a, b) => a.rank - b.rank
+                || (Number.isFinite(a.days) ? a.days : Infinity) - (Number.isFinite(b.days) ? b.days : Infinity)
+                || (Number(b.score) || 0) - (Number(a.score) || 0)
+                || a.remaining - b.remaining || String(a.id).localeCompare(String(b.id)));
+            const required = candidates.filter(task => task.urgent || task.scheduled || task.missedPlan);
+            const queue = [...required];
+            let available = Math.max(0, budget - Math.max(0, studiedMinutes) - required.reduce((sum, task) => sum + task.minutes, 0));
+            for (const task of candidates) {
+                if (queue.includes(task) || task.minutes <= 0 || Number.isFinite(this.dateNumber(task.plannedDate))
+                    || (Number.isFinite(task.days) && task.days > 7) || available <= 0 || queue.length >= Math.max(required.length, 5)) continue;
+                const minutes = Math.min(task.minutes, available);
+                queue.push({ ...task, minutes });
+                available -= minutes;
+            }
+            const remainingMinutes = queue.reduce((sum, task) => sum + task.minutes, 0);
+            const chosen = new Set(queue.map(task => task.id));
+            return {
+                date, budget, queue, remainingMinutes,
+                studiedMinutes: Math.max(0, studiedMinutes),
+                overBudget: Math.max(0, Math.ceil(remainingMinutes + studiedMinutes - budget)),
+                later: candidates.filter(task => !chosen.has(task.id)),
+                urgentCount: required.filter(task => task.urgent).length
+            };
+        }
+
         /**
          * Calculates task urgency score P using the formula:
          * P = (10 / (d + 0.5)) * w * (1 + 1 / (1 + e^(10 * (deltaG - 0.02)))) * (2 - P(L)) * B

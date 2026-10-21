@@ -21,7 +21,8 @@ function session(mode) {
         vw: 1280, vh: 720, mouse: { x: 640, y: 360, active: false },
         overlay: { classList: { contains: () => false } },
         axis: () => ({ x: 0, y: 0 }), down: () => false, remoteList: () => [],
-        sfx: noop, toast: message => s.messages.push(message), messages: [],
+        sfx: noop, toast: message => s.messages.push(message), messages: [], notices: [],
+        updateResourceNotice: resource => s.notices.push(resource.label),
         addScore: noop, setGoal: noop, emit: noop, ask: () => false,
         spend: amount => A.Session.prototype.spend.call(s, amount)
     };
@@ -108,7 +109,8 @@ for (const fps of [30, 60, 120]) {
     g.res.value = 0;
     for (let i = 0; i < fps; i++) g.update(1 / fps);
     assert.ok(g.me.vx <= g.baseSpeed * .08 + 24 + .001, 'empty boat cannot chase at full speed');
-    assert.ok(s.messages.some(message => /Out of energy/.test(message)), 'empty steering prompts a question');
+    assert.ok(s.notices.includes('Energy'), 'empty steering reopens the shared question prompt');
+    assert.ok(!s.messages.some(message => /Out of energy/.test(message)), 'empty steering does not add a duplicate warning toast');
     g.cast = null; g.castCd = 0; s.mouse.pressed = true; g.update(1 / fps);
     assert.equal(g.cast, null, 'empty boats cannot cast');
     s.mouse.pressed = false; s.axis = () => ({ x: 0, y: 0 });

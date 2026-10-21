@@ -1619,8 +1619,6 @@
                 if (this.recoverIfTrapped()) return;
             }
             const exhausted = !this.finished && s.game.res.value < 0.5;
-            if (exhausted && !this.wasExhausted) s.toast('Out of energy — no control! Press Q for a question', '#f87171');
-            this.wasExhausted = exhausted;
 
             const deepSpace = this.inDeepSpace();
 

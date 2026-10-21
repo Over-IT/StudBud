@@ -54,14 +54,7 @@
             </section>
             <p id="auth-status" class="auth-message" role="status" aria-live="polite"></p>
             <p class="auth-switch"><span id="auth-switch-prompt">New to StudBud?</span> <button id="auth-switch-btn" type="button" class="text-btn">Create an account</button></p>
-            <details class="guest-join">
-                <summary>Just joining a game? Enter a code</summary>
-                <form id="guest-game-form" class="auth-form">
-                    <label>Player name<input name="nickname" autocomplete="nickname" minlength="2" maxlength="20" pattern="[A-Za-z0-9 _\-]{2,20}" required></label>
-                    <label>Room code<input name="roomCode" autocomplete="off" minlength="6" maxlength="6" pattern="[A-HJ-NP-Za-hj-np-z2-9]{6}" required></label>
-                    <button type="submit" class="primary-btn full-width">Join game</button>
-                </form>
-            </details>
+            <a id="guest-join" class="guest-join join-shortcut" href="join/">Just joining a game? Enter a code <i class="fas fa-arrow-right" aria-hidden="true"></i></a>
             <p class="settings-hint auth-legal"><a href="privacy.html" target="_blank" rel="noopener">Privacy policy</a></p>
         </div>
         <div id="guest-game-lobby" class="glass-card hidden"></div>
@@ -160,11 +153,6 @@
                 </div>
                 
                 <div class="header-right">
-                    <div class="header-badge glass-card" id="automatic-study-indicator" title="Counts active study only. Pauses when hidden, unfocused or inactive for 60 seconds.">
-                        <i class="fas fa-stopwatch" aria-hidden="true"></i>
-                        <span class="focus-time-display">00:00</span>
-                        <span class="auto-study-state">Not studying</span>
-                    </div>
                     <!-- Burnout Warning Indicator -->
                     <div id="burnout-indicator" class="header-badge warning hidden">
                         <i class="fas fa-fire-alt"></i>
@@ -175,10 +163,6 @@
                         <i class="fas fa-graduation-cap"></i>
                         <span id="header-grade-level">Class of 2026</span>
                     </div>
-                    <div id="current-term-badge" class="header-badge glass-card">
-                        <i class="fas fa-calendar-week"></i>
-                        <span id="current-term-display">Semester 1</span>
-                    </div>
                     <button id="install-app-button" class="header-badge glass-card hidden" type="button" aria-label="Install StudBud on this device">
                         <i class="fas fa-download"></i>
                         <span>Install app</span>
@@ -188,10 +172,6 @@
                         <span id="multiplayer-header-name">Student</span>
                     </button>
 
-                    <!-- Light/Dark Theme Toggle -->
-                    <button id="theme-toggle" class="icon-btn" aria-label="Switch light and dark mode" title="Switch light and dark mode">
-                        <i class="fas fa-sun"></i>
-                    </button>
                     <button class="icon-btn header-settings-button" type="button" data-target="settings-view" aria-label="Open settings" title="Settings"><i class="fas fa-gear" aria-hidden="true"></i></button>
                 </div>
             </header>
@@ -290,7 +270,7 @@
                         </label>
                         <div class="actions">
                             <button id="add-course-btn" class="secondary-btn"><i class="fas fa-plus"></i> Add Class</button>
-                            <button id="open-target-gpa-btn" class="secondary-btn"><i class="fas fa-bullseye"></i> GPA from grade targets</button>
+                            <button id="open-target-gpa-btn" class="secondary-btn"><i class="fas fa-bullseye"></i> Grade &amp; GPA goals</button>
                             <button class="primary-btn open-ic-import-btn" type="button"><i class="fas fa-cloud-arrow-down"></i> Import from Infinite Campus</button>
                         </div>
                     </div>
@@ -371,28 +351,51 @@
                 <section id="planner-view" class="view student-workspace hidden">
                     <div class="planner-grid">
                         <header class="planner-page-header">
-                            <div><h2>Planner</h2><p class="settings-hint">Track assignments, prepare for tests, and update your progress.</p></div>
+                            <div><h2 id="planner-page-title">Planner</h2><p id="planner-page-description" class="settings-hint">Your schedule, deadlines, and a clear idea of what to work on.</p></div>
                             <div class="assignment-quick-actions">
                                 <button type="button" class="primary-btn" data-action="planner-add-assignment"><i class="fas fa-plus" aria-hidden="true"></i> Add assignment</button>
                                 <button type="button" class="secondary-btn" data-action="add-quiz"><i class="fas fa-plus" aria-hidden="true"></i> Add quiz / test</button>
+                                <button type="button" class="secondary-btn" data-action="planner-add-event" data-planner-panel="plan"><i class="fas fa-calendar-plus" aria-hidden="true"></i> Add event</button>
                             </div>
                         </header>
-                        <details class="planner-suggestions">
-                            <summary>Suggested next task &amp; study plan</summary>
-                        <div class="planner-overview">
-                            <section class="glass-card planner-focus" aria-labelledby="planner-next-heading">
-                                <header class="planner-section-header"><span class="planner-eyebrow">Your next step</span><h3 id="planner-next-heading">Work on next</h3><p class="settings-hint">One assignment to start with. Suggestions are independent of the filters below.</p></header>
-                                <div id="planner-next-task" aria-live="polite"></div>
+                        <section class="planner-day-controls" data-planner-panel="plan" aria-label="Planner dates and view">
+                            <div class="planner-date-controls">
+                                <button type="button" class="secondary-btn" data-action="planner-previous-day" aria-label="Previous day"><i class="fas fa-chevron-left" aria-hidden="true"></i></button>
+                                <label for="planner-date"><span>Date</span><input type="date" id="planner-date"></label>
+                                <button type="button" class="secondary-btn" data-action="planner-next-day" aria-label="Next day"><i class="fas fa-chevron-right" aria-hidden="true"></i></button>
+                                <button type="button" class="text-btn" data-action="planner-today">Today</button>
+                            </div>
+                            <div class="planner-view-switch" role="group" aria-label="Planner time span">
+                                <button type="button" data-action="planner-scope" data-id="day" aria-pressed="true">Day</button>
+                                <button type="button" data-action="planner-scope" data-id="week" aria-pressed="false">Week</button>
+                                <button type="button" data-action="planner-scope" data-id="month" aria-pressed="false">Month</button>
+                            </div>
+                            <label class="planner-budget" for="planner-daily-minutes"><span>Daily available time</span><span><input id="planner-daily-minutes" type="number" min="15" max="480" step="1" value="90"> min</span></label>
+                        </section>
+                        <p id="planner-plan-status" class="settings-hint" role="status" data-planner-panel="plan"></p>
+                        <div data-planner-panel="plan" class="planner-plan-content">
+                        <section id="planner-period" class="hidden" aria-labelledby="planner-period-heading"></section>
+                        <div id="planner-day-summary" class="planner-day-summary" aria-live="polite"></div>
+                        <div id="planner-daily-layout" class="planner-daily-layout">
+                            <section class="planner-day-work" aria-labelledby="planner-day-heading">
+                                <header class="planner-section-header"><h3 id="planner-day-heading" tabindex="-1">Your day</h3><p id="planner-day-description" class="settings-hint">Deadlines first, then work you chose and a few suggested blocks.</p></header>
+                                <div id="planner-active-work" class="hidden"></div>
+                                <div id="planner-day-queue"></div>
+                                <div id="planner-day-completed"></div>
                             </section>
-                            <section class="glass-card planner-prep planner-work-section" aria-labelledby="planner-prep-heading">
-                                <header class="planner-section-header"><span class="planner-eyebrow">Prepare ahead</span><h3 id="planner-prep-heading">Study plan</h3><p class="settings-hint">Study sessions for your open quizzes and tests.</p></header>
-                                <div id="planner-study-list" class="study-guidance-list" aria-live="polite"></div>
-                            </section>
+                            <aside class="glass-card planner-upcoming" aria-labelledby="planner-upcoming-heading">
+                                <section id="planner-day-schedule" aria-label="Schedule for this day"></section>
+                                <header class="planner-section-header"><h3 id="planner-upcoming-heading">Coming up &amp; unscheduled</h3><p class="settings-hint">Not in this day's plan. Add work to this day or edit its work date.</p></header>
+                                <div id="planner-upcoming-list"></div>
+                                <button type="button" class="text-btn" data-action="planner-show-library">Manage tasks <i class="fas fa-arrow-right" aria-hidden="true"></i></button>
+                            </aside>
                         </div>
-                        </details>
-                        <section class="glass-card full-width planner-work" aria-labelledby="planner-work-heading">
+                        </div>
+                        <details id="planner-library" class="glass-card full-width planner-library hidden" data-planner-panel="tasks" open>
+                            <summary>All assignments &amp; assessments <span id="planner-library-count" class="settings-hint"></span></summary>
+                        <div class="planner-work">
                             <header class="planner-section-header">
-                                <h2 id="planner-work-heading">Your assignments &amp; assessments</h2>
+                                <h3 id="planner-work-heading">Assignments &amp; assessments</h3>
                                 <p class="settings-hint">Select a status to see matching work. Mark it done or add a grade right in the list.</p>
                             </header>
                             <div class="planner-work-filters">
@@ -433,7 +436,7 @@
                             </section>
                             <section class="planner-work-section" aria-labelledby="planner-study-heading">
                                 <header class="planner-section-header">
-                                    <h3 id="planner-study-heading">Quizzes &amp; tests</h3><p class="settings-hint">Assessment dates, completion and scores. Study suggestions are at the top of the page.</p>
+                                    <h3 id="planner-study-heading">Quizzes &amp; tests</h3><p class="settings-hint">Assessment dates, completion and scores. Preparation blocks are included in your daily plan.</p>
                                 </header>
                                 <div class="table-scroll" tabindex="0" role="region" aria-label="Quizzes and tests table">
                                     <table>
@@ -442,38 +445,12 @@
                                     </table>
                                 </div>
                             </section>
-                        </section>
-                        <section class="glass-card planner-grade-inbox" aria-labelledby="planner-grades-heading">
-                            <header class="planner-section-header"><span class="planner-eyebrow">After you finish</span><h2 id="planner-grades-heading">Grade inbox</h2><p class="settings-hint">Completed work from every class, ready for a score. Always visible here, regardless of your task-list filters.</p></header>
+                        </div>
+                        </details>
+                        <details class="glass-card planner-grade-inbox hidden" data-planner-panel="tasks">
+                            <summary id="planner-grades-heading">Finished work &amp; grades</summary>
+                            <p class="settings-hint">Completed work from every class, ready for a score. Independent of the daily plan and library filters.</p>
                             <section id="planner-awaiting-grades" class="planner-awaiting-grades" aria-label="Completed work waiting for grades" aria-live="polite"></section>
-                        </section>
-                        <details class="glass-card full-width planner-attention" aria-labelledby="planner-attention-heading">
-                            <summary id="planner-attention-heading">More ways to plan <span class="settings-hint">View assignments grouped by urgency</span></summary>
-                            <header class="planner-section-header">
-                                <p class="settings-hint">Suggested order considers due dates, the task's saved priority, and how close your class grade is to a letter-grade cutoff. It is not a percentage, grade prediction, or time estimate.</p>
-                            </header>
-                            <div class="eisenhower-matrix">
-                                <div class="matrix-quadrant quadrant-1">
-                                    <h4>Do first</h4>
-                                    <p class="settings-hint">Due soon or ranked highest for attention.</p>
-                                    <ul id="quad-1-list"></ul>
-                                </div>
-                                <div class="matrix-quadrant quadrant-2">
-                                    <h4>Plan for later</h4>
-                                    <p class="settings-hint">Important work with more time before it is due.</p>
-                                    <ul id="quad-2-list"></ul>
-                                </div>
-                                <div class="matrix-quadrant quadrant-3">
-                                    <h4>Quick wins</h4>
-                                    <p class="settings-hint">Less urgent tasks estimated at 15 minutes or less.</p>
-                                    <ul id="quad-3-list"></ul>
-                                </div>
-                                <div class="matrix-quadrant quadrant-4">
-                                    <h4>Lower urgency</h4>
-                                    <p class="settings-hint">Other open work. Keep it on your list, without starting here.</p>
-                                    <ul id="quad-4-list"></ul>
-                                </div>
-                            </div>
                         </details>
                     </div>
                 </section>
@@ -847,7 +824,7 @@
                                     <form id="join-game-form" class="hosted-game-form join-game-form">
                                         <h4>Join a room</h4>
                                         <label>Player name<input id="join-game-nickname" name="nickname" type="text" maxlength="20" placeholder="Your username" aria-describedby="join-game-nickname-hint"><small id="join-game-nickname-hint" class="settings-hint">Optional. Leave blank to use your username.</small></label>
-                                        <label>6-character room code<input id="join-game-code" name="roomCode" type="text" inputmode="text" autocomplete="off" minlength="6" maxlength="6" pattern="[A-HJ-NP-Z2-9]{6}" required></label>
+                                        <label>6-character room code<input id="join-game-code" name="roomCode" type="text" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false" minlength="6" maxlength="6" pattern="[A-HJ-NP-Za-hj-np-z2-9]{6}" required></label>
                                         <button class="secondary-btn" type="submit"><i class="fas fa-right-to-bracket"></i> Join room</button>
                                     </form>
                                     <p>Ask your host for the six-character code. The lobby shows the game, time limit and resources per answer before you play. You can warm up while everyone joins.</p>
@@ -1062,7 +1039,7 @@
                             <li><strong>Home:</strong> see upcoming work, your automatic study clock and progress at a glance. Add a quiz or test to get a study plan.</li>
                             <li><strong>My classes:</strong> enter classes and grades (decimals like 23.21/25 work). What-if grades lets you try possible scores without changing your actual grades.</li>
                             <li><strong>Import from Infinite Campus:</strong> open My classes to bring in grades, assignments, categories, class times and the school calendar. The import dialog includes computer and phone instructions.</li>
-                            <li><strong>Planner:</strong> filter and sort assignments, update time remaining, or use Calendar and Class schedule for dates and your school day.</li>
+                            <li><strong>Planner:</strong> use Day, Week or Month to see deadlines, work dates and personal events. Day suggests what to work on first. Tasks is a separate page for managing assignments, completion and grades.</li>
                             <li><strong>Study:</strong> Practice is for studying, Manage sets is for creating and editing, and Discover is for community materials. Focus practice prioritizes terms needing recall using recent answers. Tests &amp; drills offers more ways to practice.</li>
                             <li><strong>Singleplayer:</strong> play the same game modes on your own with computer players. Host or join a multiplayer room to play with other students. Flashcard quizzes and practice tests remain available separately.</li>
                             <li><strong>Leaderboards &amp; Shop:</strong> compete on study time and spend coins on avatar items.</li>
@@ -1071,6 +1048,8 @@
                     </div>
                     <div class="glass-card about-card">
                         <h3>Questions or suggestions?</h3>
+                        <p>Report a bug, explain a player's behavior, or send another concern privately to staff.</p>
+                        <button type="button" class="primary-btn" data-action="report-problem"><i class="fas fa-flag" aria-hidden="true"></i> Report a problem</button>
                         <p>Contact <a href="mailto:villareala8873@parkwayschools.net">villareala8873@parkwayschools.net</a> or <a href="mailto:nesthusa2047@parkwayschools.net">nesthusa2047@parkwayschools.net</a>. Bug reports, ideas and feedback are all welcome.</p>
                     </div>
                     <div class="glass-card about-card" id="announcement-history-card">
@@ -1082,33 +1061,34 @@
                 </section>
 
                 <section id="settings-view" class="view student-workspace hidden">
-                    <header class="view-header"><div><h2 id="settings-page-title">General settings</h2><p id="settings-page-description">Choose how StudBud opens and how you prefer to study.</p></div></header>
+                    <header class="view-header"><div><h2 id="settings-page-title">General settings</h2><p id="settings-page-description">Choose how StudBud opens and how you prefer to study.</p></div><button type="button" class="secondary-btn" data-action="report-problem"><i class="fas fa-flag" aria-hidden="true"></i> Report a problem</button></header>
                     <div class="settings-grid">
                         <section class="glass-card" data-settings-panel="general">
-                            <h3>App preferences</h3>
+                            <h3 class="settings-section-heading"><i class="fas fa-sliders" aria-hidden="true"></i> App preferences</h3>
                             <label for="settings-start-page">Open StudBud to</label>
                             <select id="settings-start-page"><option value="dashboard">Home</option><option value="planner">Planner</option><option value="flashcard">Study</option><option value="gpa">My classes</option></select>
                             <p class="settings-hint">Used when you open the app without a page link. Direct links still open their own page.</p>
-                            <label for="settings-planner-default">Default Planner status</label>
+                            <label for="settings-planner-default">Default Tasks status</label>
                             <select id="settings-planner-default"><option value="todo">To do (including overdue)</option><option value="all">All work</option><option value="overdue">Overdue</option><option value="awaiting">Waiting for grade</option><option value="graded">Graded</option></select>
                             <p class="settings-hint">Preferences save automatically and sync with your account.</p>
                         </section>
                         <section class="glass-card" data-settings-panel="general">
-                            <h3>Flashcard preferences</h3>
+                            <h3 class="settings-section-heading"><i class="fas fa-layer-group" aria-hidden="true"></i> Flashcard preferences</h3>
                             <label for="settings-study-mode">Answer style</label>
                             <select id="settings-study-mode"><option value="reveal">Think, then reveal</option><option value="type">Type before revealing</option></select>
                             <label for="settings-study-direction">Ask with</label>
                             <select id="settings-study-direction"><option value="front">Term</option><option value="back">Definition</option><option value="mixed">Mixed sides</option></select>
                             <p class="settings-hint">Saved on this device. You can also change these during a study session.</p>
                         </section>
-                        <section class="glass-card" data-settings-panel="general">
-                            <h3>Privacy &amp; personalization</h3>
+                        <section class="glass-card settings-wide" data-settings-panel="general">
+                            <h3 class="settings-section-heading"><i class="fas fa-shield-halved" aria-hidden="true"></i> Privacy &amp; personalization</h3>
                             <p>Choose what other students can see, or adjust the app for your device.</p>
                             <div class="settings-actions"><button type="button" class="secondary-btn" data-action="edit-public-profile">Public profile &amp; privacy</button><button type="button" class="secondary-btn" data-target="appearance-view">Appearance &amp; accessibility</button><button type="button" class="secondary-btn" data-target="sound-view">Audio preferences</button></div>
                             <p id="preferences-save-status" class="settings-hint" role="status" aria-live="polite"></p>
                         </section>
-                        <div class="glass-card hidden" data-settings-panel="school">
-                            <h3>School &amp; student details</h3>
+                        <div class="glass-card hidden settings-school-card" data-settings-panel="school">
+                            <section class="settings-field-section">
+                            <h3 class="settings-section-heading"><i class="fas fa-school" aria-hidden="true"></i> School &amp; name</h3>
                             <div class="form-group">
                                 <label for="settings-school">School</label>
                                 <select id="settings-school"><option value="pchs">Parkway Central High School</option><option value="pnhs">Parkway North High School</option><option value="pshs">Parkway South High School</option><option value="pwhs">Parkway West High School</option><option value="other">Other / not listed</option></select>
@@ -1122,7 +1102,7 @@
                                 <label for="settings-last-name">Last name</label>
                                 <input type="text" id="settings-last-name" maxlength="60" autocomplete="family-name">
                             </div>
-                            <p class="settings-hint">Only shown publicly if you share it below.</p>
+                            <p class="settings-hint">Your real name stays private unless you share it in Profile.</p>
                             <div class="form-group">
                                 <label for="settings-grad-year">Graduation Year</label>
                                 <select id="settings-grad-year">
@@ -1133,10 +1113,14 @@
                                     <option value="2030">Class of 2030</option>
                                 </select>
                             </div>
+                            </section>
+                            <section class="settings-field-section">
+                            <h3 class="settings-section-heading"><i class="fas fa-chart-line" aria-hidden="true"></i> Academic history &amp; goals</h3>
                             <div class="form-group">
-                                <label for="settings-target-gpa">Target Cumulative GPA</label>
+                                <label for="settings-target-gpa">GPA from your class targets</label>
                                 <input type="text" id="settings-target-gpa" readonly aria-describedby="settings-target-gpa-hint">
                                 <p id="settings-target-gpa-hint" class="settings-hint">Calculated from your class grade targets, credits and weighting, including past GPA. Classes without a target use their current grade.</p>
+                                <button type="button" class="text-btn" data-action="open-grade-goals">Choose grade or GPA goals</button>
                             </div>
                             <fieldset class="settings-prior-gpa">
                                 <legend>Past credits (optional)</legend>
@@ -1163,6 +1147,7 @@
                                 </select>
                             </div>
                             <p class="settings-hint">Automatic term uses August–December for Semester 1 and January–July for Semester 2.</p>
+                            </section>
                             <button id="save-profile-btn" class="primary-btn">Save Profile</button>
                             <p id="school-profile-status" class="community-status" role="status" aria-live="polite"></p>
                             <section id="mfa-settings-card" class="settings-subsection mfa-settings-card hidden" aria-labelledby="mfa-settings-title">
@@ -1188,10 +1173,10 @@
                             </div>
                         </div>
 
-                        <div data-settings-panel="general"><div class="glass-card hidden" id="tutorial-card">
-                            <h2>Tutorial</h2>
-                            <p>Learn the workflow from importing classes to planning, studying and playing. Jump to any topic in the tour.</p>
-                            <button class="primary-btn" type="button" data-action="start-tutorial"><i class="fas fa-circle-play"></i> Replay tutorial</button>
+                        <div data-settings-panel="general" class="settings-wide"><div class="glass-card hidden settings-guide-card" id="tutorial-card">
+                            <div><h3 class="settings-section-heading"><i class="fas fa-route" aria-hidden="true"></i> Quick start guide</h3>
+                            <p>Eight short steps. Try real controls, follow the path, and skip anything you already know.</p></div>
+                            <button class="primary-btn" type="button" data-action="start-tutorial">Try the guide <i class="fas fa-arrow-right" aria-hidden="true"></i></button>
                         </div></div>
 
                         <div class="glass-card hidden" data-settings-panel="data">
@@ -1505,6 +1490,11 @@
                                 </select>
                             </div>
                         </div>
+                        <div class="form-group">
+                            <label for="assignment-planned-date">Work on date (optional)</label>
+                            <input type="date" id="assignment-planned-date">
+                            <p class="settings-hint">Reserve a day in Planner without changing the deadline. Leave blank for automatic suggestions. Unfinished past work dates carry into today's plan.</p>
+                        </div>
                         <div class="form-group row-group hidden" id="assignment-graded-fields">
                             <div class="half-width">
                                 <label for="assignment-points">Score</label>
@@ -1667,30 +1657,36 @@
             <!-- Target GPA Solver Modal -->
             <div id="target-gpa-modal" class="glass-card modal-content hidden">
                 <div class="modal-header">
-                    <h2>GPA from grade targets</h2>
+                    <h2>Grade &amp; GPA goals</h2>
                     <button class="close-modal-btn icon-btn"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="modal-body">
-                    <p>Your cumulative GPA goal is calculated from each class's grade target, credits and weighting, plus past GPA. Classes without targets use their current grade; ungraded classes without targets are excluded.</p>
+                    <p>Choose what you want to control. Preview changes here; nothing changes until you apply.</p>
                     <div class="form-group">
-                        <label for="desired-gpa">Target GPA</label>
-                        <input type="text" id="desired-gpa" readonly>
+                        <label for="grade-goal-source">I want to choose</label>
+                        <select id="grade-goal-source"><option value="grades">Class grades — calculate my GPA</option><option value="gpa">My GPA — suggest balanced class grades</option></select>
                     </div>
                     <div class="form-group">
-                        <label>Calculation Mode</label>
+                        <label for="desired-gpa">Target GPA</label>
+                        <input type="number" id="desired-gpa" min="0" max="5" step="0.001" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label for="gpa-solver-mode">GPA type</label>
                         <select id="gpa-solver-mode">
                             <option value="weighted">Weighted GPA</option>
                             <option value="unweighted">Unweighted GPA</option>
                         </select>
                     </div>
+                    <p class="settings-hint">Keep fixed locks a class target while other targets adjust. Editing a suggested grade locks it automatically. Suggestions favor similar grades, not one very low grade and several very high ones. Past credits and GPA are included.</p>
                     <div id="solver-results" class="solver-results-box hidden">
-                        <h4>Calculated GPA goal:</h4>
-                        <span id="solver-output-percentage" class="stat-number">--%</span>
+                        <p id="solver-output-percentage" role="status"></p>
                     </div>
+                    <ul id="solver-course-breakdown" class="solver-course-breakdown"></ul>
                 </div>
                 <div class="modal-footer">
                     <button class="secondary-btn cancel-modal-btn">Close</button>
-                    <button id="run-gpa-solver-btn" class="primary-btn">Calculate</button>
+                    <button id="run-gpa-solver-btn" class="secondary-btn">Recalculate</button>
+                    <button id="apply-grade-goals-btn" class="primary-btn">Apply targets</button>
                 </div>
             </div>
 

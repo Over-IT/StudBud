@@ -507,7 +507,7 @@
         skyline: 15, duel: 18, miner: 20, river: 20, frenzy: 10, fishing: 10,
         market: 25, shooter: 30, defense: 45
     });
-    const lowResourceThreshold = mode => LOW_RESOURCE_THRESHOLDS[mode] ?? 10;
+    const lowResourceThreshold = (mode, game) => game?.resourceWarningThreshold?.() ?? LOW_RESOURCE_THRESHOLDS[mode] ?? 10;
 
     class BaseGame {
         constructor(session) {
@@ -940,9 +940,8 @@
             const now = performance.now();
             if (now - (this.lastNeed || 0) > 1800) {
                 this.lastNeed = now;
-                this.sfx('wrong');
-                const prompt = this.overlay?.classList.contains('has-touch') ? 'tap recharge to answer a question' : 'press Q to answer a question';
-                this.toast(`Out of ${res.label.toLowerCase()} — ${prompt}`, '#f87171');
+                this.lowNoticeUntil = (this.t || 0) + 4;
+                this.updateResourceNotice(res, false);
             }
             return false;
         }
@@ -1365,7 +1364,8 @@
                 const key = event.target.dataset.audio;
                 if (!key) return;
                 const value = event.target.type === 'checkbox' ? event.target.checked : Number(event.target.value) / 100;
-                window.NexusApp.updateGameAudio({ [key]: value });
+                if (window.NexusApp?.updateGameAudio) window.NexusApp.updateGameAudio({ [key]: value });
+                else window.StudBudSfx?.update({ [key]: value });
             });
             const menus = overlay.querySelectorAll('.mpg-audio-settings, .mpg-test-tools, .mpg-controls-help');
             for (const panel of menus) {
@@ -1698,8 +1698,9 @@
             if (this.preview) return;
             const res = this.game.res;
             const hidden = !res || (this.testing && !this.limitedTestEnergy);
-            this.updateResourceNotice?.(res, hidden);
-            const value = res ? Math.round(res.value) : 0, low = Boolean(res && res.value <= lowResourceThreshold(this.mode)), empty = Boolean(res && res.value < 1), label = res?.label || '';
+            const noticeResource = this.game.resourceNotice ? this.game.resourceNotice() : res;
+            this.updateResourceNotice?.(noticeResource, !noticeResource || (this.testing && !this.limitedTestEnergy));
+            const value = res ? Math.round(res.value) : 0, low = Boolean(res && res.value <= lowResourceThreshold(this.mode, this.game)), empty = Boolean(res && res.value < 1), label = res?.label || '';
             const previous = this.meterState;
             if (previous && previous.hidden === hidden && previous.value === value && previous.low === low && previous.empty === empty && previous.label === label) return;
             const elements = this.meterElements ||= (() => {
@@ -1718,7 +1719,7 @@
 
         updateResourceNotice(res, hidden) {
             const time = this.t || 0;
-            const threshold = lowResourceThreshold(this.mode);
+            const threshold = lowResourceThreshold(this.mode, this.game);
             if (!res || res !== this.noticeResource || res.value > threshold * 1.5) {
                 this.lowResourceNotified = false;
                 this.lowNoticeUntil = 0;
@@ -1736,7 +1737,12 @@
             if (!visible && !this.resourceNoticeElement) return;
             const notice = this.resourceNoticeElement ||= this.overlay.querySelector('.mpg-resource-notice');
             if (!notice) return;
-            if (visible) notice.querySelector('span').textContent = `Low ${res.label.toLowerCase()}`;
+            if (visible) {
+                notice.querySelector('span').textContent = this.mode === 'chess' ? 'No moves ready' : `Low ${res.label.toLowerCase()}`;
+                notice.querySelector('small').textContent = this.mode === 'chess'
+                    ? 'Answer a question to earn a move · Q'
+                    : this.mode === 'miner' ? 'Answer to refill · Return to base to unload · Q' : 'Answer a question to refill · Q';
+            }
             notice.classList.toggle('hidden', !visible);
         }
 

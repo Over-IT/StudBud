@@ -58,6 +58,18 @@ sandbox.AppState.updateCourse(course.code, { targetPct: 90 });
 sandbox.AppState.addCourse({ code: 'seminar-a', catalogCode: 'CAT-A', title: 'Seminar', term: 'FY' });
 sandbox.AppState.addCourse({ code: 'seminar-b', catalogCode: 'CAT-B', title: 'Seminar', term: 'FY' });
 assert.equal(state.courses.length, 5, 'different official catalog identities may legitimately share a title');
+{
+    const oldCourses = state.courses, oldSettings = state.settings;
+    const save = sandbox.AppState.saveToLocalStorage;
+    sandbox.AppState.saveToLocalStorage = () => { throw new Error('Storage full'); };
+    assert.throws(() => sandbox.AppState.saveGradeGoals([], { gradeGoalSource: 'gpa' }), /Storage full/);
+    assert.equal(state.courses, oldCourses, 'a failed goal save restores class targets');
+    assert.equal(state.settings, oldSettings, 'a failed goal save also restores goal mode');
+    sandbox.AppState.saveToLocalStorage = save;
+    sandbox.AppState.saveGradeGoals(oldCourses, { ...oldSettings, gradeGoalSource: 'grades' });
+    assert.equal(state.settings.gradeGoalSource, 'grades');
+    state.settings = oldSettings;
+}
 app.calculateSemesterCourseGrade = item => item.grade ?? null;
 for (const [grade, target, fill, reached] of [[80, 90, 80, false], [95, 90, 95, true],
     [106.25, 97, 100, true], [0, 0, 0, true], [null, 90, 0, false]]) {
@@ -75,7 +87,8 @@ const view = element('flashcard-view'), panels = ['practice', 'manage', 'discove
 view.querySelectorAll = () => panels;
 elements.set(view.id, view);
 for (const id of ['study-page-title', 'study-page-description', 'active-view-title', 'page-guide', 'workspace-tabs',
-    'active-study-area', 'study-summary', 'study-type-toggle', 'study-direction']) elements.set(id, element(id));
+    'active-study-area', 'study-summary', 'study-type-toggle', 'study-direction', 'planner-page-title',
+    'planner-page-description', 'planner-library']) elements.set(id, element(id));
 let renders = 0;
 app.renderDecks = () => renders++;
 document.querySelectorAll = selector => selector === '.view' ? [view] : [];
@@ -87,6 +100,19 @@ for (const [route, page] of [['flashcard', 'practice'], ['study-manage', 'manage
     assert.match(elements.get('workspace-tabs').innerHTML, new RegExp(`data-target="${route}-view" aria-current="page"`));
 }
 assert.equal(renders, 3);
+const plannerView = element('planner-view'), plannerPanels = ['plan', 'tasks'].map(page => {
+    const panel = element(); panel.dataset.plannerPanel = page; return panel;
+});
+document.querySelectorAll = selector => selector === '.view' ? [view, plannerView] : selector === '[data-planner-panel]' ? plannerPanels : [];
+for (const route of ['planner', 'tasks']) {
+    sandbox.Router.navigate(route);
+    assert.equal(plannerView.classList.contains('hidden'), false, 'Planner and Tasks share data without sharing their layout');
+    assert.equal(elements.get('planner-page-title').textContent, route === 'tasks' ? 'Tasks' : 'Planner');
+    for (const panel of plannerPanels) assert.equal(panel.classList.contains('hidden'), panel.dataset.plannerPanel !== (route === 'tasks' ? 'tasks' : 'plan'));
+    assert.match(elements.get('workspace-tabs').innerHTML, new RegExp(`data-target="${route}-view" aria-current="page"`));
+}
+assert.doesNotMatch(read('index.html'), /id="theme-toggle"/, 'the header no longer has a theme toggle');
+assert.match(read('index.html'), /header-settings-button[^>]+data-target="settings-view"/, 'header settings remains reachable at every size');
 const settingsView = element('settings-view'), settingsPanels = ['general', 'school', 'data'].map(page => {
     const panel = element(); panel.dataset.settingsPanel = page; return panel;
 });

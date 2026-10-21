@@ -384,9 +384,6 @@
 
             this.hitLava(); this.flowLava(dt); this.revealLava(dt);
             this.depthMax = Math.max(this.depthMax, this.depthAt(me.y + me.h));
-            const depth = this.depthAt(me.y + me.h);
-            this.lowFuel = depth > 7 && this.res.value < Math.min(88, 24 + depth * 1.35);
-
             const mouse = this.mouseWorld(), centerX = me.x + me.w / 2, centerY = me.y + me.h / 2;
             let target = null, aimX = 0, aimY = 1;
             if (!s.mouse.down) this.minePointerAim = null;
@@ -499,6 +496,10 @@
             ctx.restore();
         }
         goalText() { return `Banked ${this.banked} · Carried ${this.items}/${this.cap} (${this.carry} pts)`; }
+        resourceWarningThreshold() {
+            const depth = this.depthAt(this.me.y + this.me.h);
+            return depth > 7 ? Math.min(88, 24 + depth * 1.35) : 20;
+        }
         touchLayout() { return { stick: true, stickZone: 'local', platform: true, buttons: [{ k: 'Space', label: 'Jetpack', cls: 'main' }] }; }
         hint() { return 'A/D move · W/Space jetpack · S/↓ dig down · hold mouse button to mine in that direction · depot banks crystals · Q recharges fuel'; }
         touchHint() { return 'Hold outside the controls to mine in that direction · deposit crystals at the surface depot'; }
@@ -688,10 +689,10 @@
                 [[0, 'rgba(255,224,160,.05)'], [0.35, `rgba(2,5,14,${(fogA * 0.35).toFixed(3)})`], [1, `rgba(2,5,14,${fogA})`]], w, h);
             if (s.preview) return;
             s.placeHud(ctx, 0, 0, 230, 34, 'top-center');
-            ctx.fillStyle = this.lowFuel ? 'rgba(127,29,29,.9)' : 'rgba(8,12,24,.76)'; A.util.roundRect(ctx, 0, 0, 230, 34, 10); ctx.fill();
-            ctx.strokeStyle = this.lowFuel ? 'rgba(248,113,113,.75)' : 'rgba(148,163,184,.35)'; ctx.lineWidth = 1; A.util.roundRect(ctx, .5, .5, 229, 33, 10); ctx.stroke();
-            ctx.fillStyle = this.lowFuel ? '#fecaca' : '#cbd5e1'; ctx.font = '800 12px system-ui'; ctx.textAlign = 'center';
-            ctx.fillText(`DEPTH ${depth * 5}m${this.lowFuel ? ' · LOW FUEL · HEAD UP' : ''}`, 115, 22, 220);
+            ctx.fillStyle = 'rgba(8,12,24,.76)'; A.util.roundRect(ctx, 0, 0, 230, 34, 10); ctx.fill();
+            ctx.strokeStyle = 'rgba(148,163,184,.35)'; ctx.lineWidth = 1; A.util.roundRect(ctx, .5, .5, 229, 33, 10); ctx.stroke();
+            ctx.fillStyle = '#cbd5e1'; ctx.font = '800 12px system-ui'; ctx.textAlign = 'center';
+            ctx.fillText(`DEPTH ${depth * 5}m`, 115, 22, 220);
             ctx.restore();
             s.placeHud(ctx, 0, 0, 175, 32, 'top-right');
             ctx.fillStyle = 'rgba(8,12,24,.78)'; A.util.roundRect(ctx, 0, 0, 175, 32, 9); ctx.fill();

@@ -1,0 +1,51 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+const window = {};
+const sandbox = { window, console: { error() {} }, Map, Set };
+vm.createContext(sandbox);
+vm.runInContext(read('cloudSync.js'), sandbox);
+const cloud = window.StudBudCloud;
+const Cloud = cloud.constructor;
+const snapshot = theme => ({ state: { settings: { theme }, courses: [{ code: 'math', targetGrade: 90 }] } });
+const base = snapshot('dark'), local = snapshot('light'), remote = snapshot('system');
+remote.state.courses[0].targetGrade = 95;
+assert.equal(Cloud.mergeData(base, local, remote).state.settings.theme, 'light', 'concurrent appearance changes cannot block access');
+assert.equal(Cloud.mergeData(base, local, remote).state.courses[0].targetGrade, 95, 'appearance resolution preserves independent academic changes');
+assert.equal(Cloud.mergeData(base, base, remote).state.settings.theme, 'system', 'unchanged local appearance still receives the account preference');
+const preferencesBase = { state: { currentView: 'dashboard', settings: { colorScheme: 'studbud', startPage: 'dashboard' } } };
+const preferencesLocal = { state: { currentView: 'planner', settings: { colorScheme: 'monochrome', startPage: 'planner' } } };
+const preferencesRemote = { state: { currentView: 'gpa', settings: { colorScheme: 'violet', startPage: 'flashcard' } } };
+assert.equal(Cloud.mergeData(preferencesBase, preferencesLocal, preferencesRemote).state.currentView, 'planner');
+assert.equal(Cloud.mergeData(preferencesBase, preferencesLocal, preferencesRemote).state.settings.startPage, 'planner');
+assert.throws(() => Cloud.mergeData(3, 3.5, 4, 'account.state.settings.gradeGoalGpa'), /grade goals/, 'academic goals still require an explicit conflict choice');
+local.state.courses[0].targetGrade = 80;
+let conflict;
+try { Cloud.mergeData(base, local, remote); }
+catch (error) { conflict = error; }
+assert.equal(conflict.code, 'STUDBUD_SYNC_CONFLICT');
+assert.match(conflict.message, /same class/);
+assert.doesNotMatch(conflict.message, /account\.|state\.|targetGrade/);
+assert.equal(local.state.courses[0].targetGrade, 80);
+assert.equal(remote.state.courses[0].targetGrade, 95);
+let recovered = 0;
+cloud.pendingConflict = { user: { id: 'test-account' }, message: conflict.message };
+cloud.renderConflictResolution = (pending, message) => {
+    recovered++;
+    assert.equal(pending, cloud.pendingConflict);
+    assert.equal(message, conflict.message);
+};
+(async () => {
+    await cloud.routeAuthenticatedUser({ id: 'test-account' });
+    assert.equal(recovered, 1, 'auth refresh preserves the existing choice instead of restarting a conflicting merge');
+    cloud.bootstrap = async () => { throw conflict; };
+    cloud.reportAccountError = error => { assert.equal(error, conflict); recovered++; };
+    window.NexusApp = {};
+    const app = read('app.js');
+    vm.runInContext(app.slice(app.indexOf('    const start = () =>'), app.indexOf("    if (document.readyState === 'loading')")) + '\nglobalThis.start = start;', sandbox);
+    await sandbox.start();
+    assert.equal(recovered, 2, 'cold-start conflict opens recovery controls rather than a generic startup failure');
+    console.log('Concurrent theme merge, readable conflict labels, non-destructive academic conflicts, auth retries and startup recovery passed.');
+})().catch(error => { console.error(error); process.exitCode = 1; });

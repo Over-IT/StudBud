@@ -128,7 +128,7 @@ async function run() {
     const installed = [];
     const worker = {
         console, URL, Response, AbortController, setTimeout, clearTimeout,
-        self: { location: { origin: 'https://studbud.test' }, addEventListener: (name, handler) => handlers.set(name, handler), skipWaiting() {} },
+        self: { location: { origin: 'https://studbud.test' }, registration: { scope: 'https://studbud.test/' }, addEventListener: (name, handler) => handlers.set(name, handler), skipWaiting() {} },
         caches: {
             match: async request => { cacheLookups++; return String(request.url || request).includes('missing') ? undefined : cached; },
             open: async () => ({ addAll: async files => installed.push(...files), put: async url => installed.push(url) })
@@ -155,6 +155,7 @@ async function run() {
     handlers.get('fetch')({ request: { method: 'GET', url: 'https://studbud.test/supabase-config.js' }, respondWith: promise => { response = promise; } });
     assert.equal((await response).status, 503);
     assert.equal(cacheLookups, 2, 'account settings remain network-only even during offline fallback');
+    assert.ok(installed.includes('./join/index.html') && installed.includes('./join.js'), 'the public joining page is precached separately');
     let abortSlowRequest;
     worker.setTimeout = (callback, delay) => { assert.equal(delay, 6000); abortSlowRequest = callback; return 1; };
     worker.clearTimeout = () => {};
@@ -162,15 +163,20 @@ async function run() {
     handlers.get('fetch')({ request: { method: 'GET', url: 'https://studbud.test/app.js' }, respondWith: promise => { response = promise; } });
     abortSlowRequest();
     assert.equal(await response, cached, 'stalled networks fall back to cached scripts instead of blocking app startup indefinitely');
-    handlers.get('fetch')({ request: { method: 'GET', mode: 'navigate', url: 'https://studbud.test/' }, respondWith: promise => { response = promise; } });
+    handlers.get('fetch')({ request: { method: 'GET', mode: 'navigate', url: 'https://studbud.test/' }, respondWith: promise => { response = promise; }, waitUntil() {} });
     abortSlowRequest();
     assert.equal(await response, cached);
     worker.fetch = () => { throw new Error('Cached reload must not retry a failed network for every script'); };
     handlers.get('fetch')({ request: { method: 'GET', url: 'https://studbud.test/app.js' }, respondWith: promise => { response = promise; } });
     assert.equal(await response, cached, 'a failed navigation uses cached assets immediately rather than stacking per-script timeouts');
     worker.fetch = async () => new Response('fresh network response');
-    handlers.get('fetch')({ request: { method: 'GET', mode: 'navigate', url: 'https://studbud.test/' }, respondWith: promise => { response = promise; } });
+    handlers.get('fetch')({ request: { method: 'GET', mode: 'navigate', url: 'https://studbud.test/' }, respondWith: promise => { response = promise; }, waitUntil() {} });
     assert.equal(await (await response).text(), 'fresh network response');
+    let navigationWrite;
+    handlers.get('fetch')({ request: { method: 'GET', mode: 'navigate', url: 'https://studbud.test/join/' }, respondWith: promise => { response = promise; }, waitUntil(promise) { navigationWrite = promise; } });
+    await response;
+    await navigationWrite;
+    assert.equal(installed.at(-1), './join/index.html', 'a join navigation cannot overwrite the main offline shell');
     handlers.get('fetch')({ request: { method: 'GET', url: 'https://studbud.test/app.js' }, respondWith: promise => { response = promise; } });
     assert.equal(await (await response).text(), 'fresh network response', 'successful navigation resumes network revalidation');
     let clearedBodyDeadline = 0;

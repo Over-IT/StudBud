@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Join a game | StudBud</title>
+    <meta name="description" content="Enter your StudBud game code and play with your class. No account needed.">
+    <meta name="theme-color" content="#111827">
+    <link rel="icon" type="image/svg+xml" href="../icons/studbud.svg">
+    <link rel="stylesheet" href="../styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
+    <script src="../supabase-config.js" defer></script>
+    <script src="../appDialogs.js" defer></script>
+    <script src="../nameModeration.js" defer></script>
+    <script src="../cloudSync.js" defer></script>
+    <script src="../sfx.js" defer></script>
+    <script src="../communityGames.js" defer></script>
+    <script src="../multiplayerEngine.js" defer></script>
+    <script src="../multiplayerGames.js" defer></script>
+    <script src="../multiplayerGames2.js" defer></script>
+    <script src="../multiplayerGames3.js" defer></script>
+    <script src="../chessGame.js" defer></script>
+    <script src="../join.js" defer></script>
+</head>
+<body class="join-page light-theme" data-color-scheme="studbud">
+    <main class="join-shell">
+        <a class="join-brand" href="../"><img src="../icons/studbud.svg" width="42" height="42" alt="">StudBud</a>
+        <section id="join-entry" class="glass-card join-card" aria-labelledby="join-heading">
+            <h1 id="join-heading">Join game</h1>
+            <p>Enter your host's code to play.</p>
+            <form id="join-form" class="auth-form">
+                <label for="join-code">Game code</label>
+                <input id="join-code" name="roomCode" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" minlength="6" maxlength="6" pattern="[A-HJ-NP-Za-hj-np-z2-9]{6}" placeholder="ABC234" aria-describedby="join-code-hint" required>
+                <small id="join-code-hint">The 6-character code from your host.</small>
+                <label for="join-name">Player name</label>
+                <input id="join-name" name="nickname" type="text" autocomplete="nickname" minlength="2" maxlength="20" pattern="[A-Za-z0-9 _\-]{2,20}" placeholder="What should we call you?" aria-describedby="join-name-hint" required>
+                <small id="join-name-hint">2-20 letters, numbers, spaces, - or _.</small>
+                <button class="primary-btn full-width" type="submit">Join game <i class="fas fa-arrow-right" aria-hidden="true"></i></button>
+            </form>
+            <p class="join-note"><i class="fas fa-user-shield" aria-hidden="true"></i> Guest play. No sign-in needed.</p>
+        </section>
+        <section id="join-lobby" class="glass-card join-card hidden" aria-labelledby="join-room-title">
+            <span class="join-eyebrow">YOU'RE IN</span>
+            <h1 id="join-room-title">Game lobby</h1>
+            <p>Game code <strong id="join-room-code"></strong></p>
+            <p id="join-room-state" role="status" aria-live="polite"></p>
+            <ol id="join-players" class="join-players" aria-label="Players"></ol>
+            <button id="join-leave" class="secondary-btn full-width" type="button">Leave game</button>
+        </section>
+        <p id="join-status" class="auth-message" role="status" aria-live="polite"></p>
+        <footer class="join-footer"><a href="../">Back to StudBud</a><a href="../privacy.html">Privacy policy</a></footer>
+    </main>
+</body>
+</html>

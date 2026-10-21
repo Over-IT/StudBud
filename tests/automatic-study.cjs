@@ -255,6 +255,10 @@ async function integration() {
     sandbox.window.StudBudCommunityGames = { recordStudyTime: async (id, seconds) => { sent = { id, seconds }; return { seconds }; } };
     app.refreshStudyLeaderboard = async () => {};
     state.state.studyHistory = [{ id: 'sync', durationSec: 45, autoTracked: true, leaderboardSyncPending: true }];
+    sandbox.window.StudBudCloud.accountReady = false;
+    await app.syncStudyTimeEntry(state.state.studyHistory[0], false);
+    assert.equal(sent, undefined, 'account initialization or an unresolved merge cannot upload study history');
+    sandbox.window.StudBudCloud.accountReady = true;
     await app.syncStudyTimeEntry({ ...state.state.studyHistory[0], durationSec: 15 }, false);
     assert.deepEqual(sent, { id: 'sync', seconds: 15 });
     assert.equal(state.state.studyHistory[0].leaderboardSyncPending, true, 'late network acknowledgement retains pending newer time');

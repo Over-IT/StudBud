@@ -80,25 +80,17 @@ const app = sandbox.app;
     console.log('Calendar assignment/assessment separation, event create/edit/delete, escaping, date validation and save-failure retention passed.');
 }
 {
-    const next = { innerHTML: '' };
-    elements.set('planner-next-task', next);
     state.assignments = [
         { id: 'task', title: '<Read chapter>', estimatedMinutes: 25, priority: 'high', dueDate: '2000-01-01' },
         { id: 'later', title: 'Practice', estimatedMinutes: 15, dueDate: '2099-01-01' },
         { id: 'done', title: 'Finished', status: 'completed', estimatedMinutes: 500 }
     ];
     app.renderAssignments();
-    assert.match(next.innerHTML, /2 to do/);
-    assert.match(next.innerHTML, /40 min estimated total/);
-    assert.match(next.innerHTML, /1 due today or overdue/);
-    assert.match(next.innerHTML, /&lt;Read chapter&gt;/, 'task titles are escaped');
-    assert.doesNotMatch(next.innerHTML, /Finished/);
     assert.equal(app.plannerTaskMinutes({ estimatedMinutes: -4 }), 30);
     assert.match(app.plannerTaskReason(state.assignments[0]), /Overdue/);
     assert.match(app.plannerTaskReason({ dueDate: '2099-01-01', priority: 'high' }), /Marked high priority/);
     assert.match(app.plannerTaskReason({ estimatedMinutes: 10 }), /short task/);
     assert.match(app.plannerTaskReason({}), /No due date/);
-    assert.match(next.innerHTML, /Why this task:/);
     for (const id of ['assignment-body', 'planner-assessment-body', 'planner-study-list', 'quad-1-list']) elements.set(id, { innerHTML: '' });
     state.assignments.push(
         { id: 'quiz', title: '<Quiz prep>', kind: 'quiz', estimatedMinutes: 45, dueDate: '2099-01-01' },
@@ -106,8 +98,6 @@ const app = sandbox.app;
         { id: 'graded-test', title: 'Graded test', kind: 'test', graded: true, status: 'completed', pointsEarned: 8, maxPoints: 10 }
     );
     app.renderAssignments();
-    assert.match(next.innerHTML, /2 to do/);
-    assert.match(next.innerHTML, /40 min estimated total/, 'assignment workload excludes study preparation');
     assert.doesNotMatch(elements.get('assignment-body').innerHTML, /Quiz prep|Test prep|Graded test/);
     assert.match(elements.get('assignment-body').innerHTML, /Read chapter/);
     assert.match(elements.get('planner-assessment-body').innerHTML, /&lt;Quiz prep&gt;/);
@@ -133,7 +123,6 @@ const app = sandbox.app;
     elements.delete('assignment-search');
     state.assignments = [];
     app.renderAssignments();
-    assert.match(next.innerHTML, /No open tasks/);
     assert.match(elements.get('planner-study-list').innerHTML, /Add an upcoming quiz or test/);
     assert.doesNotMatch(elements.get('planner-study-list').innerHTML, /data-action="add-quiz"/, 'planner uses its page-header add button instead of a duplicate empty-state action');
     elements.set('study-priority-list', { innerHTML: '' });
@@ -150,15 +139,14 @@ const app = sandbox.app;
     assert.match(plannerMarkup, /Quizzes &amp; tests/);
     assert.match(plannerMarkup, /aria-label="Filter assignments, quizzes and tests"/);
     assert.ok(plannerMarkup.indexOf('id="assignment-status-summary"') < plannerMarkup.indexOf('id="planner-assignment-heading"'), 'shared filters precede both work sections');
-    assert.ok(plannerMarkup.indexOf('id="planner-next-task"') < plannerMarkup.indexOf('id="assignment-status-summary"'), 'next task is a suggestion above the filterable lists');
+    assert.ok(plannerMarkup.indexOf('id="planner-day-queue"') < plannerMarkup.indexOf('id="assignment-status-summary"'), 'the daily work plan comes before library filters');
     assert.ok(plannerMarkup.indexOf('id="assignment-body"') < plannerMarkup.indexOf('id="planner-study-heading"'), 'the assessment list directly follows assignments');
-    assert.ok(plannerMarkup.indexOf('id="planner-study-list"') < plannerMarkup.indexOf('id="assignment-status-summary"'), 'study suggestions stay above the filterable lists');
+    assert.match(plannerMarkup, /<details id="planner-library"[^>]+data-planner-panel="tasks"/, 'task management has its own Planner page');
     assert.ok(plannerMarkup.indexOf('id="planner-assessment-body"') < plannerMarkup.indexOf('id="planner-grades-heading"'), 'the grade inbox has a separate place after work management');
-    assert.match(plannerMarkup, /<details class="glass-card full-width planner-attention"/, 'optional urgency grouping is collapsed by default');
+    assert.doesNotMatch(plannerMarkup, /quad-1-list|planner-suggestions/, 'old overlapping suggestion and urgency panels are removed');
     assert.match(plannerMarkup, /data-action="planner-add-assignment"/);
     assert.match(plannerMarkup, /data-action="add-quiz"/);
-    assert.ok(plannerMarkup.indexOf('id="planner-assessment-body"') < plannerMarkup.indexOf('id="planner-attention-heading"'), 'urgency groups follow both work sections');
-    for (const id of ['planner-next-task', 'assignment-status-summary', 'assignment-search', 'assignment-course-filter', 'assignment-status-filter', 'assignment-result-count', 'assignment-body', 'planner-study-list', 'planner-assessment-body', 'quad-1-list', 'quad-2-list', 'quad-3-list', 'quad-4-list']) {
+    for (const id of ['planner-day-queue', 'planner-date', 'planner-daily-minutes', 'assignment-status-summary', 'assignment-search', 'assignment-course-filter', 'assignment-status-filter', 'assignment-result-count', 'assignment-body', 'planner-assessment-body']) {
         assert.equal(plannerMarkup.split(`id="${id}"`).length - 1, 1, `${id} remains unique`);
     }
     assert.match(html, /id="assignment-status-filter" type="hidden" value="todo"/);
@@ -211,7 +199,7 @@ assert.equal(app.gradeForPercentage(100.5), 'A+');
     close(stale.weighted, 4.5);
     close(stale.unweighted, 4);
     const plan = app.gpaTargetPlan(4.5, 'weighted', [regular, honors]);
-    assert.equal(plan.byCode.get('REG').letter, 'A-', 'the GPA solver never asks a regular class for an A+ (A- already earns 4.0)');
+    assert.equal(plan.byCode.get('REG').letter, 'A', 'the balanced solver uses the real regular-class scale, without inventing an A+');
     assert.equal(plan.byCode.get('HON').letter, 'A+');
     const nexus = sandbox.window.NexusApp;
     sandbox.window.NexusApp = { AppState: sandbox.AppState };
@@ -224,7 +212,7 @@ assert.equal(app.formatNumber(87.123456), '87.12');
 assert.equal(app.formatGpaChange(3.0001, 3.0002), '0.00 GPA points');
 
 // Compare the optimized planner with exhaustive enumeration, including unequal credits.
-function exhaustive(courses, target, mode) {
+function exhaustive(courses, target, mode, centerPct) {
     let best = Infinity, maxGpa = 0;
     const totalCredits = courses.reduce((sum, row) => sum + row.credits, 0);
     function visit(index, earned, cost) {
@@ -233,9 +221,9 @@ function exhaustive(courses, target, mode) {
             if (earned >= target * totalCredits - 1e-9) best = Math.min(best, cost);
             return;
         }
-        for (const grade of sandbox.window.PARKWAY_GRADE_SCALE) {
-            const row = courses[index];
-            visit(index + 1, earned + Number(mode === 'weighted' && row.isWeighted ? grade.weighted : grade.unweighted) * row.credits, cost + grade.minPct);
+        const row = courses[index];
+        for (const grade of sandbox.window.studbudGradeScaleFor(row)) {
+            visit(index + 1, earned + Number(mode === 'weighted' && row.isWeighted ? grade.weighted : grade.unweighted) * row.credits, cost + (grade.minPct - centerPct) ** 2);
         }
     }
     visit(0, 0, 0);
@@ -245,18 +233,39 @@ for (const courses of [
     [{ ...course, code: 'a' }, { ...course, code: 'b' }],
     [{ ...course, code: 'a', isWeighted: true, credits: .5 }, { ...course, code: 'b', credits: 1.5 }, { ...course, code: 'c', isWeighted: true, credits: .75 }]
 ]) for (const mode of ['weighted', 'unweighted']) for (const target of [0, 1.5, 2.75, 3.5, 4, 4.75, 5.5]) {
-    const expected = exhaustive(courses, target, mode);
     const actual = app.gpaTargetPlan(target, mode, courses);
+    const expected = exhaustive(courses, target, mode, actual.centerPct);
     assert.equal(actual.reachable, Number.isFinite(expected.best));
     if (actual.reachable) {
-        const cost = [...actual.byCode.values()].reduce((sum, grade) => sum + grade.minPct, 0);
-        assert.equal(cost, expected.best, `optimal target plan for ${mode}/${target}`);
+        const cost = [...actual.byCode.values()].reduce((sum, grade) => sum + (grade.minPct - actual.centerPct) ** 2, 0);
+        assert.ok(Math.abs(cost - expected.best) < 1e-6, `optimal balanced target plan for ${mode}/${target}: ${cost} vs ${expected.best}, center ${actual.centerPct}, grades ${[...actual.byCode.values()].map(grade => grade.letter)}`);
         assert.ok(actual.gpa >= target - 1e-9);
     } else close(actual.gpa, expected.maxGpa);
 }
 assert.equal(app.gpaTargetPlan(3.5, 'unweighted', [course, { ...course, code: 'other' }]).gpa, 3.5);
 assert.equal(app.gpaTargetPlan(3.5, 'weighted', []).reachable, false);
 assert.equal(app.gpaTargetPlan(3.5, 'weighted', [{ ...course, credits: 0 }]).reachable, false);
+{
+    const courses = Array.from({ length: 8 }, (_, i) => ({ ...course, code: `balanced-${i}`, isWeighted: true }));
+    const plan = app.gpaTargetPlan(4.1, 'weighted', courses);
+    const percentages = [...plan.byCode.values()].map(grade => grade.minPct);
+    assert.equal(plan.reachable, true);
+    assert.ok(Math.min(...percentages) >= 80, 'high GPA goals must not sacrifice one class to an F');
+    assert.ok(Math.max(...percentages) - Math.min(...percentages) <= 7, 'targets stay close instead of using extreme grade combinations');
+    courses[0] = { ...courses[0], targetPct: 87.5, targetLocked: true };
+    const locked = app.gpaTargetPlan(4.1, 'weighted', courses);
+    assert.equal(locked.byCode.get(courses[0].code).minPct, 87.5, 'locked targets preserve the exact percentage, not just the letter cutoff');
+    assert.equal(locked.reachable, true);
+    assert.ok(locked.gpa >= 4.1);
+    const impossible = app.gpaTargetPlan(5, 'weighted', courses);
+    assert.equal(impossible.reachable, false, 'the solver never breaks a lock to claim a goal is reachable');
+    assert.equal(impossible.byCode.get(courses[0].code).minPct, 87.5);
+    assert.throws(() => app.gpaTargetPlan(4, 'weighted', [{ ...course, targetLocked: true, targetPct: null }]), /before locking/);
+    const previous = state.profile;
+    state.profile = { priorCredits: 10, priorWeightedGpa: 2, priorUnweightedGpa: 2 };
+    assert.equal(app.gpaTargetPlan(4, 'weighted', courses).reachable, false, 'past GPA and credits limit attainable cumulative GPA');
+    state.profile = previous;
+}
 
 const tomorrow = new Date();
 tomorrow.setDate(tomorrow.getDate() + 1);

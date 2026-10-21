@@ -60,9 +60,9 @@ session.game.res.value = 30; update();
 assert.equal(classes.get('low'), false, 'answering a refill question clears the warning');
 console.log('6000-frame meter DOM-query/write bounds, rounding, depleted state, testing visibility and resource replacement passed.');
 {
-    const sounds = [], noticeClasses = new Set(['hidden']), text = {};
+    const sounds = [], noticeClasses = new Set(['hidden']), text = {}, hint = {};
     let noticeQueries = 0;
-    const notice = { classList: { toggle: (name, force) => force ? noticeClasses.add(name) : noticeClasses.delete(name) }, querySelector: () => text };
+    const notice = { classList: { toggle: (name, force) => force ? noticeClasses.add(name) : noticeClasses.delete(name) }, querySelector: selector => selector === 'span' ? text : hint };
     const actor = { t: 0, countdown: 0, sfx: (...args) => sounds.push(args),
         overlay: { querySelector: () => { noticeQueries++; return notice; } } };
     const resource = { value: 30, label: 'Energy' };
@@ -91,6 +91,9 @@ console.log('6000-frame meter DOM-query/write bounds, rounding, depleted state, 
     tick(); assert.equal(sounds.length, 2, 'refilling above fifteen rearms one subsequent low warning');
     assert.equal(noticeQueries, 1, 'the center notice is cached rather than queried every frame');
     actor.over = true; tick(); assert.equal(noticeClasses.has('hidden'), true);
+    actor.over = false;
+    sandbox.window.StudBudArcade.Session.prototype.updateResourceNotice.call(actor, null, true);
+    assert.equal(noticeClasses.has('hidden'), true, 'games without a resource do not show a false warning');
 }
 const A = sandbox.window.StudBudArcade;
 {
@@ -132,7 +135,8 @@ const A = sandbox.window.StudBudArcade;
     const panel = { classList: { remove() {} }, contains: () => false,
         querySelector: selector => selector === '.mpg-summary' ? details : selector === '.mpg-results-card' ? card : exit };
     const actor = { user: { id: 'me', is_anonymous: true }, game: { scoreGoal: false, goalUnit: 'm' },
-        metric: A.Session.prototype.metric, valueText: A.Session.prototype.valueText, answered: 0, correct: 0, t: 30,
+        metric: A.Session.prototype.metric, sameRank: A.Session.prototype.sameRank,
+        valueText: A.Session.prototype.valueText, answered: 0, correct: 0, t: 30,
         overlay: { querySelector: () => panel } };
     try {
         for (const count of [0, 1, 2, 3, 4]) {
@@ -178,6 +182,30 @@ for (const [mode, threshold] of Object.entries({
     resource.value = threshold * 1.5 + .1; tick();
     resource.value = threshold; tick();
     assert.equal(sounds.length, 2, `${mode} refill rearms the warning`);
+}
+{
+    const notices = [], sounds = [], resource = { label: 'Moves', value: 0 };
+    const notice = { classList: { toggle: (name, hidden) => notices.push(hidden) }, querySelector: () => ({}) };
+    const actor = { mode: 'chess', t: 1, sfx: (...args) => sounds.push(args), game: {
+        resourceNotice: () => resource, resourceWarningThreshold: () => 0
+    }, overlay: { querySelector: selector => selector === '.mpg-resource-notice' ? notice
+        : { classList: { toggle() {} }, querySelector: () => ({}) } },
+        updateResourceNotice: A.Session.prototype.updateResourceNotice };
+    const tick = () => A.Session.prototype.updateMeter.call(actor);
+    tick();
+    assert.equal(actor.resourceNoticeVisible, true, 'Question Chess has a shared no-moves warning without inventing energy');
+    assert.equal(sounds.length, 1);
+    resource.value = 1; tick();
+    assert.equal(actor.resourceNoticeVisible, false, 'earning a move clears the prompt');
+    resource.value = 0; tick();
+    assert.equal(sounds.length, 2, 'using the move rearms one prompt');
+    const miner = { ...actor, mode: 'miner', game: { resourceWarningThreshold: () => 60 }, resourceNoticeVisible: false, noticeResource: null };
+    A.Session.prototype.updateResourceNotice.call(miner, { label: 'Fuel', value: 59 }, false);
+    assert.equal(miner.resourceNoticeVisible, true, 'deep mining uses the shared warning with the return-trip threshold');
+    for (const file of ['multiplayerGames.js', 'multiplayerGames2.js']) {
+        const code = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+        assert.doesNotMatch(code, /LOW FUEL|this\.lowFuel|s\.toast\('Out of energy/, 'mode-specific duplicate resource warnings are removed');
+    }
 }
 {
     const reward = {}, indicator = {}, messages = [];

@@ -110,6 +110,12 @@
             }
             if (equal(local, base)) return remote;
             if (equal(remote, base) || equal(local, remote)) return local;
+            // Conflicting device preferences must not block access to study data.
+            const devicePreferences = ['theme', 'colorScheme', 'schemePicked', 'compactUi', 'sidebarCollapsed',
+                'reduceMotion', 'startPage', 'plannerDefaultStatus', 'plannerSort', 'tutorialSeen', 'tutorialVersion'];
+            if (field === 'account.state.currentView'
+                || devicePreferences.some(key => field === `account.state.settings.${key}`)
+                || field.startsWith('account.state.settings.gameAudio.')) return local;
             if (/^account\.flashcards\.[^.]+\.cards\.[^.]+$/.test(field) && local && remote) {
                 const fields = ['state', 'step', 'easeFactor', 'interval', 'repetitions', 'reps', 'lapses', 'leech',
                     'lastReviewed', 'nextReviewDate', 'schedulerVersion', 'stability', 'difficulty'];
@@ -182,7 +188,17 @@
                 }
                 return merged;
             }
-            throw new Error(`Both devices changed ${field}. Choose which version to keep; neither version was overwritten.`);
+            const label = field.startsWith('account.state.courses') ? 'the same class'
+                : field.startsWith('account.state.assignments') ? 'the same assignment'
+                : field.startsWith('account.flashcards') ? 'the same study set'
+                : field.startsWith('account.state.settings.gradeGoal') ? 'your grade goals'
+                : field.startsWith('account.state.settings') ? 'your settings'
+                : field.startsWith('account.state.profile') ? 'your profile'
+                : field.startsWith('account.state.calendarEvents') ? 'the same calendar event'
+                : 'the same saved information';
+            const error = new Error(`Both devices changed ${label}. Choose which version to keep. Neither version has been overwritten.`);
+            error.code = 'STUDBUD_SYNC_CONFLICT';
+            throw error;
         }
 
         async bootstrap() {
@@ -499,6 +515,10 @@
 
         async routeAuthenticatedUser(user) {
             if (!user?.id) return;
+            if (this.pendingConflict?.user?.id === user.id) {
+                this.renderConflictResolution(this.pendingConflict, this.pendingConflict.message);
+                return;
+            }
             if (this.accountReady && this.user?.id === user.id) {
                 this.user = user;
                 return;
@@ -787,7 +807,7 @@
                     await window.NexusApp.restoreCloudSnapshot(merged);
                     this.initialSnapshot = remoteSnapshot;
                 } catch (mergeError) {
-                    this.pendingConflict = { user, remoteSnapshot, local, savedBase };
+                    this.pendingConflict = { user, remoteSnapshot, local, savedBase, message: mergeError.message };
                     throw mergeError;
                 }
             }
@@ -811,6 +831,10 @@
             document.getElementById('app-container')?.classList.remove('hidden');
             this.setCloudStatus(this.initialSnapshot ? 'Synced to your account.' : 'Saving your account data…');
             this.queueSync();
+            window.NexusApp?.syncPendingStudyTime?.().catch(error => {
+                console.error('[StudBudCloud] Study time could not sync after sign-in:', error);
+                this.setCloudStatus('Your account is open, but study time could not sync. Check your connection and try again.', true);
+            });
             window.NexusApp?.refreshAdminAccess?.();
             await window.NexusApp?.refreshPendingSharedDecks?.();
         }
@@ -836,9 +860,10 @@
             status.innerHTML = `
                 <div class="auth-conflict-panel" style="text-align:center;">
                     <p style="margin-bottom:10px;">${window.NexusApp?.escapeHTML?.(message) || message}</p>
+                    <p>This choice applies to your whole study plan, not just the item above. Check your other device first if you are unsure which copy to use.</p>
                     <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin-top:8px;">
-                        <button type="button" class="secondary-btn" id="auth-conflict-cloud-btn">Use Cloud Data</button>
-                        <button type="button" class="secondary-btn" id="auth-conflict-local-btn">Keep Device Data</button>
+                        <button type="button" class="secondary-btn" id="auth-conflict-cloud-btn">Use account copy</button>
+                        <button type="button" class="secondary-btn" id="auth-conflict-local-btn">Use this device's copy</button>
                     </div>
                 </div>
             `;

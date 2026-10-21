@@ -153,6 +153,12 @@
         hint() { return 'Q: answer for one move · Drag or select a piece · Checkmate wins'; }
         touchHint() { return 'Answer for one move · Drag or tap a piece · Escape check before play resumes'; }
         touchLayout() { return { stick: false, buttons: [] }; }
+        resourceNotice() {
+            const notice = this.moveNotice ||= { label: 'Moves', value: 0 };
+            notice.value = this.state.credits[this.side] || 0;
+            return this.state.winner === -1 ? notice : null;
+        }
+        resourceWarningThreshold() { return 0; }
         goalText() { return this.state.winner === -2 ? 'Draw' : this.state.winner >= 0 ? 'Checkmate' : `${this.state.credits[this.side] || 0} move ready · ${this.side === 0 ? 'White' : 'Black'}`; }
         rankMetric(row) { return this.state.winner === -2 ? 0 : this.state.winner >= 0 && row.id === this.players[this.state.winner] ? 1000000 : row.g; }
         buildBoard() {

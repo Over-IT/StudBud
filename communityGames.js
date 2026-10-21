@@ -699,11 +699,30 @@
         }
 
         async reportContent(targetType, targetId, reason, details = '') {
-            const { data, error } = await this.getClient().rpc('studbud_report_content', {
-                p_target_type: targetType, p_target_id: targetId, p_reason: reason, p_details: details
+            const explanation = String(details).trim();
+            if (explanation.length < 10 || explanation.length > 500) throw new Error('Explain what happened in 10 to 500 characters.');
+            const { data, error } = await (await this.publicClient()).rpc('studbud_report_content', {
+                p_target_type: targetType, p_target_id: targetId, p_reason: reason, p_details: explanation
             });
             if (error) throw new Error(error.message.includes('Could not find the function')
                 ? 'Reporting is not set up yet. Re-run supabase-setup.sql in Supabase.' : error.message);
+            return data;
+        }
+
+        async reportProblem(type, subject, details, username = '') {
+            const summary = String(subject).trim(), explanation = String(details).trim();
+            const player = String(username).trim().replace(/^@/, '');
+            if (!['bug', 'player', 'other'].includes(type)) throw new Error('Choose a report type.');
+            if (summary.length < 3 || summary.length > 120) throw new Error('Enter a summary from 3 to 120 characters.');
+            if (explanation.length < 10 || explanation.length > 2000) throw new Error('Explain what happened in 10 to 2,000 characters.');
+            if (type === 'player' && (!player || player.length > 50)) throw new Error('Enter the player’s exact username.');
+            const { data, error } = await (await this.publicClient()).rpc('studbud_submit_report', {
+                p_type: type, p_subject: summary, p_details: explanation, p_username: type === 'player' ? player : null
+            });
+            if (error) throw new Error(error.code === 'PGRST202' || error.code === '42883'
+                ? 'Reporting needs a server update. Your report has not been sent. Please use Email support instead.'
+                : error.message);
+            if (data === null || data === undefined) throw new Error('The server did not confirm your report. Please try again.');
             return data;
         }
 
