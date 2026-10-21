@@ -713,18 +713,29 @@
             super(s, 2200, 1500);
             this.title = 'Team Tower Defense';
             this.scoreGoal = false; this.goalUnit = 'base damage'; this.goalLabel = 'Team';
-            this.health = [100, 100]; this.wallets = [180, 180]; this.teamDamage = [0, 0];
+            this.health = [100, 100]; this.teamDamage = [0, 0];
             const ids = [...s.roster.keys()];
-            if (!ids.includes(s.user.id)) ids.unshift(s.user.id);
+            if (!s.spectator && !ids.includes(s.user.id)) ids.unshift(s.user.id);
             this.teams = Object.fromEntries(ids.map((id, i) => [id, i % 2]));
             if (s.room?.state?.defense_teams) this.teams = { ...s.room.state.defense_teams };
-            this.myTeam = this.teams[s.user.id];
+            this.wallets = Object.fromEntries(Object.keys(this.teams).map(id => [id, 180]));
+            this.myTeam = this.teams[s.user.id] ?? 0;
             this.me.x = this.myTeam ? 1690 : 510; this.me.y = 1250;
             this.cam.x = this.me.x; this.cam.y = this.me.y;
             this.paths = [0, 1].map(team => {
                 const offset = team * 1100;
                 return [{ x: offset + 110, y: 160 }, { x: offset + 850, y: 160 }, { x: offset + 850, y: 500 },
                     { x: offset + 250, y: 500 }, { x: offset + 250, y: 900 }, { x: offset + 850, y: 900 }, { x: offset + 850, y: 1310 }];
+            });
+            this.buildGrid = this.paths.map((_, team) => Uint8Array.from({ length: 280 }, (_, cell) =>
+                Number(this.distanceToPath(team * 1100 + 95 + cell % 14 * 70, 85 + Math.floor(cell / 14) * 70, team) > 68)));
+            this.grass = this.paths.map((_, team) => {
+                const items = [];
+                for (let y = 0; y < this.H; y += 100) for (let x = team * 1100; x < (team + 1) * 1100; x += 100) {
+                    const seed = hashStr(`${x}:${y}`), px = x + 20 + seed % 40, py = y + 30;
+                    if (this.distanceToPath(px, py, team) >= 95) items.push({ x: px, y: py, rock: seed % 7 === 0 });
+                }
+                return items;
             });
             this.troops = []; this.enemies = []; this.shots = []; this.nextId = 1;
             this.waveNumber = 0; this.waveTimer = 20; this.waveSpawnRemaining = 0; this.waveSpawnTimer = 0;
@@ -737,7 +748,7 @@
             this.shopTab = 'build'; this.previewPoint = null; this.battleSounds = 0;
             this.pointerLook = false;
             this.anim = 0; this.serial = 0; this.receivedSerial = -1; this.saveT = 0;
-            this.res = new A.Resource('Team cash', DEFENSE_COLORS[this.myTeam], 180, 0, 0);
+            this.res = new A.Resource('Your cash', DEFENSE_COLORS[this.myTeam], 180, 0, 0);
             if (s.room?.state?.defense) this.applySnapshot(s.room.state.defense);
         }
 
@@ -746,7 +757,8 @@
         get troopTypes() { return DEFENSE_TROOPS; }
         get enemyTypes() { return DEFENSE_ENEMIES; }
         answerCash() { return this.s.rewardAmount() * 3; }
-        canAfford(team, cost) { return this.unlimitedTestCash || this.wallets[team] >= cost; }
+        cashFor(id) { return Object.hasOwn(this.wallets, id) ? this.wallets[id] : 180; }
+        canAfford(id, cost) { return this.unlimitedTestCash || this.cashFor(id) >= cost; }
         upgradeCost(troop) { return DEFENSE_TROOPS[troop.type].cost * troop.level; }
         sellValue(troop) {
             return this.unlimitedTestCash ? 0 : Math.floor(DEFENSE_TROOPS[troop.type].cost * (1 + troop.level * (troop.level - 1) / 2) * .75);
@@ -846,12 +858,13 @@
             if (!this.s.preview && !this.s.practice && !this.s.roster.has(id)) return;
             if (!Number.isInteger(order.seq) || order.seq !== (this.lastSeq[id] || 0) + 1) return;
             this.lastSeq[id] = order.seq;
+            if (!Object.hasOwn(this.wallets, id)) this.wallets[id] = 180;
             const team = this.teamOf(id), type = order.type;
             let cost = 0, execute;
             if (order.action === 'answer') {
                 if (!Number.isInteger(order.count) || order.count !== (this.answers[id] || 0) + 1) return this.reject(id, 'Answer credit was not accepted; try the next question');
                 this.answers[id] = order.count;
-                this.wallets[team] += this.answerCash();
+                this.wallets[id] += this.answerCash();
                 return;
             }
             if (order.action === 'build' && Number.isInteger(type) && DEFENSE_TROOPS[type]) {
@@ -872,13 +885,13 @@
                 if (!troop) return this.reject(id, 'You can only sell towers you own');
                 const refund = this.sellValue(troop);
                 this.troops = this.troops.filter(t => t !== troop);
-                this.wallets[team] += refund;
+                this.wallets[id] += refund;
                 if (this.selected === troop.id) this.selected = null;
                 this.s.sfx('coin', 80);
                 return;
             } else return this.reject(id, 'Unknown defense order');
-            if (!this.canAfford(team, cost)) return this.reject(id, 'Not enough team cash - answer a flashcard');
-            if (!this.unlimitedTestCash) this.wallets[team] -= cost;
+            if (!this.canAfford(id, cost)) return this.reject(id, 'Not enough cash - answer a flashcard to earn your own');
+            if (!this.unlimitedTestCash) this.wallets[id] -= cost;
             execute();
             this.s.sfx(order.action === 'send' ? 'enemySend' : order.action === 'upgrade' ? 'towerUpgrade' : 'towerBuild', 80);
         }
@@ -893,8 +906,8 @@
                     const count = Math.max(this.answerCount, this.answers[this.s.user.id] || 0) + 1;
                     if (this.request('answer', { count })) this.answerCount = count;
                 }
-                else if (correct === false) this.s.toast('Wrong answer - no team cash', '#f87171');
-            }, `Correct answer: +$${this.answerCash()} shared team cash`, true);
+                else if (correct === false) this.s.toast('Wrong answer - no cash earned', '#f87171');
+            }, `Correct answer: +$${this.answerCash()} to your wallet`, true);
         }
         simulate(dt) {
             if (this.waveSpawnRemaining > 0) {
@@ -977,7 +990,8 @@
             this.enemies = this.enemies.filter(e => e.hp > 0);
         }
         snapshot() {
-            return { serial: ++this.serial, health: [...this.health], wallets: [...this.wallets], damage: [...this.teamDamage],
+            return { serial: ++this.serial, health: [...this.health],
+                wallets: Object.fromEntries(Object.keys(this.teams).map(id => [id, this.cashFor(id)])), damage: [...this.teamDamage],
                 waveNumber: this.waveNumber, waveTimer: this.waveTimer, waveSpawnRemaining: this.waveSpawnRemaining,
                 waveSpawnTimer: this.waveSpawnTimer,
                 reinforcements: this.reinforcements.map(army => [...army]), waveArmy: this.waveArmy.map(army => [...army]),
@@ -989,6 +1003,11 @@
             const pair = values => Array.isArray(values) && values.length === 2 && values.every(v => Number.isFinite(v) && v >= 0);
             const object = value => value && typeof value === 'object' && !Array.isArray(value);
             const teams = { ...(object(state?.teams) ? state.teams : {}), ...this.s.room?.state?.defense_teams };
+            const legacyWallets = pair(state?.wallets) && state.wallets.every(cash => Number.isSafeInteger(cash) && cash <= 999999999);
+            const validWallets = legacyWallets || (object(state?.wallets)
+                && Object.entries(state.wallets).every(([id, cash]) => Object.hasOwn(teams, id)
+                    && Number.isSafeInteger(cash) && cash >= 0 && cash <= 999999999)
+                && Object.keys(state.teams || {}).every(id => Object.hasOwn(state.wallets, id)));
             const waveNumber = state?.waveNumber ?? 0, waveTimer = state?.waveTimer ?? 20;
             const waveSpawnRemaining = state?.waveSpawnRemaining ?? 0, waveSpawnTimer = state?.waveSpawnTimer ?? 0;
             const reinforcements = state?.reinforcements === undefined
@@ -1001,8 +1020,8 @@
             if (!state || !Number.isInteger(state.serial) || !pair(state.health) || state.health.some(v => v > 100)
                 || !validArmy(reinforcements) || !validArmy(waveArmy)
                 || waveArmy.some((army, team) => army.some((n, type) => n > reinforcements[team][type]))
-                || !pair(state.wallets) || !pair(state.damage) || !object(state.teams) || !object(state.lastSeq) || !object(state.answers)
-                || ![0, 1].includes(teams[this.s.user.id]) || !Number.isInteger(state.nextId)
+                || !validWallets || !pair(state.damage) || !object(state.teams) || !object(state.lastSeq) || !object(state.answers)
+                || (!this.s.spectator && ![0, 1].includes(teams[this.s.user.id])) || !Number.isInteger(state.nextId)
                 || !Number.isInteger(waveNumber) || waveNumber < 0 || waveNumber > 10000
                 || !Number.isFinite(waveTimer) || waveTimer < 0 || waveTimer > 32
                 || !Number.isInteger(waveSpawnRemaining) || waveSpawnRemaining < 0 || waveSpawnRemaining > 4 + waveNumber + Math.max(...waveArmy.map(army => army.reduce((a, b) => a + b, 0)))
@@ -1049,7 +1068,15 @@
             }
             this.battleSounds = state.battleSounds || 0;
             this.receivedSerial = state.serial; this.serial = state.serial;
-            this.health = [...state.health]; this.wallets = [...state.wallets]; this.teamDamage = [...state.damage];
+            this.health = [...state.health]; this.teamDamage = [...state.damage];
+            this.wallets = Object.fromEntries(Object.keys(teams).map(id => {
+                if (!Object.hasOwn(state.teams, id)) return [id, this.cashFor(id)];
+                if (!legacyWallets) return [id, state.wallets[id]];
+                // Preserve each old team's remaining cash when resuming a shared-wallet battle.
+                const members = Object.keys(state.teams).filter(player => state.teams[player] === teams[id]).sort();
+                const total = Math.floor(state.wallets[teams[id]]);
+                return [id, Math.floor(total / members.length) + (members.indexOf(id) < total % members.length ? 1 : 0)];
+            }));
             this.waveNumber = waveNumber; this.waveTimer = waveTimer;
             this.waveSpawnRemaining = waveSpawnRemaining; this.waveSpawnTimer = waveSpawnTimer;
             this.reinforcements = reinforcements.map(army => [...army]); this.waveArmy = waveArmy.map(army => [...army]);
@@ -1060,8 +1087,8 @@
             this.myTeam = this.teams[this.s.user.id] ?? this.myTeam;
             this.sequence = Math.max(this.sequence, this.lastSeq[this.s.user.id] || 0);
             this.pending = this.pending.filter(p => p.seq > (this.lastSeq[this.s.user.id] || 0));
-            this.res.value = this.wallets[this.myTeam];
-            this.s.score = this.teamValue(this.myTeam);
+            this.res.value = this.cashFor(this.s.user.id);
+            if (!this.s.spectator) this.s.score = this.teamValue(this.myTeam);
             this.s.setGoal(this.s.score);
         }
         onEvent(event, from) {
@@ -1075,8 +1102,9 @@
             const state = room.state?.defense;
             if (state && state.serial > this.serial) this.applySnapshot(state);
             if (room.state?.defense_teams) {
-                this.teams = { ...this.teams, ...room.state.defense_teams };
-                this.myTeam = this.teams[this.s.user.id];
+                this.teams = { ...room.state.defense_teams };
+                for (const id of Object.keys(this.teams)) if (!Object.hasOwn(this.wallets, id)) this.wallets[id] = 180;
+                this.myTeam = this.teams[this.s.user.id] ?? 0;
             }
         }
         net() {
@@ -1093,6 +1121,13 @@
                 console.error('[Tower Defense] Could not save battle:', error);
                 this.s.toast('Could not save Tower Defense. Check your connection.', '#f87171');
             });
+        }
+        updateSpectator(dt) {
+            this.shots = this.shots.filter(shot => (shot.t -= dt) > 0);
+            if (!this.authority || this.finished) return;
+            this.simulate(dt);
+            this.saveT += dt;
+            if (this.saveT >= 5 || this.finished) { this.saveT = 0; this.persist(); }
         }
         update(dt) {
             if (this.finished) return;
@@ -1122,7 +1157,7 @@
                 else if (this.buildType !== null) {
                     const snapped = this.gridPoint(p.x, p.y), type = DEFENSE_TROOPS[this.buildType];
                     if (!this.canBuild(this.s.user.id)) this.s.toast('Your tower allowance or the team cap has been reached', '#fbbf24');
-                    else if (!this.canAfford(this.myTeam, type.cost)) this.s.toast('Not enough team cash - answer a flashcard', '#fbbf24');
+                    else if (!this.canAfford(this.s.user.id, type.cost)) this.s.toast('Not enough cash - answer a flashcard', '#fbbf24');
                     else if (!this.validPlacement(snapped.x, snapped.y, this.myTeam)) this.s.toast('Choose an empty grid cell on your side, away from the path', '#fbbf24');
                     else if (this.request('build', { type: this.buildType, ...snapped })) this.buildType = null;
                 }
@@ -1138,7 +1173,7 @@
                 this.retryT -= dt;
                 if (this.retryT <= 0) { this.retryT = .6; for (const order of this.pending) this.s.emit(order); }
             }
-            this.res.value = this.wallets[this.myTeam];
+            this.res.value = this.cashFor(this.s.user.id);
             const value = this.teamValue(this.myTeam);
             this.s.score = value; this.s.setGoal(value);
         }
@@ -1149,19 +1184,41 @@
             return this.finished && [0, 1].includes(this.winner) ? `${this.winner ? 'Red' : 'Blue'} team wins!` : 'Battle ended';
         }
         isWinner(rows, id) { return this.finished && [0, 1].includes(this.winner) && this.winner === this.teamOf(id); }
-        goalText() { return `${this.myTeam ? 'Red' : 'Blue'} team · Wave ${this.waveNumber} · Base ${this.health[this.myTeam]} HP · Towers ${this.troopCount(this.s.user.id)}/${this.playerTroopLimit} · Team ${this.teamTroopCount(this.myTeam)}/40 · ${this.unlimitedTestCash ? 'unlimited test cash' : `$${this.wallets[this.myTeam]} shared`}`; }
-        hint() { return 'WASD walk · Choose a tower for one placement · Click friendly towers to upgrade or sell your own for 75% · Enemy purchases add +1 every wave starting next wave, no purchase limit · Kills give no cash · Q/E answer for shared cash'; }
-        touchHint() { return 'Joystick to walk · Choose a tower, tap a free cell for one placement · Cancel clears the preview · Tap a tower for upgrades/selling · 40 team slots divided among teammates · Answer for team cash'; }
+        goalText() { return `${this.myTeam ? 'Red' : 'Blue'} team · Wave ${this.waveNumber} · Base ${this.health[this.myTeam]} HP · Towers ${this.troopCount(this.s.user.id)}/${this.playerTroopLimit} · Team ${this.teamTroopCount(this.myTeam)}/40 · ${this.unlimitedTestCash ? 'unlimited test cash' : `$${this.cashFor(this.s.user.id)} yours`}`; }
+        hint() { return 'WASD walk · Choose a tower for one placement · Spend your cash to upgrade any friendly tower; only its owner can sell it for 75% · Enemy purchases add +1 every wave starting next wave · Kills give no cash · Q/E answer for your own cash'; }
+        touchHint() { return 'Joystick to walk · Choose a tower, tap a free cell · Tap friendly towers to upgrade with your cash; sell only your own · 40 team slots divided among teammates · Answer for your own cash'; }
         touchLayout() { return { stick: true, buttons: [{ k: 'KeyE', label: 'Earn cash', cls: 'main' }] }; }
         drawTroop(ctx, troop, angle = -.6) {
-            const spec = DEFENSE_TROOPS[troop.type];
+            const spec = DEFENSE_TROOPS[troop.type], level = troop.level || 1;
             ctx.save(); ctx.translate(troop.x, troop.y);
             ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(3, 23, 31, 13, 0, 0, TAU); ctx.fill();
-            ctx.fillStyle = '#475569'; roundRect(ctx, -26, -24, 52, 48, 8); ctx.fill();
-            ctx.fillStyle = '#cbd5e1'; roundRect(ctx, -21, -21, 42, 37, 5); ctx.fill();
+            if (troop.owner === this.s.user.id) {
+                ctx.strokeStyle = '#fef3c7'; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.arc(0, 0, 33, 0, TAU); ctx.stroke();
+            }
+            ctx.fillStyle = '#1e293b'; roundRect(ctx, -27, -24, 54, 50, 9); ctx.fill();
+            ctx.fillStyle = level === 3 ? '#d4a850' : level === 2 ? '#94a3b8' : '#64748b';
+            roundRect(ctx, -25, -25, 50, 45, 7); ctx.fill();
+            ctx.fillStyle = '#334155'; roundRect(ctx, -19, -20, 38, 34, 5); ctx.fill();
+            ctx.strokeStyle = spec.color; ctx.lineWidth = level === 3 ? 3 : 2;
+            roundRect(ctx, -19, -20, 38, 34, 5); ctx.stroke();
+            if (level >= 2) {
+                ctx.fillStyle = level === 3 ? '#fde68a' : '#e2e8f0';
+                for (const side of [-1, 1]) {
+                    ctx.fillRect(side * 22 - 3, -21, 6, 11);
+                    ctx.fillRect(side * 22 - 3, 4, 6, 11);
+                }
+            }
             ctx.fillStyle = DEFENSE_COLORS[troop.team]; ctx.fillRect(-22, 17, 44, 6);
-            for (let i = 0; i < troop.level; i++) { ctx.fillStyle = '#fff'; ctx.fillRect(-13 + i * 10, 18, 5, 3); }
+            for (let i = 0; i < level; i++) { ctx.fillStyle = '#fff'; ctx.fillRect(-13 + i * 10, 18, 5, 3); }
             ctx.rotate(angle);
+            ctx.scale(1 + (level - 1) * .09, 1 + (level - 1) * .06);
+            if (level === 3) {
+                ctx.fillStyle = spec.color;
+                for (const side of [-1, 1]) {
+                    ctx.beginPath(); ctx.moveTo(-15, side * 10); ctx.lineTo(-7, side * 21); ctx.lineTo(12, side * 12); ctx.closePath(); ctx.fill();
+                }
+            }
             ctx.fillStyle = '#334155'; ctx.beginPath(); ctx.arc(0, 0, 16, 0, TAU); ctx.fill();
             if (troop.type === 0 || troop.type === 3) {
                 ctx.strokeStyle = '#92400e'; ctx.lineWidth = troop.type === 3 ? 6 : 4;
@@ -1235,15 +1292,12 @@
                 const color = DEFENSE_COLORS[team], path = this.paths[team];
                 if (!this.seenRect(team * 1100, 0, 1100, this.H, 120)) continue;
                 ctx.fillStyle = team ? '#3f4934' : '#354c43'; ctx.fillRect(team * 1100, 0, 1100, this.H);
-                for (let y = Math.floor(this.y0 / 100) * 100; y < Math.min(this.H, this.y1); y += 100) {
-                    for (let x = Math.max(team * 1100, Math.floor(this.x0 / 100) * 100); x < Math.min((team + 1) * 1100, this.x1); x += 100) {
-                        const seed = hashStr(`${x}:${y}`), px = x + 20 + seed % 40, py = y + 30;
-                        ctx.fillStyle = 'rgba(163,230,53,.08)'; ctx.fillRect(x, y, 96, 96);
-                        if (this.distanceToPath(px, py, team) < 95) continue;
-                        ctx.strokeStyle = '#6b8e4e'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(px - 7, py + 8); ctx.lineTo(px - 11, py - 2);
-                        ctx.moveTo(px, py + 9); ctx.lineTo(px + 3, py - 6); ctx.moveTo(px + 7, py + 8); ctx.lineTo(px + 13, py); ctx.stroke();
-                        if (seed % 7 === 0) { ctx.fillStyle = '#64746b'; ctx.beginPath(); ctx.ellipse(px + 30, py + 30, 12, 8, -.4, 0, TAU); ctx.fill(); }
-                    }
+                for (const grass of this.grass[team]) {
+                    const px = grass.x, py = grass.y;
+                    if (!this.seen(px, py, 50)) continue;
+                    ctx.strokeStyle = '#6b8e4e'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(px - 7, py + 8); ctx.lineTo(px - 11, py - 2);
+                    ctx.moveTo(px, py + 9); ctx.lineTo(px + 3, py - 6); ctx.moveTo(px + 7, py + 8); ctx.lineTo(px + 13, py); ctx.stroke();
+                    if (grass.rock) { ctx.fillStyle = '#64746b'; ctx.beginPath(); ctx.ellipse(px + 30, py + 30, 12, 8, -.4, 0, TAU); ctx.fill(); }
                 }
                 ctx.strokeStyle = '#293c35'; ctx.lineWidth = 98; ctx.lineJoin = 'round';
                 ctx.beginPath(); path.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke();
@@ -1252,9 +1306,10 @@
                 ctx.strokeStyle = 'rgba(70,53,33,.22)'; ctx.lineWidth = 3; ctx.setLineDash([3, 28]); ctx.stroke(); ctx.setLineDash([]);
                 for (let row = Math.max(0, Math.ceil((this.y0 - this.gridSize - 85) / this.gridSize)); row < Math.min(20, Math.floor((this.y1 + this.gridSize - 85) / this.gridSize) + 1); row++) for (let col = Math.max(0, Math.ceil((this.x0 - this.gridSize - team * 1100 - 95) / this.gridSize)); col < Math.min(14, Math.floor((this.x1 + this.gridSize - team * 1100 - 95) / this.gridSize) + 1); col++) {
                     const x = team * 1100 + 95 + col * this.gridSize, y = 85 + row * this.gridSize;
-                    if (!this.seen(x, y, this.gridSize) || this.distanceToPath(x, y, team) <= 68) continue;
-                    ctx.strokeStyle = team === this.myTeam ? 'rgba(226,232,240,.16)' : 'rgba(248,113,113,.1)';
-                    ctx.lineWidth = 1; ctx.strokeRect(x - 35, y - 35, this.gridSize, this.gridSize);
+                    if (!this.seen(x, y, this.gridSize) || !this.buildGrid[team][row * 14 + col]) continue;
+                    ctx.strokeStyle = team === this.myTeam ? 'rgba(226,232,240,.14)' : 'rgba(248,113,113,.07)';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(x - this.gridSize / 2, y - this.gridSize / 2, this.gridSize, this.gridSize);
                 }
                 for (let i = 1; i < path.length; i++) {
                     const a = path[i - 1], b = path[i], angle = Math.atan2(b.y - a.y, b.x - a.x);
@@ -1263,28 +1318,35 @@
                     ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(12, 0); ctx.lineTo(-8, -9); ctx.lineTo(-8, 9); ctx.fill(); ctx.restore();
                 }
                 const start = path[0], base = path.at(-1);
-                this.ring(ctx, start.x, start.y, 44, color, 5);
-                ctx.fillStyle = '#334155'; ctx.fillRect(start.x - 44, start.y - 36, 16, 72); ctx.fillRect(start.x + 28, start.y - 36, 16, 72);
-                ctx.fillStyle = color; ctx.fillRect(start.x - 44, start.y - 40, 88, 12);
-                ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(base.x, base.y + 38, 85, 28, 0, 0, TAU); ctx.fill();
-                ctx.fillStyle = '#94a3b8'; roundRect(ctx, base.x - 66, base.y - 44, 132, 90, 6); ctx.fill();
-                ctx.fillStyle = '#475569'; ctx.fillRect(base.x - 57, base.y - 29, 114, 65);
-                for (const side of [-1, 1]) {
-                    ctx.fillStyle = '#cbd5e1'; ctx.fillRect(base.x + side * 59 - 14, base.y - 66, 28, 98);
-                    ctx.fillStyle = color; ctx.fillRect(base.x + side * 59 - 14, base.y - 73, 28, 20);
-                    ctx.fillStyle = '#334155'; ctx.fillRect(base.x + side * 59 - 3, base.y - 44, 6, 18);
+                if (this.seen(start.x, start.y, 100)) {
+                    this.ring(ctx, start.x, start.y, 44, color, 5);
+                    ctx.fillStyle = '#334155'; ctx.fillRect(start.x - 44, start.y - 36, 16, 72); ctx.fillRect(start.x + 28, start.y - 36, 16, 72);
+                    ctx.fillStyle = color; ctx.fillRect(start.x - 44, start.y - 40, 88, 12);
+                    if (!this.s.preview) {
+                        ctx.fillStyle = '#fff'; ctx.font = '900 18px system-ui'; ctx.textAlign = 'center';
+                        ctx.fillText('ENTRY', start.x, start.y - 55);
+                    }
                 }
-                ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(base.x, base.y - 68); ctx.lineTo(base.x + 39, base.y - 43); ctx.lineTo(base.x - 39, base.y - 43); ctx.fill();
-                ctx.fillStyle = '#0f172a'; roundRect(ctx, base.x - 20, base.y - 15, 40, 50, 15); ctx.fill();
-                ctx.fillStyle = '#fff'; ctx.font = '900 18px system-ui'; ctx.textAlign = 'center';
-                ctx.fillText(`${team ? 'RED' : 'BLUE'} ${this.health[team]} HP`, base.x, base.y + 65);
-                if (!this.s.preview) ctx.fillText('ENTRY', start.x, start.y - 55);
+                if (this.seen(base.x, base.y, 120)) {
+                    ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(base.x, base.y + 38, 85, 28, 0, 0, TAU); ctx.fill();
+                    ctx.fillStyle = '#94a3b8'; roundRect(ctx, base.x - 66, base.y - 44, 132, 90, 6); ctx.fill();
+                    ctx.fillStyle = '#475569'; ctx.fillRect(base.x - 57, base.y - 29, 114, 65);
+                    for (const side of [-1, 1]) {
+                        ctx.fillStyle = '#cbd5e1'; ctx.fillRect(base.x + side * 59 - 14, base.y - 66, 28, 98);
+                        ctx.fillStyle = color; ctx.fillRect(base.x + side * 59 - 14, base.y - 73, 28, 20);
+                        ctx.fillStyle = '#334155'; ctx.fillRect(base.x + side * 59 - 3, base.y - 44, 6, 18);
+                    }
+                    ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(base.x, base.y - 68); ctx.lineTo(base.x + 39, base.y - 43); ctx.lineTo(base.x - 39, base.y - 43); ctx.fill();
+                    ctx.fillStyle = '#0f172a'; roundRect(ctx, base.x - 20, base.y - 15, 40, 50, 15); ctx.fill();
+                    ctx.fillStyle = '#fff'; ctx.font = '900 18px system-ui'; ctx.textAlign = 'center';
+                    ctx.fillText(`${team ? 'RED' : 'BLUE'} ${this.health[team]} HP`, base.x, base.y + 65);
+                }
             }
             ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 4; ctx.setLineDash([20, 15]);
             ctx.beginPath(); ctx.moveTo(1100, 0); ctx.lineTo(1100, this.H); ctx.stroke(); ctx.setLineDash([]);
             for (const troop of this.troops) {
-                if (!this.seen(troop.x, troop.y)) continue;
                 const spec = DEFENSE_TROOPS[troop.type];
+                if (!this.seen(troop.x, troop.y, troop.id === this.selected ? spec.range + (troop.level - 1) * 35 : 40)) continue;
                 if (troop.id === this.selected) this.ring(ctx, troop.x, troop.y, spec.range + (troop.level - 1) * 35, spec.color + '88', 2);
                 const shot = this.shots.find(p => p.x === troop.x && p.y === troop.y);
                 this.drawTroop(ctx, troop, shot ? Math.atan2(shot.ty - troop.y, shot.tx - troop.x) : -.6);
@@ -1299,7 +1361,7 @@
             if (this.previewPoint && !this.s.preview) {
                 const p = this.previewPoint, spec = DEFENSE_TROOPS[this.buildType];
                 const atLimit = !this.canBuild(this.s.user.id);
-                const valid = this.validPlacement(p.x, p.y, this.myTeam) && this.canAfford(this.myTeam, spec.cost) && !atLimit;
+                const valid = this.validPlacement(p.x, p.y, this.myTeam) && this.canAfford(this.s.user.id, spec.cost) && !atLimit;
                 const color = valid ? '#86efac' : '#f87171';
                 ctx.fillStyle = valid ? 'rgba(134,239,172,.25)' : 'rgba(248,113,113,.25)';
                 ctx.fillRect(p.x - 35, p.y - 35, this.gridSize, this.gridSize);
@@ -1314,10 +1376,10 @@
                 if (!this.seenRect(Math.min(shot.x, shot.tx), Math.min(shot.y, shot.ty), Math.abs(shot.tx - shot.x), Math.abs(shot.ty - shot.y), 8)) continue;
                 ctx.strokeStyle = shot.color; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(shot.x, shot.y); ctx.lineTo(shot.tx, shot.ty); ctx.stroke();
             }
-            this.drawPlayers(ctx, (c, x, y, player) => this.ring(c, x, y, 22, DEFENSE_COLORS[this.teamOf(player?.id || this.s.user.id) ?? 0], 3));
+            this.drawPlayers(ctx);
             this.end(ctx);
             this.ui.begin();
-            if (this.s.preview) return;
+            if (this.s.preview || this.s.spectator) return;
             const selected = this.troops.find(t => t.id === this.selected);
             const compactPanels = (this.s.hudBounds?.().w ?? w) < 644 * Math.max(1, 1 / (this.s.scale || 1));
             if (!selected || !compactPanels) {
@@ -1326,7 +1388,7 @@
                 this.ui.addRect({ id: 'shop-panel', x: 0, y: 0, w: 320, h: 324, on: false });
                 ctx.fillStyle = '#fff'; ctx.font = '800 14px system-ui'; ctx.textAlign = 'center';
                 ctx.fillText(`BLUE ${this.health[0]} HP  |  RED ${this.health[1]} HP`, 160, 20);
-                ctx.fillStyle = DEFENSE_COLORS[this.myTeam]; ctx.fillText(`${this.myTeam ? 'RED' : 'BLUE'} TEAM CASH: ${this.unlimitedTestCash ? 'UNLIMITED (TEST)' : `$${this.wallets[this.myTeam]}`}`, 160, 42);
+                ctx.fillStyle = DEFENSE_COLORS[this.myTeam]; ctx.fillText(`YOUR CASH: ${this.unlimitedTestCash ? 'UNLIMITED (TEST)' : `$${this.cashFor(this.s.user.id)}`}`, 160, 42);
                 ctx.fillStyle = '#fbbf24'; ctx.font = '800 12px system-ui'; ctx.fillText(this.waveStatusText(), 160, 64);
                 this.ui.button(ctx, 'shop-build', 8, 72, 148, 26, 'Build towers', true, this.shopTab === 'build' ? '#2563eb' : '#334155');
                 this.ui.button(ctx, 'shop-send', 164, 72, 148, 26, 'Buy wave enemies', true, this.shopTab === 'send' ? '#be123c' : '#334155');
@@ -1334,7 +1396,7 @@
                 catalog.forEach((type, i) => {
                     const build = this.shopTab === 'build';
                     this.ui.button(ctx, `${build ? 'build' : 'send'}:${i}`, 8 + (i % 3) * 103, 106 + Math.floor(i / 3) * 50, 98, 44, type.name,
-                        this.canAfford(this.myTeam, type.cost) && (!build || this.canBuild(this.s.user.id)),
+                        this.canAfford(this.s.user.id, type.cost) && (!build || this.canBuild(this.s.user.id)),
                         build ? i === this.buildType ? '#2563eb' : '#475569' : '#9f1239',
                         build ? `$${type.cost}` : `$${type.cost} · ${this.reinforcements[1 - this.myTeam][i]}/wave`);
                 });
@@ -1354,7 +1416,7 @@
                     ctx.fillText(this.shopTab === 'send' ? 'Each purchase adds +1 enemy every wave.' : 'Choose a tower for one placement, or select a built tower.', 12, 238);
                     ctx.fillText(this.shopTab === 'send' ? 'Starts next wave. Cash comes from questions, not kills.' : '40 team slots divided equally among active teammates.', 12, 254);
                 }
-                this.ui.button(ctx, 'earn', 8, 268, 148, 48, 'Answer for cash', !this.s.question, '#15803d', `+$${this.answerCash()} to team`);
+                this.ui.button(ctx, 'earn', 8, 268, 148, 48, 'Answer for cash', !this.s.question, '#15803d', `+$${this.answerCash()} to you`);
                 this.ui.button(ctx, 'cancel', 164, 268, 148, 48, 'Cancel placement', this.buildType !== null, '#475569', this.buildType === null ? 'Nothing selected' : 'Escape also cancels');
                 ctx.restore();
             }
@@ -1379,9 +1441,9 @@
                     ctx.fillText(`Next firing interval: ${next.rate.toFixed(2)}s`, 12, 158);
                 } else ctx.fillText('Fully upgraded', 12, 142);
                 this.ui.button(ctx, 'upgrade', 8, 172, 140, 48, selected.level < 3 ? 'Upgrade' : 'Max level',
-                    selected.level < 3 && this.canAfford(this.myTeam, this.upgradeCost(selected)), '#7c3aed',
+                    selected.level < 3 && this.canAfford(this.s.user.id, this.upgradeCost(selected)), '#7c3aed',
                     selected.level < 3 ? `$${this.upgradeCost(selected)}` : 'Level 3');
-                this.ui.button(ctx, 'sell', 156, 172, 140, 48, 'Sell tower', selected.owner === this.s.user.id, '#b45309', `+$${this.sellValue(selected)} to team`);
+                this.ui.button(ctx, 'sell', 156, 172, 140, 48, 'Sell tower', selected.owner === this.s.user.id, '#b45309', `+$${this.sellValue(selected)} to you`);
                 ctx.textAlign = 'left'; ctx.fillStyle = '#94a3b8'; ctx.font = '600 10px system-ui';
                 ctx.fillText(compactPanels ? 'Close (X) or Escape to return to the shop' : 'Owner-only selling · 75% of build + upgrade costs', 12, 240);
                 ctx.restore();

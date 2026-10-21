@@ -1427,6 +1427,10 @@ begin
     ) then raise exception 'Only testers and administrators can join staff test rooms.'; end if;
 
     v_players := v_room.state -> 'players';
+    if v_room.host_id = v_user_id and coalesce((v_room.state ->> 'host_spectator')::boolean, false) then
+        -- Rejoining with the same account restores host authority, never a second player.
+        return public.studbud_game_room_view(v_room);
+    end if;
     if exists (
         select 1 from jsonb_array_elements(v_players) as item(player)
         where player ->> 'id' = v_user_id::text
@@ -1526,7 +1530,7 @@ begin
     where room_code = upper(btrim(p_code)) and expires_at > now()
     for update;
     if v_room.id is null then raise exception 'You are not in this game, or the room has expired.'; end if;
-    if not exists (
+    if v_room.host_id is distinct from auth.uid() and not exists (
         select 1 from jsonb_array_elements(v_room.state -> 'players') as item(player)
         where player ->> 'id' = auth.uid()::text
     ) then raise exception 'You are not in this game, or the room has expired.'; end if;
@@ -1574,6 +1578,8 @@ begin
         host_last_seen_at = now(),
         state = jsonb_build_object(
             'players', v_players,
+            'host_spectator', coalesce((v_room.state ->> 'host_spectator')::boolean, false),
+            'host_player', v_room.state -> 'host_player',
             'public_deck_id', v_room.state -> 'public_deck_id',
             'source_deck_id', v_room.state -> 'source_deck_id',
             'staff_test', coalesce((v_room.state ->> 'staff_test')::boolean, false),
@@ -1600,6 +1606,88 @@ begin
     return public.studbud_game_room_view(v_room);
 end;
 $$;
+
+-- Host authority is independent of membership in the participating roster.
+create or replace function public.studbud_set_host_mode(p_code text, p_spectator boolean)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_room public.studbud_game_rooms%rowtype;
+    v_players jsonb;
+    v_host jsonb;
+    v_team integer;
+    v_limit integer;
+    v_state jsonb;
+begin
+    select * into v_room from public.studbud_game_rooms
+    where room_code = upper(btrim(p_code)) and expires_at > now() for update;
+    if not found or v_room.host_id is distinct from auth.uid() then
+        raise exception 'Only the host can switch host mode.';
+    end if;
+    if p_spectator is null or v_room.status = 'finished' then raise exception 'This room cannot change roles.'; end if;
+    if coalesce((v_room.state ->> 'host_spectator')::boolean, false) = p_spectator then
+        return public.studbud_game_room_view(v_room);
+    end if;
+    if v_room.mode = 'chess' and v_room.status <> 'waiting' then
+        raise exception 'Choose host or play before starting Question Chess. Its two seats cannot change during a match.';
+    end if;
+    v_state := v_room.state;
+    v_players := v_state -> 'players';
+    if p_spectator then
+        select value into v_host from jsonb_array_elements(v_players) where value ->> 'id' = auth.uid()::text;
+        if v_host is null then raise exception 'Host player was not found.'; end if;
+        select coalesce(jsonb_agg(player order by n), '[]'::jsonb) into v_players
+        from jsonb_array_elements(v_players) with ordinality c(player, n)
+        where player ->> 'id' <> auth.uid()::text;
+        v_state := v_state || jsonb_build_object('host_player', v_host);
+        if v_state ? 'defense_teams' then
+            v_state := jsonb_set(v_state, '{defense_teams}', (v_state -> 'defense_teams') - auth.uid()::text);
+        end if;
+        if v_state ? 'defense' then
+            v_state := jsonb_set(v_state, '{defense,teams}', (v_state -> 'defense' -> 'teams') - auth.uid()::text);
+            if jsonb_typeof(v_state -> 'defense' -> 'wallets') = 'object' then
+                v_state := jsonb_set(v_state, '{defense,wallets}', (v_state -> 'defense' -> 'wallets') - auth.uid()::text);
+            end if;
+            v_state := jsonb_set(v_state, '{defense,troops}', coalesce((
+                select jsonb_agg(unit) from jsonb_array_elements(v_state -> 'defense' -> 'troops') c(unit)
+                where unit ->> 'owner' <> auth.uid()::text
+            ), '[]'::jsonb));
+        end if;
+    else
+        v_limit := case v_room.mode when 'chess' then 2 when 'duel' then 8 else 16 end;
+        if jsonb_array_length(v_players) >= v_limit then raise exception 'The player seats are full. Stay in host mode or remove a player first.'; end if;
+        v_host := v_state -> 'host_player';
+        if jsonb_typeof(v_host) is distinct from 'object' then raise exception 'Host player was not found.'; end if;
+        v_players := v_players || jsonb_build_array(v_host);
+        if v_room.mode = 'defense' and v_room.status = 'playing' then
+            select case when count(*) filter (where value = '0') <= count(*) filter (where value = '1') then 0 else 1 end
+            into v_team from jsonb_each_text(coalesce(v_state -> 'defense_teams', '{}'::jsonb));
+            v_state := jsonb_set(v_state, '{defense_teams}', coalesce(v_state -> 'defense_teams', '{}'::jsonb)
+                || jsonb_build_object(auth.uid()::text, v_team));
+            if v_state ? 'defense' then
+                v_state := jsonb_set(v_state, '{defense,teams}', v_state -> 'defense_teams');
+                if jsonb_typeof(v_state -> 'defense' -> 'wallets') = 'object' then
+                    v_state := jsonb_set(v_state, '{defense,wallets}', (v_state -> 'defense' -> 'wallets')
+                        || jsonb_build_object(auth.uid()::text, 180));
+                end if;
+            end if;
+        end if;
+    end if;
+    if v_state ? 'defense' then
+        v_state := jsonb_set(v_state, '{defense,serial}', to_jsonb(coalesce((v_state #>> '{defense,serial}')::integer, 0) + 1));
+    end if;
+    update public.studbud_game_rooms
+    set state = v_state || jsonb_build_object('players', v_players, 'host_spectator', p_spectator),
+        host_last_seen_at = now(), updated_at = now()
+    where id = v_room.id returning * into v_room;
+    return public.studbud_game_room_view(v_room);
+end;
+$$;
+revoke all on function public.studbud_set_host_mode(text, boolean) from public, anon;
+grant execute on function public.studbud_set_host_mode(text, boolean) to authenticated;
 
 drop function if exists public.studbud_submit_game_answer(text, integer, integer);
 create or replace function public.studbud_submit_game_answer(
@@ -1635,6 +1723,8 @@ begin
     where room_code = upper(btrim(p_code)) and expires_at > now()
     for update;
     if not found or v_room.status <> 'playing' then raise exception 'This game is not accepting answers.'; end if;
+    if not exists (select 1 from jsonb_array_elements(v_room.state -> 'players') c(player)
+        where player ->> 'id' = auth.uid()::text) then raise exception 'Only participating players can answer.'; end if;
     if v_room.goal_type = 'time'
         and now() >= v_room.started_at + make_interval(secs => v_room.time_limit_seconds) then
         update public.studbud_game_rooms set status = 'finished', updated_at = now()
@@ -2054,10 +2144,10 @@ begin
     select * into v_room
     from public.studbud_game_rooms
     where room_code = upper(btrim(p_code)) and expires_at > now();
-    if not found or not exists (
+    if not found or (v_room.host_id is distinct from auth.uid() and not exists (
         select 1 from jsonb_array_elements(v_room.state -> 'players') as item(player)
         where player ->> 'id' = auth.uid()::text
-    ) then raise exception 'You are not in this game, or the room has expired.'; end if;
+    )) then raise exception 'You are not in this game, or the room has expired.'; end if;
     return v_room.cards;
 end;
 $$;
@@ -2181,7 +2271,7 @@ begin
         or jsonb_typeof(p_state -> 'answers') is distinct from 'object'
         or jsonb_typeof(p_state -> 'lastSeq') is distinct from 'object'
         or jsonb_typeof(p_state -> 'health') is distinct from 'array'
-        or jsonb_typeof(p_state -> 'wallets') is distinct from 'array'
+        or coalesce(jsonb_typeof(p_state -> 'wallets'), '') not in ('array', 'object')
         or jsonb_typeof(p_state -> 'damage') is distinct from 'array'
         or jsonb_typeof(p_state -> 'troops') is distinct from 'array'
         or jsonb_typeof(p_state -> 'enemies') is distinct from 'array'
@@ -2193,13 +2283,31 @@ begin
         raise exception 'Invalid team economy or roster.';
     end if;
     -- A queued save may precede a late arrival; retain the server's full team map.
+    if jsonb_typeof(p_state -> 'wallets') = 'object' then
+        if exists (select 1 from jsonb_each(p_state -> 'wallets') c(key, value)
+            where not ((v_room.state -> 'defense_teams') ? key)
+                or jsonb_typeof(value) is distinct from 'number' or value::text !~ '^[0-9]{1,9}$')
+            or exists (select 1 from jsonb_object_keys(p_state -> 'teams') c(key)
+                where not ((p_state -> 'wallets') ? key)) then
+            raise exception 'Invalid player cash balances.';
+        end if;
+        -- New players get their own starting cash without changing anyone else's balance.
+        p_state := jsonb_set(p_state, '{wallets}',
+            (select jsonb_object_agg(key, coalesce(p_state -> 'wallets' -> key, '180'::jsonb))
+                from jsonb_object_keys(v_room.state -> 'defense_teams') c(key)));
+    else
+        -- Accept in-progress games hosted by the previous shared-wallet client.
+        if jsonb_array_length(p_state -> 'wallets') <> 2 or exists (
+            select 1 from jsonb_array_elements(p_state -> 'wallets') c(value)
+            where jsonb_typeof(value) is distinct from 'number' or value::text !~ '^[0-9]{1,9}$'
+        ) then raise exception 'Invalid legacy cash balances.'; end if;
+    end if;
     p_state := jsonb_set(p_state, '{teams}', v_room.state -> 'defense_teams');
     if jsonb_array_length(p_state -> 'health') <> 2
-        or jsonb_array_length(p_state -> 'wallets') <> 2
         or jsonb_array_length(p_state -> 'damage') <> 2
         or jsonb_array_length(p_state -> 'troops') > 80
         or jsonb_array_length(p_state -> 'enemies') > 120
-        or exists (select 1 from jsonb_array_elements_text((p_state -> 'health') || (p_state -> 'wallets') || (p_state -> 'damage')) c(value)
+        or exists (select 1 from jsonb_array_elements_text((p_state -> 'health') || (p_state -> 'damage')) c(value)
             where value is null or value !~ '^[0-9]{1,9}$')
         or exists (select 1 from jsonb_each_text((p_state -> 'answers') || (p_state -> 'lastSeq')) c(key, value)
             where value is null or value !~ '^[0-9]{1,9}$')
@@ -4365,5 +4473,640 @@ revoke all on function public.studbud_my_classes(text[]) from public, anon;
 grant execute on function public.studbud_my_classes(text[]) to authenticated;
 revoke all on function public.studbud_sync_class_stats(jsonb) from public, anon;
 grant execute on function public.studbud_sync_class_stats(jsonb) to authenticated;
+
+-- School community privacy is separate from the existing mutual course/classmate opt-in.
+alter table public.studbud_public_profiles
+    add column if not exists show_school_discovery boolean not null default false;
+create index if not exists studbud_public_profiles_school_discovery_idx
+    on public.studbud_public_profiles (user_id) where show_school_discovery;
+
+create table if not exists public.studbud_class_community_posts (
+    id uuid primary key default gen_random_uuid(),
+    class_id uuid not null references public.studbud_classes (id) on delete cascade,
+    author_id uuid not null references auth.users (id) on delete cascade,
+    parent_id uuid references public.studbud_class_community_posts (id) on delete cascade,
+    kind text not null check (kind in ('announcement', 'discussion')),
+    body text not null,
+    deleted boolean not null default false,
+    created_at timestamptz not null default now(),
+    check (char_length(body) between 1 and 2000 or (deleted and body = '')),
+    check (parent_id is null or kind = 'discussion')
+);
+-- Private moderation evidence for soft-deleted posts. Community RPCs never return these columns.
+alter table public.studbud_class_community_posts
+    add column if not exists deleted_body text,
+    add column if not exists deleted_at timestamptz,
+    add column if not exists deleted_by uuid references auth.users (id) on delete set null;
+alter table public.studbud_class_community_posts drop constraint if exists studbud_class_community_posts_deleted_body_check;
+alter table public.studbud_class_community_posts
+    add constraint studbud_class_community_posts_deleted_body_check
+    check (deleted_body is null or char_length(deleted_body) <= 2000);
+create index if not exists studbud_class_community_posts_root_idx
+    on public.studbud_class_community_posts (class_id, created_at desc, id desc)
+    where parent_id is null and not deleted;
+create index if not exists studbud_class_community_posts_replies_idx
+    on public.studbud_class_community_posts (parent_id, created_at desc, id desc)
+    where parent_id is not null and not deleted;
+create index if not exists studbud_class_community_posts_author_idx
+    on public.studbud_class_community_posts (author_id, created_at desc);
+alter table public.studbud_class_community_posts enable row level security;
+revoke all on table public.studbud_class_community_posts from public, anon, authenticated;
+
+-- One class can advertise one room, and one room cannot be presented as multiple classes.
+create table if not exists public.studbud_class_live_rooms (
+    class_id uuid primary key references public.studbud_classes (id) on delete cascade,
+    room_id uuid not null unique references public.studbud_game_rooms (id) on delete cascade,
+    linked_at timestamptz not null default now()
+);
+alter table public.studbud_class_live_rooms enable row level security;
+revoke all on table public.studbud_class_live_rooms from public, anon, authenticated;
+
+create or replace function public.studbud_community_room_joinable(p_room public.studbud_game_rooms)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+    select coalesce((auth.uid() is not null
+      and not public.studbud_is_guest()
+      and p_room.status in ('waiting', 'playing')
+      and p_room.expires_at > now()
+      and (p_room.status = 'waiting' or (
+          p_room.status = 'playing'
+          and p_room.mode <> 'chess'
+          and coalesce((p_room.state ->> 'allow_late_join')::boolean, false)
+          and (p_room.goal_type <> 'time'
+              or p_room.started_at + make_interval(secs => p_room.time_limit_seconds) > now())
+      ))
+      and (
+          (p_room.host_id = auth.uid()
+              and coalesce((p_room.state ->> 'host_spectator')::boolean, false))
+          or case
+              when jsonb_typeof(p_room.state -> 'players') is distinct from 'array' then false
+              else jsonb_array_length(p_room.state -> 'players') <
+                  case when p_room.mode = 'chess' then 2 when p_room.mode = 'duel' then 8 else 16 end
+          end
+      )
+      and (
+          not coalesce((p_room.state ->> 'staff_test')::boolean, false)
+          or public.studbud_is_admin()
+          or public.studbud_has_user_tag(auth.uid(), 'tester')
+      )), false);
+$$;
+revoke all on function public.studbud_community_room_joinable(public.studbud_game_rooms) from public, anon, authenticated;
+
+create or replace function public.studbud_community_school(p_user_id uuid)
+returns text
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+    select coalesce(nullif(d.data #>> '{state,profile,school}', ''), pp.school,
+        a.raw_user_meta_data ->> 'school', 'pchs')
+    from auth.users a
+    left join public.studbud_public_profiles pp on pp.user_id = a.id
+    left join public.studbud_user_data d on d.user_id = a.id
+    where a.id = p_user_id;
+$$;
+revoke all on function public.studbud_community_school(uuid) from public, anon, authenticated;
+
+create or replace function public.studbud_community_require_class(p_class_id uuid)
+returns public.studbud_classes
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_class public.studbud_classes;
+    v_school text;
+    v_teacher boolean;
+begin
+    if auth.uid() is null or public.studbud_is_guest() then
+        raise exception 'Sign in with an account to use the school community.';
+    end if;
+    if public.studbud_is_hidden_user(auth.uid()) then
+        raise exception 'School community is unavailable for this account.';
+    end if;
+    v_school := public.studbud_community_school(auth.uid());
+    if v_school not in ('pchs', 'pnhs', 'pshs', 'pwhs') then
+        raise exception 'Choose a supported school in Settings to use the school community.';
+    end if;
+    select c.* into v_class from public.studbud_classes c where c.id = p_class_id;
+    if not found or v_class.school <> v_school then
+        raise exception 'This class is not available to your account.';
+    end if;
+    select exists (select 1 from public.studbud_user_tags t
+        where t.user_id = auth.uid() and t.tag = 'teacher') into v_teacher;
+    if v_class.teacher_id = auth.uid() and v_teacher then
+        perform public.studbud_require_teacher();
+        return v_class;
+    end if;
+    if exists (select 1 from public.studbud_class_members m
+        where m.class_id = v_class.id and m.user_id = auth.uid() and not m.removed) then
+        return v_class;
+    end if;
+    raise exception 'You are not an active member of this class.';
+end;
+$$;
+revoke all on function public.studbud_community_require_class(uuid) from public, anon, authenticated;
+
+create or replace function public.studbud_set_school_discovery(p_enabled boolean)
+returns boolean
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+    if auth.uid() is null or public.studbud_is_guest() then
+        raise exception 'Sign in with an account to change school discovery.';
+    end if;
+    if public.studbud_is_hidden_user(auth.uid()) then
+        raise exception 'School discovery is unavailable for this account.';
+    end if;
+    if p_enabled is null then raise exception 'Choose whether to enable school discovery.'; end if;
+    insert into public.studbud_public_profiles (user_id, show_school_discovery)
+    values (auth.uid(), p_enabled)
+    on conflict (user_id) do update
+        set show_school_discovery = excluded.show_school_discovery, updated_at = now();
+    return p_enabled;
+end;
+$$;
+revoke all on function public.studbud_set_school_discovery(boolean) from public, anon;
+grant execute on function public.studbud_set_school_discovery(boolean) to authenticated;
+
+create or replace function public.studbud_school_community(p_class_id uuid default null, p_before uuid default null)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_uid uuid := auth.uid();
+    v_school text;
+    v_class public.studbud_classes;
+    v_school_discovery boolean := false;
+    v_class_discovery boolean := false;
+    v_can_announce boolean := false;
+    v_people jsonb := '[]'::jsonb;
+    v_decks jsonb := '[]'::jsonb;
+    v_posts jsonb := '[]'::jsonb;
+    v_live jsonb := '[]'::jsonb;
+    v_before_created timestamptz;
+    v_root_count integer := 0;
+    v_next_before uuid;
+begin
+    if v_uid is null or public.studbud_is_guest() then
+        raise exception 'Sign in with an account to use the school community.';
+    end if;
+    if public.studbud_is_hidden_user(v_uid) then
+        raise exception 'School community is unavailable for this account.';
+    end if;
+    v_school := public.studbud_community_school(v_uid);
+    if v_school not in ('pchs', 'pnhs', 'pshs', 'pwhs') then
+        raise exception 'Choose a supported school in Settings to use the school community.';
+    end if;
+    select coalesce(pp.show_school_discovery, false), coalesce(pp.show_classmates, false)
+    into v_school_discovery, v_class_discovery
+    from public.studbud_public_profiles pp where pp.user_id = v_uid;
+    v_school_discovery := coalesce(v_school_discovery, false);
+    v_class_discovery := coalesce(v_class_discovery, false);
+
+    if p_class_id is not null then
+        v_class := public.studbud_community_require_class(p_class_id);
+        v_can_announce := v_class.teacher_id = v_uid
+            and public.studbud_has_user_tag(v_uid, 'teacher');
+    elsif p_before is not null then
+        raise exception 'A post cursor requires a class.';
+    end if;
+
+    if p_class_id is null then
+        if v_school_discovery then
+            select coalesce(jsonb_agg(jsonb_build_object('user_id', peers.user_id, 'username', peers.username)
+                order by lower(peers.username), peers.user_id), '[]'::jsonb)
+            into v_people
+            from (
+                select a.id as user_id,
+                    coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student') as username
+                from public.studbud_public_profiles pp
+                join auth.users a on a.id = pp.user_id
+                where pp.show_school_discovery
+                  and pp.user_id <> v_uid
+                  and coalesce(a.is_anonymous, false) = false
+                  and not public.studbud_is_hidden_user(a.id)
+                  and public.studbud_community_school(a.id) = v_school
+                order by lower(coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student')), a.id
+                limit 100
+            ) peers;
+        end if;
+
+        select coalesce(jsonb_agg(jsonb_build_object(
+            'id', d.id, 'title', d.title,
+            'author', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student'),
+            'card_count', d.card_count, 'course_title', d.course
+        ) order by d.study_count desc, d.updated_at desc, d.id), '[]'::jsonb)
+        into v_decks
+        from (
+            select d.id, d.owner_id, d.title, d.course, d.card_count, d.study_count, d.updated_at
+            from public.studbud_community_decks d
+            join auth.users author on author.id = d.owner_id
+            -- A school-scoped listing reveals affiliation, so require the author's school-disclosure consent.
+            join public.studbud_public_profiles author_profile on author_profile.user_id = d.owner_id
+                and (author_profile.show_school or (v_school_discovery and author_profile.show_school_discovery))
+            join public.studbud_user_data viewer_data on viewer_data.user_id = v_uid
+            where coalesce(author.is_anonymous, false) = false
+              and not public.studbud_is_hidden_user(d.owner_id)
+              and public.studbud_community_school(d.owner_id) = v_school
+              and exists (
+                  select 1
+                  from jsonb_array_elements(case
+                      when jsonb_typeof(viewer_data.data #> '{state,courses}') = 'array'
+                      then viewer_data.data #> '{state,courses}' else '[]'::jsonb end) as course(value)
+                  where public.studbud_course_matches(
+                      jsonb_build_object('code', d.course, 'title', d.course),
+                      coalesce(nullif(course.value ->> 'catalogCode', ''), course.value ->> 'code'),
+                      course.value ->> 'title')
+              )
+            order by d.study_count desc, d.updated_at desc, d.id
+            limit 20
+        ) d
+        join auth.users a on a.id = d.owner_id;
+
+        select coalesce(jsonb_agg(jsonb_build_object(
+            'room_code', r.room_code, 'deck_title', r.deck_title, 'mode', r.mode,
+            'status', r.status, 'joinable', r.joinable,
+            'teacher_username', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Teacher')
+        ) order by r.updated_at desc, r.id), '[]'::jsonb)
+        into v_live
+        from (
+            select room.id, room.room_code, room.deck_title, room.mode, room.status,
+                public.studbud_community_room_joinable(room) as joinable,
+                room.updated_at, room.host_id
+            from public.studbud_class_live_rooms link
+            join public.studbud_classes c on c.id = link.class_id and c.school = v_school
+            join public.studbud_game_rooms room on room.id = link.room_id
+            join public.studbud_user_tags tag on tag.user_id = c.teacher_id and tag.tag = 'teacher'
+            join auth.users host on host.id = room.host_id
+            where room.host_id = c.teacher_id
+              and public.studbud_community_school(c.teacher_id) = c.school
+              and not coalesce(host.is_anonymous, false)
+              and not public.studbud_is_hidden_user(room.host_id)
+              and room.status in ('waiting', 'playing')
+              and room.expires_at > now()
+              and room.host_last_seen_at > now() - interval '30 seconds'
+            order by room.updated_at desc, room.id
+            limit 20
+        ) r
+        join auth.users a on a.id = r.host_id;
+    else
+        if v_class_discovery then
+            select coalesce(jsonb_agg(jsonb_build_object('user_id', peers.user_id, 'username', peers.username)
+                order by lower(peers.username), peers.user_id), '[]'::jsonb)
+            into v_people
+            from (
+                select a.id as user_id,
+                    coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student') as username
+                from public.studbud_class_members m
+                join public.studbud_public_profiles pp on pp.user_id = m.user_id and pp.show_classmates
+                join auth.users a on a.id = m.user_id
+                where m.class_id = v_class.id and not m.removed and m.user_id <> v_uid
+                  and coalesce(a.is_anonymous, false) = false
+                  and not public.studbud_is_hidden_user(m.user_id)
+                order by lower(coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student')), a.id
+                limit 100
+            ) peers;
+        end if;
+
+        select coalesce(jsonb_agg(jsonb_build_object(
+            'id', d.id, 'title', d.title,
+            'author', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student'),
+            'card_count', d.card_count, 'course_title', d.course
+        ) order by d.study_count desc, d.updated_at desc, d.id), '[]'::jsonb)
+        into v_decks
+        from (
+            select d.id, d.owner_id, d.title, d.course, d.card_count, d.study_count, d.updated_at
+            from public.studbud_community_decks d
+            join auth.users author on author.id = d.owner_id
+            -- Class-scoped public sets imply the class's school; teacher class sets are returned elsewhere.
+            join public.studbud_public_profiles author_profile on author_profile.user_id = d.owner_id
+                and (author_profile.show_school or (v_school_discovery and author_profile.show_school_discovery))
+            where coalesce(author.is_anonymous, false) = false
+              and not public.studbud_is_hidden_user(d.owner_id)
+              and public.studbud_community_school(d.owner_id) = v_class.school
+              and public.studbud_course_matches(
+                  jsonb_build_object('code', d.course, 'title', d.course), v_class.course_code, v_class.title)
+            order by d.study_count desc, d.updated_at desc, d.id
+            limit 20
+        ) d
+        join auth.users a on a.id = d.owner_id;
+
+        select coalesce(jsonb_agg(jsonb_build_object(
+            'room_code', r.room_code, 'deck_title', r.deck_title, 'mode', r.mode,
+            'status', r.status, 'joinable', r.joinable,
+            'teacher_username', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Teacher')
+        ) order by r.updated_at desc, r.id), '[]'::jsonb)
+        into v_live
+        from (
+            select room.id, room.room_code, room.deck_title, room.mode, room.status,
+                public.studbud_community_room_joinable(room) as joinable,
+                room.updated_at, room.host_id
+            from public.studbud_class_live_rooms link
+            join public.studbud_game_rooms room on room.id = link.room_id
+            join public.studbud_user_tags tag on tag.user_id = v_class.teacher_id and tag.tag = 'teacher'
+            join auth.users host on host.id = room.host_id
+            where link.class_id = v_class.id
+              and room.host_id = v_class.teacher_id
+              and public.studbud_community_school(v_class.teacher_id) = v_class.school
+              and not coalesce(host.is_anonymous, false)
+              and not public.studbud_is_hidden_user(room.host_id)
+              and room.status in ('waiting', 'playing')
+              and room.expires_at > now()
+              and room.host_last_seen_at > now() - interval '30 seconds'
+            order by room.updated_at desc, room.id
+            limit 1
+        ) r
+        join auth.users a on a.id = r.host_id;
+
+        if p_before is not null then
+            select p.created_at into v_before_created
+            from public.studbud_class_community_posts p
+            join auth.users author on author.id = p.author_id
+            where p.id = p_before and p.class_id = v_class.id
+              and p.parent_id is null and not p.deleted
+              and not coalesce(author.is_anonymous, false)
+              and not public.studbud_is_hidden_user(p.author_id);
+            if v_before_created is null then raise exception 'This post cursor is unavailable.'; end if;
+        end if;
+
+        select count(*)::integer into v_root_count
+        from (
+            select p.id
+            from public.studbud_class_community_posts p
+            join auth.users author on author.id = p.author_id
+            where p.class_id = v_class.id and p.parent_id is null and not p.deleted
+              and not coalesce(author.is_anonymous, false)
+              and not public.studbud_is_hidden_user(p.author_id)
+              and (p_before is null or (p.created_at, p.id) < (v_before_created, p_before))
+            order by p.created_at desc, p.id desc
+            limit 21
+        ) page;
+
+        select coalesce(jsonb_agg(row_to_json(page)::jsonb order by page.created_at desc, page.id desc), '[]'::jsonb)
+        into v_posts
+        from (
+            select p.id, p.parent_id, p.kind, p.body, p.created_at, p.author_id,
+                coalesce(nullif(author.raw_user_meta_data ->> 'username', ''), 'Student') as username,
+                (select count(*)::integer
+                    from public.studbud_class_community_posts reply
+                    join auth.users reply_author on reply_author.id = reply.author_id
+                    where reply.parent_id = p.id and not reply.deleted
+                      and not coalesce(reply_author.is_anonymous, false)
+                      and not public.studbud_is_hidden_user(reply.author_id)) as reply_count
+            from public.studbud_class_community_posts p
+            join auth.users author on author.id = p.author_id
+            where p.class_id = v_class.id and p.parent_id is null and not p.deleted
+              and not coalesce(author.is_anonymous, false)
+              and not public.studbud_is_hidden_user(p.author_id)
+              and (p_before is null or (p.created_at, p.id) < (v_before_created, p_before))
+            order by p.created_at desc, p.id desc
+            limit 20
+        ) page;
+
+        if v_root_count > 20 then
+            select p.id into v_next_before
+            from public.studbud_class_community_posts p
+            join auth.users author on author.id = p.author_id
+            where p.class_id = v_class.id and p.parent_id is null and not p.deleted
+              and not coalesce(author.is_anonymous, false)
+              and not public.studbud_is_hidden_user(p.author_id)
+              and (p_before is null or (p.created_at, p.id) < (v_before_created, p_before))
+            order by p.created_at desc, p.id desc
+            offset 19 limit 1;
+        end if;
+    end if;
+
+    return jsonb_build_object(
+        'school', v_school,
+        'class_id', p_class_id,
+        'can_announce', v_can_announce,
+        'school_discovery', v_school_discovery,
+        'class_discovery', case when p_class_id is null then false else v_class_discovery end,
+        'people', v_people,
+        'decks', v_decks,
+        'posts', v_posts,
+        'live', v_live,
+        'next_before', v_next_before
+    );
+end;
+$$;
+revoke all on function public.studbud_school_community(uuid, uuid) from public, anon;
+grant execute on function public.studbud_school_community(uuid, uuid) to authenticated;
+
+create or replace function public.studbud_community_post(
+    p_class_id uuid, p_body text, p_kind text default 'discussion', p_parent_id uuid default null
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_uid uuid := auth.uid();
+    v_class public.studbud_classes;
+    v_body text := btrim(coalesce(p_body, ''));
+    v_kind text := lower(btrim(coalesce(p_kind, '')));
+    v_parent public.studbud_class_community_posts;
+    v_id uuid;
+begin
+    v_class := public.studbud_community_require_class(p_class_id);
+    if p_kind is null then v_kind := 'discussion'; end if;
+    if v_kind not in ('discussion', 'announcement') then
+        raise exception 'Choose a discussion or announcement.';
+    end if;
+    if char_length(v_body) not between 1 and 2000 or octet_length(v_body) > 8000 then
+        raise exception 'Posts must contain 1-2,000 characters.';
+    end if;
+    if v_kind = 'announcement' and (
+        v_class.teacher_id <> v_uid or not public.studbud_has_user_tag(v_uid, 'teacher')
+    ) then raise exception 'Only this class''s teacher can post announcements.'; end if;
+    if p_parent_id is not null then
+        if v_kind <> 'discussion' then raise exception 'Replies must be discussion posts.'; end if;
+        select p.* into v_parent from public.studbud_class_community_posts p
+        join auth.users author on author.id = p.author_id
+        where p.id = p_parent_id and p.class_id = v_class.id
+          and p.parent_id is null and not p.deleted
+          and not coalesce(author.is_anonymous, false)
+          and not public.studbud_is_hidden_user(p.author_id);
+        if not found then raise exception 'This post is unavailable for replies.'; end if;
+    end if;
+
+    perform pg_advisory_xact_lock(hashtextextended(v_uid::text, 0));
+    if (select count(*) from public.studbud_class_community_posts p
+        where p.author_id = v_uid and p.created_at > now() - interval '10 minutes') >= 10
+       or (select count(*) from public.studbud_class_community_posts p
+        where p.author_id = v_uid and p.created_at > now() - interval '1 day') >= 60 then
+        raise exception 'You are posting too quickly. Please wait before posting again.';
+    end if;
+
+    insert into public.studbud_class_community_posts (class_id, author_id, parent_id, kind, body)
+    values (v_class.id, v_uid, p_parent_id, v_kind, v_body)
+    returning id into v_id;
+    return v_id;
+end;
+$$;
+revoke all on function public.studbud_community_post(uuid, text, text, uuid) from public, anon;
+grant execute on function public.studbud_community_post(uuid, text, text, uuid) to authenticated;
+
+create or replace function public.studbud_community_replies(p_post_id uuid, p_before uuid default null)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_root public.studbud_class_community_posts;
+    v_before_created timestamptz;
+    v_reply_count integer := 0;
+    v_next_before uuid;
+    v_posts jsonb := '[]'::jsonb;
+begin
+    if p_post_id is null then raise exception 'Choose a discussion.'; end if;
+    select p.* into v_root from public.studbud_class_community_posts p
+    join auth.users author on author.id = p.author_id
+    where p.id = p_post_id and p.parent_id is null and not p.deleted
+      and not coalesce(author.is_anonymous, false)
+      and not public.studbud_is_hidden_user(p.author_id);
+    if not found then raise exception 'This post is unavailable.'; end if;
+    perform public.studbud_community_require_class(v_root.class_id);
+
+    if p_before is not null then
+        select p.created_at into v_before_created
+        from public.studbud_class_community_posts p
+        join auth.users author on author.id = p.author_id
+        where p.id = p_before and p.parent_id = v_root.id and not p.deleted
+          and not coalesce(author.is_anonymous, false)
+          and not public.studbud_is_hidden_user(p.author_id);
+        if v_before_created is null then raise exception 'This reply cursor is unavailable.'; end if;
+    end if;
+
+    select count(*)::integer into v_reply_count
+    from (
+        select p.id
+        from public.studbud_class_community_posts p
+        join auth.users author on author.id = p.author_id
+        where p.parent_id = v_root.id and not p.deleted
+          and not coalesce(author.is_anonymous, false)
+          and not public.studbud_is_hidden_user(p.author_id)
+          and (p_before is null or (p.created_at, p.id) < (v_before_created, p_before))
+        order by p.created_at desc, p.id desc
+        limit 21
+    ) page;
+    select coalesce(jsonb_agg(row_to_json(page)::jsonb order by page.created_at desc, page.id desc), '[]'::jsonb)
+    into v_posts
+    from (
+        select p.id, p.parent_id, p.kind, p.body, p.created_at, p.author_id,
+            coalesce(nullif(author.raw_user_meta_data ->> 'username', ''), 'Student') as username,
+            0::integer as reply_count
+        from public.studbud_class_community_posts p
+        join auth.users author on author.id = p.author_id
+        where p.parent_id = v_root.id and not p.deleted
+          and not coalesce(author.is_anonymous, false)
+          and not public.studbud_is_hidden_user(p.author_id)
+          and (p_before is null or (p.created_at, p.id) < (v_before_created, p_before))
+        order by p.created_at desc, p.id desc
+        limit 20
+    ) page;
+    if v_reply_count > 20 then
+        select p.id into v_next_before
+        from public.studbud_class_community_posts p
+        join auth.users author on author.id = p.author_id
+        where p.parent_id = v_root.id and not p.deleted
+          and not coalesce(author.is_anonymous, false)
+          and not public.studbud_is_hidden_user(p.author_id)
+          and (p_before is null or (p.created_at, p.id) < (v_before_created, p_before))
+        order by p.created_at desc, p.id desc
+        offset 19 limit 1;
+    end if;
+    return jsonb_build_object('posts', v_posts, 'next_before', v_next_before);
+end;
+$$;
+revoke all on function public.studbud_community_replies(uuid, uuid) from public, anon;
+grant execute on function public.studbud_community_replies(uuid, uuid) to authenticated;
+
+create or replace function public.studbud_community_delete_post(p_post_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_post public.studbud_class_community_posts;
+    v_class public.studbud_classes;
+begin
+    if auth.uid() is null or public.studbud_is_guest() or public.studbud_is_hidden_user(auth.uid()) then
+        raise exception 'Sign in with an available account to remove a post.';
+    end if;
+    select p.* into v_post from public.studbud_class_community_posts p
+    where p.id = p_post_id and not p.deleted for update;
+    if not found then raise exception 'This post is unavailable.'; end if;
+    v_class := public.studbud_community_require_class(v_post.class_id);
+    if v_post.author_id <> auth.uid() and not (
+        v_class.teacher_id = auth.uid() and public.studbud_has_user_tag(auth.uid(), 'teacher')
+    ) then raise exception 'Only the author or this class''s teacher can remove this post.'; end if;
+    if v_post.parent_id is null then
+        update public.studbud_class_community_posts
+        set deleted = true, deleted_body = body, body = '', deleted_at = now(), deleted_by = auth.uid()
+        where (id = v_post.id or parent_id = v_post.id) and not deleted;
+    else
+        update public.studbud_class_community_posts
+        set deleted = true, deleted_body = body, body = '', deleted_at = now(), deleted_by = auth.uid()
+        where id = v_post.id and not deleted;
+    end if;
+end;
+$$;
+revoke all on function public.studbud_community_delete_post(uuid) from public, anon;
+grant execute on function public.studbud_community_delete_post(uuid) to authenticated;
+
+create or replace function public.studbud_class_live_game(p_class_id uuid, p_code text)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_class public.studbud_classes;
+    v_code text := upper(btrim(coalesce(p_code, '')));
+    v_room public.studbud_game_rooms;
+begin
+    v_class := public.studbud_community_require_class(p_class_id);
+    if v_class.teacher_id <> auth.uid() or not public.studbud_has_user_tag(auth.uid(), 'teacher') then
+        raise exception 'Only this class''s teacher can list a live game.';
+    end if;
+    if v_code = '' then
+        delete from public.studbud_class_live_rooms where class_id = v_class.id;
+        return;
+    end if;
+    if v_code !~ '^[A-HJ-NP-Z2-9]{6}$' then raise exception 'Enter a valid six-character room code.'; end if;
+    select r.* into v_room from public.studbud_game_rooms r
+    where r.room_code = v_code for update;
+    if not found or v_room.host_id <> auth.uid()
+       or v_room.status not in ('waiting', 'playing')
+       or v_room.expires_at <= now()
+       or v_room.host_last_seen_at <= now() - interval '30 seconds'
+       or coalesce(public.studbud_is_hidden_user(v_room.host_id), true)
+       or coalesce((select a.is_anonymous from auth.users a where a.id = v_room.host_id), true) then
+        raise exception 'That live game is unavailable to list.';
+    end if;
+    insert into public.studbud_class_live_rooms (class_id, room_id, linked_at)
+    values (v_class.id, v_room.id, now())
+    on conflict (class_id) do update set room_id = excluded.room_id, linked_at = excluded.linked_at;
+end;
+$$;
+revoke all on function public.studbud_class_live_game(uuid, text) from public, anon;
+grant execute on function public.studbud_class_live_game(uuid, text) to authenticated;
 
 notify pgrst, 'reload schema';

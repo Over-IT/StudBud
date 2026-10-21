@@ -128,6 +128,24 @@ assert.match(node('planner-day-queue').innerHTML, /planner-start-work/);
 assert.match(node('planner-day-completed').innerHTML, /Finished this day \(1\)/);
 assert.equal(app.dailyPlannerModel().studiedMinutes, 15);
 assert.equal(app.dailyPlannerModel().queue[0].remaining, 25, 'remaining estimates use lifetime work while the daily budget uses only this day');
+assert.match(node('planner-day-queue').innerHTML, /<details class="planner-card-details"[^>]*><summary[^>]*>Details &amp; options/);
+assert.ok(node('planner-day-queue').innerHTML.indexOf('edit-assignment') > node('planner-day-queue').innerHTML.indexOf('planner-card-details'),
+    'editing and time management are progressively disclosed instead of crowding the primary actions');
+const savedAssignments = state.assignments;
+state.assignments = Array.from({ length: 6 }, (_, i) => ({
+    id: `deadline-${i}`, title: `Deadline ${i}`, courseCode: 'math', status: 'pending', graded: false, dueDate: todayKey, estimatedMinutes: 5
+}));
+app.renderDailyPlanner();
+assert.doesNotMatch(node('planner-day-queue').innerHTML, /planner-remaining/, 'urgent deadlines are never hidden in the more-tasks disclosure');
+assert.equal((node('planner-day-queue').innerHTML.match(/class="planner-day-card/g) || []).length, 6);
+state.assignments = Array.from({ length: 6 }, (_, i) => ({
+    id: `planned-${i}`, title: `Planned ${i}`, courseCode: 'math', status: 'pending', graded: false, plannedDate: todayKey, estimatedMinutes: 5
+}));
+app.renderDailyPlanner();
+assert.match(node('planner-day-queue').innerHTML, /3 more planned tasks/);
+assert.equal((node('planner-day-queue').innerHTML.split('planner-remaining')[0].match(/class="planner-day-card/g) || []).length, 3);
+state.assignments = savedAssignments;
+app.renderDailyPlanner();
 assert.throws(() => app.handleChange({ target: { id: 'planner-date', value: 'bad' } }), /valid planner date/);
 app.handleChange({ target: { id: 'planner-date', value: '2026-01-01' } });
 assert.equal(app.selectedPlannerDate(), '2026-01-01', 'digital planner can browse past dates');

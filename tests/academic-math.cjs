@@ -301,7 +301,9 @@ elements.set('study-analytics-decks', {});
 state.studyHistory = [{ durationSec: 20, gameSummary: { answered: 3, correct: 2 } }, { durationSec: 20 }];
 state.flashcards = [{ title: '<Deck>', cards: [{ reps: 1, state: 'review', lapses: 2, lastReviewed: new Date().toISOString(), nextReviewDate: tomorrow.toISOString() }] }];
 app.renderStudyAnalytics();
-assert.match(elements.get('study-analytics-summary').innerHTML, /66\.67%/);
+assert.doesNotMatch(elements.get('study-analytics-summary').innerHTML, /accuracy|66\.67%|answers submitted/i);
+assert.ok(elements.get('study-analytics-summary').innerHTML.includes(app.formatStudyDuration(40)), 'answering game questions still counts as study time');
+assert.match(elements.get('study-analytics-summary').innerHTML, /Saved sessions<\/span><strong>2<\/strong>/);
 assert.match(elements.get('study-analytics-decks').innerHTML, /&lt;Deck&gt;/);
 assert.match(elements.get('study-analytics-decks').innerHTML, /1 reviewed · 2 lapses/);
 const assignmentIds = ['assignment-form', 'assignment-id', 'assignment-modal-title', 'assignment-name',

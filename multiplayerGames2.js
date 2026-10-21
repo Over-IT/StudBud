@@ -11,6 +11,37 @@
         return ramped + gain * ramped * ramped / (2 * capTime) + Math.max(0, t - capTime) * (1 + gain);
     };
 
+    function mineFog(game, ctx, cx, cy, r0, r1, stops, w, h) {
+        const m = ctx.getTransform?.(), canvas = ctx.canvas, layer = game.fogLayer;
+        const R = m && Math.ceil(r1 * m.a), size = R * 2;
+        const key = m && `${JSON.stringify(stops)}|${Math.round(r0 * m.a)}|${R}`;
+        const lost = layer?.canvas.getContext?.('2d')?.isContextLost?.();
+        if (!m || m.b || m.c || Math.abs(m.a - m.d) > 1e-6 || !canvas?.width || !canvas.height
+            || !layer || layer.key !== key || lost) {
+            // The shared helper owns a single bounded sprite and handles unsupported transforms.
+            if (lost) game.fogLayer = null;
+            A.util.radialOverlay(game, 'fogLayer', ctx, cx, cy, r0, r1, stops, w, h);
+            return;
+        }
+        const ox = Math.round(cx * m.a + m.e - R), oy = Math.round(cy * m.d + m.f - R);
+        const W = canvas.width, H = canvas.height;
+        const left = Math.max(0, ox), right = Math.min(W, ox + size);
+        const top = Math.max(0, oy), bottom = Math.min(H, oy + size);
+        ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+        if (right > left && bottom > top) {
+            ctx.drawImage(layer.canvas, left - ox, top - oy, right - left, bottom - top,
+                left, top, right - left, bottom - top);
+        }
+        ctx.fillStyle = stops[stops.length - 1][1];
+        if (oy > 0) ctx.fillRect(0, 0, W, Math.min(H, oy));
+        if (oy + size < H) ctx.fillRect(0, Math.max(0, oy + size), W, H - Math.max(0, oy + size));
+        if (bottom > top) {
+            if (ox > 0) ctx.fillRect(0, top, Math.min(W, ox), bottom - top);
+            if (ox + size < W) ctx.fillRect(Math.max(0, ox + size), top, W - Math.max(0, ox + size), bottom - top);
+        }
+        ctx.restore();
+    }
+
     /* Shared top-down world: movement, collisions, follow camera, player drawing. */
     class Arena extends A.BaseGame {
         constructor(s, W, H) {
@@ -90,6 +121,7 @@
                 if (extra) extra(ctx, r.x, r.y, r);
                 if (!this.s.preview) nameTag(ctx, r.name || '', r.x, r.y - 30, r.color);
             }
+            if (s.spectator) return;
             const alpha = this.stun > 0 ? 0.5 + Math.sin(this.anim * 30) * 0.3 : 1;
             drawFigureTop(ctx, s.local, me.x, me.y, this.figureR || 15, me.aim, this.anim, alpha, !this.seated && this.moving);
             if (extra) extra(ctx, me.x, me.y, null);
@@ -238,8 +270,10 @@
             const col = Math.floor(cx / TS), row = Math.floor(cy / TS), radius = TS * 5;
             for (let y = Math.max(4, row - 5); y <= Math.min(ROWS - 1, row + 5); y++) {
                 for (let x = Math.max(1, col - 5); x <= Math.min(COLS - 2, col + 5); x++) {
-                    const index = y * COLS + x, distance = Math.hypot(x * TS + TS / 2 - cx, y * TS + TS / 2 - cy);
-                    if (this.T[index] !== 6 || distance > radius) continue;
+                    const index = y * COLS + x;
+                    if (this.T[index] !== 6) continue;
+                    const distance = Math.hypot(x * TS + TS / 2 - cx, y * TS + TS / 2 - cy);
+                    if (distance > radius) continue;
                     this.lavaVisibility[index] = Math.min(1, this.lavaVisibility[index] + dt * (1.6 - distance / radius));
                 }
             }
@@ -664,6 +698,7 @@
                 if (!this.s.preview) A.util.nameTag(ctx, r.name || '', r.x + 13, r.y - 12, r.color);
             }
             if (this.dig.tx >= 0 && this.dig.ty >= 0) this.drawMineProgress(ctx, this.dig.tx * TS, this.dig.ty * TS, this.dig.p / this.digDuration(this.tile(this.dig.tx, this.dig.ty), this.dig.ty));
+            if (!s.spectator) {
             A.util.drawFigureSide(ctx, s.local, me.x, me.y, me.w, me.h, me.face, this.anim, me.onGround, this.stun > 0 ? 0.72 : 1, null, me.onGround);
             this.drawPickaxe(ctx, me.x + me.w / 2, me.y + 22, this.dig.p > 0 ? this.aimAngle || 0 : me.face < 0 ? Math.PI : 0, this.dig.p > 0, this.anim);
             if (this.carry > 0) {
@@ -675,6 +710,7 @@
                 ctx.fillStyle = '#fb923c'; ctx.beginPath(); ctx.moveTo(me.x + 8, me.y + me.h - 1); ctx.lineTo(me.x + 12, me.y + me.h + 10); ctx.lineTo(me.x + 15, me.y + me.h - 1); ctx.fill();
             }
             if (!this.s.preview) A.util.nameTag(ctx, 'You', me.x + me.w / 2, me.y - 12, '#fff');
+            }
             this.particles.draw(ctx);
             this.end(ctx);
 
@@ -685,9 +721,9 @@
             const fog = s.preview ? clamp(depth / 66, 0.03, 0.5) : clamp(0.25 + depth / 14, 0.25, 0.95);
             const inner = (s.preview ? 260 : clamp(230 - depth * 1.4, 150, 230)) * this.zoom;
             const fogA = Math.round(fog * 100) / 100, r = Math.round(inner);
-            A.util.radialOverlay(this, 'fogLayer', ctx, px, py, r * 0.45, r * 1.75,
+            mineFog(this, ctx, px, py, r * 0.45, r * 1.75,
                 [[0, 'rgba(255,224,160,.05)'], [0.35, `rgba(2,5,14,${(fogA * 0.35).toFixed(3)})`], [1, `rgba(2,5,14,${fogA})`]], w, h);
-            if (s.preview) return;
+            if (s.preview || s.spectator) return;
             s.placeHud(ctx, 0, 0, 230, 34, 'top-center');
             ctx.fillStyle = 'rgba(8,12,24,.76)'; A.util.roundRect(ctx, 0, 0, 230, 34, 10); ctx.fill();
             ctx.strokeStyle = 'rgba(148,163,184,.35)'; ctx.lineWidth = 1; A.util.roundRect(ctx, .5, .5, 229, 33, 10); ctx.stroke();
@@ -1235,10 +1271,10 @@
                 ctx.lineTo(ex + Math.cos(spin.dir - 2.4) * 18, ey + Math.sin(spin.dir - 2.4) * 18); ctx.fill();
             }
             for (const r of s.remoteList()) { if (this.seen(r.x, r.y)) boat(r.x, r.y, r.f || 0, false); }
-            boat(me.x, me.y, me.aim, this.riding);
+            if (!s.spectator) boat(me.x, me.y, me.aim, this.riding);
             this.drawPlayers(ctx);
             const mw = this.mouseWorld();
-            if (!s.preview && !s.question) {
+            if (!s.preview && !s.spectator && !s.question) {
                 const ang = Math.atan2(mw.y - me.y, mw.x - me.x), d = Math.min(320, dist(mw.x, mw.y, me.x, me.y));
                 this.ring(ctx, me.x + Math.cos(ang) * d, me.y + Math.sin(ang) * d, 78, this.castCd > 0 ? 'rgba(255,255,255,.18)' : 'rgba(254,243,199,.65)', 2);
             }

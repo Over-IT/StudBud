@@ -774,6 +774,18 @@
             return data;
         }
 
+        async schoolCall(fn, args = {}) {
+            if (!['studbud_school_community', 'studbud_set_school_discovery', 'studbud_community_post',
+                'studbud_community_replies', 'studbud_community_delete_post', 'studbud_class_live_game'].includes(fn)) {
+                throw new Error('Unknown school community action.');
+            }
+            const { data, error } = await this.getClient().rpc(fn, args);
+            if (error) throw new Error(error.message.includes('Could not find the function')
+                ? 'School community needs a server update. Ask the site administrator to apply the latest database setup.'
+                : error.message);
+            return data;
+        }
+
         async awardSoloCoins(correct, total) {
             const { data, error } = await this.getClient().rpc('studbud_award_solo_coins', { p_correct: correct, p_total: total });
             if (error) throw new Error(`Could not award coins: ${error.message}`);
@@ -852,6 +864,14 @@
                 p_code: roomCode
             });
             if (error) throw new Error(`Could not start the game: ${error.message}`);
+            return data;
+        }
+
+        async setHostMode(roomCode, spectator) {
+            const { data, error } = await (await this.gameClient()).rpc('studbud_set_host_mode', {
+                p_code: roomCode, p_spectator: Boolean(spectator)
+            });
+            if (error) throw new Error(`Could not switch host mode: ${error.message}. Apply the latest database setup SQL if this function is missing.`);
             return data;
         }
 

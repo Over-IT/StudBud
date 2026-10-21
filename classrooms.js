@@ -162,11 +162,15 @@
             const item = document.getElementById('classes-nav-item');
             if (!item) return;
             const show = this.available();
+            document.getElementById('school-community-privacy')?.classList.toggle('hidden', !show);
             item.classList.toggle('hidden', !show);
             const label = item.querySelector('span');
             if (label) label.textContent = this.isTeacher() ? 'Teach' : 'Classes';
             const icon = item.querySelector('i');
             if (icon) icon.className = this.isTeacher() ? 'fas fa-chalkboard-user' : 'fas fa-school';
+            if (['gpa', 'classes', 'school-community', 'grade-scenarios', 'analytics', 'class'].includes(this.app.Router?.activeRoute)) {
+                this.app.Router.renderWorkspaceTabs();
+            }
             if (show && !this.isTeacher()) this.scheduleSync(1500);
         }
 
@@ -449,12 +453,15 @@
                     </div>
                 </section>
                 <p id="classes-status" class="classes-status" role="status" aria-live="polite"></p>
+                <button type="button" class="secondary-btn" data-school-action="open-class" data-class="${esc(item.id)}" data-title="${esc(item.title)}"><i class="fas fa-comments" aria-hidden="true"></i> Announcements, discussions &amp; live games</button>
+                <div data-school-live="${esc(item.id)}" aria-live="polite"></div>
                 <div class="segmented classes-tabs" role="tablist">
                     <button type="button" role="tab" class="${this.detailTab === 'students' ? 'selected' : ''}" aria-selected="${this.detailTab === 'students'}" data-class-action="tab" data-tab="students"><i class="fas fa-users"></i> Students${needHelp ? ` <b class="tab-badge">${needHelp}</b>` : ''}</button>
                     <button type="button" role="tab" class="${this.detailTab === 'sets' ? 'selected' : ''}" aria-selected="${this.detailTab === 'sets'}" data-class-action="tab" data-tab="sets"><i class="fas fa-layer-group"></i> Flashcard sets <b class="tab-badge muted">${(item.decks || []).length}</b></button>
                     <button type="button" role="tab" class="${this.detailTab === 'settings' ? 'selected' : ''}" aria-selected="${this.detailTab === 'settings'}" data-class-action="tab" data-tab="settings"><i class="fas fa-sliders"></i> Class settings</button>
                 </div>
                 <div id="classes-tab-body">${this.detailTab === 'sets' ? this.setsMarkup() : this.detailTab === 'settings' ? this.settingsMarkup() : this.rosterMarkup(weekStudy)}</div>`;
+            this.app.schoolCommunity?.refreshClassListings();
         }
 
         rosterMarkup(weekStudy) {
@@ -535,6 +542,7 @@
                     <div><h4>${esc(deck.title)}</h4><small>${(deck.cards || []).length} cards · updated ${esc(ago(deck.updated_at))}</small>
                     ${deck.description ? `<p>${esc(deck.description)}</p>` : ''}</div>
                     <div class="actions">
+                        <button type="button" class="primary-btn compact-btn" data-school-action="host-set" data-class="${esc(this.detail.id)}" data-id="${esc(deck.id)}"><i class="fas fa-tower-broadcast" aria-hidden="true"></i> Host live</button>
                         <button type="button" class="secondary-btn compact-btn" data-class-action="edit-deck" data-id="${esc(deck.id)}"><i class="fas fa-pen"></i> Edit</button>
                         <button type="button" class="secondary-btn compact-btn" data-class-action="copy-deck-local" data-id="${esc(deck.id)}"><i class="fas fa-download"></i> Copy to my sets</button>
                         <button type="button" class="danger-btn compact-btn" data-class-action="delete-deck" data-id="${esc(deck.id)}">Delete</button>
@@ -629,6 +637,8 @@
                         <h3>${esc(item.title)}</h3>
                         <small><i class="fas fa-chalkboard-user"></i> ${esc(personName(item.teacher))} · ${Number(item.student_count || 0)} students</small></div>
                     </header>
+                    <button type="button" class="secondary-btn" data-school-action="open-class" data-class="${esc(item.id)}" data-title="${esc(item.title)}"><i class="fas fa-comments" aria-hidden="true"></i> Class updates &amp; live games</button>
+                    <div data-school-live="${esc(item.id)}" aria-live="polite"></div>
                     ${decks.length ? `<ul class="class-deck-list">${decks.map(deck => {
                         const saved = local.find(entry => entry.classDeckId === deck.id);
                         const stale = saved && deck.updated_at && saved.classDeckUpdatedAt !== deck.updated_at;
@@ -653,6 +663,7 @@
                 <p id="classes-status" class="classes-status" role="status" aria-live="polite"></p>
                 <div class="student-class-grid">${classCards || `<div class="glass-card empty-state full-width"><i class="fas fa-users-rectangle"></i> ${courseCount ? 'None of your teachers are on StudBud yet. Their classes show up here as soon as they add your courses.' : 'Add your courses (or import from Infinite Campus) to see your classes.'}</div>`}</div>
                 ${classes.length && waiting.length ? `<p class="muted class-waiting"><i class="fas fa-hourglass-half"></i> Not on StudBud yet: ${waiting.slice(0, 8).map(course => esc(course.title)).join(', ')}${waiting.length > 8 ? '…' : ''}</p>` : ''}`;
+            this.app.schoolCommunity?.refreshClassListings();
         }
 
         findClassDeck(classId, deckId) {

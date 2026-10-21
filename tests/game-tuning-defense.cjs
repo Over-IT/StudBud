@@ -442,9 +442,10 @@ assert.notEqual(game.teamOf('host'), game.teamOf('guest'));
 const order = (id, action, data = {}) => game.command({ seq: (game.lastSeq[id] || 0) + 1, action, ...data,
     ...(action === 'build' ? game.gridPoint(data.x, data.y, game.teamOf(id)) : {}) }, id);
 order('host', 'build', { type: 0, x: 500, y: 340 });
-assert.equal(game.troops.length, 1); assert.equal(game.wallets[0], 120);
+assert.equal(game.troops.length, 1); assert.equal(game.wallets.host, 120);
 order('ally', 'upgrade', { id: game.troops[0].id });
-assert.equal(game.troops[0].level, 2); assert.equal(game.wallets[0], 60, 'teammates spend the same wallet');
+assert.equal(game.troops[0].level, 2); assert.equal(game.wallets.ally, 120, 'the upgrader pays from their own wallet');
+assert.equal(game.wallets.host, 120, 'teammates cannot spend the owner’s cash');
 order('guest', 'upgrade', { id: game.troops[0].id });
 assert.equal(game.troops[0].level, 2, 'rivals cannot upgrade friendly troops');
 order('host', 'build', { type: 0, x: 1700, y: 340 });
@@ -453,9 +454,10 @@ assert.equal(game.troops.length, 1, 'enemy-side and path construction are reject
 order('host', 'build', { type: 'map', x: 400, y: 300 });
 assert.equal(game.troops.length, 1, 'invalid troop types are rejected without spending money');
 order('host', 'answer', { count: 1 });
-assert.equal(game.wallets[0], 120);
+assert.equal(game.wallets.host, 180);
 order('ally', 'answer', { count: 1 });
-assert.equal(game.wallets[0], 180, 'answers credit the shared wallet');
+assert.equal(game.wallets.ally, 180, 'answers credit only the answering player');
+assert.equal(game.wallets.host, 180);
 order('guest', 'send', { type: 0 });
 assert.equal(game.enemies.length, 0, 'purchases queue recurring enemies for the next wave, not an immediate one-off');
 assert.equal(game.reinforcements[0][0], 1);
@@ -466,17 +468,17 @@ assert.equal(enemy.team, 0); assert.equal(enemy.segment, 0); assert.equal(enemy.
 assert.equal(game.pointOnPath(enemy).x, game.paths[0][0].x, 'sent enemies start at the opposing entry');
 game.command({ seq: game.lastSeq.guest, action: 'send', type: 0 }, 'guest');
 assert.equal(game.reinforcements[0][0], 1, 'retransmitted commands cannot duplicate recurring purchases');
-const earned = game.wallets[0];
+const earned = game.wallets.host;
 game.waveSpawnRemaining = 0; game.waveTimer = 100;
 for (let i = 0; i < 1000 && game.enemies.length; i++) game.simulate(1 / 60);
 assert.equal(game.enemies.length, 0);
 assert.equal(game.health[0], 100, 'the archer defends the path');
-assert.equal(game.wallets[0], earned, 'kills do not generate team cash');
+assert.equal(game.wallets.host, earned, 'kills do not generate cash');
 order('host', 'upgrade', { id: game.troops[0].id });
 assert.equal(game.troops[0].level, 3);
-const finalWallet = game.wallets[0];
+const finalWallet = game.wallets.host;
 order('host', 'upgrade', { id: game.troops[0].id });
-assert.equal(game.wallets[0], finalWallet, 'max-level upgrades do not consume money');
+assert.equal(game.wallets.host, finalWallet, 'max-level upgrades do not consume money');
 game.troops = [];
 game.waveTimer = 0;
 order('host', 'send', { type: 2 });
@@ -508,22 +510,134 @@ assert.equal(game.resultTitle(rows), 'Blue team wins!');
 assert.equal(game.isWinner(rows, 'ally'), true, 'all winning teammates receive the winning result');
 const client = session('defense', 'guest', ['host', 'guest']);
 {
+    const g = session('defense').game, original = g.snapshot();
+    for (const wallets of [{ ...original.wallets, intruder: 100 }, { host: 20 }, { ...original.wallets, host: -1 },
+        { ...original.wallets, host: 1.5 }, { ...original.wallets, host: Infinity }]) {
+        const serial = g.serial;
+        g.applySnapshot({ ...original, serial: serial + 1, wallets });
+        assert.equal(g.serial, serial, 'invalid snapshots cannot advance authoritative state');
+    }
+    assert.equal(g.s.messages.length, 5, 'each invalid balance produces a visible error');
+    g.applySnapshot({ ...original, serial: g.serial + 1, wallets: [231, 95] });
+    assert.equal(g.wallets.host + g.wallets.ally, 231, 'legacy blue cash is split without duplication');
+    assert.equal(g.wallets.guest + g.wallets.rival, 95, 'legacy red cash is split without duplication');
+    assert.equal(g.wallets.ally, 116, 'sorted members deterministically receive odd remainders');
+    const restored = session('defense').game;
+    restored.applySnapshot(g.snapshot());
+    assert.equal(JSON.stringify(restored.wallets), JSON.stringify(g.wallets), 'migration runs once, not on every reconnect');
+}
+{
+    const g = session('defense').game;
+    const rings = [], drawing = [];
+    const paint = new Proxy({
+        arc: (...args) => rings.push(args),
+        fillRect: (...args) => drawing.push(['rect', ...args]),
+        scale: (...args) => drawing.push(['scale', ...args])
+    }, { get: (target, key) => target[key] || noop });
+    const tower = { x: 305, y: 295, team: 0, type: 0, owner: 'host', level: 1 };
+    g.drawTroop(paint, tower);
+    assert.equal(rings.filter(args => args[2] === 33).length, 1, 'only your placed towers have the ownership circle');
+    const base = JSON.stringify(drawing);
+    rings.length = 0; drawing.length = 0;
+    g.drawTroop(paint, { ...tower, owner: 'ally' });
+    assert.equal(rings.filter(args => args[2] === 33).length, 0, 'teammate towers do not carry your ownership ring');
+    for (const type of [0, 1, 2, 3, 4, 5]) {
+        const versions = [];
+        for (const level of [1, 2, 3]) {
+            drawing.length = 0;
+            g.drawTroop(paint, { ...tower, type, level });
+            versions.push(JSON.stringify(drawing));
+        }
+        assert.equal(new Set(versions).size, 3, 'each tower type has physically distinct upgrade stages');
+    }
+    assert.ok(base.length > 0);
+    let playerExtra;
+    g.drawPlayers = (c, extra) => { playerExtra = extra; };
+    g.draw(ctx, 1280, 720);
+    assert.equal(playerExtra, undefined, 'Defense characters no longer get a permanent team circle');
+    let pathQueries = 0;
+    const distance = g.distanceToPath.bind(g);
+    g.distanceToPath = (...args) => { pathQueries++; return distance(...args); };
+    for (let frame = 0; frame < 120; frame++) g.draw(ctx, 1280, 720);
+    assert.equal(pathQueries, 0, 'static grass and grid geometry do not recalculate path distances on every frame');
+    for (const team of [0, 1]) for (let cell = 0; cell < 280; cell++) {
+        const x = team * 1100 + 95 + cell % 14 * 70, y = 85 + Math.floor(cell / 14) * 70;
+        assert.equal(Boolean(g.buildGrid[team][cell]), distance(x, y, team) > 68, 'drawn grid matches placement path clearance exactly');
+        assert.equal(JSON.stringify(g.gridPoint(x, y, team)), JSON.stringify({ x, y }), 'grid cells and placement centers use the same origin');
+    }
+}
+{
+    const app = vm.runInContext('Object.create(AppOrchestrator.prototype)', sandbox);
+    const s = session('defense', 'host', ['host', 'guest', 'ally']), g = s.game;
+    s.practice = true;
+    const bot = { id: 'ally', x: 500, y: 650, ex: {}, ai: { rng: () => 0, defenseAnswer: 100 } };
+    const demo = { game: g, session: s, bots: [bot], clock: 0 };
+    g.command({ seq: 1, action: 'build', type: 0, ...g.gridPoint(500, 340, 0) }, bot.id);
+    const tower = g.troops[0], before = g.wallets.host;
+    app.stepDefenseBots(demo, 1);
+    assert.equal(tower.level, 2, 'normal bots buy a real paid tower upgrade');
+    assert.equal(g.wallets.ally, 60);
+    assert.equal(g.wallets.host, before, 'bot upgrades never debit another player');
+    bot.ai.defenseThink = 0;
+    app.stepDefenseBots(demo, 1);
+    assert.equal(tower.level, 2, 'insufficient funds do not grant free level-three upgrades');
+    g.wallets.ally = 180; bot.ai.defenseThink = 0;
+    app.stepDefenseBots(demo, 1);
+    assert.equal(tower.level, 3, 'bots can fully upgrade towers');
+    const levels = [], sendTypes = [];
+    const command = g.command.bind(g);
+    g.command = (order, id) => { if (order.action === 'build') levels.push(order.type); if (order.action === 'send') sendTypes.push(order.type); return command(order, id); };
+    bot.ai.rng = A.util.mulberry32(125);
+    for (let turn = 0; turn < 2000; turn++) {
+        demo.clock += 5;
+        app.stepDefenseBots(demo, 5);
+    }
+    assert.ok(new Set(levels).size >= 3, 'normal bots use a varied defense rather than only the cheapest tower');
+    assert.equal(new Set(sendTypes).size, 6, 'bots can purchase every recurring enemy type');
+    assert.ok(g.troops.some(t => t.level === 3), 'normal long-running bot decisions retain fully upgraded towers');
+    assert.ok(g.answers.ally > 1, 'bots fund their actions with answers');
+    assert.ok(Object.values(g.wallets).every(cash => Number.isFinite(cash) && cash >= 0));
+    for (const type of [0, 1, 2, 3, 4, 5]) {
+        const setup = session('defense', 'host', ['host', 'guest', 'ally']), battle = setup.game;
+        setup.practice = true;
+        const picks = [.5, .1, (type + .5) / 6], random = A.util.mulberry32(42);
+        const player = { id: 'ally', x: 500, y: 650, ex: {}, ai: { rng: () => picks.length ? picks.shift() : random(), defenseAnswer: 100 } };
+        const fixture = { game: battle, session: setup, bots: [player], clock: 0 };
+        for (let count = 1; count <= 10; count++) battle.command({ seq: count, action: 'answer', count }, player.id);
+        for (let attempt = 0; attempt < 10 && !battle.troops.length; attempt++) app.stepDefenseBots(fixture, 5);
+        assert.equal(battle.troops[0]?.type, type, `bots can buy tower catalog entry ${type} with earned cash`);
+        player.ai.defensePlan = { action: 'send', type }; player.ai.defenseThink = 0;
+        app.stepDefenseBots(fixture, 5);
+        assert.equal(battle.reinforcements[1][type], 1, `bots can buy enemy catalog entry ${type} with earned cash`);
+        const previousCash = battle.wallets.ally, ownTower = battle.troops[0];
+        player.ai.defensePlan = { action: 'sell', id: ownTower.id }; player.ai.defenseThink = 0;
+        app.stepDefenseBots(fixture, 5);
+        assert.equal(battle.troops.length, 0, 'bots may sell only their own towers using the same order validation');
+        assert.equal(battle.wallets.ally, previousCash + battle.sellValue(ownTower));
+    }
+}
+{
     const late = session('defense', 'late', ['host', 'guest', 'late']);
     const authoritativeTeams = { host: 0, guest: 1, late: 1 };
     const existing = session('defense', 'host', ['host', 'guest']).game;
     existing.simulate(3);
-    existing.wallets = [230, 95]; existing.health = [91, 75];
+    existing.wallets = { host: 230, guest: 95 }; existing.health = [91, 75];
     const snapshot = existing.snapshot();
     late.room.state = { defense: snapshot, defense_teams: authoritativeTeams };
     late.game.onRoom(late.room);
     assert.equal(late.game.myTeam, 1, 'late arrivals follow server teams, not client roster alternation');
     assert.equal(late.game.teamOf('late'), 1, 'older snapshots cannot erase a late arrival');
-    assert.deepEqual([...late.game.wallets], [...existing.wallets], 'late arrivals share the current wallet instead of resetting the economy');
+    assert.equal(late.game.wallets.host, 230);
+    assert.equal(late.game.wallets.guest, 95);
+    assert.equal(late.game.wallets.late, 180, 'late arrivals get their own starting wallet');
     assert.deepEqual([...late.game.health], [...existing.health], 'late arrivals inherit the current base health');
     existing.s.room.state = { defense_teams: authoritativeTeams };
     existing.onRoom(existing.s.room);
     assert.equal(existing.teamOf('late'), 1, 'the host includes newcomers in the next battle snapshot');
     assert.equal(existing.snapshot().teams.late, 1);
+    existing.wallets.late = 75;
+    existing.onRoom(existing.s.room);
+    assert.equal(existing.wallets.late, 75, 'repeated room updates never reset player cash');
 }
 client.game.request('send', { type: 0 });
 assert.equal(client.game.enemies.length, 0, 'non-hosts never simulate or spend optimistically');
@@ -548,29 +662,29 @@ client.game.recharge(); client.answer(true);
 assert.equal(client.game.pending[0].count, 1, 'the next accepted answer still uses the consecutive credit counter');
 client.game.draw(ctx, 390, 844);
 assert.ok(client.game.ui.rects.length >= 8, 'touch play exposes build, send, upgrade and answer controls');
-console.log('1v1/teams, shared wallets, paid placement/upgrades/sends, path entry, kills, defeat, host authority, retries, acknowledgements and team-wide results passed.');
+console.log('1v1/teams, player wallets, paid placement/upgrades/sends, path entry, kills, defeat, host authority, retries, acknowledgements and team-wide results passed.');
 const admin = session('defense');
-admin.testing = true; admin.game.wallets[0] = 0;
+admin.testing = true; admin.game.wallets.host = 0;
 admin.game.request('build', { type: 1, x: 500, y: 340 });
 admin.game.request('upgrade', { id: admin.game.troops[0].id });
 admin.game.request('upgrade', { id: admin.game.troops[0].id });
 admin.game.request('send', { type: 2 });
 assert.equal(admin.game.troops[0].level, 3);
 assert.equal(admin.game.reinforcements[1][2], 1);
-assert.equal(admin.game.wallets[0], 0, 'admin test purchases are free rather than bypassing the shared wallet only visually');
+assert.equal(admin.game.wallets.host, 0, 'admin test purchases are free');
 admin.game.draw(ctx, 1280, 720);
 assert.ok(admin.game.ui.rects.filter(r => r.id.startsWith('send:')).every(r => r.on), 'admin send controls remain enabled with an empty wallet');
 assert.match(admin.game.goalText(), /unlimited test cash/);
 {
     const limited = session('defense');
     limited.testing = true; limited.limitedTestEnergy = true;
-    limited.game.wallets[0] = 0;
+    limited.game.wallets.host = 0;
     limited.game.request('build', { type: 1, x: 500, y: 340 });
     assert.equal(limited.game.troops.length, 0, 'limited staff tests cannot build without cash');
-    limited.game.wallets[0] = 1000;
+    limited.game.wallets.host = 1000;
     limited.game.request('build', { type: 1, x: 500, y: 340 });
     assert.equal(limited.game.troops.length, 1);
-    assert.ok(limited.game.wallets[0] < 1000, 'limited staff tests debit the shared wallet');
+    assert.ok(limited.game.wallets.host < 1000, 'limited staff tests debit the player wallet');
     assert.ok(limited.game.sellValue(limited.game.troops[0]) > 0, 'paid test towers retain their normal refund');
     assert.doesNotMatch(limited.game.goalText(), /unlimited/);
 }
@@ -627,20 +741,20 @@ for (const count of [1, 2, 3, 4, 8]) {
 }
 {
     const s = session('defense'), g = s.game;
-    g.wallets[0] = 1000;
+    g.wallets.host = 1000;
     g.request('build', { type: 0, x: 515, y: 1135 });
     const tower = g.troops[0];
     assert.equal(g.sellValue(tower), 45);
     g.request('upgrade', { id: tower.id }); assert.equal(g.sellValue(tower), 90);
     g.request('upgrade', { id: tower.id }); assert.equal(g.sellValue(tower), 180, 'refund includes every paid upgrade');
-    const wallet = g.wallets[0];
+    const wallet = g.wallets.host;
     for (const id of ['ally', 'guest']) g.command({ seq: (g.lastSeq[id] || 0) + 1, action: 'sell', id: tower.id }, id);
     assert.equal(g.troops.length, 1, 'teammates and opponents cannot sell someone else’s tower');
-    assert.equal(g.wallets[0], wallet);
+    assert.equal(g.wallets.host, wallet);
     const sell = { seq: (g.lastSeq.host || 0) + 1, action: 'sell', id: tower.id };
     g.command(sell, 'host'); g.command(sell, 'host');
     assert.equal(g.troops.length, 0);
-    assert.equal(g.wallets[0], wallet + 180, 'retransmitted sell orders refund only once');
+    assert.equal(g.wallets.host, wallet + 180, 'retransmitted sell orders refund only once');
     assert.ok(g.s.events.some(event => event.k === 'td-error' && /only sell towers you own/.test(event.message)), 'rejected selling is reported to the requesting player');
     s.testing = true;
     g.request('build', { type: 0, x: 515, y: 1135 });
@@ -967,14 +1081,14 @@ console.log('Automatic waves, wave scaling, host-synchronized progress and idle 
     assert.deepEqual(Array.from(g.enemyTypes, type => type.cost), [90, 150, 300, 45, 435, 240], 'all recurring prices are three times their former one-off prices');
     for (let type = 0; type < g.enemyTypes.length; type++) {
         const price = g.enemyTypes[type].cost, before = g.reinforcements[1][type];
-        g.wallets[0] = price - 1;
+        g.wallets.host = price - 1;
         g.request('send', { type });
         assert.equal(g.reinforcements[1][type], before, 'a recurring purchase must be fully funded');
-        assert.equal(g.wallets[0], price - 1);
-        g.wallets[0] = price;
+        assert.equal(g.wallets.host, price - 1);
+        g.wallets.host = price;
         g.request('send', { type });
         assert.equal(g.reinforcements[1][type], before + 1);
-        assert.equal(g.wallets[0], 0, 'every accepted purchase pays the advertised price');
+        assert.equal(g.wallets.host, 0, 'every accepted purchase pays the advertised price');
     }
     g.waveNumber = 50; g.teamDamage = [39, 75];
     assert.equal(g.teamValue(0), 39, 'waves do not inflate the displayed base-damage score');
@@ -1076,14 +1190,14 @@ console.log('Automatic waves, wave scaling, host-synchronized progress and idle 
     assert.equal(total, 135, 'large purchased waves deploy every paid enemy plus the baseline');
 }
 for (const tower of [0, 1, 4, 5, 'poison']) {
-    const g = session('defense').game, cash = [...g.wallets];
+    const g = session('defense').game, cash = { ...g.wallets };
     g.enemies = Array.from({ length: 3 }, (_, i) => ({ id: i + 2, team: 0, type: 0,
         hp: 1, segment: 0, progress: 180 + i * 10, slow: 0,
         ...(tower === 'poison' ? { poisonT: 1, poisonD: 9 } : {}) }));
     if (tower !== 'poison') g.troops = [{ id: 1, team: 0, type: tower, x: 300, y: 240, level: 1, cd: 0 }];
     g.simulate(tower === 'poison' ? .2 : 0);
     assert.ok(g.enemies.length < 3, `${tower} fixture actually kills enemies`);
-    assert.deepEqual([...g.wallets], cash, `${tower} kills do not pay either team`);
+    assert.equal(JSON.stringify(g.wallets), JSON.stringify(cash), `${tower} kills do not pay any player`);
 }
 {
     const g = session('defense').game;
@@ -1118,7 +1232,7 @@ console.log('Uncapped recurring purchases, next-wave isolation, partial-wave res
             const team = g.teamOf(id), owned = g.troops.filter(t => t.team === team);
             if (owned.length >= 40) return;
             const type = owned.length % 6, cell = cells[owned.length];
-            if (g.canAfford(team, g.troopTypes[type].cost)) order(id, 'build', { type, x: cell.x + team * 1100, y: cell.y });
+            if (g.canAfford(id, g.troopTypes[type].cost)) order(id, 'build', { type, x: cell.x + team * 1100, y: cell.y });
         };
         if (scenario === 'maxed-defense') {
             s.testing = true;
@@ -1137,7 +1251,7 @@ console.log('Uncapped recurring purchases, next-wave isolation, partial-wave res
                 nextAnswer += 10;
                 for (const id of ['host', 'guest']) {
                     order(id, 'answer', { count: (g.answers[id] || 0) + 1 });
-                    if (scenario === 'recurring-attacks' && g.canAfford(g.teamOf(id), g.enemyTypes[2].cost)) order(id, 'send', { type: 2 });
+                    if (scenario === 'recurring-attacks' && g.canAfford(id, g.enemyTypes[2].cost)) order(id, 'send', { type: 2 });
                     else if (scenario === 'recurring-attacks' && nextAnswer % 30 === 0) continue;
                     else build(id);
                 }
@@ -1161,6 +1275,15 @@ console.log('Uncapped recurring purchases, next-wave isolation, partial-wave res
     assert.match(save, /\.04 \* power/, 'server accepts the same uncapped health scaling as the host');
     assert.match(save, /least\(100, \(p_state -> 'damage'/, 'persisted room scores are capped actual damage');
     assert.doesNotMatch(save, /then 10000/, 'the server no longer adds a victory bonus to displayed scores');
+    assert.match(save, /jsonb_typeof\(p_state -> 'wallets'\) = 'object'/, 'new player-keyed cash is persisted');
+    assert.match(save, /Invalid player cash balances/, 'invalid cash maps have an explicit failure');
+    assert.match(save, /jsonb_each\(p_state -> 'wallets'\)[\s\S]*?defense_teams[\s\S]*?jsonb_typeof\(value\) is distinct from 'number'/,
+        'cash belongs to authoritative roster members and must be numeric');
+    assert.match(save, /jsonb_object_keys\(p_state -> 'teams'\)[\s\S]*?p_state -> 'wallets'/,
+        'every snapshot member must have a wallet');
+    assert.match(save, /coalesce\(p_state -> 'wallets' -> key, '180'::jsonb\)/,
+        'late roster members get starting cash without overwriting submitted balances');
+    assert.match(save, /Invalid legacy cash balances/, 'in-progress old-host snapshots retain validated compatibility');
 }
 {
     const s = session('defense'), g = s.game;
@@ -1173,9 +1296,9 @@ console.log('Uncapped recurring purchases, next-wave isolation, partial-wave res
     assert.equal(g.troops.length, 6); assert.equal(g.enemies.length, 0);
     assert.equal(g.reinforcements[1].reduce((a, b) => a + b, 0), 6);
     assert.ok(g.troops.every(t => (t.x - t.team * 1100 - 95) % 70 === 0 && (t.y - 85) % 70 === 0), 'all placements snap to cell centers');
-    const placed = g.troops[0], cash = g.wallets[0];
+    const placed = g.troops[0], cash = g.wallets.host;
     g.request('build', { type: 0, x: placed.x + 20, y: placed.y + 20 });
-    assert.equal(g.troops.length, 6); assert.equal(g.wallets[0], cash, 'one tower per cell; duplicate cells do not spend cash');
+    assert.equal(g.troops.length, 6); assert.equal(g.wallets.host, cash, 'one tower per cell; duplicate cells do not spend cash');
     g.command({ action: 'build', seq: g.lastSeq.host + 1, type: 0, x: 510, y: 320 }, 'host');
     assert.equal(g.troops.length, 6, 'host rejects unsnapped remote placement orders');
     const restored = session('defense', 'guest').game;

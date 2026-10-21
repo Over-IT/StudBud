@@ -571,7 +571,7 @@
     // 4. ROUTER ENGINE
     // ============================================================================
     const WORKSPACES = [
-        { main: 'gpa', tabs: [['gpa', 'Grades & GPA'], ['grade-scenarios', 'What-if grades'], ['analytics', 'Analytics']] },
+        { main: 'gpa', tabs: [['gpa', 'My grades'], ['classes', 'Classrooms'], ['school-community', 'Community'], ['grade-scenarios', 'What-if grades'], ['analytics', 'Analytics']] },
         { main: 'planner', tabs: [['planner', 'Planner'], ['tasks', 'Tasks'], ['calendar', 'Calendar'], ['schedule', 'Class schedule']] },
         { main: 'flashcard', extraRoutes: ['importer'], tabs: [['flashcard', 'Practice'], ['study-manage', 'Manage sets'], ['study-discover', 'Discover'], ['exam-arcade', 'Tests & drills']] },
         { main: 'multiplayer', tabs: [['multiplayer', 'Games'], ['friends', 'Buds'], ['leaderboard', 'Leaderboards']] },
@@ -582,7 +582,7 @@
         dashboard: ['Home', 'What is due today and what to study next.'],
         gpa: ['Classes & grades', 'Import from Infinite Campus or add a class.'],
         'grade-scenarios': ['What-if grades', 'Try possible scores without changing your saved grades.'],
-        analytics: ['Study insights', 'Grades, study time and progress.'],
+        analytics: ['Analytics', 'Grades, study time and progress.'],
         planner: ['Planner', 'Know what to work on today, and make room for what is next.'],
         tasks: ['Tasks', 'Manage assignments, assessments, completion and grades.'],
         calendar: ['Calendar', 'Assignments, study deadlines and your own events.'],
@@ -605,14 +605,15 @@
         sound: ['Sound & music', 'Interface sounds, effects and music.'],
         about: ['Help & about', 'How StudBud works.'],
         admin: ['Staff tools', 'Tools for testers, moderators and admins.'],
-        classes: ['Classes', 'Join your teachers’ classes and study their flashcard sets.']
+        classes: ['Classes', 'Join your teachers’ classes and study their flashcard sets.'],
+        'school-community': ['School community', 'Find study buddies, share learning and join your class live.']
     };
 
     class RouterEngine {
         constructor() {
             this.routes = [
                 "dashboard", "gpa", "grade-scenarios", "planner", "tasks", "calendar", "schedule", "flashcard",
-                "analytics", "leaderboard", "exam-arcade", "study-manage", "study-discover", "multiplayer", "profile", "shop", "inventory", "importer", "settings", "settings-school", "settings-data", "appearance", "sound", "admin", "about", "friends", "classes"
+                "analytics", "leaderboard", "exam-arcade", "study-manage", "study-discover", "multiplayer", "profile", "shop", "inventory", "importer", "settings", "settings-school", "settings-data", "appearance", "sound", "admin", "about", "friends", "classes", "school-community"
             ];
             this.activeRoute = "dashboard";
         }
@@ -643,10 +644,27 @@
             this.navigate(targetRoute, false);
         }
 
+        renderWorkspaceTabs(route = this.activeRoute) {
+            const workspace = WORKSPACES.find(group => group.tabs.some(([tab]) => tab === route)
+                || group.extraRoutes?.includes(route) || (route === 'class' && group.main === 'gpa'));
+            const selectedTab = route === 'importer' ? 'study-manage' : route === 'class' ? 'gpa' : route;
+            const tabs = document.getElementById('workspace-tabs');
+            if (!tabs) return;
+            const classrooms = window.NexusApp?.classrooms;
+            const pages = (workspace?.tabs || []).filter(([tab]) => !['classes', 'school-community'].includes(tab) || classrooms?.available());
+            const restoreFocus = tabs.contains(document.activeElement);
+            tabs.classList.toggle('hidden', pages.length === 0);
+            tabs.dataset.pageCount = String(pages.length);
+            tabs.setAttribute('aria-label', workspace?.main === 'gpa' ? 'School pages'
+                : workspace ? `${PAGE_GUIDES[workspace.main]?.[0] || 'Workspace'} pages` : 'Workspace pages');
+            tabs.innerHTML = pages.map(([tab, label]) => `<button type="button" class="workspace-tab${tab === selectedTab ? ' selected' : ''}" data-target="${tab}-view"${tab === selectedTab ? ' aria-current="page"' : ''}>${tab === 'classes' && classrooms?.isTeacher() ? 'Teaching' : label}</button>`).join('');
+            if (restoreFocus) tabs.querySelector('[aria-current="page"]')?.focus({ preventScroll: true });
+        }
+
         navigate(route, updateHash = true) {
             if (route !== 'class' && !this.routes.includes(route)) route = "dashboard";
             if (route === 'admin' && (!window.NexusApp?.canAccessStaff || window.StudBudCloud?.offlineMode)) route = "dashboard";
-            if (route === 'classes' && window.NexusApp?.classrooms && !window.NexusApp.classrooms.available()) route = "dashboard";
+            if (['classes', 'school-community'].includes(route) && window.NexusApp?.classrooms && !window.NexusApp.classrooms.available()) route = "dashboard";
 
             this.activeRoute = route;
             AppState.set('currentView', route);
@@ -660,17 +678,7 @@
             const studyPage = ({ flashcard: 'practice', 'study-manage': 'manage', 'study-discover': 'discover' })[route];
             const settingsPage = ({ settings: 'general', 'settings-school': 'school', 'settings-data': 'data' })[route];
             const viewId = route === 'class' ? 'class-detail-view' : studyPage ? 'flashcard-view' : settingsPage ? 'settings-view' : route === 'tasks' ? 'planner-view' : `${route}-view`;
-            const workspace = WORKSPACES.find(group => group.tabs.some(([tab]) => tab === route) || group.extraRoutes?.includes(route) || (route === 'class' && group.main === 'gpa'));
-            const selectedTab = route === 'importer' ? 'study-manage' : route === 'class' ? 'gpa' : route;
-            const tabs = document.getElementById('workspace-tabs');
-            if (tabs) {
-                const restoreFocus = tabs.contains(document.activeElement);
-                tabs.classList.toggle('hidden', !workspace);
-                tabs.dataset.pageCount = String(workspace?.tabs.length || 0);
-                tabs.setAttribute('aria-label', workspace ? `${PAGE_GUIDES[workspace.main]?.[0] || 'Workspace'} pages` : 'Workspace pages');
-                tabs.innerHTML = workspace ? workspace.tabs.map(([tab, label]) => `<button type="button" class="workspace-tab${tab === selectedTab ? ' selected' : ''}" data-target="${tab}-view"${tab === selectedTab ? ' aria-current="page"' : ''}>${label}</button>`).join('') : '';
-                if (restoreFocus) tabs.querySelector('[aria-current="page"]')?.focus({ preventScroll: true });
-            }
+            this.renderWorkspaceTabs(route);
             document.querySelectorAll('.view').forEach(view => {
                 const isActive = view.id === viewId;
                 view.classList.toggle('active', isActive);
@@ -1491,6 +1499,7 @@
                 if (route === 'about') this.loadAnnouncementHistory();
                 if (route === 'admin') this.loadAdminList();
                 if (route === 'classes') this.classrooms?.render();
+                if (route === 'school-community') this.schoolCommunity?.render();
                 if (route === 'multiplayer') {
                     this.renderHostedGameDecks();
                     this.renderMultiplayerProfile(true);
@@ -1996,11 +2005,21 @@
             return category.excluded ? 'Excluded' : this.usesCategoryWeights(course) ? `${Number(category.weight || 0).toFixed(2)}%` : 'Unweighted';
         }
 
+        isGradeBearingItem(course, item) {
+            const category = (course.categories || []).find(category => category.id === item.categoryId);
+            if (category?.excluded) return false;
+            if (!this.usesCategoryWeights(course)) return true;
+            if (category) return Number(category.weight) > 0;
+            return (course.categories || []).reduce((sum, category) => sum + (Number(category.weight) || 0), 0) < 100;
+        }
+
         calculateCourseGrade(course, assignments = AppState.get('assignments') || []) {
             const courseAssignments = assignments.filter(item =>
                 item.courseCode === course.code &&
                 this.isGradedItem(item) &&
-                !(course.categories || []).some(category => category.id === item.categoryId && category.excluded)
+                this.isGradeBearingItem(course, item) &&
+                Number.isFinite(Number(item.pointsEarned)) &&
+                Number.isFinite(Number(item.maxPoints)) && Number(item.maxPoints) > 0
             );
             if (!courseAssignments.length) return null;
 
@@ -2029,12 +2048,69 @@
                         activeWeight += unassignedWeight;
                     }
                 }
-                if (activeWeight > 0) return weightedTotal / activeWeight * 100;
+                return activeWeight > 0 ? weightedTotal / activeWeight * 100 : null;
             }
 
             const earned = courseAssignments.reduce((sum, item) => sum + Number(item.pointsEarned || 0), 0);
             const possible = courseAssignments.reduce((sum, item) => sum + Number(item.maxPoints || 0), 0);
             return possible > 0 ? earned / possible * 100 : null;
+        }
+
+        /** The grade is affine in a shared score on a fixed set of known, ungraded items. */
+        requiredCourseScore(course, items, target, assignments = AppState.get('assignments') || []) {
+            if (!Number.isFinite(target) || target < 0 || target > 100) return { status: 'no-target' };
+            const eligible = items.filter(item => item.courseCode === course.code && !item.dismissed
+                && !this.isGradedItem(item) && this.isGradeBearingItem(course, item));
+            if (!eligible.length) return { status: 'no-work' };
+            if (eligible.some(item => !Number.isFinite(Number(item.maxPoints)) || !(Number(item.maxPoints) > 0))) {
+                return { status: 'unknown-points' };
+            }
+            const ids = new Set(eligible.map(item => item.id));
+            const base = assignments.filter(item => !ids.has(item.id));
+            const project = pct => this.calculateCourseGrade(course, base.concat(eligible.map(item => ({
+                ...item, graded: true, status: 'completed', pointsEarned: Number(item.maxPoints) * pct / 100
+            }))));
+            const minimum = project(0), maximum = project(100);
+            if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) return { status: 'no-impact' };
+            const slope = maximum - minimum;
+            if (Math.abs(slope) < 1e-10) return { status: minimum >= target ? 'already-secured' : 'no-impact', minimum, maximum };
+            const requiredPct = (target - minimum) / slope * 100;
+            const status = requiredPct > 100 + 1e-8 ? 'impossible' : requiredPct <= 0 ? 'already-secured' : 'attainable';
+            return { status, requiredPct: Math.max(0, requiredPct), minimum, maximum,
+                maxPoints: eligible.reduce((sum, item) => sum + Number(item.maxPoints), 0) };
+        }
+
+        courseTargetGuidance(course, assignments, target = this.effectiveCourseTarget(course), showActions = true) {
+            const grade = this.calculateCourseGrade(course, assignments);
+            if (!Number.isFinite(target)) return '<p class="settings-hint">Choose a target percentage to see the scores you need on your saved work.</p>';
+            const remaining = assignments.filter(item => item.courseCode === course.code && !item.dismissed
+                && !this.isGradedItem(item) && this.isGradeBearingItem(course, item));
+            const known = remaining.filter(item => Number.isFinite(Number(item.maxPoints)) && Number(item.maxPoints) > 0);
+            const unknownCount = remaining.length - known.length;
+            const roundedUp = value => (Math.ceil((value - 1e-9) * 100) / 100).toFixed(2);
+            const scoreText = result => {
+                if (result.status === 'impossible') return `Not reachable with this work alone: even 100% gives ${result.maximum.toFixed(2)}%.`;
+                if (result.status === 'already-secured') return `Even 0% on this work keeps the recorded grade at or above ${target.toFixed(2)}%.`;
+                if (result.status !== 'attainable') return 'This work cannot change the recorded grade with these category weights.';
+                return `Need at least ${roundedUp(result.requiredPct)}% (${roundedUp(result.maxPoints * result.requiredPct / 100)} / ${this.formatNumber(result.maxPoints)} points).`;
+            };
+            const current = grade === null ? 'No scored work yet.' : grade >= target
+                ? `Currently meeting your ${target.toFixed(2)}% target. New scores can still change that.`
+                : `${(target - grade).toFixed(2)} percentage points below your ${target.toFixed(2)}% target.`;
+            const summary = known.length
+                ? `<p><strong>Across ${known.length} saved ungraded item${known.length === 1 ? '' : 's'}:</strong> ${scoreText(this.requiredCourseScore(course, known, target, assignments))}${this.usesCategoryWeights(course) && known.length > 1 ? ' Assumes the same percentage on each item, using your category weights.' : ''}</p>`
+                : '<p>No saved ungraded work with known points can affect this grade yet. Add a real upcoming test or assignment and its possible points to calculate a score.</p>';
+            const next = known.filter(item => this.isOpenAssignment(item))
+                .sort((a, b) => String(a.dueDate || '9999').localeCompare(String(b.dueDate || '9999')) || String(a.title).localeCompare(String(b.title)))
+                .slice(0, 3);
+            const rows = next.map(item => {
+                const result = this.requiredCourseScore(course, [item], target, assignments);
+                return `<div class="grade-score-item"><strong>${this.escapeHTML(item.title || 'Assignment')}</strong><small>${this.escapeHTML(item.kind || 'assignment')} · ${this.escapeHTML(item.dueDate ? `Due ${item.dueDate}` : 'No due date')} · ${this.formatNumber(item.maxPoints)} possible points</small><p>${scoreText(result)} Assumes only this item is added to your current scores.</p>${showActions ? `<button type="button" class="secondary-btn" data-action="work-on-assignment" data-id="${this.escapeHTML(item.id)}">Work on this</button> <button type="button" class="text-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Check points / category</button>` : ''}</div>`;
+            }).join('');
+            const awaiting = known.filter(item => item.status === 'completed').length;
+            const missingPointActions = showActions ? remaining.filter(item => !known.includes(item)).slice(0, 2)
+                .map(item => `<button type="button" class="text-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Add possible points: ${this.escapeHTML(item.title || 'Assignment')}</button>`).join(' ') : '';
+            return `<div class="grade-target-guidance"><p>${current}</p>${summary}${unknownCount ? `<p class="settings-hint">${unknownCount} other ungraded item${unknownCount === 1 ? ' has' : 's have'} no valid possible points and ${unknownCount === 1 ? 'is' : 'are'} not included. Add points in the assignment editor.</p>${missingPointActions}` : ''}${awaiting ? `<p class="settings-hint">Includes ${awaiting} completed item${awaiting === 1 ? '' : 's'} awaiting a grade, not extra work to do.</p>` : ''}${rows ? `<details><summary>Scores needed on upcoming work</summary>${rows}</details>` : ''}<small>Estimate for saved work only, not a final-semester prediction. Unlisted future work, retakes and extra credit are not assumed. Excluded categories and dismissed ungraded work are not included.</small></div>`;
         }
 
         renderClassDetail() {
@@ -2096,13 +2172,7 @@
                         <div class="inline-form"><input id="class-target-percent" type="number" min="0" max="100" step="0.01" value="${Number.isFinite(target) ? Number(target.toFixed(2)) : ''}" placeholder="e.g. 90"><button class="primary-btn" data-action="save-class-target">Save target</button></div>
                         ${AppState.get('settings')?.gradeGoalSource === 'gpa' ? '<p class="settings-hint">Saving a target locks this class and rebalances the other class targets for your GPA goal. Clear it to unlock.</p>' : ''}
                         <button type="button" class="text-btn" data-action="open-grade-goals">Manage grade &amp; GPA goals</button>
-                        <p>${(() => {
-                            const goal = this.effectiveCourseTarget(course);
-                            if (!Number.isFinite(goal)) return 'Set a class target here. Your GPA goal is calculated from class targets.';
-                            const source = 'class target';
-                            if (grade === null) return `No graded work yet. Aim for at least ${goal.toFixed(2)}% (${source}).`;
-                            return grade >= goal ? `You are currently meeting your ${source}.` : `You are ${(goal - grade).toFixed(2)} points below your ${source}.`;
-                        })()}</p>
+                        ${this.courseTargetGuidance(course, assignments)}
                     </section>
                     <details class="glass-card workspace-disclosure">
                         <summary>Grade categories &amp; weights <span>Only needed for category-weighted grading</span></summary>
@@ -3107,7 +3177,7 @@
             document.getElementById('planner-page-title').textContent = page === 'tasks' ? 'Tasks' : 'Planner';
             document.getElementById('planner-page-description').textContent = page === 'tasks'
                 ? 'All your work in one place. Update tasks, mark them done, or record grades.'
-                : 'Your schedule, deadlines, and a clear idea of what to work on.';
+                : 'A clear plan for your next work block.';
             document.getElementById('planner-library').open = true;
         }
 
@@ -3145,7 +3215,7 @@
             const daily = scope === 'day' && date >= today;
             document.getElementById('planner-daily-layout').classList.toggle('hidden', !daily);
             document.getElementById('planner-day-summary').classList.toggle('hidden', !daily);
-            document.querySelector('.planner-budget').classList.toggle('hidden', !daily);
+            document.querySelector('.planner-budget').classList.toggle('planner-budget-inactive', !daily);
             panel.classList.toggle('hidden', daily);
             document.querySelectorAll('[data-action="planner-scope"]').forEach(button =>
                 button.setAttribute('aria-pressed', String(button.dataset.id === scope)));
@@ -3199,6 +3269,8 @@
         renderDailyPlanner() {
             const queue = document.getElementById('planner-day-queue');
             if (!queue) return;
+            const expandedTasks = new Set([...queue.querySelectorAll('.planner-card-details[open]')].map(details => details.dataset.taskId));
+            const moreExpanded = Boolean(queue.querySelector?.('.planner-remaining[open]'));
             const focused = document.activeElement;
             const restoreFocus = focused?.closest?.('#planner-day-queue, #planner-upcoming-list, #planner-active-work');
             const focusAction = focused?.dataset?.action, focusId = focused?.dataset?.id;
@@ -3215,19 +3287,19 @@
             document.getElementById('planner-daily-minutes').value = plan.budget;
             document.getElementById('planner-day-heading').textContent = title;
             document.getElementById('planner-day-description').textContent = isToday
-                ? 'Start at the top. Deadlines stay visible even if the day is full. Suggestions adjust as you work.'
-                : 'A preview using your current unfinished work, not a second copy of it. Completed work drops out automatically.';
+                ? 'Start with the first task. Your plan adjusts as you work.'
+                : 'Planned from your current unfinished work.';
             const formatMinutes = minutes => {
                 const rounded = Math.ceil(minutes);
                 return rounded >= 60 ? `${Math.floor(rounded / 60)}h${rounded % 60 ? ` ${rounded % 60}m` : ''}` : `${rounded}m`;
             };
             document.getElementById('planner-day-summary').innerHTML = `
-                <div><strong>${plan.urgentCount}</strong><span>missing or due by this day</span></div>
-                <div><strong>${formatMinutes(plan.remainingMinutes)}</strong><span>work left in this plan</span></div>
-                <div><strong>${formatMinutes(plan.studiedMinutes)}</strong><span>study time saved this day</span></div>
+                <div><strong>${plan.urgentCount}</strong><span>due or overdue</span></div>
+                <div><strong>${formatMinutes(plan.remainingMinutes)}</strong><span>planned</span></div>
+                <div><strong>${formatMinutes(plan.studiedMinutes)}</strong><span>studied</span></div>
                 <p class="${plan.overBudget ? 'planner-overloaded' : ''}">${plan.overBudget
-                    ? `About ${formatMinutes(plan.overBudget)} over your available time. Deadlines are not hidden: revise estimates, move flexible work, or ask for more time.`
-                    : `${formatMinutes(Math.max(0, plan.budget - plan.studiedMinutes - plan.remainingMinutes))} unallocated. Leave room for breaks and anything unexpected.`}</p>`;
+                    ? `${formatMinutes(plan.overBudget)} over budget. Move flexible work or adjust estimates.`
+                    : `${formatMinutes(Math.max(0, plan.budget - plan.studiedMinutes - plan.remainingMinutes))} free for breaks or other work.`}</p>`;
             const renderCard = (task, index) => {
                 const id = this.escapeHTML(task.id), name = this.escapeHTML(task.title);
                 const due = task.dueDate ? `Due ${this.escapeHTML(String(task.dueDate).slice(0, 10))}` : 'No deadline';
@@ -3239,19 +3311,22 @@
                 return `<li class="planner-day-card${index === 0 ? ' planner-start-card' : ''}${task.urgent ? ' is-urgent' : ''}">
                     <div class="planner-card-top"><span class="planner-card-order">${index + 1}</span><span class="planner-card-badge">${index === 0 ? 'Start here · ' : ''}${badge}</span><span>${this.escapeHTML(block)}</span></div>
                     <h4>${task.assessment ? 'Prepare: ' : ''}${name}</h4><p class="planner-card-meta">${this.escapeHTML(task.courseTitle)} · ${due}</p>
-                    <p class="planner-card-reason">${this.escapeHTML(task.reason)}</p>
                     ${task.minutes === 0 ? `<p class="settings-hint">${task.assessment ? 'Estimated study time is covered. Check readiness; mark done only after the assessment.' : 'Estimated time is covered. Check the work and turn it in before marking done.'}</p>` : ''}
-                    <div class="planner-card-actions">${isToday ? `<button type="button" class="${index === 0 ? 'primary' : 'secondary'}-btn" data-action="planner-start-work" data-id="${id}" aria-label="Work on ${name}">Work on this</button>${this.assessmentStudyButton(task)}` : ''}
+                    <div class="planner-card-actions">${isToday ? `<button type="button" class="${index === 0 ? 'primary' : 'secondary'}-btn" data-action="planner-start-work" data-id="${id}" aria-label="Work on ${name}">Work on this</button>` : ''}
+                    <button type="button" class="text-btn" data-action="toggle-assignment" data-id="${id}" aria-label="Mark ${name} as done"><i class="fas fa-check" aria-hidden="true"></i> Done</button></div>
+                    <details class="planner-card-details" data-task-id="${id}"${expandedTasks.has(task.id) ? ' open' : ''}><summary aria-label="Details and options for ${name}">Details &amp; options</summary>
+                    <p class="planner-card-reason">${this.escapeHTML(task.reason)}</p>${this.assignmentTimeMarkup(task)}
+                    <div class="planner-card-actions">${this.assessmentStudyButton(task)}
                     <button type="button" class="secondary-btn" data-action="edit-assignment" data-id="${id}">Edit / move</button>
-                    <button type="button" class="text-btn" data-action="toggle-assignment" data-id="${id}" aria-label="Mark ${name} as done">Mark done</button>
-                    ${this.assignmentState(task) === 'overdue' ? `<button type="button" class="text-btn" data-action="dismiss-assignment" data-id="${id}" aria-label="Dismiss ${name}">Dismiss</button>` : ''}</div>
-                    <details class="planner-card-details"><summary>Time progress &amp; options</summary>${this.assignmentTimeMarkup(task)}
-                    <div class="planner-card-actions"><button type="button" class="text-btn" data-action="log-study" data-id="${id}">Log offline work</button>
+                    <button type="button" class="text-btn" data-action="log-study" data-id="${id}">Log offline work</button>
+                    ${this.assignmentState(task) === 'overdue' ? `<button type="button" class="text-btn" data-action="dismiss-assignment" data-id="${id}" aria-label="Dismiss ${name}">Dismiss overdue work</button>` : ''}
                     ${task.plannedDate ? `<button type="button" class="text-btn" data-action="planner-clear-date" data-id="${id}">Use automatic work dates</button>` : ''}</div></details>
                 </li>`;
             };
-            queue.innerHTML = plan.queue.length ? `<ol class="planner-day-list">${plan.queue.map(renderCard).join('')}</ol>`
-                : `<div class="glass-card planner-day-empty"><h4>${plan.later.length ? 'No more suggested work for this day' : 'You are caught up'}</h4><p>${plan.later.length ? 'Your time is covered or the remaining work is planned for later. You can still add something from Coming up, or adjust available time.' : 'No unfinished assignments or assessments. Add your next task when you get it.'}</p><button type="button" class="secondary-btn" data-action="planner-add-assignment">Add assignment</button></div>`;
+            const visibleCount = Math.max(3, plan.queue.findLastIndex(task => task.urgent) + 1);
+            const remaining = plan.queue.slice(visibleCount);
+            queue.innerHTML = plan.queue.length ? `<ol class="planner-day-list">${plan.queue.slice(0, visibleCount).map(renderCard).join('')}</ol>${remaining.length ? `<details class="planner-remaining"${moreExpanded ? ' open' : ''}><summary>${remaining.length} more planned task${remaining.length === 1 ? '' : 's'}</summary><ol class="planner-day-list" start="${visibleCount + 1}">${remaining.map((task, index) => renderCard(task, index + visibleCount)).join('')}</ol></details>` : ''}`
+                : `<div class="glass-card planner-day-empty"><h4>${plan.later.length ? 'Your plan is clear' : 'You are caught up'}</h4><p>${plan.later.length ? 'Open Upcoming work to add a task, or adjust your available time.' : 'Add your next assignment when you get it.'}</p><button type="button" class="secondary-btn" data-action="planner-add-assignment">Add assignment</button></div>`;
             const laterCard = task => `<li><div><strong>${this.escapeHTML(task.title)}</strong><small>${this.escapeHTML(task.courseTitle)} · ${task.dueDate ? `Due ${this.escapeHTML(String(task.dueDate).slice(0, 10))}` : 'No deadline'}${task.plannedDate ? ` · Work on ${this.escapeHTML(task.plannedDate)}` : ''}</small></div>
                 <div class="planner-card-actions"><button type="button" class="secondary-btn" data-action="planner-add-to-day" data-id="${this.escapeHTML(task.id)}">Add to this day</button><button type="button" class="text-btn" data-action="edit-assignment" data-id="${this.escapeHTML(task.id)}">Edit</button></div></li>`;
             document.getElementById('planner-upcoming-list').innerHTML = plan.later.length
@@ -5290,7 +5365,7 @@
         }
 
         questionRewardInfo(mode) {
-            const resource = ({ miner: 'Fuel', frenzy: 'Bait', fishing: 'Bait', shooter: 'Ammo', crypto: 'Research cash', hack: 'Crypto', defense: 'Shared team cash' })[mode] || 'Energy';
+            const resource = ({ miner: 'Fuel', frenzy: 'Bait', fishing: 'Bait', shooter: 'Ammo', crypto: 'Research cash', hack: 'Crypto', defense: 'Your cash' })[mode] || 'Energy';
             const multiplier = mode === 'crypto' ? 8 : ['hack', 'defense'].includes(mode) ? 3 : 1;
             return { resource, multiplier };
         }
@@ -5305,7 +5380,7 @@
             const recommendations = {
                 skyline: [20, 35, 'Default 30 energy buys 10 seconds of walking at 3 energy/s, or about 8-10 seconds of mixed climbing. Air steering costs 2/s, jumps 2, air/wall jumps 3 and dashes 8. Waiting is free.'],
                 duel: [25, 45, 'About 10 seconds of fighting: swings cost 3, the Special 10 and shielding 5 per second.'],
-                defense: [20, 40, 'Pays $60-120 into your shared team wallet; troops, enemies and upgrades all cost cash.'],
+                defense: [20, 40, 'Pays $60-120 into your own wallet; troops, enemies and upgrades all cost your cash.'],
                 miner: [30, 45, 'About 10 seconds of active mining: 7 seconds digging at 2.8 fuel/s plus 2.3 seconds jetting at 9 fuel/s uses about 40 fuel.'],
                 river: [30, 50, 'Default 40 energy buys about 10 seconds of moving and casting: steering costs 3 energy/s and a net costs 4 energy. Waiting and riding a wave forward remain free.'],
                 frenzy: [10, 20, 'About 10 seconds of fishing: each cast costs 10 bait and a full cast, bite and reel takes about 6-7 seconds.'],
@@ -5373,10 +5448,10 @@
             document.getElementById('chess-setup-note')?.classList.toggle('hidden', !chess);
             const soloNote = document.getElementById('solo-game-note');
             if (soloNote) soloNote.textContent = chess ? 'You play a computer opponent. One correct answer earns one move. No time limit; checkmate wins.'
-                : mode === 'defense' ? 'Share cash from correct answers, not kills. Buy enemies to add +1 every wave against rivals. Reduce the opposing base to 0 HP.'
+                : mode === 'defense' ? 'Earn your own cash from correct answers, not kills. Buy enemies to add +1 every wave against rivals. Reduce the opposing base to 0 HP.'
                 : 'Same game as multiplayer, with computer players instead of a room. Correct answers earn coins when you are signed in.';
             const labels = {
-                defense: ['Team Tower Defense', 'Red vs blue, 1v1 or teams. Questions earn team cash; kills do not. Each enemy purchase adds +1 to every future wave against rivals. First base to 0 HP loses.'],
+                defense: ['Team Tower Defense', 'Red vs blue, 1v1 or teams. Questions earn your own cash; kills do not. Each enemy purchase adds +1 to every future wave against rivals. First base to 0 HP loses.'],
                 skyline: ['Escape to Space', 'Climb rooftop switchbacks, cross a factory and reach space. Lower routes can catch a fall.'],
                 river: ['River Fishing', 'Catch fish, surf waves or hold left to paddle through them. Nearby rivals trigger an 8-second flashcard duel: answer first to steal fish points. Whirlpools spin and launch your boat.'],
                 market: ['Package Delivery', 'Deliver packages across town and dodge cars.'],
@@ -7624,6 +7699,7 @@
             if (options.allow_late_join && !room.state?.allow_late_join) {
                 window.StudBudDialogs.notify('This server did not save Allow late joining. Late joining is still off. The site administrator must apply the updated supabase-setup.sql before this option can work.');
             }
+            return room;
         }
 
         async hostStaffTest(mode, seed, { limitedTestEnergy = false, questionReward = 100 } = {}) {
@@ -7670,6 +7746,31 @@
             }
         }
 
+        async toggleHostedHostMode() {
+            const room = this.hostedGameRoom;
+            if (!room || room.host_id !== this.gameUser()?.id || this.hostRoleBusy) return;
+            this.hostRoleBusy = true;
+            const session = this.arcadeSession;
+            const paused = session?.paused;
+            if (session) session.paused = true;
+            try {
+                await session?.reportScore(true);
+                session?.game.persist?.();
+                await session?.game.persistPromise;
+                const next = await window.StudBudCommunityGames.setHostMode(room.room_code, !room.state?.host_spectator);
+                if (this.hostedGameRoom?.room_code !== room.room_code) return;
+                this.destroyArcadeSession();
+                this.hostedGameRoom = next;
+                this.renderHostedGameRoom(next);
+            } catch (error) {
+                if (session && !session.destroyed) session.toast(error.message, '#f87171');
+                document.getElementById('hosted-room-status').textContent = error.message;
+            } finally {
+                if (session && !session.destroyed) session.paused = paused;
+                this.hostRoleBusy = false;
+            }
+        }
+
         openHostedGame(room) {
             this.hostedGameRoom = room;
             this.arcadeLeft = false;
@@ -7703,6 +7804,7 @@
 
         async refreshHostedGame() {
             if (!this.hostedGameRoom) return;
+            if (this.hostRoleBusy) return;
             if (this.hostedGameBusy) { this.hostedRefreshQueued = true; return; }
             const code = this.hostedGameRoom.room_code;
             this.hostedGameBusy = true; this.hostedRefreshQueued = false;
@@ -7744,6 +7846,14 @@
             if (!panel || !room) return;
             const isHost = room.host_id === this.gameUser().id;
             const state = room.state || {};
+            const spectator = isHost && Boolean(state.host_spectator);
+            panel.classList.toggle('smartboard-host', spectator);
+            const roleButton = document.getElementById('hosted-mode-btn');
+            roleButton.classList.toggle('hidden', !isHost || room.status === 'finished');
+            roleButton.textContent = spectator ? 'Switch to play' : 'Host screen (no playing)';
+            roleButton.setAttribute('aria-pressed', String(spectator));
+            const hostNote = document.getElementById('hosted-mode-note');
+            hostNote.classList.toggle('hidden', !spectator);
             const players = Array.isArray(state.players) ? state.players : [];
             const me = players.find(player => player.id === this.gameUser().id);
             const modeNames = {
@@ -7768,6 +7878,15 @@
             const joinLabel = room.mode !== 'chess' && state.allow_late_join ? 'Late joining allowed' : 'Joining locks at start';
             document.getElementById('hosted-room-meta').textContent = `${goalLabel} · ${players.length} / ${playerLimit} players · ${joinLabel}`;
             document.getElementById('hosted-room-code').textContent = room.room_code;
+            const quizHost = spectator && ['classic', 'rush', 'survival'].includes(room.mode) && room.status === 'playing';
+            const questionView = document.getElementById('hosted-question');
+            questionView.classList.toggle('hidden', !quizHost);
+            if (quizHost) {
+                const question = state.question || {};
+                questionView.querySelector('h3').textContent = question.prompt || question.front || 'Waiting for the next question…';
+                questionView.querySelector('ol').innerHTML = (question.options || []).map(option => `<li>${this.escapeHTML(option)}</li>`).join('');
+                questionView.querySelector('button').disabled = players.some(player => !player.eliminated && !player.answered);
+            }
             const rankedPlayers = players.map(player => room.mode === 'defense'
                 ? { ...player, score: Math.min(100, Math.max(0, Math.floor(Number(state.defense?.damage?.[state.defense?.teams?.[player.id]] ?? player.score) || 0))) }
                 : player).sort((a, b) => {
@@ -7821,7 +7940,7 @@
             document.getElementById('multiplayer-arena').classList.toggle('hidden', inLobby);
             if (inLobby) {
                 const info = {
-                    defense: ['Red vs blue: only correct answers earn new team cash; kills pay nothing. Build and upgrade towers. Each enemy purchase permanently adds +1 of that type per wave against rivals, starting next wave. Waves get stronger until a base falls.', 'WASD walk · Click build/select · Buy recurring enemies · Q/E earn cash'],
+                    defense: ['Red vs blue: correct answers earn your own cash; kills pay nothing. Spend it to build or upgrade friendly towers and buy recurring enemies for rivals. Waves get stronger until a base falls.', 'WASD walk · Click build/select · Buy recurring enemies · Q/E earn your own cash'],
                     skyline: ['Climb rooftops, machinery and low-gravity Space. At narrow wall shafts, hold toward a wall and press Space, then steer toward the opposite wall and jump again. Blue arrows mark jump-through platforms. Falls can land on lower routes; R returns to your saved checkpoint.', 'A/D run · Space jump (twice) / wall jump · Shift dash · R checkpoint'],
                     river: ['Catch fish and surf waves for points. Hold left against a wave for a moment to paddle through, or shelter in pale shallows. Nearby rivals start an 8-second flashcard duel: the first correct answer steals fish points. Whirlpools spin and launch your boat.', 'WASD steer · click cast · Q recharge · answer rival duels quickly'],
                     market: ['Deliver packages across town and dodge cars.', 'WASD move · Shift sprint · Q recharge'],
@@ -7851,7 +7970,7 @@
             startButton.textContent = room.mode === 'duel' ? 'Start the hill brawl' : 'Start the game';
             finishButton.classList.toggle('hidden', !isHost || room.status === 'finished');
             const waitingCard = document.getElementById('waiting-arcade-card');
-            const guestWaiting = room.status === 'waiting';
+            const guestWaiting = room.status === 'waiting' && !spectator;
             const hasWorkspace = Boolean(window.StudBudCloud.user || window.StudBudCloud.isGuest?.());
             waitingCard.classList.toggle('hidden', !guestWaiting || !hasWorkspace);
             if (guestWaiting && hasWorkspace && !this.waitingRunner.started) this.startWaitingRunner();
@@ -7866,7 +7985,7 @@
 
             if (room.status === 'waiting') {
                 document.getElementById('hosted-room-status').textContent = isHost
-                    ? (players.length < 2 ? `Share the room code. ${room.mode === 'duel' ? 'Your rival' : 'At least one other player'} must join before the race starts.` : 'Host controls are ready. Kick a player or start when the lobby is set.')
+                    ? (players.length < 2 ? `Share the room code. ${spectator ? 'At least two players' : 'At least one other player'} must join before starting.` : 'Host controls are ready. Kick a player or start when the lobby is set.')
                     : 'Waiting for the host to start the game.';
             } else if (room.status === 'finished') {
                 document.getElementById('hosted-room-status').textContent = state.staff_test ? 'Staff test complete · no coins or progress awarded.' : this.gameUser().is_anonymous
@@ -7898,12 +8017,15 @@
         syncArcadeSession(room, isHost) {
             const arcade = window.StudBudArcade;
             const api = window.StudBudCommunityGames;
-            if (room.status === 'playing' && arcade && !this.arcadeLeft) {
+            if (this.arcadeSession && !this.arcadeSession.destroyed
+                && this.arcadeSession.spectator !== Boolean(isHost && room.state?.host_spectator)) this.destroyArcadeSession();
+            if (room.status === 'playing' && arcade && (!isHost || !room.state?.host_spectator || arcade.games[room.mode]) && !this.arcadeLeft) {
                 if (!this.arcadeSession || this.arcadeSession.destroyed) {
                     this.closePractice();
                     const deck = this.gameUser().is_anonymous ? null : this.roomStudyDeck(room);
                     this.arcadeSession = new arcade.Session({
                         room, user: this.gameUser(), api, isHost,
+                        onToggleHostMode: () => this.toggleHostedHostMode(),
                         testing: Boolean(room.state?.staff_test), seed: room.state?.seed,
                         fallbackCards: (deck?.cards || []).filter(card => card.front && card.back),
                         studySet: { deckId: deck?.id, title: room.deck_title || deck?.title, publicId: room.state?.public_deck_id || deck?.communityDeckId || deck?.communitySourceId },
@@ -8101,21 +8223,38 @@
                 if (ai.defenseThink > 0) continue;
                 ai.defenseThink = 2.5 + rng() * 2;
                 const troops = game.troops.filter(t => t.team === team);
-                if (game.troopCount(bot.id) < game.playerTroopLimit && game.canAfford(team, 60) && rng() < .55) {
+                const owned = troops.filter(t => t.owner === bot.id);
+                const upgrades = troops.filter(t => t.level < 3);
+                upgrades.sort((a, b) => Number(b.owner === bot.id) - Number(a.owner === bot.id) || a.level - b.level);
+                let plan = ai.defensePlan;
+                if (plan?.action === 'upgrade' && !upgrades.some(t => t.id === plan.id)
+                    || plan?.action === 'build' && !game.canBuild(bot.id)
+                    || plan?.action === 'sell' && !owned.some(t => t.id === plan.id)) plan = null;
+                if (!plan) {
+                    const replaceable = owned.find(t => t.level === 1);
+                    if (upgrades.length && rng() < .3) plan = { action: 'upgrade', id: upgrades[0].id };
+                    else if (game.canBuild(bot.id) && rng() < .6) plan = { action: 'build', type: Math.floor(rng() * game.troopTypes.length) };
+                    else if (!game.canBuild(bot.id) && replaceable && rng() < .15) plan = { action: 'sell', id: replaceable.id };
+                    else plan = { action: 'send', type: Math.floor(rng() * game.enemyTypes.length) };
+                }
+                ai.defensePlan = plan;
+                const tower = plan.action === 'upgrade' ? upgrades.find(t => t.id === plan.id) : null;
+                const cost = tower ? game.upgradeCost(tower) : plan.action === 'build' ? game.troopTypes[plan.type].cost
+                    : plan.action === 'send' ? game.enemyTypes[plan.type].cost : 0;
+                // Save for the chosen purchase instead of spending every answer on the cheapest option.
+                if (!game.canAfford(bot.id, cost)) continue;
+                if (plan.action === 'build') {
                     for (let attempt = 0; attempt < 16; attempt++) {
                         const { x, y } = game.gridPoint(team * 1100 + 100 + rng() * 850, 230 + rng() * 900, team);
                         if (game.validPlacement(x, y, team) && game.distanceToPath(x, y, team) < 210) {
-                            const affordable = game.troopTypes.map((type, index) => ({ type, index })).filter(({ type }) => game.canAfford(team, type.cost));
-                            if (affordable.length) order('build', { type: affordable[Math.floor(rng() * affordable.length)].index, x, y });
+                            order('build', { type: plan.type, x, y });
+                            ai.defensePlan = null;
                             break;
                         }
                     }
-                } else if (rng() < .2 && troops.some(t => t.level < 3)) {
-                    const troop = troops.find(t => t.level < 3);
-                    if (game.canAfford(team, game.upgradeCost(troop))) order('upgrade', { id: troop.id });
                 } else {
-                    const affordable = game.enemyTypes.map((type, index) => ({ type, index })).filter(({ type }) => game.canAfford(team, type.cost));
-                    if (affordable.length) order('send', { type: affordable[Math.floor(rng() * affordable.length)].index });
+                    order(plan.action, plan.action === 'send' ? { type: plan.type } : { id: plan.id });
+                    ai.defensePlan = null;
                 }
             }
         }
@@ -8390,7 +8529,7 @@
             const sidebarToggle = document.getElementById('sidebar-collapse-btn');
             if (!sidebarToggle) return;
             const expanded = !AppState.get('settings')?.sidebarCollapsed;
-            const topNavigation = window.matchMedia('(max-width: 768px)').matches;
+            const topNavigation = window.matchMedia('(max-width: 600px)').matches;
             const orientation = topNavigation
                 ? (expanded ? 'up' : 'down')
                 : (expanded ? 'left' : 'right');
@@ -8871,6 +9010,10 @@
                 ], { duration: 240, easing: 'cubic-bezier(.2,.8,.2,1)' });
             }
             root.querySelector('.tutorial-card').scrollTop = 0;
+            if (step.goal === 'assignment') {
+                const menu = document.querySelector('.planner-add-menu');
+                if (menu) menu.open = true;
+            }
             this.tutorialSel = step.sel || '';
             root.querySelector('.tutorial-spot').hidden = true;
             this.tutorialPreparing = true;
@@ -9456,9 +9599,7 @@
             if (!summary || !list) return;
             const sessions = (AppState.get('studyHistory') || []).filter(session => Number(session.durationSec) > 0);
             const seconds = sessions.reduce((sum, session) => sum + Number(session.durationSec), 0);
-            const answered = sessions.reduce((sum, session) => sum + Number(session.gameSummary?.answered || 0), 0);
-            const correct = sessions.reduce((sum, session) => sum + Number(session.gameSummary?.correct || 0), 0);
-            summary.innerHTML = `<article><span>Logged study time</span><strong>${this.formatStudyDuration(seconds)}</strong></article><article><span>Saved sessions</span><strong>${sessions.length}</strong></article><article><span>Game answer accuracy</span><strong>${answered ? `${(correct / answered * 100).toFixed(2)}%` : '—'}</strong><small>${answered} answers submitted</small></article>`;
+            summary.innerHTML = `<article><span>Logged study time</span><strong>${this.formatStudyDuration(seconds)}</strong></article><article><span>Saved sessions</span><strong>${sessions.length}</strong></article>`;
             const decks = AppState.get('flashcards') || [];
             list.innerHTML = decks.length ? decks.map(deck => {
                 const cards = deck.cards || [];
@@ -9981,6 +10122,11 @@
                 } else if (id === 'hosted-start-btn') {
                     this.hostedGameRoom = await window.StudBudCommunityGames.startRoom(this.hostedGameRoom.room_code);
                     this.renderHostedGameRoom(this.hostedGameRoom);
+                } else if (id === 'hosted-mode-btn') {
+                    await this.toggleHostedHostMode();
+                } else if (id === 'hosted-next-question-btn') {
+                    this.hostedGameRoom = await window.StudBudCommunityGames.nextQuestion(this.hostedGameRoom.room_code);
+                    this.renderHostedGameRoom(this.hostedGameRoom);
                 } else if (id === 'hosted-finish-btn') {
                     this.hostedGameRoom = await window.StudBudCommunityGames.finishRoom(this.hostedGameRoom.room_code);
                     this.renderHostedGameRoom(this.hostedGameRoom);
@@ -10122,6 +10268,7 @@
                 } else if (target.matches('.close-modal-btn, .cancel-modal-btn')) {
                     this.closeModal();
                 } else if (action) {
+                    target.closest?.('.planner-add-menu')?.removeAttribute('open');
                     await this.handleDataAction(action, target.dataset.id);
                 }
             } catch (error) {
@@ -11825,7 +11972,7 @@
             document.getElementById('grade-goal-source').value = settings.gradeGoalSource || 'grades';
             document.getElementById('gpa-solver-mode').value = settings.gradeGoalWeight || 'weighted';
             const current = this.calculateTargetGPA(courses);
-            document.getElementById('desired-gpa').value = settings.gradeGoalGpa ?? (Number(current.totalCredits) > 0 ? Number(current.weighted).toFixed(2) : '3.5');
+            document.getElementById('desired-gpa').value = settings.gradeGoalGpa ?? (Number(current.totalCredits) > 0 ? Number(current[settings.gradeGoalWeight || 'weighted']).toFixed(2) : '3.5');
             this.solveTargetGPA();
         }
 
@@ -11877,15 +12024,16 @@
                 const grade = this.calculateCourseGrade(course);
                 const gradeText = grade === null ? 'no grades yet' : `now ${grade.toFixed(2)}%`;
                 const code = this.escapeHTML(course.code), name = this.escapeHTML(course.title || course.code);
-                return `<li><div><strong>${name}</strong><small>${this.escapeHTML(gradeText)} · ${this.formatNumber(Number(course.credits) || 0)} credits${course.isWeighted ? ' · weighted' : ''}</small></div>
-                    <label class="goal-grade-input"><span>Target %</span><input type="number" min="0" max="100" step="0.01" data-goal-grade="${code}" value="${course.targetPct ?? ''}" placeholder="Current grade" aria-label="Target percentage for ${name}"></label>
-                    <span class="goal-letter">${course.targetPct === null || course.targetPct === undefined ? 'Auto' : this.escapeHTML(this.gradeForPercentage(course.targetPct, course))}</span>
-                    <label class="goal-lock"><input type="checkbox" data-goal-lock="${code}" ${course.targetLocked ? 'checked' : ''}> Keep fixed<span class="sr-only"> for ${name}</span></label></li>`;
+                return `<li><div><strong>${name}</strong><small>${this.escapeHTML(gradeText)} · ${this.formatNumber(Number(course.credits) || 0)} credits${course.isWeighted ? ' · weighted GPA credit' : ''}</small>
+                    <details class="goal-score-guidance"><summary>How to reach this class target</summary>${this.courseTargetGuidance(course, AppState.get('assignments') || [], this.effectiveCourseTarget(course), false)}</details></div>
+                    <label class="goal-grade-input"><span>Class target %</span><input type="number" min="0" max="100" step="0.01" data-goal-grade="${code}" value="${course.targetPct ?? ''}" placeholder="Use current" aria-label="Target percentage for ${name}"></label>
+                    <span class="goal-letter">${course.targetPct === null || course.targetPct === undefined ? 'Current' : this.escapeHTML(this.gradeForPercentage(course.targetPct, course))}</span>
+                    <label class="goal-lock"><input type="checkbox" data-goal-lock="${code}" ${course.targetLocked ? 'checked' : ''}> Keep fixed<span class="sr-only"> in GPA plans for ${name}</span></label></li>`;
             });
             const currentText = Number(tracked.totalCredits) > 0 ? `Current ${mode} GPA ${current.toFixed(2)}` : 'No graded classes yet';
             output.textContent = source === 'gpa' && !plan.reachable
                 ? `Not reachable with these locks and credits. Maximum ${mode} GPA: ${plan.gpa.toFixed(3)}. Lower your goal or unlock a class.`
-                : Number(goal.totalCredits) > 0 ? `${currentText} → planned ${mode} GPA ${target.toFixed(3)}` : 'Set class targets to calculate your GPA goal.';
+                : Number(goal.totalCredits) > 0 ? `${currentText} → planned ${mode} GPA ${target.toFixed(3)}. ${source === 'gpa' ? 'Suggested class targets meet your GPA goal; the score estimates below show what your saved work can achieve.' : 'Your class targets determine this GPA; blank targets use current scored grades.'} ${goal.priorCredits > 0 ? 'Includes your saved past GPA and credits. ' : ''}Targets are a plan, not earned grades. Apply saves; Cancel keeps your previous goals.` : 'Set class targets to calculate your GPA goal.';
             detail.innerHTML = rows.join('');
             this.gpaGoalPreview = { courses, source, mode, requested, reachable: source !== 'gpa' || plan.reachable };
             apply.disabled = !this.gpaGoalPreview.reachable;
@@ -13007,6 +13155,7 @@
 
     window.NexusApp = new AppOrchestrator();
     window.StudBudClassrooms?.attach(window.NexusApp);
+    window.StudBudSchoolCommunity?.attach(window.NexusApp);
 
     const start = () => window.StudBudCloud.bootstrap().catch(error => {
         console.error('[NexusApp] Startup failed:', error);

@@ -190,7 +190,7 @@ async function run() {
     abortSlowRequest();
     assert.equal(await response, cached, 'stalled response bodies also fall back to cached assets');
     const html = source('index.html');
-    assert.equal((html.match(/<li class="nav-item(?: active)?" data-target=/g) || []).length, 7, 'seven primary workspaces replace the long sidebar');
+    assert.equal((html.match(/<li class="nav-item(?: active)?" data-target=/g) || []).length, 6, 'six primary workspaces replace the long sidebar; Settings stays in the header');
     assert.match(html, /id="workspace-tabs"/);
     assert.match(html, /id="offline-start-btn"/);
     assert.match(source('app.js'), /both devices|WORKSPACES/i);

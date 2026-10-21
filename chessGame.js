@@ -233,8 +233,12 @@
                         : Rules.inCheck(state.board, 1 - this.side) ? 'Opponent in check. Wait for their escape; you may prepare a move credit.'
                     : `${this.side === 0 ? 'White' : 'Black'} · ${ready ? 'Move ready: drag a piece or select its destination' : 'Answer a question to earn your next move'}`;
             this.panel.querySelector('.chess-question').disabled = ready || Boolean(this.pending) || state.winner !== -1 || this.s.over;
+            if (this.s.spectator) {
+                this.statusElement.textContent = state.winner === -1 ? 'Host view · White vs Black · answer-powered moves' : this.statusElement.textContent;
+                this.panel.querySelector('.chess-question').disabled = true;
+            }
         }
-        canMove() { return Boolean(this.state.credits[this.side]) && !Rules.inCheck(this.state.board, 1 - this.side) && !this.pending && !this.s.question && !this.s.paused && !this.s.over && this.s.countdown <= 0 && this.state.winner === -1; }
+        canMove() { return !this.s.spectator && Boolean(this.state.credits[this.side]) && !Rules.inCheck(this.state.board, 1 - this.side) && !this.pending && !this.s.question && !this.s.paused && !this.s.over && this.s.countdown <= 0 && this.state.winner === -1; }
         startDrag(event) {
             const square = event.target.closest('[data-square]');
             if (!square || event.button !== 0 || this.drag || !this.canMove()) return;
@@ -309,6 +313,7 @@
             }, 'Correct answer: one chess move', true);
         }
         request(request) {
+            if (this.s.spectator) return;
             const seq = this.state.ack[this.side] + 1;
             if (this.authority) this.handleRequest({ ...request, seq }, this.s.user.id);
             else {
@@ -380,8 +385,10 @@
         }
         updateScore() {
             const score = side => this.state.capturePoints[side];
-            this.s.setGoal(score(this.side));
-            this.s.score = score(this.side);
+            if (!this.s.spectator) {
+                this.s.setGoal(score(this.side));
+                this.s.score = score(this.side);
+            }
             for (let side = 0; side < this.players.length; side++) {
                 const remote = this.s.remotes?.get?.(this.players[side]);
                 if (remote) { remote.goal = score(side); remote.score = score(side); }

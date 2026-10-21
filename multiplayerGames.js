@@ -10,6 +10,9 @@
         items.length = kept;
     }
 
+    // Keep repeated details on their original world-space lattice when skipping hidden rows.
+    const visibleRepeatStart = (start, step, min) => start + Math.max(0, Math.ceil((min - start) / step)) * step;
+
     function duelBackdrop(ctx, w, h, game) {
         const low = !!game.s.graphics?.low;
         A.util.screenLayer(game, 'backdropLayer', `duel:${low}:${w}:${h}`, ctx, paint => {
@@ -171,17 +174,20 @@
             ctx.globalAlpha = 1;
         }
         if (low) return;
-        const cells = (f, size, fn) => {
+        const intersects = (x, y, width, height) => x <= w && x + width >= 0 && y <= h && y + height >= 0;
+        const cells = (f, size, fn, pad = 0) => {
             const ox = cam.x * f, oy = cam.y * f;
-            const x0 = Math.floor(ox / size) - 1, y0 = Math.floor(oy / size) - 1;
-            for (let gx = x0; gx < x0 + w / size + 3; gx++) for (let gy = y0; gy < y0 + h / size + 3; gy++) fn(ihash(gx, gy + (f * 1000 | 0)), gx * size - ox, gy * size - oy);
+            const x0 = Math.floor((ox - pad) / size), y0 = Math.floor((oy - pad) / size);
+            const x1 = Math.floor((ox + w + pad) / size), y1 = Math.floor((oy + h + pad) / size);
+            for (let gx = x0; gx <= x1; gx++) for (let gy = y0; gy <= y1; gy++) fn(ihash(gx, gy + (f * 1000 | 0)), gx * size - ox, gy * size - oy);
         };
         const stars = weight(3);
         if (stars > 0) {
             ctx.fillStyle = '#fff'; ctx.globalAlpha = stars * 0.9;
             cells(0.05, 150, (hh, px, py) => {
                 const sz = 1 + ((hh >> 20) & 1) + ((hh & 7) === 0 ? 1 : 0);
-                ctx.fillRect(px + (hh & 127), py + ((hh >> 8) & 127), sz, sz);
+                const x = px + (hh & 127), y = py + ((hh >> 8) & 127);
+                if (intersects(x, y, sz, sz)) ctx.fillRect(x, y, sz, sz);
             });
             ctx.globalAlpha = 1;
         }
@@ -195,11 +201,12 @@
                     const bw = size - 14 + (hh % 30), bh = base + (hh % span);
                     const bx = n * size - cam.x * f;
                     const roofY = baseY - bh;
+                    if (!intersects(bx, roofY, bw, Math.max(0, h - roofY))) continue;
                     ctx.fillStyle = color; ctx.fillRect(bx, roofY, bw, Math.max(0, h - roofY));
                     // Windows never overlap each other, so one batched fill per building matches per-window fills.
                     ctx.fillStyle = 'rgba(250,204,21,.22)'; ctx.beginPath();
-                    for (let row = 0, wy = baseY - bh + 14; wy < baseY - 20; wy += 26, row++) {
-                        if (wy > h || wy < -11) continue;
+                    const first = roofY + 14, startY = visibleRepeatStart(first, 26, -11);
+                    for (let row = Math.round((startY - first) / 26), wy = startY; wy < Math.min(baseY - 20, h + 1); wy += 26, row++) {
                         for (let col = 0, wx = bx + 10; wx < bx + bw - 12; wx += 22, col++) if (((hh >> ((row * 5 + col * 3) % 20)) & 7) < 2) ctx.rect(wx, wy, 8, 11);
                     }
                     ctx.fill();
@@ -214,8 +221,12 @@
                 cells(f, size, (hh, px, py) => {
                     if (hh % 3 === 0) return;
                     const cx = px + (hh & 255), cy = py + ((hh >> 8) & 255), r = 40 + ((hh >> 16) & 31);
-                    for (const [dx, dy, k] of [[0, 0, 1], [-r, 12, 0.7], [r * 1.1, 14, 0.75]]) { ctx.beginPath(); ctx.ellipse(cx + dx, cy + dy, r * 1.7 * k, r * 0.7 * k, 0, 0, TAU); ctx.fill(); }
-                });
+                    for (const [dx, dy, k] of [[0, 0, 1], [-r, 12, 0.7], [r * 1.1, 14, 0.75]]) {
+                        const rx = r * 1.7 * k, ry = r * .7 * k;
+                        if (!intersects(cx + dx - rx, cy + dy - ry, rx * 2, ry * 2)) continue;
+                        ctx.beginPath(); ctx.ellipse(cx + dx, cy + dy, rx, ry, 0, 0, TAU); ctx.fill();
+                    }
+                }, 180);
             }
         }
         const fo = weight(1);
@@ -235,6 +246,8 @@
                 ctx.fillStyle = '#334155';
                 for (const y of [py + 80, py + 600]) { ctx.fillRect(gx - 26, y, 52, 16); ctx.fillRect(gx - 8, y - 8, 16, 32); }
                 const gear = (x, y, radius, direction) => {
+                    const reach = radius + 17;
+                    if (!intersects(x - reach, y - reach, reach * 2, reach * 2)) return;
                     ctx.save(); ctx.translate(x, y); ctx.rotate(anim * .45 * direction * 72 / radius + (hh % 10));
                     ctx.fillStyle = '#1e293b'; ctx.beginPath(); ctx.arc(0, 0, radius, 0, TAU); ctx.fill();
                     for (let k = 0; k < 16; k++) { ctx.rotate(TAU / 16); ctx.fillRect(-7, -radius - 9, 14, 14); }
@@ -252,7 +265,7 @@
                 const angle = anim * .9;
                 ctx.moveTo(gx + 264 - Math.cos(angle) * 24, gy - 235 - Math.sin(angle) * 24);
                 ctx.lineTo(gx + 264 + Math.cos(angle) * 24, gy - 235 + Math.sin(angle) * 24); ctx.stroke();
-            });
+            }, 12);
             ctx.globalAlpha = 1;
         }
         const au = weight(3);
@@ -267,6 +280,7 @@
             }
             cells(.14, 640, (hh, px, py) => {
                 if (hh % 3) return;
+                if (!intersects(px + 200, py + 140, 200, 200)) return;
                 ctx.save(); ctx.translate(px + 300, py + 240); ctx.rotate((hh % 10) * .3);
                 ctx.fillStyle = '#1d4ed8'; ctx.fillRect(-90, -25, 65, 50); ctx.fillRect(25, -25, 65, 50);
                 ctx.strokeStyle = '#93c5fd'; ctx.lineWidth = 1;
@@ -1504,6 +1518,8 @@
             return true;
         }
 
+        updateSpectator(dt) { this.update(dt); }
+
         update(dt) {
             const s = this.s, me = this.me, t = s.t;
             this.anim += dt; this.dtLast = dt;
@@ -1558,7 +1574,7 @@
             }
             for (const b of this.boxes) if (b.t > 0) b.t -= hazardDt;
 
-            this.updatePlayer(dt);
+            if (!s.spectator) this.updatePlayer(dt);
             this.updateBackdrop(dt);
             if (!s.preview && this.dead <= 0) {
                 const biome = SKY_ROUTE[this.backdropArea || 0];
@@ -1800,8 +1816,7 @@
             if (low) return;
             // Window bays never overlap, so each layer is batched into one path in the original paint order.
             const bays = [], rows = [];
-            for (let yy = Math.ceil((p.y + 24) / 76) * 76; yy < p.y + p.h - 34; yy += 76) {
-                if (yy < top - 60 || yy > bottom) continue;
+            for (let yy = visibleRepeatStart(Math.ceil((p.y + 24) / 76) * 76, 76, top - 60); yy < Math.min(p.y + p.h - 34, bottom + 1); yy += 76) {
                 rows.push(yy);
                 for (let xx = p.x + 34; xx < p.x + p.w - 42; xx += 62) bays.push(xx, yy);
             }
@@ -1823,16 +1838,16 @@
             ctx.moveTo(pipeX, p.y + 18); ctx.lineTo(pipeX, p.y + p.h - 18);
             ctx.stroke();
             ctx.fillStyle = shade;
-            for (let yy = p.y + 46; yy < p.y + p.h - 18; yy += 100) ctx.fillRect(pipeX - 5, yy, 10, 5);
+            for (let yy = visibleRepeatStart(p.y + 46, 100, top - 5); yy < Math.min(p.y + p.h - 18, bottom + 1); yy += 100) ctx.fillRect(pipeX - 5, yy, 10, 5);
             if (p.bi === 2) {
                 ctx.strokeStyle = '#4d7c62'; ctx.lineWidth = 3; ctx.beginPath();
                 ctx.moveTo(edge - 8, p.y + 18); ctx.lineTo(edge - 8, p.y + p.h - 16); ctx.stroke();
                 ctx.fillStyle = '#86b99a';
-                for (let yy = p.y + 34; yy < p.y + p.h - 20; yy += 36) {
+                for (let yy = visibleRepeatStart(p.y + 34, 36, top - 8); yy < Math.min(p.y + p.h - 20, bottom + 8); yy += 36) {
                     ctx.beginPath(); ctx.ellipse(edge - 13, yy, 7, 3, -.6, 0, TAU); ctx.fill();
                 }
             } else if (p.bi === 1) {
-                for (let yy = p.y + 22; yy < p.y + p.h - 10; yy += 48) {
+                for (let yy = visibleRepeatStart(p.y + 22, 48, top - 8); yy < Math.min(p.y + p.h - 10, bottom + 1); yy += 48) {
                     ctx.fillStyle = '#fbbf24'; ctx.fillRect(edge - 4, yy, 16, 8);
                     ctx.fillStyle = '#292524'; ctx.fillRect(edge + 2, yy, 4, 8);
                 }
@@ -2028,19 +2043,20 @@
 
         // Scale crossing: a vertical blade billboard on roof stilts faces a climbing rail bolted to the taller tower.
         drawScaleRig(ctx, p) {
+            const view = A.util.canvasView(ctx, 20);
+            const top = view?.y0 ?? -Infinity, end = view?.y1 ?? Infinity;
             if (p.climbRail) {
                 ctx.fillStyle = '#334155'; ctx.fillRect(p.x, p.y, p.w, p.h);
                 ctx.fillStyle = '#facc15'; ctx.fillRect(p.x - 3, p.y, 3, p.h);
                 ctx.fillStyle = '#94a3b8';
-                for (let y = p.y + 20; y < p.y + p.h; y += 46) { ctx.fillRect(p.x - 7, y, 15, 5); ctx.fillStyle = '#64748b'; ctx.fillRect(p.x - 7, y + 5, 15, 2); ctx.fillStyle = '#94a3b8'; }
+                for (let y = visibleRepeatStart(p.y + 20, 46, top - 7); y < Math.min(p.y + p.h, end); y += 46) { ctx.fillRect(p.x - 7, y, 15, 5); ctx.fillStyle = '#64748b'; ctx.fillRect(p.x - 7, y + 5, 15, 2); ctx.fillStyle = '#94a3b8'; }
                 return;
             }
             const bottom = p.y + p.h, glow = ['#f472b6', '#38bdf8', '#facc15'][p.hue || 0];
             if (p.scaleTower) {
                 ctx.fillStyle = '#334155'; ctx.fillRect(p.x, p.y, p.w, p.h);
                 ctx.fillStyle = '#64748b'; ctx.fillRect(p.x, p.y, p.w, 12);
-                const top = Math.max(p.y + 30, this.cam.y - 100), end = Math.min(bottom, this.cam.y + (this.viewHeight || 900) + 100);
-                for (let y = top - ((top - p.y - 30) % 65); y < end; y += 65) {
+                for (let y = visibleRepeatStart(p.y + 30, 65, top - 28); y < Math.min(bottom, end); y += 65) {
                     ctx.fillStyle = '#a5d9ed';
                     for (let x = p.x + 16; x < p.x + p.w - 12; x += 32) ctx.fillRect(x, y, 18, 28);
                 }
@@ -2061,7 +2077,7 @@
             ctx.fillStyle = glow; ctx.globalAlpha = .85;
             ctx.fillRect(p.x + 8, p.y + 10, p.w - 16, p.h - 20);
             ctx.globalAlpha = 1; ctx.fillStyle = '#0f172a';
-            for (let y = p.y + 34; y < bottom - 24; y += 52) ctx.fillRect(p.x + 8, y, p.w - 16, 10);
+            for (let y = visibleRepeatStart(p.y + 34, 52, top - 10); y < Math.min(bottom - 24, end); y += 52) ctx.fillRect(p.x + 8, y, p.w - 16, 10);
             ctx.fillStyle = '#e2e8f0'; ctx.fillRect(p.x + p.w - 4, p.y + 4, 4, p.h - 8);
         }
 
@@ -3045,7 +3061,7 @@
             const small = !s.preview && (cssW < 700 || cssH < 550);
             const zoom = this.zoom = s.preview ? 1 : A.util.sceneZoom(s, w, h, 720);
             const viewW = w / zoom, viewH = h / zoom;
-            this.viewWidth = viewW;
+            this.viewWidth = viewW; this.viewHeight = viewH;
             const lookX = small ? clamp((me.vx || 0) * 0.12, -80, 80) : 0;
             const lookY = small ? clamp(-(me.vy || 0) * 0.09, 0, 70) : 0;
             const targetX = viewW >= W + 120 ? (W - viewW) / 2 : clamp(me.x + 13 + lookX - viewW / 2, -60, W + 60 - viewW);
@@ -3128,7 +3144,7 @@
                         ctx.fillStyle = g; ctx.fillRect(p.x, p.y + 10, p.w, bodyH - 10);
                     } else if (p.bi === 1) {
                         ctx.fillStyle = '#44403c'; ctx.fillRect(p.x, p.y, p.w, bodyH);
-                        ctx.fillStyle = '#292524'; for (let rx = p.x + 20; rx < p.x + p.w; rx += 40) for (let ry = p.y + 36; ry < p.y + bodyH - 10; ry += 40) { ctx.beginPath(); ctx.arc(rx, ry, 4, 0, TAU); ctx.fill(); }
+                        ctx.fillStyle = '#292524'; for (let rx = visibleRepeatStart(p.x + 20, 40, left - 4); rx < Math.min(p.x + p.w, right + 4); rx += 40) for (let ry = visibleRepeatStart(p.y + 36, 40, top - 4); ry < Math.min(p.y + bodyH - 10, bottom + 4); ry += 40) { ctx.beginPath(); ctx.arc(rx, ry, 4, 0, TAU); ctx.fill(); }
                         for (let sx = p.x; sx < p.x + p.w; sx += 32) { ctx.fillStyle = (((sx - p.x) / 32) | 0) % 2 ? '#fbbf24' : '#1c1917'; ctx.fillRect(sx, p.y, Math.min(32, p.x + p.w - sx), 9); }
                     } else if (p.bi === 3) {
                         const g = ctx.createLinearGradient(0, p.y, 0, p.y + bodyH); g.addColorStop(0, '#4c1d95'); g.addColorStop(1, '#1e1b4b');
@@ -3141,8 +3157,8 @@
                         ctx.fillStyle = g; ctx.fillRect(p.x, p.y, p.w, bodyH);
                         ctx.fillStyle = '#64748b'; ctx.fillRect(p.x - 4, p.y, p.w + 8, 9);
                         ctx.fillStyle = '#475569'; ctx.fillRect(p.x - 4, p.y + 9, p.w + 8, 4);
-                        for (let wx = p.x + 18; wx < p.x + p.w - 30; wx += 54) {
-                            for (let wy = p.y + 28; wy < p.y + bodyH - 18; wy += 56) {
+                        for (let wx = visibleRepeatStart(p.x + 18, 54, left - 24); wx < Math.min(p.x + p.w - 30, right); wx += 54) {
+                            for (let wy = visibleRepeatStart(p.y + 28, 56, top - 30); wy < Math.min(p.y + bodyH - 18, bottom); wy += 56) {
                                 ctx.fillStyle = (hashStr(`${wx}:${wy}`) & 3) === 0 ? '#fde68a' : '#1e293b';
                                 ctx.fillRect(wx, wy, 24, 30);
                             }
@@ -3370,7 +3386,7 @@
                         jump: Number.isFinite(r.ex?.jp) ? r.ex.jp : 0, doubleJump: Number.isFinite(r.ex?.j) ? r.ex.j : 0, landing: Number.isFinite(r.ex?.l) ? r.ex.l : 0 });
                 if (!this.s.preview) nameTag(ctx, r.name || '', r.x + 13, r.y - 14, r.color);
             }
-            if (this.dead <= 0) {
+            if (!s.spectator && this.dead <= 0) {
                 const blink = this.boost > 0 ? 0.7 + Math.sin(this.anim * 20) * 0.3 : 1;
                 if (this.airJumpPulse > 0) {
                     const progress = 1 - this.airJumpPulse / .25;
@@ -3881,7 +3897,7 @@
                     { vx: r.vx, vy: r.vy, grounded: r.ex?.g === true, dashAmount: Number.isFinite(r.ex?.dp) ? r.ex.dp : undefined,
                         jump: Number.isFinite(r.ex?.jp) ? r.ex.jp : 0, doubleJump: Number.isFinite(r.ex?.j) ? r.ex.j : 0, landing: Number.isFinite(r.ex?.l) ? r.ex.l : 0 });
             }
-            if (this.respawn <= 0) {
+            if (!s.spectator && this.respawn <= 0) {
                 const alpha = this.invuln > 0 ? 0.55 + Math.sin(this.anim * 22) * 0.25 : 1;
                 this.drawFighter(ctx, me.x, me.y, s.local, me.face, this.state, this.dmg, 'You', this.hammer > 0, this.swingT > 0 ? (this.swingHeavy ? 0.45 : 0.22) - this.swingT : 9, alpha, true, this.aim, this.swingAim, this.swingHeavy, this.shield,
                     { vx: me.vx, vy: me.vy, grounded: me.onGround, dashAmount: this.dashPose, jump: this.jumpPulse, doubleJump: this.airJumpPulse, landing: this.landingPose });
@@ -4210,6 +4226,13 @@
         }
 
         goalText() { return `${this.multiplayer ? `${this.pk} player KOs` : `${this.kills} drones · ${this.pk} players`} · HP ${Math.max(0, Math.round(this.hp))}`; }
+        updateSpectator(dt) {
+            this.bullets = this.bullets.filter(bullet => {
+                bullet.x += bullet.vx * dt; bullet.y += bullet.vy * dt;
+                return (bullet.life -= dt) > 0;
+            });
+            this.damageTexts = this.damageTexts.filter(text => (text.t -= dt) > 0);
+        }
         touchLayout() { return { stick: true, buttons: [{ k: 'ShiftLeft', label: 'Dash' }, { k: 'Space', label: 'Blast', cls: 'e' }] }; }
         hint() { return 'WASD move · hold F / click / canvas touch to fire · mouse aims and looks ahead · Shift dash · Space / E shockwave · colored pickups = timed weapons / repairs · Q reload'; }
 
@@ -4340,7 +4363,7 @@
                     ctx.fillStyle = '#fef08a'; ctx.beginPath(); ctx.arc(r.x + Math.cos(r.f || 0) * 34, r.y + Math.sin(r.f || 0) * 34, 8, 0, TAU); ctx.fill();
                 }
             }
-            if (this.dead <= 0) {
+            if (!s.spectator && this.dead <= 0) {
                 const alpha = this.invuln > 0 ? 0.55 + Math.sin(this.anim * 24) * 0.3 : 1;
                 this.drawShip(ctx, me.x, me.y, me.aim, s.local, this.hp, 'You', true, alpha, this.overdrive > 0);
                 if (this.muzzle > 0) { ctx.fillStyle = '#fef08a'; ctx.beginPath(); ctx.arc(me.x + Math.cos(me.aim) * 34, me.y + Math.sin(me.aim) * 34, 9, 0, TAU); ctx.fill(); }
@@ -4354,7 +4377,7 @@
                 ctx.fillText(n.amount, n.x, n.y); ctx.globalAlpha = 1;
             }
             ctx.restore();
-            if (s.preview) return;
+            if (s.preview || s.spectator) return;
             s.placeHud(ctx, 14, 142, 270, 58, 'top-left');
             ctx.fillStyle = 'rgba(8,12,24,.8)'; roundRect(ctx, 14, 142, 270, 58, 9); ctx.fill();
             ctx.textAlign = 'left'; ctx.font = '800 14px system-ui'; ctx.fillStyle = '#e2e8f0';

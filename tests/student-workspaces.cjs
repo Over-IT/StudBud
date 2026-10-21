@@ -100,6 +100,29 @@ for (const [route, page] of [['flashcard', 'practice'], ['study-manage', 'manage
     assert.match(elements.get('workspace-tabs').innerHTML, new RegExp(`data-target="${route}-view" aria-current="page"`));
 }
 assert.equal(renders, 3);
+{
+    const tabs = elements.get('workspace-tabs');
+    sandbox.Router.renderWorkspaceTabs('gpa');
+    assert.match(tabs.innerHTML, /My grades/);
+    assert.doesNotMatch(tabs.innerHTML, /data-target="classes-view"/, 'unavailable classrooms stay out of School tabs');
+    app.classrooms = { available: () => true, isTeacher: () => false };
+    sandbox.Router.renderWorkspaceTabs('classes');
+    assert.match(tabs.innerHTML, /data-target="classes-view" aria-current="page">Classrooms/);
+    assert.equal(tabs.dataset.pageCount, '5');
+    assert.match(tabs.innerHTML, /data-target="school-community-view"/);
+    app.classrooms.isTeacher = () => true;
+    sandbox.Router.renderWorkspaceTabs('classes');
+    assert.match(tabs.innerHTML, /aria-current="page">Teaching/);
+    assert.equal(tabs['aria-label'], 'School pages');
+    app.classrooms.available = () => false;
+    sandbox.Router.renderWorkspaceTabs('gpa');
+    assert.equal(tabs.dataset.pageCount, '3', 'capability changes remove the classroom tab immediately');
+    delete app.classrooms;
+    sandbox.Router.renderWorkspaceTabs('dashboard');
+    assert.equal(tabs.classList.contains('hidden'), true, 'pages without secondary tabs have no empty tab group');
+    assert.equal(tabs.innerHTML, '');
+}
+assert.doesNotMatch(read('index.html'), /class="nav-section-label"[^>]*>More</, 'no empty More group in the sidebar');
 const plannerView = element('planner-view'), plannerPanels = ['plan', 'tasks'].map(page => {
     const panel = element(); panel.dataset.plannerPanel = page; return panel;
 });

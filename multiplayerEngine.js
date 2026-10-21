@@ -549,6 +549,10 @@
             this.user = options.user;
             this.api = options.api;
             this.isHost = Boolean(options.isHost);
+            this.spectator = this.isHost && Boolean(this.room.state?.host_spectator);
+            this.onToggleHostMode = options.onToggleHostMode;
+            this.spectatorAuto = true;
+            this.spectatorClock = 0;
             this.onLeave = options.onLeave;
             this.onRestart = options.onRestart;
             this.finishRoom = options.finishRoom;
@@ -595,6 +599,7 @@
             this.done = false;
             this.lastReport = { score: -1, answered: -1, at: 0 };
             this.startedAt = Date.parse(this.room.started_at) || Date.now();
+            if (!this.practice && !this.preview) this.matchStartAt = this.startedAt + 3400;
             this.deadline = ['chess', 'defense'].includes(this.mode) ? Infinity : this.practice
                 ? Number(options.timeLimitSeconds) > 0 ? this.startedAt + Number(options.timeLimitSeconds) * 1000 : Infinity
                 : this.room.goal_type === 'time'
@@ -627,7 +632,8 @@
 
         // ---------- roster / network ----------
         updateRoster(room) {
-            const players = Array.isArray(room.state?.players) ? room.state.players : [];
+            const players = (Array.isArray(room.state?.players) ? room.state.players : [])
+                .filter(player => !(room.state?.host_spectator && player.id === room.host_id));
             const ids = new Set(), defaults = defaultPlayerColors(players);
             players.forEach(player => {
                 ids.add(player.id);
@@ -643,6 +649,7 @@
                 if (remote) { remote.cos = info.cos; remote.color = info.color; remote.name = info.nickname; }
             });
             for (const id of [...this.roster.keys()]) if (!ids.has(id)) { this.roster.delete(id); this.remotes.delete(id); this.readyPlayers?.delete(id); }
+            for (const id of this.remotes.keys()) if (!ids.has(id)) this.remotes.delete(id);
             if (this.roster.has(this.user.id)) this.local = this.roster.get(this.user.id);
         }
 
@@ -694,15 +701,9 @@
         syncStart() {
             if (!this.connected || !this.cardsReady) return false;
             this.readyPlayers.add(this.user.id);
-            if (!this.matchStartAt && this.isHost && [...this.roster.keys()].every(id => this.readyPlayers.has(id))) {
-                this.matchStartAt = Date.now() + 3400;
-            }
-            if (!this.matchStartAt) return false;
-            if (!this.startClockSynced) {
-                this.localStartAt = Math.max(this.matchStartAt, Date.now() + 1200);
-                this.startClockSynced = true;
-            }
-            this.countdown = Math.max(0, (this.localStartAt - Date.now()) / 1000);
+            // The server's room start survives late joins and host reconnects.
+            this.matchStartAt = this.startedAt + 3400;
+            this.countdown = Math.max(0, (this.matchStartAt - Date.now()) / 1000);
             return true;
         }
 
@@ -716,6 +717,11 @@
         sendState() {
             if (this.over) return;
             const ev = this.outbox.splice(0, 40);
+            if (this.spectator) {
+                this.send({ t: 's', id: this.user.id, spectator: true, ready: Boolean(this.cardsReady),
+                    startAt: this.matchStartAt, ex: this.game.net().ex, ev: ev.filter(event => event.k === 'td-error') });
+                return;
+            }
             const body = { t: 's', id: this.user.id, s: Math.round(this.score), g: Math.round(this.goal), q: this.answered,
                 d: this.done ? 1 : 0, ft: this.finishMs, ready: Boolean(this.cardsReady), startAt: this.isHost ? this.matchStartAt : undefined, ...this.game.net() };
             // Idle players (nothing changed, no events) drop to a heartbeat, cutting realtime traffic for parked or answering players.
@@ -731,7 +737,13 @@
                 if (p.id === this.room.host_id) this.finish(p.st);
                 return;
             }
-            if (p.t !== 's' || !this.roster.has(p.id)) return;
+            if (p.t !== 's') return;
+            if (p.id === this.room.host_id && this.room.state?.host_spectator) {
+                this.game.onState(p.ex || {}, { id: p.id });
+                for (const event of p.ev || []) if (event.k === 'td-error') this.game.onEvent(event, { id: p.id });
+                return;
+            }
+            if (!this.roster.has(p.id)) return;
             if (p.ready) this.readyPlayers?.add(p.id);
             if (p.id === this.room.host_id && Number.isFinite(p.startAt) && !this.matchStartAt) this.matchStartAt = p.startAt;
             let r = this.remotes.get(p.id);
@@ -755,13 +767,14 @@
         sfx(name, gap, volume) { if (!this.preview) sfx(name, gap, volume); }
 
         addScore(n) {
+            if (this.spectator) return;
             this.score = Math.max(0, this.score + n);
             if (this.mode === 'miner' || this.mode === 'river') return;
             if (n >= 40) this.sfx('coin', 120);
             else if (n > 0) this.sfx('pop', 90);
             else if (n < 0) this.sfx('hit');
         }
-        setGoal(n) { this.goal = n; }
+        setGoal(n) { if (!this.spectator) this.goal = n; }
 
         standings() {
             const rows = [];
@@ -828,7 +841,7 @@
         }
 
         hostEnd() {
-            if (this.ending || this.over) return;
+            if (!this.isHost || this.practice || this.ending || this.over) return;
             this.ending = true;
             const st = this.standings();
             this.send({ t: 'end', id: this.user.id, st });
@@ -874,7 +887,7 @@
         }
 
         async reportScore(force) {
-            if (this.practice) return;
+            if (this.practice || this.spectator) return;
             const last = this.lastReport;
             const answered = this.answered + Math.floor(this.t / 20);
             const value = this.game?.scoreGoal === false ? Math.max(0, Math.round(this.goal)) : this.score;
@@ -894,13 +907,13 @@
             this.renderResults();
             this.awardPracticeCoins();
             const me = this.standingsCache.findIndex(row => row.id === this.user.id);
-            window.NexusApp?.saveGameSummary?.(this).catch(error => {
+            if (!this.spectator) window.NexusApp?.saveGameSummary?.(this).catch(error => {
                 console.error('[Game] Could not save match summary:', error);
                 this.toast('Your match summary could not be saved. Keep this page open, check your connection and try again.', '#f87171');
             });
             window.StudBudSfx?.stopMusic();
             const won = this.game?.isWinner ? this.game.isWinner(this.standingsCache, this.user.id) : me === 0;
-            this.sfx(won ? 'win' : 'lose');
+            if (!this.spectator) this.sfx(won ? 'win' : 'lose');
         }
 
         // Solo practice pays coins for correct answers through the server-capped solo reward.
@@ -961,6 +974,7 @@
 
         // Player-triggered question that refills the game's resource.
         recharge() {
+            if (this.spectator) return;
             if (this.game.recharge) return this.game.recharge();
             const res = this.game.res;
             if (!res || this.paused || this.question || this.over || this.countdown > 0) return;
@@ -973,7 +987,7 @@
 
         // Automatic triggers (mystery boxes, chests, pads) are blocked briefly after any question closes.
         ask(callback, note, manual, opts) {
-            if (this.preview) return false;
+            if (this.preview || this.spectator) return false;
             if (opts?.force && this.question) this.closeQuestion(true);
             if (this.paused || this.question || this.over || this.countdown > 0) return false;
             if (!manual && performance.now() < (this.askCooldownUntil || 0)) return false;
@@ -1084,14 +1098,15 @@
 
         // ---------- input ----------
         axis() {
+            if (this.spectator) return { x: 0, y: 0 };
             const k = this.keys;
             return {
                 x: (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0),
                 y: (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0) - (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0)
             };
         }
-        pressed(...codes) { return codes.some(code => this.justPressed.has(code)); }
-        down(...codes) { return codes.some(code => this.keys.has(code)); }
+        pressed(...codes) { return !this.spectator && codes.some(code => this.justPressed.has(code)); }
+        down(...codes) { return !this.spectator && codes.some(code => this.keys.has(code)); }
 
         bind() {
             const typing = e => e.target?.isContentEditable || e.target?.tagName === 'TEXTAREA'
@@ -1144,12 +1159,22 @@
                 },
                 keyup: e => this.keys.delete(e.code),
                 blur: () => { this.keys.clear(); this.mouse.down = false; this.mouse.rdown = false; this.aimPointer = null; this.resetTouchStick?.(); },
+                visibility: () => {
+                    this.renderBudget = null;
+                    this.handlers.blur();
+                    if (this.preview) {
+                        cancelAnimationFrame(this.raf);
+                        this.lastFrame = performance.now();
+                        if (!document.hidden && !this.destroyed) this.raf = requestAnimationFrame(t => this.frame(t));
+                    }
+                },
                 resize: () => this.resize()
             };
             window.addEventListener('keydown', this.handlers.keydown);
             window.addEventListener('keyup', this.handlers.keyup);
             window.addEventListener('blur', this.handlers.blur);
             window.addEventListener('resize', this.handlers.resize);
+            document.addEventListener('visibilitychange', this.handlers.visibility);
             const canvas = this.canvas;
             canvas.tabIndex = 0;
             canvas.setAttribute('aria-label', 'Game area. Use the game controls, Q to refill, or Tab to reach game buttons.');
@@ -1197,6 +1222,11 @@
                 else if (target.classList.contains('mpg-hud-toggle')) {
                     this.setHudCollapsed(!this.overlay.classList.contains('hud-collapsed'));
                 }
+                else if (target.classList.contains('mpg-resolution')) {
+                    this.fullResolution = !this.fullResolution;
+                    this.renderDpr = undefined;
+                    this.resize();
+                }
                 else if (target.classList.contains('mpg-checkpoint') && this.mode === 'skyline' && !this.over && !this.question && this.countdown <= 0 && !this.paused) this.game.returnToCheckpoint();
                 else if (target.classList.contains('mpg-test-pause') && this.testing) {
                     if (this.paused) {
@@ -1220,6 +1250,14 @@
                 else if (target.classList.contains('mpg-leave') || target.classList.contains('mpg-exit')) this.onLeave?.();
                 else if (target.classList.contains('mpg-end')) this.hostEnd();
                 else if (target.classList.contains('mpg-add-time')) this.addTime();
+                else if (target.classList.contains('mpg-host-mode')) this.onToggleHostMode?.();
+                else if (target.classList.contains('mpg-spectator-next')) this.nextSpectator();
+                else if (target.classList.contains('mpg-spectator-auto')) {
+                    this.spectatorAuto = !this.spectatorAuto;
+                    this.spectatorClock = 0;
+                    target.setAttribute('aria-pressed', String(this.spectatorAuto));
+                    target.textContent = `Auto camera: ${this.spectatorAuto ? 'on' : 'off'}`;
+                }
             });
         }
 
@@ -1258,12 +1296,14 @@
         buildDom() {
             const overlay = document.createElement('div');
             overlay.className = 'mpg-overlay';
+            overlay.classList.toggle('mpg-spectator', this.spectator);
             overlay.innerHTML = `
                 <canvas class="mpg-canvas"></canvas>
                 <div class="mpg-top">
                     <div class="mpg-chip"><strong class="mpg-name"></strong><span class="mpg-goal"></span>${this.testing ? `<small class="mpg-practice-indicator">Staff testing · ${this.limitedTestEnergy ? 'limited' : 'infinite'} resources</small>` : this.practice ? '<small class="mpg-practice-indicator">Singleplayer</small>' : ''}</div>
                     <div class="mpg-timer"></div>
                     <div class="mpg-actions">
+                        ${this.isHost && !this.practice ? `<button type="button" class="mpg-host-mode" aria-pressed="${this.spectator}">${this.spectator ? 'Switch to play' : 'Host screen'}</button>` : ''}
                         ${this.isHost && !this.practice && this.room.goal_type === 'time' && !['chess', 'defense'].includes(this.mode) ? `<details class="mpg-audio-settings"><summary>Add time</summary><div class="mpg-audio-panel">
                             <label>Minutes to add <input class="mpg-add-minutes" type="number" min="1" max="60" step="1" value="1"></label>
                             <small>Maximum match length: 60 minutes.</small>
@@ -1273,6 +1313,8 @@
                         <button type="button" class="mpg-hud-toggle" aria-expanded="true" aria-controls="mpg-match-details mpg-match-standings" aria-label="Hide match details and standings">HUD</button>
                         <details class="mpg-controls-help"><summary>Controls</summary><div class="mpg-help-panel"><div class="mpg-hint" id="mpg-controls-hint"></div></div></details>
                         <details class="mpg-audio-settings"><summary>Settings</summary><div class="mpg-audio-panel">
+                            ${this.mode !== 'chess' ? `<button type="button" class="mpg-resolution" aria-pressed="false">Auto resolution · 100%</button>
+                            <small>Auto resolution reduces canvas sharpness only when frames stay slow, then restores it when possible. Physics, effects and controls stay unchanged. Click to lock full resolution.</small>` : ''}
                             <label>Game volume <input type="range" min="0" max="100" value="${Math.round((window.StudBudSfx?.settings.volume ?? .7) * 100)}" data-audio="volume"></label>
                             <label>Music volume <input type="range" min="0" max="100" value="${Math.round((window.StudBudSfx?.settings.musicVolume ?? .5) * 100)}" data-audio="musicVolume"></label>
                             <label><input type="checkbox" data-audio="game" ${window.StudBudSfx?.settings.game !== false ? 'checked' : ''}> Game sounds</label>
@@ -1291,6 +1333,13 @@
                         <button type="button" class="mpg-end ${this.isHost && !this.practice ? '' : 'hidden'}">End match</button>
                         <button type="button" class="mpg-leave">${this.testing ? 'Close test' : this.practice ? 'End game' : 'Leave'}</button>
                     </div>
+                    ${this.spectator ? `<section class="mpg-host-banner" aria-label="Host screen">
+                        <div><small>JOIN AT ${esc(window.location?.host || 'StudBud')}/join</small><strong>${esc(this.code)}</strong></div>
+                        <div><b>HOST SCREEN · NOT PLAYING</b><p class="mpg-watching" role="status"></p>
+                        <button type="button" class="mpg-spectator-next">Next player</button>
+                        <button type="button" class="mpg-spectator-auto" aria-pressed="true">Auto camera: on</button>
+                        <details><summary>Play on another device / window</summary><p>Open <a href="/join/" target="_blank" rel="noopener">Guest join</a> in a private window or another browser and enter this code. Normal signed-in tabs share this host identity. Keep this host screen connected.</p></details></div>
+                    </section>` : ''}
                 </div>
                 <ol class="mpg-board" id="mpg-match-standings" aria-label="Match standings"></ol>
                 <div class="mpg-score"><span>Score</span><strong>0</strong></div>
@@ -1399,6 +1448,7 @@
         }
 
         setHudCollapsed(collapsed) {
+            if (this.spectator) collapsed = false;
             this.overlay.classList.toggle('hud-collapsed', collapsed);
             this.overlay.querySelector('.mpg-match-details').hidden = collapsed;
             this.overlay.querySelector('.mpg-board').hidden = collapsed;
@@ -1608,7 +1658,9 @@
 
         resize() {
             this.graphics = graphicsProfile();
-            const dpr = Math.min(window.devicePixelRatio || 1, this.graphics.maxDpr);
+            const nativeDpr = Math.min(window.devicePixelRatio || 1, this.graphics.maxDpr);
+            const dpr = this.fullResolution ? nativeDpr : Math.min(nativeDpr, this.renderDpr || nativeDpr);
+            this.nativeDpr = nativeDpr;
             const w = this.overlay.clientWidth, h = this.overlay.clientHeight;
             if (this.canvas.width !== Math.floor(w * dpr)) this.canvas.width = Math.floor(w * dpr);
             if (this.canvas.height !== Math.floor(h * dpr)) this.canvas.height = Math.floor(h * dpr);
@@ -1616,13 +1668,44 @@
             this.scale = clamp(h / 720, .65, 1.25);
             this.vw = w / this.scale;
             this.vh = h / this.scale;
+            this.renderBudget = null;
+            this.resolutionButton ||= this.overlay.querySelector?.('.mpg-resolution');
+            if (this.resolutionButton) {
+                this.resolutionButton.textContent = this.fullResolution ? 'Full resolution' : `Auto resolution · ${Math.round(dpr / nativeDpr * 100)}%`;
+                this.resolutionButton.setAttribute('aria-pressed', String(Boolean(this.fullResolution)));
+            }
             this.layoutHud();
+        }
+
+        trackRenderBudget(interval, work) {
+            if (this.fullResolution || this.preview || this.mode === 'chess' || this.paused || this.over || this.countdown > 0
+                || document.hidden || interval <= 0 || interval > 250 || !this.nativeDpr) {
+                this.renderBudget = null;
+                return;
+            }
+            const budget = this.renderBudget || (this.renderBudget = { elapsed: 0, work: 0, frames: 0, slow: 0, fast: 0 });
+            budget.elapsed += interval;
+            budget.work += work;
+            budget.frames++;
+            if (budget.elapsed < 1500 || budget.frames < 20) return;
+            const cadence = budget.elapsed / budget.frames, cpu = budget.work / budget.frames;
+            budget.slow = cadence > 25 ? budget.slow + budget.elapsed : 0;
+            budget.fast = cadence < 19 && cpu < 10 ? budget.fast + budget.elapsed : 0;
+            budget.elapsed = budget.work = budget.frames = 0;
+            // Hysteresis avoids resizing on isolated stalls or constantly rebuilding cached layers.
+            const floor = Math.min(.75, this.nativeDpr);
+            const next = budget.slow >= 3000 ? Math.max(floor, this.dpr - .25)
+                : budget.fast >= 8000 ? Math.min(this.nativeDpr, this.dpr + .25) : this.dpr;
+            if (next === this.dpr) return;
+            this.renderDpr = next;
+            this.resize();
+            this.toast?.(`Auto resolution: ${Math.round(next / this.nativeDpr * 100)}% · change in Settings`, '#93c5fd');
         }
 
         layoutHud() {
             if (!this.overlay || !this.scale) return;
             const root = this.overlay.getBoundingClientRect();
-            const header = this.overlay.querySelector('.mpg-hud').getBoundingClientRect();
+            const header = this.overlay.querySelector(this.spectator ? '.mpg-top' : '.mpg-hud').getBoundingClientRect();
             let top = header.bottom - root.top + 8;
             if (this.mode === 'chess') this.overlay.style.setProperty('--chess-top', `${top}px`);
             let bottom = 8;
@@ -1659,7 +1742,15 @@
             // Skip unchanged text so the 4 Hz HUD tick doesn't invalidate layout over the game canvas.
             const setText = (el, text) => { if (el && el.textContent !== text) el.textContent = text; };
             setText(o.querySelector('.mpg-name'), this.game.title || '');
-            setText(o.querySelector('.mpg-goal'), this.game.goalText());
+            setText(o.querySelector('.mpg-goal'), this.spectator
+                ? this.mode === 'defense' ? `BLUE ${this.game.health[0]} HP · RED ${this.game.health[1]} HP · ${this.game.waveStatusText()}`
+                    : 'Live leaderboard · no host score or coins'
+                : this.game.goalText());
+            if (this.spectator) {
+                const info = this.roster.get(this.spectatorId);
+                const live = this.remotes.has(this.spectatorId);
+                setText(o.querySelector('.mpg-watching'), info ? `${live ? 'Watching' : 'Waiting for live view of'} ${info.nickname}` : 'Waiting for players to join…');
+            }
             const objective = this.game.scoreGoal === false;
             const scoreBox = o.querySelector('.mpg-score');
             setText(scoreBox.querySelector('span'), objective ? (this.game.goalLabel || 'Score') : 'Score');
@@ -1686,7 +1777,7 @@
                 const position = me ? `${Math.round(me.x)}, ${Math.round(me.y)}` : 'Not applicable';
                 diagnostics.textContent = `Mode: ${this.mode}\nSeed: ${this.seed}\nTime: ${this.t.toFixed(1)}s\nPlayers: ${this.roster.size}\nPosition: ${position}\nResources: infinite\nScore: ${Math.round(this.score)}\nObjective: ${Math.round(this.goal)}${this.mode === 'skyline' ? `\nFly speed: ${this.testFlySpeed || 600} units/s\nCheckpoint: ${this.game.cp.id + 1}/${this.game.checkpoints.length}\nSolids: ${this.game.solids.length}\nMachines: ${this.game.drills.length}` : ''}`;
             }
-            const boardMarkup = this.standings().slice(0, 6).map((row, i) =>
+            const boardMarkup = this.standings().slice(0, this.spectator ? 16 : 6).map((row, i) =>
                 `<li class="${row.id === this.user.id ? 'me' : ''}">${avatarMarkup(row, 'mpg-player-avatar')}<span>${i + 1}. ${esc(row.n)} ${accountTagMarkup(row.username, row.tags)}</span><b>${this.valueText(row)}</b></li>`).join('');
             if (boardMarkup !== this.lastBoardMarkup) {
                 o.querySelector('.mpg-board').innerHTML = boardMarkup;
@@ -1697,9 +1788,9 @@
         updateMeter() {
             if (this.preview) return;
             const res = this.game.res;
-            const hidden = !res || (this.testing && !this.limitedTestEnergy);
+            const hidden = Boolean(this.spectator) || !res || (this.testing && !this.limitedTestEnergy);
             const noticeResource = this.game.resourceNotice ? this.game.resourceNotice() : res;
-            this.updateResourceNotice?.(noticeResource, !noticeResource || (this.testing && !this.limitedTestEnergy));
+            this.updateResourceNotice?.(noticeResource, Boolean(this.spectator) || !noticeResource || (this.testing && !this.limitedTestEnergy));
             const value = res ? Math.round(res.value) : 0, low = Boolean(res && res.value <= lowResourceThreshold(this.mode, this.game)), empty = Boolean(res && res.value < 1), label = res?.label || '';
             const previous = this.meterState;
             if (previous && previous.hidden === hidden && previous.value === value && previous.low === low && previous.empty === empty && previous.label === label) return;
@@ -1789,7 +1880,7 @@
                     ${questionHistoryMarkup(this.questionHistory)}
                     ${window.NexusApp?.studySetMarkup?.(this.studySet) || ''}
                 </details>
-                <p>${this.testing ? 'Staff tests do not award coins or save study progress.' : this.user.is_anonymous ? 'Guest match complete. Guest sessions do not save account progress or earn coins.' : this.practice ? this.practiceResultText() : this.rewards ? 'Coins have been added to your multiplayer wallet.' : 'Tallying coin rewards…'}</p>
+                <p>${this.spectator ? 'Host view complete. You did not participate and earn no coins.' : this.testing ? 'Staff tests do not award coins or save study progress.' : this.user.is_anonymous ? 'Guest match complete. Guest sessions do not save account progress or earn coins.' : this.practice ? this.practiceResultText() : this.rewards ? 'Coins have been added to your multiplayer wallet.' : 'Tallying coin rewards…'}</p>
                 <button type="button" class="mpg-exit">${this.practice ? 'Back to game setup' : 'Back to lobby'}</button>
             </div>`;
             panel.querySelector('.mpg-summary').open = Boolean(summaryOpen);
@@ -1798,8 +1889,46 @@
         }
 
         // ---------- main loop ----------
+        nextSpectator() {
+            const ids = [...this.roster.keys()];
+            const index = ids.indexOf(this.spectatorId);
+            this.spectatorId = ids.length ? ids[(index + 1) % ids.length] : null;
+            this.spectatorClock = 0;
+        }
+
+        updateSpectator(dt) {
+            if (!this.roster.has(this.spectatorId)) this.nextSpectator();
+            if (this.spectatorAuto && (this.spectatorClock += dt) >= 8) this.nextSpectator();
+            const remote = this.remotes.get(this.spectatorId);
+            if (remote && Number.isFinite(remote.x) && Number.isFinite(remote.y)) {
+                const k = Math.min(1, dt * 6);
+                if (this.game.cam) {
+                    this.game.cam.x += (remote.x - this.game.cam.x) * k;
+                    this.game.cam.y += (remote.y - this.game.cam.y) * k;
+                }
+                if (this.game.me) { this.game.me.x = remote.x; this.game.me.y = remote.y; }
+            }
+            this.game.anim = this.t;
+            this.game.particles?.update(dt);
+            if (this.game.view) this.game.updateCamera?.(this.vw, this.vh, dt);
+            this.game.updateSpectator?.(dt);
+        }
+
+        drawSpectatorSummary(ctx, w, h) {
+            ctx.fillStyle = '#0b1424'; ctx.fillRect(0, 0, w, h);
+            const rows = this.standings(), current = rows.find(row => row.id === this.spectatorId);
+            ctx.textAlign = 'center'; ctx.fillStyle = '#93c5fd'; ctx.font = '700 22px system-ui';
+            ctx.fillText(this.game.title || 'Live game', w * .38, h * .5);
+            ctx.fillStyle = '#fff'; ctx.font = '800 32px system-ui';
+            ctx.fillText(current?.n || 'Waiting for players…', w * .38, h * .58, w * .6);
+            ctx.font = '700 26px system-ui';
+            if (current) ctx.fillText(this.valueText(current), w * .38, h * .66);
+        }
+
         frame(now) {
             if (this.destroyed) return;
+            if (this.preview && document.hidden) return;
+            const workStart = performance.now(), interval = now - this.lastFrame;
             const dt = Math.min(0.05, (now - this.lastFrame) / 1000);
             this.lastFrame = now;
             if (!this.over) {
@@ -1816,7 +1945,7 @@
                     el.classList.toggle('is-loading', Boolean(waiting));
                     el.textContent = waiting ? !this.connected ? 'Connecting…' : !this.cardsReady ? 'Loading questions…'
                         : `Loading players… ${this.readyPlayers.size}/${this.roster.size}` : this.countdown > -0.2 ? text : '';
-                    el.classList.toggle('hidden', this.countdown <= -0.2);
+                    el.classList.toggle('hidden', !waiting && this.countdown <= 0);
                 } else {
                     if (!this.countdownHidden) {
                         this.overlay.querySelector('.mpg-countdown').classList.add('hidden');
@@ -1826,13 +1955,14 @@
                         this.t += dt;
                         this.onTick?.(dt);
                         if (this.testing && !this.limitedTestEnergy && this.game.res) this.game.res.value = this.game.res.max;
-                        this.game.update(dt);
+                        if (this.spectator) this.updateSpectator(dt);
+                        else this.game.update(dt);
                         if (this.testing && !this.limitedTestEnergy && this.game.res) this.game.res.value = this.game.res.max;
                     }
                     this.checkEnd();
                     if (!this.practice && !this.isHost && !this.over && Date.now() > this.deadline + 9000) this.finish(this.standings());
                 }
-            } else if (!this.paused) {
+            } else if (!this.paused && !this.spectator) {
                 this.game.settleAfterFinish?.(dt);
             }
             if (!this.paused) {
@@ -1857,12 +1987,14 @@
             this.justPressed.clear();
             this.mouse.pressed = false;
             this.mouse.rpressed = false;
-            if ((this.mode !== 'chess' || this.preview) && now - (this.lastDrawAt ?? -Infinity) >= 1000 / (this.graphics?.fps ?? Infinity) - .1) {
+            if (!document.hidden && (this.mode !== 'chess' || this.preview) && now - (this.lastDrawAt ?? -Infinity) >= 1000 / (this.graphics?.fps ?? Infinity) - .1) {
                 this.lastDrawAt = now;
                 const ctx = this.ctx;
                 ctx.setTransform(this.dpr * this.scale, 0, 0, this.dpr * this.scale, 0, 0);
-                this.game.draw(ctx, this.vw, this.vh);
+                if (this.spectator && ['crypto', 'frenzy', 'fishing'].includes(this.mode)) this.drawSpectatorSummary(ctx, this.vw, this.vh);
+                else this.game.draw(ctx, this.vw, this.vh);
             }
+            this.trackRenderBudget?.(interval, performance.now() - workStart);
             this.raf = requestAnimationFrame(t => this.frame(t));
         }
 
@@ -1878,6 +2010,7 @@
             window.removeEventListener('keyup', this.handlers.keyup);
             window.removeEventListener('blur', this.handlers.blur);
             window.removeEventListener('resize', this.handlers.resize);
+            document.removeEventListener('visibilitychange', this.handlers.visibility);
             window.removeEventListener('pointermove', this.stickHandlers?.move);
             window.removeEventListener('pointerup', this.stickHandlers?.end);
             window.removeEventListener('pointercancel', this.stickHandlers?.end);

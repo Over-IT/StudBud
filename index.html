@@ -17,11 +17,22 @@
 </head>
 <body class="dark-theme" data-color-scheme="studbud">
     <section id="auth-screen" class="auth-screen hidden" aria-labelledby="auth-title">
-        <div class="glass-card auth-card">
-            <div class="logo-container">
-                <img class="logo-mark" src="./icons/studbud.svg" alt="" width="44" height="44">
-                <span class="logo-text">StudBud</span>
-            </div>
+        <div class="auth-card">
+            <aside class="auth-welcome" aria-label="Welcome and game joining">
+                <div class="logo-container">
+                    <img class="logo-mark" src="./icons/studbud.svg" alt="" width="52" height="52">
+                    <span class="logo-text">StudBud</span>
+                </div>
+                <div class="auth-intro">
+                    <h2>Your school day,<br>all in one place.</h2>
+                    <p>Plan your work, practice your sets and learn with your class.</p>
+                </div>
+                <div class="auth-game-entry">
+                    <div><h2>Joining a live game?</h2><p>No account needed. Have your teacher's or friend's code ready.</p></div>
+                    <a id="guest-join" class="primary-btn join-shortcut" href="join/"><i class="fas fa-keyboard" aria-hidden="true"></i> Join with a code <i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+                </div>
+            </aside>
+            <div class="auth-account"><div class="auth-account-content">
             <h1 id="auth-title">Welcome to StudBud</h1>
             <p id="auth-description">Sign in to sync across devices, or continue as a guest. No account needed.</p>
             <button id="offline-start-btn" class="primary-btn full-width guest-start-btn" type="button"><i class="fas fa-user-clock" aria-hidden="true"></i> Continue as guest</button>
@@ -54,8 +65,8 @@
             </section>
             <p id="auth-status" class="auth-message" role="status" aria-live="polite"></p>
             <p class="auth-switch"><span id="auth-switch-prompt">New to StudBud?</span> <button id="auth-switch-btn" type="button" class="text-btn">Create an account</button></p>
-            <a id="guest-join" class="guest-join join-shortcut" href="join/">Just joining a game? Enter a code <i class="fas fa-arrow-right" aria-hidden="true"></i></a>
             <p class="settings-hint auth-legal"><a href="privacy.html" target="_blank" rel="noopener">Privacy policy</a></p>
+            </div></div>
         </div>
         <div id="guest-game-lobby" class="glass-card hidden"></div>
     </section>
@@ -79,8 +90,8 @@
                     <li class="nav-item active" data-target="dashboard-view" role="button" tabindex="0" aria-current="page">
                         <i class="fas fa-home"></i> <span>Home</span>
                     </li>
-                    <li class="nav-item" data-target="gpa-view" data-also="grade-scenarios-view analytics-view class-detail-view" role="button" tabindex="0">
-                        <i class="fas fa-graduation-cap"></i> <span>My classes</span>
+                    <li class="nav-item" data-target="gpa-view" data-also="grade-scenarios-view analytics-view class-detail-view classes-view school-community-view" role="button" tabindex="0">
+                        <i class="fas fa-graduation-cap"></i> <span>School</span>
                     </li>
                     <li class="nav-item workspace-child" data-target="grade-scenarios-view" role="button" tabindex="0">
                         <i class="fas fa-flask"></i> <span>Hypothetical Grades</span>
@@ -117,7 +128,7 @@
                         <i class="fas fa-users"></i> <span>Games</span><strong id="friend-nav-badge" class="sidebar-coin-count hidden">0</strong>
                     </li>
                     <li class="nav-item" data-target="profile-view" data-also="shop-view inventory-view" role="button" tabindex="0">
-                        <i class="fas fa-user-astronaut"></i> <span>Profile</span><strong id="multiplayer-sidebar-coins" class="sidebar-coin-count">0 <i class="fas fa-coins"></i></strong>
+                        <i class="fas fa-user"></i> <span>Profile</span>
                     </li>
                     <li class="nav-item workspace-child" data-target="inventory-view" role="button" tabindex="0">
                         <i class="fas fa-box-open"></i> <span>Locker</span>
@@ -125,17 +136,13 @@
                     <li class="nav-item workspace-child" data-target="importer-view" role="button" tabindex="0">
                         <i class="fas fa-file-import"></i> <span>Import Cards</span>
                     </li>
-                    <li class="nav-section-label" aria-hidden="true">More</li>
-                    <li id="classes-nav-item" class="nav-item hidden" data-target="classes-view" role="button" tabindex="0">
+                    <li id="classes-nav-item" class="nav-item workspace-child hidden" data-target="classes-view" role="button" tabindex="0">
                         <i class="fas fa-school"></i> <span>Teacher classes</span>
-                    </li>
-                    <li id="admin-nav-item" class="nav-item hidden" data-target="admin-view" role="button" tabindex="0">
-                        <i class="fas fa-user-shield"></i> <span>Staff tools</span>
                     </li>
                     <li class="nav-item workspace-child" data-target="about-view" role="button" tabindex="0">
                         <i class="fas fa-circle-info"></i> <span>About</span>
                     </li>
-                    <li class="nav-item" data-target="settings-view" data-also="appearance-view sound-view about-view" role="button" tabindex="0">
+                    <li class="nav-item workspace-child" data-target="settings-view" data-also="appearance-view sound-view about-view" role="button" tabindex="0">
                         <i class="fas fa-gear"></i> <span>Settings</span>
                     </li>
                 </ul>
@@ -352,23 +359,26 @@
                     <div class="planner-grid">
                         <header class="planner-page-header">
                             <div><h2 id="planner-page-title">Planner</h2><p id="planner-page-description" class="settings-hint">Your schedule, deadlines, and a clear idea of what to work on.</p></div>
-                            <div class="assignment-quick-actions">
-                                <button type="button" class="primary-btn" data-action="planner-add-assignment"><i class="fas fa-plus" aria-hidden="true"></i> Add assignment</button>
-                                <button type="button" class="secondary-btn" data-action="add-quiz"><i class="fas fa-plus" aria-hidden="true"></i> Add quiz / test</button>
-                                <button type="button" class="secondary-btn" data-action="planner-add-event" data-planner-panel="plan"><i class="fas fa-calendar-plus" aria-hidden="true"></i> Add event</button>
-                            </div>
+                            <details class="planner-add-menu">
+                                <summary class="primary-btn"><i class="fas fa-plus" aria-hidden="true"></i> Add new</summary>
+                                <div class="planner-add-options">
+                                    <button type="button" class="text-btn" data-action="planner-add-assignment">Assignment</button>
+                                    <button type="button" class="text-btn" data-action="add-quiz">Quiz / test</button>
+                                    <button type="button" class="text-btn" data-action="planner-add-event" data-planner-panel="plan">Event / study block</button>
+                                </div>
+                            </details>
                         </header>
                         <section class="planner-day-controls" data-planner-panel="plan" aria-label="Planner dates and view">
+                            <div class="planner-view-switch" role="group" aria-label="Planner time span">
+                                <button type="button" data-action="planner-scope" data-id="day" aria-pressed="true">Day</button>
+                                <button type="button" data-action="planner-scope" data-id="week" aria-pressed="false">Week</button>
+                                <button type="button" data-action="planner-scope" data-id="month" aria-pressed="false">Month</button>
+                            </div>
                             <div class="planner-date-controls">
                                 <button type="button" class="secondary-btn" data-action="planner-previous-day" aria-label="Previous day"><i class="fas fa-chevron-left" aria-hidden="true"></i></button>
                                 <label for="planner-date"><span>Date</span><input type="date" id="planner-date"></label>
                                 <button type="button" class="secondary-btn" data-action="planner-next-day" aria-label="Next day"><i class="fas fa-chevron-right" aria-hidden="true"></i></button>
                                 <button type="button" class="text-btn" data-action="planner-today">Today</button>
-                            </div>
-                            <div class="planner-view-switch" role="group" aria-label="Planner time span">
-                                <button type="button" data-action="planner-scope" data-id="day" aria-pressed="true">Day</button>
-                                <button type="button" data-action="planner-scope" data-id="week" aria-pressed="false">Week</button>
-                                <button type="button" data-action="planner-scope" data-id="month" aria-pressed="false">Month</button>
                             </div>
                             <label class="planner-budget" for="planner-daily-minutes"><span>Daily available time</span><span><input id="planner-daily-minutes" type="number" min="15" max="480" step="1" value="90"> min</span></label>
                         </section>
@@ -383,10 +393,12 @@
                                 <div id="planner-day-queue"></div>
                                 <div id="planner-day-completed"></div>
                             </section>
-                            <aside class="glass-card planner-upcoming" aria-labelledby="planner-upcoming-heading">
+                            <aside class="glass-card planner-upcoming" aria-label="Schedule and upcoming work">
                                 <section id="planner-day-schedule" aria-label="Schedule for this day"></section>
-                                <header class="planner-section-header"><h3 id="planner-upcoming-heading">Coming up &amp; unscheduled</h3><p class="settings-hint">Not in this day's plan. Add work to this day or edit its work date.</p></header>
-                                <div id="planner-upcoming-list"></div>
+                                <details class="planner-later-disclosure">
+                                    <summary id="planner-upcoming-heading">Upcoming work</summary>
+                                    <div id="planner-upcoming-list"></div>
+                                </details>
                                 <button type="button" class="text-btn" data-action="planner-show-library">Manage tasks <i class="fas fa-arrow-right" aria-hidden="true"></i></button>
                             </aside>
                         </div>
@@ -634,7 +646,7 @@
                     </div>
                     <section class="glass-card">
                         <h3>Your study activity</h3>
-                        <p class="settings-hint">From your saved sessions. Skipped questions don't count.</p>
+                        <p class="settings-hint">Active study time and sessions saved by StudBud, including time spent answering game questions.</p>
                         <div id="study-analytics-summary" class="analytics-summary"></div>
                     </section>
                     <section class="glass-card">
@@ -836,7 +848,11 @@
                                         <div class="hosted-room-code"><span>Room code</span><strong id="hosted-room-code"></strong><button id="copy-hosted-room-code-btn" class="secondary-btn" type="button" data-action="copy-hosted-room-code" aria-label="Copy room code"><i class="fas fa-copy" aria-hidden="true"></i> Copy</button></div>
                                     </div>
                                     <p id="hosted-room-status" class="hosted-room-status"></p>
+                                    <p id="hosted-mode-note" class="hosted-mode-note hidden">Host screen · You are not a player and earn no coins. Keep this screen connected to run the match. To play separately, open <a href="/join/" target="_blank" rel="noopener">the guest join page</a> in a private window or another browser and enter this code. A normal signed-in tab shares your host identity.</p>
                                     <div id="lobby-info" class="lobby-info hidden"></div>
+                                    <section id="hosted-question" class="hosted-question hidden" aria-label="Live quiz question">
+                                        <h3></h3><ol></ol><button id="hosted-next-question-btn" class="primary-btn" type="button">Next question</button>
+                                    </section>
                                     <div id="multiplayer-arena" class="multiplayer-arena" aria-label="Live game progress">
                                         <div class="multiplayer-scene-head"><strong id="multiplayer-scene-name"></strong><span id="multiplayer-scene-goal"></span></div>
                                         <canvas id="multiplayer-room-canvas" width="900" height="360" aria-label="Animated live game arena"></canvas>
@@ -848,6 +864,7 @@
                                     </details>
                                     <div id="hosted-podium" class="hosted-podium hidden"></div>
                                     <div class="hosted-room-actions">
+                                        <button id="hosted-mode-btn" class="secondary-btn hidden" type="button" aria-pressed="false">Host screen (no playing)</button>
                                         <button id="hosted-start-btn" class="primary-btn hidden" type="button">Start game</button>
                                         <button id="hosted-finish-btn" class="secondary-btn hidden" type="button">End game</button>
                                         <button id="hosted-leave-btn" class="secondary-btn" type="button">Leave room</button>
@@ -867,6 +884,9 @@
                 <!-- Classes: teacher dashboard or student class list (classrooms.js) -->
                 <section id="classes-view" class="view hidden">
                     <div id="classes-root" class="classes-root"></div>
+                </section>
+                <section id="school-community-view" class="view student-workspace hidden">
+                    <div id="school-community-root"></div>
                 </section>
 
                 <!-- Staff tools (role-appropriate tabs) -->
@@ -920,6 +940,7 @@
                             <label class="settings-check"><input type="checkbox" id="public-show-classmates" disabled> Let students sharing a course find my username</label>
                             <p id="public-classmates-availability" class="settings-hint" role="status">Checking course-discovery availability…</p>
                             <p class="settings-hint">Off by default. Course discovery reveals your username and shared course to other opted-in students at your school. It does not reveal grades, assignments, study time or your full course list. Shared courses may have different teachers or periods.</p>
+                            <p id="school-community-privacy" class="settings-hint hidden">Schoolmate discovery is a separate choice. <button type="button" class="text-btn" data-target="school-community-view">Manage school community privacy</button></p>
                             <small class="settings-hint">Only Parkway high schools have a public school tag. Other schools are never shown publicly.</small>
                             <label class="settings-check"><input type="checkbox" id="public-show-stats" checked> Show my study time, streak and match wins</label>
                             <p id="public-profile-status" class="community-status" role="status" aria-live="polite"></p>
@@ -1066,7 +1087,7 @@
                         <section class="glass-card" data-settings-panel="general">
                             <h3 class="settings-section-heading"><i class="fas fa-sliders" aria-hidden="true"></i> App preferences</h3>
                             <label for="settings-start-page">Open StudBud to</label>
-                            <select id="settings-start-page"><option value="dashboard">Home</option><option value="planner">Planner</option><option value="flashcard">Study</option><option value="gpa">My classes</option></select>
+                            <select id="settings-start-page"><option value="dashboard">Home</option><option value="planner">Planner</option><option value="flashcard">Study</option><option value="gpa">School</option></select>
                             <p class="settings-hint">Used when you open the app without a page link. Direct links still open their own page.</p>
                             <label for="settings-planner-default">Default Tasks status</label>
                             <select id="settings-planner-default"><option value="todo">To do (including overdue)</option><option value="all">All work</option><option value="overdue">Overdue</option><option value="awaiting">Waiting for grade</option><option value="graded">Graded</option></select>
@@ -1083,7 +1104,7 @@
                         <section class="glass-card settings-wide" data-settings-panel="general">
                             <h3 class="settings-section-heading"><i class="fas fa-shield-halved" aria-hidden="true"></i> Privacy &amp; personalization</h3>
                             <p>Choose what other students can see, or adjust the app for your device.</p>
-                            <div class="settings-actions"><button type="button" class="secondary-btn" data-action="edit-public-profile">Public profile &amp; privacy</button><button type="button" class="secondary-btn" data-target="appearance-view">Appearance &amp; accessibility</button><button type="button" class="secondary-btn" data-target="sound-view">Audio preferences</button></div>
+                            <div class="settings-actions"><button type="button" class="secondary-btn" data-action="edit-public-profile">Public profile &amp; privacy</button><button type="button" class="secondary-btn" data-target="appearance-view">Appearance &amp; accessibility</button><button type="button" class="secondary-btn" data-target="sound-view">Audio preferences</button><button id="admin-nav-item" type="button" class="secondary-btn hidden" data-target="admin-view"><i class="fas fa-user-shield" aria-hidden="true"></i> Staff tools</button></div>
                             <p id="preferences-save-status" class="settings-hint" role="status" aria-live="polite"></p>
                         </section>
                         <div class="glass-card hidden settings-school-card" data-settings-panel="school">
@@ -1812,6 +1833,7 @@
     <script src="chessGame.js" defer></script>
     <script src="infiniteCampusImport.js" defer></script>
     <script src="classrooms.js" defer></script>
+    <script src="schoolCommunity.js" defer></script>
     <script src="app.js" defer></script>
     <script src="ads.js" defer></script>
     <script>

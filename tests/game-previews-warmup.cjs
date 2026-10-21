@@ -884,7 +884,7 @@ for (const mode of Object.keys(A.games)) {
         console.log(`${mode} ${testing ? 'testing' : 'solo'} three-minute bot objectives: ${demo.bots.map(bot => bot.goal).join(', ')}`);
         if (mode === 'market') assert.ok(demo.bots.every(bot => bot.deliveries > 0), `every market bot must complete real deliveries over a full run: ${JSON.stringify(demo.bots.filter(bot => !bot.deliveries))}`);
         if (mode === 'defense') {
-            assert.ok(demo.game.wallets.every(Number.isFinite), 'shared defense wallets remain finite in previews and practice');
+            assert.ok(Object.values(demo.game.wallets).every(Number.isFinite), 'player defense wallets remain finite in previews and practice');
             assert.ok(demo.bots.every(bot => demo.game.answers[bot.id] > 0), 'every defense bot earns cash through simulated correct answers');
             assert.ok(demo.game.troops.length > 0 && demo.game.nextId > 10, 'defense bots build troops and send real enemies');
         }
