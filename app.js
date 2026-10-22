@@ -2822,7 +2822,7 @@
             }).join('');
             container.innerHTML = `
                 <h3>${esc(model.studentName ? `${model.studentName}'s classes` : 'Classes found')}</h3>
-                <p class="settings-hint">Update your existing classes to refresh grades, assignments and schedules without changing their names or Honors/AP settings. Search each dropdown to choose the right class.${existingCourses.length ? ' Unmatched classes are not imported unless you choose to add them.' : ' Review suggested catalog matches before adding classes.'}</p>
+                <p class="settings-hint">Update your existing classes to refresh grades, assignments and schedules without changing their names or Honors/AP settings. Active academic classes are selected automatically; unmatched classes are added using their Campus names. Review suggested catalog matches, search each dropdown to choose the right class, or choose Don't import to leave a class out.</p>
                 <div class="ic-class-list">${rows || '<p class="empty-state">No classes were found for this school year.</p>'}</div>
                 <fieldset class="ic-options">
                     <legend>Also import</legend>

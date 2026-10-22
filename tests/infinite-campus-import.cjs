@@ -109,6 +109,32 @@ assert.strictEqual(health.term, 'S2');
 
 const options = { catalog, today: '2026-01-20', now: 1768900000000 };
 {
+    const academic = plain(model.sections[0]);
+    const defaultsModel = { ...plain(model), assignments: [], sections: [
+        { ...academic, id: 'new-academic', name: 'Paleography', courseNumber: 'LOCAL1', grades: [], categories: [] },
+        { ...academic, id: 'advisory', name: 'Advisory', courseNumber: '', grades: [], categories: [] },
+        { ...academic, id: 'study-hall', name: 'Study Hall', courseNumber: '', grades: [], categories: [] },
+        { ...academic, id: 'dropped', name: 'Dropped Academic Class', courseNumber: '', dropped: true, grades: [], categories: [] }
+    ] };
+    for (const school of ['pchs', 'other']) {
+        const saved = { courses: [{ code: 'saved', title: 'Already saved class', school, categories: [] }] };
+        const defaults = IC.buildImportPlan(defaultsModel, saved, { school, catalog });
+        const entry = defaults.classes.find(entry => entry.sectionIDs.includes('new-academic'));
+        assert.equal(entry.match, null, 'fixture is an unmatched local class');
+        assert.equal(entry.include, true, 'unmatched academic classes with no grades import by default at any school');
+        for (const section of ['advisory', 'study-hall', 'dropped']) {
+            assert.equal(defaults.classes.find(entry => entry.sectionIDs.includes(section)).include, false,
+                `${section} remains skipped by default`);
+        }
+        const imported = IC.applyImportPlan(defaultsModel, defaults, saved, options);
+        assert.equal(imported.summary.coursesAdded, 1);
+        assert.equal(imported.courses[1].title, entry.name, 'unmatched classes keep the Campus name');
+        assert.equal(IC.applyImportPlan(defaultsModel, defaults, saved, {
+            ...options, overrides: { [entry.key]: 'skip' }
+        }).summary.coursesAdded, 0, 'explicit skip still overrides automatic inclusion');
+    }
+}
+{
     const biologyModel = plain(model);
     biologyModel.sections = biologyModel.sections.filter(section => ['501', '502'].includes(section.id));
     biologyModel.sections.forEach(section => { section.name = 'HON BIO'; section.courseNumber = '137141'; });
@@ -128,11 +154,15 @@ const options = { catalog, today: '2026-01-20', now: 1768900000000 };
     assert.equal(IC.applyImportPlan(biologyModel, again, updated, options).courses.length, 1, 'refresh stays idempotent');
 
     const unrelated = IC.buildImportPlan(model, state, { school: 'pchs', catalog });
-    assert.ok(unrelated.classes.every(entry => !entry.include), 'unmatched classes default to skip when classes already exist');
-    assert.equal(IC.applyImportPlan(model, unrelated, state, options).summary.coursesAdded, 0);
+    assert.ok(unrelated.classes.every(entry => entry.include), 'active academic classes default to import even when other classes already exist');
+    const added = IC.applyImportPlan(model, unrelated, state, options);
+    assert.equal(added.summary.coursesAdded, unrelated.classes.length);
+    assert.equal(added.courses[0].code, existing.code, 'adding new classes preserves unrelated saved classes');
+    const refreshed = IC.applyImportPlan(model, IC.buildImportPlan(model, added, { school: 'pchs', catalog }), added, options);
+    assert.equal(refreshed.summary.coursesAdded, 0, 'subsequent imports update recognized classes instead of adding duplicates');
     const calcEntry = unrelated.classes.find(entry => entry.sectionIDs.includes('501'));
     const redirected = IC.applyImportPlan(model, unrelated, state, {
-        ...options, overrides: { [calcEntry.key]: `existing:${existing.code}` }
+        ...options, overrides: { [calcEntry.key]: `existing:${existing.code}`, [health.key]: 'skip' }
     });
     assert.equal(redirected.courses.length, 1, 'manual matching selects an existing class instead of adding');
     assert.equal(redirected.courses[0].title, existing.title, 'manual matching preserves the existing identity');

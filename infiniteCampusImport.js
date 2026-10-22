@@ -843,8 +843,7 @@
                     : null,
                 suggestions: group.match.suggestions.map(course => ({ code: course.code, title: course.title })),
                 existingCode: existing ? existing.code : null,
-                include: !dropped && (hasWork || (!looksNonAcademic(first.name) && Boolean(group.match.course)))
-                    && (Boolean(existing) || !courses.length),
+                include: !dropped && (hasWork || !looksNonAcademic(first.name)),
                 dropped
             };
         });
