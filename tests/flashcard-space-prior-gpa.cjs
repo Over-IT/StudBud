@@ -46,6 +46,24 @@ const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
     for (const key of ['priorCredits', 'priorWeightedGpa', 'priorUnweightedGpa']) assert.ok(app.includes(key), `${key} is stored on the profile`);
 }
 
+// Usual GPA displays use weighted values; unweighted figures require opening a disclosure.
+{
+    const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+    const dashboard = html.slice(html.indexOf('<div class="glass-card widget gpa-widget">'), html.indexOf('<details class="glass-card widget full-width study-history-disclosure">'));
+    assert.match(dashboard, /id="dash-weighted-gpa"[\s\S]*?stat-label">GPA</);
+    assert.match(dashboard, /<details class="gpa-secondary"><summary>View unweighted GPA<\/summary>[\s\S]*?id="dash-unweighted-gpa"/);
+    assert.doesNotMatch(dashboard.replace(/<details\b[\s\S]*?<\/details>/g, ''), /[Uu]nweighted/);
+    for (const start of ['        renderCourses() {', '        renderGradeScenarios() {']) {
+        const section = app.slice(app.indexOf(start), app.indexOf(start) + (start.includes('renderCourses') ? 3200 : 10000));
+        assert.match(section, /<details class="gpa-secondary"><summary>View unweighted GPA/);
+        const primary = section.replace(/<details class="gpa-secondary">[\s\S]*?<\/details>/g, '');
+        assert.doesNotMatch(primary, /gpa-summary-label">[^<]*[Uu]nweighted/);
+    }
+    assert.match(html, /<details class="gpa-secondary">\s*<summary>GPA calculation options<\/summary>[\s\S]*?id="gpa-solver-mode"/);
+    assert.match(html, /<option value="weighted">GPA<\/option>/);
+    assert.doesNotMatch(app, /'Weighted GPA history'|'Weighted GPA'/);
+}
+
 // Space while studying only ever flips the card, never activates a focused rating/star button.
 {
     const handler = app.slice(app.indexOf("const studying = Router.activeRoute === 'flashcard'"));

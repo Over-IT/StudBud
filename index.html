@@ -257,9 +257,9 @@
                         <div class="glass-card widget gpa-widget">
                             <div class="view-header"><h3>GPA Snapshot</h3><button class="text-btn" type="button" data-target="gpa-view">View classes <i class="fas fa-arrow-right" aria-hidden="true"></i></button></div>
                             <div class="gpa-stats">
-                                <div><span class="stat-number" id="dash-weighted-gpa">0.00</span><span class="stat-label">Weighted</span></div>
-                                <div><span class="stat-number" id="dash-unweighted-gpa">0.00</span><span class="stat-label">Unweighted</span></div>
+                                <div><span class="stat-number" id="dash-weighted-gpa">0.00</span><span class="stat-label">GPA</span></div>
                             </div>
+                            <details class="gpa-secondary"><summary>View unweighted GPA</summary><p><strong id="dash-unweighted-gpa">0.00</strong> unweighted GPA</p><small>Your usual GPA includes Honors/AP weighting. Unweighted GPA leaves that extra weighting out.</small></details>
                         </div>
                         <details class="glass-card widget full-width study-history-disclosure">
                             <summary>Study history &amp; weekly plan <span>Review your time and suggested practice</span></summary>
@@ -643,7 +643,7 @@
                     <div class="glass-card analytics-controls">
                         <div><label for="analytics-metric-select">Measure</label><select id="analytics-metric-select">
                             <option value="class">Class grades</option>
-                            <option value="weighted">Weighted GPA</option>
+                            <option value="weighted">GPA</option>
                             <option value="unweighted">Unweighted GPA</option>
                         </select></div>
                         <div id="analytics-course-control"><label for="analytics-course-select">Class</label><select id="analytics-course-select"><option value="all">All classes</option></select></div>
@@ -1167,13 +1167,16 @@
                                     <input type="number" id="settings-prior-credits" min="0" max="100" step="0.5" inputmode="decimal" placeholder="e.g. 14">
                                 </div>
                                 <div class="form-group">
-                                    <label for="settings-prior-weighted">Past weighted GPA</label>
+                                    <label for="settings-prior-weighted">Past GPA</label>
                                     <input type="number" id="settings-prior-weighted" min="0" max="5" step="0.001" inputmode="decimal" placeholder="e.g. 4.15">
                                 </div>
+                                <details class="gpa-secondary">
+                                    <summary>Enter past unweighted GPA (optional)</summary>
                                 <div class="form-group">
                                     <label for="settings-prior-unweighted">Past unweighted GPA</label>
                                     <input type="number" id="settings-prior-unweighted" min="0" max="5" step="0.001" inputmode="decimal" placeholder="e.g. 3.90">
                                 </div>
+                                </details>
                             </fieldset>
                             <p class="settings-hint">Ready for next year? Save final grades and credits to a read-only archive, then optionally reset your class list. Flashcard sets and study history are kept.</p>
                             <button type="button" class="secondary-btn" data-action="open-school-year">Finish school year</button>
@@ -1731,13 +1734,16 @@
                         <label for="desired-gpa">Target GPA</label>
                         <input type="number" id="desired-gpa" min="0" max="5" step="0.001" readonly>
                     </div>
+                    <details class="gpa-secondary">
+                        <summary>GPA calculation options</summary>
                     <div class="form-group">
                         <label for="gpa-solver-mode">GPA type</label>
                         <select id="gpa-solver-mode">
-                            <option value="weighted">Weighted GPA</option>
+                            <option value="weighted">GPA (includes Honors/AP weighting)</option>
                             <option value="unweighted">Unweighted GPA</option>
                         </select>
                     </div>
+                    </details>
                     <p class="settings-hint">Keep fixed locks a class target while other targets adjust. Editing a suggested grade locks it automatically. Suggestions favor similar grades, not one very low grade and several very high ones. Past credits and GPA are included.</p>
                     <div id="solver-results" class="solver-results-box hidden">
                         <p id="solver-output-percentage" role="status"></p>

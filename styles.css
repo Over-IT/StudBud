@@ -1374,6 +1374,11 @@ tbody tr:hover {
 }
 
 .gpa-summary-grid article { display: grid; gap: 4px; }
+.gpa-secondary { margin-top: 12px; color: var(--text-secondary); }
+.gpa-secondary > summary { cursor: pointer; width: fit-content; font-size: .85rem; font-weight: 700; color: var(--accent-primary); padding: 8px 0; }
+.gpa-secondary > p { margin: 8px 0; }
+.gpa-secondary > small { display: block; color: var(--text-muted); }
+.gpa-summary-grid > .gpa-secondary { grid-column: 1 / -1; margin-top: 0; }
 .gpa-summary-label { color: var(--text-secondary); font-size: 0.9rem; }
 .gpa-summary-grid strong { color: var(--accent-primary); font-size: 2rem; line-height: 1.1; }
 .gpa-summary-grid small, .class-term { color: var(--text-muted); }

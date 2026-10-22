@@ -553,6 +553,8 @@ Until that server update is installed, the discovery opt-in is disabled with an 
 
 **Past credits:** Settings → School & GPA has an optional **Past credits** section for credits and weighted/unweighted GPA from semesters **not already in a StudBud year archive**. Cumulative GPA blends those credits, archived final grades and graded current classes by credit weight. If only one manual past GPA is entered it is used for both; leaving manual credits blank or 0 turns off that manual contribution, not archived years. Run `node tests/flashcard-space-prior-gpa.cjs` to check the blending and flashcard Space handling.
 
+**GPA display:** the usual **GPA** number includes Honors/AP weighting. Home, the class overview and hypothetical grade comparisons keep unweighted figures behind **View unweighted GPA** disclosures. Analytics still offers an explicit Unweighted GPA measure; goal calculation options and the optional past unweighted GPA field are tucked into secondary disclosures. This changes presentation only, not grade scales, stored grades or either GPA calculation.
+
 **Today's schedule** follows the school's weekday rotation and shows incomplete assignments, quizzes and tests due today under the matching class. Work for a class that does not meet today appears separately. Weekends and days with no matching classes explain that your schedule is still saved, offer **Edit schedule**, and include a collapsed preview of the next school day's classes.
 
 ### Administration

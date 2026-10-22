@@ -1678,10 +1678,12 @@
                 ? window.GPACalculator.calculateCurrentGPA(projectedCourses)
                 : currentGpa;
             summary.innerHTML = `
-                <article class="glass-card"><span class="gpa-summary-label">Current ${this.termLabel(this.schoolSemester())} weighted GPA</span><strong>${Number(currentGpa.weighted).toFixed(2)}</strong><small>Before hypothetical grades</small></article>
-                <article class="glass-card"><span class="gpa-summary-label">Projected ${this.termLabel(this.schoolSemester())} weighted GPA</span><strong>${Number(projectedGpa.weighted).toFixed(2)}</strong><small>${this.formatGpaChange(currentGpa.weighted, projectedGpa.weighted)}</small></article>
+                <article class="glass-card"><span class="gpa-summary-label">Current ${this.termLabel(this.schoolSemester())} GPA</span><strong>${Number(currentGpa.weighted).toFixed(2)}</strong><small>Before hypothetical grades</small></article>
+                <article class="glass-card"><span class="gpa-summary-label">Projected ${this.termLabel(this.schoolSemester())} GPA</span><strong>${Number(projectedGpa.weighted).toFixed(2)}</strong><small>${this.formatGpaChange(currentGpa.weighted, projectedGpa.weighted)}</small></article>
+                <details class="gpa-secondary"><summary>View unweighted GPA comparison</summary><div class="gpa-summary-grid">
                 <article class="glass-card"><span class="gpa-summary-label">Current ${this.termLabel(this.schoolSemester())} unweighted GPA</span><strong>${Number(currentGpa.unweighted).toFixed(2)}</strong><small>Before hypothetical grades</small></article>
                 <article class="glass-card"><span class="gpa-summary-label">Projected ${this.termLabel(this.schoolSemester())} unweighted GPA</span><strong>${Number(projectedGpa.unweighted).toFixed(2)}</strong><small>${this.formatGpaChange(currentGpa.unweighted, projectedGpa.unweighted)}</small></article>
+                </div></details>
             `;
 
             itemsContainer.innerHTML = scenarioItems.length ? scenarioItems.map(item => {
@@ -1801,10 +1803,10 @@
                 const earnedCredits = this.completedAcademicCredits();
                 const creditNote = `${this.formatNumber(currentGpa.totalCredits)} tracked credits in ${this.termLabel(semester)}`;
                 summary.innerHTML = `
-                    <article class="glass-card"><span class="gpa-summary-label">${this.termLabel(semester)} weighted GPA</span><strong>${Number(currentGpa.weighted).toFixed(2)}</strong><small>${creditNote}</small></article>
-                    <article class="glass-card"><span class="gpa-summary-label">${this.termLabel(semester)} unweighted GPA</span><strong>${Number(currentGpa.unweighted).toFixed(2)}</strong><small>${creditNote}</small></article>
-                    <article class="glass-card"><span class="gpa-summary-label">Cumulative weighted / unweighted</span><strong>${Number(cumulative.weighted).toFixed(2)} / ${Number(cumulative.unweighted).toFixed(2)}</strong><small>Past years plus graded current classes</small></article>
+                    <article class="glass-card"><span class="gpa-summary-label">${this.termLabel(semester)} GPA</span><strong>${Number(currentGpa.weighted).toFixed(2)}</strong><small>${creditNote}</small></article>
+                    <article class="glass-card"><span class="gpa-summary-label">Cumulative GPA</span><strong>${Number(cumulative.weighted).toFixed(2)}</strong><small>Past years plus graded current classes</small></article>
                     <article class="glass-card"><span class="gpa-summary-label">Completed credits</span><strong>${this.formatNumber(earnedCredits)}</strong><small>Past credits plus passed archived classes; excludes current classes</small></article>
+                    <details class="gpa-secondary"><summary>View unweighted GPA</summary><p>${this.termLabel(semester)}: <strong>${Number(currentGpa.unweighted).toFixed(2)}</strong></p><p>Cumulative: <strong>${Number(cumulative.unweighted).toFixed(2)}</strong></p><small>GPA normally includes Honors/AP weighting. These values leave the extra weighting out.</small></details>
                 `;
             }
             if (body) {
@@ -2970,7 +2972,7 @@
                     `${daysUntilDue} days until due; split the work into ${sessionCount} focused session${sessionCount === 1 ? '' : 's'}.`;
                 if (minutesStudied) reason += ` You have logged ${minutesStudied} min; about ${remainingStudyMinutes} min remain in the estimate.`;
                 if (gradeGap > 0) reason += ` ${gradeGap.toFixed(2)} points below the ${target.toFixed(2)}% class target.`;
-                if (gpaGap > 0) reason += ` Your current weighted GPA (${currentWeightedGpa.toFixed(2)}) is below your ${targetGpa.toFixed(2)} target.`;
+                if (gpaGap > 0) reason += ` Your current GPA (${currentWeightedGpa.toFixed(2)}) is below your ${targetGpa.toFixed(2)} target.`;
                 const deckLinks = this.decksForAssessment(item);
                 const flashcardMinutes = Math.round(taskSessions.filter(session => session.source === 'flashcards')
                     .reduce((sum, session) => sum + Math.max(0, Number(session.durationSec || 0)), 0) / 60);
@@ -9878,7 +9880,7 @@
                     })()}</strong>${selectedCourse && !this.hasCourseTarget(selectedCourse) && Number.isFinite(this.effectiveCourseTarget(selectedCourse)) ? '<small>Needed for your GPA goal</small>' : ''}</article>`;
             } else {
                 datasets = [{
-                    label: metric === 'weighted' ? 'Weighted GPA' : 'Unweighted GPA',
+                    label: metric === 'weighted' ? 'GPA' : 'Unweighted GPA',
                     data: labels.map(date => {
                         const coursesAtDate = courses.map(course => {
                             const scored = datedAssignments.filter(item => item.courseCode === course.code && dateFor(item) <= date);
@@ -9890,12 +9892,12 @@
                     borderColor: accentColor
                 }];
                 const currentGpa = this.calculateSemesterGPA(courses);
-                title.textContent = metric === 'weighted' ? 'Weighted GPA history' : 'Unweighted GPA history';
+                title.textContent = metric === 'weighted' ? 'GPA history' : 'Unweighted GPA history';
                 caption.textContent = labels.length
                     ? 'GPA is recalculated from class grades recorded on or before each date.'
                     : 'Record dated assignment scores to start your GPA timeline.';
                 if (summary) summary.innerHTML = `
-                    <article><span>Current ${metric} GPA</span><strong>${Number(currentGpa[metric]).toFixed(2)}</strong></article>
+                    <article><span>${metric === 'weighted' ? 'Current GPA' : 'Current unweighted GPA'}</span><strong>${Number(currentGpa[metric]).toFixed(2)}</strong></article>
                     <article><span>Classes tracked</span><strong>${courses.length}</strong></article>
                     <article><span>Scored assignments</span><strong>${assignments.filter(item => this.isGradedItem(item)).length}</strong></article>`;
             }
