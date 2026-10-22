@@ -343,6 +343,10 @@ assert.match(engineSource, /mpg-controls-help/);
 assert.match(engineSource, /content\.hidden = !panel\.open/);
 assert.match(engineSource, /panels\.appendChild\(content\)/, 'help and tools occupy their own HUD row');
 const styleSource = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+assert.match(styleSource, /\.sidebar-collapsed #sidebar \.logo-text\s*\{\s*display:\s*none/);
+assert.match(styleSource, /\.sidebar-collapsed #sidebar \.logo-container\s*\{[^}]*display:\s*flex/);
+assert.doesNotMatch(styleSource, /\.sidebar-collapsed \.logo-container\s*\{\s*display:\s*none/,
+    'sidebar collapse must not hide the icon or branding outside the sidebar');
 assert.match(styleSource, /\.sidebar-collapse-btn:not\(:disabled\):active\s*\{\s*transform:\s*translateY\(-50%\)/,
     'pressing the sidebar arrow preserves its hit target instead of overriding its centered position');
 assert.match(styleSource, /\.workspace-tabs \{[^}]*padding: 12px var\(--spacing-xl\)/, 'all workspace tab rows use the same desktop gutter as page content');
@@ -532,6 +536,13 @@ async function checkPracticeGrading() {
     assert.equal(sandbox.document.activeElement, close);
     app.handleKeydown({ key: 'Tab', shiftKey: true, target: input, preventDefault() {} });
     assert.equal(sandbox.document.activeElement, save);
+    const nativeClassSelect = new Element();
+    nativeClassSelect.tagName = 'SELECT';
+    nativeClassSelect.tabIndex = -1;
+    modal.querySelectorAll = () => [close, nativeClassSelect, input, save];
+    input.focus();
+    app.handleKeydown({ key: 'Tab', shiftKey: true, target: input, preventDefault() {} });
+    assert.equal(sandbox.document.activeElement, close, 'Shift+Tab skips the native backing select of a searchable class dropdown');
     app.handleKeydown({ key: 'Escape', target: input, preventDefault() {} });
     assert.equal(sandbox.document.activeElement, launcher, 'closing a dialog restores its launcher');
     assert.equal(background.inert, false);

@@ -20,7 +20,10 @@
     async function studbudInfiniteCampusCollector(studbudOrigin) {
         const FORMAT_NAME = 'studbud-infinite-campus';
         const previous = document.getElementById('studbud-ic-overlay');
-        if (previous) previous.remove();
+        if (previous) {
+            previous.studbudCleanup?.();
+            previous.remove();
+        }
         const box = document.createElement('div');
         box.id = 'studbud-ic-overlay';
         box.setAttribute('role', 'dialog');
@@ -45,7 +48,7 @@
             actions.appendChild(element);
             return element;
         };
-        const closeButton = () => button('Close', () => box.remove(), true);
+        const closeButton = () => button('Close', () => { box.studbudCleanup?.(); box.remove(); }, true);
 
         const path = location.pathname;
         const campusIndex = path.indexOf('/campus/');
@@ -204,88 +207,46 @@
                 days,
                 warnings
             };
-            const json = JSON.stringify(payload);
             const classCount = sectionIDs.size;
             const workCount = assignments.length;
-            let sent = false;
+            const summary = `Found ${classCount} classes and ${workCount} assignments.${warnings.length ? `\n${warnings.length} item(s) could not be read; the rest is fine.` : ''}`;
+            let timeout;
+            let pending = false;
             const send = () => {
-                if (!studbudOrigin || !window.opener || window.opener.closed) return false;
+                clearTimeout(timeout);
+                pending = false;
+                if (!studbudOrigin || !window.opener || window.opener.closed) {
+                    say(`${summary}\nOpen StudBud, choose Import from Infinite Campus, and use its Open Infinite Campus button. Run the bookmark in that Campus tab to reconnect, then choose Send to StudBud.`);
+                    return;
+                }
+                pending = true;
+                say(`${summary}\nSending to StudBud…`);
                 try {
                     window.opener.postMessage(payload, studbudOrigin);
-                    return true;
                 } catch (error) {
-                    return false;
+                    pending = false;
+                    say(`${summary}\nCould not send to StudBud. Reopen Campus using Open Infinite Campus in StudBud, then run the bookmark and try again.`);
+                    return;
                 }
+                timeout = setTimeout(() => {
+                    pending = false;
+                    say(`${summary}\nStudBud has not confirmed receipt. Keep StudBud open and choose Send to StudBud to retry. If it still does not respond, reopen Campus using Open Infinite Campus in StudBud and run the bookmark again.`);
+                }, 5000);
             };
-            let acknowledged = false;
-            window.addEventListener('message', event => {
-                if (event.origin === studbudOrigin && event.data && event.data.format === `${FORMAT_NAME}-ack`) {
-                    acknowledged = true;
+            const onMessage = event => {
+                if (pending && event.source === window.opener && event.origin === studbudOrigin && event.data && event.data.format === `${FORMAT_NAME}-ack`) {
+                    pending = false;
+                    clearTimeout(timeout);
                     say(`StudBud received ${classCount} classes and ${workCount} assignments.\nSwitch back to the StudBud tab to check your classes and finish the import.`);
                 }
-            });
-            sent = send();
-            const summary = `Found ${classCount} classes and ${workCount} assignments.${warnings.length ? `\n${warnings.length} item(s) could not be read; the rest is fine.` : ''}`;
-            const writeClipboard = async () => {
-                try {
-                    await navigator.clipboard.writeText(json);
-                    return true;
-                } catch (error) {
-                    const area = document.createElement('textarea');
-                    area.value = json;
-                    area.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
-                    document.body.appendChild(area);
-                    area.focus();
-                    area.select();
-                    area.setSelectionRange(0, area.value.length);
-                    let copied = false;
-                    try { copied = document.execCommand('copy'); } catch (copyError) { copied = false; }
-                    area.remove();
-                    return copied;
-                }
             };
-            const fallBackToClipboard = async () => {
-                if (acknowledged) return;
-                const copied = await writeClipboard();
-                say(copied
-                    ? `${summary}\nYour data is copied. Go back to StudBud and click "Paste data from Campus".`
-                    : `${summary}\nClick "Copy data", then go back to StudBud and click "Paste data from Campus".`);
+            window.addEventListener('message', onMessage);
+            box.studbudCleanup = () => {
+                clearTimeout(timeout);
+                window.removeEventListener('message', onMessage);
             };
-            say(sent ? `${summary}\nSending to StudBud…` : summary);
-            if (sent) setTimeout(fallBackToClipboard, 2000);
-            else fallBackToClipboard();
-            const copy = async () => {
-                const copied = await writeClipboard();
-                say(copied
-                    ? `${summary}\nCopied! Go back to StudBud and click "Paste data from Campus".`
-                    : `${summary}\nYour browser blocked copying. Use "Show data" to select and copy it manually, or use "Download .json" and choose the file in StudBud.`);
-            };
-            button('Copy data', copy);
-            button('Show data', () => {
-                let area = box.querySelector('textarea');
-                if (!area) {
-                    area = document.createElement('textarea');
-                    area.value = json;
-                    area.readOnly = true;
-                    area.setAttribute('aria-label', 'Infinite Campus data to copy into StudBud');
-                    area.style.cssText = 'box-sizing:border-box;width:100%;height:120px;margin-top:12px;font:16px/1.4 system-ui;color:#111827;background:#fff';
-                    box.appendChild(area);
-                }
-                area.focus();
-                area.select();
-                area.setSelectionRange(0, area.value.length);
-                say(`${summary}\nTap and hold the selected data and choose Copy (or press Ctrl+C / Cmd+C), then return to StudBud and paste it into the data box.`);
-            }, true);
-            button('Download .json', () => {
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
-                link.download = 'studbud-infinite-campus.json';
-                document.body.appendChild(link);
-                link.click();
-                link.remove();
-                setTimeout(() => URL.revokeObjectURL(link.href), 10000);
-            }, true);
-            if (studbudOrigin && window.opener) button('Send to StudBud again', () => { if (!send()) say('StudBud is no longer open in the other tab. Use Copy data instead.'); }, true);
+            say(`${summary}\nChoose Send to StudBud, then return to StudBud to review and save.`);
+            button('Send to StudBud', send);
             closeButton();
         } catch (error) {
             say(error && error.message ? error.message : 'Infinite Campus data could not be read.');
@@ -818,7 +779,7 @@
     function buildImportPlan(model, state = {}, options = {}) {
         const school = ['pchs', 'pnhs', 'pshs', 'pwhs', 'other'].includes(options.school) ? options.school : 'pchs';
         const catalog = list(options.catalog);
-        const courses = list(state.courses);
+        const courses = list(state.courses).filter(course => !course.school || course.school === school);
         const termsById = new Map(model.terms.map(term => [term.id, term]));
         const allStarts = model.terms.map(term => term.start).filter(Boolean).sort();
         const allEnds = model.terms.map(term => term.end).filter(Boolean).sort();
@@ -852,11 +813,16 @@
             const times = [...new Set(placements.filter(item => item.start).map(item => `${displayTime(item.start)}–${displayTime(item.end)}`))];
             const graded = group.sections.flatMap(section => section.grades);
             const hasWork = group.assignmentCount > 0 || graded.length > 0;
-            const existing = courses.find(course => !usedExisting.has(course.code) && list(course.icSectionIDs).some(id => sectionIDs.includes(String(id))))
-                || courses.find(course => !usedExisting.has(course.code) && !list(course.icSectionIDs).length && (
-                    (group.match.course && group.match.confidence >= 0.55 && (course.catalogCode || course.code) === group.match.course.code)
-                    || (!group.match.course && String(course.title || '').toLowerCase() === tidyTitle(first.name).toLowerCase())
-                ));
+            const available = courses.filter(course => !usedExisting.has(course.code));
+            const byTitle = available.map(course => ({
+                course,
+                score: Math.max(titleSimilarity(first.name, course.title), titleSimilarity(first.name, course.icName))
+            })).sort((left, right) => right.score - left.score);
+            const titleMatch = byTitle[0]?.score >= 0.8 && (!byTitle[1] || byTitle[0].score - byTitle[1].score >= 0.12)
+                ? byTitle[0].course : null;
+            const existing = available.find(course => list(course.icSectionIDs).some(id => sectionIDs.includes(String(id))))
+                || titleMatch
+                || available.find(course => group.match.course && (course.catalogCode || course.code) === group.match.course.code);
             if (existing) usedExisting.add(existing.code);
             const dropped = group.sections.every(section => section.dropped);
             return {
@@ -877,7 +843,8 @@
                     : null,
                 suggestions: group.match.suggestions.map(course => ({ code: course.code, title: course.title })),
                 existingCode: existing ? existing.code : null,
-                include: !dropped && (hasWork || (!looksNonAcademic(first.name) && Boolean(group.match.course))),
+                include: !dropped && (hasWork || (!looksNonAcademic(first.name) && Boolean(group.match.course)))
+                    && (Boolean(existing) || !courses.length),
                 dropped
             };
         });
@@ -941,9 +908,15 @@
                 summary.skipped++;
                 return;
             }
-            const catalogCode = override === undefined ? entry.match?.code || '' : override;
+            const existingCode = override?.startsWith('existing:') ? override.slice('existing:'.length)
+                : override === undefined ? entry.existingCode : null;
+            let course = existingCode ? courses.find(item => item.code === existingCode && (!item.school || item.school === school)) : null;
+            if (existingCode && !course) throw new Error('That existing class is no longer available. Preview the Campus import again.');
+            const catalogCode = course ? '' : override === undefined ? entry.match?.code || '' : override;
             const catalogCourse = school !== 'other' && catalogCode ? catalog.find(course => course.code === catalogCode) : null;
-            let course = entry.existingCode ? courses.find(item => item.code === entry.existingCode) : null;
+            if (!course && catalogCourse) {
+                course = courses.find(item => (!item.school || item.school === school) && (item.catalogCode || item.code) === catalogCourse.code);
+            }
             const isNew = !course;
             if (isNew) {
                 let code;
@@ -960,6 +933,14 @@
             } else {
                 summary.coursesUpdated++;
             }
+            courses.forEach(other => {
+                if (other === course || !list(other.icSectionIDs).some(id => entry.sectionIDs.includes(String(id)))) return;
+                other.icSectionIDs = list(other.icSectionIDs).filter(id => !entry.sectionIDs.includes(String(id)));
+                if (!other.icSectionIDs.length) {
+                    ['icName', 'icCourseNumber', 'icTeacher', 'icRoom'].forEach(key => { delete other[key]; });
+                }
+                touchedCodes.push(other.code);
+            });
             const sections = entry.sectionIDs.map(id => sectionsById.get(id)).filter(Boolean);
             const name = entry.name;
             Object.assign(course, {

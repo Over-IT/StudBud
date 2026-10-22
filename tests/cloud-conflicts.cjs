@@ -30,6 +30,31 @@ assert.match(conflict.message, /same class/);
 assert.doesNotMatch(conflict.message, /account\.|state\.|targetGrade/);
 assert.equal(local.state.courses[0].targetGrade, 80);
 assert.equal(remote.state.courses[0].targetGrade, 95);
+{
+    const clone = value => JSON.parse(JSON.stringify(value));
+    const before = { state: { profile: {}, courses: [{ code: 'bio' }], assignments: [{ id: 'work', pointsEarned: 90 }],
+        academicYears: [], schedule: { all: {} }, settings: { theme: 'dark' } } };
+    const next = clone(before);
+    next.state.profile.academicYearStart = 2026;
+    next.state.academicYears = [{ id: 'school-year-2025', label: '2025-2026', transcript: [{ code: 'bio', finalGrade: 'A' }] }];
+    next.state.courses = [];
+    next.state.assignments = [];
+    const oldDevice = clone(before);
+    oldDevice.state.settings.theme = 'light';
+    const merged = Cloud.mergeData(before, next, oldDevice);
+    assert.equal(merged.state.academicYears.length, 1);
+    assert.equal(merged.state.courses.length, 0, 'unchanged old-device classes do not reappear after finishing the year');
+    assert.equal(merged.state.assignments.length, 0);
+    assert.equal(merged.state.settings.theme, 'light', 'independent device preferences still merge');
+    oldDevice.state.assignments.push({ id: 'late-work' });
+    assert.throws(() => Cloud.mergeData(before, next, oldDevice), error => error.code === 'STUDBUD_SYNC_CONFLICT',
+        'old-year work added concurrently cannot silently become a new-year orphan');
+    assert.throws(() => Cloud.mergeData(before, oldDevice, next), error => error.code === 'STUDBUD_SYNC_CONFLICT');
+    const alternate = clone(next);
+    alternate.state.academicYears[0].transcript[0].finalGrade = 'B';
+    assert.throws(() => Cloud.mergeData(before, next, alternate), error => error.code === 'STUDBUD_SYNC_CONFLICT',
+        'final transcripts are indivisible when devices disagree');
+}
 let recovered = 0;
 cloud.pendingConflict = { user: { id: 'test-account' }, message: conflict.message };
 cloud.renderConflictResolution = (pending, message) => {

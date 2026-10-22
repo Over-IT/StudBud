@@ -108,6 +108,54 @@ const health = plan.classes.find(entry => entry.sectionIDs.includes('600'));
 assert.strictEqual(health.term, 'S2');
 
 const options = { catalog, today: '2026-01-20', now: 1768900000000 };
+{
+    const biologyModel = plain(model);
+    biologyModel.sections = biologyModel.sections.filter(section => ['501', '502'].includes(section.id));
+    biologyModel.sections.forEach(section => { section.name = 'HON BIO'; section.courseNumber = '137141'; });
+    const existing = { code: 'my-honors-bio', title: 'Honors Biology', school: 'pchs', isWeighted: true,
+        credits: 1, targetPct: 93, category: 'Science', categories: [] };
+    const state = { courses: [existing], assignments: [], schedule: {} };
+    const updatePlan = IC.buildImportPlan(biologyModel, state, { school: 'pchs', catalog });
+    assert.equal(updatePlan.classes[0].existingCode, existing.code, 'existing title wins over a conflicting catalog number');
+    const updated = IC.applyImportPlan(biologyModel, updatePlan, state, options);
+    assert.equal(updated.courses.length, 1, 'grade refresh does not add a catalog duplicate');
+    assert.equal(updated.courses[0].title, 'Honors Biology');
+    assert.equal(updated.courses[0].isWeighted, true);
+    assert.equal(updated.courses[0].targetPct, 93);
+    assert.ok(updated.assignments.some(item => item.courseCode === existing.code), 'grades go to the existing class');
+    assert.equal(updated.summary.coursesAdded, 0);
+    const again = IC.buildImportPlan(biologyModel, updated, { school: 'pchs', catalog });
+    assert.equal(IC.applyImportPlan(biologyModel, again, updated, options).courses.length, 1, 'refresh stays idempotent');
+
+    const unrelated = IC.buildImportPlan(model, state, { school: 'pchs', catalog });
+    assert.ok(unrelated.classes.every(entry => !entry.include), 'unmatched classes default to skip when classes already exist');
+    assert.equal(IC.applyImportPlan(model, unrelated, state, options).summary.coursesAdded, 0);
+    const calcEntry = unrelated.classes.find(entry => entry.sectionIDs.includes('501'));
+    const redirected = IC.applyImportPlan(model, unrelated, state, {
+        ...options, overrides: { [calcEntry.key]: `existing:${existing.code}` }
+    });
+    assert.equal(redirected.courses.length, 1, 'manual matching selects an existing class instead of adding');
+    assert.equal(redirected.courses[0].title, existing.title, 'manual matching preserves the existing identity');
+    assert.ok(redirected.assignments.some(item => item.courseCode === existing.code));
+    const mistaken = { code: 'wrong-bio', title: 'Biology and environmental science', school: 'pchs',
+        icSectionIDs: ['501', '502'], icName: 'HON BIO', categories: [] };
+    const incorrectState = { ...state, courses: [mistaken, existing] };
+    const correctionPlan = IC.buildImportPlan(biologyModel, incorrectState, { school: 'pchs', catalog });
+    const corrected = IC.applyImportPlan(biologyModel, correctionPlan, incorrectState, {
+        ...options, overrides: { [correctionPlan.classes[0].key]: `existing:${existing.code}` }
+    });
+    assert.equal(corrected.courses.length, 2, 'correcting a mapping does not delete another saved class');
+    assert.equal(corrected.courses[0].icSectionIDs.length, 0, 'the old class releases remapped Campus sections');
+    assert.equal(mistaken.icSectionIDs.length, 2, 'the import does not mutate saved state before commit');
+    assert.equal(IC.buildImportPlan(biologyModel, corrected, { school: 'pchs', catalog }).classes[0].existingCode, existing.code,
+        'the next import remembers the corrected existing-class mapping');
+    assert.throws(() => IC.applyImportPlan(model, unrelated, state, {
+        ...options, overrides: { [calcEntry.key]: 'existing:deleted-class' }
+    }), /no longer available/);
+    const anotherSchool = { ...existing, school: 'pnhs' };
+    assert.ok(!IC.buildImportPlan(biologyModel, { courses: [anotherSchool] }, { school: 'pchs', catalog })
+        .classes.some(entry => entry.existingCode), 'never targets a retained class from another school');
+}
 const first = IC.applyImportPlan(model, plan, { courses: [], assignments: [], schedule: { all: { 8: 'KEEP' } } }, options);
 const calcCourse = first.courses.find(course => course.catalogCode === '119801/119802');
 assert.strictEqual(calcCourse.title, 'AP Calculus AB');
@@ -344,7 +392,7 @@ new vm.Script(IC.buildConsoleScript(''));
 async function mobileImport() {
     const elements = new Map();
     const element = () => ({
-        value: '', open: false, dataset: {}, classList: { toggle() {} },
+        value: '', open: false, dataset: {}, classList: { toggle() {}, contains: () => false },
         setAttribute(name, value) { this[name] = value; },
         closest() { return { open: false }; },
         focus() { this.focused = true; },
@@ -353,7 +401,7 @@ async function mobileImport() {
     });
     for (const id of ['ic-bookmarklet-link', 'ic-bookmarklet-url', 'ic-mobile-instructions',
         'ic-mobile-recommendation', 'ic-website-method', 'ic-district-url', 'ic-import-modal',
-        'ic-import-status', 'ic-import-textarea']) elements.set(id, element());
+        'ic-import-status']) elements.set(id, element());
     sandbox.document = { getElementById: id => elements.get(id) || null };
     sandbox.localStorage = { getItem: () => null };
     sandbox.location = { protocol: 'https:', origin: 'https://studbud.example' };
@@ -381,17 +429,23 @@ async function mobileImport() {
     assert.strictEqual(elements.get('ic-bookmarklet-url').selected, true);
     assert.deepStrictEqual(elements.get('ic-bookmarklet-url').selection, [0, bookmarklet.length]);
     assert.match(elements.get('ic-import-status').textContent, /tap and hold/);
-    await app.pasteInfiniteCampusFromClipboard();
-    assert.match(elements.get('ic-import-status').textContent, /Tap and hold/);
-    let preview;
-    app.previewInfiniteCampusData = value => { preview = IC.parsePayload(value); };
-    sandbox.navigator.clipboard.readText = async () => JSON.stringify(payload);
-    await app.pasteInfiniteCampusFromClipboard();
-    assert.strictEqual(preview.sections.length, 3, 'phone clipboard data reaches the same importer');
-    const fileInput = { files: [{ text: async () => JSON.stringify(payload) }] };
-    elements.set('ic-import-file', fileInput);
-    await app.previewInfiniteCampusFromInput();
-    assert.strictEqual(preview.sections.length, 3, 'downloaded JSON works through the phone file picker');
+    let preview, ack;
+    app.previewInfiniteCampusData = value => { preview = IC.parsePayload(value); return true; };
+    app.icAllowedOrigin = 'https://district.infinitecampus.org';
+    sandbox.focus = () => {};
+    app.handleInfiniteCampusMessage({ origin: app.icAllowedOrigin, data: payload,
+        source: { postMessage(message, origin) { ack = { message, origin }; } } });
+    assert.strictEqual(preview.sections.length, 3, 'direct sending reaches the same review importer');
+    assert.equal(ack.message.format, IC.ACK_FORMAT);
+    assert.equal(ack.origin, app.icAllowedOrigin);
+    preview = null;
+    app.handleInfiniteCampusMessage({ origin: 'https://untrusted.example', data: payload });
+    assert.equal(preview, null, 'untrusted websites cannot send an import');
+    ack = null;
+    app.previewInfiniteCampusData = () => false;
+    app.handleInfiniteCampusMessage({ origin: app.icAllowedOrigin, data: payload,
+        source: { postMessage() { ack = true; } } });
+    assert.equal(ack, null, 'failed previews are not acknowledged as successful transfers');
     const steps = app.tutorialSteps();
     assert.strictEqual(steps[1].title, 'Save your classes', 'Campus import is early in the shorter hands-on guide');
     assert.strictEqual(steps.filter(step => step.action?.includes('open-ic-import')).length, 1);
@@ -413,17 +467,21 @@ async function mobileImport() {
         remove() {}
     }
     const body = new HelperElement('body');
+    const timers = new Map(), listeners = new Map();
+    let timerId = 0;
     const collectorSandbox = {
         console, URL, Blob, Set, location: { origin: 'https://district.infinitecampus.org', pathname: '/campus/portal/students' },
         document: { body, getElementById: () => null, createElement: tag => new HelperElement(tag), execCommand: () => false },
-        navigator: { clipboard: { writeText: async () => { throw new Error('blocked'); } } },
+        setTimeout: handler => { timers.set(++timerId, handler); return timerId; },
+        clearTimeout: id => timers.delete(id),
         fetch: async url => ({
             ok: true, status: 200,
             text: async () => JSON.stringify(url.endsWith('api/portal/students')
                 ? [{ personID: 1, firstName: 'Sam', enrollments: [] }] : [])
         })
     };
-    collectorSandbox.window = { opener: null, addEventListener() {} };
+    collectorSandbox.window = { opener: null, addEventListener(name, handler) { listeners.set(name, handler); },
+        removeEventListener(name, handler) { if (listeners.get(name) === handler) listeners.delete(name); } };
     vm.createContext(collectorSandbox);
     await vm.runInContext(IC.buildConsoleScript('https://studbud.example'), collectorSandbox);
     const box = body.children.find(child => child.id === 'studbud-ic-overlay');
@@ -432,16 +490,53 @@ async function mobileImport() {
     assert.match(box.style.cssText, /overflow-y:auto/);
     const actions = box.children[2];
     assert.ok(actions.children.every(button => button.style.cssText.includes('min-height:44px')));
-    const copyButton = actions.children.find(child => child.textContent === 'Copy data');
-    await copyButton.handlers.click();
-    assert.match(box.children[1].textContent, /Show data/);
-    const showButton = actions.children.find(child => child.textContent === 'Show data');
-    showButton.handlers.click();
-    const manualData = box.querySelector('textarea');
-    assert.strictEqual(manualData.selected, true, 'clipboard-blocked phones can select the collected data');
-    assert.strictEqual(JSON.parse(manualData.value).format, IC.FORMAT);
-    showButton.handlers.click();
-    assert.strictEqual(box.children.filter(child => child.tag === 'textarea').length, 1, 'showing data again reuses the copy field');
+    assert.deepEqual(actions.children.map(child => child.textContent), ['Send to StudBud', 'Close']);
+    const sendButton = actions.children[0];
+    sendButton.handlers.click();
+    assert.match(box.children[1].textContent, /Open Infinite Campus button/);
+    const sent = [];
+    const opener = collectorSandbox.window.opener = { postMessage: (data, origin) => sent.push({ data, origin }) };
+    sendButton.handlers.click();
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].origin, 'https://studbud.example');
+    assert.equal(sent[0].data.format, IC.FORMAT);
+    assert.match(box.children[1].textContent, /Sending to StudBud/);
+    listeners.get('message')({ origin: 'https://evil.example', source: opener, data: { format: IC.ACK_FORMAT } });
+    assert.equal(timers.size, 1, 'untrusted acknowledgements cannot fake success');
+    listeners.get('message')({ origin: 'https://studbud.example', source: {}, data: { format: IC.ACK_FORMAT } });
+    assert.equal(timers.size, 1, 'the acknowledgement must come from the StudBud tab');
+    [...timers.values()][0]();
+    assert.match(box.children[1].textContent, /has not confirmed receipt/);
+    sendButton.handlers.click();
+    assert.equal(sent.length, 2, 'sending can retry without collecting or saving twice');
+    listeners.get('message')({ origin: 'https://studbud.example', source: opener, data: { format: IC.ACK_FORMAT } });
+    assert.match(box.children[1].textContent, /StudBud received/);
+    assert.equal(timers.size, 0);
+    opener.closed = true;
+    sendButton.handlers.click();
+    assert.match(box.children[1].textContent, /reconnect/);
+    collectorSandbox.window.opener = { postMessage() { throw new Error('Disconnected'); } };
+    sendButton.handlers.click();
+    assert.match(box.children[1].textContent, /Could not send/);
+    assert.equal(timers.size, 0, 'failed sends do not leave receipt timers running');
+    collectorSandbox.window.opener = opener;
+    opener.closed = false;
+    sendButton.handlers.click();
+    assert.equal(timers.size, 1);
+    collectorSandbox.document.getElementById = () => box;
+    await vm.runInContext(IC.buildConsoleScript('https://studbud.example'), collectorSandbox);
+    assert.equal(timers.size, 0, 'rerunning the helper cleans up the previous send');
+    assert.equal(listeners.size, 1, 'rerunning replaces the old listener');
+    const replacementActions = body.children[body.children.length - 1].children[2];
+    replacementActions.children[0].handlers.click();
+    assert.equal(timers.size, 1);
+    replacementActions.children[1].handlers.click();
+    assert.equal(timers.size, 0, 'closing the helper clears pending receipt timers');
+    actions.children[1].handlers.click();
+    assert.equal(listeners.size, 0, 'closing the helper removes transfer listeners');
+    const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+    assert.doesNotMatch(html, /ic-transfer-method|ic-import-file|ic-import-textarea|ic-copy-script-btn|ic-paste-clipboard-btn/);
+    assert.match(html, /choose <strong>Send to StudBud<\/strong>/);
     // Regression: Parkway only gives A+ in weighted (Honors/AP) classes. A regular Campus class must not
 // auto-match a weighted catalog course, and its 97%+ grade must show as A.
 {
@@ -482,6 +577,6 @@ async function mobileImport() {
     assert.strictEqual(chosen.courses.find(course => course.icSectionIDs.includes('801')).isWeighted, true);
 }
 
-console.log('Infinite Campus import, early tutorial, mobile bookmark setup, clipboard/file fallbacks and scrollable collector tests passed.');
+console.log('Infinite Campus import, early tutorial, mobile bookmark setup, direct sending/confirmation/retry and scrollable collector tests passed.');
 }
 mobileImport().catch(error => { console.error(error); process.exitCode = 1; });

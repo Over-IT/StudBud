@@ -70,6 +70,9 @@ const join = () => form.listeners.submit({ preventDefault() {} });
     assert.match(source('index.html'), /<div class="auth-card">/);
     assert.doesNotMatch(source('index.html'), /class="glass-card auth-card"/, 'sign-in is a full-page layout, not a floating card');
     assert.match(source('styles.css'), /\.auth-card\s*\{[^}]*min-height:\s*100dvh/s);
+    assert.match(source('index.html'), /<figure class="auth-preview"[\s\S]*?Example preview/);
+    assert.match(source('styles.css'), /\.auth-preview\s*\{\s*display:\s*none/,
+        'phones keep the sign-in and code-join actions compact');
     assert.match(source('index.html'), /id="join-game-form"/, 'in-app joining remains available');
     assert.match(source('join/index.html'), /data-color-scheme="studbud"/, 'the standalone page uses the normal StudBud palette');
     assert.doesNotMatch(source('index.html'), /id="automatic-study-indicator"|id="current-term-badge"/);

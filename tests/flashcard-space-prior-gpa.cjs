@@ -12,7 +12,7 @@ const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
     assert.ok(start > 0 && end > start, 'prior GPA helpers exist in app.js');
     const sandbox = { profile: {} };
     vm.createContext(sandbox);
-    const Gpa = vm.runInContext(`const AppState = { get: () => profile }; (class { ${app.slice(start, end)} })`, sandbox);
+    const Gpa = vm.runInContext(`const AppState = { get: key => key === 'profile' ? profile : [] }; (class { ${app.slice(start, end)} })`, sandbox);
     const gpa = new Gpa();
     const tracked = { totalCredits: 6, weighted: '4.5', unweighted: '4' };
 

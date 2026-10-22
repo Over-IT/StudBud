@@ -234,6 +234,7 @@
                 calendarEvents: [],
                 gradeScenarios: [],
                 selectedGradeScenarioId: null,
+                academicYears: [],
                 flashcards: [],
                 studyHistory: [],
                 gameMetrics: freshGameMetrics(),
@@ -264,6 +265,7 @@
                         assignments: Array.isArray(parsed.assignments) ? parsed.assignments : this.state.assignments,
                         calendarEvents: Array.isArray(parsed.calendarEvents) ? parsed.calendarEvents : this.state.calendarEvents,
                         gradeScenarios: Array.isArray(parsed.gradeScenarios) ? parsed.gradeScenarios : this.state.gradeScenarios,
+                        academicYears: Array.isArray(parsed.academicYears) ? parsed.academicYears : [],
                         selectedGradeScenarioId: parsed.selectedGradeScenarioId || this.state.selectedGradeScenarioId,
                         schedule: parsed.schedule && typeof parsed.schedule === 'object'
                             ? { all: {}, odd: {}, even: {}, ...parsed.schedule }
@@ -301,6 +303,7 @@
                 calendarEvents: this.state.calendarEvents,
                 gradeScenarios: this.state.gradeScenarios,
                 selectedGradeScenarioId: this.state.selectedGradeScenarioId,
+                academicYears: this.state.academicYears,
                 settings: this.state.settings,
                 schedule: this.state.schedule
             };
@@ -346,6 +349,14 @@
             EventBus.emit('state:updated:courses', courses);
             EventBus.emit('state:changed', { key: 'courses', value: courses });
             EventBus.emit('state:changed', { key: 'settings', value: preferences });
+        }
+
+        saveSchoolYear(changes) {
+            const previous = this.state;
+            this.state = { ...previous, ...changes };
+            try { this.saveToLocalStorage(); }
+            catch (error) { this.state = previous; throw error; }
+            EventBus.emit('state:restored', this.state);
         }
 
         addCourse(course) {
@@ -500,6 +511,7 @@
                 calendarEvents: this.state.calendarEvents,
                 gradeScenarios: this.state.gradeScenarios,
                 selectedGradeScenarioId: this.state.selectedGradeScenarioId,
+                academicYears: this.state.academicYears,
                 gameMetrics: this.state.gameMetrics,
                 settings: this.state.settings,
                 schedule: this.state.schedule
@@ -540,6 +552,7 @@
                 this.state.calendarEvents = Array.isArray(parsed.state.calendarEvents) ? parsed.state.calendarEvents : [];
                 this.state.gradeScenarios = Array.isArray(parsed.state.gradeScenarios) ? parsed.state.gradeScenarios : [];
                 this.state.selectedGradeScenarioId = parsed.state.selectedGradeScenarioId || null;
+                this.state.academicYears = Array.isArray(parsed.state.academicYears) ? parsed.state.academicYears : [];
                 this.state.gameMetrics = gameMetrics;
                 this.state.settings = parsed.state.settings || this.state.settings;
                 this.state.schedule = parsed.state.schedule || { all: {}, odd: {}, even: {} };
@@ -1369,11 +1382,13 @@
                 this.setInfiniteCampusStatus('On a computer, drag StudBud Import to your bookmarks bar. On a phone, use the phone/tablet instructions below. Run the saved bookmark on the signed-in Campus website, not here.', 'warn');
             });
             document.addEventListener('change', event => {
-                if (event.target.id === 'ic-import-file' && event.target.files?.[0]) {
-                    this.previewInfiniteCampusFromInput().catch(error => this.setInfiniteCampusStatus(this.friendlyErrorMessage(error), 'error'));
-                }
                 if (event.target.matches('select[data-ic-class]')) {
                     event.target.closest('.ic-class-row')?.classList.toggle('ic-skipped', event.target.value === 'skip');
+                    const effect = event.target.closest('.ic-class-row')?.querySelector('[data-ic-effect]');
+                    const option = event.target.selectedOptions[0];
+                    if (effect) effect.textContent = event.target.value === 'skip' ? 'Not imported'
+                        : event.target.value.startsWith('existing:') ? `Updates ${option.textContent}`
+                            : 'Adds a class unless that catalog class is already in your list';
                 }
                 if (event.target.id === 'study-direction') {
                     localStorage.setItem('studbud-study-direction', event.target.value);
@@ -1523,6 +1538,7 @@
         renderUI() {
             this.syncPreferences();
             this.renderCourses();
+            this.renderAcademicHistory();
             this.renderAssignments();
             this.renderDecks();
             this.renderHostedGameDecks();
@@ -1781,10 +1797,14 @@
             const summary = document.getElementById('cumulative-gpa-summary');
             const currentGpa = this.calculateSemesterGPA(courses);
             if (summary) {
+                const cumulative = this.calculateTrackedGPA(allCourses);
+                const earnedCredits = this.completedAcademicCredits();
                 const creditNote = `${this.formatNumber(currentGpa.totalCredits)} tracked credits in ${this.termLabel(semester)}`;
                 summary.innerHTML = `
                     <article class="glass-card"><span class="gpa-summary-label">${this.termLabel(semester)} weighted GPA</span><strong>${Number(currentGpa.weighted).toFixed(2)}</strong><small>${creditNote}</small></article>
                     <article class="glass-card"><span class="gpa-summary-label">${this.termLabel(semester)} unweighted GPA</span><strong>${Number(currentGpa.unweighted).toFixed(2)}</strong><small>${creditNote}</small></article>
+                    <article class="glass-card"><span class="gpa-summary-label">Cumulative weighted / unweighted</span><strong>${Number(cumulative.weighted).toFixed(2)} / ${Number(cumulative.unweighted).toFixed(2)}</strong><small>Past years plus graded current classes</small></article>
+                    <article class="glass-card"><span class="gpa-summary-label">Completed credits</span><strong>${this.formatNumber(earnedCredits)}</strong><small>Past credits plus passed archived classes; excludes current classes</small></article>
                 `;
             }
             if (body) {
@@ -1980,14 +2000,149 @@
             return this.withPriorGPA(calculator.calculateCurrentGPA(targets), profile);
         }
 
-        /** Credits and GPA earned before the classes tracked in StudBud (from Settings). */
+        /** Manual prior GPA and archived final grades, weighted by attempted credits. */
         priorGPA(profile = AppState.get('profile') || {}) {
             const read = value => value === '' || value === null || value === undefined ? NaN : Number(value);
             const credits = read(profile.priorCredits);
             const weighted = read(profile.priorWeightedGpa);
             const unweighted = read(profile.priorUnweightedGpa);
-            if (!(credits > 0) || !Number.isFinite(weighted) || !Number.isFinite(unweighted)) return null;
-            return { credits, weighted, unweighted };
+            const sources = credits > 0 && Number.isFinite(weighted) && Number.isFinite(unweighted)
+                ? [{ credits, weighted, unweighted }] : [];
+            (AppState.get('academicYears') || []).forEach(year => {
+                const result = window.GPACalculator.calculateCurrentGPA((year.transcript || []).map(course => ({
+                    ...course, targetGrade: course.finalGrade
+                })));
+                if (result.totalCredits > 0) sources.push({ credits: result.totalCredits, weighted: Number(result.weighted), unweighted: Number(result.unweighted) });
+            });
+            const total = sources.reduce((sum, source) => sum + source.credits, 0);
+            if (!total) return null;
+            const average = key => sources.reduce((sum, source) => sum + source.credits * source[key], 0) / total;
+            return { credits: total, weighted: average('weighted'), unweighted: average('unweighted') };
+        }
+
+        completedAcademicCredits() {
+            const archived = (AppState.get('academicYears') || []).flatMap(year => year.transcript || [])
+                .reduce((sum, course) => sum + (course.finalGrade === 'F' ? 0 : Number(course.credits) || 0), 0);
+            return archived + Math.max(0, Number(AppState.get('profile')?.priorCredits) || 0);
+        }
+
+        schoolYearSnapshot() {
+            return JSON.stringify(Object.fromEntries(['courses', 'assignments', 'schedule', 'calendarEvents', 'gradeScenarios', 'academicYears', 'profile']
+                .map(key => [key, AppState.get(key)])));
+        }
+
+        openSchoolYearReview() {
+            const courses = AppState.get('courses') || [];
+            if (!courses.length) throw new Error('Add or import your classes before finishing a school year.');
+            this.schoolYearDraft = this.schoolYearSnapshot();
+            const now = new Date();
+            document.getElementById('school-year-start').value = AppState.get('profile')?.academicYearStart
+                || now.getFullYear() - (now.getMonth() < 7 ? 1 : 0);
+            document.getElementById('school-year-reset').checked = true;
+            document.getElementById('school-year-review-classes').innerHTML = courses.map((course, index) => {
+                const percent = this.calculateCourseGrade(course);
+                const grade = percent === null ? '' : this.gradeForPercentage(percent, course);
+                const letters = ['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'D-', 'F']
+                    .filter(letter => letter !== 'A+' || course.isWeighted);
+                return `<div class="school-year-course" data-year-course="${index}">
+                    <div><strong>${this.escapeHTML(course.title)}</strong><small>${percent === null ? 'No recorded grade - enter a final grade or leave out of transcript' : `Current recorded grade: ${this.formatNumber(percent)}%`}</small></div>
+                    <label><input type="checkbox" data-year-count${grade ? ' checked' : ''}> Count in transcript</label>
+                    <label>Final grade<select data-year-grade><option value="">Choose final grade</option>${letters.map(letter =>
+                        `<option value="${letter}"${letter === grade ? ' selected' : ''}>${letter}</option>`).join('')}</select></label>
+                    <label>Credits attempted<input type="number" data-year-credits min="0" max="10" step="0.25" value="${Number(course.credits) || 0}"></label>
+                </div>`;
+            }).join('');
+            this.openModal('school-year-modal');
+        }
+
+        buildSchoolYearArchive(startYear, selections, resetClasses) {
+            if (!Number.isInteger(startYear) || startYear < 2000 || startYear > 2100) throw new Error('Enter a school year starting between 2000 and 2100.');
+            const years = AppState.get('academicYears') || [];
+            if (years.some(year => year.startYear === startYear)) throw new Error('That school year has already been archived. It cannot be counted twice.');
+            const courses = AppState.get('courses') || [];
+            if (!courses.length) throw new Error('There are no current classes to archive.');
+            const transcript = courses.flatMap((course, index) => {
+                const selection = selections[index];
+                if (!selection) throw new Error('Review every class before finishing the year.');
+                if (!selection.include) return [];
+                const credits = Number(selection.credits);
+                if (!['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'D-', 'F'].includes(selection.grade)
+                    || (!course.isWeighted && selection.grade === 'A+')) throw new Error(`Choose a valid final grade for ${course.title}.`);
+                if (selection.credits === '' || !Number.isFinite(credits) || credits < 0 || credits > 10 || !Number.isInteger(credits * 4)) {
+                    throw new Error(`Enter credits for ${course.title} from 0 to 10, in increments of 0.25.`);
+                }
+                return [{ code: course.code, title: course.title, school: course.school, category: course.category,
+                    isWeighted: Boolean(course.isWeighted), credits, finalGrade: selection.grade }];
+            });
+            const archive = {
+                id: `school-year-${startYear}`, startYear, label: `${startYear}-${startYear + 1}`, finishedAt: new Date().toISOString(),
+                courses, assignments: AppState.get('assignments') || [], schedule: AppState.get('schedule') || {},
+                calendarEvents: AppState.get('calendarEvents') || [], gradeScenarios: AppState.get('gradeScenarios') || [],
+                transcript
+            };
+            const shells = resetClasses ? [] : courses.map(course => Object.fromEntries(Object.entries({
+                ...course, categories: (course.categories || []).map(category =>
+                    Object.fromEntries(Object.entries(category).filter(([key]) => !key.startsWith('ic'))))
+            }).filter(([key]) => !key.startsWith('ic'))));
+            return JSON.parse(JSON.stringify({
+                academicYears: [...years, archive], courses: shells, assignments: [], calendarEvents: [],
+                gradeScenarios: [], selectedGradeScenarioId: null, schedule: { all: {}, odd: {}, even: {} },
+                profile: { ...AppState.get('profile'), academicYearStart: startYear + 1, currentTerm: 'auto' }
+            }));
+        }
+
+        async finishSchoolYear() {
+            if (this.schoolYearSaving) return;
+            this.schoolYearSaving = true;
+            try {
+                if (this.schoolYearDraft !== this.schoolYearSnapshot()) throw new Error('Your school data changed. Close this dialog and review the year again.');
+                const selections = [...document.querySelectorAll('#school-year-review-classes [data-year-course]')].map(row => ({
+                    include: row.querySelector('[data-year-count]').checked,
+                    grade: row.querySelector('[data-year-grade]').value,
+                    credits: row.querySelector('[data-year-credits]').value
+                }));
+                const changes = this.buildSchoolYearArchive(Number(document.getElementById('school-year-start').value), selections,
+                    document.getElementById('school-year-reset').checked);
+                const year = changes.academicYears[changes.academicYears.length - 1];
+                if (!await window.StudBudDialogs.confirm(`Finish ${year.label}? Save ${year.transcript.length} final class grades to cumulative GPA and credits. Current assignments, calendar and scenarios move into the read-only archive. Sets and study history stay saved.`)) return;
+                if (this.schoolYearDraft !== this.schoolYearSnapshot()) throw new Error('Your school data changed during confirmation. Review the year again.');
+                AppState.saveSchoolYear(changes);
+                this.icImport = null;
+                this.closeModal();
+                window.StudBudDialogs.notify(`${year.label} saved. Your cumulative GPA and completed credits are preserved. You can now import next year's classes.`);
+            } finally {
+                this.schoolYearSaving = false;
+            }
+        }
+
+        renderAcademicHistory() {
+            const container = document.getElementById('academic-year-history');
+            if (!container) return;
+            const years = AppState.get('academicYears') || [];
+            const esc = value => this.escapeHTML(value ?? '');
+            container.innerHTML = years.length ? `<h3>Previous school years</h3><p class="settings-hint">Read-only archives. Final transcript grades count toward cumulative GPA; passed classes count toward completed credits.</p>`
+                + [...years].sort((a, b) => b.startYear - a.startYear).map(year => {
+                    const titles = new Map(year.courses.map(course => [course.code, course.title]));
+                    const periods = year.schedule?.ic?.sections || ['all', 'odd', 'even'].flatMap(pattern =>
+                        Object.entries(year.schedule?.[pattern] || {}).map(([period, code]) => ({ period, courseCode: code, psName: pattern })));
+                    return `<details class="glass-card workspace-disclosure">
+                    <summary>${esc(year.label)} <span>${year.courses.length} classes archived</span></summary>
+                    ${year.courses.map(course => {
+                        const final = year.transcript.find(item => item.code === course.code);
+                        const work = year.assignments.filter(item => item.courseCode === course.code);
+                        return `<details class="school-year-archived-class"><summary>${esc(course.title)} <span>${final ? `${esc(final.finalGrade)} - ${esc(final.credits)} credits attempted${final.finalGrade === 'F' ? ' (0 earned)' : ''}` : 'Not counted in transcript'}</span></summary>
+                            <ul>${work.length ? work.map(item => `<li>${esc(item.title)} - ${this.isGradedItem(item) ? `${esc(item.pointsEarned)} / ${esc(item.maxPoints)}` : 'Not graded'}${item.dueDate ? ` - ${esc(item.dueDate)}` : ''}</li>`).join('') : '<li>No assignments recorded</li>'}</ul></details>`;
+                    }).join('')}
+                    ${periods.length ? `<details class="school-year-archived-class"><summary>Saved schedule</summary><ul>${periods.map(period =>
+                        `<li>${esc(period.psName)} - Period ${esc(period.period)}: ${esc(titles.get(period.courseCode) || period.courseCode)}${period.start ? ` - ${esc(period.start)}-${esc(period.end)}` : ''}</li>`).join('')}</ul></details>` : ''}
+                    ${year.calendarEvents.length ? `<details class="school-year-archived-class"><summary>Calendar events (${year.calendarEvents.length})</summary><ul>${year.calendarEvents.map(event =>
+                        `<li>${esc(event.date)} - ${esc(event.title)}${event.notes ? ` - ${esc(event.notes)}` : ''}</li>`).join('')}</ul></details>` : ''}
+                    ${year.gradeScenarios.length ? `<details class="school-year-archived-class"><summary>Saved hypothetical grade scenarios (${year.gradeScenarios.length})</summary>${year.gradeScenarios.map(scenario =>
+                        `<details><summary>${esc(scenario.name || scenario.title || 'Scenario')}</summary><ul>${(scenario.items || []).map(item =>
+                            `<li>${esc(item.title)} - ${esc(titles.get(item.courseCode) || item.courseCode)}: ${esc(item.pointsEarned)} / ${esc(item.maxPoints)}</li>`).join('')}${Object.entries(scenario.overrides || {}).map(([id, points]) =>
+                            `<li>${esc(year.assignments.find(item => item.id === id)?.title || id)} - hypothetical score: ${esc(points)}</li>`).join('')}</ul></details>`).join('')}</details>` : ''}
+                    </details>`;
+                }).join('') : '';
         }
 
         /** Blends past credits into a GPA result, weighting each side by its credits. */
@@ -2369,23 +2524,6 @@
             this.showInfiniteCampusSteps(true);
         }
 
-        async pasteInfiniteCampusFromClipboard() {
-            let text = '';
-            try {
-                if (!navigator.clipboard?.readText) throw new Error('unavailable');
-                text = String(await navigator.clipboard.readText() || '').trim();
-            } catch {
-                const manual = document.getElementById('ic-import-textarea');
-                const details = manual?.closest('details');
-                if (details) details.open = true;
-                manual?.focus();
-                this.setInfiniteCampusStatus('Your browser blocked reading the clipboard. Tap and hold in the data box and choose Paste on a phone, or press Ctrl+V (Cmd+V on Mac), then choose Preview.', 'warn');
-                return;
-            }
-            if (!text) throw new Error('Your clipboard is empty. On the Campus tab, choose Copy data in the StudBud box first.');
-            this.previewInfiniteCampusData(text);
-        }
-
         setInfiniteCampusStatus(message, tone = '') {
             const status = document.getElementById('ic-import-status');
             if (!status) return;
@@ -2411,7 +2549,7 @@
             this.icWindow = window.open(url.href, 'studbud-ic');
             this.setInfiniteCampusStatus(this.icWindow
                 ? 'Campus opened in a new tab. Sign in on the website (not the Campus app), then run your saved StudBud Import bookmark. On Chrome for Android, type the bookmark name in the address bar and tap the saved bookmark suggestion.'
-                : 'Your browser blocked the new tab. Open Campus yourself, then run the helper there.');
+                : 'Your browser blocked the Campus tab. Allow pop-ups for StudBud, then choose Open Infinite Campus again so Send to StudBud can connect.');
         }
 
         async copyInfiniteCampusBookmarklet() {
@@ -2428,23 +2566,6 @@
                 input.select();
                 input.setSelectionRange(0, input.value.length);
                 this.setInfiniteCampusStatus('Automatic copying is blocked. The bookmark URL is selected below: tap and hold and choose Copy on a phone, or press Ctrl+C (Cmd+C on Mac). Paste it into the address of your StudBud Import bookmark.', 'warn');
-            }
-        }
-
-        async copyInfiniteCampusScript() {
-            const origin = /^https?:$/.test(window.location.protocol) ? window.location.origin : '';
-            const script = window.StudBudIC.buildConsoleScript(origin);
-            try {
-                if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable.');
-                await navigator.clipboard.writeText(script);
-                this.setInfiniteCampusStatus('Console script copied. On the signed-in Campus page press F12, open Console, paste it, and press Enter.');
-            } catch {
-                const textarea = document.getElementById('ic-import-textarea');
-                const details = textarea.closest('details');
-                if (details) details.open = true;
-                textarea.value = script;
-                textarea.select();
-                this.setInfiniteCampusStatus('Copy blocked by the browser. The script is selected in the box below. Copy it with Ctrl+C, then clear the box.', 'warn');
             }
         }
 
@@ -2469,20 +2590,15 @@
             if (!IC || !data || typeof data !== 'object' || data.format !== IC.FORMAT) return;
             // Data only opens a preview; nothing is saved until the student confirms the import
             if (!this.isTrustedInfiniteCampusMessage(event)) return;
+            if (document.getElementById('ic-import-modal')?.classList.contains('hidden')) this.openModal('ic-import-modal');
+            if (!this.previewInfiniteCampusData(data)) return;
             try {
                 event.source?.postMessage({ format: IC.ACK_FORMAT }, event.origin);
-            } catch { /* the helper still offers copy and download */ }
-            if (document.getElementById('ic-import-modal')?.classList.contains('hidden')) this.openModal('ic-import-modal');
-            this.previewInfiniteCampusData(data);
+            } catch (error) {
+                console.warn('[NexusApp] Campus import received, but receipt could not be confirmed:', error);
+                this.setInfiniteCampusStatus('Your import arrived. Review and save below; Campus may not show its confirmation.', 'warn');
+            }
             window.focus();
-        }
-
-        async previewInfiniteCampusFromInput() {
-            const file = document.getElementById('ic-import-file')?.files?.[0];
-            const textarea = document.getElementById('ic-import-textarea');
-            const text = file ? await file.text() : String(textarea?.value || '').trim();
-            if (!text) throw new Error('Paste the copied Infinite Campus data or choose the downloaded .json file first.');
-            this.previewInfiniteCampusData(text);
         }
 
         previewInfiniteCampusData(input) {
@@ -2501,6 +2617,7 @@
             this.renderInfiniteCampusPreview();
             const warnings = model.warnings.length ? ` ${model.warnings.length} item(s) could not be read from Campus.` : '';
             this.setInfiniteCampusStatus(`Found ${plan.counts.classes} classes, ${plan.counts.assignments} assignments (${plan.counts.graded} graded), and ${plan.counts.days} calendar days. Check the matches below, then import.${warnings}`, warnings ? 'warn' : 'ok');
+            return true;
         }
 
         renderInfiniteCampusPreview() {
@@ -2519,18 +2636,21 @@
             });
             const fullCatalog = [...byCategory.entries()].map(([category, courses]) =>
                 `<optgroup label="${esc(category)}">${courses.map(course => `<option value="${esc(course.code)}">${esc(course.title)}</option>`).join('')}</optgroup>`).join('');
-            const existingTitles = new Map((AppState.get('courses') || []).map(course => [course.code, course.title]));
+            const existingCourses = (AppState.get('courses') || []).filter(course => !course.school || course.school === plan.school);
+            const existingTitles = new Map(existingCourses.map(course => [course.code, course.title]));
+            const existingOptions = existingCourses.map(course =>
+                `<option value="existing:${esc(course.code)}">${esc(course.title)} (${esc(course.code)})</option>`).join('');
             const rows = plan.classes.map((entry, index) => {
-                const selected = entry.include ? (entry.match?.code || '') : 'skip';
-                const suggestionOptions = entry.suggestions.map(course => `<option value="${esc(course.code)}">${esc(course.title)}${entry.match?.code === course.code ? ' (best match)' : ''}</option>`).join('');
+                const suggestionOptions = entry.suggestions.map(course => `<option value="${esc(course.code)}">${esc(course.title)}${entry.match?.code === course.code ? ' (suggested)' : ''}</option>`).join('');
                 const select = `<select data-ic-class="${index}" aria-label="StudBud class for ${esc(entry.name)}">
-                    ${pchs && suggestionOptions ? `<optgroup label="Closest ${esc(schoolTag)} courses">${suggestionOptions}</optgroup>` : ''}
-                    <option value="">Use Campus name: ${esc(entry.name)}</option>
                     <option value="skip">Don't import</option>
-                    ${pchs ? `<optgroup label="All ${esc(schoolTag)} courses">${fullCatalog}</optgroup>` : ''}
+                    ${existingOptions ? `<optgroup label="Update one of your classes">${existingOptions}</optgroup>` : ''}
+                    <option value="">Add using Campus name: ${esc(entry.name)}</option>
+                    ${pchs && suggestionOptions ? `<optgroup label="Add / match suggested ${esc(schoolTag)} course">${suggestionOptions}</optgroup>` : ''}
+                    ${pchs ? fullCatalog : ''}
                 </select>`;
                 const confidence = entry.match ? Math.round(entry.match.confidence * 100) : 0;
-                const badge = !pchs ? ''
+                const badge = entry.existingCode ? '<span class="ic-badge ok">Existing class</span>' : !pchs ? ''
                     : entry.match ? `<span class="ic-badge ${confidence >= 85 ? 'ok' : 'check'}">${entry.match.method === 'number' ? 'Course # match' : `${confidence}% name match`}</span>`
                         : '<span class="ic-badge check">No catalog match</span>';
                 const grade = entry.grades.length ? entry.grades[entry.grades.length - 1] : null;
@@ -2543,17 +2663,17 @@
                     `${entry.assignmentCount} assignments`,
                     entry.categoryCount ? `${entry.categoryCount} categories` : '',
                     grade ? `${grade.task || grade.term}: ${grade.score || ''}${Number.isFinite(grade.percent) ? ` (${grade.percent}%)` : ''}` : '',
-                    entry.existingCode ? `updates “${existingTitles.get(entry.existingCode) || entry.existingCode}”` : 'new class',
                     entry.dropped ? 'dropped' : ''
                 ].filter(Boolean).map(esc).join(' · ');
                 return `<div class="ic-class-row${entry.include ? '' : ' ic-skipped'}">
-                    <div class="ic-class-info"><div><strong>${esc(entry.name)}</strong> ${badge}</div><small>${details}</small></div>
+                    <div class="ic-class-info"><div><strong>${esc(entry.name)}</strong> ${badge}</div><small>${details}</small>
+                    <small data-ic-effect>${!entry.include ? 'Not imported - choose an existing class or explicitly add it' : entry.existingCode ? `Updates ${esc(existingTitles.get(entry.existingCode) || entry.existingCode)}` : 'Adds a new class'}</small></div>
                     ${select}
                 </div>`;
             }).join('');
             container.innerHTML = `
                 <h3>${esc(model.studentName ? `${model.studentName}'s classes` : 'Classes found')}</h3>
-                ${pchs ? `<p class="settings-hint">Each Campus class is matched to the closest ${esc(schoolTag)} catalog course (course number first, then name). Change any match that looks wrong.</p>` : ''}
+                <p class="settings-hint">Update your existing classes to refresh grades, assignments and schedules without changing their names or Honors/AP settings. Search each dropdown to choose the right class.${existingCourses.length ? ' Unmatched classes are not imported unless you choose to add them.' : ' Review suggested catalog matches before adding classes.'}</p>
                 <div class="ic-class-list">${rows || '<p class="empty-state">No classes were found for this school year.</p>'}</div>
                 <fieldset class="ic-options">
                     <legend>Also import</legend>
@@ -2566,7 +2686,7 @@
                 <div class="modal-footer"><button id="ic-restart-btn" class="secondary-btn" type="button"><i class="fas fa-rotate-left"></i> Start over</button><button id="ic-apply-import-btn" class="primary-btn" type="button"><i class="fas fa-file-import"></i> Import into StudBud</button></div>`;
             container.querySelectorAll('select[data-ic-class]').forEach(select => {
                 const entry = plan.classes[Number(select.dataset.icClass)];
-                select.value = entry.include ? (entry.match?.code || '') : 'skip';
+                select.value = entry.include ? (entry.existingCode ? `existing:${entry.existingCode}` : entry.match?.code || '') : 'skip';
             });
             container.classList.remove('hidden');
             this.showInfiniteCampusSteps(false);
@@ -2610,8 +2730,6 @@
             const preview = document.getElementById('ic-import-preview');
             preview.innerHTML = '';
             preview.classList.add('hidden');
-            document.getElementById('ic-import-textarea').value = '';
-            document.getElementById('ic-import-file').value = '';
             this.showInfiniteCampusSteps(true);
             window.StudBudDialogs.notify(`Infinite Campus import complete: ${parts.join(', ') || 'nothing new to add'}.`);
         }
@@ -10278,16 +10396,10 @@
                     this.openInfiniteCampusImport();
                 } else if (id === 'ic-open-campus-btn') {
                     this.openInfiniteCampusSite();
-                } else if (id === 'ic-copy-script-btn') {
-                    await this.copyInfiniteCampusScript();
                 } else if (id === 'ic-copy-bookmarklet-btn') {
                     await this.copyInfiniteCampusBookmarklet();
-                } else if (id === 'ic-paste-clipboard-btn') {
-                    await this.pasteInfiniteCampusFromClipboard();
                 } else if (id === 'ic-restart-btn') {
                     this.restartInfiniteCampusImport();
-                } else if (id === 'ic-preview-btn') {
-                    await this.previewInfiniteCampusFromInput();
                 } else if (id === 'ic-apply-import-btn') {
                     this.applyInfiniteCampusImport();
                 } else if (id === 'remove-ic-schedule-btn') {
@@ -10391,7 +10503,7 @@
                 const modal = modalOverlay.querySelector('.modal-content:not(.hidden)');
                 if (event.key === 'Tab') {
                     const targets = [...modal.querySelectorAll('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], summary')]
-                        .filter(element => element.offsetWidth && element.offsetHeight);
+                        .filter(element => element.offsetWidth && element.offsetHeight && element.tabIndex !== -1);
                     const index = targets.indexOf(document.activeElement);
                     const next = index < 0 ? event.shiftKey ? targets.length - 1 : 0
                         : (index + (event.shiftKey ? -1 : 1) + targets.length) % targets.length;
@@ -11419,6 +11531,8 @@
                 this.openGradeGoals();
                 this.openModal('target-gpa-modal');
             }
+            if (action === 'open-school-year') this.openSchoolYearReview();
+            if (action === 'finish-school-year') await this.finishSchoolYear();
             if (['planner-previous-day', 'planner-next-day', 'planner-today'].includes(action)) {
                 this.plannerDate = action === 'planner-today' ? ''
                     : window.PlannerEngine.shiftPeriod(this.selectedPlannerDate(), this.plannerScope || 'day', action === 'planner-previous-day' ? -1 : 1);

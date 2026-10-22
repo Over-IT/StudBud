@@ -1,4 +1,4 @@
-const CACHE_NAME = 'studbud-shell-v182';
+const CACHE_NAME = 'studbud-shell-v185';
 let offlineNavigation = false;
 const PUBLIC_DEPENDENCIES = [
     'https://cdn.jsdelivr.net/npm/chart.js',
@@ -44,6 +44,7 @@ const APP_FILES = [
     './multiplayerGames3.js',
     './chessGame.js',
     './infiniteCampusImport.js',
+    './classSearch.js',
     './classrooms.js',
     './schoolCommunity.js',
     './app.js',

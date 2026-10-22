@@ -45,6 +45,18 @@
 
         static mergeData(base, local, remote, field = 'account') {
             const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+            if (field === 'account.state' && local && remote
+                && local.profile?.academicYearStart !== remote.profile?.academicYearStart) {
+                const baselineYear = base?.profile?.academicYearStart;
+                const previousYear = local.profile?.academicYearStart === baselineYear ? local
+                    : remote.profile?.academicYearStart === baselineYear ? remote : null;
+                const academicFields = ['courses', 'assignments', 'calendarEvents', 'gradeScenarios', 'schedule', 'academicYears'];
+                if (previousYear && academicFields.some(key => !equal(previousYear[key], base?.[key]))) {
+                    const error = new Error('School data changed on another device while finishing a school year. Choose which version to keep. Neither version has been overwritten.');
+                    error.code = 'STUDBUD_SYNC_CONFLICT';
+                    throw error;
+                }
+            }
             if (field === 'account.state.gameMetrics' && local && remote && (local.resetId || '') !== (remote.resetId || '')) {
                 // Progress from before an activity reset never merges into progress after it.
                 return (local.resetId || '') > (remote.resetId || '') ? local : remote;
@@ -110,6 +122,11 @@
             }
             if (equal(local, base)) return remote;
             if (equal(remote, base) || equal(local, remote)) return local;
+            if (/^account\.state\.academicYears\.[^.]+$/.test(field) && local && remote) {
+                const error = new Error('This school year was archived differently on two devices. Choose which version to keep. Final transcripts cannot be combined automatically.');
+                error.code = 'STUDBUD_SYNC_CONFLICT';
+                throw error;
+            }
             // Conflicting device preferences must not block access to study data.
             const devicePreferences = ['theme', 'colorScheme', 'schemePicked', 'compactUi', 'sidebarCollapsed',
                 'reduceMotion', 'startPage', 'plannerDefaultStatus', 'plannerSort', 'tutorialSeen', 'tutorialVersion'];
