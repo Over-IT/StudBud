@@ -50,6 +50,12 @@ assert.equal(remote.state.courses[0].targetGrade, 95);
     assert.throws(() => Cloud.mergeData(before, next, oldDevice), error => error.code === 'STUDBUD_SYNC_CONFLICT',
         'old-year work added concurrently cannot silently become a new-year orphan');
     assert.throws(() => Cloud.mergeData(before, oldDevice, next), error => error.code === 'STUDBUD_SYNC_CONFLICT');
+    const pinned = clone(before);
+    pinned.state.profile.academicYearStart = 2025;
+    const pinnedMerge = Cloud.mergeData(before, pinned, oldDevice);
+    assert.equal(pinnedMerge.state.profile.academicYearStart, 2025);
+    assert.equal(pinnedMerge.state.assignments.length, 2, 'initial calendar-year pinning is not an archive transition and must not block independent school work');
+    assert.equal(Cloud.mergeData(before, oldDevice, pinned).state.assignments.length, 2, 'initial year pinning merges in either direction');
     const alternate = clone(next);
     alternate.state.academicYears[0].transcript[0].finalGrade = 'B';
     assert.throws(() => Cloud.mergeData(before, next, alternate), error => error.code === 'STUDBUD_SYNC_CONFLICT',

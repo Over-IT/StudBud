@@ -285,6 +285,7 @@
                 const { id: _metricsId, ...storedMetrics } = metrics || {};
                 this.state.gameMetrics = currentGameMetrics(metrics ? storedMetrics : null);
                 if (!metrics || this.state.gameMetrics !== storedMetrics) await NexusDB.put('gameMetrics', { id: 'user_metrics', ...this.state.gameMetrics });
+                this.state.courses = this.normalizeCourseCredits(this.state.courses);
                 this.saveToLocalStorage();
 
                 EventBus.emit('state:initialized', this.state);
@@ -292,6 +293,17 @@
                 console.error('[AppState] Initialization error:', err);
                 throw err;
             }
+        }
+
+        normalizeCourseCredits(courses) {
+            return courses.map(course => {
+                if (!['S1', 'S2'].includes(course.term)) return course;
+                const school = course.school || this.state.profile?.school;
+                const catalog = window.STUDBUD_SCHOOLS?.catalog(school).find(item => item.code === (course.catalogCode || course.code));
+                if (!catalog || Number(course.credits) !== Number(catalog.credits)) return course;
+                const credits = window.studbudCatalogCreditsForTerm(catalog, course.term);
+                return credits === Number(course.credits) ? course : { ...course, credits };
+            });
         }
 
         saveToLocalStorage() {
@@ -547,7 +559,7 @@
                 });
 
                 this.state.profile = parsed.state.profile || this.state.profile;
-                this.state.courses = parsed.state.courses || [];
+                this.state.courses = this.normalizeCourseCredits(parsed.state.courses || []);
                 this.state.assignments = parsed.state.assignments || [];
                 this.state.calendarEvents = Array.isArray(parsed.state.calendarEvents) ? parsed.state.calendarEvents : [];
                 this.state.gradeScenarios = Array.isArray(parsed.state.gradeScenarios) ? parsed.state.gradeScenarios : [];
@@ -1175,6 +1187,11 @@
             this.updateMultiplayerModeSetup(this.selectedMultiplayerMode);
             this.renderUI();
             Router.init();
+            const refreshCalendar = () => {
+                if (!document.hidden && this.calendarToday !== this.calendarDateKey(new Date())) this.renderUI();
+            };
+            document.addEventListener('visibilitychange', refreshCalendar);
+            this.schoolCalendarTimer = setInterval(refreshCalendar, 60000);
             this.initAutomaticStudy();
             if (window.StudBudCloud.isGuest?.()) {
                 this.refreshGuestFeatures();
@@ -1536,6 +1553,7 @@
         }
 
         renderUI() {
+            this.syncSchoolCalendar();
             this.syncPreferences();
             this.renderCourses();
             this.renderAcademicHistory();
@@ -1672,7 +1690,7 @@
             const currentGpa = this.calculateSemesterGPA(courses);
             const projectedCourses = courses.map(course => {
                 const grade = this.calculateScenarioCourseGrade(course, assignments, hypotheticalAssignments);
-                return Number.isFinite(grade) ? { ...course, targetGrade: this.gradeForPercentage(grade, course) } : null;
+                return Number.isFinite(grade) ? { ...course, credits: this.semesterCredits(course), targetGrade: this.gradeForPercentage(grade, course) } : null;
             }).filter(Boolean);
             const projectedGpa = window.GPACalculator
                 ? window.GPACalculator.calculateCurrentGPA(projectedCourses)
@@ -1865,7 +1883,7 @@
                         <details class="transcript-class-details" data-transcript-class="${this.escapeHTML(course.code)}">
                             <summary class="transcript-class-summary">
                                 <span class="transcript-chevron" aria-hidden="true"><i class="fas fa-chevron-right"></i></span>
-                                <span class="transcript-class-name"><strong>${this.escapeHTML(course.title)}</strong><small>${this.escapeHTML(this.termLabel(course.term))} · ${course.isWeighted ? 'Weighted' : 'Regular'} · ${this.formatNumber(course.credits || 0)} credits</small></span>
+                                <span class="transcript-class-name"><strong>${this.escapeHTML(course.title)}</strong><small>${this.escapeHTML(this.termLabel(course.term))} · ${course.isWeighted ? 'Weighted' : 'Regular'} · ${this.formatNumber(this.semesterCredits(course))} credits this semester (${this.formatNumber(course.credits || 0)} for the course)</small></span>
                                 <span class="transcript-grade"><strong>${this.escapeHTML(gradeLetter)}</strong><small>${currentGrade === null ? 'No graded work' : `${currentGrade.toFixed(2)}%`}</small></span>
                                 <span class="transcript-class-target"><small>Target</small><strong>${course.targetPct !== null && course.targetPct !== undefined && Number.isFinite(Number(course.targetPct)) ? `${Number(course.targetPct).toFixed(2)}%` : '—'}</strong></span>
                                 <span class="transcript-item-count">${classAssignments.length} item${classAssignments.length === 1 ? '' : 's'}</span>
@@ -1931,9 +1949,129 @@
             return ({ S1: 'Semester 1', S2: 'Semester 2', FY: 'Full Year' })[term] || 'Full Year';
         }
 
+        calendarDateKey(date) {
+            return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+        }
+
+        schoolCalendar(now = new Date(), profile = AppState.get('profile') || {}) {
+            const school = profile.school || window.StudBudCloud?.user?.user_metadata?.school || 'other';
+            const ic = (AppState.get('schedule') || {}).ic;
+            const importedCourse = (AppState.get('courses') || []).find(course =>
+                (ic?.sections || []).some(section => section.courseCode === course.code));
+            const importedSchool = ic?.school || importedCourse?.school || AppState.get('profile')?.school
+                || window.StudBudCloud?.user?.user_metadata?.school;
+            const terms = ic && importedSchool === school
+                ? (ic.terms || []).concat((ic.sections || []).map(section => ({ start: section.termStart, end: section.termEnd })))
+                    .filter(term => /^\d{4}-\d{2}-\d{2}$/.test(term.start) && /^\d{4}-\d{2}-\d{2}$/.test(term.end) && term.start <= term.end)
+                : [];
+            const latestStart = terms.map(term => term.start).sort().at(-1);
+            const importedYear = latestStart ? Number(latestStart.slice(0, 4)) - (latestStart.slice(5) < '07-01' ? 1 : 0) : null;
+            const startYear = Number.isInteger(profile.academicYearStart) ? profile.academicYearStart
+                : importedYear || now.getFullYear() - (now.getMonth() < 7 ? 1 : 0);
+            const official = ['pchs', 'pnhs', 'pshs', 'pwhs'].includes(school)
+                ? window.STUDBUD_ACADEMIC_CALENDARS?.[startYear] : null;
+            let calendar = {
+                startYear, start: `${startYear}-08-15`, semester2Start: `${startYear + 1}-01-01`, end: `${startYear + 1}-05-31`,
+                source: 'Editable default dates - set these for your school', hasSchoolCalendar: false, ...official
+            };
+            if (official) Object.assign(calendar, { source: 'Parkway district calendar', hasSchoolCalendar: true });
+            const yearTerms = terms.filter(term => term.start >= `${startYear}-07-01` && term.end < `${startYear + 1}-07-01`);
+            if (yearTerms.length) {
+                const starts = yearTerms.map(term => term.start).sort();
+                const semester2 = yearTerms.find(term => /^(?:S2|Semester\s*2|2nd Semester)$/i.test(term.name || ''))?.start
+                    || starts.find(start => start >= `${startYear + 1}-01-01`);
+                if (semester2) Object.assign(calendar, {
+                    start: starts[0], semester2Start: semester2, end: yearTerms.map(term => term.end).sort().at(-1),
+                    source: 'Imported Infinite Campus calendar', hasSchoolCalendar: true
+                });
+            }
+            const custom = profile.schoolCalendar;
+            if (custom && custom.school === school) {
+                const dates = Object.fromEntries(['start', 'semester2Start', 'end'].map(key => {
+                    const year = startYear + (custom[key] < custom.start ? 1 : 0);
+                    const [month, day] = String(custom[key]).split('-').map(Number);
+                    const lastDay = new Date(year, month, 0).getDate();
+                    return [key, this.calendarDateKey(new Date(year, month - 1, Math.min(day, lastDay)))];
+                }));
+                if (dates.start < dates.semester2Start && dates.semester2Start <= dates.end) {
+                    calendar = { ...calendar, ...dates, source: 'Your custom calendar dates', custom: true };
+                }
+            }
+            return calendar;
+        }
+
+        syncSchoolCalendar() {
+            const profile = AppState.get('profile') || {};
+            const calendar = this.schoolCalendar();
+            if (!Number.isInteger(profile.academicYearStart) && (AppState.get('courses') || []).length) {
+                AppState.set('profile', { ...profile, academicYearStart: calendar.startYear });
+            }
+            const term = this.configuredSemester();
+            if (this.calendarTerm && this.calendarTerm !== term) this.semesterView = null;
+            this.calendarTerm = term;
+            this.calendarToday = this.calendarDateKey(new Date());
+            const due = this.calendarToday > calendar.end && (AppState.get('courses') || []).length > 0
+                && !(AppState.get('academicYears') || []).some(year => year.startYear === calendar.startYear);
+            document.getElementById('school-year-notice')?.classList.toggle('hidden', !due);
+            const text = document.getElementById('school-year-notice-text');
+            if (text) text.textContent = `${calendar.startYear}-${calendar.startYear + 1} has ended. Review final grades to save the year and prepare for next year. You can adjust the dates in Settings > School & GPA.`;
+        }
+
+        renderSchoolCalendarSettings(profile = AppState.get('profile') || {}) {
+            const calendar = this.schoolCalendar(new Date(), profile);
+            const values = {
+                'settings-academic-year': calendar.startYear,
+                'settings-year-start': calendar.start,
+                'settings-semester2-start': calendar.semester2Start,
+                'settings-year-end': calendar.end
+            };
+            const custom = document.getElementById('settings-calendar-custom');
+            if (custom) {
+                custom.checked = Boolean(calendar.custom) || !calendar.hasSchoolCalendar;
+                custom.disabled = !calendar.hasSchoolCalendar;
+            }
+            for (const [id, value] of Object.entries(values)) {
+                const field = document.getElementById(id);
+                if (field) {
+                    field.value = String(value);
+                    field.disabled = id !== 'settings-academic-year' && !custom?.checked;
+                }
+            }
+            const source = document.getElementById('settings-calendar-source');
+            if (source) source.textContent = `${calendar.source}. Year-end review is available after ${calendar.end}.`;
+        }
+
+        readSchoolCalendarSettings(school) {
+            const startYear = Number(document.getElementById('settings-academic-year').value);
+            if (!Number.isInteger(startYear) || startYear < 2000 || startYear > 2100) {
+                throw new Error('Enter a school year starting between 2000 and 2100.');
+            }
+            if (!document.getElementById('settings-calendar-custom').checked) {
+                return { academicYearStart: startYear, schoolCalendar: null };
+            }
+            const dates = Object.fromEntries([
+                ['start', 'settings-year-start'], ['semester2Start', 'settings-semester2-start'], ['end', 'settings-year-end']
+            ].map(([key, id]) => [key, document.getElementById(id).value]));
+            for (const value of Object.values(dates)) {
+                const parsed = new Date(`${value}T12:00:00`);
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(parsed.getTime()) || this.calendarDateKey(parsed) !== value) {
+                    throw new Error('Enter valid dates for the first day, semester 2, and last day of school.');
+                }
+            }
+            const monthDays = Object.fromEntries(Object.entries(dates).map(([key, value]) => [key, value.slice(5)]));
+            if (Object.entries(dates).some(([key, value]) =>
+                Number(value.slice(0, 4)) !== startYear + (monthDays[key] < monthDays.start ? 1 : 0))
+                || dates.start >= dates.semester2Start || dates.semester2Start > dates.end) {
+                throw new Error('Calendar dates must cover one school year: first day, then semester 2, then the last day. Check the school year starting year too.');
+            }
+            return { academicYearStart: startYear, schoolCalendar: { school, ...monthDays } };
+        }
+
         configuredSemester() {
             const term = (AppState.get('profile') || {}).currentTerm;
-            return term === 'S1' || term === 'S2' ? term : (new Date().getMonth() >= 7 ? 'S1' : 'S2');
+            if (term === 'S1' || term === 'S2') return term;
+            const calendar = this.schoolCalendar();
+            return this.calendarDateKey(new Date()) < calendar.semester2Start ? 'S1' : 'S2';
         }
 
         schoolSemester() {
@@ -1947,9 +2085,9 @@
             return courses.filter(course => !['S1', 'S2'].includes(course.term) || course.term === semester);
         }
 
-        semesterAssignments(assignments, courses) {
+        semesterAssignments(assignments, courses, semester = this.schoolSemester()) {
             const coursesByCode = new Map(courses.map(course => [course.code, course]));
-            const semester = this.schoolSemester();
+            const calendar = this.schoolCalendar();
             return assignments.filter(item => {
                 const course = coursesByCode.get(item.courseCode);
                 if (!course) return false;
@@ -1957,12 +2095,16 @@
                 const rawDate = item.dueDate || item.gradedAt;
                 if (!rawDate) return true;
                 const date = String(rawDate);
-                const month = /^\d{4}-\d{2}-\d{2}$/.test(date)
-                    ? Number(date.slice(5, 7)) - 1
-                    : new Date(date).getMonth();
-                return !Number.isInteger(month) || month < 0 || month > 11
-                    || (month >= 7 ? 'S1' : 'S2') === semester;
+                const parsed = new Date(date);
+                if (Number.isNaN(parsed.getTime())) return true;
+                const key = /^\d{4}-\d{2}-\d{2}/.test(date) ? date.slice(0, 10) : this.calendarDateKey(parsed);
+                return (key < calendar.semester2Start ? 'S1' : 'S2') === semester;
             });
+        }
+
+        semesterCredits(course) {
+            const credits = Number(course.credits) || 0;
+            return ['S1', 'S2'].includes(course.term) ? credits : credits / 2;
         }
 
         calculateSemesterGPA(courses) {
@@ -1972,7 +2114,7 @@
             const currentCourses = courses.map(course => {
                 const courseAssignments = assignments.filter(item => item.courseCode === course.code);
                 const grade = this.calculateCourseGrade(course, courseAssignments);
-                return Number.isFinite(grade) ? { ...course, targetGrade: this.gradeForPercentage(grade, course) } : null;
+                return Number.isFinite(grade) ? { ...course, credits: this.semesterCredits(course), targetGrade: this.gradeForPercentage(grade, course) } : null;
             }).filter(Boolean);
             return calculator.calculateCurrentGPA(currentCourses);
         }
@@ -1985,10 +2127,17 @@
         calculateTrackedGPA(courses = AppState.get('courses') || []) {
             const calculator = window.GPACalculator;
             if (!calculator) return { weighted: '0.000', unweighted: '0.000', totalCredits: 0 };
-            const currentCourses = courses.map(course => {
-                const grade = this.calculateCourseGrade(course);
-                return Number.isFinite(grade) ? { ...course, targetGrade: this.gradeForPercentage(grade, course) } : null;
-            }).filter(Boolean);
+            const assignments = AppState.get('assignments') || [];
+            const currentCourses = courses.flatMap(course => {
+                const terms = ['S1', 'S2'].includes(course.term) ? [course.term] : ['S1', 'S2'];
+                return terms.flatMap(term => {
+                    const work = this.semesterAssignments(assignments, [course], term).filter(item =>
+                        ['S1', 'S2'].includes(course.term) || item.dueDate || item.gradedAt || term === this.configuredSemester());
+                    const grade = this.calculateCourseGrade(course, work);
+                    return Number.isFinite(grade)
+                        ? [{ ...course, credits: this.semesterCredits(course), targetGrade: this.gradeForPercentage(grade, course) }] : [];
+                });
+            });
             return this.withPriorGPA(calculator.calculateCurrentGPA(currentCourses));
         }
 
@@ -2037,9 +2186,7 @@
             const courses = AppState.get('courses') || [];
             if (!courses.length) throw new Error('Add or import your classes before finishing a school year.');
             this.schoolYearDraft = this.schoolYearSnapshot();
-            const now = new Date();
-            document.getElementById('school-year-start').value = AppState.get('profile')?.academicYearStart
-                || now.getFullYear() - (now.getMonth() < 7 ? 1 : 0);
+            document.getElementById('school-year-start').value = this.schoolCalendar().startYear;
             document.getElementById('school-year-reset').checked = true;
             document.getElementById('school-year-review-classes').innerHTML = courses.map((course, index) => {
                 const percent = this.calculateCourseGrade(course);
@@ -8537,6 +8684,7 @@
             }
             const currentTermSetting = document.getElementById('settings-current-term');
             if (currentTermSetting) currentTermSetting.value = profile.currentTerm || 'auto';
+            this.renderSchoolCalendarSettings(profile);
             const priorFields = { 'settings-prior-credits': 'priorCredits', 'settings-prior-weighted': 'priorWeightedGpa', 'settings-prior-unweighted': 'priorUnweightedGpa' };
             for (const [id, key] of Object.entries(priorFields)) {
                 const field = document.getElementById(id);
@@ -8545,7 +8693,7 @@
             const schoolSetting = document.getElementById('settings-school');
             if (schoolSetting && !schoolSetting.dataset?.dirty) {
                 const stored = profile.school || window.StudBudCloud?.user?.user_metadata?.school;
-                schoolSetting.value = this.isKnownSchool(stored) ? stored : 'pchs';
+                schoolSetting.value = this.isKnownSchool(stored) ? stored : 'other';
             }
 
             const classYear = profile.graduationYear || 2026;
@@ -9885,7 +10033,7 @@
                         const coursesAtDate = courses.map(course => {
                             const scored = datedAssignments.filter(item => item.courseCode === course.code && dateFor(item) <= date);
                             const grade = this.calculateCourseGrade(course, scored);
-                            return Number.isFinite(grade) ? { ...course, targetGrade: this.gradeForPercentage(grade, course) } : null;
+                            return Number.isFinite(grade) ? { ...course, credits: this.semesterCredits(course), targetGrade: this.gradeForPercentage(grade, course) } : null;
                         }).filter(Boolean);
                         return Number(this.withPriorGPA(window.GPACalculator.calculateCurrentGPA(coursesAtDate))[metric]);
                     }),
@@ -10838,11 +10986,35 @@
                 this.updateCourseSchoolFields();
                 this.renderOtherGradeScaleEditor();
                 this.updatePublicSchoolOption();
+                this.renderSchoolCalendarSettings({ ...AppState.get('profile'), school: event.target.value });
+                return;
+            }
+            if (event.target.id === 'settings-academic-year') {
+                this.renderSchoolCalendarSettings({
+                    ...AppState.get('profile'), school: document.getElementById('settings-school').value,
+                    academicYearStart: Number(event.target.value)
+                });
+                return;
+            }
+            if (event.target.id === 'settings-calendar-custom') {
+                for (const id of ['settings-year-start', 'settings-semester2-start', 'settings-year-end']) {
+                    document.getElementById(id).disabled = !event.target.checked;
+                }
+                if (!event.target.checked) this.renderSchoolCalendarSettings({
+                    ...AppState.get('profile'), school: document.getElementById('settings-school').value,
+                    academicYearStart: Number(document.getElementById('settings-academic-year').value), schoolCalendar: null
+                });
                 return;
             }
             if (event.target.id === 'school-semester-select') {
                 this.semesterView = event.target.value === 'S2' ? 'S2' : 'S1';
                 this.renderUI();
+                return;
+            }
+            if (event.target.id === 'course-term') {
+                const code = document.getElementById('course-name').value;
+                const catalogCourse = this.schoolCatalog().find(course => course.code === code);
+                if (catalogCourse) document.getElementById('course-credits').value = window.studbudCatalogCreditsForTerm(catalogCourse, event.target.value);
                 return;
             }
             if (event.target.id === 'import-deck-course' || event.target.id === 'import-deck-assessment') {
@@ -11024,7 +11196,7 @@
             if (select?.dataset?.dirty && this.isKnownSchool(select.value)) return select.value;
             const profile = AppState.get('profile') || {};
             const stored = profile.school || window.StudBudCloud?.user?.user_metadata?.school;
-            return this.isKnownSchool(stored) ? stored : 'pchs';
+            return this.isKnownSchool(stored) ? stored : 'other';
         }
 
         isKnownSchool(id) {
@@ -11165,7 +11337,7 @@
             const mapped = categoryMap[catalogCourse.category] || catalogCourse.category;
             const category = Array.from(categorySelect.options).some(option => option.value === mapped) ? mapped : 'Electives';
             categorySelect.value = category;
-            document.getElementById('course-credits').value = catalogCourse.credits;
+            document.getElementById('course-credits').value = window.studbudCatalogCreditsForTerm(catalogCourse, document.getElementById('course-term').value);
             const weightedScale = (window.studbudGradeScaleFor?.(catalogCourse) || window.PARKWAY_GRADE_SCALE || []).map(item =>
                 `${item.letter} ${catalogCourse.isWeighted ? item.weighted : item.unweighted.toFixed(2)}`
             ).join(' · ');
@@ -11337,7 +11509,7 @@
                 );
                 code = oldCode || (sameCatalogAlreadyUsed ? `${catalogCode}_${term}_${Date.now()}` : catalogCode);
                 title = catalogCourse.title;
-                credits = Number(catalogCourse.credits);
+                credits = window.studbudCatalogCreditsForTerm(catalogCourse, term);
                 isWeighted = Boolean(catalogCourse.isWeighted);
             }
             if ((AppState.get('courses') || []).some(item => item.code === code && item.code !== oldCode)) {
@@ -12280,6 +12452,7 @@
                 throw new Error('Graduation year must be between 2026 and 2030.');
             }
             if (!this.isKnownSchool(school)) throw new Error('Choose your school from the list.');
+            const calendarSettings = this.readSchoolCalendarSettings(school);
             const priorValue = id => {
                 const raw = document.getElementById(id)?.value?.trim() || '';
                 return raw === '' ? null : Number(raw);
@@ -12300,6 +12473,7 @@
             }
             const profile = {
                 ...AppState.get('profile'),
+                ...calendarSettings,
                 school,
                 firstName: document.getElementById('settings-first-name').value.trim(),
                 lastName: document.getElementById('settings-last-name').value.trim(),

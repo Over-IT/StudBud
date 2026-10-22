@@ -948,7 +948,7 @@
                 catalogCode: catalogCourse ? catalogCourse.code : (isNew ? '' : course.catalogCode || ''),
                 title: catalogCourse ? catalogCourse.title : (isNew || !course.title ? name : course.title),
                 term: entry.term,
-                credits: catalogCourse ? Number(catalogCourse.credits) : Number(course.credits) || (entry.term === 'FY' ? 1 : 0.5),
+                credits: catalogCourse ? window.studbudCatalogCreditsForTerm(catalogCourse, entry.term) : Number(course.credits) || (entry.term === 'FY' ? 1 : 0.5),
                 category: catalogCourse ? SUBJECT_MAP[catalogCourse.category] || 'Electives' : course.category || guessSubject(name),
                 isWeighted: catalogCourse ? Boolean(catalogCourse.isWeighted) : (isNew ? looksWeighted(name) : Boolean(course.isWeighted)),
                 icSectionIDs: [...new Set([...list(course.icSectionIDs).map(String), ...entry.sectionIDs])],
@@ -1107,6 +1107,8 @@
             const previous = schedule.ic || {};
             schedule.ic = {
                 importedAt: new Date(now).toISOString(),
+                school,
+                terms: model.terms.map(term => ({ ...term })),
                 sections: include.schedule ? sections : list(previous.sections),
                 calendars: include.calendar ? model.calendars : (previous.calendars || {})
             };

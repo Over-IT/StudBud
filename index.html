@@ -209,6 +209,12 @@
             </aside>
 
             <!-- VIEW CONTAINERS -->
+            <aside id="school-year-notice" class="offline-notice hidden" role="status">
+                <span id="school-year-notice-text"></span>
+                <div class="offline-notice-actions">
+                    <button type="button" class="secondary-btn" data-action="open-school-year">Review finished year</button>
+                </div>
+            </aside>
             <div id="view-container">
                 
                 <!-- 1. Dashboard View -->
@@ -292,7 +298,6 @@
                             <button id="add-course-btn" class="secondary-btn"><i class="fas fa-plus"></i> Add Class</button>
                             <button id="open-target-gpa-btn" class="secondary-btn"><i class="fas fa-bullseye"></i> Grade &amp; GPA goals</button>
                             <button class="primary-btn open-ic-import-btn" type="button"><i class="fas fa-cloud-arrow-down"></i> Import from Infinite Campus</button>
-                            <button class="secondary-btn" type="button" data-action="open-school-year"><i class="fas fa-box-archive"></i> Finish school year</button>
                         </div>
                     </div>
                     <div id="cumulative-gpa-summary" class="gpa-summary-grid"></div>
@@ -1178,8 +1183,28 @@
                                 </div>
                                 </details>
                             </fieldset>
-                            <p class="settings-hint">Ready for next year? Save final grades and credits to a read-only archive, then optionally reset your class list. Flashcard sets and study history are kept.</p>
-                            <button type="button" class="secondary-btn" data-action="open-school-year">Finish school year</button>
+                            <fieldset>
+                                <legend>School calendar</legend>
+                                <p id="settings-calendar-source" class="settings-hint"></p>
+                                <div class="form-group">
+                                    <label for="settings-academic-year">Current school year starting in</label>
+                                    <input type="number" id="settings-academic-year" min="2000" max="2100" step="1">
+                                </div>
+                                <label><input type="checkbox" id="settings-calendar-custom"> Use my own calendar dates</label>
+                                <div class="form-group">
+                                    <label for="settings-year-start">First day of school</label>
+                                    <input type="date" id="settings-year-start">
+                                </div>
+                                <div class="form-group">
+                                    <label for="settings-semester2-start">First day of semester 2</label>
+                                    <input type="date" id="settings-semester2-start">
+                                </div>
+                                <div class="form-group">
+                                    <label for="settings-year-end">Last day of school</label>
+                                    <input type="date" id="settings-year-end">
+                                </div>
+                                <p class="settings-hint">After the last day, a review prompt appears automatically. Nothing is archived until you confirm final grades. Custom month/day dates repeat next year; adjust them here when needed. Without a supported school calendar, set these dates for your school.</p>
+                            </fieldset>
                             <div class="form-group">
                                 <label for="settings-current-term">Current semester</label>
                                 <select id="settings-current-term">
@@ -1188,7 +1213,7 @@
                                     <option value="S2">Semester 2</option>
                                 </select>
                             </div>
-                            <p class="settings-hint">Automatic term uses August–December for Semester 1 and January–July for Semester 2.</p>
+                            <p class="settings-hint">Automatic semester follows your school calendar dates. You can still browse either semester in School without changing this setting.</p>
                             </section>
                             <button id="save-profile-btn" class="primary-btn">Save Profile</button>
                             <p id="school-profile-status" class="community-status" role="status" aria-live="polite"></p>
@@ -1462,8 +1487,9 @@
                                 </select>
                             </div>
                             <div class="half-width">
-                                <label for="course-credits">Credits</label>
+                                <label for="course-credits">Credits for the selected term</label>
                                 <input type="number" id="course-credits" step="0.01" min="0" max="20" value="0.5" readonly required>
+                                <small class="settings-hint">For Full Year, enter the whole year's credits (e.g. 1). Each semester tracks half. For a semester-only class, enter that semester's credits (e.g. 0.5).</small>
                             </div>
                         </div>
                         <div class="form-group row-group">

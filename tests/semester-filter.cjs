@@ -5,15 +5,15 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const methods = source.slice(
-    source.indexOf('        configuredSemester() {'),
+    source.indexOf('        calendarDateKey(date) {'),
     source.indexOf('        calculateTrackedGPA(')
 );
-let month = 0;
+let today = '2026-10-21T12:00:00';
 class FixedDate extends Date {
-    getMonth() { return month; }
+    constructor(...args) { super(...(args.length ? args : [today])); }
 }
 const state = {
-    profile: { currentTerm: 'S1' },
+    profile: { currentTerm: 'S1', academicYearStart: 2026 },
     assignments: [
         { courseCode: 'fall', points: 90 },
         { courseCode: 'spring', points: 20 },
@@ -64,7 +64,11 @@ assert.deepEqual(
     ['fall', 'year', 'year'],
     'hides other-semester courses and dated full-year assignments while retaining undated work'
 );
-assert.equal(app.calculateSemesterGPA(app.schoolSemesterCourses(courses)).weighted, '54.333');
+assert.equal(app.calculateSemesterGPA(app.schoolSemesterCourses(courses)).weighted, '63.250');
+assert.equal(app.calculateSemesterGPA(app.schoolSemesterCourses(courses)).totalCredits, 2, 'full-year and legacy classes count half their credits in a semester');
+assert.equal(app.semesterCredits({ term: 'S1', credits: 0.5 }), 0.5, 'semester-only credits are not halved');
+assert.equal(app.semesterCredits({ term: 'FY', credits: 0 }), 0, 'non-credit classes remain non-credit');
+assert.equal(courses[2].credits, 1, 'semester calculations never change the full-course credit value');
 
 app.semesterView = 'S2';
 assert.equal(app.schoolSemester(), 'S2', 'the session view can switch from the configured semester');
@@ -78,13 +82,13 @@ assert.deepEqual(
     ['2027-02-12', 'undated'],
     'full-year classes show only assignments dated in the selected semester'
 );
-assert.equal(app.calculateSemesterGPA(app.schoolSemesterCourses(courses)).weighted, '24.333');
+assert.equal(app.calculateSemesterGPA(app.schoolSemesterCourses(courses)).weighted, '23.250');
 
 app.semesterView = null;
 state.profile.currentTerm = 'auto';
-month = 7;
+today = '2026-08-15T12:00:00';
 assert.equal(app.schoolSemester(), 'S1', 'automatic semester is Semester 1 from August through December');
-month = 0;
+today = '2027-01-01T12:00:00';
 assert.equal(app.schoolSemester(), 'S2', 'automatic semester is Semester 2 from January through July');
 
 console.log('Semester filter: configured and automatic defaults, session switching, full-year courses, linked assignments and term GPA passed.');

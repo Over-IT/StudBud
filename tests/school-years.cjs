@@ -24,7 +24,8 @@ vm.runInContext(source.slice(source.indexOf('    class AppOrchestrator'), source
 const { app, AppState } = sandbox;
 const plain = value => JSON.parse(JSON.stringify(value));
 const initial = () => ({
-    profile: { school: 'pchs', priorCredits: 2, priorWeightedGpa: 3, priorUnweightedGpa: 3 },
+    profile: { school: 'pchs', priorCredits: 2, priorWeightedGpa: 3, priorUnweightedGpa: 3,
+        schoolCalendar: { school: 'pchs', start: '08-18', semester2Start: '01-05', end: '05-22' } },
     courses: [
         { code: 'BIO', title: 'Honors Biology', school: 'pchs', isWeighted: true, category: 'Science', credits: 1, targetPct: 93,
             icSectionIDs: ['old-bio'], icName: 'HON BIO', categories: [{ id: 'test', name: 'Tests', weight: 100, icTermID: 'old-term' }] },
@@ -83,6 +84,7 @@ const local = JSON.parse(saved.get(AppState.STORAGE_KEY));
 assert.equal(local.academicYears.length, 1, 'year archive survives reload');
 assert.equal(local.courses.length, 0);
 assert.equal(AppState.state.profile.academicYearStart, 2026);
+assert.equal(AppState.state.profile.schoolCalendar.end, '05-22', 'user-set calendar dates persist for the next school year');
 assert.throws(() => app.buildSchoolYearArchive(2025, selections, true), /already been archived/);
 const prior = app.priorGPA();
 assert.equal(prior.credits, 4, 'failed attempted credits still count in GPA');
@@ -105,6 +107,7 @@ assert.doesNotMatch(archiveView.innerHTML, /<input|<select|data-action=/, 'the a
 async function persistence() {
     const backup = JSON.parse(await AppState.exportAppState());
     assert.equal(backup.state.academicYears[0].transcript[0].finalGrade, 'A', 'cloud/backup payload includes the final transcript');
+    assert.equal(backup.state.profile.schoolCalendar.end, '05-22', 'calendar preferences sync and back up with the profile');
     AppState.state.academicYears = [];
     await AppState.importAppState(JSON.stringify(backup));
     assert.equal(AppState.state.academicYears[0].assignments.length, 2, 'backup restore preserves archived work');

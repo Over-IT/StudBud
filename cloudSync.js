@@ -46,7 +46,10 @@
         static mergeData(base, local, remote, field = 'account') {
             const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
             if (field === 'account.state' && local && remote
-                && local.profile?.academicYearStart !== remote.profile?.academicYearStart) {
+                && local.profile?.academicYearStart !== remote.profile?.academicYearStart
+                && (base?.profile?.academicYearStart !== undefined
+                    || !equal(local.academicYears || [], base?.academicYears || [])
+                    || !equal(remote.academicYears || [], base?.academicYears || []))) {
                 const baselineYear = base?.profile?.academicYearStart;
                 const previousYear = local.profile?.academicYearStart === baselineYear ? local
                     : remote.profile?.academicYearStart === baselineYear ? remote : null;

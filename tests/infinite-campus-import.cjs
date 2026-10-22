@@ -157,6 +157,13 @@ const options = { catalog, today: '2026-01-20', now: 1768900000000 };
         .classes.some(entry => entry.existingCode), 'never targets a retained class from another school');
 }
 const first = IC.applyImportPlan(model, plan, { courses: [], assignments: [], schedule: { all: { 8: 'KEEP' } } }, options);
+assert.equal(first.schedule.ic.school, 'pchs', 'imported calendar dates stay tied to the selected school');
+assert.deepStrictEqual(plain(first.schedule.ic.terms), plain(model.terms), 'term dates are retained for automatic semester and school-year boundaries');
+const semesterPlan = plain(plan);
+semesterPlan.classes.find(entry => entry.key === calc.key).term = 'S1';
+const semesterOnly = IC.applyImportPlan(model, semesterPlan, {}, options);
+assert.equal(semesterOnly.courses.find(course => course.catalogCode === '119801/119802').credits, 0.5,
+    'a single semester of an annual catalog class imports only half the annual credits');
 const calcCourse = first.courses.find(course => course.catalogCode === '119801/119802');
 assert.strictEqual(calcCourse.title, 'AP Calculus AB');
 assert.strictEqual(calcCourse.isWeighted, true);

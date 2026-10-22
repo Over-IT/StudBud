@@ -303,6 +303,17 @@ window.STUDBUD_SCHOOL_COURSES = window.STUDBUD_SCHOOL_COURSES || {};
 // Courses from earlier catalogs that no school currently offers; still resolvable for saved data.
 const PARKWAY_RETIRED_COURSES = [];
 
+// District calendars: https://www.parkwayschools.net/about-parkway/calendar
+window.STUDBUD_ACADEMIC_CALENDARS = {
+    2025: { start: '2025-08-18', semester2Start: '2026-01-05', end: '2026-05-22' },
+    2026: { start: '2026-08-25', semester2Start: '2027-01-05', end: '2027-05-28' }
+};
+
+window.studbudCatalogCreditsForTerm = (course, term) => {
+    const credits = Number(course.credits) || 0;
+    return credits > 0.5 && ['S1', 'S2'].includes(term) ? credits / 2 : credits;
+};
+
 // Every Parkway high school shares a grading scale, graduation requirements and Infinite Campus portal.
 // "pchs" stays the id for Central so existing accounts keep working.
 const PARKWAY_SCHOOL_LIST = [
