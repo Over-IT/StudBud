@@ -559,6 +559,10 @@ Review each final letter grade and full-course attempted credits against the rep
 
 **GPA display:** the usual **GPA** number includes Honors/AP weighting. Home, the class overview and hypothetical grade comparisons keep unweighted figures behind **View unweighted GPA** disclosures. Analytics still offers an explicit Unweighted GPA measure; goal calculation options and the optional past unweighted GPA field are tucked into secondary disclosures. This changes presentation only, not grade scales, stored grades or either GPA calculation.
 
+**Class goal shortcut:** **Set goal / Edit goal** on a class card opens a focused percentage-goal dialog, not the full class editor. Save a target or leave it blank to remove the goal; Cancel changes nothing. GPA-driven goals keep explicitly saved class targets fixed and rebalance the other targets. Class names, credits, terms, weighting and categories are unchanged. **Edit class** remains available in the grade breakdown.
+
+**Desktop sidebar shortcuts:** screens at least 1101 px wide and 850 px tall show Settings and Staff tools (only for authorized staff) directly in the sidebar. Appearance, Audio and Help remain inside Settings rather than getting separate sidebar entries. Smaller/shorter screens keep the compact navigation without these extra rows; Settings stays accessible from the header and Staff tools from Settings. Collapsing the desktop sidebar retains the shortcut icons and their tooltips.
+
 **Today's schedule** follows the school's weekday rotation and shows incomplete assignments, quizzes and tests due today under the matching class. Work for a class that does not meet today appears separately. Weekends and days with no matching classes explain that your schedule is still saved, offer **Edit schedule**, and include a collapsed preview of the next school day's classes.
 
 ### Administration

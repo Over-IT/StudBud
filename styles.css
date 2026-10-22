@@ -4996,6 +4996,12 @@ body.sidebar-collapsed .nav-section-label { display: none; }
 .workspace-tab { border-width: 1px; font-weight: 700; box-shadow: none; }
 .workspace-tab.selected { border-width: 1px; box-shadow: none; }
 
+.desktop-nav-extra { display: none; }
+@media (min-width: 1101px) and (min-height: 850px) {
+    #main-nav .nav-item.desktop-nav-extra:not(.hidden) { display: flex; }
+    body:not(.sidebar-collapsed) #main-nav .nav-section-label.desktop-nav-extra { display: block; }
+}
+
 @media (min-width: 601px) and (max-width: 1100px) {
     :root { --sidebar-width: 204px; }
     .header-right { flex-wrap: wrap; }

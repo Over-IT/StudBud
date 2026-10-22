@@ -190,4 +190,56 @@ assert.equal(app.gpaGoalPreview.reachable, true);
 edit({ goalLock: 'math' }, '', false);
 assert.equal(app.gpaGoalPreview.courses[0].targetLocked, false, 'unlocking rebalances instead of preserving a stale fixed target');
 assert.equal(state.courses[0].targetLocked, true, 'lock toggles remain preview-only until Apply');
+// A class-card goal shortcut edits only the goal, independently of class metadata.
+sandbox.AppState.updateCourse = (code, changes) => {
+    state.courses = state.courses.map(course => course.code === code ? { ...course, ...changes } : course);
+};
+state.settings = { gradeGoalSource: 'grades' };
+state.courses = [{
+    code: 'goal', title: '<Goal class>', credits: 1, term: 'FY', isWeighted: true,
+    categories: [{ id: 'tests', weight: 100 }], targetPct: null, icSectionIDs: ['123']
+}];
+const metadata = () => JSON.stringify(state.courses.map(({ targetPct, targetGrade, targetLocked, ...rest }) => rest));
+const originalMetadata = metadata();
+let opened;
+app.openModal = id => { opened = id; };
+const beforeGoal = JSON.stringify(state);
+app.openCourseGoal('goal');
+assert.equal(opened, 'course-goal-modal');
+assert.equal(node('course-goal-name').textContent, '<Goal class>', 'class names are rendered as text');
+assert.equal(node('course-goal-percent').value, '');
+node('course-goal-percent').value = '92.25';
+app.closeModal();
+assert.equal(JSON.stringify(state), beforeGoal, 'canceling a goal dialog never saves');
+app.saveCourseTarget('goal', '92.25');
+assert.equal(state.courses[0].targetPct, 92.25);
+assert.equal(metadata(), originalMetadata, 'saving a goal preserves all class metadata and Campus identity');
+app.openCourseGoal('goal');
+assert.equal(node('course-goal-percent').value, '92.25');
+for (const invalid of ['NaN', '-1', '101', 'Infinity']) {
+    const beforeInvalid = JSON.stringify(state);
+    assert.throws(() => app.saveCourseTarget('goal', invalid), /target between/);
+    assert.equal(JSON.stringify(state), beforeInvalid);
+}
+assert.throws(() => app.openCourseGoal('missing'), /no longer exists/);
+assert.throws(() => app.saveCourseTarget('missing', '90'), /no longer exists/);
+app.saveCourseTarget('goal', '0');
+assert.equal(state.courses[0].targetPct, 0, 'zero is a valid goal, not an empty target');
+app.saveCourseTarget('goal', ' ');
+assert.equal(state.courses[0].targetPct, null);
+assert.equal(state.courses[0].targetGrade, null);
+assert.equal(state.courses[0].targetLocked, false);
+state.settings = { gradeGoalSource: 'gpa', gradeGoalWeight: 'weighted', gradeGoalGpa: 3 };
+app.saveCourseTarget('goal', '93.25');
+assert.equal(state.courses[0].targetPct, 93.25, 'GPA balancing preserves the explicitly entered percentage');
+assert.equal(state.courses[0].targetLocked, true);
+assert.equal(metadata(), originalMetadata);
+const html = read('index.html');
+const goalDialog = html.slice(html.indexOf('<div id="course-goal-modal"'), html.indexOf('<div id="target-gpa-modal"'));
+assert.match(goalDialog, /form="course-goal-form"/);
+assert.match(goalDialog, /id="course-goal-percent"/);
+assert.doesNotMatch(goalDialog, /id="course-(?:name|credits|term|manual-weighted)"/);
+assert.match(source, /data-action="edit-course-goal"[^>]*aria-label="Edit grade target/);
+assert.match(source, /action === 'edit-course-goal'\) this\.openCourseGoal\(id\)/);
+assert.match(source, /form\.id === 'course-goal-form'\) this\.saveCourseTarget/);
 console.log('Grade target scores: points, weights, partial categories, impossible/unknown work, guidance and GPA locks/preview/apply passed.');

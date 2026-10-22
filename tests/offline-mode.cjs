@@ -190,6 +190,12 @@ async function run() {
     abortSlowRequest();
     assert.equal(await response, cached, 'stalled response bodies also fall back to cached assets');
     const html = source('index.html');
+    const sidebar = html.slice(html.indexOf('<nav id="main-nav">'), html.indexOf('<!-- MAIN CONTENT AREA -->'));
+    assert.equal((sidebar.match(/class="nav-item desktop-nav-extra(?: hidden)?"/g) || []).length, 2,
+        'desktop extras contain only Settings and permission-gated Staff tools');
+    assert.doesNotMatch(sidebar, /data-target="(?:appearance|sound|about)-view"/,
+        'appearance, audio and help stay inside Settings, not in the sidebar');
+    assert.match(sidebar, /data-target="settings-view" data-also="appearance-view sound-view about-view"/);
     assert.equal((html.match(/<li class="nav-item(?: active)?" data-target=/g) || []).length, 6, 'six primary workspaces replace the long sidebar; Settings stays in the header');
     assert.match(html, /id="workspace-tabs"/);
     assert.match(html, /id="offline-start-btn"/);

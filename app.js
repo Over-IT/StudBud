@@ -1914,7 +1914,7 @@
                         </div>
                         <div class="class-grade-scale" aria-hidden="true"><span>0%</span><span>${scale}%</span></div>
                         <p class="class-goal-status${reached ? ' is-reached' : ''}"><i class="fas fa-${reached ? 'circle-check' : target === null ? 'bullseye' : 'arrow-trend-up'}" aria-hidden="true"></i> ${status}</p>
-                        <div class="class-card-actions"><button class="primary-btn" data-action="open-class" data-id="${this.escapeHTML(course.code)}" aria-label="Open ${title}">Open class <i class="fas fa-arrow-right" aria-hidden="true"></i></button><button class="text-btn" data-action="edit-course" data-id="${this.escapeHTML(course.code)}" aria-label="Edit grade target for ${title}">${target === null ? 'Set goal' : 'Edit goal'}</button></div>
+                        <div class="class-card-actions"><button class="primary-btn" data-action="open-class" data-id="${this.escapeHTML(course.code)}" aria-label="Open ${title}">Open class <i class="fas fa-arrow-right" aria-hidden="true"></i></button><button class="text-btn" data-action="edit-course-goal" data-id="${this.escapeHTML(course.code)}" aria-label="Edit grade target for ${title}">${target === null ? 'Set goal' : 'Edit goal'}</button></div>
                     </article>`;
                 }).join('') : `<p class="empty-state glass-card">No classes for ${this.escapeHTML(this.termLabel(semester))} yet. Switch semesters or add a class.</p>`;
             }
@@ -5163,6 +5163,7 @@
             window.NexusApp.isAdmin = this.isAdmin;
             window.NexusApp.canAccessStaff = this.canAccessStaff;
             document.getElementById('admin-nav-item')?.classList.toggle('hidden', !this.canAccessStaff);
+            document.getElementById('admin-sidebar-item')?.classList.toggle('hidden', !this.canAccessStaff);
             this.classrooms?.refreshNav();
             if (this.Router?.activeRoute === 'school-community' && this.schoolCommunity
                 && this.schoolCommunity.context !== this.schoolCommunity.key()) await this.schoolCommunity.render();
@@ -10857,7 +10858,7 @@
                 }
                 return;
             }
-            if (!['course-form', 'assignment-form', 'calendar-event-form', 'card-form', 'deck-editor-form', 'schedule-form', 'study-log-form', 'grade-scenario-assignment-form'].includes(form.id)) return;
+            if (!['course-form', 'course-goal-form', 'assignment-form', 'calendar-event-form', 'card-form', 'deck-editor-form', 'schedule-form', 'study-log-form', 'grade-scenario-assignment-form'].includes(form.id)) return;
             event.preventDefault();
             if (form.dataset.saving === 'true') return;
             form.dataset.saving = 'true';
@@ -10865,6 +10866,8 @@
             submitButtons.forEach(button => { button.disabled = true; });
             try {
                 if (form.id === 'course-form') await this.saveCourse();
+                if (form.id === 'course-goal-form') this.saveCourseTarget(
+                    document.getElementById('course-goal-id').value, document.getElementById('course-goal-percent').value);
                 if (form.id === 'assignment-form') this.saveAssignment();
                 if (form.id === 'calendar-event-form') this.saveCalendarEvent();
                 if (form.id === 'card-form') await this.saveCard();
@@ -11162,6 +11165,34 @@
             else if (preset === 'binaural') Soundscape.startBinaural();
             else if (preset === 'white') Soundscape.startNoise('white');
             button.classList.add('active');
+        }
+
+        openCourseGoal(code) {
+            const course = (AppState.get('courses') || []).find(item => item.code === code);
+            if (!course) throw new Error('That class no longer exists. Refresh your classes and try again.');
+            document.getElementById('course-goal-id').value = course.code;
+            document.getElementById('course-goal-name').textContent = course.title;
+            document.getElementById('course-goal-percent').value = this.hasCourseTarget(course) ? String(course.targetPct) : '';
+            this.openModal('course-goal-modal');
+        }
+
+        saveCourseTarget(code, rawValue) {
+            const courses = AppState.get('courses') || [];
+            const course = courses.find(item => item.code === code);
+            if (!course) throw new Error('That class no longer exists. Refresh your classes and try again.');
+            const text = String(rawValue).trim();
+            const targetPct = text === '' ? null : Number(text);
+            if (targetPct !== null && (!Number.isFinite(targetPct) || targetPct < 0 || targetPct > 100)) {
+                throw new Error('Enter a target between 0 and 100%, or leave it blank to remove the goal.');
+            }
+            const changes = {
+                targetPct, targetGrade: targetPct === null ? null : this.gradeForPercentage(targetPct, course),
+                ...(targetPct === null ? { targetLocked: false } : {})
+            };
+            if (AppState.get('settings')?.gradeGoalSource === 'gpa') {
+                AppState.saveGradeGoals(this.rebalanceGradeGoals(courses.map(item => item.code === code
+                    ? { ...item, ...changes, targetLocked: targetPct !== null } : item)));
+            } else AppState.updateCourse(code, changes);
         }
 
         openCourseForm(course) {
@@ -11760,6 +11791,7 @@
                 Router.navigate('class');
             }
             if (action === 'edit-course') this.openCourseForm(courses.find(item => item.code === id));
+            if (action === 'edit-course-goal') this.openCourseGoal(id);
             if (action === 'delete-course' && await window.StudBudDialogs.confirm('Delete this class and its assignments?')) {
                 AppState.removeCourse(id);
                 this.renderUI();
@@ -11851,25 +11883,8 @@
                 this.renderUI();
             }
             if (action === 'save-class-target') {
-                const course = courses.find(item => item.code === Router.selectedClassCode);
                 const input = document.getElementById('class-target-percent');
-                if (course && String(input.value).trim() === '') {
-                    if (AppState.get('settings')?.gradeGoalSource === 'gpa') {
-                        AppState.saveGradeGoals(this.rebalanceGradeGoals(courses.map(item => item.code === course.code
-                            ? { ...item, targetPct: null, targetGrade: null, targetLocked: false } : item)));
-                    } else AppState.updateCourse(course.code, { targetPct: null, targetGrade: null, targetLocked: false });
-                    this.renderClassDetail();
-                    return;
-                }
-                const targetPct = Number(input.value);
-                if (!course || !Number.isFinite(targetPct) || targetPct < 0 || targetPct > 100) {
-                    window.StudBudDialogs.notify('Enter a target between 0 and 100%.');
-                    return;
-                }
-                if (AppState.get('settings')?.gradeGoalSource === 'gpa') {
-                    AppState.saveGradeGoals(this.rebalanceGradeGoals(courses.map(item => item.code === course.code
-                        ? { ...item, targetPct, targetGrade: this.gradeForPercentage(targetPct, course), targetLocked: true } : item)));
-                } else AppState.updateCourse(course.code, { targetPct, targetGrade: this.gradeForPercentage(targetPct, course) });
+                this.saveCourseTarget(Router.selectedClassCode, input.value);
                 this.renderClassDetail();
             }
             if (action === 'toggle-deck-pin') {

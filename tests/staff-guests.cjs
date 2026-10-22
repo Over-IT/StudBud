@@ -5,7 +5,7 @@ const path = require('node:path');
 const source = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 const nodes = new Map();
 const node = () => ({ value: '', textContent: '', innerHTML: '', classList: { toggle() {}, add() {}, remove() {} } });
-for (const id of ['account-name', 'admin-list', 'admin-status', 'admin-search', 'admin-nav-item', 'admin-game-test-mode', 'admin-game-test-bots', 'admin-game-test-seed', 'admin-deck-deck']) nodes.set(id, node());
+for (const id of ['account-name', 'admin-list', 'admin-status', 'admin-search', 'admin-nav-item', 'admin-sidebar-item', 'admin-game-test-mode', 'admin-game-test-bots', 'admin-game-test-seed', 'admin-deck-deck']) nodes.set(id, node());
 const calls = [];
 const sandbox = {
     console, Map, Set, Date, Math, confirm: () => true, prompt: () => 'reason',
@@ -39,7 +39,14 @@ async function run() {
     for (const role of ['', 'teacher', 'tester', 'moderator', 'admin', 'both']) {
         admin = role === 'admin';
         tags = role === 'both' ? ['tester', 'moderator'] : role && !admin ? [role] : [];
+        const visibility = new Map();
+        for (const id of ['admin-nav-item', 'admin-sidebar-item']) {
+            nodes.get(id).classList.toggle = (name, hidden) => { if (name === 'hidden') visibility.set(id, hidden); };
+        }
         await app.refreshAdminAccess();
+        for (const id of ['admin-nav-item', 'admin-sidebar-item']) {
+            assert.equal(visibility.get(id), !['tester', 'moderator', 'admin', 'both'].includes(role), `${role} staff shortcut visibility`);
+        }
         assert.equal(app.canTestGames, ['tester', 'admin', 'both'].includes(role), `${role} testing gate`);
         assert.equal(app.canModerateFlashcards, ['moderator', 'admin', 'both'].includes(role), `${role} moderation gate`);
         if (app.canTestGames) assert.doesNotThrow(() => app.startPractice('duel', { testing: true }));

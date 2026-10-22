@@ -152,11 +152,12 @@
                     <li id="classes-nav-item" class="nav-item workspace-child hidden" data-target="classes-view" role="button" tabindex="0">
                         <i class="fas fa-school"></i> <span>Teacher classes</span>
                     </li>
-                    <li class="nav-item workspace-child" data-target="about-view" role="button" tabindex="0">
-                        <i class="fas fa-circle-info"></i> <span>About</span>
-                    </li>
-                    <li class="nav-item workspace-child" data-target="settings-view" data-also="appearance-view sound-view about-view" role="button" tabindex="0">
+                    <li class="nav-section-label desktop-nav-extra" aria-hidden="true">Tools &amp; preferences</li>
+                    <li class="nav-item desktop-nav-extra" data-target="settings-view" data-also="appearance-view sound-view about-view" role="button" tabindex="0" title="Settings">
                         <i class="fas fa-gear"></i> <span>Settings</span>
+                    </li>
+                    <li id="admin-sidebar-item" class="nav-item desktop-nav-extra hidden" data-target="admin-view" role="button" tabindex="0" title="Staff tools">
+                        <i class="fas fa-user-shield" aria-hidden="true"></i> <span>Staff tools</span>
                     </li>
                 </ul>
             </nav>
@@ -1745,6 +1746,28 @@
             </div>
 
             <!-- Target GPA Solver Modal -->
+            <div id="course-goal-modal" class="glass-card modal-content hidden">
+                <div class="modal-header">
+                    <h2>Class grade goal</h2>
+                    <button type="button" class="close-modal-btn icon-btn" aria-label="Close grade goal"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body">
+                    <p id="course-goal-name"></p>
+                    <form id="course-goal-form">
+                        <input type="hidden" id="course-goal-id">
+                        <div class="form-group">
+                            <label for="course-goal-percent">Target grade (%)</label>
+                            <input type="number" id="course-goal-percent" min="0" max="100" step="0.01" placeholder="Optional" aria-describedby="course-goal-hint">
+                            <p id="course-goal-hint" class="settings-hint">Leave blank to remove this goal. With a GPA goal, saving a class target keeps it fixed while other targets adjust.</p>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="secondary-btn cancel-modal-btn">Cancel</button>
+                    <button type="submit" form="course-goal-form" class="primary-btn">Save goal</button>
+                </div>
+            </div>
+
             <div id="target-gpa-modal" class="glass-card modal-content hidden">
                 <div class="modal-header">
                     <h2>Grade &amp; GPA goals</h2>
