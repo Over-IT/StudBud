@@ -92,13 +92,35 @@
             };
         }
 
-        dailyPlan(tasks, { date, today, budget = 90, studiedMinutes = 0 }) {
+        availableMinutes(settings = {}, date) {
+            const day = this.dateNumber(date);
+            if (!Number.isFinite(day)) throw new Error('Choose a valid availability date.');
+            const validMinutes = value => Number.isInteger(value) && value >= 0 && value <= 480;
+            const override = settings.plannerDayMinutes?.[date];
+            if (override !== undefined) {
+                if (!validMinutes(override)) throw new Error('Available time must be a whole number from 0 to 480 minutes.');
+                return override;
+            }
+            const weekday = new Date(day * 86400000).getUTCDay();
+            const workdays = settings.plannerWorkdays ?? [0, 1, 2, 3, 4, 5, 6];
+            if (!Array.isArray(workdays) || workdays.some(value => !Number.isInteger(value) || value < 0 || value > 6)) {
+                throw new Error('Choose valid study days.');
+            }
+            if (!workdays.includes(weekday)) return 0;
+            const week = this.period(date, 'week').start;
+            const minutes = settings.plannerWeekMinutes?.[week]
+                ?? settings.plannerWeekdayMinutes?.[weekday] ?? settings.plannerDailyMinutes ?? 90;
+            if (!validMinutes(minutes)) throw new Error('Available time must be a whole number from 0 to 480 minutes.');
+            return minutes;
+        }
+
+        dailyPlan(tasks, { date, today, budget = 90, studiedMinutes = 0, availability }) {
             const day = this.dateNumber(date);
             if (!Number.isFinite(day) || !Number.isFinite(this.dateNumber(today))) {
                 throw new Error('Choose a valid day for your plan.');
             }
-            if (!Number.isInteger(budget) || budget < 15 || budget > 480) {
-                throw new Error('Daily available time must be a whole number from 15 to 480 minutes.');
+            if (!Number.isInteger(budget) || budget < 0 || budget > 480) {
+                throw new Error('Daily available time must be a whole number from 0 to 480 minutes.');
             }
             const candidates = tasks.filter(task => task.open).map(task => {
                 const due = this.dateNumber(String(task.dueDate || '').slice(0, 10));
@@ -111,8 +133,13 @@
                 const assessment = ['quiz', 'test'].includes(String(task.kind || '').toLowerCase());
                 // Daily study blocks include work already logged on this day, so a checkpoint cannot create a new block.
                 const logged = Math.max(0, Number(task.dayMinutes) || 0);
+                const daysToWork = Math.max(1, Math.min(5, days || 1));
+                const capacity = availability ? Array.from({ length: daysToWork }, (_, index) =>
+                    this.availableMinutes(availability, new Date((day + index) * 86400000).toISOString().slice(0, 10)))
+                    .reduce((sum, minutes) => sum + minutes, 0) : daysToWork * budget;
+                const share = capacity > 0 ? budget / capacity : 1 / daysToWork;
                 const dailyTarget = Math.min(remaining + logged, 60,
-                    Math.max(15, Math.ceil((remaining + logged) / Math.max(1, Math.min(5, days || 1)) / 5) * 5));
+                    Math.max(15, Math.ceil((remaining + logged) * share / 5) * 5));
                 const minutes = urgent ? remaining
                     : assessment || remaining > 60 ? Math.max(0, Math.ceil(dailyTarget - logged)) : remaining;
                 let reason = task.icMissing ? 'Marked missing. Check what needs to be finished or turned in.'

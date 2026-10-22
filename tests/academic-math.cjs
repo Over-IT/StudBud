@@ -146,9 +146,12 @@ const app = sandbox.app;
     assert.doesNotMatch(plannerMarkup, /quad-1-list|planner-suggestions/, 'old overlapping suggestion and urgency panels are removed');
     assert.match(plannerMarkup, /data-action="planner-add-assignment"/);
     assert.match(plannerMarkup, /data-action="add-quiz"/);
-    for (const id of ['planner-day-queue', 'planner-date', 'planner-daily-minutes', 'assignment-status-summary', 'assignment-search', 'assignment-course-filter', 'assignment-status-filter', 'assignment-result-count', 'assignment-body', 'planner-assessment-body']) {
+    for (const id of ['planner-day-queue', 'planner-date', 'planner-current-minutes', 'assignment-status-summary', 'assignment-search', 'assignment-course-filter', 'assignment-status-filter', 'assignment-result-count', 'assignment-body', 'planner-assessment-body']) {
         assert.equal(plannerMarkup.split(`id="${id}"`).length - 1, 1, `${id} remains unique`);
     }
+    assert.doesNotMatch(plannerMarkup, /id="planner-(availability|daily-minutes|weekday-controls)"/,
+        'detailed study schedule controls stay out of the usual Planner');
+    assert.equal(html.split('id="planner-daily-minutes"').length - 1, 1, 'the default lives in preferences once');
     assert.match(html, /id="assignment-status-filter" type="hidden" value="todo"/);
     assert.match(html, /id="delete-assignment-editor-btn"[^>]*data-action="delete-assignment"/);
     assert.match(appSource, /deleteButton\.classList\.toggle\('hidden', !assignment\)/, 'delete is available only when editing saved work');

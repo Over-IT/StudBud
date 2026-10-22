@@ -4,7 +4,17 @@ const path = require('node:path');
 const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const state = { courses: [], assignments: [], flashcards: [], settings: {} };
-const sandbox = { window: {}, AppState: { get: key => state[key] }, document: { getElementById: () => ({}) }, Map, Set };
+const saveEvents = [];
+const sandbox = {
+    window: {},
+    AppState: {
+        get: key => state[key],
+        set: (key, value) => { state[key] = value; saveEvents.push(key); }
+    },
+    document: { getElementById: () => ({}) },
+    Map,
+    Set
+};
 vm.createContext(sandbox);
 vm.runInContext(source.slice(source.indexOf('    class AppOrchestrator'), source.indexOf('    window.NexusApp ='))
     + '\nglobalThis.app = Object.create(AppOrchestrator.prototype);', sandbox);
@@ -12,6 +22,13 @@ const app = sandbox.app;
 app.tutorialCompletedSteps = new Set();
 app.tutorialInitialAnswers = new Map();
 app.completeTutorialAction = index => app.tutorialCompletedSteps.add(index);
+app.endTutorialUI = () => saveEvents.push('end-tour');
+app.syncTutorialUI = () => saveEvents.push('sync-tour');
+app.finishTutorial();
+assert.deepEqual(saveEvents, ['settings', 'end-tour', 'sync-tour'], 'dismissal saves before closing the tour');
+assert.equal(state.settings.tutorialSeen, true);
+assert.equal(state.settings.tutorialVersion, 3);
+saveEvents.length = 0;
 const check = (index, expected) => {
     app.tutorialStep = index;
     app.checkTutorialProgress();
@@ -28,6 +45,13 @@ state.settings.plannerDailyMinutes = 5;
 check(3, false);
 state.settings.plannerDailyMinutes = 45;
 check(3, true);
+app.tutorialCompletedSteps.delete(3);
+delete state.settings.plannerDailyMinutes;
+state.settings.plannerAvailabilityConfigured = true;
+check(3, true);
+assert.equal(app.tutorialSteps()[3].change, '#planner-current-minutes');
+assert.match(source, /if \(step.goal === 'budget'\) \{\s*this.openPlannerTime\(\);/,
+    'Try it explicitly opens the today time control, rather than focusing a hidden field');
 check(4, false);
 app.dashboardSprintAssignmentId = 'homework';
 check(4, true);

@@ -3477,16 +3477,64 @@
             }));
         }
 
-        dailyPlannerModel() {
-            const date = this.selectedPlannerDate();
+        renderPlannerAvailability() {
+            const settings = AppState.get('settings') || {};
+            const today = localDateKey(new Date());
+            const controls = document.getElementById('planner-weekday-controls');
+            if (!controls) return;
+            document.getElementById('planner-daily-minutes').value = settings.plannerDailyMinutes ?? 90;
+            const workdays = settings.plannerWorkdays ?? [0, 1, 2, 3, 4, 5, 6];
+            controls.innerHTML = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((name, day) =>
+                `<div class="planner-weekday"><label><input type="checkbox" id="planner-workday-${day}"${workdays.includes(day) ? ' checked' : ''}> ${name}</label>
+                <label for="planner-weekday-${day}" class="sr-only">${name} minutes (optional)</label>
+                <input type="number" id="planner-weekday-${day}" min="0" max="480" step="1" placeholder="Default minutes" value="${this.escapeHTML(String(settings.plannerWeekdayMinutes?.[day] ?? ''))}"${workdays.includes(day) ? '' : ' disabled'}></div>`
+            ).join('');
+            document.getElementById('planner-availability-status').textContent =
+                `Available today: ${window.PlannerEngine.availableMinutes(settings, today)} minutes.`;
+        }
+
+        openPlannerAvailability() {
+            Router.navigate('settings');
+            this.renderPlannerAvailability();
+            document.getElementById('planner-daily-minutes').focus();
+        }
+
+        openPlannerTime() {
+            this.plannerScope = 'day';
+            this.plannerDate = '';
+            Router.navigate('planner');
+            this.renderDailyPlanner();
+            document.getElementById('planner-current-minutes').focus();
+        }
+
+        renderPlannerTime() {
+            const input = document.getElementById('planner-current-minutes');
+            if (!input) return;
+            const settings = AppState.get('settings') || {};
+            const date = this.selectedPlannerDate(), scope = this.plannerScope || 'day';
+            const week = window.PlannerEngine.period(date, 'week').start;
+            document.querySelector('.planner-day-controls .planner-budget').classList.toggle('hidden', scope === 'month');
+            document.getElementById('planner-time-label').textContent = scope === 'week'
+                ? 'Minutes per workday this week' : date === localDateKey(new Date()) ? "Today's study time" : "This day's study time";
+            input.value = (scope === 'week' ? settings.plannerWeekMinutes?.[week] : settings.plannerDayMinutes?.[date]) ?? '';
+            const fallback = scope === 'week' ? settings.plannerDailyMinutes ?? 90
+                : window.PlannerEngine.availableMinutes({ ...settings, plannerDayMinutes: {} }, date);
+            input.placeholder = String(fallback);
+            document.getElementById('planner-time-hint').textContent = scope === 'week'
+                ? 'Per selected workday, not a weekly total. Blank uses preferences; day overrides take priority.'
+                : `Blank uses your usual schedule (${fallback} min).`;
+        }
+
+        dailyPlannerModel(date = this.selectedPlannerDate()) {
             const today = localDateKey(new Date());
             const history = (AppState.get('studyHistory') || []).filter(session => {
                 const at = new Date(session.timestamp);
                 return Number.isFinite(at.getTime()) && localDateKey(at) === date;
             });
             const tasks = this.plannerTasks(history);
+            const settings = AppState.get('settings') || {};
             return { ...window.PlannerEngine.dailyPlan(tasks, {
-                date, today, budget: AppState.get('settings')?.plannerDailyMinutes ?? 90,
+                date, today, budget: window.PlannerEngine.availableMinutes(settings, date), availability: settings,
                 studiedMinutes: history.reduce((sum, session) => sum + Math.max(0, Number(session.durationSec) || 0) / 60, 0)
             }), tasks,
                 workMinutes: history.filter(session => session.activityType === 'work').reduce((sum, session) => sum + Math.max(0, Number(session.durationSec) || 0) / 60, 0)
@@ -3501,7 +3549,6 @@
             const daily = scope === 'day' && date >= today;
             document.getElementById('planner-daily-layout').classList.toggle('hidden', !daily);
             document.getElementById('planner-day-summary').classList.toggle('hidden', !daily);
-            document.querySelector('.planner-budget').classList.toggle('planner-budget-inactive', !daily);
             panel.classList.toggle('hidden', daily);
             document.querySelectorAll('[data-action="planner-scope"]').forEach(button =>
                 button.setAttribute('aria-pressed', String(button.dataset.id === scope)));
@@ -3570,7 +3617,7 @@
             const scope = this.plannerScope || 'day';
             document.querySelector('[data-action="planner-previous-day"]').setAttribute('aria-label', `Previous ${scope}`);
             document.querySelector('[data-action="planner-next-day"]').setAttribute('aria-label', `Next ${scope}`);
-            document.getElementById('planner-daily-minutes').value = plan.budget;
+            this.renderPlannerTime();
             document.getElementById('planner-day-heading').textContent = title;
             document.getElementById('planner-day-description').textContent = isToday
                 ? 'Start with the first task. Your plan adjusts as you work.'
@@ -3613,7 +3660,7 @@
             const visibleCount = Math.max(3, plan.queue.findLastIndex(task => task.urgent) + 1);
             const remaining = plan.queue.slice(visibleCount);
             queue.innerHTML = plan.queue.length ? `<ol class="planner-day-list">${plan.queue.slice(0, visibleCount).map(renderCard).join('')}</ol>${remaining.length ? `<details class="planner-remaining"${moreExpanded ? ' open' : ''}><summary>${remaining.length} more planned task${remaining.length === 1 ? '' : 's'}</summary><ol class="planner-day-list" start="${visibleCount + 1}">${remaining.map((task, index) => renderCard(task, index + visibleCount)).join('')}</ol></details>` : ''}`
-                : `<div class="glass-card planner-day-empty"><h4>${plan.later.length ? 'Your plan is clear' : 'You are caught up'}</h4><p>${plan.later.length ? 'Open Upcoming work to add a task, or adjust your available time.' : 'Add your next assignment when you get it.'}</p><button type="button" class="secondary-btn" data-action="planner-add-assignment">Add assignment</button></div>`;
+                : `<div class="glass-card planner-day-empty"><h4>${plan.budget === 0 ? 'A day off from suggested work' : plan.later.length ? 'Your plan is clear' : 'You are caught up'}</h4><p>${plan.budget === 0 ? 'No automatic suggestions with 0 available minutes. Deadlines and work you choose still appear here.' : plan.later.length ? 'Open Upcoming work to add a task, or adjust your available time.' : 'Add your next assignment when you get it.'}</p><button type="button" class="secondary-btn" data-action="planner-add-assignment">Add assignment</button></div>`;
             const laterCard = task => `<li><div><strong>${this.escapeHTML(task.title)}</strong><small>${this.escapeHTML(task.courseTitle)} · ${task.dueDate ? `Due ${this.escapeHTML(String(task.dueDate).slice(0, 10))}` : 'No deadline'}${task.plannedDate ? ` · Work on ${this.escapeHTML(task.plannedDate)}` : ''}</small></div>
                 <div class="planner-card-actions"><button type="button" class="secondary-btn" data-action="planner-add-to-day" data-id="${this.escapeHTML(task.id)}">Add to this day</button><button type="button" class="text-btn" data-action="edit-assignment" data-id="${this.escapeHTML(task.id)}">Edit</button></div></li>`;
             document.getElementById('planner-upcoming-list').innerHTML = plan.later.length
@@ -8777,6 +8824,7 @@
         }
 
         syncPreferences() {
+            this.renderPlannerAvailability();
             const settings = AppState.get('settings') || {};
             const start = document.getElementById('settings-start-page');
             if (start) start.value = settings.startPage || 'dashboard';
@@ -9234,7 +9282,7 @@
                 { title: 'Set up your next school day', text: 'Use your own schoolwork: save a deadline, plan a work block, then answer a flashcard. The path checks off real progress, not button clicks. Skip anything you do not need.' },
                 { route: 'gpa', sel: '#gpa-view .open-ic-import-btn', title: 'Save your classes', text: 'Import from Infinite Campus using the computer or phone instructions. Review the results and save them. You can also use Add class. This checks off once a class is saved.', action: '#gpa-view .open-ic-import-btn', goal: 'classes' },
                 { route: 'planner', sel: '[data-action="planner-add-assignment"]', title: 'Save one real deadline', text: 'Add an assignment you actually need to finish. Choose its class, enter its due date, then save. You can edit all your deadlines later in Tasks.', action: '[data-action="planner-add-assignment"]', goal: 'assignment' },
-                { route: 'planner', sel: '.planner-day-controls', title: 'Set your time for today', text: 'How many minutes can you study today? Enter that in Daily available time. Your planner puts deadlines first and breaks the rest into smaller blocks.', change: '#planner-daily-minutes', goal: 'budget' },
+                { route: 'planner', sel: '.planner-day-controls .planner-budget', title: 'Set your time for today', text: "Choose Try it and enter today's study minutes. Leave it blank to use your usual schedule. Week view lets you set minutes per workday for that week. Defaults and workdays live in General settings. Deadlines stay visible even when over budget.", change: '#planner-current-minutes', goal: 'budget' },
                 { route: 'planner', sel: '#planner-day-queue', title: 'Start one work block', text: 'Choose Work on this for a task you can do now. Keep this page open while you work. Time pauses when you leave or go idle. Mark done only when finished.', action: '[data-action="planner-start-work"]', goal: 'work' },
                 { route: 'study-manage', sel: '#create-deck-btn', title: 'Save three useful flashcards', text: 'Make a New study set for your next quiz. Give it a topic, add at least three terms with answers, and save. Importing a set works too.', action: '#create-deck-btn', goal: 'deck' },
                 { route: 'flashcard', sel: '#deck-grid', title: 'Answer and rate one card', text: 'Choose Study on a set. Think of the answer, reveal it, then choose Again, Hard, Good or Easy honestly. Opening a set alone does not finish this step. Close study to return here.', action: '[data-action="study-deck"], [data-action="study-focus"]', goal: 'answer' },
@@ -9270,6 +9318,11 @@
                 else if (kind === 'collapse') this.toggleTutorialCollapsed(!this.tutorialCollapsed);
                 else if (kind === 'try') {
                     const step = this.tutorialSteps()[this.tutorialStep];
+                    if (step.goal === 'budget') {
+                        this.openPlannerTime();
+                        this.toggleTutorialCollapsed(true);
+                        return;
+                    }
                     const target = document.querySelector(step.action || step.change);
                     if (target && !target.disabled) { target.focus({ preventScroll: true }); if (step.action) target.click(); }
                     else root.querySelector('.tutorial-task-status').textContent = 'Nothing to try here yet. Skip this step and come back after adding your materials.';
@@ -9329,7 +9382,8 @@
             const decks = AppState.get('flashcards') || [];
             const completed = goal === 'classes' ? (AppState.get('courses') || []).length > 0
                 : goal === 'assignment' ? (AppState.get('assignments') || []).some(item => !item.dismissed && item.title && item.dueDate && item.courseCode)
-                : goal === 'budget' ? Number.isFinite(settings.plannerDailyMinutes) && settings.plannerDailyMinutes >= 15 && settings.plannerDailyMinutes <= 480
+                : goal === 'budget' ? settings.plannerAvailabilityConfigured === true
+                    || Number.isFinite(settings.plannerDailyMinutes) && settings.plannerDailyMinutes >= 15 && settings.plannerDailyMinutes <= 480
                 : goal === 'work' ? Boolean(this.dashboardSprintAssignmentId)
                 : goal === 'deck' ? decks.some(deck => (deck.cards || []).filter(card => card.front?.trim() && card.back?.trim()).length >= 3)
                 : goal === 'answer' ? decks.some(deck => (deck.cards || []).some(card =>
@@ -9389,6 +9443,7 @@
                 const menu = document.querySelector('.planner-add-menu');
                 if (menu) menu.open = true;
             }
+            if (step.goal === 'budget') this.openPlannerTime();
             this.tutorialSel = step.sel || '';
             root.querySelector('.tutorial-spot').hidden = true;
             this.tutorialPreparing = true;
@@ -9588,8 +9643,8 @@
         }
 
         finishTutorial() {
-            this.endTutorialUI();
             AppState.set('settings', { ...AppState.get('settings'), tutorialSeen: true, tutorialVersion: 3 });
+            this.endTutorialUI();
             this.syncTutorialUI();
         }
 
@@ -9931,32 +9986,23 @@
             const totalElement = document.getElementById('today-study-total');
             const classContainer = document.getElementById('today-study-by-class');
             if (!totalElement || !classContainer) return;
-            const recommendations = this.getStudyRecommendations();
+            const plan = this.dailyPlannerModel(localDateKey(new Date()));
+            const recommendations = plan.queue.filter(item => item.assessment);
             const byClass = new Map();
             recommendations.forEach(item => {
                 const current = byClass.get(item.courseCode) || { title: item.courseTitle, minutes: 0, items: 0 };
-                current.minutes += item.sessionMinutes;
+                current.minutes += item.minutes;
                 current.items += 1;
                 byClass.set(item.courseCode, current);
             });
-            // Decks tagged for an upcoming quiz/test get practice time under that class.
-            const upcomingIds = new Set(this.deckAssessmentOptionsIds());
-            const linkedDecks = (AppState.get('flashcards') || []).filter(deck => deck.assessmentId && upcomingIds.has(String(deck.assessmentId)) && (deck.cards || []).length);
-            linkedDecks.forEach(deck => {
-                const link = this.deckLinkInfo(deck);
-                const key = link.courseCode || `deck_${deck.id}`;
-                const current = byClass.get(key) || { title: link.course?.title || deck.title, minutes: 0, items: 0 };
-                current.minutes += Math.min(30, Math.max(10, Math.ceil((deck.cards || []).length / 10) * 5));
-                current.items += 1;
-                byClass.set(key, current);
-            });
             const totalMinutes = Array.from(byClass.values()).reduce((sum, item) => sum + item.minutes, 0);
             totalElement.textContent = totalMinutes
-                ? `Plan for about ${Math.floor(totalMinutes / 60)} hr ${totalMinutes % 60} min today across upcoming quizzes and tests${linkedDecks.length ? `, including ${linkedDecks.length} flashcard deck${linkedDecks.length === 1 ? '' : 's'} to practice` : ''}. Estimates use due dates, task size, and your study logs.`
-                : 'Nothing to study today. Add an upcoming quiz or test to get a study time estimate.';
+                ? `Plan for about ${Math.floor(totalMinutes / 60)} hr ${totalMinutes % 60} min of quiz/test preparation today, within your Planner's work and study plan.${plan.overBudget ? ` Deadlines and chosen work put the full plan ${plan.overBudget} min over your available time.` : ''}`
+                : plan.budget === 0 ? 'No automatic study suggestions today: you have 0 available minutes. Deadlines and chosen work remain in Planner.'
+                    : 'No quiz or test preparation in today’s available time. Open Planner to see deadlines, other work and upcoming tasks.';
             classContainer.innerHTML = byClass.size ? Array.from(byClass.values()).map(item =>
                 `<article class="study-progress-item"><strong>${this.escapeHTML(item.title)}</strong><span>${item.minutes} min · ${item.items} task${item.items === 1 ? '' : 's'}</span></article>`
-            ).join('') : '<div class="empty-state empty-state-cta"><p>Add a quiz or test to create a study plan.</p><button class="primary-btn" type="button" data-action="add-quiz"><i class="fas fa-plus"></i> Add a quiz or test</button></div>';
+            ).join('') : '<div class="empty-state empty-state-cta"><p>Your study suggestions follow your Planner availability.</p><button class="primary-btn" type="button" data-action="planner-availability">Adjust study availability</button></div>';
         }
 
         setCloudChartControls() {
@@ -10964,15 +11010,44 @@
                 this.renderDailyPlanner();
                 return;
             }
-            if (event.target.id === 'planner-daily-minutes') {
-                const minutes = Number(event.target.value);
-                if (!Number.isInteger(minutes) || minutes < 15 || minutes > 480) {
-                    event.target.value = AppState.get('settings')?.plannerDailyMinutes ?? 90;
-                    throw new Error('Available time must be a whole number from 15 to 480 minutes.');
+            if (['planner-daily-minutes', 'planner-current-minutes'].includes(event.target.id)
+                || /^planner-(workday|weekday)-[0-6]$/.test(event.target.id)) {
+                const settings = { ...AppState.get('settings'), plannerAvailabilityConfigured: true };
+                const id = event.target.id, raw = event.target.value.trim();
+                if (id.startsWith('planner-workday-')) {
+                    const day = Number(id.slice(-1));
+                    const days = new Set(settings.plannerWorkdays ?? [0, 1, 2, 3, 4, 5, 6]);
+                    if (event.target.checked) days.add(day);
+                    else days.delete(day);
+                    settings.plannerWorkdays = [...days].sort();
+                } else {
+                    const minutes = Number(raw);
+                    if ((raw === '' && id === 'planner-daily-minutes')
+                        || !Number.isInteger(minutes) || minutes < 0 || minutes > 480) {
+                        this.renderPlannerAvailability();
+                        this.renderPlannerTime();
+                        throw new Error('Available time must be a whole number from 0 to 480 minutes.');
+                    }
+                    if (id === 'planner-daily-minutes') settings.plannerDailyMinutes = minutes;
+                    else if (id === 'planner-current-minutes') {
+                        const date = this.selectedPlannerDate(), scope = this.plannerScope || 'day';
+                        if (scope === 'month') throw new Error('Choose Day or Week to set study time.');
+                        const field = scope === 'week' ? 'plannerWeekMinutes' : 'plannerDayMinutes';
+                        const key = scope === 'week' ? window.PlannerEngine.period(date, 'week').start : date;
+                        settings[field] = { ...settings[field] };
+                        if (raw === '') delete settings[field][key];
+                        else settings[field][key] = minutes;
+                    } else {
+                        settings.plannerWeekdayMinutes = { ...settings.plannerWeekdayMinutes };
+                        if (raw === '') delete settings.plannerWeekdayMinutes[id.slice(-1)];
+                        else settings.plannerWeekdayMinutes[id.slice(-1)] = minutes;
+                    }
                 }
-                AppState.set('settings', { ...AppState.get('settings'), plannerDailyMinutes: minutes });
+                AppState.set('settings', settings);
                 this.renderDailyPlanner();
-                document.getElementById('planner-plan-status').textContent = 'Daily available time saved. Deadlines remain in your plan even when they exceed this time.';
+                this.renderPlannerAvailability();
+                document.getElementById(id)?.focus({ preventScroll: true });
+                document.getElementById('planner-plan-status').textContent = 'Study availability saved. Deadlines remain visible even when they exceed your time.';
                 return;
             }
             const preference = {
@@ -11781,6 +11856,7 @@
         async handleDataAction(action, id) {
             const courses = AppState.get('courses') || [];
             const assignments = AppState.get('assignments') || [];
+            if (action === 'planner-availability') this.openPlannerAvailability();
             if (action === 'open-grade-goals') {
                 this.openGradeGoals();
                 this.openModal('target-gpa-modal');

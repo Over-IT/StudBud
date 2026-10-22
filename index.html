@@ -402,7 +402,7 @@
                                 <button type="button" class="secondary-btn" data-action="planner-next-day" aria-label="Next day"><i class="fas fa-chevron-right" aria-hidden="true"></i></button>
                                 <button type="button" class="text-btn" data-action="planner-today">Today</button>
                             </div>
-                            <label class="planner-budget" for="planner-daily-minutes"><span>Daily available time</span><span><input id="planner-daily-minutes" type="number" min="15" max="480" step="1" value="90"> min</span></label>
+                            <label class="planner-budget" for="planner-current-minutes"><span id="planner-time-label">Today's study time</span><span><input id="planner-current-minutes" type="number" min="0" max="480" step="1" aria-describedby="planner-time-hint"> min</span><small id="planner-time-hint">Leave blank to use preferences.</small></label>
                         </section>
                         <p id="planner-plan-status" class="settings-hint" role="status" data-planner-panel="plan"></p>
                         <div data-planner-panel="plan" class="planner-plan-content">
@@ -1123,6 +1123,14 @@
                             <label for="settings-study-direction">Ask with</label>
                             <select id="settings-study-direction"><option value="front">Term</option><option value="back">Definition</option><option value="mixed">Mixed sides</option></select>
                             <p class="settings-hint">Saved on this device. You can also change these during a study session.</p>
+                        </section>
+                        <section id="planner-availability" class="glass-card settings-wide" data-settings-panel="general">
+                            <h3 class="settings-section-heading"><i class="fas fa-calendar" aria-hidden="true"></i> Study time preferences</h3>
+                            <p class="settings-hint">Your usual schedule for suggested work. Override one day or week in Planner. These preferences do not create calendar events.</p>
+                            <label class="planner-budget" for="planner-daily-minutes"><span>Default minutes per study day</span><span><input id="planner-daily-minutes" type="number" min="0" max="480" step="1" value="90"> min</span></label>
+                            <fieldset class="planner-workdays"><legend>Days to work</legend><p class="settings-hint">Select your study days. Optional weekday times replace the default; leave them blank to use it.</p><div id="planner-weekday-controls"></div></fieldset>
+                            <p id="planner-availability-status" class="settings-hint" aria-live="polite"></p>
+                            <p class="settings-hint">0 means a day off. Deadlines and chosen work remain visible even when over budget. Changes save automatically.</p>
                         </section>
                         <section class="glass-card" data-settings-panel="general">
                             <h3 class="settings-section-heading"><i class="fas fa-user" aria-hidden="true"></i> Account</h3>

@@ -4788,7 +4788,11 @@ body.compact-ui .open-box { --ob-w: 110px; }
 .planner-view-switch { display: flex; grid-column: 1 / -1; justify-self: start; border-bottom: 1px solid var(--border-glass); gap: 4px; }
 .planner-view-switch button { min-width: 76px; min-height: 44px; padding: 10px 16px; border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: transparent; color: var(--text-secondary); font-weight: 700; }
 .planner-view-switch button[aria-pressed="true"] { border-bottom-color: var(--accent-primary); color: var(--accent-primary); background: color-mix(in srgb, var(--accent-primary) 7%, transparent); }
-.planner-budget-inactive { visibility: hidden; pointer-events: none; }
+#planner-availability { display: grid; gap: 16px; }
+.planner-workdays { min-width: 0; padding: 12px; border: 1px solid var(--border-glass); border-radius: 12px; }
+#planner-weekday-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.planner-weekday { display: grid; gap: 8px; }
+.planner-weekday input[type="number"] { width: 100%; min-height: 44px; }
 .grade-target-guidance { display: grid; gap: 10px; margin-top: 12px; }
 .grade-target-guidance > p, .grade-score-item > p { margin: 0; }
 .grade-target-guidance > small, .grade-score-item > small { color: var(--text-secondary); line-height: 1.5; }
@@ -4881,7 +4885,7 @@ body.compact-ui .open-box { --ob-w: 110px; }
 .planner-date-controls label, .planner-budget { display: grid; gap: 5px; font-size: .8rem; color: var(--text-secondary); font-weight: 700; }
 .planner-date-controls input { min-width: 0; min-height: 44px; }
 .planner-date-controls > button { min-height: 44px; min-width: 44px; }
-.planner-budget > span:last-child { display: flex; align-items: center; gap: 8px; }
+.planner-budget > span:nth-of-type(2) { display: flex; align-items: center; gap: 8px; }
 .planner-budget input { width: 92px; min-height: 44px; }
 #planner-plan-status:empty { display: none; }
 .planner-day-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }

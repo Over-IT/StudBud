@@ -56,7 +56,41 @@ assert.throws(() => engine.period(day, 'year'), /valid planner/);
     assert.equal(past.focus.length, 0, 'past agenda dates do not invent historical work suggestions');
 }
 assert.throws(() => plan([], { date: 'bad' }), /valid day/);
-for (const budget of [0, 14, 481, 20.5, NaN]) assert.throws(() => plan([], { budget }), /15 to 480/);
+for (const budget of [-1, 481, 20.5, NaN]) assert.throws(() => plan([], { budget }), /0 to 480/);
+{
+    const availability = { plannerDailyMinutes: 90, plannerWorkdays: [1, 2, 3, 4, 5],
+        plannerWeekdayMinutes: { 2: 30, 3: 60 } };
+    assert.equal(engine.availableMinutes({}, day), 90, 'existing users keep the daily 90-minute default');
+    assert.equal(engine.availableMinutes(availability, day), 30, 'weekday-specific minutes override the default');
+    assert.equal(engine.availableMinutes(availability, '2026-10-22'), 90);
+    assert.equal(engine.availableMinutes(availability, '2026-10-24'), 0, 'weekends can be days off');
+    assert.equal(engine.availableMinutes({ ...availability, plannerWorkdays: [] }, day), 0, 'no selected workdays is valid');
+    assert.equal(engine.availableMinutes({ ...availability, plannerDayMinutes: { '2026-10-24': 20 } }, '2026-10-24'), 20,
+        'a date-specific override can enable an otherwise excluded workday');
+    assert.equal(engine.availableMinutes({ ...availability, plannerDayMinutes: { '2026-10-19': 0 } }, day), 30,
+        'yesterday overrides do not carry into today');
+    const weekly = { ...availability, plannerWeekMinutes: { '2026-10-19': 40 } };
+    assert.equal(engine.availableMinutes(weekly, day), 40, 'a week override replaces weekday preferences');
+    assert.equal(engine.availableMinutes(weekly, '2026-10-24'), 0, 'a week override respects days off');
+    assert.equal(engine.availableMinutes(weekly, '2026-10-27'), 30, 'week overrides never leak into another week');
+    assert.equal(engine.availableMinutes({ ...weekly, plannerDayMinutes: { [day]: 15 } }, day), 15, 'day overrides take priority over week overrides');
+    assert.throws(() => engine.availableMinutes({ plannerDailyMinutes: -1 }, day), /0 to 480/);
+    assert.throws(() => engine.availableMinutes({ plannerWorkdays: [7] }, day), /valid study days/);
+    const study = task('weighted-time', { kind: 'test', dueDate: '2026-10-22', remainingMinutes: 90 });
+    const distributed = plan([study], { budget: 30, availability });
+    assert.equal(distributed.queue[0].minutes, 30, '30 of 90 available minutes gets a third of the remaining study');
+    const weighted = plan([study], { budget: 60,
+        availability: { ...availability, plannerWeekdayMinutes: { 2: 60, 3: 30 } } });
+    assert.equal(weighted.queue[0].minutes, 60,
+        'the larger-availability day gets two thirds of the 90-minute preparation, not equal calendar-day shares');
+    const checkpoint = plan([{ ...study, remainingMinutes: 75, dayMinutes: 15 }], { budget: 60, studiedMinutes: 15,
+        availability: { ...availability, plannerWeekdayMinutes: { 2: 60, 3: 30 } } });
+    assert.equal(checkpoint.queue[0].minutes, 45, 'logging work reduces the same availability-weighted block');
+    const fridayOnly = { plannerDailyMinutes: 90, plannerWorkdays: [5] };
+    assert.equal(plan([study], { budget: 0, availability: fridayOnly }).queue.length, 0, 'days off produce no flexible suggestions');
+    assert.equal(plan([task('deadline', { dueDate: day })], { budget: 0 }).queue.length, 1, 'days off never hide deadlines');
+    assert.equal(plan([task('chosen', { plannedDate: day })], { budget: 0 }).queue.length, 1, 'explicit work dates remain visible');
+}
 assert.deepEqual(ids(plan([])), []);
 assert.deepEqual(ids(plan([
     task('future', { dueDate: '2026-11-20' }),
@@ -119,7 +153,9 @@ state.studyHistory = [
     { id: 'invalid', timestamp: 'not a date', durationSec: 9999 }
 ];
 for (const id of ['planner-day-queue', 'planner-date', 'planner-daily-minutes', 'planner-day-heading', 'planner-day-description',
-    'planner-day-summary', 'planner-upcoming-list', 'planner-day-completed', 'planner-active-work', 'planner-library-count', 'planner-plan-status']) node(id);
+    'planner-day-summary', 'planner-upcoming-list', 'planner-day-completed', 'planner-active-work', 'planner-library-count', 'planner-plan-status',
+    'planner-availability', 'planner-weekday-controls', 'planner-current-minutes', 'planner-availability-status',
+    'planner-time-label', 'planner-time-hint', 'today-study-total', 'today-study-by-class']) node(id);
 app.renderDailyPlanner();
 assert.match(node('planner-day-queue').innerHTML, /&lt;Homework&gt;/);
 assert.match(node('planner-day-queue').innerHTML, /&lt;Math&gt;/);
@@ -161,10 +197,59 @@ assert.throws(() => app.handleChange({ target: { id: 'planner-date', value: 'bad
 app.handleChange({ target: { id: 'planner-date', value: '2026-01-01' } });
 assert.equal(app.selectedPlannerDate(), '2026-01-01', 'digital planner can browse past dates');
 app.plannerDate = '';
-assert.throws(() => app.handleChange({ target: { id: 'planner-daily-minutes', value: '5' } }), /15 to 480/);
+assert.throws(() => app.handleChange({ target: { id: 'planner-daily-minutes', value: '-1' } }), /0 to 480/);
+assert.throws(() => app.handleChange({ target: { id: 'planner-daily-minutes', value: '' } }), /0 to 480/);
 app.handleChange({ target: { id: 'planner-daily-minutes', value: '45' } });
 assert.equal(state.settings.plannerDailyMinutes, 45);
+app.handleChange({ target: { id: 'planner-current-minutes', value: '20' } });
+assert.equal(state.settings.plannerDayMinutes[todayKey], 20);
+assert.equal(app.dailyPlannerModel().budget, 20);
+app.handleChange({ target: { id: 'planner-current-minutes', value: '' } });
+assert.equal(app.dailyPlannerModel().budget, 45, 'clearing the today override restores the default');
+const todayWeekday = new Date(`${todayKey}T12:00:00`).getDay();
+app.handleChange({ target: { id: `planner-weekday-${todayWeekday}`, value: '60' } });
+assert.equal(app.dailyPlannerModel().budget, 60);
+app.handleChange({ target: { id: `planner-workday-${todayWeekday}`, value: '', checked: false } });
+assert.equal(app.dailyPlannerModel().budget, 0);
+app.handleChange({ target: { id: 'planner-current-minutes', value: '30' } });
+assert.equal(app.dailyPlannerModel().budget, 30, 'a manual override takes precedence over a day off');
+app.handleChange({ target: { id: 'planner-current-minutes', value: '' } });
+app.handleChange({ target: { id: `planner-workday-${todayWeekday}`, value: '', checked: true } });
+app.handleChange({ target: { id: `planner-weekday-${todayWeekday}`, value: '' } });
+assert.equal(app.dailyPlannerModel().budget, 45);
+assert.equal(state.settings.plannerAvailabilityConfigured, true);
 assert.equal(app.selectedPlannerDate(), todayKey);
+app.plannerScope = 'week';
+app.plannerDate = '2026-01-01';
+app.openPlannerTime();
+assert.equal(app.plannerScope, 'day');
+assert.equal(app.selectedPlannerDate(), todayKey);
+assert.equal(sandbox.Router.activeRoute, 'planner', 'Try it brings you to the actual time input');
+app.plannerScope = 'week';
+app.renderDailyPlanner();
+assert.match(node('planner-time-label').textContent, /per workday this week/);
+app.handleChange({ target: { id: 'planner-current-minutes', value: '80' } });
+assert.equal(app.dailyPlannerModel().budget, 80);
+app.plannerScope = 'day';
+app.handleChange({ target: { id: 'planner-current-minutes', value: '25' } });
+assert.equal(app.dailyPlannerModel().budget, 25);
+app.handleChange({ target: { id: 'planner-current-minutes', value: '' } });
+assert.equal(app.dailyPlannerModel().budget, 80, 'clearing a day override restores the week override');
+app.plannerScope = 'week';
+app.handleChange({ target: { id: 'planner-current-minutes', value: '' } });
+assert.equal(app.dailyPlannerModel().budget, 45, 'clearing a week override restores saved preferences');
+app.plannerScope = 'day';
+app.renderTodayStudyPlan();
+assert.doesNotMatch(node('today-study-total').textContent, /NaN|undefined/);
+state.settings.plannerDayMinutes[todayKey] = 0;
+app.plannerDate = '2026-10-01';
+app.renderTodayStudyPlan();
+assert.match(node('today-study-total').textContent, /0 available minutes/,
+    'Home uses today availability even when Planner is browsing a different date');
+delete state.settings.plannerDayMinutes[todayKey];
+app.plannerDate = '';
+app.openPlannerAvailability();
+assert.equal(sandbox.Router.activeRoute, 'settings', 'detailed workday controls live in preferences');
 
 async function run() {
     let renders = 0, flushed = false;
