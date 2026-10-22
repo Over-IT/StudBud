@@ -159,6 +159,36 @@ const assignment = (earned, possible, categoryId) => ({ courseCode: 'math', poin
 close(app.calculateCourseGrade(course, [assignment(9, 10), assignment(50, 100)]), 59 / 110 * 100);
 close(app.calculateCourseGrade(course, [assignment(0, 100), { ...assignment(100, 100), graded: false, status: 'pending' }]), 0);
 assert.equal(app.calculateCourseGrade(course, []), null);
+close(app.calculateCourseGrade(course, [assignment(363, 395), assignment(11, 0)]), 374 / 395 * 100);
+assert.equal(app.calculateCourseGrade(course, [assignment(363, 395), assignment(11, 0)]).toFixed(2), '94.68',
+    'zero-possible-point extra credit reproduces the reported Campus grade instead of 91.90%');
+assert.equal(app.calculateCourseGrade(course, [assignment(11, 0)]), null, 'bonus points alone never divide by zero');
+{
+    const bonus = { ...assignment(11, 0), id: 'bonus', title: 'Extra credit' };
+    const savedAssignments = state.assignments, savedScenarios = state.gradeScenarios;
+    const savedSelected = state.selectedGradeScenarioId, savedSave = app.saveGradeScenarioItems;
+    state.assignments = [bonus];
+    state.gradeScenarios = [{ id: 'bonus-scenario', overrides: {} }];
+    state.selectedGradeScenarioId = 'bonus-scenario';
+    app.saveGradeScenarioItems = items => { state.gradeScenarios = items; };
+    app.setScenarioOverride('bonus', '12.5');
+    assert.equal(state.gradeScenarios[0].overrides.bonus, 12.5, 'hypothetical extra credit can exceed its zero denominator');
+    const container = { innerHTML: '' };
+    elements.set('grade-scenario-existing', container);
+    app.renderScenarioExisting([course], [bonus], state.gradeScenarios[0].overrides);
+    assert.match(container.innerHTML, /Actual: 11 \/ 0/);
+    assert.doesNotMatch(container.innerHTML, /\bmax="/, 'bonus score controls never impose a zero or fake 100-point maximum');
+    state.assignments = savedAssignments;
+    state.gradeScenarios = savedScenarios;
+    state.selectedGradeScenarioId = savedSelected;
+    app.saveGradeScenarioItems = savedSave;
+    elements.delete('grade-scenario-existing');
+}
+close(app.calculateCourseGrade(course, [assignment(363, 395), { ...assignment(11, 0), graded: false }]), 363 / 395 * 100);
+for (const invalid of [null, undefined, '', -1, NaN, Infinity]) {
+    close(app.calculateCourseGrade(course, [assignment(80, 100), assignment(11, invalid)]), 80,
+        'unknown or invalid possible points are not treated as extra credit');
+}
 for (const weight of [null, 0, undefined]) {
     const named = { ...course, categories: [{ id: 'classwork', weight }, { id: 'engagement', weight }] };
     close(app.calculateCourseGrade(named, [assignment(10, 10, 'classwork'), assignment(10, 10, 'engagement'), assignment(60, 100)]), 80 / 120 * 100);
@@ -170,6 +200,10 @@ assert.equal(app.categoryWeightLabel(excluded, excluded.categories[0]), 'Exclude
 const categorized = { ...course, categories: [{ id: 'tests', weight: 70 }, { id: 'work', weight: 30 }] };
 close(app.calculateCourseGrade(categorized, [assignment(80, 100, 'tests'), assignment(100, 100, 'work')]), 86);
 close(app.calculateCourseGrade(categorized, [assignment(80, 100, 'tests')]), 80);
+close(app.calculateCourseGrade(categorized, [assignment(80, 100, 'tests'), assignment(10, 0, 'tests'), assignment(100, 100, 'work')]), 93);
+close(app.calculateCourseGrade(excluded, [assignment(11, 0, 'practice'), assignment(80, 100)]), 80);
+close(app.calculateCourseGrade({ ...course, categories: [{ id: 'tests', weight: 70 }] },
+    [assignment(80, 100, 'tests'), assignment(80, 100), assignment(10, 0)]), 83);
 close(app.calculateCourseGrade({ ...course, categories: [{ id: 'tests', weight: 70 }] },
     [assignment(80, 100, 'tests'), assignment(100, 100)]), 86);
 const gpa = sandbox.window.GPACalculator;
@@ -298,14 +332,20 @@ assert.deepEqual([...app.shuffleCards([1, 2, 3, 4])].sort(), [1, 2, 3, 4]);
 
 elements.set('study-analytics-summary', {});
 elements.set('study-analytics-decks', {});
-state.studyHistory = [{ durationSec: 20, gameSummary: { answered: 3, correct: 2 } }, { durationSec: 20 }];
-state.flashcards = [{ title: '<Deck>', cards: [{ reps: 1, state: 'review', lapses: 2, lastReviewed: new Date().toISOString(), nextReviewDate: tomorrow.toISOString() }] }];
+state.studyHistory = [{ deckId: 'time-deck', durationSec: 20, gameSummary: { answered: 3, correct: 2 } }, { durationSec: 20 }];
+state.flashcards = [{ id: 'time-deck', title: '<Deck>', cards: [{ reps: 1, state: 'review', lapses: 2, lastReviewed: new Date().toISOString(), nextReviewDate: tomorrow.toISOString() }] }];
 app.renderStudyAnalytics();
 assert.doesNotMatch(elements.get('study-analytics-summary').innerHTML, /accuracy|66\.67%|answers submitted/i);
 assert.ok(elements.get('study-analytics-summary').innerHTML.includes(app.formatStudyDuration(40)), 'answering game questions still counts as study time');
-assert.match(elements.get('study-analytics-summary').innerHTML, /Saved sessions<\/span><strong>2<\/strong>/);
+assert.match(elements.get('study-analytics-summary').innerHTML, /Saved study sessions<\/span><strong>2<\/strong>/);
+state.studyHistory.push({ id: 'homework-work', deckId: 'time-deck', activityType: 'work', durationSec: 600 });
+app.renderStudyAnalytics();
+assert.match(elements.get('study-analytics-summary').innerHTML, /Logged study time<\/span><strong>40 sec<\/strong>/,
+    'assignment work never increases study analytics');
+assert.match(elements.get('study-analytics-summary').innerHTML, /Assignment work time<\/span><strong>10 min<\/strong>/);
 assert.match(elements.get('study-analytics-decks').innerHTML, /&lt;Deck&gt;/);
 assert.match(elements.get('study-analytics-decks').innerHTML, /1 reviewed · 2 lapses/);
+assert.match(elements.get('study-analytics-decks').innerHTML, /20 sec studied/, 'per-set study time excludes work sessions');
 const assignmentIds = ['assignment-form', 'assignment-id', 'assignment-modal-title', 'assignment-name',
     'assignment-course', 'assignment-due-date', 'assignment-date-hint', 'assignment-points',
     'assignment-max-points', 'assignment-kind', 'assignment-size', 'assignment-importance',

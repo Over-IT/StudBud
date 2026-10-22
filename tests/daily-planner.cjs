@@ -127,7 +127,18 @@ assert.doesNotMatch(node('planner-day-queue').innerHTML, /<Homework>|<Math>|Fini
 assert.match(node('planner-day-queue').innerHTML, /planner-start-work/);
 assert.match(node('planner-day-completed').innerHTML, /Finished this day \(1\)/);
 assert.equal(app.dailyPlannerModel().studiedMinutes, 15);
-assert.equal(app.dailyPlannerModel().queue[0].remaining, 25, 'remaining estimates use lifetime work while the daily budget uses only this day');
+assert.equal(app.dailyPlannerModel().queue[0].remaining, 45, 'ordinary assignments keep their work estimate instead of subtracting old study sessions');
+assert.doesNotMatch(node('planner-day-queue').innerHTML, /min studied/,
+    'ordinary assignment cards never show study minutes');
+assert.match(node('planner-day-queue').innerHTML, /Log offline work/);
+state.studyHistory.push({ id: 'actual-work', assignmentId: 'homework', activityType: 'work', timestamp: new Date().toISOString(), durationSec: 600 });
+app.renderDailyPlanner();
+assert.equal(app.dailyPlannerModel().workMinutes, 10);
+assert.equal(app.dailyPlannerModel().studiedMinutes, 25, 'both work and study consume the daily time budget');
+assert.equal(app.dailyPlannerModel().queue[0].remaining, 35, 'only actual work reduces ordinary assignment estimates');
+assert.match(node('planner-day-summary').innerHTML, /15m<\/strong><span>studied/);
+assert.match(node('planner-day-summary').innerHTML, /10m<\/strong><span>worked/);
+assert.match(node('planner-day-queue').innerHTML, /10 min worked/);
 assert.match(node('planner-day-queue').innerHTML, /<details class="planner-card-details"[^>]*><summary[^>]*>Details &amp; options/);
 assert.ok(node('planner-day-queue').innerHTML.indexOf('edit-assignment') > node('planner-day-queue').innerHTML.indexOf('planner-card-details'),
     'editing and time management are progressively disclosed instead of crowding the primary actions');

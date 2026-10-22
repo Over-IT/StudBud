@@ -104,10 +104,10 @@
                                 ...r,
                                 ...l,
                                 durationSec: Math.max(Number(l.durationSec) || 0, Number(r.durationSec) || 0),
-                                leaderboardSyncPending: l.autoTracked || r.autoTracked
+                                leaderboardSyncPending: (l.activityType || r.activityType) !== 'work' && (l.autoTracked || r.autoTracked
                                     ? Math.max(Number(l.durationSec) || 0, Number(r.durationSec) || 0) >
                                         Math.max(Number(l.leaderboardSyncedSeconds) || 0, Number(r.leaderboardSyncedSeconds) || 0)
-                                    : Boolean(l.leaderboardSyncPending && r.leaderboardSyncPending),
+                                    : Boolean(l.leaderboardSyncPending && r.leaderboardSyncPending)),
                                 leaderboardSyncedSeconds: Math.max(Number(l.leaderboardSyncedSeconds) || 0, Number(r.leaderboardSyncedSeconds) || 0),
                                 leaderboardSyncedAt: l.leaderboardSyncedAt || r.leaderboardSyncedAt || null,
                                 ...(gameSummary ? { gameSummary } : {})
@@ -200,7 +200,7 @@
                     && remote.state?.gameMetrics?.xp !== base?.state?.gameMetrics?.xp) {
                     const previous = new Set((base?.studyHistory || []).map(session => session.id));
                     const remoteIds = new Set((remote.studyHistory || []).map(session => session.id));
-                    const sharedXp = (local.studyHistory || []).filter(session => !previous.has(session.id) && remoteIds.has(session.id))
+                    const sharedXp = (local.studyHistory || []).filter(session => session.activityType !== 'work' && !previous.has(session.id) && remoteIds.has(session.id))
                         .reduce((xp, session) => xp + Math.max(1, Math.round((session.durationSec || 60) / 60)) * 10, 0);
                     merged.state.gameMetrics.xp -= sharedXp;
                     if (merged.state.gameMetrics.xp < 0) merged.state.gameMetrics.xp = 0;

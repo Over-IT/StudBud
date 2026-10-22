@@ -240,7 +240,7 @@
 
                         <div class="glass-card widget focus-sprint-widget">
                             <div class="view-header">
-                                <div><h3><i class="fas fa-stopwatch"></i> Automatic study time</h3><p class="study-guidance-intro">Flashcards and questions track automatically. Select a task below to work on an assignment here.</p></div>
+                                <div><h3><i class="fas fa-stopwatch"></i> Work &amp; study time</h3><p class="study-guidance-intro">Assignments track time worked. Quiz/test preparation, flashcards and questions track study time separately.</p></div>
                                 <span id="focus-sprint-clock" class="focus-sprint-clock">00:00</span>
                             </div>
                             <div class="focus-sprint-controls">
@@ -249,6 +249,7 @@
                                 <button id="focus-sprint-reset-btn" class="secondary-btn" type="button">Stop working on task</button>
                             </div>
                             <p id="focus-sprint-status" class="study-guidance-intro" role="status">Pauses after 60 seconds without interaction or when StudBud is hidden or unfocused. Log offline work manually.</p>
+                            <p id="focus-time-totals" class="study-guidance-intro"></p>
                         </div>
                         <div class="glass-card widget full-width upcoming-assessments-widget">
                             <div class="view-header"><h3>Upcoming quizzes &amp; tests</h3><button class="secondary-btn" type="button" data-action="add-quiz"><i class="fas fa-plus"></i> Add quiz or test</button></div>
@@ -1396,17 +1397,17 @@
             </div>
             <div id="study-log-modal" class="glass-card modal-content hidden">
                 <div class="modal-header">
-                    <h2>Log a study session</h2>
+                    <h2 id="study-log-title">Log a study session</h2>
                     <button class="close-modal-btn icon-btn" aria-label="Close"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="modal-body">
                     <form id="study-log-form">
                         <input type="hidden" id="study-log-assignment-id">
                         <div class="form-group">
-                            <label for="study-log-minutes">Minutes studied</label>
+                            <label id="study-log-minutes-label" for="study-log-minutes">Minutes studied</label>
                             <input type="number" id="study-log-minutes" min="1" max="360" step="1" value="25" required>
                         </div>
-                        <div class="form-group">
+                        <div class="form-group" id="study-log-method-group">
                             <label for="study-log-method">How did you study?</label>
                             <select id="study-log-method" required>
                                 <option value="retrieval">Closed-book recall / self-quiz</option>
@@ -1418,7 +1419,7 @@
                                 <option value="checklist">Checklist / project steps</option>
                             </select>
                         </div>
-                        <div class="form-group">
+                        <div class="form-group" id="study-log-effectiveness-group">
                             <label for="study-log-effectiveness">How effective did that feel?</label>
                             <select id="study-log-effectiveness" required>
                                 <option value="1">1 - Not effective</option>
@@ -1436,7 +1437,7 @@
                 </div>
                 <div class="modal-footer">
                     <button class="secondary-btn cancel-modal-btn">Cancel</button>
-                    <button type="submit" form="study-log-form" class="primary-btn">Save Study Log</button>
+                    <button id="study-log-save" type="submit" form="study-log-form" class="primary-btn">Save Study Log</button>
                 </div>
             </div>
             
@@ -1575,9 +1576,10 @@
                             <div class="half-width">
                                 <label for="assignment-max-points">Out of</label>
                                 <div class="score-number-field">
-                                    <input type="number" id="assignment-max-points" step="any" min="0.01" value="100">
+                                    <input type="number" id="assignment-max-points" step="any" min="0" value="100" aria-describedby="assignment-extra-credit-hint">
                                     <div class="score-number-arrows"><button type="button" data-score-input="assignment-max-points" data-score-delta="1" aria-label="Increase out of by 1">▴</button><button type="button" data-score-input="assignment-max-points" data-score-delta="-1" aria-label="Decrease out of by 1">▾</button></div>
                                 </div>
+                                <small id="assignment-extra-credit-hint" class="settings-hint">Use 0 possible points for extra credit. Bonus points add to the grade without increasing the points possible.</small>
                             </div>
                         </div>
                         <details class="assignment-more" id="assignment-study-options">
@@ -1590,7 +1592,7 @@
                                 <div class="form-group">
                                     <label for="assignment-remaining">Time remaining (minutes, optional)</label>
                                     <input type="number" id="assignment-remaining" min="0" max="10080" step="1" placeholder="Automatic from estimated time and study history">
-                                    <p class="settings-hint">Set a new estimate of work left, including for large assignments. Future active study reduces it automatically. Reaching 100% of estimated time does not mark the work done.</p>
+                                    <p id="assignment-remaining-hint" class="settings-hint">Estimate the work left to finish or turn in. Assignment work reduces it; work time is separate from study time.</p>
                                     <p id="assignment-time-progress" class="settings-hint"></p>
                                 </div>
                                 <div class="half-width">

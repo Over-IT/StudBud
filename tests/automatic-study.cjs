@@ -120,11 +120,11 @@ async function integration() {
     assert.equal(state.state.gameMetrics.xp, beforeZero, 'gameplay with no questions earns no study XP');
     assert.equal(state.state.studyHistory[1].leaderboardSyncPending, false);
 
-    state.state.assignments = [{ id: 'essay', title: 'Essay', status: 'pending', graded: false, estimatedMinutes: 120 }];
+    state.state.assignments = [{ id: 'essay', title: 'Essay exam', kind: 'test', status: 'pending', graded: false, estimatedMinutes: 120 }];
     state.state.studyHistory = [{ id: 'essay-session', assignmentId: 'essay', durationSec: 1800 }];
     const essay = state.state.assignments[0];
     assert.deepEqual(clone(app.assignmentTimeProgress(essay)), {
-        totalMinutes: 120, studiedMinutes: 30, remainingMinutes: 90, pct: 25
+        totalMinutes: 120, studiedMinutes: 30, workedMinutes: 0, remainingMinutes: 90, pct: 25
     });
     essay.remainingEstimateMinutes = 30;
     essay.remainingEstimateStudiedSeconds = 1800;
@@ -144,7 +144,7 @@ async function integration() {
     assert.equal(app.assignmentTimeProgress(quiz).totalMinutes, app.getStudyRecommendations()[0].totalStudyMinutes,
         'planner rows and study suggestions share one time estimate');
     const fields = {
-        'assignment-id': 'essay', 'assignment-kind': 'assignment', 'assignment-max-points': '100',
+        'assignment-id': 'essay', 'assignment-kind': 'test', 'assignment-max-points': '100',
         'assignment-name': 'Essay', 'assignment-course': '', 'assignment-due-date': '2026-11-01',
         'assignment-category': '', 'assignment-size': '120', 'assignment-importance': '3', 'assignment-remaining': '20'
     };
@@ -215,6 +215,63 @@ async function integration() {
     state.state.currentView = 'dashboard';
     app.dashboardSprintAssignmentId = 'essay';
     assert.equal(app.automaticStudyContext().session.assignmentId, 'essay');
+    const ordinary = { id: 'homework', title: 'Homework', kind: 'assignment', status: 'pending', graded: false,
+        estimatedMinutes: 120, remainingEstimateMinutes: 20, remainingEstimateStudiedSeconds: 1800 };
+    state.state.assignments.push(ordinary);
+    state.state.studyHistory.push({ id: 'old-homework-study', assignmentId: 'homework', durationSec: 3600 });
+    app.dashboardSprintAssignmentId = 'homework';
+    const homeworkContext = app.automaticStudyContext();
+    assert.equal(homeworkContext.session.activityType, 'work', 'ordinary assignments start work tracking, not study');
+    assert.equal(homeworkContext.session.assignmentId, 'homework');
+    assert.equal(app.assignmentStudySeconds('homework'), 0, 'legacy study sessions do not reduce assignment work estimates');
+    assert.equal(app.assignmentTimeProgress(ordinary).remainingMinutes, 20, 'ordinary work estimates ignore the old study baseline');
+    assert.doesNotMatch(app.assignmentTimeMarkup(ordinary), /studied|<progress/, 'ordinary assignment rows never show study minutes or study completion bars');
+    assert.match(app.assignmentTimeMarkup(ordinary), /20 min work remaining/);
+    assert.match(app.assignmentTimeMarkup(quiz), /min studied/, 'quizzes still show study time');
+    const workXp = state.state.gameMetrics.xp;
+    await state.recordStudySession({ id: 'work-log', assignmentId: 'homework', activityType: 'work', durationSec: 600 });
+    assert.equal(app.activitySeconds('work', 'homework'), 600);
+    assert.equal(app.assignmentTimeProgress(ordinary).remainingMinutes, 10, 'work, but not study, reduces remaining homework');
+    assert.equal(state.state.gameMetrics.xp, workXp, 'work sessions never earn study XP');
+    assert.equal(state.state.studyHistory.find(item => item.id === 'work-log').leaderboardSyncPending, false);
+    await state.recordStudySession({ id: 'auto-work', assignmentId: 'homework', activityType: 'work', durationSec: 15, autoTracked: true });
+    await state.recordStudySession({ id: 'auto-work', durationSec: 30, autoTracked: true });
+    assert.equal(state.state.gameMetrics.xp, workXp, 'automatic work checkpoints never earn study XP');
+    assert.equal(app.activitySeconds('work', 'homework'), 630);
+    const beforeStudy = app.activitySeconds('study');
+    await state.recordStudySession({ id: 'work-for-quiz', assignmentId: 'quiz', activityType: 'work', durationSec: 120 });
+    assert.equal(app.assignmentStudySeconds('quiz'), 0, 'changing an item type cannot reclassify its saved work as study');
+    assert.equal(app.activitySeconds('study'), beforeStudy);
+    for (const id of ['study-log-form', 'study-log-assignment-id', 'study-log-minutes', 'study-log-method',
+        'study-log-title', 'study-log-minutes-label', 'study-log-save', 'study-log-method-group',
+        'study-log-effectiveness-group', 'study-log-effectiveness', 'study-log-notes']) {
+        nodes.set(id, { value: '', reset() {}, classList: { toggle() {} } });
+    }
+    const oldModal = app.openModal;
+    app.openModal = () => {};
+    app.openStudyLog('homework');
+    assert.equal(nodes.get('study-log-minutes-label').textContent, 'Minutes worked');
+    nodes.get('study-log-minutes').value = '5';
+    await app.saveStudyLog();
+    assert.equal(app.activitySeconds('work', 'homework'), 930, 'offline work logs use the same per-assignment work total');
+    assert.equal(state.state.gameMetrics.xp, workXp);
+    app.openModal = oldModal;
+    const oldTracker = app.studyTracker, oldQueryAll = sandbox.document.querySelectorAll;
+    const clock = {};
+    nodes.set('focus-sprint-status', {});
+    sandbox.document.querySelectorAll = selector => selector.includes('focus-time-display') ? [clock] : [];
+    app.studyTracker = { context: homeworkContext, running: true, seconds: () => 120, sessions: new Map() };
+    app.updateAutomaticStudyDisplay();
+    assert.equal(clock.textContent, '02:00', 'homework displays its work timer');
+    assert.match(nodes.get('focus-sprint-status').textContent, /Working.*save separately/);
+    state.state.assignments.find(item => item.id === 'homework').kind = 'quiz';
+    const changedContext = app.automaticStudyContext();
+    assert.equal(changedContext.session.activityType, 'study');
+    assert.notEqual(changedContext.key, homeworkContext.key, 'changing type starts a separate session rather than relabeling work');
+    state.state.assignments.find(item => item.id === 'homework').kind = 'assignment';
+    app.studyTracker = oldTracker;
+    sandbox.document.querySelectorAll = oldQueryAll;
+    app.dashboardSprintAssignmentId = 'essay';
     state.state.currentView = 'settings';
     assert.equal(app.automaticStudyContext(), null, 'browsing unrelated pages does not count selected-task time');
     state.state.currentView = 'exam-arcade';
@@ -249,6 +306,15 @@ async function integration() {
     assert.equal(merged.durationSec, 30);
     assert.equal(merged.leaderboardSyncPending, true, 'an old acknowledgement cannot discard newer unsynced time');
     assert.equal(merged.leaderboardSyncedSeconds, 15);
+    const workMerged = Cloud.mergeData([], [{ ...local[0], activityType: 'work' }],
+        [{ ...remote[0], activityType: 'work' }], 'account.studyHistory')[0];
+    assert.equal(workMerged.durationSec, 30);
+    assert.equal(workMerged.activityType, 'work');
+    assert.equal(workMerged.leaderboardSyncPending, false, 'account merges never queue work for study leaderboards');
+    const baseline = { state: { gameMetrics: { xp: 0, level: 1 } }, studyHistory: [] };
+    const withWork = xp => ({ state: { gameMetrics: { xp, level: 1 } }, studyHistory: [workMerged] });
+    assert.equal(Cloud.mergeData(baseline, withWork(10), withWork(20)).state.gameMetrics.xp, 30,
+        'sharing a zero-XP work session cannot subtract unrelated earned XP during account merge');
 
     let sent;
     sandbox.window.StudBudCloud.user = { id: 'owner' };
@@ -259,6 +325,8 @@ async function integration() {
     await app.syncStudyTimeEntry(state.state.studyHistory[0], false);
     assert.equal(sent, undefined, 'account initialization or an unresolved merge cannot upload study history');
     sandbox.window.StudBudCloud.accountReady = true;
+    await app.syncStudyTimeEntry({ id: 'work-never-uploaded', activityType: 'work', durationSec: 600, leaderboardSyncPending: true }, false);
+    assert.equal(sent, undefined, 'work is never submitted to the study leaderboard even if an old merge queued it');
     await app.syncStudyTimeEntry({ ...state.state.studyHistory[0], durationSec: 15 }, false);
     assert.deepEqual(sent, { id: 'sync', seconds: 15 });
     assert.equal(state.state.studyHistory[0].leaderboardSyncPending, true, 'late network acknowledgement retains pending newer time');

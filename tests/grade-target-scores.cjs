@@ -61,8 +61,10 @@ const multi = [future('short', 10), future('long', 90)];
 result = required(multi, 85, [scored('past', 80, 100), ...multi]);
 close(result.requiredPct, 90);
 close(result.maxPoints, 100);
-const malformed = [scored('bad', 'invalid', 100), scored('zero', 999, 0), scored('valid', 8, 10)];
+const malformed = [scored('bad', 'invalid', 100), scored('negative', 999, -1), scored('valid', 8, 10)];
 close(app.calculateCourseGrade(course, malformed), 80);
+close(app.calculateCourseGrade(course, [scored('past', 80, 100), scored('bonus', 10, 0)]), 90);
+close(required([exam], 90, [scored('past', 80, 100), scored('bonus', 10, 0), exam]).requiredPct, 90);
 
 const weighted = {
     ...course,

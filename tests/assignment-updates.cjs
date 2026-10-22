@@ -84,6 +84,11 @@ async function run() {
     assert.equal(state.assignments[1].pointsEarned, 0);
     assert.equal(state.assignments[1].maxPoints, 20);
     assert.ok(state.assignments[1].gradedAt, 'grading records the date');
+    node('assignment-points').value = '11';
+    node('assignment-max-points').value = '0';
+    app.saveAssignment();
+    assert.equal(state.assignments[1].pointsEarned, 11);
+    assert.equal(state.assignments[1].maxPoints, 0, 'editing extra credit never replaces zero possible points with 100');
     render();
     assert.match(node('planner-awaiting-grades').innerHTML, /No grades to add right now/);
     assert.equal(node('home-grade-inbox').innerHTML, '', 'empty inbox takes no space on Home');

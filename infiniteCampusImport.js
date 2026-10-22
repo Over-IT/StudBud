@@ -869,7 +869,7 @@
     // ------------------------------------------------------------------
     function guessKind(title, categoryName) {
         const value = String(title || '').toLowerCase();
-        if (/\b(review|practice|prep(aration)?|study guide|corrections?|retake request|worksheet|notes|project|presentation|essay|homework)\b/.test(value)) return 'assignment';
+        if (/\b(review|practice|prep(aration)?|study guide|corrections?|retake request|worksheet|notes|project|presentation|essay|homework|extra credit)\b/.test(value)) return 'assignment';
         if (/\bquiz(zes)?\b/.test(value)) return 'quiz';
         if (/\b(tests?|exams?|midterm|final exam|summative|assessment|unit check|ccsa|eoc)\b/.test(value)) return 'test';
         const category = String(categoryName || '').trim().toLowerCase();
@@ -893,7 +893,8 @@
         const courses = list(state.courses).map(course => ({ ...course, categories: list(course.categories).map(category => ({ ...category })) }));
         const excludedIDs = new Set(list(model.excludedAssignmentIDs).map(id => `ic_${id}`));
         const assignments = list(state.assignments).filter(item => !excludedIDs.has(item.id) || item.source !== 'infinite-campus')
-            .map(item => ({ ...item }));
+            .map(item => excludedIDs.has(item.icAssignmentID)
+                ? { ...item, graded: false, icExcused: true } : { ...item });
         const schedule = { all: {}, odd: {}, even: {}, ...(state.schedule || {}) };
         const sectionsById = new Map(model.sections.map(section => [section.id, section]));
         const summary = { coursesAdded: 0, coursesUpdated: 0, categories: 0, gradedAdded: 0, gradedUpdated: 0, upcomingAdded: 0, upcomingUpdated: 0, periods: 0, days: 0, skipped: 0 };
@@ -1006,16 +1007,33 @@
             const scored = item.scorePoints !== null;
             const graded = scored && !ignored;
             if (!include.graded) return;
-            const id = `ic_${item.id}`;
-            const current = assignments.find(entry => entry.id === id);
+            const campusId = `ic_${item.id}`;
+            let current = assignments.find(entry => entry.id === campusId || entry.icAssignmentID === campusId);
             if (ignored) {
                 if (current?.source === 'infinite-campus' && current.graded) {
-                    assignments.splice(assignments.indexOf(current), 1);
+                    if (current.id === campusId) assignments.splice(assignments.indexOf(current), 1);
+                    else Object.assign(current, { graded: false, icExcused: true });
+                    summary.gradedUpdated++;
+                } else if (current?.icAssignmentID && current.graded) {
+                    Object.assign(current, { graded: false, icExcused: true });
                     summary.gradedUpdated++;
                 }
                 return;
             }
             if (!graded && !item.missing) return;
+            if (!current && graded) {
+                const titleKey = value => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+                const candidates = assignments.filter(entry => entry.courseCode === course.code
+                    && !entry.graded && !(entry.graded === undefined && (entry.status === 'completed' || Number(entry.pointsEarned) > 0))
+                    && !entry.icAssignmentID && !String(entry.id).startsWith('ic_')
+                    && titleKey(entry.title) === titleKey(item.title));
+                if (candidates.length === 1) current = candidates[0];
+                else if (item.dueDate) {
+                    const dated = candidates.filter(entry => String(entry.dueDate || '').slice(0, 10) === item.dueDate);
+                    if (dated.length === 1) current = dated[0];
+                }
+            }
+            const id = current?.id || campusId;
             if (sourceCategories.length > 1 && !sourceCategory) {
                 throw new Error(`Could not determine the grading term for "${item.title}". Recollect the Campus grade details before importing.`);
             }
@@ -1032,30 +1050,37 @@
                 possible *= item.multiplier;
             }
             const importedKind = guessKind(item.title, item.categoryName || category?.name || '');
+            const gradeOnly = current && !current.graded && graded;
+            const preserveDetails = Boolean(gradeOnly || current?.icPreserveDetails);
             const legacyValue = `${current?.title || item.title} ${item.categoryName || category?.name || ''}`.toLowerCase();
             const legacyKind = /\b(test|exam|midterm|final|summative|assessment|unit check|ccsa|eoc)\b/.test(legacyValue)
                 ? 'test' : /\bquiz(zes)?\b/.test(legacyValue) ? 'quiz' : 'assignment';
             const userEditedKind = current?.kind && current.kind !== (current.icKind || legacyKind);
-            const kind = userEditedKind ? current.kind : importedKind;
+            const kind = (preserveDetails || userEditedKind) && current.kind ? current.kind : importedKind;
             const status = item.missing ? 'pending' : 'completed';
             const assignment = {
                 ...(current || {}),
                 id,
-                title: item.title,
+                title: current?.title || item.title,
                 courseCode: course.code,
-                dueDate: item.dueDate || current?.dueDate || '',
+                dueDate: current?.dueDate || item.dueDate || '',
                 pointsEarned: round2(Math.max(0, earned)),
                 maxPoints: round2(Math.max(0, possible)),
-                categoryId: category ? category.id : null,
+                categoryId: preserveDetails && current.categoryId ? current.categoryId : category ? category.id : null,
                 kind,
                 icKind: importedKind,
-                estimatedMinutes: current?.estimatedMinutes || (kind === 'test' ? 90 : kind === 'quiz' ? 45 : 30),
+                icAssignmentID: campusId,
+                icPreserveDetails: preserveDetails,
+                estimatedMinutes: current?.estimatedMinutes ?? (kind === 'test' ? 90 : kind === 'quiz' ? 45
+                    : /\b(project|presentation|paper|essay)\b/i.test(item.title) ? 90
+                    : /\blab\b/i.test(item.title) ? 60
+                    : /\b(worksheet|notes|warm[- ]?up|exit ticket)\b/i.test(item.title) ? 20 : 30),
                 importance: current?.importance || (kind === 'test' ? 4 : 3),
                 priority: current?.priority || 'high',
                 graded,
                 status,
                 gradedAt: graded ? (item.gradedAt || current?.gradedAt || item.dueDate || today) : null,
-                source: 'infinite-campus',
+                source: current?.source || 'infinite-campus',
                 icMissing: item.missing,
                 icLate: item.late,
                 icExcused: ignored && !graded

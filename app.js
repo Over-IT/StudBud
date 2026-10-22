@@ -485,25 +485,26 @@
             session = { ...previous, ...session };
             session.timestamp = session.timestamp || new Date().toISOString();
             if (session.autoTracked) session.durationSec = Math.max(Number(previous?.durationSec) || 0, Number(session.durationSec) || 0);
-            session.leaderboardSyncPending = Number(session.durationSec) > 0;
+            session.leaderboardSyncPending = session.activityType !== 'work' && Number(session.durationSec) > 0;
 
             await NexusDB.put('studyHistory', session);
             const sessionIndex = this.state.studyHistory.findIndex(item => item.id === session.id);
             if (sessionIndex >= 0) this.state.studyHistory[sessionIndex] = session;
             else this.state.studyHistory.push(session);
 
-            const earnedXp = entry => entry ? entry.autoTracked
+            const earnedXp = entry => entry && entry.activityType !== 'work' ? entry.autoTracked
                 ? Math.floor(Math.max(0, Number(entry.durationSec) || 0) / 6)
                 : Math.max(1, Math.round((entry.durationSec || 60) / 60)) * 10 : 0;
             this.state.gameMetrics.xp += Math.max(0, earnedXp(session) - earnedXp(previous));
             this.state.gameMetrics.level = Math.floor(this.state.gameMetrics.xp / 500) + 1;
 
             await NexusDB.put('gameMetrics', { id: 'user_metrics', ...this.state.gameMetrics });
-            this.setSaveStatus('Study session and progress saved on this device.');
+            this.setSaveStatus(`${session.activityType === 'work' ? 'Assignment work' : 'Study session'} and progress saved on this device.`);
 
             if (session.assignmentId && !session.autoTracked) {
                 const updatedAssignment = this.state.assignments.find(item => item.id === session.assignmentId);
-                if (updatedAssignment) this.updateAssignment(updatedAssignment.id, { lastStudiedAt: session.timestamp });
+                if (updatedAssignment) this.updateAssignment(updatedAssignment.id,
+                    { [session.activityType === 'work' ? 'lastWorkedAt' : 'lastStudiedAt']: session.timestamp });
             }
             EventBus.emit('study:recorded', session);
             EventBus.emit('metrics:updated', this.state.gameMetrics);
@@ -1511,6 +1512,8 @@
                 this.renderDashboard();
                 this.renderAssignments();
                 this.renderStudyRecommendations('planner-study-list');
+                if (Router.activeRoute === 'class') this.renderClassDetail();
+                if (Router.activeRoute === 'analytics') this.renderStudyAnalytics();
             });
             this.EventBus.on('state:restored', () => this.renderUI());
             this.EventBus.on('router:navigated', route => {
@@ -1759,11 +1762,11 @@
                 const rows = items.map(item => {
                     const overridden = Object.prototype.hasOwnProperty.call(overrides, item.id);
                     const actual = this.isGradedItem(item) ? Number(item.pointsEarned || 0) : null;
-                    const max = Number(item.maxPoints || 100);
+                    const max = Number(item.maxPoints ?? 100);
                     return `<div class="scenario-existing-row${overridden ? ' is-changed' : ''}">
                         <div><strong>${this.escapeHTML(item.title)}</strong><small>${actual === null ? 'Not graded yet' : `Actual: ${this.formatNumber(actual)} / ${this.formatNumber(max)}`}</small></div>
                         <label class="scenario-existing-input"><span class="sr-only">Hypothetical score for ${this.escapeHTML(item.title)}</span>
-                            <input type="number" min="0" max="${max}" step="0.01" data-scenario-override="${this.escapeHTML(item.id)}" value="${overridden ? Number(Number(overrides[item.id]).toFixed(2)) : ''}" placeholder="${actual === null ? 'Score' : this.formatNumber(actual)}"> / ${this.formatNumber(max)}</label>
+                            <input type="number" min="0" ${max > 0 ? `max="${max}"` : ''} step="0.01" data-scenario-override="${this.escapeHTML(item.id)}" value="${overridden ? Number(Number(overrides[item.id]).toFixed(2)) : ''}" placeholder="${actual === null ? 'Score' : this.formatNumber(actual)}"> / ${this.formatNumber(max)}</label>
                         <button class="secondary-btn" data-action="reset-scenario-override" data-id="${this.escapeHTML(item.id)}" ${overridden ? '' : 'disabled'}>Reset</button>
                     </div>`;
                 }).join('');
@@ -1778,7 +1781,8 @@
             if (!selectedId || !assignment) return;
             const text = String(rawValue ?? '').trim();
             const value = Math.round(Number(text) * 100) / 100;
-            const clear = text === '' || !Number.isFinite(value) || value < 0 || value > Number(assignment.maxPoints || 100);
+            const max = Number(assignment.maxPoints ?? 100);
+            const clear = text === '' || !Number.isFinite(value) || value < 0 || (max > 0 && value > max);
             const scenarios = (AppState.get('gradeScenarios') || []).map(scenario => {
                 if (scenario.id !== selectedId) return scenario;
                 const overrides = { ...(scenario.overrides || {}) };
@@ -2326,7 +2330,8 @@
                 this.isGradedItem(item) &&
                 this.isGradeBearingItem(course, item) &&
                 Number.isFinite(Number(item.pointsEarned)) &&
-                Number.isFinite(Number(item.maxPoints)) && Number(item.maxPoints) > 0
+                item.maxPoints !== null && item.maxPoints !== undefined && item.maxPoints !== '' &&
+                Number.isFinite(Number(item.maxPoints)) && Number(item.maxPoints) >= 0
             );
             if (!courseAssignments.length) return null;
 
@@ -2498,7 +2503,7 @@
                     <div class="table-responsive" tabindex="0" role="region" aria-label="Class assignments table"><table><thead><tr><th>Status</th><th>Item</th><th>Category</th><th>Type</th><th>Due</th><th>Score</th><th>Actions</th></tr></thead><tbody>${workRows}</tbody></table></div>
                 </section>
                 <section class="glass-card class-focus-panel">
-                    <div><h3>Study this class</h3><p>Flashcards track automatically. Select Work on this for an assignment to track active work.</p></div>
+                    <div><h3>Work and study</h3><p>Flashcards and quiz/test preparation track study time. Work on assignments tracks work time separately.</p></div>
                     <div class="focus-timer-control">
                         <i class="fas fa-stopwatch"></i>
                         <span class="focus-time-display">00:00</span>
@@ -3082,7 +3087,7 @@
                 ? Math.max(0, targetGpa - currentWeightedGpa) : 0;
             const today = new Date();
             today.setHours(0, 0, 0, 0);
-            const history = AppState.get('studyHistory') || [];
+            const history = (AppState.get('studyHistory') || []).filter(session => session.activityType !== 'work');
             // Only quizzes and tests need studying; homework is just done and turned in
             const recommended = assignments.filter(item => this.isOpenAssignment(item) && ['quiz', 'test'].includes(String(item.kind || 'assignment').toLowerCase())).map(item => {
                 const course = courses.find(entry => entry.code === item.courseCode);
@@ -3270,11 +3275,17 @@
         openStudyLog(assignmentId) {
             const assignment = (AppState.get('assignments') || []).find(item => item.id === assignmentId);
             if (!assignment) throw new Error('This assignment is no longer available.');
+            const work = !this.isStudyAssessment(assignment);
             const recommendation = this.getStudyRecommendations().find(item => item.id === assignmentId);
             document.getElementById('study-log-form').reset();
             document.getElementById('study-log-assignment-id').value = assignmentId;
             document.getElementById('study-log-minutes').value = recommendation?.sessionMinutes || 25;
             document.getElementById('study-log-method').value = recommendation?.studyMethodKey || 'retrieval';
+            document.getElementById('study-log-title').textContent = work ? 'Log assignment work' : 'Log a study session';
+            document.getElementById('study-log-minutes-label').textContent = work ? 'Minutes worked' : 'Minutes studied';
+            document.getElementById('study-log-save').textContent = work ? 'Save Work Log' : 'Save Study Log';
+            document.getElementById('study-log-method-group').classList.toggle('hidden', work);
+            document.getElementById('study-log-effectiveness-group').classList.toggle('hidden', work);
             this.openModal('study-log-modal');
         }
 
@@ -3282,21 +3293,23 @@
             const assignmentId = document.getElementById('study-log-assignment-id').value;
             const assignment = (AppState.get('assignments') || []).find(item => item.id === assignmentId);
             if (!assignment) throw new Error('This assignment is no longer available.');
+            const work = !this.isStudyAssessment(assignment);
             const minutes = Number(document.getElementById('study-log-minutes').value);
             const effectiveness = Number(document.getElementById('study-log-effectiveness').value);
-            if (!Number.isInteger(minutes) || minutes < 1 || minutes > 360 || !Number.isInteger(effectiveness) || effectiveness < 1 || effectiveness > 5) {
-                throw new Error('Enter a study time from 1 to 360 minutes and an effectiveness rating from 1 to 5.');
+            if (!Number.isInteger(minutes) || minutes < 1 || minutes > 360 || (!work && (!Number.isInteger(effectiveness) || effectiveness < 1 || effectiveness > 5))) {
+                throw new Error('Enter time from 1 to 360 minutes and, for study, an effectiveness rating from 1 to 5.');
             }
             const method = document.getElementById('study-log-method').value;
             await AppState.recordStudySession({
                 id: `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
                 assignmentId,
+                activityType: work ? 'work' : 'study',
                 courseCode: assignment.courseCode,
                 title: assignment.title,
                 durationSec: minutes * 60,
                 method,
-                methodLabel: this.studyMethodLabel(method),
-                effectiveness,
+                methodLabel: work ? 'Assignment work' : this.studyMethodLabel(method),
+                effectiveness: work ? null : effectiveness,
                 notes: document.getElementById('study-log-notes').value.trim(),
                 source: 'assignment'
             });
@@ -3312,7 +3325,7 @@
             const weekStart = new Date(now);
             weekStart.setDate(now.getDate() - ((now.getDay() + 6) % 7));
             weekStart.setHours(0, 0, 0, 0);
-            const sessions = (AppState.get('studyHistory') || []).filter(session => Number(session.durationSec) > 0 || session.gameSummary)
+            const sessions = (AppState.get('studyHistory') || []).filter(session => session.activityType !== 'work' && (Number(session.durationSec) > 0 || session.gameSummary))
                 .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
             const thisWeek = sessions.filter(session => new Date(session.timestamp) >= weekStart);
             const minutes = Math.round(thisWeek.reduce((sum, session) => sum + Number(session.durationSec || 0), 0) / 60);
@@ -3452,13 +3465,14 @@
         }
 
         plannerTasks(history = []) {
-            const minutesFor = id => history.filter(session => session.assignmentId === id)
+            const minutesFor = item => history.filter(session => session.assignmentId === item.id
+                && (session.activityType === 'work') === !this.isStudyAssessment(item))
                 .reduce((sum, session) => sum + Math.max(0, Number(session.durationSec) || 0) / 60, 0);
             const courses = AppState.get('courses') || [];
             return (AppState.get('assignments') || []).filter(item => !item.dismissed).map(item => ({
                 ...item, open: this.isOpenAssignment(item),
                 courseTitle: courses.find(course => course.code === item.courseCode)?.title || item.courseCode || 'Unassigned',
-                remainingMinutes: this.plannerTaskMinutes(item), dayMinutes: minutesFor(item.id),
+                remainingMinutes: this.plannerTaskMinutes(item), dayMinutes: minutesFor(item),
                 score: this.assignmentPriority(item, courses).score
             }));
         }
@@ -3474,7 +3488,9 @@
             return { ...window.PlannerEngine.dailyPlan(tasks, {
                 date, today, budget: AppState.get('settings')?.plannerDailyMinutes ?? 90,
                 studiedMinutes: history.reduce((sum, session) => sum + Math.max(0, Number(session.durationSec) || 0) / 60, 0)
-            }), tasks };
+            }), tasks,
+                workMinutes: history.filter(session => session.activityType === 'work').reduce((sum, session) => sum + Math.max(0, Number(session.durationSec) || 0) / 60, 0)
+            };
         }
 
         renderPlannerPeriod(tasks = this.plannerTasks()) {
@@ -3566,7 +3582,8 @@
             document.getElementById('planner-day-summary').innerHTML = `
                 <div><strong>${plan.urgentCount}</strong><span>due or overdue</span></div>
                 <div><strong>${formatMinutes(plan.remainingMinutes)}</strong><span>planned</span></div>
-                <div><strong>${formatMinutes(plan.studiedMinutes)}</strong><span>studied</span></div>
+                <div><strong>${formatMinutes(plan.studiedMinutes - plan.workMinutes)}</strong><span>studied</span></div>
+                <div><strong>${formatMinutes(plan.workMinutes)}</strong><span>worked</span></div>
                 <p class="${plan.overBudget ? 'planner-overloaded' : ''}">${plan.overBudget
                     ? `${formatMinutes(plan.overBudget)} over budget. Move flexible work or adjust estimates.`
                     : `${formatMinutes(Math.max(0, plan.budget - plan.studiedMinutes - plan.remainingMinutes))} free for breaks or other work.`}</p>`;
@@ -3588,7 +3605,7 @@
                     <p class="planner-card-reason">${this.escapeHTML(task.reason)}</p>${this.assignmentTimeMarkup(task)}
                     <div class="planner-card-actions">${this.assessmentStudyButton(task)}
                     <button type="button" class="secondary-btn" data-action="edit-assignment" data-id="${id}">Edit / move</button>
-                    <button type="button" class="text-btn" data-action="log-study" data-id="${id}">Log offline work</button>
+                    <button type="button" class="text-btn" data-action="log-study" data-id="${id}">Log offline ${this.isStudyAssessment(task) ? 'study' : 'work'}</button>
                     ${this.assignmentState(task) === 'overdue' ? `<button type="button" class="text-btn" data-action="dismiss-assignment" data-id="${id}" aria-label="Dismiss ${name}">Dismiss overdue work</button>` : ''}
                     ${task.plannedDate ? `<button type="button" class="text-btn" data-action="planner-clear-date" data-id="${id}">Use automatic work dates</button>` : ''}</div></details>
                 </li>`;
@@ -3608,7 +3625,7 @@
             const active = (AppState.get('assignments') || []).find(item => item.id === this.dashboardSprintAssignmentId && this.isOpenAssignment(item));
             const activePanel = document.getElementById('planner-active-work');
             activePanel.classList.toggle('hidden', !active || !isToday);
-            activePanel.innerHTML = active ? `<strong>Working on: ${this.escapeHTML(active.title)}</strong><p>Active time saves automatically while you work here. The header clock shows when it is counting or paused.</p><button type="button" class="secondary-btn" data-action="planner-stop-work">Stop working on task</button>` : '';
+            activePanel.innerHTML = active ? `<strong>Working on: ${this.escapeHTML(active.title)}</strong><p>${this.isStudyAssessment(active) ? 'Active study time saves automatically while you work here. The header clock shows when it is counting or paused.' : 'Finish or turn in this assignment, then mark it done. Assignment work does not count as quiz or test study time.'}</p><button type="button" class="secondary-btn" data-action="planner-stop-work">Stop working on task</button>` : '';
             document.getElementById('planner-library-count').textContent = `${(AppState.get('assignments') || []).length} saved`;
             this.renderPlannerPeriod(plan.tasks);
             if (restoreFocus) {
@@ -3622,12 +3639,24 @@
             return Math.ceil(this.assignmentTimeProgress(item).remainingMinutes);
         }
 
+        isStudyAssessment(item) {
+            return ['quiz', 'test'].includes(String(item?.kind || '').toLowerCase());
+        }
+
         assignmentStudySeconds(assignmentId) {
             if (!assignmentId) return 0;
-            const saved = (AppState.get('studyHistory') || []).filter(session => session.assignmentId === assignmentId);
+            const assignment = (AppState.get('assignments') || []).find(item => item.id === assignmentId);
+            if (!this.isStudyAssessment(assignment)) return 0;
+            return this.activitySeconds('study', assignmentId);
+        }
+
+        activitySeconds(activityType, assignmentId) {
+            const matches = session => (session.activityType === 'work' ? 'work' : 'study') === activityType
+                && (assignmentId === undefined || session.assignmentId === assignmentId);
+            const saved = (AppState.get('studyHistory') || []).filter(matches);
             let seconds = saved.reduce((sum, session) => sum + Math.max(0, Number(session.durationSec) || 0), 0);
             for (const session of this.studyTracker?.sessions.values() || []) {
-                if (session.assignmentId !== assignmentId) continue;
+                if (!matches(session)) continue;
                 const recorded = saved.find(item => item.id === session.id);
                 seconds += Math.max(0, Math.floor(session.milliseconds / 1000) - (Number(recorded?.durationSec) || 0));
             }
@@ -3648,7 +3677,7 @@
             if (Number(item.importance || 3) >= 4) estimate += 15;
             if (Number.isFinite(grade) && Number.isFinite(target) && target - grade >= 5) estimate += 15;
             if (Number(tracked.totalCredits) > 0 && targetGpa - Number(tracked.weighted) >= .25) estimate += 15;
-            const ratings = (AppState.get('studyHistory') || []).filter(session => session.assignmentId === item.id)
+            const ratings = (AppState.get('studyHistory') || []).filter(session => session.activityType !== 'work' && session.assignmentId === item.id)
                 .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp))).slice(0, 3)
                 .map(session => Number(session.effectiveness)).filter(rating => rating >= 1 && rating <= 5);
             if (ratings.length && ratings.reduce((sum, value) => sum + value, 0) / ratings.length <= 2) estimate += 15;
@@ -3656,22 +3685,26 @@
         }
 
         assignmentTimeProgress(item, estimate = this.assignmentEstimateMinutes(item)) {
-            const studiedMinutes = this.assignmentStudySeconds(item.id) / 60;
+            const assessment = this.isStudyAssessment(item);
+            const studiedMinutes = assessment ? this.assignmentStudySeconds(item.id) / 60 : 0;
+            const workedMinutes = this.activitySeconds('work', item.id) / 60;
+            const elapsedMinutes = assessment ? studiedMinutes : workedMinutes;
             const overridden = item.remainingEstimateMinutes !== null && item.remainingEstimateMinutes !== undefined
                 && Number.isFinite(Number(item.remainingEstimateMinutes));
             const totalMinutes = overridden
-                ? Math.max(0, Number(item.remainingEstimateStudiedSeconds) || 0) / 60 + Math.max(0, Number(item.remainingEstimateMinutes))
+                ? Math.max(0, Number(assessment ? item.remainingEstimateStudiedSeconds : item.remainingEstimateWorkedSeconds) || 0) / 60 + Math.max(0, Number(item.remainingEstimateMinutes))
                 : estimate;
             const complete = item.status === 'completed' || (this.isGradedItem(item) && !item.icMissing);
-            const remainingMinutes = complete ? 0 : Math.max(0, totalMinutes - studiedMinutes);
+            const remainingMinutes = complete ? 0 : Math.max(0, totalMinutes - elapsedMinutes);
             const pct = complete || (totalMinutes === 0 && overridden) ? 100
-                : totalMinutes > 0 ? Math.min(100, Math.floor(studiedMinutes / totalMinutes * 100)) : 0;
-            return { totalMinutes, studiedMinutes, remainingMinutes, pct };
+                : totalMinutes > 0 ? Math.min(100, Math.floor(elapsedMinutes / totalMinutes * 100)) : 0;
+            return { totalMinutes, studiedMinutes, workedMinutes, remainingMinutes, pct };
         }
 
         assignmentTimeMarkup(item) {
             const progress = this.assignmentTimeProgress(item);
-            return `<div class="assignment-time-progress"><span>${progress.pct}% of estimated time</span><progress max="100" value="${progress.pct}" aria-label="Estimated time completion for ${this.escapeHTML(item.title)}">${progress.pct}%</progress><small>${Math.ceil(progress.remainingMinutes)} min left · ${Math.floor(progress.studiedMinutes)} min studied</small></div>`;
+            if (!this.isStudyAssessment(item)) return `<small class="assignment-work-estimate">${Math.floor(progress.workedMinutes)} min worked · ${Math.ceil(progress.remainingMinutes)} min work remaining</small>`;
+            return `<div class="assignment-time-progress"><span>${progress.pct}% of estimated time</span><progress max="100" value="${progress.pct}" aria-label="Estimated time completion for ${this.escapeHTML(item.title)}">${progress.pct}%</progress><small>${Math.ceil(progress.remainingMinutes)} min left · ${Math.floor(progress.studiedMinutes)} min studied${progress.workedMinutes ? ` · ${Math.floor(progress.workedMinutes)} min worked separately` : ''}</small></div>`;
         }
 
         plannerTaskReason(item) {
@@ -9631,6 +9664,7 @@
                 // Older servers don't send the week, so fall back to sessions logged on this device.
                 const byDay = {};
                 (AppState.state?.studyHistory || []).forEach(session => {
+                    if (session.activityType === 'work') return;
                     const key = dayKey(session.timestamp);
                     if (key) byDay[key] = (byDay[key] || 0) + (Number(session.durationSec) || 0);
                 });
@@ -9839,6 +9873,7 @@
         }
 
         async syncStudyTimeEntry(session, refreshBoard = true) {
+            if (session?.activityType === 'work') return;
             if (!session?.leaderboardSyncPending || !window.StudBudCloud?.user || !window.StudBudCloud.accountReady) return;
             if (Number(session.durationSec) <= 0) return;
             const seconds = Math.min(21600, Math.max(1, Math.round(Number(session.durationSec) || 0)));
@@ -9866,7 +9901,7 @@
         async syncPendingStudyTime() {
             if (window.StudBudCloud?.offlineMode || window.navigator?.onLine === false) return;
             if (!window.StudBudCloud?.user || !window.StudBudCloud.accountReady || !window.StudBudCommunityGames) return;
-            const pending = (await NexusDB.getAll('studyHistory')).filter(session => session.leaderboardSyncPending);
+            const pending = (await NexusDB.getAll('studyHistory')).filter(session => session.activityType !== 'work' && session.leaderboardSyncPending);
             for (const session of pending) await this.syncStudyTimeEntry(session, false);
             if (pending.length) await this.refreshStudyLeaderboard(this.studyLeaderboardPeriod || 'daily');
         }
@@ -9939,16 +9974,18 @@
             const summary = document.getElementById('study-analytics-summary');
             const list = document.getElementById('study-analytics-decks');
             if (!summary || !list) return;
-            const sessions = (AppState.get('studyHistory') || []).filter(session => Number(session.durationSec) > 0);
+            const sessions = (AppState.get('studyHistory') || []).filter(session => session.activityType !== 'work' && Number(session.durationSec) > 0);
             const seconds = sessions.reduce((sum, session) => sum + Number(session.durationSec), 0);
-            summary.innerHTML = `<article><span>Logged study time</span><strong>${this.formatStudyDuration(seconds)}</strong></article><article><span>Saved sessions</span><strong>${sessions.length}</strong></article>`;
+            summary.innerHTML = `<article><span>Logged study time</span><strong>${this.formatStudyDuration(seconds)}</strong></article><article><span>Assignment work time</span><strong>${this.formatStudyDuration(this.activitySeconds('work'))}</strong></article><article><span>Saved study sessions</span><strong>${sessions.length}</strong></article>`;
             const decks = AppState.get('flashcards') || [];
             list.innerHTML = decks.length ? decks.map(deck => {
                 const cards = deck.cards || [];
                 const reviewed = cards.filter(card => card.lastReviewed || Number(card.reps || card.repetitions) > 0).length;
                 const lapses = cards.reduce((sum, card) => sum + Number(card.lapses || 0), 0);
                 const mastery = this.deckMastery(deck);
-                return `<article><strong>${this.escapeHTML(deck.title)}</strong><span>${cards.length} cards · ${mastery.pct}% recall estimate</span><small>${reviewed} reviewed · ${lapses} lapses</small><button type="button" class="secondary-btn" data-action="view-focus-cards" data-id="${this.escapeHTML(deck.id)}">Cards needing focus</button></article>`;
+                const deckSeconds = sessions.filter(session => session.deckId === deck.id)
+                    .reduce((sum, session) => sum + Number(session.durationSec), 0);
+                return `<article><strong>${this.escapeHTML(deck.title)}</strong><span>${cards.length} cards · ${mastery.pct}% recall estimate</span><small>${reviewed} reviewed · ${lapses} lapses · ${this.formatStudyDuration(deckSeconds)} studied</small><button type="button" class="secondary-btn" data-action="view-focus-cards" data-id="${this.escapeHTML(deck.id)}">Cards needing focus</button></article>`;
             }).join('') : '<p class="empty-state">Create a deck and log some study sessions to see your activity here.</p>';
         }
 
@@ -11487,6 +11524,15 @@
             document.getElementById('assignment-todo-fields').classList.toggle('hidden', graded);
             document.getElementById('assignment-graded-fields').classList.toggle('hidden', !graded);
             document.getElementById('assignment-study-options').classList.toggle('hidden', graded);
+            const assessment = ['quiz', 'test'].includes(kind);
+            const hint = document.getElementById('assignment-remaining-hint');
+            if (hint) hint.textContent = assessment
+                ? 'Set a new estimate of study time left. Future active study reduces it automatically. Reaching 100% does not mark the quiz or test done.'
+                : 'Estimate the work left to finish or turn in. Active assignment work reduces it; work time is separate from study time.';
+            const remaining = document.getElementById('assignment-remaining');
+            if (remaining) remaining.placeholder = assessment ? 'Automatic from estimate and study history' : 'Estimated work left';
+            const progress = document.getElementById('assignment-time-progress');
+            if (progress) progress.classList.toggle('hidden', false);
             document.getElementById('assignment-due-date').required = !graded;
             document.getElementById('assignment-max-points').required = graded;
             document.getElementById('assignment-points').required = graded;
@@ -11583,7 +11629,9 @@
             const keepCampusScore = Boolean(current?.icMissing && current.graded && !gradingNow);
             const graded = gradingNow || keepCampusScore;
             const kind = document.getElementById('assignment-kind').value;
-            const maxPoints = Math.round((Number(document.getElementById('assignment-max-points').value) || 100) * 100) / 100;
+            const maxText = document.getElementById('assignment-max-points').value.trim();
+            const maxPoints = Math.round((maxText === '' ? 100 : Number(maxText)) * 100) / 100;
+            if (!Number.isFinite(maxPoints) || maxPoints < 0) throw new Error('Possible points must be zero or greater. Use zero for extra credit.');
             const pointsEarned = keepCampusScore ? current.pointsEarned
                 : graded ? Math.round(Math.max(0, Number(document.getElementById('assignment-points').value) || 0) * 100) / 100 : 0;
             const remaining = document.getElementById('assignment-remaining');
@@ -11612,7 +11660,8 @@
                 plannedDate,
                 ...(remaining && remainingRaw !== (remaining.dataset.original || '') ? {
                     remainingEstimateMinutes: remainingRaw === '' ? null : Number(remainingRaw),
-                    remainingEstimateStudiedSeconds: remainingRaw === '' ? null : this.assignmentStudySeconds(id)
+                    remainingEstimateStudiedSeconds: remainingRaw === '' ? null : this.assignmentStudySeconds(id),
+                    remainingEstimateWorkedSeconds: remainingRaw === '' ? null : this.activitySeconds('work', id)
                 } : {}),
                 importance: Number(document.getElementById('assignment-importance').value) || 3,
                 priority: current ? current.priority : 'high',
@@ -12696,8 +12745,8 @@
             this.studyTracker = new window.ActiveStudyTracker({
                 save: session => AppState.recordStudySession(session),
                 onError: error => {
-                    console.error('[NexusApp] Automatic study time could not be saved:', error);
-                    AppState.setSaveStatus(`Study time could not be saved. Keep this page open to retry. ${this.friendlyErrorMessage(error)}`, 'error');
+                    console.error('[NexusApp] Automatic work/study time could not be saved:', error);
+                    AppState.setSaveStatus(`Work/study time could not be saved. Keep this page open to retry. ${this.friendlyErrorMessage(error)}`, 'error');
                 }
             });
             const activity = event => {
@@ -12764,7 +12813,7 @@
 
         deckStudyTimeContext(deck, source, key, title) {
             const link = deck ? this.deckLinkInfo(deck) : {};
-            const target = link.assessment && this.isOpenAssignment(link.assessment) ? link.assessment : null;
+            const target = link.assessment && this.isStudyAssessment(link.assessment) && this.isOpenAssignment(link.assessment) ? link.assessment : null;
             return { key, session: {
                 title, source, method: source === 'flashcards' ? 'flashcards' : 'practice',
                 deckId: deck?.id, assignmentId: target?.id,
@@ -12809,9 +12858,13 @@
             if (['dashboard', 'planner', 'class'].includes(route) && this.dashboardSprintAssignmentId) {
                 const item = (AppState.get('assignments') || []).find(item => item.id === this.dashboardSprintAssignmentId && this.isOpenAssignment(item));
                 if (item) {
+                    const activityType = this.isStudyAssessment(item) ? 'study' : 'work';
+                    if (this.assignmentActivityType !== activityType) this.assignmentStudyTimeId = null;
+                    this.assignmentActivityType = activityType;
                     this.assignmentStudyTimeId ||= this.studyTimeKey();
                     return { key: this.assignmentStudyTimeId, session: {
-                        title: `Assignment: ${item.title}`, source: 'assignment', method: this.getStudyMethodKey(item),
+                        activityType,
+                        title: `${activityType === 'work' ? 'Work' : 'Study'}: ${item.title}`, source: 'assignment', method: this.getStudyMethodKey(item),
                         assignmentId: item.id, courseCode: item.courseCode
                     } };
                 }
@@ -12829,13 +12882,16 @@
 
         updateAutomaticStudyDisplay() {
             if (!this.studyTracker) return;
-            const seconds = this.studyTracker.seconds(this.studyTracker.context?.key || this.lastStudyTimeKey);
+            const work = this.studyTracker.context?.session?.activityType === 'work';
+            const seconds = this.studyTracker.seconds(this.studyTracker.context?.key);
             const time = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
             document.querySelectorAll('.focus-time-display, #focus-sprint-clock').forEach(node => { node.textContent = time; });
-            const state = seconds >= 21600 ? 'Session limit (6 hr)' : this.studyTracker.running ? 'Studying' : this.studyTracker.context ? 'Paused' : 'Not studying';
+            const state = seconds >= 21600 ? 'Session limit (6 hr)' : this.studyTracker.running ? (work ? 'Working' : 'Studying') : this.studyTracker.context ? 'Paused' : 'Not tracking';
             document.querySelectorAll('.auto-study-state').forEach(node => { node.textContent = state; });
             const status = document.getElementById('focus-sprint-status');
-            if (status) status.textContent = `${state}. Active time saves automatically. Pauses after 60 seconds without interaction or when hidden / unfocused.`;
+            if (status) status.textContent = `${state}. Assignment work and studying save separately. Pauses after 60 seconds without interaction or when hidden / unfocused.`;
+            const totals = document.getElementById('focus-time-totals');
+            if (totals) totals.textContent = `Total worked: ${this.formatStudyDuration(this.activitySeconds('work'))} · Total studied: ${this.formatStudyDuration(this.activitySeconds('study'))}`;
         }
 
         startArcade(game) {

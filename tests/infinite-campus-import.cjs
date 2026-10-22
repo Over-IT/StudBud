@@ -214,7 +214,8 @@ assert.strictEqual(imported('a1').kind, 'test');
         ['Exam study guide', 'Assessments', 'assignment'],
         ['Unit 3 Exam', 'Homework', 'test'],
         ['Chapter 5', 'Quizzes', 'quiz'],
-        ['Daily work', 'Tests and Quizzes', 'assignment']
+        ['Daily work', 'Tests and Quizzes', 'assignment'],
+        ['Civil War Test Extra Credit', 'Tests', 'assignment']
     ];
     for (const [title, categoryName, kind] of cases) {
         const changed = { ...model, assignments: [{ ...model.assignments[0], title, categoryName, categoryID: '' }] };
@@ -226,6 +227,9 @@ assert.strictEqual(imported('a1').kind, 'test');
     delete oldRecord.icKind;
     const repaired = IC.applyImportPlan(correctedModel, plan, { courses: first.courses, assignments: [oldRecord], schedule: {} }, options);
     assert.equal(repaired.assignments[0].kind, 'assignment', 'reimport repairs the legacy test-review misclassification');
+    const editedRecord = { ...repaired.assignments[0], kind: 'quiz', icKind: 'assignment' };
+    const preserved = IC.applyImportPlan(correctedModel, plan, { courses: repaired.courses, assignments: [editedRecord] }, options);
+    assert.equal(preserved.assignments[0].kind, 'quiz', 'a user-selected type overrides import inference on reimport');
 }
 assert.strictEqual(first.schedule.all['1'], calcCourse.code);
 assert.strictEqual(first.schedule.all['8'], 'KEEP', 'unrelated periods are kept');
@@ -263,6 +267,62 @@ const keptQuiz = second.assignments.find(item => item.id === 'ic_a4');
 assert.deepStrictEqual(plain([keptQuiz.estimatedMinutes, keptQuiz.kind]), [120, 'test']);
 assert.deepStrictEqual(plain(keptQuiz), upcomingQuiz, 'reimport leaves the entire upcoming assignment unchanged');
 assert.strictEqual(second.summary.coursesUpdated, 2);
+{
+    const campus = model.assignments.find(item => item.id === 'a1');
+    const manual = { id: 'my-task', title: `  ${campus.title.toUpperCase()}  `, courseCode: calcCourse.code,
+        graded: false, status: 'pending', dueDate: '2026-02-20', kind: 'assignment',
+        estimatedMinutes: 75, remainingEstimateMinutes: 25, remainingEstimateWorkedSeconds: 1200,
+        notes: 'Keep my notes', plannedDate: '2026-02-18', priority: 'low', importance: 1,
+        categoryId: calcCourse.categories[0].id, completedAt: null };
+    const sameTitleOtherClass = { ...manual, id: 'other-task', courseCode: 'other-course' };
+    const savedState = { courses: first.courses, assignments: [manual, sameTitleOtherClass] };
+    const merged = IC.applyImportPlan(model, replan, savedState, options);
+    const updated = merged.assignments.find(item => item.id === manual.id);
+    assert.ok(updated, 'a unique title match in the same class updates the existing ungraded task');
+    assert.equal(merged.assignments.some(item => item.id === 'ic_a1'), false, 'grade import never duplicates a matched manual task');
+    assert.equal(updated.pointsEarned, 90);
+    assert.equal(updated.maxPoints, 100);
+    assert.equal(updated.graded, true);
+    assert.equal(updated.icAssignmentID, 'ic_a1');
+    for (const key of ['title', 'courseCode', 'dueDate', 'kind', 'estimatedMinutes', 'remainingEstimateMinutes',
+        'remainingEstimateWorkedSeconds', 'notes', 'plannedDate', 'priority', 'importance', 'categoryId']) {
+        assert.deepEqual(updated[key], manual[key], `grade updates preserve ${key}`);
+    }
+    assert.equal(manual.graded, false, 'previewing does not mutate saved tasks');
+    assert.equal(merged.assignments.find(item => item.id === 'other-task').graded, false, 'never matches a different class');
+    const again = IC.applyImportPlan(model, replan, merged, options);
+    assert.equal(again.assignments.length, merged.assignments.length, 'Campus identity remains linked across later imports');
+    assert.equal(again.assignments.find(item => item.id === manual.id).notes, manual.notes);
+    const excusedModel = plain(model);
+    excusedModel.assignments.find(item => item.id === 'a1').exempt = true;
+    const excused = IC.applyImportPlan(excusedModel, replan, merged, options).assignments.find(item => item.id === manual.id);
+    assert.equal(excused.notes, manual.notes, 'excusing a linked grade never deletes the original task or its notes');
+    assert.equal(excused.graded, false, 'an excused linked score stops affecting grades');
+    const ambiguous = IC.applyImportPlan(model, replan, { courses: first.courses,
+        assignments: [manual, { ...manual, id: 'duplicate-title' }] }, options);
+    assert.equal(ambiguous.assignments.find(item => item.id === manual.id).graded, false,
+        'ambiguous titles never silently overwrite one of the tasks');
+    assert.ok(ambiguous.assignments.some(item => item.id === 'ic_a1'));
+    const dated = IC.applyImportPlan(model, replan, { courses: first.courses,
+        assignments: [manual, { ...manual, id: 'dated-task', dueDate: campus.dueDate }] }, options);
+    assert.equal(dated.assignments.find(item => item.id === 'dated-task').graded, true,
+        'a unique matching due date resolves repeated assignment titles');
+    const gradedModel = plain(model);
+    const future = gradedModel.assignments.find(item => item.id === 'a4');
+    future.scorePoints = 18;
+    future.totalPoints = 20;
+    const newlyGraded = IC.applyImportPlan(gradedModel, replan, { courses: first.courses, assignments: edited }, options);
+    const savedQuiz = newlyGraded.assignments.find(item => item.id === upcomingQuiz.id);
+    for (const key of ['title', 'dueDate', 'estimatedMinutes', 'kind']) assert.equal(savedQuiz[key], upcomingQuiz[key]);
+    assert.equal(savedQuiz.graded, true, 'a Campus-linked ungraded assignment receives its new grade');
+    assert.equal(savedQuiz.pointsEarned, 18);
+    const estimatesModel = plain(model);
+    estimatesModel.assignments = ['Lab report', 'Essay project', 'Daily worksheet', 'Reading'].map((title, index) =>
+        ({ ...campus, id: `estimate-${index}`, title, categoryName: 'Homework', scorePoints: 10, totalPoints: 10, multiplier: 1 }));
+    const estimates = IC.applyImportPlan(estimatesModel, replan, { courses: first.courses }, options);
+    assert.deepEqual(plain(estimates.assignments.map(item => item.estimatedMinutes)), [60, 90, 20, 30],
+        'unfamiliar imported assignments receive editable completion-time estimates');
+}
 
 // Citizenship is a separate grading task, not an academic category.
 {
@@ -325,6 +385,32 @@ assert.strictEqual(second.summary.coursesUpdated, 2);
     const app = vm.runInContext('Object.create(AppOrchestrator.prototype)', gradeSandbox);
     assert.ok(Math.abs(app.calculateCourseGrade(academicCourse) - (80 * .6 + (200 / 300 * 100) * .4)) < 1e-9,
         'the actual app computes Campus category weighting and percent/multiplier totals correctly');
+    const bonusPayload = plain(payload);
+    bonusPayload.assignments = [];
+    bonusPayload.details = { 501: { details: [{ task: { termID: 1, taskName: 'Semester' }, categories: [
+        { groupID: 10, name: 'Coursework', isWeighted: false, assignments: [
+            { objectSectionID: 'coursework', assignmentName: 'Coursework', scorePoints: 363, totalPoints: 395, multiplier: 1 },
+            { objectSectionID: 'bonus', assignmentName: 'Civil War Test Extra Credit', scorePoints: 11, totalPoints: 0, multiplier: 1 }
+        ] }
+    ] }] } };
+    const bonusModel = IC.parsePayload(bonusPayload);
+    const bonusPlan = IC.buildImportPlan(bonusModel, {}, { school: 'pchs', catalog });
+    const bonusImport = IC.applyImportPlan(bonusModel, bonusPlan, {}, options);
+    const bonusCourse = bonusImport.courses.find(course => course.icSectionIDs.includes('501'));
+    const bonus = bonusImport.assignments.find(item => item.id === 'ic_bonus');
+    assert.equal(bonus.pointsEarned, 11);
+    assert.equal(bonus.maxPoints, 0);
+    assert.equal(bonus.kind, 'assignment');
+    assert.equal(app.calculateCourseGrade(bonusCourse, bonusImport.assignments).toFixed(2), '94.68',
+        'collector-shaped extra credit survives parsing, importing and actual grade calculation');
+    const bonusAgain = IC.applyImportPlan(bonusModel,
+        IC.buildImportPlan(bonusModel, bonusImport, { school: 'pchs', catalog }), bonusImport, options);
+    assert.equal(app.calculateCourseGrade(bonusCourse, bonusAgain.assignments).toFixed(2), '94.68',
+        'reimport cannot duplicate bonus points');
+    bonusModel.assignments.find(item => item.id === 'bonus').multiplier = 2;
+    const multipliedBonus = IC.applyImportPlan(bonusModel, bonusPlan, {}, options);
+    assert.equal(multipliedBonus.assignments.find(item => item.id === 'ic_bonus').pointsEarned, 22);
+    assert.equal(multipliedBonus.assignments.find(item => item.id === 'ic_bonus').maxPoints, 0);
     const oldCitizen = { id: 'ic_citizen', source: 'infinite-campus', courseCode: academicCourse.code,
         categoryId: 'category_ic_99', graded: true, pointsEarned: 10, maxPoints: 10 };
     const oldCourse = { ...academicCourse, categories: [...academicCourse.categories,
