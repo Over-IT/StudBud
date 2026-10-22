@@ -1124,6 +1124,11 @@
                             <select id="settings-study-direction"><option value="front">Term</option><option value="back">Definition</option><option value="mixed">Mixed sides</option></select>
                             <p class="settings-hint">Saved on this device. You can also change these during a study session.</p>
                         </section>
+                        <section class="glass-card" data-settings-panel="general">
+                            <h3 class="settings-section-heading"><i class="fas fa-user" aria-hidden="true"></i> Account</h3>
+                            <p>Signed in as <strong id="account-name">—</strong></p>
+                            <button id="sign-out-btn" class="secondary-btn" type="button"><i class="fas fa-right-from-bracket" aria-hidden="true"></i> Sign out</button>
+                        </section>
                         <section class="glass-card settings-wide" data-settings-panel="general">
                             <h3 class="settings-section-heading"><i class="fas fa-shield-halved" aria-hidden="true"></i> Privacy &amp; personalization</h3>
                             <p>Choose what other students can see, or adjust the app for your device.</p>
@@ -1252,9 +1257,7 @@
                             <h3>Account &amp; saved data</h3>
                             <p>Your classes, grades, flashcards and history are saved on this device, including offline. Connect an account to sync across devices. Offline sharing updates wait for reconnection; purchases and hosted matches require internet.</p>
                             <p id="data-save-status" class="data-save-status" role="status" aria-live="polite">Checking local save status…</p>
-                            <p>Signed in as <strong id="account-name">—</strong></p>
                             <div class="settings-actions">
-                                <button id="sign-out-btn" class="secondary-btn"><i class="fas fa-right-from-bracket"></i> Sign out</button>
                                 <button class="secondary-btn open-ic-import-btn" type="button"><i class="fas fa-cloud-arrow-down"></i> Import from Infinite Campus</button>
                             </div>
                             <p class="settings-hint"><a href="privacy.html" target="_blank" rel="noopener">Privacy policy &amp; advertising</a></p>
