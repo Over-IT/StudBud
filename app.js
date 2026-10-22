@@ -1429,6 +1429,7 @@
                 }
                 if (event.target.matches('#deck-editor-search')) this.renderDeckEditorCards();
                 if (event.target.matches('#deck-editor-filter')) this.renderDeckEditorCards();
+                if (event.target.matches('#card-browser-search')) this.renderCardBrowser();
                 if (event.target.matches('.shop-search-input')) {
                     const key = event.target.dataset.searchKey;
                     if (key === 'multiplayer-inventory-items') this.inventorySearch = event.target.value.trim();
@@ -1569,6 +1570,8 @@
                 return;
             }
             this.deckEditorDraft = null;
+            this.cardBrowserDeckId = null;
+            this.cardBrowserSharedDeck = null;
             const overlay = document.getElementById('modal-container');
             if (overlay) overlay.classList.add('hidden');
             document.querySelectorAll('#modal-container .modal-content').forEach(modal => {
@@ -4049,6 +4052,56 @@
             this.openModal('deck-editor-modal');
         }
 
+        openCardBrowser(deckId, filter = 'all', sharedDeck = null) {
+            const deck = sharedDeck || (AppState.get('flashcards') || []).find(item => item.id === deckId);
+            if (!deck) throw new Error('The selected deck no longer exists.');
+            this.cardBrowserDeckId = deckId;
+            this.cardBrowserSharedDeck = sharedDeck;
+            document.querySelector('#card-browser-modal [data-action="browser-edit-set"]')?.classList.toggle('hidden', Boolean(sharedDeck));
+            document.getElementById('card-browser-practice').classList.toggle('hidden', Boolean(sharedDeck));
+            document.getElementById('card-browser-save')?.classList.toggle('hidden', !sharedDeck?.can_save);
+            document.getElementById('card-browser-filter').closest?.('label')?.classList.toggle('hidden', Boolean(sharedDeck));
+            document.getElementById('card-browser-set').textContent = deck.title;
+            document.getElementById('card-browser-filter').value = filter;
+            document.getElementById('card-browser-search').value = '';
+            this.renderCardBrowser();
+            this.openModal('card-browser-modal');
+        }
+
+        renderCardBrowser() {
+            const deck = this.cardBrowserSharedDeck || (AppState.get('flashcards') || []).find(item => item.id === this.cardBrowserDeckId);
+            if (!deck) throw new Error('The selected deck no longer exists.');
+            const filter = document.getElementById('card-browser-filter').value;
+            const query = document.getElementById('card-browser-search').value.trim().toLowerCase();
+            const descriptions = {
+                weak: ['Weak cards', 'At least two recent answers with accuracy below 75%. Older sets use lifetime accuracy until you practice again.'],
+                focus: ['Cards needing recall practice', 'New cards and terms that need more consistent recall. Written answers and self-ratings count fully; choices count half.'],
+                all: ['All cards', 'Browse without editing. Open a card to reveal its answer.'],
+                starred: ['Starred cards', 'Cards you starred for later review.']
+            };
+            const [title, guidance] = descriptions[filter] || descriptions.all;
+            const eligible = (deck.cards || []).filter(card => filter === 'weak' ? window.FlashcardTools.cardProgress(card).weak
+                : filter === 'focus' ? window.FlashcardTools.cardProgress(card).mastery < 1 : filter === 'starred' ? card.starred : true);
+            const cards = eligible.filter(card => `${card.front} ${card.back} ${(card.tags || []).join(' ')}`.toLowerCase().includes(query));
+            if (filter === 'weak' || filter === 'focus') cards.sort((a, b) =>
+                window.AnkiStudySession.priority(b) - window.AnkiStudySession.priority(a));
+            document.getElementById('card-browser-title').textContent = title;
+            document.getElementById('card-browser-guidance').textContent = guidance;
+            document.getElementById('card-browser-count').textContent = `${cards.length} of ${(deck.cards || []).length} cards${query ? ` · ${eligible.length} in this group` : ''}`;
+            document.getElementById('card-browser-cards').innerHTML = cards.map(card => {
+                const progress = window.FlashcardTools.cardProgress(card);
+                const accuracy = progress.attempts ? `${Math.round(progress.accuracy * 100)}% accuracy${progress.recentAttempts ? ` · last ${progress.recentAttempts} answers` : ' · lifetime'}` : 'Not practiced yet';
+                return `<details class="card-browser-card"><summary><span><strong>${this.escapeHTML(card.front)}</strong>
+                    <small>${accuracy}${card.suspended ? ' · Scheduled study paused' : ''}</small></span><span class="card-browser-reveal" aria-hidden="true">Answer <i class="fas fa-chevron-down"></i></span></summary>
+                    <div class="card-browser-answer"><div class="card-browser-definition">${this.cardAnswerMarkup(card)}</div>
+                    ${card.tags?.length ? `<small>${this.escapeHTML(card.tags.join(', '))}</small>` : ''}
+                    <small>${Math.round(progress.mastery * 100)}% recall estimate · ${this.cardFocusReason(card)}</small></div></details>`;
+            }).join('') || `<div class="empty-state">${query ? 'No cards match your search. Try another term or clear the search.' : filter === 'weak' ? 'No weak cards in this set. Weak cards appear after at least two recent answers below 75% accuracy.' : filter === 'focus' ? 'No cards need more recall practice right now.' : filter === 'starred' ? 'No starred cards yet. Star cards while studying or in the editor.' : 'This set has no cards yet.'}</div>`;
+            const practice = document.getElementById('card-browser-practice');
+            practice.disabled = !eligible.some(card => !card.suspended || filter === 'starred');
+            practice.textContent = filter === 'weak' ? 'Practice weak cards' : filter === 'focus' ? 'Practice focus cards' : filter === 'starred' ? 'Practice starred cards' : 'Study this set';
+        }
+
         renderDeckEditorCards() {
             const draft = this.deckEditorDraft;
             if (!draft) return;
@@ -4844,9 +4897,11 @@
             window.NexusApp.canAccessStaff = this.canAccessStaff;
             document.getElementById('admin-nav-item')?.classList.toggle('hidden', !this.canAccessStaff);
             this.classrooms?.refreshNav();
+            if (this.Router?.activeRoute === 'school-community' && this.schoolCommunity
+                && this.schoolCommunity.context !== this.schoolCommunity.key()) await this.schoolCommunity.render();
             if (this.classrooms?.available() && /^#\/?classes$/i.test(window.location.hash) && Router.activeRoute !== 'classes') Router.handleHashChange();
             document.querySelectorAll('#admin-view [data-admin-tab]').forEach(button => {
-                const allowed = this.isAdmin || (['decks', 'reports', 'users'].includes(button.dataset.adminTab) && this.canModerateFlashcards)
+                const allowed = this.isAdmin || (['decks', 'reports', 'users', 'classes'].includes(button.dataset.adminTab) && this.canModerateFlashcards)
                     || (button.dataset.adminTab === 'games' && this.canTestGames);
                 button.classList.toggle('hidden', !allowed);
             });
@@ -5023,13 +5078,24 @@
             let tab = this.adminTab || (this.canModerateFlashcards ? 'decks' : 'games');
             if (tab === 'decks' && !this.canModerateFlashcards) tab = 'games';
             if (tab === 'games' && !this.canTestGames) tab = 'decks';
-            if ((['users', 'reports'].includes(tab) && !this.canModerateFlashcards) || (tab === 'notices' && !this.isAdmin)) tab = this.canModerateFlashcards ? 'decks' : 'games';
+            if ((['users', 'reports', 'classes'].includes(tab) && !this.canModerateFlashcards) || (tab === 'notices' && !this.isAdmin)) tab = this.canModerateFlashcards ? 'decks' : 'games';
             this.adminTab = tab;
+            const request = this.adminListRequest = (this.adminListRequest || 0) + 1;
+            const account = window.StudBudCloud?.user?.id;
+            const current = () => request === this.adminListRequest && this.adminTab === tab && this.canAccessStaff
+                && account === window.StudBudCloud?.user?.id;
             document.getElementById('admin-search-form')?.classList.toggle('hidden', ['games', 'notices', 'reports'].includes(tab));
+            const search = document.getElementById('admin-search');
+            if (search) search.placeholder = tab === 'classes' ? 'Search course name or code' : 'Search by title or username';
+            if (tab === 'classes') {
+                await this.schoolCommunity.renderModeration(document.getElementById('admin-search').value.trim());
+                return;
+            }
             if (tab === 'reports') {
                 status.textContent = 'Loading reports...';
                 try {
                     const rows = await window.StudBudCommunityGames.adminCall('studbud_admin_list_reports', { p_status: 'open' });
+                    if (!current()) return;
                     const esc = value => this.escapeHTML(String(value ?? ''));
                     const reasonLabel = { inappropriate: 'Inappropriate', wrong: 'Wrong answers', spam: 'Spam', copyright: 'Copyright', harassment: 'Harassment', other: 'Other' };
                     status.textContent = rows.length ? `${rows.length} reported item${rows.length === 1 ? '' : 's'} waiting for review.` : 'No open reports. Nice and quiet.';
@@ -5051,6 +5117,7 @@
                         </div>${isDeck ? `<div id="admin-deck-${esc(row.target_id)}" class="admin-deck-details hidden"></div>` : ''}</article>`;
                     }).join('');
                 } catch (error) {
+                    if (!current()) return;
                     status.textContent = this.friendlyErrorMessage(error, 'Could not load reports.');
                     list.innerHTML = '';
                 }
@@ -5084,6 +5151,7 @@
                 status.textContent = 'Loading announcement…';
                 try {
                     const notice = await window.StudBudCommunityGames.getSiteNotice();
+                    if (!current()) return;
                     status.textContent = notice?.active ? 'This announcement is currently visible to signed-in students.' : 'No announcement is currently published.';
                     list.innerHTML = `<form id="admin-notice-form" class="admin-notice-form">
                         <label>Announcement message<textarea id="admin-notice-message" rows="5" maxlength="1000" required>${this.escapeHTML(notice?.message || '')}</textarea></label>
@@ -5091,8 +5159,10 @@
                         <div class="admin-actions"><button type="submit" class="primary-btn">Publish announcement</button>${notice?.active ? '<button type="button" class="secondary-btn" data-admin-action="hide-notice">Unpublish</button>' : ''}</div>
                     </form>`;
                     const history = await window.StudBudCommunityGames.getSiteNoticeHistory();
+                    if (!current()) return;
                     list.innerHTML += `<section class="admin-notice-history"><h4>Announcement history</h4><p class="settings-hint">Unpublish hides the current banner. Delete permanently removes a selected announcement for everyone.</p>${history.map(item => `<article class="admin-row"><div><strong>${this.escapeHTML(this.formatAnnouncementTime(item.published_at))}</strong><p>${this.escapeHTML(item.message)}</p><small>By ${this.escapeHTML(item.author_name || 'Site administrator')}</small></div><button type="button" class="danger-btn" data-admin-action="delete-notice" data-id="${this.escapeHTML(item.publication_id)}">Delete announcement</button></article>`).join('') || '<p>No announcements yet.</p>'}</section>`;
                 } catch (error) {
+                    if (!current()) return;
                     status.textContent = this.friendlyErrorMessage(error, 'Could not load announcements.');
                     list.innerHTML = '';
                 }
@@ -5103,6 +5173,7 @@
             try {
                 const games = window.StudBudCommunityGames;
                 const rows = await games.adminCall(tab === 'users' ? 'studbud_admin_list_users' : 'studbud_admin_list_decks', { p_query: query });
+                if (!current()) return;
                 status.textContent = rows.length ? `${rows.length} shown` : 'Nothing found.';
                 const esc = value => this.escapeHTML(String(value ?? ''));
                 list.innerHTML = tab === 'users'
@@ -5134,6 +5205,7 @@
                             <button type="button" class="danger-btn" data-admin-action="delete-deck" data-id="${esc(deck.id)}" data-name="${esc(deck.title)}">Delete</button>
                         </div></details><div id="admin-deck-${esc(deck.id)}" class="admin-deck-details hidden"></div></article>`).join('');
             } catch (error) {
+                if (!current()) return;
                 status.textContent = this.friendlyErrorMessage(error, 'Could not load admin data.');
                 list.innerHTML = '';
             }
@@ -8538,7 +8610,8 @@
             sidebarToggle.setAttribute('aria-expanded', String(expanded));
             sidebarToggle.setAttribute('aria-label', `${action} ${target}`);
             sidebarToggle.title = `${action} ${target}`;
-            sidebarToggle.innerHTML = `<i class="fas fa-chevron-${orientation}" aria-hidden="true"></i>`;
+            const icon = sidebarToggle.querySelector('i');
+            if (icon) icon.className = `fas fa-chevron-${orientation}`;
             document.querySelectorAll('.nav-item[data-target]').forEach(item => {
                 const label = item.querySelector('span')?.textContent.trim();
                 if (!label) return;
@@ -10015,9 +10088,10 @@
                 } else if (target.matches('.audio-btn[data-audio]')) {
                     this.toggleSoundscape(target);
                 } else if (id === 'sidebar-collapse-btn') {
-                    const settings = { ...AppState.get('settings'), sidebarCollapsed: !AppState.get('settings').sidebarCollapsed };
+                    const settings = { ...AppState.get('settings'), sidebarCollapsed: !AppState.get('settings')?.sidebarCollapsed };
                     AppState.set('settings', settings);
-                    this.applyAppearance();
+                    document.body.classList.toggle('sidebar-collapsed', settings.sidebarCollapsed);
+                    this.updateSidebarToggle();
                 } else if (id === 'new-grade-scenario-btn') {
                     const nameInput = document.getElementById('grade-scenario-name');
                     this.creatingGradeScenario = true;
@@ -10547,6 +10621,7 @@
         }
 
         handleChange(event) {
+            if (event.target.id === 'card-browser-filter') this.renderCardBrowser();
             if (event.target.matches?.('[data-goal-grade], [data-goal-lock]')) {
                 const code = event.target.dataset.goalGrade || event.target.dataset.goalLock;
                 const draft = this.gpaGoalDraft?.get(code);
@@ -11544,8 +11619,27 @@
                 this.renderDailyPlanner();
                 this.refreshAutomaticStudy();
             }
-            if (action === 'view-weak-cards') this.openDeckEditor(id, 'weak');
-            if (action === 'view-focus-cards') this.openDeckEditor(id, 'focus');
+            if (action === 'view-weak-cards') this.openCardBrowser(id, 'weak');
+            if (action === 'view-focus-cards') this.openCardBrowser(id, 'focus');
+            if (action === 'browser-edit-set') {
+                if (this.cardBrowserSharedDeck) throw new Error('Save a personal copy before editing a shared set.');
+                const deckId = this.cardBrowserDeckId;
+                this.closeModal();
+                this.openDeckEditor(deckId);
+            }
+            if (action === 'browser-practice') {
+                if (this.cardBrowserSharedDeck) throw new Error('Add this shared set to your library before practicing.');
+                const deckId = this.cardBrowserDeckId;
+                const filter = document.getElementById('card-browser-filter').value;
+                this.closeModal();
+                this.startStudy(deckId, filter === 'all' ? 'scheduled' : filter);
+            }
+            if (action === 'browser-save-shared') {
+                if (!this.cardBrowserSharedDeck?.can_save) throw new Error('This set is open for moderation review only.');
+                const sharedDeck = this.cardBrowserSharedDeck;
+                await this.schoolCommunity.saveSharedSet(sharedDeck.id);
+                if (this.cardBrowserSharedDeck === sharedDeck) this.closeModal();
+            }
             if (action === 'editor-add-card') this.openCardForm(this.deckEditorDraft?.id, '', true);
             if (action === 'editor-edit-card') this.openCardForm(this.deckEditorDraft?.id, id, true);
             if (action === 'editor-bulk-add') this.addBulkEditorCards();
@@ -11589,17 +11683,19 @@
             const deck = (AppState.get('flashcards') || []).find(item => item.id === deckId);
             if (!deck) throw new Error('The selected deck no longer exists.');
             const active = (deck.cards || []).filter(card => card && !card.suspended);
-            const cards = mode === 'focus' ? active.filter(card => window.FlashcardTools.cardProgress(card).mastery < 1)
+            const cards = mode === 'weak' ? active.filter(card => window.FlashcardTools.cardProgress(card).weak)
+                : mode === 'focus' ? active.filter(card => window.FlashcardTools.cardProgress(card).mastery < 1)
                 : mode === 'starred' ? (deck.cards || []).filter(card => card && card.starred) : mode === 'cram' ? (deck.cards || []).filter(Boolean) : active;
             if (!cards.length) {
-                window.StudBudDialogs.notify(mode === 'focus' ? 'No active cards need more recall practice. Use Study to review the full set, or unpause cards in the editor.'
+                window.StudBudDialogs.notify(mode === 'weak' ? 'No active weak cards to practice. Paused cards remain visible in the viewer; unpause them in Edit set to include them.'
+                    : mode === 'focus' ? 'No active cards need more recall practice. Use Study to review the full set, or unpause cards in the editor.'
                     : mode === 'starred' ? 'Star some cards first (press S while studying, or use the set editor).'
                     : (deck.cards || []).length ? 'All cards are paused. Unpause cards in the editor, or use Cram.' : 'This deck has no cards yet.');
                 return;
             }
             if (window.SM2Engine?.migrateDeck?.(deck)) AppState.saveFlashcardDeck(deck).catch(error => console.error('[NexusApp] Deck migration could not be saved:', error));
             let session = null;
-            if (mode === 'scheduled' || mode === 'focus') {
+            if (mode === 'scheduled' || mode === 'focus' || mode === 'weak') {
                 if (!window.SM2Engine?.createSession) throw new Error('The spaced-repetition scheduler did not load. Reload before studying.');
                 session = window.SM2Engine.createSession(cards, { deck, includeAll: true, learnAheadAll: false, learnAheadMinutes: 0 });
                 if (!session || !session.remaining) throw new Error('No study cards could be loaded. Check this set in the editor.');
@@ -11613,7 +11709,7 @@
             this.recordFlashcardTime();
             this.flashcardStudyTimeId = this.studyTimeKey();
             this.activeDeckId = deckId;
-            this.cramMode = mode !== 'scheduled' && mode !== 'focus';
+            this.cramMode = !['scheduled', 'focus', 'weak'].includes(mode);
             this.studyMode = mode;
             this.studySession = session;
             this.studyCards = [];
@@ -11711,7 +11807,7 @@
             this.currentStudyCard = card || null;
             if (!card) return this.showStudySummary();
             const deck = this.studyDeck();
-            document.getElementById('study-deck-title').textContent = `${deck?.title || 'Flashcards'}${this.studyMode === 'focus' ? ' · Focus practice' : this.studyMode === 'starred' ? ' · Starred' : this.cramMode ? ' · Cram' : ''}`;
+            document.getElementById('study-deck-title').textContent = `${deck?.title || 'Flashcards'}${this.studyMode === 'weak' ? ' · Weak cards' : this.studyMode === 'focus' ? ' · Focus practice' : this.studyMode === 'starred' ? ' · Starred' : this.cramMode ? ' · Cram' : ''}`;
             const progress = document.getElementById('study-progress');
             let remaining;
             if (this.studySession) {

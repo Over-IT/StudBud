@@ -176,6 +176,20 @@ app.applyAppearance();
 media.listeners[0]();
 assert.equal(document.documentElement.style.colorScheme, 'dark', 'OS changes never replace an explicit preference');
 assert.equal(media.listeners.length, 1, 'appearance refreshes do not accumulate listeners');
+const sidebarToggle = element('sidebar-collapse-btn'), sidebarIcon = { className: '' };
+sidebarToggle.querySelector = selector => selector === 'i' ? sidebarIcon : null;
+Object.defineProperty(sidebarToggle, 'innerHTML', { set() { throw Error('Do not replace the icon during a pointer gesture.'); } });
+elements.set(sidebarToggle.id, sidebarToggle);
+media.matches = false;
+state.settings.sidebarCollapsed = false;
+app.updateSidebarToggle();
+assert.equal(sidebarToggle['aria-expanded'], 'true');
+assert.equal(sidebarIcon.className, 'fas fa-chevron-left');
+state.settings.sidebarCollapsed = true;
+app.updateSidebarToggle();
+assert.equal(sidebarToggle['aria-expanded'], 'false');
+assert.equal(sidebarIcon.className, 'fas fa-chevron-right');
+elements.delete(sidebarToggle.id);
 const background = element('background'), alreadyInert = element('already-inert'), area = elements.get('active-study-area');
 alreadyInert.inert = true;
 body.children = [area, background, alreadyInert];
@@ -205,6 +219,15 @@ app.startStudy('focus', 'focus');
 assert.deepEqual(Array.from(selected), ['new']);
 assert.ok(app.studySession, 'focus practice uses the real scheduler');
 assert.equal(app.cramMode, false, 'focus practice preserves normal scheduled reviews');
+app.exitStudyFocus();
+state.flashcards[0].cards.push(
+    { id: 'weak', front: 'Weak term', back: 'Answer', practiceStats: { attempts: 4, correct: 1 } },
+    { id: 'paused-weak', front: 'Paused weak', back: 'Answer', suspended: true, practiceStats: { attempts: 4, correct: 0 } }
+);
+app.startStudy('focus', 'weak');
+assert.deepEqual(Array.from(selected), ['weak'], 'weak practice includes only weak, unpaused cards, not every focus card');
+assert.ok(app.studySession);
+assert.equal(app.cramMode, false, 'weak practice retains the normal spaced-review scheduler');
 app.exitStudyFocus();
 const list = element('classmate-list'), button = element();
 list.dataset.course = course.code;

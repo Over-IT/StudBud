@@ -12,7 +12,9 @@ const state = { flashcards: [], courses: [{ code: 'math', title: 'Math' }, { cod
 const elements = new Map();
 for (const id of ['card-form', 'card-deck-id', 'card-id', 'card-front', 'card-back', 'card-tags', 'card-answer-image', 'card-remove-image', 'card-distractors',
     'deck-editor-title', 'deck-editor-course', 'deck-editor-assessment', 'deck-editor-search',
-    'deck-editor-count', 'deck-editor-cards', 'deck-editor-filter', 'deck-editor-bulk', 'deck-editor-undo', 'modal-container']) {
+    'deck-editor-count', 'deck-editor-cards', 'deck-editor-filter', 'deck-editor-bulk', 'deck-editor-undo', 'modal-container',
+    'card-browser-title', 'card-browser-set', 'card-browser-filter', 'card-browser-search', 'card-browser-guidance',
+    'card-browser-count', 'card-browser-cards', 'card-browser-practice', 'card-browser-save']) {
     const element = { value: '', textContent: '', reset() {}, classList: { add() {}, toggle() {}, contains: () => false } };
     Object.defineProperty(element, 'innerHTML', {
         get() { return this.html || ''; },
@@ -31,7 +33,7 @@ const sandbox = {
     window: { crypto: require('node:crypto').webcrypto, StudBudDialogs: { confirm: async () => true, notify() {} } },
     document: {
         getElementById: id => elements.get(id) || null,
-        querySelector: () => ({ textContent: '' }),
+        querySelector: () => ({ textContent: '', classList: { toggle() {} } }),
         querySelectorAll: () => []
     },
     AppState: {
@@ -423,48 +425,63 @@ async function weakCardViewing() {
             attempts: 100, correct: 98, recentAnswers: [true, false, true, false] } }
     ] }];
     const snapshot = clone(deck());
-    value('deck-editor-search', 'stale search');
+    const editorDraft = app.deckEditorDraft;
+    value('card-browser-search', 'stale search');
     await app.handleDataAction('view-weak-cards', 'weak-set');
-    assert.equal(app.modal, 'deck-editor-modal');
-    assert.equal(elements.get('deck-editor-filter').value, 'weak');
-    assert.equal(elements.get('deck-editor-search').value, '');
-    assert.equal(elements.get('deck-editor-count').textContent, '3 of 7 cards');
-    const markup = elements.get('deck-editor-cards').innerHTML;
+    assert.equal(app.modal, 'card-browser-modal');
+    assert.equal(app.deckEditorDraft, editorDraft, 'browsing never creates or replaces an editing draft');
+    assert.equal(elements.get('card-browser-filter').value, 'weak');
+    assert.equal(elements.get('card-browser-search').value, '');
+    assert.equal(elements.get('card-browser-count').textContent, '3 of 7 cards');
+    const markup = elements.get('card-browser-cards').innerHTML;
     assert.match(markup, /&lt;Weak term&gt;/);
     assert.match(markup, /Weak answer/);
     assert.match(markup, /50% accuracy/);
     assert.match(markup, /Paused weak term/);
     assert.match(markup, /Recent weak term/);
+    assert.match(markup, /<details class="card-browser-card">/);
+    assert.doesNotMatch(markup, /editor-edit-card|editor-delete-card|<input|<textarea/);
     assert.doesNotMatch(markup, /Boundary term|New term|Single attempt|Recovered term/);
-    value('deck-editor-search', 'paused');
-    app.renderDeckEditorCards();
-    assert.equal(elements.get('deck-editor-count').textContent, '1 of 7 cards');
-    value('deck-editor-search', 'unmatched');
-    app.renderDeckEditorCards();
-    assert.match(elements.get('deck-editor-cards').innerHTML, /No cards match/);
-    value('deck-editor-search', '');
-    value('deck-editor-filter', 'all');
-    app.renderDeckEditorCards();
-    assert.equal(elements.get('deck-editor-count').textContent, '7 of 7 cards');
+    value('card-browser-search', 'paused');
+    app.renderCardBrowser();
+    assert.equal(elements.get('card-browser-count').textContent, '1 of 7 cards · 3 in this group');
+    value('card-browser-search', 'unmatched');
+    app.renderCardBrowser();
+    assert.match(elements.get('card-browser-cards').innerHTML, /No cards match/);
+    value('card-browser-search', '');
+    value('card-browser-filter', 'all');
+    app.renderCardBrowser();
+    assert.equal(elements.get('card-browser-count').textContent, '7 of 7 cards');
     app.closeModal();
     assert.deepEqual(deck(), snapshot, 'viewing and filtering never writes or changes saved progress');
     app.openDeckEditor('weak-set');
     assert.equal(elements.get('deck-editor-filter').value, 'all', 'normal editing still opens all cards');
     await app.handleDataAction('view-focus-cards', 'weak-set');
-    app.deckEditorDraft.cards.push({ id: 'full-recall', front: 'Full recall term', back: 'Full recall answer',
+    deck().cards.push({ id: 'full-recall', front: 'Full recall term', back: 'Full recall answer',
         practiceStats: { attempts: 4, correct: 4, recentAnswers: [true, true, true, true],
             recentEvidence: Array.from({ length: 4 }, () => ({ correct: true, weight: 1 })) } });
-    app.renderDeckEditorCards();
-    assert.equal(elements.get('deck-editor-filter').value, 'focus');
-    assert.equal(elements.get('deck-editor-count').textContent, '7 of 8 cards');
-    assert.match(elements.get('deck-editor-cards').innerHTML, /not practiced yet/);
-    assert.match(elements.get('deck-editor-cards').innerHTML, /Focus: recent misses/);
-    assert.doesNotMatch(elements.get('deck-editor-cards').innerHTML, /Full recall term/);
+    app.renderCardBrowser();
+    assert.equal(elements.get('card-browser-filter').value, 'focus');
+    assert.equal(elements.get('card-browser-count').textContent, '7 of 8 cards');
+    assert.match(elements.get('card-browser-cards').innerHTML, /not practiced yet/);
+    assert.match(elements.get('card-browser-cards').innerHTML, /Focus: recent misses/);
+    assert.doesNotMatch(elements.get('card-browser-cards').innerHTML, /Full recall term/);
+    const startStudy = app.startStudy;
+    let practice;
+    app.startStudy = (id, mode) => { practice = { id, mode }; };
+    value('card-browser-filter', 'weak');
+    await app.handleDataAction('browser-practice');
+    assert.deepEqual(practice, { id: 'weak-set', mode: 'weak' });
+    app.startStudy = startStudy;
+    await app.handleDataAction('view-weak-cards', 'weak-set');
+    await app.handleDataAction('browser-edit-set');
+    assert.equal(app.modal, 'deck-editor-modal', 'editing requires the explicit Edit set action');
     state.flashcards = [{ id: 'empty-set', title: 'Empty set', cards: [] }];
     await app.handleDataAction('view-weak-cards', 'empty-set');
-    assert.match(elements.get('deck-editor-cards').innerHTML, /No weak cards in this set/);
-    assert.match(elements.get('deck-editor-cards').innerHTML, /at least two recent answers/);
-    assert.equal(elements.get('deck-editor-count').textContent, '0 of 0 cards');
+    assert.match(elements.get('card-browser-cards').innerHTML, /No weak cards in this set/);
+    assert.match(elements.get('card-browser-cards').innerHTML, /at least two recent answers/);
+    assert.equal(elements.get('card-browser-count').textContent, '0 of 0 cards');
+    assert.equal(elements.get('card-browser-practice').disabled, true);
     await assert.rejects(app.handleDataAction('view-weak-cards', 'missing'), /no longer exists/);
 }
 

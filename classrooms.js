@@ -655,13 +655,14 @@
             this.root.innerHTML = `
                 <section class="glass-card student-join">
                     <div>
-                        <h2><i class="fas fa-school"></i> Your classes</h2>
-                        <p>Classes appear automatically when a teacher at ${esc(this.app.schoolShortName?.() || 'your school')} teaches a course in your course list. Your teacher can see your grade, missing work and study time for that course.</p>
+                        <h2><i class="fas fa-school"></i> Teacher classrooms</h2>
+                        <p>Course communities are available without a teacher. These additional classrooms appear when a teacher at ${esc(this.app.schoolShortName?.() || 'your school')} adds your course. That teacher can see your grade, missing work and study time for that course.</p>
+                        <button type="button" class="secondary-btn" data-target="school-community-view">Open my course communities</button>
                     </div>
                     ${courseCount ? '' : '<button type="button" class="primary-btn" data-class-action="add-my-courses"><i class="fas fa-plus"></i> Add your courses</button>'}
                 </section>
                 <p id="classes-status" class="classes-status" role="status" aria-live="polite"></p>
-                <div class="student-class-grid">${classCards || `<div class="glass-card empty-state full-width"><i class="fas fa-users-rectangle"></i> ${courseCount ? 'None of your teachers are on StudBud yet. Their classes show up here as soon as they add your courses.' : 'Add your courses (or import from Infinite Campus) to see your classes.'}</div>`}</div>
+                <div class="student-class-grid">${classCards || `<div class="glass-card empty-state full-width"><i class="fas fa-users-rectangle"></i> ${courseCount ? 'No teacher classrooms yet. Your course communities still have discussions and shared sets; no teacher is required.' : 'Add your courses (or import from Infinite Campus) to see your course communities.'}</div>`}</div>
                 ${classes.length && waiting.length ? `<p class="muted class-waiting"><i class="fas fa-hourglass-half"></i> Not on StudBud yet: ${waiting.slice(0, 8).map(course => esc(course.title)).join(', ')}${waiting.length > 8 ? '…' : ''}</p>` : ''}`;
             this.app.schoolCommunity?.refreshClassListings();
         }

@@ -79,7 +79,7 @@
                     <img class="logo-mark" src="./icons/studbud.svg" alt="" width="40" height="40">
                     <span class="logo-text">StudBud</span>
                 </div>
-                <button id="sidebar-collapse-btn" class="icon-btn sidebar-collapse-btn" aria-label="Collapse sidebar" aria-expanded="true" title="Collapse sidebar">
+                <button id="sidebar-collapse-btn" type="button" class="icon-btn sidebar-collapse-btn" aria-label="Collapse sidebar" aria-expanded="true" title="Collapse sidebar">
                     <i class="fas fa-chevron-left"></i>
                 </button>
             </div>
@@ -897,6 +897,7 @@
                         <div class="admin-tabs">
                             <button type="button" class="secondary-btn selected" data-admin-tab="decks">Public flashcards</button>
                             <button type="button" class="secondary-btn" data-admin-tab="reports">Reports</button>
+                            <button type="button" class="secondary-btn" data-admin-tab="classes">Class communities</button>
                             <button type="button" class="secondary-btn" data-admin-tab="users">Users</button>
                             <button type="button" class="secondary-btn" data-admin-tab="games">Game testing</button>
                             <button type="button" class="secondary-btn" data-admin-tab="notices">Announcements</button>
@@ -1559,6 +1560,28 @@
                     <button type="button" id="save-add-another-assignment-btn" class="secondary-btn">Save &amp; add another</button>
                     <button id="delete-assignment-editor-btn" type="button" class="danger-btn hidden" data-action="delete-assignment">Delete assignment</button>
                     <button type="submit" form="assignment-form" class="primary-btn">Save</button>
+                </div>
+            </div>
+
+            <div id="card-browser-modal" class="glass-card modal-content hidden">
+                <div class="modal-header">
+                    <div><h2 id="card-browser-title">View cards</h2><p id="card-browser-set" class="settings-hint"></p></div>
+                    <button type="button" class="close-modal-btn icon-btn" aria-label="Close card viewer"><i class="fas fa-times" aria-hidden="true"></i></button>
+                </div>
+                <div class="modal-body">
+                    <div class="card-browser-controls">
+                        <label>Show<select id="card-browser-filter"><option value="weak">Weak cards</option><option value="focus">Needs recall practice</option><option value="all">All cards</option><option value="starred">Starred cards</option></select></label>
+                        <label>Find a card<input id="card-browser-search" type="search" placeholder="Search terms, answers or tags"></label>
+                    </div>
+                    <p id="card-browser-guidance" class="settings-hint"></p>
+                    <p id="card-browser-count" role="status" aria-live="polite"></p>
+                    <div id="card-browser-cards"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="secondary-btn" data-action="browser-edit-set">Edit set</button>
+                    <button type="button" class="secondary-btn cancel-modal-btn">Close</button>
+                    <button type="button" id="card-browser-practice" class="primary-btn" data-action="browser-practice">Practice weak cards</button>
+                    <button type="button" id="card-browser-save" class="primary-btn hidden" data-action="browser-save-shared">Add to my sets</button>
                 </div>
             </div>
 

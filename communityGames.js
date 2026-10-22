@@ -491,7 +491,10 @@
             return data;
         }
 
-        async publishDeck(deck) {
+        sharedDeckRow(deck) {
+            if (deck.classShareSourceOwnerId && deck.classShareSourceOwnerId !== this.getUserId()) {
+                throw new Error('This set was shared by someone else. Make your own set to share it.');
+            }
             if (deck.communitySourceId && deck.communitySourceOwnerId && deck.communitySourceOwnerId !== this.getUserId()) {
                 const author = deck.communitySourceAuthor ? ` by ${deck.communitySourceAuthor}` : '';
                 throw new Error(`“${deck.title}” was added from another student's shared set${author}, so it can't be reposted. Make your own set to share it.`);
@@ -508,7 +511,7 @@
             if (cards.some(card => card.front.length > 5000 || card.back.length > 5000)) {
                 throw new Error('Shared card terms and definitions must be 5000 characters or fewer.');
             }
-            const row = {
+            return {
                 owner_id: this.getUserId(),
                 source_deck_id: String(deck.id),
                 title,
@@ -520,6 +523,10 @@
                 cards,
                 updated_at: new Date().toISOString()
             };
+        }
+
+        async publishDeck(deck) {
+            const row = this.sharedDeckRow(deck);
             const save = payload => this.getClient().from('studbud_community_decks')
                 .upsert(payload, { onConflict: 'owner_id,source_deck_id' }).select('id').single();
             // BEFORE INSERT guards run before ON CONFLICT, so reuse the published row's identity.
@@ -776,7 +783,9 @@
 
         async schoolCall(fn, args = {}) {
             if (!['studbud_school_community', 'studbud_set_school_discovery', 'studbud_community_post',
-                'studbud_community_replies', 'studbud_community_delete_post', 'studbud_class_live_game'].includes(fn)) {
+                'studbud_community_replies', 'studbud_community_delete_post', 'studbud_class_live_game',
+                'studbud_course_communities', 'studbud_share_class_set', 'studbud_get_class_shared_set',
+                'studbud_remove_class_shared_set'].includes(fn)) {
                 throw new Error('Unknown school community action.');
             }
             const { data, error } = await this.getClient().rpc(fn, args);

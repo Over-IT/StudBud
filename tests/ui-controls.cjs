@@ -343,6 +343,8 @@ assert.match(engineSource, /mpg-controls-help/);
 assert.match(engineSource, /content\.hidden = !panel\.open/);
 assert.match(engineSource, /panels\.appendChild\(content\)/, 'help and tools occupy their own HUD row');
 const styleSource = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+assert.match(styleSource, /\.sidebar-collapse-btn:not\(:disabled\):active\s*\{\s*transform:\s*translateY\(-50%\)/,
+    'pressing the sidebar arrow preserves its hit target instead of overriding its centered position');
 assert.match(styleSource, /\.workspace-tabs \{[^}]*padding: 12px var\(--spacing-xl\)/, 'all workspace tab rows use the same desktop gutter as page content');
 assert.match(styleSource, /\.workspace-tabs \{[^}]*padding-left: max\(var\(--spacing-sm\), env\(safe-area-inset-left\)\); padding-right: max\(var\(--spacing-sm\), env\(safe-area-inset-right\)\)/, 'mobile tabs match content gutters and device safe areas');
 const duelButtons = controlsFor('duel').buttons.children;
