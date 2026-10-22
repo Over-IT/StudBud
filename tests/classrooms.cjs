@@ -170,7 +170,7 @@ assert.match(sqlFunction('studbud_my_classes'), /studbud_user_tags where user_id
     assert.equal(student.calls[2][1].p_snapshots[0].snapshot.grade_pct, 90, 'assignment/grade snapshot reaches teacher');
     student.rendered.length = 0;
     await student.client.syncSnapshots(true);
-    assert.deepEqual(student.rendered, ['student'], 'background enrollment/deck refresh updates the visible tab');
+    assert.deepEqual(student.rendered, [], 'snapshot syncing never rebuilds the active classroom or its drafts');
 
     student.state.courses = Array.from({ length: 55 }, (_, index) => ({ code: 'C' + index }));
     assert.equal(student.client.courseCodes().length, 55, 'no silent course-code limit');
@@ -187,7 +187,7 @@ assert.match(sqlFunction('studbud_my_classes'), /studbud_user_tags where user_id
     const markup = harness();
     markup.client.studentData = { classes: [{ id: 'bio', course_code: 'BIO', title: 'Biology', student_count: 2,
         teacher: { first_name: 'Ada', last_name: 'Teacher' }, decks: [{ id: 'set', title: 'Cells', cards: [{ front: 'Cell', back: 'Life' }] }] }] };
-    Object.getPrototypeOf(markup.client).renderStudent.call(markup.client);
+    markup.root.innerHTML = markup.client.studentSetsMarkup(markup.client.studentData.classes);
     assert.match(markup.root.innerHTML, /Ada Teacher/);
     assert.match(markup.root.innerHTML, /Cells/);
     assert.match(markup.root.innerHTML, /data-class-action="study-class-deck"/);

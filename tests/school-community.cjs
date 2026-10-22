@@ -16,12 +16,13 @@ function harness() {
     let account = 'student', available = true;
     const cloud = { user: { id: account } };
     const app = {
-        EventBus: { on() {} }, Router: { activeRoute: 'school-community', navigate(route) { this.activeRoute = route; } },
+        EventBus: { on() {} }, Router: { activeRoute: 'classes', navigate(route) { this.activeRoute = route; } },
         AppState: { get: key => state[key], saveFlashcardDeck: async deck => state.flashcards.push(deck) },
         updateSavedDeck: async (id, patch) => Object.assign(state.flashcards.find(deck => deck.id === id), patch),
         classrooms: { available: () => available, contextKey: () => account, isTeacher: () => false,
             courseCodes: () => ['BIO'], call: async () => ({ classes: [{ id: 'class1', title: 'Biology' }] }),
             courseMatches: (course, code) => course.code === code,
+            studentSetsMarkup: () => '<section>Teacher-published sets</section>',
             status: message => elements.get('school-community-status').textContent = message },
         friendlyErrorMessage: error => error.message, schoolShortName: () => 'Central',
         gameNickname: () => 'Student', openHostedGame(room) { this.hostedGameRoom = room; },
@@ -83,7 +84,7 @@ function harness() {
     await h.click('join', { code: 'OTHER1' });
     assert.equal(h.calls.filter(row => row[0] === 'join').length, joined, 'cannot silently leave an existing game');
     assert.match(h.elements.get('school-community-status').textContent, /Leave your current game/);
-    h.app.Router.activeRoute = 'school-community';
+    h.app.Router.activeRoute = 'classes';
     await h.click('discovery', { enabled: 'false' });
     assert.ok(h.calls.some(([fn, args]) => fn === 'studbud_set_school_discovery' && args.p_enabled === false));
 
@@ -208,11 +209,62 @@ function harness() {
         ? { classes: [{ id: 'course', title: 'Biology', course_code: 'BIO', community: true }] }
         : { can_post: true, can_announce: false, posts: [], class_sets: [], course_community: true, teacher_classes: [] };
     await courses.community.render();
-    assert.match(courses.elements.get('school-community-root').innerHTML, /My course communities/);
+    assert.match(courses.elements.get('school-community-root').innerHTML, /My classrooms/);
+    assert.match(courses.elements.get('school-community-root').innerHTML, /Open classroom/);
     assert.match(courses.elements.get('school-community-root').innerHTML, /No teacher or join code needed/);
     await courses.community.open('course', 'Biology');
     assert.match(courses.elements.get('school-community-root').innerHTML, /Write a post/);
     assert.doesNotMatch(courses.elements.get('school-community-root').innerHTML, /Open teacher tools/);
+
+    const teacher = harness();
+    teacher.app.classrooms.isTeacher = () => true;
+    const managed = [];
+    teacher.app.classrooms.renderTeacherHome = () => managed.push('add-course');
+    teacher.app.classrooms.renderTeacherDetail = () => managed.push('tools');
+    teacher.app.classrooms.call = async (fn, args) => {
+        if (fn === 'studbud_teacher_class_detail') {
+            managed.push(args.p_class_id);
+            return { id: 'own-teaching-class', course_code: 'BIO', title: 'Biology', decks: [], students: [] };
+        }
+        return { classes: [{ id: 'own-teaching-class', course_code: 'BIO', title: 'Biology' }] };
+    };
+    teacher.api.schoolCall = async fn => fn === 'studbud_course_communities'
+        ? { classes: [{ id: 'course-bio', course_code: 'BIO', title: 'Biology', community: true }] }
+        : { can_announce: true, course_community: true, posts: [], people: [], decks: [], live: [] };
+    await teacher.community.render();
+    assert.ok(managed.includes('add-course'), 'course creation stays inside the classroom overview');
+    assert.equal(teacher.community.classes.length, 1, 'a teacher does not create a duplicate classroom card');
+    assert.equal(teacher.community.classes[0].id, 'course-bio');
+    await teacher.community.open('course-bio', 'Biology');
+    assert.ok(managed.includes('own-teaching-class'), 'private tools use the owned teaching ID, not the public course ID');
+    assert.match(teacher.elements.get('school-community-root').innerHTML, /data-tab="teacher"/);
+    teacher.community.tab = 'teacher'; teacher.community.paint();
+    assert.ok(managed.includes('tools'));
+    assert.match(teacher.elements.get('school-community-root').innerHTML, /id="classes-root"/);
+    teacher.community.tab = 'sets'; teacher.community.paint();
+    assert.match(teacher.elements.get('school-community-root').innerHTML, /Teacher-published sets/);
+    const privateCalls = managed.filter(id => id === 'own-teaching-class').length;
+    teacher.app.classrooms.call = async () => ({ classes: [] });
+    await teacher.community.render();
+    assert.equal(managed.filter(id => id === 'own-teaching-class').length, privateCalls, 'announcement permission never grants another teacher private tools');
+    assert.doesNotMatch(teacher.elements.get('school-community-root').innerHTML, /data-tab="teacher"/);
+    assert.doesNotMatch(h.elements.get('school-community-root').innerHTML, /data-tab="teacher"/, 'students never see teacher tools');
+    let finishPrivate, startPrivate;
+    const privateStarted = new Promise(resolve => { startPrivate = resolve; });
+    teacher.app.classrooms.call = async fn => {
+        if (fn === 'studbud_teacher_class_detail') {
+            startPrivate();
+            return new Promise(resolve => { finishPrivate = resolve; });
+        }
+        return { classes: [{ id: 'own-teaching-class', course_code: 'BIO', title: 'Biology' }] };
+    };
+    const privateLoading = teacher.community.render();
+    await privateStarted;
+    await teacher.community.open(null);
+    finishPrivate({ id: 'own-teaching-class', students: [{ username: 'private-student' }] });
+    await privateLoading;
+    assert.equal(teacher.community.teacherDetail, null, 'a stale private roster cannot appear after leaving its classroom');
+    assert.doesNotMatch(teacher.elements.get('school-community-root').innerHTML, /private-student|data-tab="teacher"/);
     courses.state.flashcards = [{ id: 'own', title: 'My unit set', cards: [
         { front: 'Cell', back: 'Basic unit', practiceStats: { attempts: 20 }, answerImage: 'private' },
         { front: 'ATP', back: 'Energy' }] }];
@@ -314,9 +366,9 @@ function harness() {
     const html = read('index.html'), app = read('app.js'), classes = read('classrooms.js');
     assert.match(html, /src="schoolCommunity\.js"/);
     assert.match(read('service-worker.js'), /'\.\/schoolCommunity\.js'/);
-    assert.match(app, /route === 'school-community'.*schoolCommunity\?\.render/);
+    assert.match(app, /route === 'classes'.*schoolCommunity\?\.render/);
     assert.match(classes, /data-school-action="host-set"/);
-    assert.match(classes, /data-school-live=/);
+    assert.doesNotMatch(html, /id="school-community-view"/, 'there is only one classroom view');
     assert.match(read('communityGames.js'), /async schoolCall\(fn/);
     console.log('School community: privacy opt-ins, scoped routing, safe markup, drafts/polling, stale accounts, posting failures, existing imports/Buds and live joining passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

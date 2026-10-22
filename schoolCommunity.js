@@ -56,6 +56,8 @@
             this.classTitle = '';
             this.data = null;
             this.classes = [];
+            this.teacherClasses = [];
+            this.teacherDetail = null;
             this.pendingLive = null;
             this.drafts.clear();
             this.posting.clear();
@@ -79,22 +81,28 @@
         }
         async open(classId, title = '') {
             this.resetContext();
-            if (classId !== this.classId) this.data = null;
+            if (classId !== this.classId) {
+                this.data = null;
+                this.app.classrooms.requestId++;
+                this.app.classrooms.detail = null;
+                this.app.classrooms.editingDeck = null;
+                this.app.classrooms.detailTab = 'students';
+            }
             this.classId = classId;
             this.classTitle = title;
             this.tab = classId ? 'updates' : 'people';
-            if (this.app.Router.activeRoute === 'school-community') await this.render();
-            else this.app.Router.navigate('school-community');
+            if (this.app.Router.activeRoute === 'classes') await this.render();
+            else this.app.Router.navigate('classes');
         }
         async render() {
             this.resetContext();
             if (!this.root) return;
             if (!this.available()) {
-                this.root.innerHTML = '<div class="glass-card empty-state">Sign in, connect and choose your supported school to use School community.</div>';
+                this.root.innerHTML = '<div class="glass-card empty-state">Sign in, connect and choose your supported school to use Classrooms.</div>';
                 return;
             }
             const id = ++this.request, key = this.key(), classId = this.classId;
-            if (!this.data) this.root.innerHTML = '<p role="status">Loading school community…</p>';
+            if (!this.data) this.root.innerHTML = '<p role="status">Loading classrooms…</p>';
             else this.status('Refreshing class updates…');
             try {
                 // Student enrollment must be synchronized before checking access to a class board.
@@ -105,8 +113,23 @@
                 if (!this.current(id, key)) return;
                 const data = await this.call('studbud_school_community', { p_class_id: classId });
                 if (!this.current(id, key)) return;
+                const teacherClasses = listing.classes || [];
+                const course = [...(courses.classes || []), ...teacherClasses].find(item => item.id === classId);
+                const ownedClass = this.app.classrooms.isTeacher() && classId && data.can_announce
+                    ? teacherClasses.find(item => item.id === classId || course && this.app.classrooms.courseMatches(
+                        { code: course.course_code }, item.course_code)) : null;
+                let teacherDetail = null;
+                if (ownedClass) {
+                    teacherDetail = await this.app.classrooms.call('studbud_teacher_class_detail', { p_class_id: ownedClass.id });
+                    if (!this.current(id, key)) return;
+                }
                 this.data = data;
-                this.classes = [...(courses.classes || []), ...(listing.classes || [])];
+                this.teacherClasses = teacherClasses;
+                this.teacherDetail = teacherDetail;
+                this.classes = [...(courses.classes || []), ...teacherClasses.filter(item =>
+                    !(courses.classes || []).some(course => this.app.classrooms.courseMatches({ code: course.course_code }, item.course_code)))];
+                if (this.app.classrooms.isTeacher()) this.app.classrooms.teacherData = listing;
+                else this.app.classrooms.studentData = listing;
                 this.classTitle = this.classes.find(item => item.id === classId)?.title || this.classTitle;
                 this.paint();
                 return true;
@@ -121,33 +144,41 @@
             const data = this.data;
             const tabs = this.classId ? [['updates', 'Updates'], ['people', 'Classmates'], ['sets', 'Shared sets']]
                 : [['people', 'Schoolmates'], ['sets', 'Shared sets']];
-            this.root.innerHTML = `<header class="view-header"><div><h2>${esc(this.classId ? this.classTitle || 'Class community' : this.app.schoolShortName?.() || 'School community')}</h2>
+            if (this.teacherDetail) tabs.push(['teacher', 'Teacher tools']);
+            if (!tabs.some(([tab]) => tab === this.tab)) this.tab = this.classId ? 'updates' : 'people';
+            this.root.innerHTML = `<header class="view-header"><div><h2>${esc(this.classId ? this.classTitle || 'Classroom' : `${this.app.schoolShortName?.() || 'School'} classrooms`)}</h2>
                 <p>${this.classId ? 'Announcements, study questions and live games.' : 'Find opted-in schoolmates and publicly shared study sets.'}</p></div>
                 <button type="button" class="secondary-btn" data-school-action="refresh">Refresh</button></header>
-                <div class="community-toolbar"><label for="community-class">Community<select id="community-class"><option value="">Whole school</option>${this.classId && !(this.classes || []).some(item => item.id === this.classId) ? `<option value="${esc(this.classId)}" selected>Review: ${esc(this.classTitle || 'Class community')}</option>` : ''}${(this.classes || []).map(item =>
-                    `<option value="${esc(item.id)}"${item.id === this.classId ? ' selected' : ''}>${esc(item.title)}${item.community ? ' · Course community' : ' · Teacher classroom'}${item.section ? ` · ${esc(item.section)}` : ''}</option>`).join('')}</select></label>
+                <div class="community-toolbar"><label for="community-class">Classroom<select id="community-class"><option value="">All classrooms &amp; school</option>${this.classId && !(this.classes || []).some(item => item.id === this.classId) ? `<option value="${esc(this.classId)}" selected>Review: ${esc(this.classTitle || 'Classroom')}</option>` : ''}${(this.classes || []).map(item =>
+                    `<option value="${esc(item.id)}"${item.id === this.classId ? ' selected' : ''}>${esc(item.title)}${item.section ? ` · ${esc(item.section)}` : ''}</option>`).join('')}</select></label>
                 <button type="button" class="text-btn" data-target="friends-view">Manage buds &amp; requests</button>
-                ${this.classId ? '<button type="button" class="text-btn" data-target="classes-view">Class flashcard sets</button>' : ''}</div>
+                ${this.classId ? '<button type="button" class="text-btn" data-school-action="open-class" data-class="">All classrooms</button>' : ''}</div>
                 <p id="school-community-status" role="status" aria-live="polite"></p>
                 ${this.classId && data.can_moderate ? `<div class="community-review-banner"><p><i class="fas fa-shield-halved" aria-hidden="true"></i> Moderation access · ${esc(SCHOOL_NAMES[data.school] || data.school)} · Shared content only; no private grades.${data.can_post === false ? ' Review only: you are not a member of this course.' : ''}</p><button type="button" class="text-btn" data-target="admin-view">Back to class search</button></div>` : ''}
                 ${!this.classId ? this.courseListMarkup() : ''}
-                ${this.classId && data.course_community ? `<p class="settings-hint">This community is for students taking this course at this school, with or without a teacher.</p>
-                    ${(data.teacher_classes || []).length ? `<div class="community-teachers"><span>Teacher classrooms:</span>${data.teacher_classes.map(item =>
-                        `<button type="button" class="text-btn" data-school-action="open-class" data-class="${esc(item.id)}" data-title="${esc(item.title)}">${esc(item.title)} · @${esc(item.teacher)}</button>`).join('')}</div>` : ''}
-                    ${data.can_announce ? '<button type="button" class="text-btn" data-target="classes-view">Open teacher tools &amp; class sets</button>' : ''}` : ''}
+                ${this.classId && data.course_community ? `<p class="settings-hint">This classroom is for students taking this course at this school, with or without a teacher.</p>
+                    ${(data.teacher_classes || []).length ? `<p class="settings-hint">Teachers: ${data.teacher_classes.map(item => `@${esc(item.teacher)}`).join(', ')}. Teacher announcements, class sets and live games are available here.</p>` : ''}` : ''}
                 <div id="community-live">${this.liveMarkup(data.live || [], this.classId, data.can_announce)}</div>
-                <nav class="community-tabs" aria-label="Community sections">${tabs.map(([tab, label]) =>
+                <nav class="community-tabs" aria-label="Classroom sections">${tabs.map(([tab, label]) =>
                     `<button type="button" class="secondary-btn${this.tab === tab ? ' selected' : ''}" data-school-action="tab" data-tab="${tab}"${this.tab === tab ? ' aria-current="page"' : ''}>${label}</button>`).join('')}</nav>
-                <div id="community-content">${this.tab === 'updates' ? this.updatesMarkup() : this.tab === 'sets' ? this.setsMarkup() : this.peopleMarkup()}</div>`;
+                <div id="community-content">${this.tab === 'teacher' ? '<div id="classes-root" class="classes-root"></div>'
+                    : this.tab === 'updates' ? this.updatesMarkup() : this.tab === 'sets' ? this.setsMarkup() : this.peopleMarkup()}</div>
+                ${!this.classId && this.app.classrooms.isTeacher() ? '<details class="glass-card"><summary>Add a course you teach</summary><div id="classes-root" class="classes-root"></div></details>' : ''}
+                ${this.tab !== 'teacher' && (this.classId || !this.app.classrooms.isTeacher()) ? '<p id="classes-status" class="classes-status" role="status" aria-live="polite"></p>' : ''}`;
+            if (this.app.classrooms.isTeacher()) {
+                this.app.classrooms.detail = this.teacherDetail;
+                if (this.tab === 'teacher') this.app.classrooms.renderTeacherDetail();
+                else if (!this.classId) this.app.classrooms.renderTeacherHome();
+            }
             const live = document.getElementById('community-live');
             if (live) this.liveMarkupCache.set(live, this.liveMarkup(data.live || [], this.classId, data.can_announce));
         }
         courseListMarkup() {
-            const courses = (this.classes || []).filter(item => item.community);
-            return `<section class="community-course-list"><h3>My course communities</h3><p class="settings-hint">Your school + courses. No teacher or join code needed.</p>
+            const courses = this.classes || [];
+            return `<section class="community-course-list"><h3>My classrooms</h3><p class="settings-hint">Your school + courses. No teacher or join code needed. Teachers add announcements, class sets, live games and private progress tools.</p>
                 ${courses.length ? `<div class="community-set-grid">${courses.map(item => `<article class="glass-card"><span class="eyebrow">${esc(item.course_code)}</span><h4>${esc(item.title)}</h4>
-                    <button type="button" class="secondary-btn" data-school-action="open-class" data-class="${esc(item.id)}" data-title="${esc(item.title)}">Open community</button></article>`).join('')}</div>`
-                    : '<p>Add your courses in My grades and sync your account to find their communities.</p><button type="button" class="text-btn" data-target="gpa-view">Manage my courses</button>'}</section>`;
+                    <button type="button" class="secondary-btn" data-school-action="open-class" data-class="${esc(item.id)}" data-title="${esc(item.title)}">Open classroom</button></article>`).join('')}</div>`
+                    : '<p>Add your courses in My grades and sync your account to find their classrooms.</p><button type="button" class="text-btn" data-target="gpa-view">Manage my courses</button>'}</section>`;
         }
         liveMarkup(rooms, classId, teacher = false) {
             if (!rooms.length) return classId ? '<p class="settings-hint">No class game is live right now. Your teacher can host from a class set.</p>' : '';
@@ -166,7 +197,11 @@
                     `<li><button type="button" class="text-btn" data-action="view-profile" data-id="${esc(person.user_id)}">@${esc(person.username)}</button><button type="button" class="secondary-btn compact-btn" data-school-action="add-bud" data-name="${esc(person.username)}">Add bud</button></li>`).join('') || '<li>No opted-in schoolmates yet. Invite a friend to turn discovery on.</li>'}</ul>`}</section>`;
         }
         setsMarkup() {
-            return `${this.classSetsMarkup()}<section><header class="view-header"><div><h3>Public study sets ${this.classId ? 'for this course' : 'from your school'}</h3><p>Your teacher's classroom sets are also available in Classrooms.</p></div>
+            const course = (this.classes || []).find(item => item.id === this.classId);
+            const listing = this.app.classrooms.isTeacher() ? this.teacherClasses : this.app.classrooms.studentData?.classes || this.teacherClasses;
+            const teacherSets = this.teacherDetail ? [this.teacherDetail] : (listing || []).filter(item =>
+                course && this.app.classrooms.courseMatches({ code: course.course_code }, item.course_code));
+            return `${teacherSets.length ? this.app.classrooms.studentSetsMarkup(teacherSets) : ''}${this.classSetsMarkup()}<section><header class="view-header"><div><h3>Public study sets ${this.classId ? 'for this course' : 'from your school'}</h3><p>Teacher-published and student-shared sets are available together here.</p></div>
                 <button type="button" class="secondary-btn" data-target="study-manage-view">Manage &amp; share your sets</button></header>
                 <p class="settings-hint">Authors must also share their school publicly, or both of you must enable school discovery, to appear in school-scoped lists.</p>
                 <div class="community-set-grid">${(this.data.decks || []).map(deck => `<article class="glass-card"><h4>${esc(deck.title)}</h4>
@@ -344,13 +379,12 @@
         }
         async poll() {
             if (document.hidden || !this.available() || this.polling) return;
-            if (this.app.Router.activeRoute === 'classes') return this.refreshClassListings();
-            if (this.app.Router.activeRoute !== 'school-community' || !this.data || !this.classId) return;
+            if (this.app.Router.activeRoute !== 'classes' || !this.data || !this.classId) return;
             this.polling = true;
             const id = this.request, key = this.key(), classId = this.classId;
             try {
                 const data = await this.call('studbud_school_community', { p_class_id: classId });
-                if (!this.current(id, key) || this.app.Router.activeRoute !== 'school-community') return;
+                if (!this.current(id, key) || this.app.Router.activeRoute !== 'classes') return;
                 this.data.live = data.live;
                 const live = document.getElementById('community-live');
                 this.updateLive(live, this.liveMarkup(data.live || [], classId, data.can_announce));
@@ -473,7 +507,7 @@
             if (action !== 'replies') button.disabled = true;
             const id = this.request, key = this.key();
             try {
-                if (action === 'open-class') await this.open(button.dataset.class, button.dataset.title);
+                if (action === 'open-class') await this.open(button.dataset.class || null, button.dataset.title);
                 else if (action === 'refresh') await this.render();
                 else if (action === 'moderation-page') await this.renderModeration(this.moderationQuery, Number(button.dataset.offset));
                 else if (action === 'tab') {
@@ -551,13 +585,13 @@
                     form.elements.details.value = `Class: ${this.classId}\nPost: ${button.dataset.id}\nQuoted content: ${body.slice(0, 1300)}\n\nWhat happened: `;
                 } else if (action === 'unlist') {
                     await this.call('studbud_class_live_game', { p_class_id: button.dataset.class, p_code: null });
-                    if (this.app.Router.activeRoute === 'school-community' && this.current(id, key)) await this.render();
+                    if (this.app.Router.activeRoute === 'classes' && this.current(id, key)) await this.render();
                     else await this.refreshClassListings();
                 }
             } catch (error) {
                 if (key !== this.key() || (action !== 'open-class' && action !== 'refresh' && id !== this.request)) return;
                 const message = this.app.friendlyErrorMessage(error);
-                if (this.app.Router.activeRoute === 'school-community') this.status(message, true);
+                if (this.app.Router.activeRoute === 'classes') this.status(message, true);
                 else this.app.classrooms.status(message, 'error');
             } finally { if (button.isConnected) button.disabled = false; }
         }

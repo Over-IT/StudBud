@@ -4901,6 +4901,10 @@ body.compact-ui .open-box { --ob-w: 110px; }
 .planner-start-card { border: 2px solid var(--accent-primary); background: color-mix(in srgb, var(--accent-primary) 6%, var(--bg-base)); }
 .planner-card-top { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: .8rem; color: var(--text-secondary); }
 .planner-card-order { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--bg-glass-hover); font-weight: 800; color: var(--text-primary); }
+.planner-drag-handle { display: flex; justify-content: center; gap: 5px; width: auto; min-width: 44px; min-height: 44px; padding: 6px 10px; border: 1px solid var(--border-glass); cursor: grab; touch-action: none; }
+.planner-drag-handle:active { cursor: grabbing; }
+.planner-drop-target { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+.planner-order-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
 .planner-card-badge { font-weight: 800; color: var(--accent-primary); margin-right: auto; }
 .is-urgent .planner-card-badge { color: var(--text-primary); text-decoration: underline; text-decoration-color: var(--quad-1-border); text-underline-offset: 4px; }
 .planner-day-card h4 { margin: 10px 0 4px; font-size: 1.1rem; }

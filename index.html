@@ -103,7 +103,7 @@
                     <li class="nav-item active" data-target="dashboard-view" role="button" tabindex="0" aria-current="page">
                         <i class="fas fa-home"></i> <span>Home</span>
                     </li>
-                    <li class="nav-item" data-target="gpa-view" data-also="grade-scenarios-view analytics-view class-detail-view classes-view school-community-view" role="button" tabindex="0">
+                    <li class="nav-item" data-target="gpa-view" data-also="grade-scenarios-view analytics-view class-detail-view classes-view" role="button" tabindex="0">
                         <i class="fas fa-graduation-cap"></i> <span>School</span>
                     </li>
                     <li class="nav-item workspace-child" data-target="grade-scenarios-view" role="button" tabindex="0">
@@ -904,10 +904,7 @@
                 </section>
 
                 <!-- Classes: teacher dashboard or student class list (classrooms.js) -->
-                <section id="classes-view" class="view hidden">
-                    <div id="classes-root" class="classes-root"></div>
-                </section>
-                <section id="school-community-view" class="view student-workspace hidden">
+                <section id="classes-view" class="view student-workspace hidden">
                     <div id="school-community-root"></div>
                 </section>
 
@@ -963,7 +960,7 @@
                             <label class="settings-check"><input type="checkbox" id="public-show-classmates" disabled> Let students sharing a course find my username</label>
                             <p id="public-classmates-availability" class="settings-hint" role="status">Checking course-discovery availability…</p>
                             <p class="settings-hint">Off by default. Course discovery reveals your username and shared course to other opted-in students at your school. It does not reveal grades, assignments, study time or your full course list. Shared courses may have different teachers or periods.</p>
-                            <p id="school-community-privacy" class="settings-hint hidden">Schoolmate discovery is a separate choice. <button type="button" class="text-btn" data-target="school-community-view">Manage school community privacy</button></p>
+                            <p id="school-community-privacy" class="settings-hint hidden">Schoolmate discovery is a separate choice. <button type="button" class="text-btn" data-target="classes-view">Manage classroom discovery privacy</button></p>
                             <small class="settings-hint">Only Parkway high schools have a public school tag. Other schools are never shown publicly.</small>
                             <label class="settings-check"><input type="checkbox" id="public-show-stats" checked> Show my study time, streak and match wins</label>
                             <p id="public-profile-status" class="community-status" role="status" aria-live="polite"></p>

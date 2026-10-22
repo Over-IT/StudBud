@@ -7,7 +7,8 @@ const nodes = new Map();
 const node = id => {
     if (!nodes.has(id)) nodes.set(id, {
         id, value: '', innerHTML: '', textContent: '', dataset: {}, disabled: false,
-        classList: { toggle() {} }, setAttribute() {}, focus() {}, querySelectorAll: () => []
+        classList: { toggle() {} }, setAttribute() {}, focus() {}, querySelectorAll: () => [],
+        addEventListener(type, handler) { (this.listeners ||= {})[type] = handler; }
     });
     return nodes.get(id);
 };
@@ -191,6 +192,60 @@ state.assignments = Array.from({ length: 6 }, (_, i) => ({
 app.renderDailyPlanner();
 assert.match(node('planner-day-queue').innerHTML, /3 more planned tasks/);
 assert.equal((node('planner-day-queue').innerHTML.split('planner-remaining')[0].match(/class="planner-day-card/g) || []).length, 3);
+const automatic = Array.from(app.dailyPlannerModel().queue, task => task.id);
+const estimates = Object.fromEntries(app.dailyPlannerModel().queue.map(task => [task.id, task.minutes]));
+assert.equal(app.dailyPlannerModel().manualOrder, false);
+assert.match(node('planner-day-queue').innerHTML, /draggable="true" data-planner-drag=/);
+app.reorderPlannerTasks(automatic[4], automatic[0]);
+assert.deepEqual(Array.from(app.dailyPlannerModel().queue, task => task.id), [automatic[4], ...automatic.filter(id => id !== automatic[4])]);
+assert.deepEqual(Object.fromEntries(app.dailyPlannerModel().queue.map(task => [task.id, task.minutes])), estimates, 'reordering never reallocates minutes');
+assert.equal(app.dailyPlannerModel().manualOrder, true);
+assert.match(node('planner-day-queue').innerHTML, /Use automatic order/);
+assert.doesNotMatch(node('planner-day-queue').innerHTML, /planner-remaining/, 'all manually ordered tasks remain reachable');
+assert.deepEqual(Array.from(state.settings.plannerTaskOrder[todayKey]), Array.from(app.dailyPlannerModel().queue, task => task.id), 'the order is persisted in settings, not just DOM');
+const reloaded = Object.create(Object.getPrototypeOf(app));
+reloaded.calculateCourseGrade = app.calculateCourseGrade;
+assert.deepEqual(Array.from(reloaded.dailyPlannerModel().queue, task => task.id), Array.from(app.dailyPlannerModel().queue, task => task.id), 'a new app instance restores saved order');
+assert.equal(app.dailyPlannerModel('2999-01-01').manualOrder, false, 'custom priorities are scoped to a single date');
+const keyHandle = { dataset: { plannerDrag: automatic[4] } };
+node('planner-day-queue').listeners.keydown({ target: { closest: () => keyHandle }, key: 'ArrowDown', preventDefault() {} });
+assert.equal(app.dailyPlannerModel().queue[1].id, automatic[4], 'keyboard movement uses the same persisted ordering');
+state.assignments.find(task => task.id === automatic[4]).status = 'completed';
+assert.ok(!app.dailyPlannerModel().queue.some(task => task.id === automatic[4]), 'completed tasks disappear without breaking saved order');
+state.assignments.push({ id: 'new-task', title: 'New', courseCode: 'math', status: 'pending', plannedDate: todayKey, estimatedMinutes: 5 });
+assert.equal(app.dailyPlannerModel().queue.at(-1).id, 'new-task', 'new tasks follow existing custom priorities');
+assert.throws(() => app.reorderPlannerTasks('gone', automatic[0]), /plan changed/);
+assert.throws(() => app.reorderPlannerTasks(automatic[0], automatic[1], false, '2000-01-01'), /day changed/);
+const saveSettings = sandbox.AppState.set;
+sandbox.AppState.set = () => { throw Error('Storage full'); };
+assert.throws(() => app.reorderPlannerTasks(automatic[0], automatic[1]), /Storage full/, 'save errors are not reported as success');
+sandbox.AppState.set = saveSettings;
+app.resetPlannerOrder();
+assert.equal(state.settings.plannerTaskOrder[todayKey], undefined);
+assert.equal(app.dailyPlannerModel().manualOrder, false);
+assert.doesNotMatch(node('planner-day-queue').innerHTML, /Use automatic order/);
+const queueNode = node('planner-day-queue'), listeners = queueNode.listeners;
+const dragIds = Array.from(app.dailyPlannerModel().queue, task => task.id);
+const targetCard = { dataset: { plannerTask: dragIds[1] }, getBoundingClientRect: () => ({ top: 0, height: 100 }),
+    classList: { add() {} }, closest() { return this; } };
+const dragHandle = { dataset: { plannerDrag: dragIds[0] }, setPointerCapture() {}, closest() { return this; } };
+queueNode.contains = () => true;
+sandbox.document.elementFromPoint = () => targetCard;
+listeners.pointerdown({ target: dragHandle, pointerType: 'touch', pointerId: 7, button: 0 });
+listeners.pointerup({ pointerId: 7, clientX: 10, clientY: 80 });
+assert.equal(app.dailyPlannerModel().queue[1].id, dragIds[0], 'touch dragging persists placement after the target');
+app.resetPlannerOrder();
+listeners.pointerdown({ target: dragHandle, pointerType: 'touch', pointerId: 8, button: 0 });
+listeners.pointercancel({ pointerId: 8 });
+listeners.pointerup({ pointerId: 8, clientX: 10, clientY: 80 });
+assert.equal(app.dailyPlannerModel().manualOrder, false, 'canceled touch drags never change priorities');
+const transfer = { setData(type, value) { this[type] = value; } };
+listeners.dragstart({ target: dragHandle, dataTransfer: transfer });
+listeners.pointercancel({ pointerId: 9 });
+listeners.drop({ preventDefault() {}, clientX: 10, clientY: 80 });
+assert.equal(transfer['text/plain'], dragIds[0]);
+assert.equal(app.dailyPlannerModel().queue[1].id, dragIds[0], 'native dragging survives the browser pointer cancellation when drag begins');
+app.resetPlannerOrder();
 state.assignments = savedAssignments;
 app.renderDailyPlanner();
 assert.throws(() => app.handleChange({ target: { id: 'planner-date', value: 'bad' } }), /valid planner date/);

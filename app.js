@@ -597,7 +597,7 @@
     // 4. ROUTER ENGINE
     // ============================================================================
     const WORKSPACES = [
-        { main: 'gpa', tabs: [['gpa', 'My grades'], ['classes', 'Classrooms'], ['school-community', 'Community'], ['grade-scenarios', 'What-if grades'], ['analytics', 'Analytics']] },
+        { main: 'gpa', tabs: [['gpa', 'My grades'], ['classes', 'Classrooms'], ['grade-scenarios', 'What-if grades'], ['analytics', 'Analytics']] },
         { main: 'planner', tabs: [['planner', 'Planner'], ['tasks', 'Tasks'], ['calendar', 'Calendar'], ['schedule', 'Class schedule']] },
         { main: 'flashcard', extraRoutes: ['importer'], tabs: [['flashcard', 'Practice'], ['study-manage', 'Manage sets'], ['study-discover', 'Discover'], ['exam-arcade', 'Tests & drills']] },
         { main: 'multiplayer', tabs: [['multiplayer', 'Games'], ['friends', 'Buds'], ['leaderboard', 'Leaderboards']] },
@@ -631,8 +631,7 @@
         sound: ['Sound & music', 'Interface sounds, effects and music.'],
         about: ['Help & about', 'How StudBud works.'],
         admin: ['Staff tools', 'Tools for testers, moderators and admins.'],
-        classes: ['Classes', 'Join your teachers’ classes and study their flashcard sets.'],
-        'school-community': ['School community', 'Find study buddies, share learning and join your class live.']
+        classes: ['Classrooms', 'Your courses, class discussions, shared sets and teacher tools.']
     };
 
     class RouterEngine {
@@ -677,17 +676,20 @@
             const tabs = document.getElementById('workspace-tabs');
             if (!tabs) return;
             const classrooms = window.NexusApp?.classrooms;
-            const pages = (workspace?.tabs || []).filter(([tab]) => !['classes', 'school-community'].includes(tab) || classrooms?.available());
+            const pages = (workspace?.tabs || []).filter(([tab]) => {
+                return tab !== 'classes' || classrooms?.available();
+            });
             const restoreFocus = tabs.contains(document.activeElement);
             tabs.classList.toggle('hidden', pages.length === 0);
             tabs.dataset.pageCount = String(pages.length);
             tabs.setAttribute('aria-label', workspace?.main === 'gpa' ? 'School pages'
                 : workspace ? `${PAGE_GUIDES[workspace.main]?.[0] || 'Workspace'} pages` : 'Workspace pages');
-            tabs.innerHTML = pages.map(([tab, label]) => `<button type="button" class="workspace-tab${tab === selectedTab ? ' selected' : ''}" data-target="${tab}-view"${tab === selectedTab ? ' aria-current="page"' : ''}>${tab === 'classes' && classrooms?.isTeacher() ? 'Teaching' : label}</button>`).join('');
+            tabs.innerHTML = pages.map(([tab, label]) => `<button type="button" class="workspace-tab${tab === selectedTab ? ' selected' : ''}" data-target="${tab}-view"${tab === selectedTab ? ' aria-current="page"' : ''}>${label}</button>`).join('');
             if (restoreFocus) tabs.querySelector('[aria-current="page"]')?.focus({ preventScroll: true });
         }
 
         navigate(route, updateHash = true) {
+            if (route === 'school-community') route = 'classes';
             if (route !== 'class' && !this.routes.includes(route)) route = "dashboard";
             if (route === 'admin' && (!window.NexusApp?.canAccessStaff || window.StudBudCloud?.offlineMode)) route = "dashboard";
             if (['classes', 'school-community'].includes(route) && window.NexusApp?.classrooms && !window.NexusApp.classrooms.available()) route = "dashboard";
@@ -1534,8 +1536,7 @@
                 if (route === 'friends') this.loadFriends();
                 if (route === 'about') this.loadAnnouncementHistory();
                 if (route === 'admin') this.loadAdminList();
-                if (route === 'classes') this.classrooms?.render();
-                if (route === 'school-community') this.schoolCommunity?.render();
+                if (route === 'classes') this.schoolCommunity?.render();
                 if (route === 'multiplayer') {
                     this.renderHostedGameDecks();
                     this.renderMultiplayerProfile(true);
@@ -3479,9 +3480,9 @@
 
         renderPlannerAvailability() {
             const settings = AppState.get('settings') || {};
-            const today = localDateKey(new Date());
             const controls = document.getElementById('planner-weekday-controls');
             if (!controls) return;
+            const today = localDateKey(new Date());
             document.getElementById('planner-daily-minutes').value = settings.plannerDailyMinutes ?? 90;
             const workdays = settings.plannerWorkdays ?? [0, 1, 2, 3, 4, 5, 6];
             controls.innerHTML = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((name, day) =>
@@ -3533,12 +3534,117 @@
             });
             const tasks = this.plannerTasks(history);
             const settings = AppState.get('settings') || {};
-            return { ...window.PlannerEngine.dailyPlan(tasks, {
+            const plan = window.PlannerEngine.dailyPlan(tasks, {
                 date, today, budget: window.PlannerEngine.availableMinutes(settings, date), availability: settings,
                 studiedMinutes: history.reduce((sum, session) => sum + Math.max(0, Number(session.durationSec) || 0) / 60, 0)
-            }), tasks,
+            });
+            const savedOrder = settings.plannerTaskOrder?.[date];
+            const order = new Map((Array.isArray(savedOrder) ? savedOrder : []).map((id, index) => [id, index]));
+            const manualOrder = plan.queue.some(task => order.has(task.id));
+            if (manualOrder) plan.queue.sort((a, b) => (order.get(a.id) ?? order.size) - (order.get(b.id) ?? order.size));
+            return { ...plan, tasks, manualOrder,
                 workMinutes: history.filter(session => session.activityType === 'work').reduce((sum, session) => sum + Math.max(0, Number(session.durationSec) || 0) / 60, 0)
             };
+        }
+
+        reorderPlannerTasks(source, target, after = false, date = this.selectedPlannerDate()) {
+            if (date !== this.selectedPlannerDate()) throw new Error('The planner day changed. Drag the task again.');
+            const plan = this.dailyPlannerModel(date);
+            const ids = plan.queue.map(task => task.id);
+            if (!ids.includes(source) || !ids.includes(target)) throw new Error('The plan changed. Refresh and try again.');
+            if (source === target) return;
+            ids.splice(ids.indexOf(source), 1);
+            ids.splice(ids.indexOf(target) + Number(after), 0, source);
+            const settings = AppState.get('settings') || {};
+            AppState.set('settings', { ...settings, plannerTaskOrder: { ...settings.plannerTaskOrder, [date]: ids } });
+            this.renderDailyPlanner();
+            document.getElementById('planner-plan-status').textContent = 'Task order saved for this day. Automatic time estimates and deadlines are unchanged.';
+        }
+
+        resetPlannerOrder() {
+            const settings = AppState.get('settings') || {};
+            const order = { ...settings.plannerTaskOrder };
+            delete order[this.selectedPlannerDate()];
+            AppState.set('settings', { ...settings, plannerTaskOrder: order });
+            this.renderDailyPlanner();
+            document.getElementById('planner-plan-status').textContent = 'Automatic task order restored for this day.';
+        }
+
+        bindPlannerReordering(queue) {
+            if (queue.dataset.reorderBound) return;
+            queue.dataset.reorderBound = '1';
+            let drag = null;
+            const clear = () => {
+                drag = null;
+                queue.querySelectorAll('.planner-drop-target').forEach(node => node.classList.remove('planner-drop-target'));
+            };
+            const attempt = callback => {
+                try { callback(); }
+                catch (error) { window.StudBudDialogs.notify(this.friendlyErrorMessage(error, 'Could not save the task order.')); }
+                finally { clear(); }
+            };
+            const destination = (x, y) => {
+                const card = document.elementFromPoint(x, y)?.closest('[data-planner-task]');
+                return card && queue.contains(card) ? card : null;
+            };
+            const drop = (card, y) => {
+                if (!drag || !card) return;
+                const { top, height } = card.getBoundingClientRect();
+                this.reorderPlannerTasks(drag.id, card.dataset.plannerTask, y > top + height / 2, drag.date);
+            };
+            queue.addEventListener('dragstart', event => {
+                const handle = event.target.closest('[data-planner-drag]');
+                if (!handle) return;
+                drag = { id: handle.dataset.plannerDrag, date: this.selectedPlannerDate() };
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', drag.id);
+            });
+            queue.addEventListener('dragover', event => {
+                if (!drag) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'move';
+                queue.querySelectorAll('.planner-drop-target').forEach(node => node.classList.remove('planner-drop-target'));
+                destination(event.clientX, event.clientY)?.classList.add('planner-drop-target');
+            });
+            queue.addEventListener('drop', event => {
+                if (!drag) return;
+                event.preventDefault();
+                attempt(() => drop(destination(event.clientX, event.clientY), event.clientY));
+            });
+            queue.addEventListener('dragend', clear);
+            queue.addEventListener('pointerdown', event => {
+                const handle = event.target.closest('[data-planner-drag]');
+                if (!handle || event.pointerType === 'mouse' || event.button !== 0 || event.isPrimary === false) return;
+                drag = { id: handle.dataset.plannerDrag, date: this.selectedPlannerDate(), pointer: event.pointerId };
+                handle.setPointerCapture(event.pointerId);
+            });
+            queue.addEventListener('pointermove', event => {
+                if (!drag || drag.pointer !== event.pointerId) return;
+                event.preventDefault();
+                queue.querySelectorAll('.planner-drop-target').forEach(node => node.classList.remove('planner-drop-target'));
+                destination(event.clientX, event.clientY)?.classList.add('planner-drop-target');
+            });
+            queue.addEventListener('pointerup', event => {
+                if (!drag || drag.pointer !== event.pointerId) return;
+                attempt(() => drop(destination(event.clientX, event.clientY), event.clientY));
+            });
+            const cancelPointer = event => { if (drag?.pointer === event.pointerId) clear(); };
+            queue.addEventListener('pointercancel', cancelPointer);
+            queue.addEventListener('lostpointercapture', cancelPointer);
+            window.addEventListener?.('blur', clear);
+            queue.addEventListener('keydown', event => {
+                const handle = event.target.closest('[data-planner-drag]');
+                if (!handle || !['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+                event.preventDefault();
+                const ids = this.dailyPlannerModel().queue.map(task => task.id);
+                const index = ids.indexOf(handle.dataset.plannerDrag);
+                const next = index + (event.key === 'ArrowUp' ? -1 : 1);
+                if (index < 0 || next < 0 || next >= ids.length) return;
+                attempt(() => {
+                    this.reorderPlannerTasks(ids[index], ids[next], next > index);
+                    [...queue.querySelectorAll('[data-planner-drag]')].find(node => node.dataset.plannerDrag === ids[index])?.focus();
+                });
+            });
         }
 
         renderPlannerPeriod(tasks = this.plannerTasks()) {
@@ -3608,6 +3714,7 @@
             const restoreFocus = focused?.closest?.('#planner-day-queue, #planner-upcoming-list, #planner-active-work');
             const focusAction = focused?.dataset?.action, focusId = focused?.dataset?.id;
             const plan = this.dailyPlannerModel();
+            this.bindPlannerReordering(queue);
             const today = localDateKey(new Date());
             const isToday = plan.date === today;
             const date = new Date(`${plan.date}T12:00:00`);
@@ -3642,8 +3749,8 @@
                 const block = task.minutes === 0 ? 'Check progress'
                     : task.minutes < task.remaining ? `${formatMinutes(task.minutes)} block · ${formatMinutes(task.remaining)} total left`
                     : `About ${formatMinutes(task.minutes)} left`;
-                return `<li class="planner-day-card${index === 0 ? ' planner-start-card' : ''}${task.urgent ? ' is-urgent' : ''}">
-                    <div class="planner-card-top"><span class="planner-card-order">${index + 1}</span><span class="planner-card-badge">${index === 0 ? 'Start here · ' : ''}${badge}</span><span>${this.escapeHTML(block)}</span></div>
+                return `<li class="planner-day-card${index === 0 ? ' planner-start-card' : ''}${task.urgent ? ' is-urgent' : ''}" data-planner-task="${id}">
+                    <div class="planner-card-top"><button type="button" class="planner-card-order planner-drag-handle" draggable="true" data-planner-drag="${id}" aria-label="Reorder ${name}. Drag or use Up and Down arrow keys." title="Drag to reorder, or use Up and Down arrow keys"><i class="fas fa-grip-vertical" aria-hidden="true"></i><span>${index + 1}</span></button><span class="planner-card-badge">${index === 0 ? 'Start here · ' : ''}${badge}</span><span>${this.escapeHTML(block)}</span></div>
                     <h4>${task.assessment ? 'Prepare: ' : ''}${name}</h4><p class="planner-card-meta">${this.escapeHTML(task.courseTitle)} · ${due}</p>
                     ${task.minutes === 0 ? `<p class="settings-hint">${task.assessment ? 'Estimated study time is covered. Check readiness; mark done only after the assessment.' : 'Estimated time is covered. Check the work and turn it in before marking done.'}</p>` : ''}
                     <div class="planner-card-actions">${isToday ? `<button type="button" class="${index === 0 ? 'primary' : 'secondary'}-btn" data-action="planner-start-work" data-id="${id}" aria-label="Work on ${name}">Work on this</button>` : ''}
@@ -3657,9 +3764,9 @@
                     ${task.plannedDate ? `<button type="button" class="text-btn" data-action="planner-clear-date" data-id="${id}">Use automatic work dates</button>` : ''}</div></details>
                 </li>`;
             };
-            const visibleCount = Math.max(3, plan.queue.findLastIndex(task => task.urgent) + 1);
+            const visibleCount = plan.manualOrder ? plan.queue.length : Math.max(3, plan.queue.findLastIndex(task => task.urgent) + 1);
             const remaining = plan.queue.slice(visibleCount);
-            queue.innerHTML = plan.queue.length ? `<ol class="planner-day-list">${plan.queue.slice(0, visibleCount).map(renderCard).join('')}</ol>${remaining.length ? `<details class="planner-remaining"${moreExpanded ? ' open' : ''}><summary>${remaining.length} more planned task${remaining.length === 1 ? '' : 's'}</summary><ol class="planner-day-list" start="${visibleCount + 1}">${remaining.map((task, index) => renderCard(task, index + visibleCount)).join('')}</ol></details>` : ''}`
+            queue.innerHTML = plan.queue.length ? `<div class="planner-order-toolbar"><p class="settings-hint">${plan.manualOrder ? 'Your task order for this day.' : 'Automatically prioritized. Drag a numbered grip to change the order.'}</p>${plan.manualOrder ? '<button type="button" class="text-btn" data-action="planner-auto-order">Use automatic order</button>' : ''}</div><ol class="planner-day-list">${plan.queue.slice(0, visibleCount).map(renderCard).join('')}</ol>${remaining.length ? `<details class="planner-remaining"${moreExpanded ? ' open' : ''}><summary>${remaining.length} more planned task${remaining.length === 1 ? '' : 's'}</summary><ol class="planner-day-list" start="${visibleCount + 1}">${remaining.map((task, index) => renderCard(task, index + visibleCount)).join('')}</ol></details>` : ''}`
                 : `<div class="glass-card planner-day-empty"><h4>${plan.budget === 0 ? 'A day off from suggested work' : plan.later.length ? 'Your plan is clear' : 'You are caught up'}</h4><p>${plan.budget === 0 ? 'No automatic suggestions with 0 available minutes. Deadlines and work you choose still appear here.' : plan.later.length ? 'Open Upcoming work to add a task, or adjust your available time.' : 'Add your next assignment when you get it.'}</p><button type="button" class="secondary-btn" data-action="planner-add-assignment">Add assignment</button></div>`;
             const laterCard = task => `<li><div><strong>${this.escapeHTML(task.title)}</strong><small>${this.escapeHTML(task.courseTitle)} · ${task.dueDate ? `Due ${this.escapeHTML(String(task.dueDate).slice(0, 10))}` : 'No deadline'}${task.plannedDate ? ` · Work on ${this.escapeHTML(task.plannedDate)}` : ''}</small></div>
                 <div class="planner-card-actions"><button type="button" class="secondary-btn" data-action="planner-add-to-day" data-id="${this.escapeHTML(task.id)}">Add to this day</button><button type="button" class="text-btn" data-action="edit-assignment" data-id="${this.escapeHTML(task.id)}">Edit</button></div></li>`;
@@ -5245,7 +5352,7 @@
             document.getElementById('admin-nav-item')?.classList.toggle('hidden', !this.canAccessStaff);
             document.getElementById('admin-sidebar-item')?.classList.toggle('hidden', !this.canAccessStaff);
             this.classrooms?.refreshNav();
-            if (this.Router?.activeRoute === 'school-community' && this.schoolCommunity
+            if (this.Router?.activeRoute === 'classes' && this.schoolCommunity
                 && this.schoolCommunity.context !== this.schoolCommunity.key()) await this.schoolCommunity.render();
             if (this.classrooms?.available() && /^#\/?classes$/i.test(window.location.hash) && Router.activeRoute !== 'classes') Router.handleHashChange();
             document.querySelectorAll('#admin-view [data-admin-tab]').forEach(button => {
@@ -11873,6 +11980,7 @@
                 this.plannerScope = id;
                 this.renderDailyPlanner();
             }
+            if (action === 'planner-auto-order') this.resetPlannerOrder();
             if (action === 'planner-open-day') {
                 if (!Number.isFinite(window.PlannerEngine.dateNumber(id))) throw new Error('Choose a valid planner date.');
                 this.plannerDate = id;

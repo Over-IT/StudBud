@@ -101,6 +101,7 @@
         }
 
         async refreshVisible() {
+            if (this.app.schoolCommunity && this.isTeacher() && !this.root) return;
             if (!this.available() || !this.visible() || this.loading || this.polling || this.addingCourse) return;
             // Never replace a teacher's draft or an actively used roster control during polling.
             if (this.editingDeck || this.detailTab === 'settings' && this.detail
@@ -109,12 +110,18 @@
             const key = this.contextKey();
             const id = this.requestId;
             const classId = this.detail?.id;
+            const communityRequest = this.app.schoolCommunity?.request;
             try {
                 if (this.isTeacher()) {
                     const data = await this.call(classId ? 'studbud_teacher_class_detail' : 'studbud_teacher_classes', classId ? { p_class_id: classId } : undefined);
                     if (!this.currentRequest(id, key) || !this.visible() || this.editingDeck
+                        || this.app.schoolCommunity && (!this.root || communityRequest !== this.app.schoolCommunity.request)
                         || this.detailTab === 'settings' && this.detail || this.root?.contains(document.activeElement)) return;
-                    if (classId) { this.detail = data; this.renderTeacherDetail(); }
+                    if (classId) {
+                        this.detail = data;
+                        if (this.app.schoolCommunity) this.app.schoolCommunity.teacherDetail = data;
+                        this.renderTeacherDetail();
+                    }
                     else { this.teacherData = data; this.renderTeacherHome(); }
                 } else {
                     await this.syncSnapshots(true);
@@ -165,7 +172,7 @@
             document.getElementById('school-community-privacy')?.classList.toggle('hidden', !show);
             item.classList.toggle('hidden', !show);
             const label = item.querySelector('span');
-            if (label) label.textContent = this.isTeacher() ? 'Teach' : 'Classes';
+            if (label) label.textContent = 'Classrooms';
             const icon = item.querySelector('i');
             if (icon) icon.className = this.isTeacher() ? 'fas fa-chalkboard-user' : 'fas fa-school';
             if (['gpa', 'classes', 'school-community', 'grade-scenarios', 'analytics', 'class'].includes(this.app.Router?.activeRoute)) {
@@ -176,12 +183,13 @@
 
         status(message, type = '') {
             const node = document.getElementById('classes-status');
-            if (!node) return;
+            if (!node) return this.app.schoolCommunity?.status(message, type === 'error');
             node.textContent = message || '';
             node.className = `classes-status${type ? ` ${type}` : ''}`;
         }
 
         async render() {
+            if (this.app.schoolCommunity) return this.app.schoolCommunity.render();
             this.resetContext();
             this.init();
             const root = this.root;
@@ -203,6 +211,7 @@
 
         // ------------------------------------------------------------------ TEACHER
         async loadTeacher() {
+            if (this.app.schoolCommunity) return this.app.schoolCommunity.render();
             const id = ++this.requestId;
             const key = this.contextKey();
             this.loading = true;
@@ -220,24 +229,8 @@
         }
 
         renderTeacherHome() {
-            const data = this.teacherData || { classes: [] };
-            const classes = data.classes || [];
-            const totalStudents = classes.reduce((sum, item) => sum + Number(item.student_count || 0), 0);
-            const totalMissing = classes.reduce((sum, item) => sum + Number(item.missing_total || 0), 0);
             const school = this.app.schoolShortName?.() || 'your school';
             this.root.innerHTML = `
-                <section class="teacher-hero glass-card">
-                    <div>
-                        <span class="eyebrow"><i class="fas fa-chalkboard-user"></i> Teacher · ${esc(school)}</span>
-                        <h2>Your classes</h2>
-                        <p>Add the courses you teach. Students at ${esc(school)} who have that course are added automatically. They see your flashcard sets, and you see their grades, missing work and study time.</p>
-                    </div>
-                    <div class="teacher-hero-stats">
-                        <div><strong>${classes.length}</strong><small>classes</small></div>
-                        <div><strong>${totalStudents}</strong><small>students</small></div>
-                        <div class="${totalMissing ? 'warn' : ''}"><strong>${totalMissing}</strong><small>missing items</small></div>
-                    </div>
-                </section>
                 <section class="glass-card teacher-new-class">
                     <h3><i class="fas fa-plus"></i> Add a course you teach</h3>
                     <form id="teacher-class-form" class="teacher-class-form" autocomplete="off">
@@ -250,10 +243,7 @@
                         <small id="teacher-course-help" class="muted">Only ${esc(school)} courses are listed. Use ↑ ↓ and Enter, or tap a course to add it. Courses you already teach are checked.</small>
                     </form>
                 </section>
-                <p id="classes-status" class="classes-status" role="status" aria-live="polite"></p>
-                <div class="teacher-class-grid">
-                    ${classes.length ? classes.map(item => this.teacherClassCard(item)).join('') : '<div class="glass-card empty-state full-width"><i class="fas fa-chalkboard"></i> No courses yet. Search above and tap the courses you teach.</div>'}
-                </div>`;
+                <p id="classes-status" class="classes-status" role="status" aria-live="polite"></p>`;
         }
 
         teacherClassCard(item) {
@@ -354,6 +344,15 @@
         }
 
         async openClass(id) {
+            if (this.app.schoolCommunity) {
+                const community = this.app.schoolCommunity;
+                const item = (this.teacherData?.classes || []).find(item => item.id === id);
+                const course = (community.classes || []).find(course => item &&
+                    this.courseMatches({ code: course.course_code }, item.course_code));
+                const result = community.open(course?.id || id, course?.title || item?.title);
+                community.tab = 'teacher';
+                return result;
+            }
             const request = ++this.requestId;
             const key = this.contextKey();
             this.loading = true;
@@ -438,7 +437,6 @@
             const needHelp = students.filter(student => this.attentionScore(student) >= 3).length;
             const weekStudy = students.reduce((sum, student) => sum + Number(student.week_seconds || 0), 0);
             this.root.innerHTML = `
-                <button type="button" class="link-btn classes-back" data-class-action="back"><i class="fas fa-arrow-left"></i> All classes</button>
                 <section class="teacher-hero glass-card">
                     <div>
                         <span class="eyebrow"><span class="class-code-chip">${esc(item.course_code)}</span> ${item.section ? esc(item.section) : ''}</span>
@@ -453,15 +451,12 @@
                     </div>
                 </section>
                 <p id="classes-status" class="classes-status" role="status" aria-live="polite"></p>
-                <button type="button" class="secondary-btn" data-school-action="open-class" data-class="${esc(item.id)}" data-title="${esc(item.title)}"><i class="fas fa-comments" aria-hidden="true"></i> Announcements, discussions &amp; live games</button>
-                <div data-school-live="${esc(item.id)}" aria-live="polite"></div>
                 <div class="segmented classes-tabs" role="tablist">
                     <button type="button" role="tab" class="${this.detailTab === 'students' ? 'selected' : ''}" aria-selected="${this.detailTab === 'students'}" data-class-action="tab" data-tab="students"><i class="fas fa-users"></i> Students${needHelp ? ` <b class="tab-badge">${needHelp}</b>` : ''}</button>
                     <button type="button" role="tab" class="${this.detailTab === 'sets' ? 'selected' : ''}" aria-selected="${this.detailTab === 'sets'}" data-class-action="tab" data-tab="sets"><i class="fas fa-layer-group"></i> Flashcard sets <b class="tab-badge muted">${(item.decks || []).length}</b></button>
                     <button type="button" role="tab" class="${this.detailTab === 'settings' ? 'selected' : ''}" aria-selected="${this.detailTab === 'settings'}" data-class-action="tab" data-tab="settings"><i class="fas fa-sliders"></i> Class settings</button>
                 </div>
                 <div id="classes-tab-body">${this.detailTab === 'sets' ? this.setsMarkup() : this.detailTab === 'settings' ? this.settingsMarkup() : this.rosterMarkup(weekStudy)}</div>`;
-            this.app.schoolCommunity?.refreshClassListings();
         }
 
         rosterMarkup(weekStudy) {
@@ -623,11 +618,10 @@
         }
 
         renderStudent() {
-            const data = this.studentData || { classes: [] };
-            const classes = data.classes || [];
-            const covered = new Set(classes.map(item => item.course_code));
-            const waiting = (this.app.AppState.get('courses') || [])
-                .filter(course => ![...covered].some(code => this.courseMatches(course, code)));
+            return this.app.schoolCommunity?.paint();
+        }
+
+        studentSetsMarkup(classes) {
             const local = this.app.AppState.get('flashcards') || [];
             const classCards = classes.map(item => {
                 const decks = item.decks || [];
@@ -637,8 +631,6 @@
                         <h3>${esc(item.title)}</h3>
                         <small><i class="fas fa-chalkboard-user"></i> ${esc(personName(item.teacher))} · ${Number(item.student_count || 0)} students</small></div>
                     </header>
-                    <button type="button" class="secondary-btn" data-school-action="open-class" data-class="${esc(item.id)}" data-title="${esc(item.title)}"><i class="fas fa-comments" aria-hidden="true"></i> Class updates &amp; live games</button>
-                    <div data-school-live="${esc(item.id)}" aria-live="polite"></div>
                     ${decks.length ? `<ul class="class-deck-list">${decks.map(deck => {
                         const saved = local.find(entry => entry.classDeckId === deck.id);
                         const stale = saved && deck.updated_at && saved.classDeckUpdatedAt !== deck.updated_at;
@@ -651,20 +643,7 @@
                     }).join('')}</ul>` : '<p class="muted">Your teacher has not posted any flashcard sets yet.</p>'}
                 </article>`;
             }).join('');
-            const courseCount = (this.app.AppState.get('courses') || []).length;
-            this.root.innerHTML = `
-                <section class="glass-card student-join">
-                    <div>
-                        <h2><i class="fas fa-school"></i> Teacher classrooms</h2>
-                        <p>Course communities are available without a teacher. These additional classrooms appear when a teacher at ${esc(this.app.schoolShortName?.() || 'your school')} adds your course. That teacher can see your grade, missing work and study time for that course.</p>
-                        <button type="button" class="secondary-btn" data-target="school-community-view">Open my course communities</button>
-                    </div>
-                    ${courseCount ? '' : '<button type="button" class="primary-btn" data-class-action="add-my-courses"><i class="fas fa-plus"></i> Add your courses</button>'}
-                </section>
-                <p id="classes-status" class="classes-status" role="status" aria-live="polite"></p>
-                <div class="student-class-grid">${classCards || `<div class="glass-card empty-state full-width"><i class="fas fa-users-rectangle"></i> ${courseCount ? 'No teacher classrooms yet. Your course communities still have discussions and shared sets; no teacher is required.' : 'Add your courses (or import from Infinite Campus) to see your course communities.'}</div>`}</div>
-                ${classes.length && waiting.length ? `<p class="muted class-waiting"><i class="fas fa-hourglass-half"></i> Not on StudBud yet: ${waiting.slice(0, 8).map(course => esc(course.title)).join(', ')}${waiting.length > 8 ? '…' : ''}</p>` : ''}`;
-            this.app.schoolCommunity?.refreshClassListings();
+            return `<section><h3>Teacher-published sets</h3><p class="settings-hint">Teachers of this course can see your course grade, missing work and study progress.</p><div class="student-class-grid">${classCards}</div></section>`;
         }
 
         findClassDeck(classId, deckId) {
@@ -756,7 +735,6 @@
                 if (!current()) return;
                 this.studentData = data;
                 this.lastCodesKey = codesKey;
-                if (this.visible() && !this.loading) this.renderStudent();
                 const items = (data.classes || [])
                     .map(item => ({ class_id: item.id, snapshot: this.snapshotFor(item.course_code) }))
                     .filter(item => item.snapshot);
@@ -860,7 +838,8 @@
                     await this.call('studbud_teacher_delete_class', { p_class_id: this.detail.id });
                     this.detail = null;
                     this.detailTab = 'students';
-                    await this.loadTeacher();
+                    if (this.app.schoolCommunity) await this.app.schoolCommunity.open(null);
+                    else await this.loadTeacher();
                     this.status('Course removed.');
                 } else if (action === 'remove-student') {
                     if (!await window.StudBudDialogs.confirm(`Remove ${button.dataset.name}? They stop seeing this class and you stop seeing their progress. You can restore them later.`)) return;
@@ -879,8 +858,8 @@
                     await this.openClass(this.detail.id);
                 } else if (action === 'copy-deck-local' || action === 'save-class-deck') {
                     const deck = await this.saveClassDeck(button.dataset.class, id);
-                    this.status(`“${deck.title}” is in your study sets.`, 'success');
                     if (!this.isTeacher()) this.renderStudent();
+                    this.status(`“${deck.title}” is in your study sets.`, 'success');
                 } else if (action === 'study-class-deck') {
                     const deck = await this.saveClassDeck(button.dataset.class, id);
                     this.app.Router.navigate('flashcard');
