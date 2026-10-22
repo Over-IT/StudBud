@@ -734,6 +734,7 @@
         'Practical Arts': 'Practical Arts', ELA: 'ELA', Math: 'Math', Science: 'Science', 'Social Studies': 'Social Studies',
         PE: 'PE', Health: 'Health', 'Personal Finance': 'Personal Finance', Electives: 'Electives', 'World Languages': 'Electives'
     };
+    const CENTRAL_CLASS_PERIODS = new Set(['1', '2', '3', '5', '6', '7', '8']);
 
     function guessSubject(name) {
         const value = String(name || '').toLowerCase();
@@ -789,6 +790,8 @@
 
         const groups = new Map();
         model.sections.forEach(section => {
+            if (school === 'pchs' && !section.placements.some(item =>
+                CENTRAL_CLASS_PERIODS.has(String(periodNumberFrom(item.periodName) ?? '')))) return;
             const match = school !== 'other' ? matchCourse(section.courseNumber, section.name, catalog) : { course: null, confidence: 0, method: 'none', suggestions: [] };
             const nameKey = titleTokens(section.name).join(' ') || section.id;
             const key = match.course && match.confidence >= 0.55 ? `catalog:${match.course.code}` : `name:${nameKey}`;
@@ -1142,10 +1145,9 @@
                 // Fill the period picker too; a class whose term covers today wins a shared period
                 const all = { ...(schedule.all || {}) };
                 Object.keys(all).forEach(period => { if (touchedCodes.includes(all[period])) delete all[period]; });
-                const valid = new Set(['1', '2', '3', '5', '6', '7', '8']);
                 const candidates = sections
                     .map(item => ({ ...item, number: String(periodNumberFrom(item.period) ?? '') }))
-                    .filter(item => valid.has(item.number))
+                    .filter(item => CENTRAL_CLASS_PERIODS.has(item.number))
                     .sort((left, right) => Number(right.termStart <= today && today <= right.termEnd) - Number(left.termStart <= today && today <= left.termEnd));
                 candidates.forEach(item => {
                     if (all[item.number]) return;

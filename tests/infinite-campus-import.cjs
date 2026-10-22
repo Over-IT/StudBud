@@ -111,11 +111,13 @@ const options = { catalog, today: '2026-01-20', now: 1768900000000 };
 {
     const academic = plain(model.sections[0]);
     const defaultsModel = { ...plain(model), assignments: [], sections: [
-        { ...academic, id: 'new-academic', name: 'Paleography', courseNumber: 'LOCAL1', grades: [], categories: [] },
+        { ...academic, id: 'new-academic', name: 'Paleography', courseNumber: 'LOCAL1', placements: [{ periodName: '3' }], grades: [], categories: [] },
         { ...academic, id: 'advisory', name: 'Advisory', courseNumber: '', grades: [], categories: [] },
         { ...academic, id: 'study-hall', name: 'Study Hall', courseNumber: '', grades: [], categories: [] },
+        { ...academic, id: 'huddle', name: 'Huddle High School', courseNumber: '', placements: [], grades: [], categories: [] },
+        { ...academic, id: 'acc-lab', name: 'ACC Lab', courseNumber: '', placements: [{ periodName: '4' }], grades: [], categories: [] },
         { ...academic, id: 'dropped', name: 'Dropped Academic Class', courseNumber: '', dropped: true, grades: [], categories: [] }
-    ] };
+    ], assignments: [{ ...plain(model.assignments[0]), sectionID: 'acc-lab' }] };
     for (const school of ['pchs', 'other']) {
         const saved = { courses: [{ code: 'saved', title: 'Already saved class', school, categories: [] }] };
         const defaults = IC.buildImportPlan(defaultsModel, saved, { school, catalog });
@@ -126,12 +128,16 @@ const options = { catalog, today: '2026-01-20', now: 1768900000000 };
             assert.equal(defaults.classes.find(entry => entry.sectionIDs.includes(section)).include, false,
                 `${section} remains skipped by default`);
         }
+        for (const section of ['huddle', 'acc-lab']) {
+            assert.equal(defaults.classes.some(entry => entry.sectionIDs.includes(section)), school !== 'pchs',
+                'Central classes without an allowed period are omitted from the import preview');
+        }
         const imported = IC.applyImportPlan(defaultsModel, defaults, saved, options);
-        assert.equal(imported.summary.coursesAdded, 1);
+        assert.equal(imported.summary.coursesAdded, school === 'pchs' ? 1 : 3);
         assert.equal(imported.courses[1].title, entry.name, 'unmatched classes keep the Campus name');
         assert.equal(IC.applyImportPlan(defaultsModel, defaults, saved, {
             ...options, overrides: { [entry.key]: 'skip' }
-        }).summary.coursesAdded, 0, 'explicit skip still overrides automatic inclusion');
+        }).summary.coursesAdded, school === 'pchs' ? 0 : 2, 'explicit skip still overrides automatic inclusion');
     }
 }
 {
@@ -674,7 +680,7 @@ async function mobileImport() {
         ...payload,
         roster: [
             { sectionID: 801, calendarID: 77, endYear: 2026, courseNumber: '', courseName: 'FRENCH 4', teacherDisplay: 'Roy, A', sectionPlacements: [{ termID: 1, periodName: '3' }] },
-            { sectionID: 802, calendarID: 77, endYear: 2026, courseNumber: '', courseName: 'HONORS DRAWING', teacherDisplay: 'Fox, B', sectionPlacements: [{ termID: 1, periodName: '4' }] }
+            { sectionID: 802, calendarID: 77, endYear: 2026, courseNumber: '', courseName: 'HONORS DRAWING', teacherDisplay: 'Fox, B', sectionPlacements: [{ termID: 1, periodName: '5' }] }
         ],
         grades: [], details: {},
         assignments: [
