@@ -1715,16 +1715,28 @@
                 const duplicate = seen.has(key);
                 seen.add(key);
                 const invalidScore = item.pointsEarned !== null && (item.pointsEarned < 0 || item.maxPoints <= 0);
-                return { ...item, categoryId: category?.id || null, duplicate, invalidScore, include: !duplicate && !invalidScore };
+                const multiplier = item.multiplier === undefined ? 1 : Number(item.multiplier);
+                const unsupportedMultiplier = item.pointsEarned !== null && item.multiplier !== undefined
+                    && (item.multiplier === '' || !Number.isFinite(multiplier) || multiplier <= 0
+                        || !Number.isFinite(item.pointsEarned * multiplier) || !Number.isFinite(item.maxPoints * multiplier));
+                return { ...item, categoryId: category?.id || null, duplicate, invalidScore, unsupportedMultiplier,
+                    multiplierValue: multiplier, include: !duplicate && !invalidScore && !unsupportedMultiplier };
             });
             this.campusAssignmentDraft = {
                 rows, courseCode, sourceText: document.getElementById('campus-paste-assignments').value
             };
             preview.innerHTML = `<ul class="campus-paste-list campus-paste-assignments">${rows.map((row, index) => {
-                const grade = row.pointsEarned === null ? 'No score' : `${row.pointsEarned}/${row.maxPoints}`;
-                const detail = [row.dueDate || 'No due date', grade, row.category || 'No category'].join(' · ');
-                const state = row.duplicate ? 'Already added' : row.invalidScore ? 'Check score' : detail;
-                return `<li><label><input type="checkbox" data-campus-assignment-index="${index}"${row.include ? ' checked' : ''}${row.include ? '' : ' disabled'}><span>${this.escapeHTML(row.title)}</span></label><small class="${row.invalidScore ? 'campus-paste-warning' : ''}">${this.escapeHTML(state)}</small></li>`;
+                const grade = row.incompleteScore ? 'Score needs points possible' : row.pointsEarned === null ? 'No score'
+                    : row.multiplierValue !== 1 && !row.unsupportedMultiplier
+                        ? `${row.pointsEarned}/${row.maxPoints} × ${row.multiplierValue} = ${Number((row.pointsEarned * row.multiplierValue).toPrecision(12))}/${Number((row.maxPoints * row.multiplierValue).toPrecision(12))}`
+                        : `${row.pointsEarned}/${row.maxPoints}`;
+                const category = row.category ? row.categoryId ? row.category : `${row.category} (not matched)` : 'No category';
+                const ungradedMultiplier = row.pointsEarned === null && row.multiplier !== undefined && Number(row.multiplier) !== 1;
+                const detail = [row.dueDate || 'No due date', grade, category, row.missing ? 'Missing' : '',
+                    ungradedMultiplier ? 'Multiplier not applied to ungraded work' : ''].filter(Boolean).join(' · ');
+                const state = row.duplicate ? 'Already added' : row.invalidScore ? 'Check score'
+                    : row.unsupportedMultiplier ? 'Invalid score multiplier; enter this assignment manually' : detail;
+                return `<li><label><input type="checkbox" data-campus-assignment-index="${index}"${row.include ? ' checked' : ''}${row.include ? '' : ' disabled'}><span>${this.escapeHTML(row.title)}</span></label><small class="${row.invalidScore || row.unsupportedMultiplier || row.incompleteScore || ungradedMultiplier || (row.category && !row.categoryId) ? 'campus-paste-warning' : ''}">${this.escapeHTML(state)}</small></li>`;
             }).join('')}</ul>`;
             const count = rows.filter(row => row.include).length;
             const graded = rows.filter(row => row.include && row.pointsEarned !== null).length;
@@ -1754,8 +1766,8 @@
                     title: row.title,
                     courseCode: draft.courseCode,
                     dueDate: row.dueDate,
-                    pointsEarned: graded ? row.pointsEarned : 0,
-                    maxPoints: graded ? row.maxPoints : 100,
+                    pointsEarned: graded ? Number((row.pointsEarned * row.multiplierValue).toPrecision(12)) : 0,
+                    maxPoints: graded ? Number((row.maxPoints * row.multiplierValue).toPrecision(12)) : row.maxPoints ?? 100,
                     categoryId: row.categoryId,
                     kind: /\bquiz\b/i.test(row.title) ? 'quiz' : /\b(?:test|exam)\b/i.test(row.title) ? 'test' : 'assignment',
                     estimatedMinutes: 30,
@@ -1764,8 +1776,9 @@
                     priority: 'high',
                     graded,
                     dismissed: false,
-                    status: graded ? 'completed' : 'pending',
-                    completedAt: graded ? today : null,
+                    icMissing: Boolean(row.missing),
+                    status: graded && !row.missing ? 'completed' : 'pending',
+                    completedAt: graded && !row.missing ? today : null,
                     gradedAt: graded ? today : null
                 });
             });
