@@ -906,12 +906,12 @@ input:focus, select:focus, textarea:focus {
 #top-header {
     min-height: var(--header-height);
     height: auto;
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     justify-content: space-between;
     padding: var(--spacing-sm) var(--spacing-xl);
     gap: var(--spacing-sm) var(--spacing-md);
-    flex-wrap: wrap;
     border-bottom: 1px solid var(--border-glass);
     z-index: var(--z-header);
     flex-shrink: 0;
@@ -4754,13 +4754,15 @@ progress::-webkit-progress-value { background: var(--accent-primary); border-rad
 .roster-row { contain-intrinsic-size: auto 64px; }
 /* Low-power devices keep quick one-shot feedback but drop looping animations. */
 
-.workspace-tabs { flex-wrap: wrap; overflow: visible; gap: 4px; padding: 0 var(--spacing-xl); margin-bottom: 0; border-bottom: 1px solid var(--border-glass); }
-.workspace-tab { min-width: 0; min-height: 48px; padding: 12px 16px; border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: transparent; color: var(--text-secondary); font-weight: 700; box-shadow: none; white-space: normal; overflow-wrap: anywhere; }
+.workspace-tabs { flex-wrap: wrap; overflow: visible; gap: 6px; padding: 6px; margin: 10px var(--spacing-xl) 0; border: 1px solid var(--border-glass); border-radius: 14px; background: var(--bg-base); }
+.workspace-tab { min-width: 0; min-height: 44px; padding: 10px 16px; border: 1px solid var(--border-glass); border-radius: 9px; background: var(--bg-glass); color: var(--text-secondary); font-weight: 700; box-shadow: none; white-space: normal; overflow-wrap: anywhere; }
 .workspace-tab:hover { color: var(--text-primary); background: var(--bg-glass-hover); }
-.workspace-tab.selected { padding: 12px 16px; border-width: 0 0 3px; text-decoration: none; color: var(--text-primary); background: transparent; border-color: var(--accent-primary); box-shadow: none; }
+.workspace-tab.selected { padding: 10px 16px; border-width: 1px; text-decoration: none; color: var(--text-primary); background: color-mix(in srgb, var(--accent-primary) 18%, var(--bg-base)); border-color: var(--accent-primary); box-shadow: none; }
 @media (max-width: 768px) {
-    .workspace-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); overflow: visible; padding: 0 var(--spacing-md); }
+    .workspace-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); overflow: visible; padding: 6px; margin-inline: var(--spacing-md); }
     .workspace-tabs[data-page-count="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .workspace-tabs[data-page-count="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .workspace-tabs[data-page-count="1"] { grid-template-columns: minmax(0, 1fr); }
     .workspace-tab { white-space: normal; }
 }
 
@@ -5030,9 +5032,6 @@ details.planner-grade-inbox { display: block; }
 .nav-item.active { border-width: 1px; }
 .nav-section-label { padding: 18px 16px 6px; color: var(--text-secondary); font-size: .65rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; list-style: none; }
 body.sidebar-collapsed .nav-section-label { display: none; }
-.workspace-tabs { padding-top: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border-glass); gap: 8px; }
-.workspace-tab { border-width: 1px; font-weight: 700; box-shadow: none; }
-.workspace-tab.selected { border-width: 1px; box-shadow: none; }
 
 .desktop-nav-extra { display: none; }
 @media (min-width: 1101px) and (min-height: 850px) {
@@ -5060,13 +5059,13 @@ body.sidebar-collapsed .nav-section-label { display: none; }
     #top-header .header-left { align-self: center; }
     #top-header .header-left h1 { font-size: 1.05rem; }
     #top-header .page-guide { display: none; }
-    .header-right { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: 190px; }
+    .header-right { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: 100%; }
     .header-settings-button { display: inline-flex; }
     .header-settings-button.icon-btn { min-height: 44px; min-width: 44px; }
     #multiplayer-profile-button { min-width: 44px; min-height: 44px; padding: 4px; }
     #multiplayer-header-name { display: none; }
-    .workspace-tabs { padding: 0 12px; margin-bottom: 0; }
-    .workspace-tab, .workspace-tab.selected { padding: 12px; font-size: .82rem; }
+    .workspace-tabs { margin: 8px 12px 0; }
+    .workspace-tab, .workspace-tab.selected { padding: 10px 8px; font-size: .82rem; }
     #view-container { padding: 18px 12px; }
     .student-workspace > .view-header { align-items: stretch; gap: 14px; }
     .student-workspace > .view-header > div:first-child { flex-basis: 100%; }
@@ -5590,5 +5589,16 @@ html:has(.modal-overlay:not(.hidden)), html:has(.app-confirmation[open]), html:h
 #importer-view .deck-link-hint { margin: 0 0 6px; font-size: .78rem; color: var(--text-secondary); }
 /* Games: coin wallet lives in the top bar while Games is open */
 #top-header .multiplayer-wallet { padding: 6px 12px; }
+#top-header .multiplayer-wallet strong { white-space: nowrap; }
+@media (max-width: 600px) {
+    #top-header .multiplayer-wallet { min-height: 44px; padding: 6px 8px; gap: 4px; }
+    #top-header .multiplayer-wallet strong { font-size: .9rem; }
+    #top-header .multiplayer-wallet span { font-size: .68rem; }
+}
 body:not(:has(#multiplayer-view.active)) #top-header .multiplayer-wallet { display: none; }
 .importer-fields label { font-size: .85rem; font-weight: 600; }
+
+:is(.multiplayer-tabs, .importer-mode-tabs, .campus-paste-tabs) { flex-wrap: wrap; gap: 6px; padding: 6px; border: 1px solid var(--border-glass); border-radius: 14px; background: var(--bg-base); }
+:is(.multiplayer-tab, .importer-mode-btn, .campus-paste-tabs > button) { min-height: 44px; border: 1px solid var(--border-glass); border-radius: 9px; background: var(--bg-glass); color: var(--text-secondary); font-weight: 700; }
+:is(.multiplayer-tab, .importer-mode-btn, .campus-paste-tabs > button):hover { background: var(--bg-glass-hover); color: var(--text-primary); }
+:is(.multiplayer-tab.selected, .importer-mode-btn.active, .campus-paste-tabs > button.selected) { border-color: var(--accent-primary); background: color-mix(in srgb, var(--accent-primary) 18%, var(--bg-base)); color: var(--text-primary); box-shadow: none; }

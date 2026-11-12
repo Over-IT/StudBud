@@ -6129,7 +6129,6 @@
             if (lateJoin) {
                 lateJoin.disabled = chess;
                 lateJoin.closest('label').classList.toggle('hidden', chess);
-                document.getElementById('host-game-late-join-hint')?.classList.toggle('hidden', chess);
             }
             const controls = [
                 document.getElementById('host-game-time')?.closest('.multiplayer-goals'),
