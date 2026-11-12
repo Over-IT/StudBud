@@ -635,7 +635,7 @@
                         return `<li>
                             <span class="class-deck-icon"><i class="fas fa-layer-group"></i></span>
                             <span><strong>${esc(deck.title)}</strong><small>${(deck.cards || []).length} cards${deck.description ? ` · ${esc(deck.description)}` : ''}${stale ? ' · <b>updated by your teacher</b>' : ''}</small></span>
-                            <button type="button" class="primary-btn compact-btn" data-class-action="study-class-deck" data-class="${esc(item.id)}" data-id="${esc(deck.id)}"><i class="fas fa-play"></i> Study</button>
+                            <button type="button" class="primary-btn compact-btn" data-class-action="study-class-deck" data-class="${esc(item.id)}" data-id="${esc(deck.id)}"><i class="fas fa-play"></i> Review set</button>
                             <button type="button" class="secondary-btn compact-btn" data-class-action="save-class-deck" data-class="${esc(item.id)}" data-id="${esc(deck.id)}"${saved && !stale ? ' disabled' : ''}>${saved ? (stale ? 'Update' : '<i class="fas fa-check"></i> Saved') : '<i class="fas fa-plus"></i> Save'}</button>
                         </li>`;
                     }).join('')}</ul>` : '<p class="muted">Your teacher has not posted any flashcard sets yet.</p>'}

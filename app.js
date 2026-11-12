@@ -606,7 +606,7 @@
     const WORKSPACES = [
         { main: 'gpa', tabs: [['gpa', 'My grades'], ['classes', 'Classrooms'], ['grade-scenarios', 'What-if grades'], ['analytics', 'Analytics']] },
         { main: 'planner', tabs: [['planner', 'Planner'], ['tasks', 'Tasks'], ['calendar', 'Calendar'], ['schedule', 'Class schedule']] },
-        { main: 'flashcard', extraRoutes: ['importer'], tabs: [['flashcard', 'Practice'], ['study-manage', 'Manage sets'], ['study-discover', 'Discover'], ['exam-arcade', 'Tests & drills']] },
+        { main: 'flashcard', extraRoutes: ['importer'], tabs: [['flashcard', 'Review cards'], ['study-manage', 'Manage sets'], ['study-discover', 'Discover sets'], ['exam-arcade', 'Tests & drills']] },
         { main: 'multiplayer', tabs: [['multiplayer', 'Games'], ['friends', 'Buds'], ['leaderboard', 'Leaderboards']] },
         { main: 'profile', tabs: [['profile', 'Profile'], ['shop', 'Shop'], ['inventory', 'Locker']] },
         { main: 'settings', tabs: [['settings', 'General'], ['settings-school', 'School & GPA'], ['appearance', 'Appearance'], ['sound', 'Audio'], ['settings-data', 'Data & account'], ['about', 'Help'], ['admin', 'Staff tools']] }
@@ -4149,7 +4149,7 @@
                 <article class="glass-card deck-card${pinned ? ' is-pinned' : ''}" data-deck-id="${id}">
                     ${reorder}
                     <div class="deck-card-top">
-                        <button type="button" class="deck-ring" data-action="view-focus-cards" data-id="${id}" style="--p:${mastery.pct}" aria-label="${mastery.pct}% recall estimate for ${title}. View cards needing focus" title="${mastery.pct}% recall estimate · Average of card progress from the last four answers. Written answers and Study/Cram self-ratings count fully; choices count half. Click for terms needing focus."><span>${mastery.pct}%</span></button>
+                        <button type="button" class="deck-ring" data-action="view-focus-cards" data-id="${id}" style="--p:${mastery.pct}" aria-label="${mastery.pct}% recall estimate for ${title}. View cards below 100% recall" title="${mastery.pct}% recall estimate · View cards below 100% recall"><span>${mastery.pct}%</span></button>
                         <div class="deck-card-title">
                             <h3>${title}</h3>
                             ${author}
@@ -4161,8 +4161,8 @@
                                 <button class="deck-menu-item" type="button" role="menuitem" data-action="add-card" data-id="${id}"><i class="fas fa-plus"></i> Add a card</button>
                                 <button class="deck-menu-item" type="button" role="menuitem" data-action="cram-deck" data-id="${id}" ${cardCount ? '' : 'disabled'}><i class="fas fa-bolt"></i> Cram all cards</button>
                                 <button class="deck-menu-item" type="button" role="menuitem" data-action="view-weak-cards" data-id="${id}"><i class="fas fa-triangle-exclamation"></i> View weak cards (${mastery.weak})</button>
-                                <button class="deck-menu-item" type="button" role="menuitem" data-action="view-focus-cards" data-id="${id}"><i class="fas fa-bullseye"></i> Cards needing focus</button>
-                                ${mastery.starred ? `<button class="deck-menu-item" type="button" role="menuitem" data-action="cram-starred" data-id="${id}"><i class="fas fa-star"></i> Study starred (${mastery.starred})</button>` : ''}
+                                <button class="deck-menu-item" type="button" role="menuitem" data-action="view-focus-cards" data-id="${id}"><i class="fas fa-bullseye"></i> Cards below 100% recall</button>
+                                ${mastery.starred ? `<button class="deck-menu-item" type="button" role="menuitem" data-action="cram-starred" data-id="${id}"><i class="fas fa-star"></i> Review starred (${mastery.starred})</button>` : ''}
                                 ${share}
                                 ${linkEditor}
                                 <button class="deck-menu-item is-danger" type="button" role="menuitem" data-action="delete-deck" data-id="${id}"><i class="fas fa-trash"></i> Delete set</button>
@@ -4180,7 +4180,7 @@
                     <div class="deck-main-actions">
                         ${managing
                             ? `<button class="primary-btn" data-action="edit-deck" data-id="${id}"><i class="fas fa-pen" aria-hidden="true"></i> Edit cards</button><button class="secondary-btn" data-action="add-card" data-id="${id}"><i class="fas fa-plus" aria-hidden="true"></i> Add card</button>`
-                            : `<button class="primary-btn" data-action="study-deck" data-id="${id}" ${studyCount ? '' : 'disabled'}><i class="fas fa-play" aria-hidden="true"></i> Study</button><button class="secondary-btn" data-action="study-focus" data-id="${id}" ${studyCount ? '' : 'disabled'}><i class="fas fa-bullseye" aria-hidden="true"></i> Focus practice</button>`}
+                            : `<button class="primary-btn" data-action="study-deck" data-id="${id}" ${studyCount ? '' : 'disabled'}><i class="fas fa-play" aria-hidden="true"></i> Review set</button><button class="secondary-btn" data-action="study-focus" data-id="${id}" ${studyCount ? '' : 'disabled'}><i class="fas fa-bullseye" aria-hidden="true"></i> Review below 100%</button>`}
                     </div>
                 </article>`;
             }).join('') : `<div class="empty-state glass-card full-width empty-state-cta">${search
@@ -4389,7 +4389,7 @@
                 panel.classList.toggle('hidden', !panel.dataset.studyPanel.split(' ').includes(page));
             });
             const copy = {
-                practice: ['Practice', 'Choose a set, practice the terms needing focus, or try a test.'],
+                practice: ['Review cards', 'Review a set or just the cards below full recall.'],
                 manage: ['Manage study sets', 'Create sets, edit cards, organize your library and choose what to share.'],
                 discover: ['Community study sets', 'Browse shared sets. Add a copy to your library to practice at your own pace.']
             }[page];
@@ -4435,7 +4435,7 @@
                     <div><strong>${this.escapeHTML(deck.title)}</strong>
                         <span>${exact ? 'For' : 'Same class as'} ${this.escapeHTML(this.deckAssessmentLabel(item))}${when ? ` · ${when}` : ''}</span>
                         <small>${this.escapeHTML(studied)} · suggested ${item.sessionMinutes} min today</small></div>
-                    <button class="primary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}" ${studyCount ? '' : 'disabled'}><i class="fas fa-play"></i> Study</button>
+                    <button class="primary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}" ${studyCount ? '' : 'disabled'}><i class="fas fa-play"></i> Review set</button>
                 </article>`;
             }).join('');
         }
@@ -4657,7 +4657,7 @@
             const query = document.getElementById('card-browser-search').value.trim().toLowerCase();
             const descriptions = {
                 weak: ['Weak cards', 'At least two recent answers with accuracy below 75%. Older sets use lifetime accuracy until you practice again.'],
-                focus: ['Cards needing recall practice', 'New cards and terms that need more consistent recall. Written answers and self-ratings count fully; choices count half.'],
+                focus: ['Cards below 100% recall', 'Includes new cards. Paused cards are shown but not reviewed.'],
                 all: ['All cards', 'Browse without editing. Open a card to reveal its answer.'],
                 starred: ['Starred cards', 'Cards you starred for later review.']
             };
@@ -4681,7 +4681,7 @@
             }).join('') || `<div class="empty-state">${query ? 'No cards match your search. Try another term or clear the search.' : filter === 'weak' ? 'No weak cards in this set. Weak cards appear after at least two recent answers below 75% accuracy.' : filter === 'focus' ? 'No cards need more recall practice right now.' : filter === 'starred' ? 'No starred cards yet. Star cards while studying or in the editor.' : 'This set has no cards yet.'}</div>`;
             const practice = document.getElementById('card-browser-practice');
             practice.disabled = !eligible.some(card => !card.suspended || filter === 'starred');
-            practice.textContent = filter === 'weak' ? 'Practice weak cards' : filter === 'focus' ? 'Practice focus cards' : filter === 'starred' ? 'Practice starred cards' : 'Study this set';
+            practice.textContent = filter === 'weak' ? 'Review weak cards' : filter === 'focus' ? 'Review below 100%' : filter === 'starred' ? 'Review starred cards' : 'Review set';
         }
 
         renderDeckEditorCards() {
@@ -9616,7 +9616,7 @@
                 { route: 'planner', sel: '.planner-day-controls .planner-budget', title: 'Set your time for today', text: "Choose Try it and enter today's study minutes. Leave it blank to use your usual schedule. Week view sets minutes per workday. Defaults and workdays live in General settings.", change: '#planner-current-minutes', goal: 'budget' },
                 { route: 'planner', sel: '#planner-day-queue', title: 'Start one work block', text: 'Choose Work on this for a task you can do now. Keep this page open while you work. Time pauses when you leave or go idle. Mark done only when finished.', action: '[data-action="planner-start-work"]', goal: 'work' },
                 { route: 'study-manage', sel: '#create-deck-btn', title: 'Save three useful flashcards', text: 'Make a New study set for your next quiz. Give it a topic, add at least three terms with answers, and save. Importing a set works too.', action: '#create-deck-btn', goal: 'deck' },
-                { route: 'flashcard', sel: '#deck-grid', title: 'Answer and rate one card', text: 'Choose Study on a set. Think of the answer, reveal it, then choose Again, Hard, Good or Easy honestly. Opening a set alone does not finish this step. Close study to return here.', action: '[data-action="study-deck"], [data-action="study-focus"]', goal: 'answer' },
+                { route: 'flashcard', sel: '#deck-grid', title: 'Answer and rate one card', text: 'Choose Review set or Review below 100%. Think of the answer, reveal it, then rate your recall with Again, Hard, Good or Easy.', action: '[data-action="study-deck"], [data-action="study-focus"]', goal: 'answer' },
                 { route: 'settings', sel: '#settings-start-page', title: 'Choose your starting page', text: 'Choose the page you want to see when you open StudBud. Planner is for deciding what to work on; Tasks is your full list of deadlines. Your choice saves automatically.', change: '#settings-start-page', goal: 'preference' }
             ];
         }
@@ -10362,7 +10362,7 @@
                 const mastery = this.deckMastery(deck);
                 const deckSeconds = sessions.filter(session => session.deckId === deck.id)
                     .reduce((sum, session) => sum + Number(session.durationSec), 0);
-                return `<article><strong>${this.escapeHTML(deck.title)}</strong><span>${cards.length} cards · ${mastery.pct}% recall estimate</span><small>${reviewed} reviewed · ${lapses} lapses · ${this.formatStudyDuration(deckSeconds)} studied</small><button type="button" class="secondary-btn" data-action="view-focus-cards" data-id="${this.escapeHTML(deck.id)}">Cards needing focus</button></article>`;
+                return `<article><strong>${this.escapeHTML(deck.title)}</strong><span>${cards.length} cards · ${mastery.pct}% recall estimate</span><small>${reviewed} reviewed · ${lapses} lapses · ${this.formatStudyDuration(deckSeconds)} studied</small><button type="button" class="secondary-btn" data-action="view-focus-cards" data-id="${this.escapeHTML(deck.id)}">Cards below 100% recall</button></article>`;
             }).join('') : '<p class="empty-state">Create a deck and log some study sessions to see your activity here.</p>';
         }
 
@@ -12493,7 +12493,7 @@
                 : mode === 'starred' ? (deck.cards || []).filter(card => card && card.starred) : mode === 'cram' ? (deck.cards || []).filter(Boolean) : active;
             if (!cards.length) {
                 window.StudBudDialogs.notify(mode === 'weak' ? 'No active weak cards to practice. Paused cards remain visible in the viewer; unpause them in Edit set to include them.'
-                    : mode === 'focus' ? 'No active cards need more recall practice. Use Study to review the full set, or unpause cards in the editor.'
+                    : mode === 'focus' ? 'No active cards below 100% recall. Use Review set, or unpause cards in the editor.'
                     : mode === 'starred' ? 'Star some cards first (press S while studying, or use the set editor).'
                     : (deck.cards || []).length ? 'All cards are paused. Unpause cards in the editor, or use Cram.' : 'This deck has no cards yet.');
                 return;
@@ -12614,7 +12614,7 @@
             this.currentStudyCard = card || null;
             if (!card) return this.showStudySummary();
             const deck = this.studyDeck();
-            document.getElementById('study-deck-title').textContent = `${deck?.title || 'Flashcards'}${this.studyMode === 'weak' ? ' · Weak cards' : this.studyMode === 'focus' ? ' · Focus practice' : this.studyMode === 'starred' ? ' · Starred' : this.cramMode ? ' · Cram' : ''}`;
+            document.getElementById('study-deck-title').textContent = `${deck?.title || 'Flashcards'}${this.studyMode === 'weak' ? ' · Weak cards' : this.studyMode === 'focus' ? ' · Below 100% recall' : this.studyMode === 'starred' ? ' · Starred' : this.cramMode ? ' · Cram' : ''}`;
             const progress = document.getElementById('study-progress');
             let remaining;
             if (this.studySession) {
