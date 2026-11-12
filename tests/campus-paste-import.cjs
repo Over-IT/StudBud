@@ -11,6 +11,12 @@ const catalog = [
 assert.deepEqual(paste.parseCourses('Course\tTeacher\tRoom\nBiology I\tMs. Example\t101\nENG202\tMr. Example\t202\nBiology I\tOther\t1', catalog),
     [{ name: 'Biology I', match: catalog[0] }, { name: 'ENG202', match: catalog[1] }],
     'copied class tables match by title or catalog code, ignore unrelated columns and deduplicate');
+assert.deepEqual(paste.parseCourses('Course,Teacher,Room\n"Biology I, Honors",Ms. Example,101\nEnglish Literature,Mr. Example,202', [
+    { code: 'BIO101', title: 'Biology I, Honors' }, catalog[1]
+]), [
+    { name: 'Biology I, Honors', match: { code: 'BIO101', title: 'Biology I, Honors' } },
+    { name: 'English Literature', match: catalog[1] }
+], 'quoted CSV class copy preserves commas inside names');
 assert.deepEqual(paste.parseCourses('Biology I\nUnknown elective', catalog), [
     { name: 'Biology I', match: catalog[0] }, { name: 'Unknown elective', match: null }
 ], 'pasted plain course lists keep unmatched names visible for review');
@@ -20,6 +26,16 @@ assert.deepEqual(paste.parseCourses('Schedule\nStudent details\nCourse\tTeacher\
     [{ name: 'Biology I', match: catalog[0] }], 'page text outside a recognized table is ignored');
 
 const today = new Date(2026, 10, 12);
+assert.equal(paste.tableTextFromHtml('<table>ignored</table>', class {
+    parseFromString() {
+        const rows = [
+            [{ textContent: ' Assignment ' }, { textContent: ' Due date ' }, { textContent: 'Score' }],
+            [{ textContent: 'Geometry, practice' }, { textContent: ' 11/20/2026 ' }, { textContent: ' 8/10 ' }]
+        ].map(cells => ({ querySelectorAll: () => cells }));
+        return { querySelectorAll: () => rows };
+    }
+}), 'Assignment\tDue date\tScore\nGeometry, practice\t11/20/2026\t8/10',
+'rich clipboard tables normalize into rows without splitting commas in cells');
 assert.deepEqual(paste.parseAssignments('Assignment\tDue Date\tScore\tPoints Possible\tCategory\tTeacher\n' +
     'Chapter 1 quiz\t11/14/2026\t18\t20\tQuizzes\tIgnore Me\n' +
     'Lab report\tNov 18\t--\t--\tLabs\tIgnore Me\n' +
@@ -52,9 +68,21 @@ assert.deepEqual(paste.parseAssignments('Assignment\tScore\nQuiz\t7', today), [
 assert.deepEqual(paste.parseAssignments('Assignment\tScore\nQuiz\t75%', today), [
     { title: 'Quiz', dueDate: '', pointsEarned: 75, maxPoints: 100, category: '' }
 ], 'an explicit percentage has a known denominator');
+assert.deepEqual(paste.parseAssignments('Assignment,Due Date,Score,Points Possible,Category,Status\n' +
+    '"Angles, Lines, and Proofs",11/20/2026,8,10,Homework,Missing', today), [
+    { title: 'Angles, Lines, and Proofs', dueDate: '2026-11-20', pointsEarned: 8, maxPoints: 10, category: 'Homework', missing: true }
+], 'quoted CSV assignment copy preserves comma titles, score, category and status');
+assert.deepEqual(paste.parseAssignments('Assignment\t10/12 Memorization Google Doc\nDue:\t10/15/2026\n' +
+    'Assignment\t10/13-14 ws1.7Ch\nDue:\t10/15/2026\nScore:\t92/100(92%)', today), [
+    { title: '10/12 Memorization Google Doc', dueDate: '2026-10-15', pointsEarned: null, maxPoints: null, category: '' },
+    { title: '10/13-14 ws1.7Ch', dueDate: '2026-10-15', pointsEarned: 92, maxPoints: 100, category: '' }
+], 'key/value rows from copied page layouts are not misread as a column-header table');
 assert.deepEqual(paste.parseAssignments('Assignment\nHomework\nDue: 11/12/2026\nMissing\nScore0/10(0%)', today), [
     { title: 'Homework', dueDate: '2026-11-12', pointsEarned: 0, maxPoints: 10, category: '', missing: true }
 ], 'joined score labels and missing status also work when copying line by line');
+assert.deepEqual(paste.parseAssignments('Assignment\nQuiz\nDue 11/22/2026\nScore 8/10\nStatus Missing', today), [
+    { title: 'Quiz', dueDate: '2026-11-22', pointsEarned: 8, maxPoints: 10, category: '', missing: true }
+], 'unpunctuated labeled details stay attached to the assignment');
 const campusPage = 'Example classGradesTerm 2In-progressTestsWeight: 70120/150(80%)' +
     'AssignmentUnit TestDue: 10/23/2026Score84/100(84%)' +
     'AssignmentReview QuizMultiplier: 0.5Due: 09/13/2026CommentsretakeScore80/100(80%)' +
@@ -69,6 +97,8 @@ assert.deepEqual(paste.parseAssignments(campusPage, today), [
     { title: 'Study Guide', dueDate: '2026-11-10', pointsEarned: null, maxPoints: null, category: 'Homework' },
     { title: 'Assignment 2', dueDate: '2026-11-09', pointsEarned: 7, maxPoints: 10, category: 'Homework' }
 ], 'concatenated Campus pages preserve assignment boundaries, category sections, scores and missing status');
+assert.ok(paste.parseAssignments(campusPage, today).every(item => !['Assignment', 'Score', '92/100(92%)'].includes(item.title)),
+    'copied labels and score text never become separate assignment titles');
 assert.equal(paste.parseDate('2/30/2026', today), '', 'invalid calendar dates are not imported');
 assert.equal(paste.parseDate('2026-02-31', today), '', 'invalid ISO dates are not imported');
 assert.equal(paste.parseDate('11/19', today), '2026-11-19', 'dates without a year use the current year');

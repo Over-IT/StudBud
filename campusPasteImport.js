@@ -4,8 +4,47 @@
     const normalize = value => String(value || '').normalize('NFKC').trim().toLowerCase()
         .replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
+    function parseCsv(text) {
+        const rows = [];
+        let row = [], cell = '', quoted = false;
+        const source = String(text || '');
+        for (let index = 0; index < source.length; index++) {
+            const character = source[index];
+            if (character === '"') {
+                if (quoted && source[index + 1] === '"') { cell += '"'; index++; }
+                else quoted = !quoted;
+            } else if (character === ',' && !quoted) {
+                row.push(cell.trim()); cell = '';
+            } else if ((character === '\n' || character === '\r') && !quoted) {
+                if (character === '\r' && source[index + 1] === '\n') index++;
+                row.push(cell.trim()); cell = '';
+                if (row.some(Boolean)) rows.push(row);
+                row = [];
+            } else cell += character;
+        }
+        row.push(cell.trim());
+        if (row.some(Boolean)) rows.push(row);
+        return rows;
+    }
+
+    function tableTextFromHtml(html, Parser = root.DOMParser) {
+        if (!html || !/<table[\s>]/i.test(html) || !Parser) return '';
+        const copied = new Parser().parseFromString(html, 'text/html');
+        const rows = [...copied.querySelectorAll('tr')].map(row =>
+            [...row.querySelectorAll('th, td')].map(cell => cell.textContent.replace(/\s+/g, ' ').trim()))
+            .filter(row => row.some(Boolean));
+        return rows.map(row => row.join('\t')).join('\n');
+    }
+
     function rowsFromText(text) {
-        return String(text || '').replace(/^\uFEFF/, '').split(/\r?\n/)
+        const source = String(text || '').replace(/^\uFEFF/, '');
+        const firstLine = source.split(/\r?\n/, 1)[0] || '';
+        const firstCell = normalize(firstLine.split(',')[0].replace(/^"/, '').replace(/"$/, ''));
+        if (!source.includes('\t') && firstLine.includes(',')
+            && ['assignment', 'assignment name', 'title', 'course', 'course name', 'class', 'class name'].includes(firstCell)) {
+            return parseCsv(source);
+        }
+        return source.split(/\r?\n/)
             .map(line => line.split('\t').map(cell => cell.trim().replace(/^"(.*)"$/, '$1')))
             .filter(row => row.some(Boolean));
     }
@@ -98,7 +137,7 @@
     function parseCampusPage(text, today) {
         const raw = String(text || '').replace(/&amp;/gi, '&');
         const markers = [...raw.matchAll(/Assignment/g)].map(match => match.index);
-        if (!markers.length || !/Assignment[^\t\r\n]+(?:Due|Multiplier)\s*:/i.test(raw)) return null;
+        if (!markers.length || !/Assignment[^\t\r\n]+(?:Due\s*:|Multiplier\s*:)/i.test(raw)) return null;
 
         const categoryFrom = value => {
             const match = value.match(/(?:In-progress|[\r\n\t)])\s*([\p{L}][\p{L} &/-]{0,60})\s*Weight\s*:\s*[\d.]+[\s\S]*$/iu)
@@ -138,6 +177,15 @@
             const joinedScore = line.match(/^score\s*((?:\d+(?:\.\d+)?\s*\/\s*\d+(?:\.\d+)?(?:\s*\(\s*\d+(?:\.\d+)?\s*%\s*\))?|\d+(?:\.\d+)?\s*%))$/i);
             if (joinedScore) return { name: 'score', value: joinedScore[1] };
             if (/^missing$/i.test(line)) return { name: 'missing', value: '' };
+            const inline = line.match(/^(due(?: date)?|date due|multiplier|category|type|score|points earned|earned|points possible|possible points|out of|status)\s+(.+)$/i);
+            if (inline) {
+                const name = normalize(inline[1]), value = inline[2].trim();
+                if (['due', 'due date', 'date due'].includes(name) && parseDate(value, today)) return { name, value };
+                if (['score', 'points earned', 'earned', 'points possible', 'possible points', 'out of'].includes(name)
+                    && (scoreParts(value).earned !== null || /^(?:-|--|n\/?a|missing|excused)$/i.test(value))) return { name, value };
+                if (name === 'multiplier' && Number.isFinite(Number(value))) return { name, value };
+                if (['category', 'type', 'status'].includes(name)) return { name, value };
+            }
             const match = line.match(/^(due(?: date)?|date due|multiplier|category|type|score|points earned|earned|points possible|possible points|out of|comments?|status|assigned(?: date)?)(?:\s*:\s*|\s*$)(.*)$/i);
             if (match) return { name: normalize(match[1]), value: match[2].trim() };
             if (/^comments?/i.test(line)) return { name: 'comment', value: '' };
@@ -145,7 +193,8 @@
         };
         const isHeading = line => /^(?:assignment(?: name)?|score|total|category total|term total|semester total)$/i.test(line);
         const isTitle = (line, next) => !field(line) && !isHeading(line)
-            && Boolean(field(next || '')) && !/^(?:-|--|n\/?a|\d+(?:\.\d+)?(?:\s*\/\s*\d+(?:\.\d+)?)?\s*%?)$/i.test(line);
+            && Boolean(field(next || '')) && scoreParts(line).earned === null
+            && !/^(?:-|--|n\/?a|\d+(?:\.\d+)?(?:\s*\/\s*\d+(?:\.\d+)?)?\s*%?)$/i.test(line);
         if (!lines.some((line, index) => isTitle(line, lines[index + 1]))) return null;
 
         const result = [];
@@ -170,10 +219,11 @@
                     const date = ['due', 'due date', 'date due'].includes(detail.name) && (empty || Boolean(parseDate(next, today)));
                     const score = ['score', 'points earned', 'earned', 'points possible', 'possible points', 'out of', 'multiplier'].includes(detail.name)
                         && (empty || scoreParts(next).earned !== null);
+                    const status = detail.name === 'status' && /^(?:missing|excused)$/i.test(next);
                     const following = field(lines[index + 2] || '');
                     const category = ['category', 'type'].includes(detail.name)
                         && !['due', 'due date', 'date due', 'multiplier'].includes(following?.name);
-                    if (date || score || category) value = lines[++index];
+                    if (date || score || status || category) value = lines[++index];
                 }
                 if (['due', 'due date', 'date due'].includes(detail.name)) current.due = value;
                 else if (['score', 'points earned', 'earned'].includes(detail.name)) current.score = value;
@@ -196,7 +246,14 @@
         const campusPage = parseCampusPage(text, today);
         if (campusPage) return campusPage;
         const titleAliases = ['assignment', 'assignment name', 'title', 'name'];
-        const headerRow = rows.findIndex(row => findHeaderIndex(row.map(normalize), titleAliases) >= 0);
+        const columnAliases = [...titleAliases, 'due', 'due date', 'date due', 'date', 'score', 'points', 'points earned',
+            'earned', 'out of', 'possible', 'points possible', 'possible points', 'max points', 'max score',
+            'total points', 'category', 'type', 'multiplier', 'status', 'missing'];
+        const headerRow = rows.findIndex(row => {
+            const headers = row.map(normalize);
+            return findHeaderIndex(headers, titleAliases) >= 0
+                && new Set(headers.filter(header => columnAliases.includes(header))).size >= 2;
+        });
         const hasHeader = headerRow >= 0;
         if (!hasHeader || rows[headerRow].length === 1) {
             const blocks = parseAssignmentBlocks(rows, today);
@@ -209,18 +266,23 @@
             due: findHeaderIndex(headers, ['due', 'due date', 'date due', 'date']),
             score: findHeaderIndex(headers, ['score', 'points', 'points earned', 'earned']),
             max: findHeaderIndex(headers, ['out of', 'possible', 'points possible', 'possible points', 'max points', 'max score', 'total points']),
-            category: findHeaderIndex(headers, ['category', 'type'])
+            category: findHeaderIndex(headers, ['category', 'type']),
+            multiplier: findHeaderIndex(headers, ['multiplier']),
+            status: findHeaderIndex(headers, ['status', 'missing'])
         } : { title: 0, due: 1, score: 2, max: 3, category: 4 };
         const data = hasHeader ? rows.slice(headerRow + 1).filter(row => rows[headerRow].length === 1 || row.length > 1) : rows;
         return data.map(row => {
             const title = String(row[indexes.title] || '').trim();
             if (!title || /^(?:total|category total|term total|semester total)$/i.test(title)) return null;
-            return assignmentResult(title, indexes.due >= 0 ? row[indexes.due] : '',
+            const item = assignmentResult(title, indexes.due >= 0 ? row[indexes.due] : '',
                 indexes.score >= 0 ? row[indexes.score] : '', indexes.max >= 0 ? row[indexes.max] : '',
                 indexes.category >= 0 ? row[indexes.category] : '', today);
+            if (indexes.multiplier >= 0 && row[indexes.multiplier] !== undefined) item.multiplier = String(row[indexes.multiplier]).trim();
+            if (indexes.status >= 0 && /^missing$/i.test(row[indexes.status] || '')) item.missing = true;
+            return item;
         }).filter(Boolean);
     }
 
-    root.StudBudCampusPaste = { parseCourses, parseAssignments, parseDate };
+    root.StudBudCampusPaste = { parseCourses, parseAssignments, parseDate, tableTextFromHtml };
     if (typeof module !== 'undefined' && module.exports) module.exports = root.StudBudCampusPaste;
 })(typeof window !== 'undefined' ? window : globalThis);

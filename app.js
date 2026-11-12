@@ -1444,6 +1444,16 @@
             waitingCanvas.addEventListener('pointerup', event => this.finishWaitingHop(event));
             waitingCanvas.addEventListener('pointercancel', event => this.finishWaitingHop(event));
             waitingCanvas.addEventListener('contextmenu', event => event.preventDefault());
+            document.addEventListener('paste', event => {
+                const target = event.target;
+                if (!target.matches?.('#campus-paste-courses, #campus-paste-assignments')) return;
+                const html = event.clipboardData?.getData('text/html');
+                const pasted = window.StudBudCampusPaste?.tableTextFromHtml(html);
+                if (!pasted) return;
+                event.preventDefault();
+                target.setRangeText(pasted, target.selectionStart, target.selectionEnd, 'end');
+                target.dispatchEvent(new Event('input', { bubbles: true }));
+            });
             document.addEventListener('input', event => {
                 if (event.target.matches('#campus-paste-courses')) this.invalidateCampusPastePreview('courses');
                 if (event.target.matches('#campus-paste-assignments')) this.invalidateCampusPastePreview('assignments');
