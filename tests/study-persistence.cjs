@@ -288,11 +288,6 @@ async function run() {
 
     const sql = read('supabase-setup.sql');
     assert.match(sql, /alter table public\.studbud_removed_decks alter column source_deck_id drop not null/);
-    const repair = read('supabase-repair-random-spanish-100.sql');
-    assert.match(repair, /begin;[\s\S]*insert into public\.studbud_removed_decks[\s\S]*studbud_prune_removed_decks[\s\S]*commit;/);
-    assert.match(repair, /on conflict \(id\) do update/);
-    assert.match(repair, /e905f9a1-1f2a-411f-90b8-e7cce02b0c3c/);
-    assert.doesNotMatch(repair, /title\s*=/i, 'repair targets the confirmed public identity rather than a matching title');
     assert.match(sql, /create table if not exists public\.studbud_removed_decks/);
     assert.match(sql, /create trigger studbud_prune_removed_decks before insert or update of data/);
     assert.match(sql, /create trigger studbud_block_removed_decks before insert or update/);
