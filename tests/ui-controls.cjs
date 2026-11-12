@@ -139,9 +139,9 @@ assert.match(publishNoticeFunction, /if v_author_username is null then raise exc
 assert.match(publishNoticeFunction, /values \(btrim\(p_message\), auth.uid\(\), v_author_username\)/,
     'author is taken from the authenticated administrator, not browser input');
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-assert.match(html, /id="settings-first-name"/);
-assert.match(html, /id="settings-last-name"/);
-assert.match(html, /id="public-show-real-name"/);
+	assert.doesNotMatch(html, /id="settings-first-name"/, 'StudBud does not collect real names');
+	assert.doesNotMatch(html, /id="settings-last-name"/, 'StudBud does not collect real names');
+	assert.doesNotMatch(html, /id="public-show-real-name"/, 'public profiles cannot opt into showing real names');
 assert.match(html, /<body class="dark-theme" data-color-scheme="studbud">/,
     'the initial page paint uses the StudBud default before app startup');
 {

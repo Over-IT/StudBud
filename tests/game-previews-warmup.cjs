@@ -484,7 +484,7 @@ const retiredTrails = [
     'acc_dust_trail', 'acc_confetti_trail', 'acc_sakura_trail', 'acc_pixel_trail',
     'acc_meteor_trail', 'acc_aurora_trail'
 ];
-assert.equal(catalog.filter(item => item.type === 'effect' && !item.season).length, 36);
+assert.equal(catalog.filter(item => item.type === 'effect' && !item.season).length, 37);
 assert.equal(catalog.filter(item => item.season).length, 96, 'twelve seasonal sets retain their originals plus twelve themed extras');
 assert.ok(!catalog.some(item => item.type === 'trail' || retiredTrails.includes(item.id)));
 assert.ok(!sandbox.window.StudBudCommunityGames.constructor.boxes.some(box => box.id === 'trail'));

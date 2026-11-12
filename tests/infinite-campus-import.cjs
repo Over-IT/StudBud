@@ -552,12 +552,13 @@ async function mobileImport() {
     assert.strictEqual(elements.get('ic-mobile-recommendation').open, false);
     assert.strictEqual(elements.get('ic-bookmarklet-url').value, bookmarklet);
     await app.copyInfiniteCampusBookmarklet();
-    assert.strictEqual(sandbox.copied, bookmarklet, 'phone users copy the runnable bookmark URL, not a console-only script');
+    assert.strictEqual(sandbox.copied, undefined, 'bookmarklet helper actions stay disabled for ToS-safe imports');
+    assert.match(elements.get('ic-import-status').textContent, /disabled/i);
     sandbox.navigator.clipboard.writeText = async () => { throw new Error('denied'); };
     await app.copyInfiniteCampusBookmarklet();
-    assert.strictEqual(elements.get('ic-bookmarklet-url').selected, true);
-    assert.deepStrictEqual(elements.get('ic-bookmarklet-url').selection, [0, bookmarklet.length]);
-    assert.match(elements.get('ic-import-status').textContent, /tap and hold/);
+    assert.strictEqual(elements.get('ic-bookmarklet-url').selected, undefined);
+    assert.strictEqual(elements.get('ic-bookmarklet-url').selection, undefined);
+    assert.match(elements.get('ic-import-status').textContent, /manual paste/i);
     let preview, ack;
     app.previewInfiniteCampusData = value => { preview = IC.parsePayload(value); return true; };
     app.icAllowedOrigin = 'https://district.infinitecampus.org';
@@ -578,7 +579,7 @@ async function mobileImport() {
     const steps = app.tutorialSteps();
     assert.strictEqual(steps[1].title, 'Save your classes', 'Campus import is early in the shorter hands-on guide');
     assert.strictEqual(steps.filter(step => step.action?.includes('open-ic-import')).length, 1);
-    assert.match(steps[1].text, /phone/);
+    assert.match(steps[1].text, /paste|export|manual/i);
     assert.equal(steps.length, 8, 'the basic guide stays short');
     assert.ok(steps.every(step => step.text.length <= 210), 'each step gives one short instruction');
     assert.equal(steps.filter(step => step.action || step.change).length, 7, 'steps point to actions rather than pages of explanation');
@@ -665,7 +666,7 @@ async function mobileImport() {
     assert.equal(listeners.size, 0, 'closing the helper removes transfer listeners');
     const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
     assert.doesNotMatch(html, /ic-transfer-method|ic-import-file|ic-import-textarea|ic-copy-script-btn|ic-paste-clipboard-btn/);
-    assert.match(html, /choose <strong>Send to StudBud<\/strong>/);
+    assert.match(html, /Preview pasted data/);
     // Regression: Parkway only gives A+ in weighted (Honors/AP) classes. A regular Campus class must not
 // auto-match a weighted catalog course, and its 97%+ grade must show as A.
 {

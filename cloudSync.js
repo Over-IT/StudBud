@@ -1,10 +1,103 @@
 (function (window) {
     'use strict';
 
+    const ZK_ENVELOPE_VERSION = 1;
+    const ZK_PBKDF2_ITERATIONS = 150000;
+
+    const utf8Bytes = value => {
+        const text = unescape(encodeURIComponent(String(value || '')));
+        const out = new Uint8Array(text.length);
+        for (let i = 0; i < text.length; i++) out[i] = text.charCodeAt(i);
+        return out;
+    };
+    const utf8Text = bytes => {
+        const list = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+        let text = '';
+        const chunk = 0x8000;
+        for (let i = 0; i < list.length; i += chunk) {
+            text += String.fromCharCode(...list.subarray(i, i + chunk));
+        }
+        return decodeURIComponent(escape(text));
+    };
+
+    const encoder = typeof TextEncoder !== 'undefined' ? new TextEncoder() : { encode: utf8Bytes };
+    const decoder = typeof TextDecoder !== 'undefined' ? new TextDecoder() : { decode: utf8Text };
+    const crypto = globalThis.crypto;
+
+    function bytesToBase64(bytes) {
+        let out = '';
+        const chunk = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunk) {
+            out += String.fromCharCode(...bytes.subarray(i, i + chunk));
+        }
+        return btoa(out);
+    }
+
+    function base64ToBytes(text) {
+        const binary = atob(String(text || ''));
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        return bytes;
+    }
+
+    function isZkEnvelope(value) {
+        return Boolean(value && typeof value === 'object' && value.zk && value.zk.v === ZK_ENVELOPE_VERSION && value.zk.ct);
+    }
+
+    async function deriveZkKey(passphrase, salt) {
+        const keyMaterial = await crypto.subtle.importKey(
+            'raw',
+            encoder.encode(String(passphrase || '')),
+            { name: 'PBKDF2' },
+            false,
+            ['deriveKey']
+        );
+        return crypto.subtle.deriveKey(
+            { name: 'PBKDF2', salt, iterations: ZK_PBKDF2_ITERATIONS, hash: 'SHA-256' },
+            keyMaterial,
+            { name: 'AES-GCM', length: 256 },
+            false,
+            ['encrypt', 'decrypt']
+        );
+    }
+
+    async function encryptSnapshot(passphrase, snapshot) {
+        const salt = crypto.getRandomValues(new Uint8Array(16));
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const key = await deriveZkKey(passphrase, salt);
+        const payload = encoder.encode(JSON.stringify(snapshot));
+        const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, payload);
+        return {
+            zk: {
+                v: ZK_ENVELOPE_VERSION,
+                alg: 'AES-GCM',
+                kdf: 'PBKDF2',
+                hash: 'SHA-256',
+                iter: ZK_PBKDF2_ITERATIONS,
+                salt: bytesToBase64(salt),
+                iv: bytesToBase64(iv),
+                ct: bytesToBase64(new Uint8Array(encrypted))
+            }
+        };
+    }
+
+    async function decryptSnapshot(passphrase, envelope) {
+        const zk = envelope?.zk;
+        if (!zk || zk.v !== ZK_ENVELOPE_VERSION) throw new Error('This device cannot open the encrypted account data format.');
+        const salt = base64ToBytes(zk.salt);
+        const iv = base64ToBytes(zk.iv);
+        const ct = base64ToBytes(zk.ct);
+        const key = await deriveZkKey(passphrase, salt);
+        const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
+        return JSON.parse(decoder.decode(new Uint8Array(decrypted)));
+    }
+
     class StudBudCloudSync {
         constructor() {
             this.client = null;
             this.user = null;
+            this.zkPassphrase = null;
+            this.zkPassphraseUserId = null;
             this.initialSnapshot = null;
             this.syncTimer = null;
             this.appStarted = false;
@@ -21,6 +114,48 @@
             this.offlineMode = false;
             this.mfaPendingUser = null;
             this.authBusy = false;
+        }
+
+        zkSessionKey(userId) {
+            return `STUDBUD_ZK_ACCOUNT_KEY:${userId}`;
+        }
+
+        async deriveAccountKey(userId, password) {
+            if (!crypto?.subtle) throw new Error('Secure encryption is unavailable in this browser.');
+            const value = `${String(userId || '').trim()}|${String(password || '')}|studbud-zk-account-v1`;
+            const digest = await crypto.subtle.digest('SHA-256', encoder.encode(value));
+            return bytesToBase64(new Uint8Array(digest));
+        }
+
+        async setAccountKeyFromPassword(userId, password, persist = true) {
+            if (!userId || !password) return null;
+            const secret = await this.deriveAccountKey(userId, password);
+            this.zkPassphrase = secret;
+            this.zkPassphraseUserId = userId;
+            const key = this.zkSessionKey(userId);
+            try {
+                sessionStorage.setItem(key, secret);
+                if (persist) localStorage.setItem(key, secret);
+            } catch (error) {
+                // Some private modes block storage APIs.
+            }
+            return secret;
+        }
+
+        clearAccountKey(userId) {
+            if (this.zkPassphraseUserId === userId || !userId) {
+                this.zkPassphrase = null;
+                this.zkPassphraseUserId = null;
+            }
+            const key = this.zkSessionKey(userId || this.user?.id || '');
+            if (!key.endsWith(':')) {
+                try {
+                    sessionStorage.removeItem(key);
+                    localStorage.removeItem(key);
+                } catch (error) {
+                    // ignore storage errors
+                }
+            }
         }
 
         async getFriendRooms() {
@@ -419,7 +554,12 @@
             }
             if (localStorage.getItem('STUDBUD_CLOUD_ACCOUNT_ID') && !localStorage.getItem('STUDBUD_CLOUD_SYNC_BASE')) {
                 const base = this.lastSnapshot || JSON.parse(await window.NexusApp.AppState.exportAppState());
-                localStorage.setItem('STUDBUD_CLOUD_SYNC_BASE', JSON.stringify(base));
+                const accountId = localStorage.getItem('STUDBUD_CLOUD_ACCOUNT_ID');
+                if (accountId) {
+                    localStorage.setItem('STUDBUD_CLOUD_SYNC_BASE', JSON.stringify(await this.encodeSnapshot(accountId, base)));
+                } else {
+                    localStorage.setItem('STUDBUD_CLOUD_SYNC_BASE', JSON.stringify(base));
+                }
             }
             this.bindStateEvents();
             document.getElementById('auth-screen')?.classList.add('hidden');
@@ -625,13 +765,16 @@
             this.setAuthStatus('Signing in…');
             try {
                 const identifier = document.getElementById('login-username').value.trim();
+                const password = document.getElementById('login-password').value;
                 const { data, error } = await this.client.auth.signInWithPassword({
                     email: this.usernameEmail(identifier),
-                    password: document.getElementById('login-password').value
+                    password
                 });
                 if (error) throw error;
+                const signedInUser = data.user || data.session?.user;
+                if (signedInUser?.id) await this.setAccountKeyFromPassword(signedInUser.id, password);
                 document.getElementById('login-password').value = '';
-                await this.routeAuthenticatedUser(data.user || data.session?.user);
+                await this.routeAuthenticatedUser(signedInUser);
             } catch (error) {
                 console.error('[StudBudCloud] Sign-in failed:', error);
                 this.reportAccountError(error);
@@ -678,9 +821,11 @@
                     this.setAuthStatus('Account creation is waiting for server email confirmation. The site administrator must turn off Confirm email in Supabase so username accounts can be created without email verification.', true);
                     return;
                 }
+                const signedInUser = data.user || data.session.user;
+                if (signedInUser?.id) await this.setAccountKeyFromPassword(signedInUser.id, password);
                 document.getElementById('signup-password').value = '';
                 document.getElementById('signup-password-confirm').value = '';
-                await this.routeAuthenticatedUser(data.user || data.session.user);
+                await this.routeAuthenticatedUser(signedInUser);
             } catch (error) {
                 console.error('[StudBudCloud] Sign-up failed:', error);
                 this.reportAccountError(error);
@@ -791,11 +936,19 @@
             if (error) throw new Error(`Could not load your cloud data: ${error.message}`);
             if (version !== this.accountVersion) return;
 
-            const remoteSnapshot = row?.data || null;
+	            const remoteEncrypted = row?.data || null;
+	            const remoteSnapshot = await this.decodeSnapshot(user.id, remoteEncrypted);
+
             const previousAccount = localStorage.getItem('STUDBUD_CLOUD_ACCOUNT_ID');
-            const savedBase = previousAccount === user.id ? localStorage.getItem('STUDBUD_CLOUD_SYNC_BASE')
+            const savedBaseText = previousAccount === user.id ? localStorage.getItem('STUDBUD_CLOUD_SYNC_BASE')
                 : !previousAccount && localStorage.getItem('STUDBUD_LOCAL_ONLY_DATA') ? '{}' : null;
-            this.initialSnapshot = savedBase ? null : remoteSnapshot;
+            const hasSavedBase = Boolean(savedBaseText);
+            let savedBase = null;
+            if (savedBaseText) {
+                try { savedBase = JSON.parse(savedBaseText); }
+                catch (error) { savedBase = null; }
+            }
+            this.initialSnapshot = hasSavedBase ? null : remoteSnapshot;
             this.lastSnapshot = remoteSnapshot ? JSON.parse(JSON.stringify(remoteSnapshot)) : null;
             this.user = user;
             if (this.initialSnapshot) {
@@ -816,13 +969,13 @@
                 }
             }
             if (version !== this.accountVersion) return;
-            if (savedBase && remoteSnapshot) {
+            if (hasSavedBase && remoteSnapshot) {
                 const local = JSON.parse(await window.NexusApp.AppState.exportAppState());
                 if (version !== this.accountVersion) return;
                 try {
                     const base = !previousAccount
                         ? window.NexusApp.AppState.emptyCloudSnapshot()
-                        : JSON.parse(savedBase);
+                        : await this.decodeSnapshot(user.id, savedBase);
                     const merged = StudBudCloudSync.mergeData(base, local, remoteSnapshot);
                     await window.NexusApp.restoreCloudSnapshot(merged);
                     this.initialSnapshot = remoteSnapshot;
@@ -904,7 +1057,7 @@
                 try {
                     await window.NexusApp.restoreCloudSnapshot(conflict.local);
                     localStorage.setItem('STUDBUD_CLOUD_ACCOUNT_ID', conflict.user.id);
-                    localStorage.setItem('STUDBUD_CLOUD_SYNC_BASE', JSON.stringify(conflict.remoteSnapshot));
+                    localStorage.setItem('STUDBUD_CLOUD_SYNC_BASE', JSON.stringify(await this.encodeSnapshot(conflict.user.id, conflict.remoteSnapshot)));
                     await this.openAccount(conflict.user);
                     await this.syncNow();
                 } catch (err) {
@@ -940,6 +1093,44 @@
                 return 'Choose a stronger password with at least 8 characters.';
             }
             return window.NexusApp?.friendlyErrorMessage(error, fallback) || fallback;
+        }
+
+        async requireZkPassphrase(userId) {
+            if (this.zkPassphrase && this.zkPassphraseUserId === userId) return this.zkPassphrase;
+            const key = this.zkSessionKey(userId);
+            try {
+                const cached = sessionStorage.getItem(key) || localStorage.getItem(key);
+                if (cached) {
+                    this.zkPassphrase = cached;
+                    this.zkPassphraseUserId = userId;
+                    return cached;
+                }
+            } catch (error) {
+                // Storage can be unavailable in strict privacy modes.
+            }
+            throw new Error('Your encrypted account data is locked on this device. Sign out and sign in again to unlock cloud sync.');
+        }
+
+        async decodeSnapshot(userId, value) {
+            if (!value) return null;
+            if (!isZkEnvelope(value)) return value;
+            const passphrase = await this.requireZkPassphrase(userId);
+            try {
+                return await decryptSnapshot(passphrase, value);
+            } catch (error) {
+                const message = String(error?.message || '');
+                if (/operationerror|decrypt|authentication tag|data error/i.test(message)) {
+                    this.clearAccountKey(userId);
+                    throw new Error('Cloud data could not be unlocked on this device. Sign out and sign in again.');
+                }
+                throw error;
+            }
+        }
+
+        async encodeSnapshot(userId, snapshot) {
+	        if (!crypto?.subtle) return snapshot;
+	        const passphrase = await this.requireZkPassphrase(userId);
+	        return encryptSnapshot(passphrase, snapshot);
         }
 
         bindStateEvents() {
@@ -1004,9 +1195,11 @@
                         if (readError) throw new Error(readError.message);
                         if (!this.accountReady || this.user?.id !== userId || this.accountVersion !== version) return;
                         if (completedRevision !== this.syncRevision) break;
-                        const merged = current ? StudBudCloudSync.mergeData(this.lastSnapshot || {}, backup, current.data) : backup;
+                        const remote = current ? await this.decodeSnapshot(userId, current.data) : null;
+                        const merged = remote ? StudBudCloudSync.mergeData(this.lastSnapshot || {}, backup, remote) : backup;
+                        const encryptedMerged = await this.encodeSnapshot(userId, merged);
                         const nextWrite = Math.max(Date.now(), current ? Date.parse(current.updated_at) + 1 : 0);
-                        const row = { user_id: userId, data: merged, updated_at: new Date(nextWrite).toISOString() };
+                        const row = { user_id: userId, data: encryptedMerged, updated_at: new Date(nextWrite).toISOString() };
                         const { data, error } = current
                             ? await this.client.from('studbud_user_data').update(row).eq('user_id', userId).eq('updated_at', current.updated_at).select('user_id')
                             : await this.client.from('studbud_user_data').insert(row).select('user_id');
@@ -1014,7 +1207,7 @@
                         if (error && error.code !== '23505') throw new Error(error.message);
                         if (error || !data?.length) continue;
                         this.lastSnapshot = backup;
-                        localStorage.setItem('STUDBUD_CLOUD_SYNC_BASE', JSON.stringify(backup));
+                        localStorage.setItem('STUDBUD_CLOUD_SYNC_BASE', JSON.stringify(await this.encodeSnapshot(userId, backup)));
                         saved = true;
                         if (completedRevision === this.syncRevision
                             && JSON.stringify({ ...merged, exportedAt: '' }) !== JSON.stringify({ ...backup, exportedAt: '' })) {
@@ -1023,7 +1216,7 @@
                                 await window.NexusApp.restoreCloudSnapshot(merged);
                                 if (!this.accountReady || this.user?.id !== userId || this.accountVersion !== version) return;
                                 this.lastSnapshot = merged;
-                                localStorage.setItem('STUDBUD_CLOUD_SYNC_BASE', JSON.stringify(merged));
+                                localStorage.setItem('STUDBUD_CLOUD_SYNC_BASE', JSON.stringify(await this.encodeSnapshot(userId, merged)));
                             }
                             finally { this.restoringSnapshot = false; }
                         }
@@ -1080,10 +1273,12 @@
 
         async handleSignedOut() {
             if (this.signOutHandling) return this.signOutHandling;
+            const previousUserId = this.user?.id || localStorage.getItem('STUDBUD_CLOUD_ACCOUNT_ID') || '';
             this.accountVersion++;
             this.accountReady = false;
             this.user = null;
             this.initialSnapshot = null;
+            this.clearAccountKey(previousUserId);
             window.clearTimeout(this.syncTimer);
             this.syncTimer = null;
             this.clearMfaLoginPrompt();

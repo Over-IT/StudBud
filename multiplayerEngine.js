@@ -295,11 +295,60 @@
         ctx.fillText(name, x, y);
     }
 
-    function graphicsProfile() {
-        // Legacy saved quality preferences do not affect rendering fidelity.
+    function graphicsProfile(mode, hardware = null) {
         // fps: Infinity = draw on every display refresh (no artificial frame cap)
-        return { low: false, maxDpr: 2, fps: Infinity, previewFps: 60,
-            avatarFps: 60, particleScale: 1, particleLimit: 320 };
+        // Note: When running in Node tests, `navigator` and device hints may be absent.
+        const nav = hardware || (typeof navigator !== 'undefined' ? navigator : null) || {};
+        const legacyPref = (() => {
+            try {
+                const state = window.NexusApp?.AppState?.get?.('settings') || window.NexusApp?.AppState?.get?.() || null;
+                return state?.gameQuality || state?.settings?.gameQuality || null;
+            } catch (error) {
+                return null;
+            }
+        })();
+        // `mode` is an explicit override when provided (including the string 'auto').
+        // When omitted, fall back to any saved preference, otherwise 'auto'.
+        const requested = mode == null ? (legacyPref || 'auto') : mode;
+
+        const cores = Number(nav.hardwareConcurrency || 0);
+        const mem = Number(nav.deviceMemory || 0);
+        const saveData = Boolean(nav.connection?.saveData);
+        // Typical school Chromebooks trend toward 2-4 cores and 2-4GB memory; start in low detail there.
+        const autoLow = (saveData || (cores > 0 && cores <= 4) || (mem > 0 && mem <= 4));
+
+        const low = requested === 'low' ? true : (requested === 'full' || requested === 'high') ? false : autoLow;
+
+        // Keep simulation/draw cadence uncapped by default on higher-end devices.
+        // On low-end devices, cap to 60 FPS (so 120Hz displays don't double the work), and allow
+        // runtime fallback to 30 FPS if the device can't sustain 60.
+        if (low) {
+            return {
+                low: true,
+                // Clamp backing pixels hard: DPR 2->1.25 is ~60% fewer pixels.
+                maxDpr: 1.25,
+                // Allow auto-resolution to go blurrier before giving up.
+                minDpr: 0.6,
+                fps: 60,
+                minFps: 30,
+                previewFps: 24,
+                avatarFps: 30,
+                particleScale: 0.75,
+                particleLimit: 160
+            };
+        }
+        return {
+            low: false,
+            maxDpr: 2,
+            minDpr: 0.75,
+            // Cap at 60fps for consistent load (even on 120Hz displays).
+            fps: 60,
+            minFps: 30,
+            previewFps: 60,
+            avatarFps: 60,
+            particleScale: 1,
+            particleLimit: 320
+        };
     }
 
     function canvasView(ctx, margin = 0) {
@@ -560,7 +609,16 @@
             this.testing = Boolean(options.testing || this.room.state?.staff_test);
             this.limitedTestEnergy = this.testing && Boolean(options.limitedTestEnergy ?? this.room.state?.limited_test_energy);
             this.preview = Boolean(options.preview);
-            this.graphics = graphicsProfile();
+            this.graphicsMode = (() => {
+                if (options.graphicsMode) return options.graphicsMode;
+                try {
+                    const state = window.NexusApp?.AppState?.get?.('settings') || window.NexusApp?.AppState?.get?.() || null;
+                    return state?.gameQuality || state?.settings?.gameQuality || 'auto';
+                } catch (error) {
+                    return 'auto';
+                }
+            })();
+            this.graphics = graphicsProfile(this.graphicsMode);
             this.returnFocus = document.activeElement;
             this.correct = 0;
             this.reward = Math.min(100, Math.max(5, Math.round(Number(options.questionReward ?? this.room.state?.question_reward) || 20)));
@@ -1657,7 +1715,7 @@
         }
 
         resize() {
-            this.graphics = graphicsProfile();
+            this.graphics ||= graphicsProfile(this.graphicsMode);
             const nativeDpr = Math.min(window.devicePixelRatio || 1, this.graphics.maxDpr);
             const dpr = this.fullResolution ? nativeDpr : Math.min(nativeDpr, this.renderDpr || nativeDpr);
             this.nativeDpr = nativeDpr;
@@ -1665,10 +1723,16 @@
             if (this.canvas.width !== Math.floor(w * dpr)) this.canvas.width = Math.floor(w * dpr);
             if (this.canvas.height !== Math.floor(h * dpr)) this.canvas.height = Math.floor(h * dpr);
             this.dpr = dpr;
+            this.lowDetail = Boolean(this.graphics?.low) || (nativeDpr > 0 && (dpr / nativeDpr) <= 0.8);
             this.scale = clamp(h / 720, .65, 1.25);
             this.vw = w / this.scale;
             this.vh = h / this.scale;
             this.renderBudget = null;
+            // `graphics.fps` is the preferred ceiling. `renderFps` may drop to `graphics.minFps`
+            // under sustained load.
+            if (!Number.isFinite(this.renderFps) || this.renderFps > (this.graphics?.fps ?? Infinity)) {
+                this.renderFps = this.graphics?.fps ?? Infinity;
+            }
             this.resolutionButton ||= this.overlay.querySelector?.('.mpg-resolution');
             if (this.resolutionButton) {
                 this.resolutionButton.textContent = this.fullResolution ? 'Full resolution' : `Auto resolution · ${Math.round(dpr / nativeDpr * 100)}%`;
@@ -1693,13 +1757,40 @@
             budget.fast = cadence < 19 && cpu < 10 ? budget.fast + budget.elapsed : 0;
             budget.elapsed = budget.work = budget.frames = 0;
             // Hysteresis avoids resizing on isolated stalls or constantly rebuilding cached layers.
-            const floor = Math.min(.75, this.nativeDpr);
+            const floor = Math.min(this.graphics?.minDpr ?? 0.75, this.nativeDpr);
             const next = budget.slow >= 3000 ? Math.max(floor, this.dpr - .25)
                 : budget.fast >= 8000 ? Math.min(this.nativeDpr, this.dpr + .25) : this.dpr;
             if (next === this.dpr) return;
             this.renderDpr = next;
             this.resize();
             this.toast?.(`Auto resolution: ${Math.round(next / this.nativeDpr * 100)}% · change in Settings`, '#93c5fd');
+        }
+
+        trackFrameCadence(interval) {
+            const graphics = this.graphics || {};
+            if (!Number.isFinite(graphics.fps) || !Number.isFinite(graphics.minFps) || graphics.fps <= graphics.minFps) return;
+            // Full-resolution lock is about sharpness, not simulation cadence.
+            if (this.preview || this.mode === 'chess' || this.paused || this.over || this.countdown > 0 || document.hidden) return;
+
+            // Maintain a lightweight rolling view of real cadence to decide between 60 and 30.
+            const fpsBudget = this.fpsBudget || (this.fpsBudget = { elapsed: 0, frames: 0, slow: 0, fast: 0 });
+            fpsBudget.elapsed += interval;
+            fpsBudget.frames++;
+            if (fpsBudget.elapsed < 1500 || fpsBudget.frames < 20) return;
+            const cadence = fpsBudget.elapsed / fpsBudget.frames;
+            // If we can't keep ~50-55fps, prefer a stable 30fps.
+            fpsBudget.slow = cadence > 20 ? fpsBudget.slow + fpsBudget.elapsed : 0;
+            // If we're consistently near 60fps, restore 60.
+            fpsBudget.fast = cadence < 18 ? fpsBudget.fast + fpsBudget.elapsed : 0;
+            fpsBudget.elapsed = fpsBudget.frames = 0;
+
+            const current = Number.isFinite(this.renderFps) ? this.renderFps : graphics.fps;
+            const desired = (fpsBudget.slow >= 2500) ? graphics.minFps
+                : (fpsBudget.fast >= 8000) ? graphics.fps
+                    : current;
+            if (desired === current) return;
+            this.renderFps = desired;
+            this.toast?.(`Frame rate: ${desired} FPS · change in Settings`, '#93c5fd');
         }
 
         layoutHud() {
@@ -1928,72 +2019,120 @@
         frame(now) {
             if (this.destroyed) return;
             if (this.preview && document.hidden) return;
-            const workStart = performance.now(), interval = now - this.lastFrame;
-            const dt = Math.min(0.05, (now - this.lastFrame) / 1000);
+            const workStart = performance.now();
+            const prevFrame = Number.isFinite(this.lastFrame) ? this.lastFrame : now;
+            const interval = now - prevFrame;
             this.lastFrame = now;
-            if (!this.over) {
-                if (this.countdown > 0) {
-                    const waiting = this.networkLoading && !this.syncStart();
-                    if (!this.networkLoading) this.countdown -= dt;
-                    const step = this.countdown > 0.4 ? Math.ceil(this.countdown - 0.4) : 0;
-                    if (!waiting && step !== this.lastCountStep) {
-                        this.lastCountStep = step;
-                        this.sfx(step ? 'countdown' : 'go');
+            this.trackFrameCadence?.(interval);
+
+            const fpsCap = Number.isFinite(this.renderFps) ? this.renderFps : (this.graphics?.fps ?? Infinity);
+            const stepMs = fpsCap === Infinity ? 0 : (1000 / fpsCap);
+	            const lastSimAt = Number.isFinite(this.lastSimAt) ? this.lastSimAt : prevFrame;
+            const deltaMs = now - lastSimAt;
+            this.lastSimAt = now;
+
+            const stepOnce = (dt) => {
+                if (!this.over) {
+                    if (this.countdown > 0) {
+                        const waiting = this.networkLoading && !this.syncStart();
+                        if (!this.networkLoading) this.countdown -= dt;
+                        const step = this.countdown > 0.4 ? Math.ceil(this.countdown - 0.4) : 0;
+                        if (!waiting && step !== this.lastCountStep) {
+                            this.lastCountStep = step;
+                            this.sfx(step ? 'countdown' : 'go');
+                        }
+                        const text = this.countdown > 0.4 ? String(Math.ceil(this.countdown - 0.4)) : 'GO!';
+                        const el = this.overlay.querySelector('.mpg-countdown');
+                        el.classList.toggle('is-loading', Boolean(waiting));
+                        el.textContent = waiting ? !this.connected ? 'Connecting…' : !this.cardsReady ? 'Loading questions…'
+                            : `Loading players… ${this.readyPlayers.size}/${this.roster.size}` : this.countdown > -0.2 ? text : '';
+                        el.classList.toggle('hidden', !waiting && this.countdown <= 0);
+                    } else {
+                        if (!this.countdownHidden) {
+                            this.overlay.querySelector('.mpg-countdown').classList.add('hidden');
+                            this.countdownHidden = true;
+                        }
+                        if (!this.paused) {
+                            this.t += dt;
+                            this.onTick?.(dt);
+                            if (this.testing && !this.limitedTestEnergy && this.game.res) this.game.res.value = this.game.res.max;
+                            if (this.spectator) this.updateSpectator(dt);
+                            else this.game.update(dt);
+                            if (this.testing && !this.limitedTestEnergy && this.game.res) this.game.res.value = this.game.res.max;
+                        }
+                        this.checkEnd();
+                        if (!this.practice && !this.isHost && !this.over && Date.now() > this.deadline + 9000) this.finish(this.standings());
                     }
-                    const text = this.countdown > 0.4 ? String(Math.ceil(this.countdown - 0.4)) : 'GO!';
-                    const el = this.overlay.querySelector('.mpg-countdown');
-                    el.classList.toggle('is-loading', Boolean(waiting));
-                    el.textContent = waiting ? !this.connected ? 'Connecting…' : !this.cardsReady ? 'Loading questions…'
-                        : `Loading players… ${this.readyPlayers.size}/${this.roster.size}` : this.countdown > -0.2 ? text : '';
-                    el.classList.toggle('hidden', !waiting && this.countdown <= 0);
-                } else {
-                    if (!this.countdownHidden) {
-                        this.overlay.querySelector('.mpg-countdown').classList.add('hidden');
-                        this.countdownHidden = true;
-                    }
-                    if (!this.paused) {
-                        this.t += dt;
-                        this.onTick?.(dt);
-                        if (this.testing && !this.limitedTestEnergy && this.game.res) this.game.res.value = this.game.res.max;
-                        if (this.spectator) this.updateSpectator(dt);
-                        else this.game.update(dt);
-                        if (this.testing && !this.limitedTestEnergy && this.game.res) this.game.res.value = this.game.res.max;
-                    }
-                    this.checkEnd();
-                    if (!this.practice && !this.isHost && !this.over && Date.now() > this.deadline + 9000) this.finish(this.standings());
+                } else if (!this.paused && !this.spectator) {
+                    this.game.settleAfterFinish?.(dt);
                 }
-            } else if (!this.paused && !this.spectator) {
-                this.game.settleAfterFinish?.(dt);
-            }
-            if (!this.paused) {
-                for (const r of this.remotes.values()) {
-                    if (now - r.seen > 5000) { this.remotes.delete(r.id); continue; }
-                    const tx = r.tx, ty = r.ty;
-                    const gap = dist(r.x, r.y, tx, ty);
-                    const k = gap > 500 ? 1 : 1 - Math.exp(-dt * 14);
-                    r.x += (tx - r.x) * k;
-                    r.y += (ty - r.y) * k;
+                if (!this.paused) {
+                    for (const r of this.remotes.values()) {
+                        if (now - r.seen > 5000) { this.remotes.delete(r.id); continue; }
+                        const tx = r.tx, ty = r.ty;
+                        const gap = dist(r.x, r.y, tx, ty);
+                        const k = gap > 500 ? 1 : 1 - Math.exp(-dt * 14);
+                        r.x += (tx - r.x) * k;
+                        r.y += (ty - r.y) * k;
+                    }
+                }
+                const q = this.question;
+                if (q?.deadline && !q.locked) {
+                    const left = Math.max(0, (q.deadline - performance.now()) / (q.seconds * 1000));
+                    const bar = this.overlay.querySelector('.mpg-q-timer');
+                    const value = left.toFixed(2);
+                    if (bar.style.getPropertyValue('--left') !== value) bar.style.setProperty('--left', value);
+                    if (left <= 0) this.skipQuestion();
+                }
+                this.updateMeter();
+            };
+
+            let stepped = false;
+            if (stepMs <= 0) {
+                const dt = Math.min(0.05, (deltaMs || 0) / 1000);
+                stepOnce(dt);
+                stepped = true;
+            } else {
+                this.stepCarryMs = (Number.isFinite(this.stepCarryMs) ? this.stepCarryMs : 0) + (deltaMs || 0);
+                let steps = 0;
+                // Cap catch-up work to avoid spiraling.
+                // Floating-point math for repeating decimals (e.g. 1000/60) can drift by tiny
+                // fractions of a millisecond over long runs. Use a small epsilon so fixed-step
+                // sims don't drop a tick in synthetic (or very stable) timing.
+                while (this.stepCarryMs + 1e-6 >= stepMs && steps < 3) {
+                    stepOnce(Math.min(0.05, stepMs / 1000));
+                    steps++;
+                    stepped = true;
+                    this.stepCarryMs -= stepMs;
+                    if (this.stepCarryMs < 0) this.stepCarryMs = 0;
+                    // Consume edge-triggered inputs after the first step so a single
+                    // press doesn't apply to multiple catch-up ticks.
+                    if (steps === 1) {
+                        this.justPressed.clear();
+                        this.mouse.pressed = false;
+                        this.mouse.rpressed = false;
+                    }
+                }
+                if (!stepped) {
+                    this.trackRenderBudget?.(interval, performance.now() - workStart);
+                    this.raf = requestAnimationFrame(t => this.frame(t));
+                    return;
                 }
             }
-            const q = this.question;
-            if (q?.deadline && !q.locked) {
-                const left = Math.max(0, (q.deadline - performance.now()) / (q.seconds * 1000));
-                const bar = this.overlay.querySelector('.mpg-q-timer');
-                const value = left.toFixed(2);
-                if (bar.style.getPropertyValue('--left') !== value) bar.style.setProperty('--left', value);
-                if (left <= 0) this.skipQuestion();
-            }
-            this.updateMeter();
-            this.justPressed.clear();
-            this.mouse.pressed = false;
-            this.mouse.rpressed = false;
-            if (!document.hidden && (this.mode !== 'chess' || this.preview) && now - (this.lastDrawAt ?? -Infinity) >= 1000 / (this.graphics?.fps ?? Infinity) - .1) {
+
+            if (!document.hidden && (this.mode !== 'chess' || this.preview)) {
                 this.lastDrawAt = now;
                 const ctx = this.ctx;
                 ctx.setTransform(this.dpr * this.scale, 0, 0, this.dpr * this.scale, 0, 0);
                 if (this.spectator && ['crypto', 'frenzy', 'fishing'].includes(this.mode)) this.drawSpectatorSummary(ctx, this.vw, this.vh);
                 else this.game.draw(ctx, this.vw, this.vh);
             }
+
+            // Clear one-shot inputs once a tick has been processed.
+            this.justPressed.clear();
+            this.mouse.pressed = false;
+            this.mouse.rpressed = false;
+
             this.trackRenderBudget?.(interval, performance.now() - workStart);
             this.raf = requestAnimationFrame(t => this.frame(t));
         }
@@ -2104,11 +2243,12 @@
         const canvases = new Set();
         const visible = new Set();
         const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+        const profile = graphicsProfile();
         let frame = 0, lastTime = -Infinity;
         const draw = time => {
             frame = 0;
             if (document.hidden || motion.matches || !visible.size) return;
-            if (time - lastTime >= 1000 / graphicsProfile().avatarFps) {
+            if (time - lastTime >= 1000 / (profile.avatarFps || 60)) {
                 lastTime = time;
                 for (const canvas of visible) drawAvatar(canvas, { cos: canvas.dataset }, time / 1000);
             }

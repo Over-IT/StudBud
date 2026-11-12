@@ -242,15 +242,21 @@ for (const [mode, threshold] of Object.entries({
 }
 sandbox.window.matchMedia = () => ({ matches: true });
 sandbox.window.NexusApp = { AppState: { get: () => ({ gameQuality: 'low' }) } };
-const full = A.graphicsProfile();
-assert.equal(full.low, false, 'legacy saved low quality is ignored');
-for (const mode of ['auto', 'low', 'full', 'high', undefined]) {
-    const profile = A.graphicsProfile(mode, { hardwareConcurrency: 2, deviceMemory: 2, connection: { saveData: true } });
-    assert.equal(profile.low, false, 'hardware, reduced motion and saved settings cannot lower game quality');
-    assert.equal(profile.maxDpr, 2);
-    assert.equal(profile.fps, Infinity, 'game rendering is not frame capped');
-    assert.equal(profile.particleScale, 1);
-}
+const full = A.graphicsProfile('full');
+assert.equal(full.low, false, 'explicit full quality keeps the high-detail profile');
+assert.equal(full.maxDpr, 2);
+assert.equal(full.fps, 60, 'game rendering caps at 60fps by default');
+
+const lowSaved = A.graphicsProfile();
+assert.equal(lowSaved.low, true, 'saved low quality activates the low-detail profile');
+assert.equal(lowSaved.maxDpr, 1.25);
+assert.equal(lowSaved.particleLimit, 160);
+
+const lowAuto = A.graphicsProfile('auto', { hardwareConcurrency: 2, deviceMemory: 2, connection: { saveData: true } });
+assert.equal(lowAuto.low, true, 'low-end hardware activates the low-detail profile');
+const highAuto = A.graphicsProfile('auto', { hardwareConcurrency: 8, deviceMemory: 8, connection: { saveData: false } });
+assert.equal(highAuto.low, false, 'higher-end hardware stays in full detail');
+
 const particles = new A.Particles({ graphics: full, preview: true });
 for (let i = 0; i < 100; i++) particles.burst(0, 0, '#fff', 100);
 assert.equal(particles.items.length, 320, 'full-detail particle growth is bounded');
@@ -271,11 +277,11 @@ assert.equal(ticks, 6000, 'all game physics updates survive render throttling');
 assert.equal(draws, 6000, 'full detail renders all 60 Hz display frames');
 frameSession.testing = true;
 frameSession.game.res = { value: 10, max: 100 };
-A.Session.prototype.frame.call(frameSession, 100010);
+A.Session.prototype.frame.call(frameSession, 100020);
 assert.equal(frameSession.game.res.value, 100, 'unlimited tests automatically keep resources full');
 frameSession.limitedTestEnergy = true;
 frameSession.game.res.value = 10;
-A.Session.prototype.frame.call(frameSession, 100020);
+A.Session.prototype.frame.call(frameSession, 100040);
 assert.equal(frameSession.game.res.value, 10, 'limited tests never auto-refill resources');
 frameSession.testing = false;
 frameSession.mode = 'chess';
@@ -283,6 +289,7 @@ A.Session.prototype.frame.call(frameSession, 100100);
 assert.equal(draws, 6002, 'DOM chess avoids redundant canvas frames');
 assert.equal(frameSession.graphics.low, false);
 assert.equal(frameSession.resolutionScale, undefined, 'frame timing never silently lowers render resolution');
+sandbox.window.NexusApp = null;
 const resizeSession = {
     adaptiveLow: true, resolutionScale: .5, overlay: { clientWidth: 800, clientHeight: 600 },
     canvas: {}, layoutHud() {}

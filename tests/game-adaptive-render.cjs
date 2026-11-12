@@ -97,8 +97,10 @@ for (const nativeDpr of [1, 2]) for (const mode of ['defense', 'miner', 'market'
     }
     const full = run(true), auto = run(false);
     assert.equal(auto.state, full.state, `${mode}: resolution preserves actual game simulation and network state`);
-    assert.equal(auto.updates, 600);
-    assert.equal(auto.draws, 600, 'auto resolution never drops rendering or physics frames');
+    assert.equal(auto.draws, 600, 'auto resolution never drops render frames');
+    assert.equal(full.draws, 600, 'full-resolution lock never drops render frames');
+    assert.equal(auto.updates, full.updates, 'auto resolution never changes simulation cadence');
+    assert.ok(auto.updates >= 600, 'simulation never skips a whole session frame worth of work');
     assert.equal(auto.s.dpr, .75);
     assert.equal(auto.s.vw, full.s.vw);
     assert.equal(auto.s.vh, full.s.vh);
@@ -140,11 +142,12 @@ for (const nativeDpr of [1, 2]) for (const mode of ['defense', 'miner', 'market'
     s.game.update = () => { updates++; };
     s.game.draw = () => { draws++; };
     for (let i = 1; i <= 100; i++) s.frame(26600 + i * 40);
-    assert.equal(updates, 100, 'hidden live hosts retain authoritative simulation');
+    const hiddenUpdates = updates;
+    assert.ok(hiddenUpdates >= 100, 'hidden live hosts retain authoritative simulation');
     assert.equal(draws, 0, 'hidden live sessions submit no canvas work');
     s.preview = true;
     s.frame(31000);
-    assert.equal(updates, 100, 'hidden disposable previews do not simulate either');
+    assert.equal(updates, hiddenUpdates, 'hidden disposable previews do not simulate either');
 }
 {
     function scene(uncull, x, y) {

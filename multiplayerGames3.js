@@ -67,6 +67,7 @@
             this.cash = 200; this.units = ASSETS.map(() => 0); this.sel = 0;
             this.rigs = 0; this.intern = 0; this.researchCd = 0;
             this.anim = 0; this.lastNews = -1; this.fx = [];
+            this.chartCache = ASSETS.map(() => ({ c: null, d: null }));
             s.overlay.querySelector('.mpg-board').style.display = 'none';
             s.overlay.querySelector('.mpg-score').style.display = 'none';
             s.canvas.style.cursor = 'default';
@@ -168,39 +169,73 @@
         hint() { return '1-6 pick an asset · B / S buy & sell (Shift = max) · Research questions pay cash (set by the host) · build mining rigs for passive income'; }
 
         chart(ctx, i, x, y, w, h, t, detailed) {
-            const span = detailed ? 120 : 40, n = detailed ? 60 : 20;
-            const pts = [];
-            let lo = Infinity, hi = -Infinity;
-            for (let k = 0; k <= n; k++) {
-                const p = this.price(i, Math.max(0, t - span + (span * k) / n));
-                pts.push(p); lo = Math.min(lo, p); hi = Math.max(hi, p);
+            const low = Boolean(this.s.graphics?.low);
+            const span = detailed ? (low ? 90 : 120) : (low ? 30 : 40);
+            const n = detailed ? (low ? 40 : 60) : (low ? 14 : 20);
+            const hz = detailed ? 6 : 8;
+            const bucket = Math.floor(t * hz);
+            const slot = this.chartCache[i] || (this.chartCache[i] = { c: null, d: null });
+            const key = detailed ? 'd' : 'c';
+            let cache = slot[key];
+            if (!cache || cache.bucket !== bucket || cache.n !== n || cache.span !== span) {
+                const pts = cache?.pts && cache.pts.length === n + 1 ? cache.pts : new Float32Array(n + 1);
+                let lo = Infinity, hi = -Infinity;
+                for (let k = 0; k <= n; k++) {
+                    const p = this.price(i, Math.max(0, t - span + (span * k) / n));
+                    pts[k] = p;
+                    if (p < lo) lo = p;
+                    if (p > hi) hi = p;
+                }
+                const pad = (hi - lo) * 0.12 || 1;
+                lo -= pad; hi += pad;
+                cache = slot[key] = {
+                    bucket,
+                    n,
+                    span,
+                    pts,
+                    lo,
+                    hi,
+                    up: pts[n] >= pts[0]
+                };
             }
-            const pad = (hi - lo) * 0.12 || 1;
-            lo -= pad; hi += pad;
+            const pts = cache.pts;
+            const lo = cache.lo;
+            const hi = cache.hi;
             if (detailed) {
                 ctx.strokeStyle = 'rgba(148,163,184,.15)'; ctx.lineWidth = 1; ctx.fillStyle = '#64748b'; ctx.font = '600 11px system-ui'; ctx.textAlign = 'right';
                 for (let g = 0; g <= 4; g++) { const gy = y + (h * g) / 4; ctx.beginPath(); ctx.moveTo(x, gy); ctx.lineTo(x + w, gy); ctx.stroke(); ctx.fillText(money(hi - ((hi - lo) * g) / 4), x + w - 4, gy - 3); }
             }
-            const up = pts[pts.length - 1] >= pts[0];
+            const up = cache.up;
             ctx.beginPath();
-            pts.forEach((p, k) => { const px = x + (w * k) / n, py = y + h - ((p - lo) / (hi - lo)) * h; if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); });
+            for (let k = 0; k <= n; k++) {
+                const p = pts[k];
+                const px = x + (w * k) / n;
+                const py = y + h - ((p - lo) / (hi - lo)) * h;
+                if (k === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+            }
             ctx.strokeStyle = up ? '#4ade80' : '#f87171'; ctx.lineWidth = detailed ? 3 : 2; ctx.lineJoin = 'round'; ctx.stroke();
             if (detailed) {
                 ctx.lineTo(x + w, y + h); ctx.lineTo(x, y + h); ctx.closePath();
-                const g = ctx.createLinearGradient(0, y, 0, y + h);
-                g.addColorStop(0, up ? 'rgba(74,222,128,.28)' : 'rgba(248,113,113,.28)'); g.addColorStop(1, 'rgba(0,0,0,0)');
-                ctx.fillStyle = g; ctx.fill();
+                ctx.save();
+                ctx.clip();
+                A.util.bandGradient(ctx, x, y, w, h, [[0, up ? 'rgba(74,222,128,.28)' : 'rgba(248,113,113,.28)'], [1, 'rgba(0,0,0,0)']]);
+                ctx.restore();
             }
         }
 
         draw(ctx, w, h) {
             const s = this.s, t = clock(s), ui = this.ui;
             ui.begin();
-            const bg = ctx.createLinearGradient(0, 0, w, h);
-            bg.addColorStop(0, '#0b1020'); bg.addColorStop(1, '#10213f');
-            ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h);
-            ctx.strokeStyle = 'rgba(56,189,248,.05)'; ctx.lineWidth = 1;
-            for (let x = 0; x < w; x += 50) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+            const low = Boolean(s.graphics?.low);
+            A.util.screenLayer(this, 'bgLayer', `crypto:${low}:${Math.round(w)}x${Math.round(h)}`, ctx, paint => {
+                const bg = paint.createLinearGradient(0, 0, w, h);
+                bg.addColorStop(0, '#0b1020'); bg.addColorStop(1, '#10213f');
+                paint.fillStyle = bg; paint.fillRect(0, 0, w, h);
+                paint.strokeStyle = 'rgba(56,189,248,.05)'; paint.lineWidth = 1;
+                const step = low ? 80 : 50;
+                for (let x = 0; x < w; x += step) { paint.beginPath(); paint.moveTo(x, 0); paint.lineTo(x, h); paint.stroke(); }
+            });
 
             if (s.preview) {
                 ASSETS.forEach((asset, i) => {
@@ -324,7 +359,8 @@
             this.splash = [];
             const r = mulberry32(s.seed);
             this.res = new A.Resource('Bait', '#7dd3fc', 100, 20, 2);
-            this.school = Array.from({ length: 22 }, () => ({ y: r(), x0: r() * 3000, spd: (30 + r() * 60) * (r() < 0.5 ? 1 : -1), type: r() < 0.5 ? 0 : r() < 0.6 ? 1 : r() < 0.85 ? 2 : 3 }));
+            const low = Boolean(s.graphics?.low);
+            this.school = Array.from({ length: low ? 12 : 22 }, () => ({ y: r(), x0: r() * 3000, spd: (30 + r() * 60) * (r() < 0.5 ? 1 : -1), type: r() < 0.5 ? 0 : r() < 0.6 ? 1 : r() < 0.85 ? 2 : 3 }));
         }
 
         slotOf(id, w) {
@@ -413,18 +449,35 @@
 
         draw(ctx, w, h) {
             const s = this.s, wy = h * 0.4, t = this.anim;
+            const low = Boolean(s.graphics?.low);
             this.ui.begin();
-            const sky = ctx.createLinearGradient(0, 0, 0, wy);
-            sky.addColorStop(0, '#38bdf8'); sky.addColorStop(1, '#fde68a');
-            ctx.fillStyle = sky; ctx.fillRect(0, 0, w, wy);
-            ctx.fillStyle = '#fef08a'; ctx.beginPath(); ctx.arc(w * 0.85, wy * 0.45, 46, 0, TAU); ctx.fill();
+            A.util.screenLayer(this, 'backdropLayer', `fishing:${low}:${Math.round(w)}x${Math.round(h)}:${Math.round(wy)}`, ctx, paint => {
+                const sky = paint.createLinearGradient(0, 0, 0, wy);
+                sky.addColorStop(0, '#38bdf8'); sky.addColorStop(1, '#fde68a');
+                paint.fillStyle = sky; paint.fillRect(0, 0, w, wy);
+                paint.fillStyle = '#fef08a'; paint.beginPath(); paint.arc(w * 0.85, wy * 0.45, 46, 0, TAU); paint.fill();
+                const water = paint.createLinearGradient(0, wy, 0, h);
+                water.addColorStop(0, '#22d3ee'); water.addColorStop(0.4, '#0e7490'); water.addColorStop(1, '#083344');
+                paint.fillStyle = water; paint.fillRect(0, wy, w, h - wy);
+                const dockY = wy - 6;
+                paint.fillStyle = '#92400e'; paint.fillRect(0, dockY, w, 16);
+                paint.fillStyle = '#78350f'; for (let x = 20; x < w; x += 80) paint.fillRect(x, dockY + 16, 10, 60);
+            });
             ctx.fillStyle = 'rgba(255,255,255,.85)';
-            for (let i = 0; i < 4; i++) { const cx = ((i * 380 + t * 12) % (w + 300)) - 150; ctx.beginPath(); ctx.ellipse(cx, 80 + (i % 2) * 40, 70, 22, 0, 0, TAU); ctx.ellipse(cx + 40, 74 + (i % 2) * 40, 46, 20, 0, 0, TAU); ctx.fill(); }
-            const water = ctx.createLinearGradient(0, wy, 0, h);
-            water.addColorStop(0, '#22d3ee'); water.addColorStop(0.4, '#0e7490'); water.addColorStop(1, '#083344');
-            ctx.fillStyle = water; ctx.fillRect(0, wy, w, h - wy);
+            for (let i = 0; i < (low ? 2 : 4); i++) {
+                const cx = ((i * 380 + t * 12) % (w + 300)) - 150;
+                ctx.beginPath();
+                ctx.ellipse(cx, 80 + (i % 2) * 40, 70, 22, 0, 0, TAU);
+                ctx.ellipse(cx + 40, 74 + (i % 2) * 40, 46, 20, 0, 0, TAU);
+                ctx.fill();
+            }
             ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 2; ctx.beginPath();
-            for (let x = 0; x <= w; x += 12) { const y = wy + Math.sin(x / 30 + t * 2) * 3; if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); }
+            const step = low ? 18 : 12;
+            for (let x = 0; x <= w; x += step) {
+                const y = wy + Math.sin(x / 30 + t * 2) * (low ? 2 : 3);
+                if (x === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
             ctx.stroke();
             for (const f of this.school) {
                 const span = w + 200;
@@ -437,8 +490,6 @@
                 ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(-24, -6); ctx.lineTo(-24, 6); ctx.fill(); ctx.restore();
             }
             const dockY = wy - 6;
-            ctx.fillStyle = '#92400e'; ctx.fillRect(0, dockY, w, 16);
-            ctx.fillStyle = '#78350f'; for (let x = 20; x < w; x += 80) ctx.fillRect(x, dockY + 16, 10, 60);
 
             const angler = (info, st, depth, power, isMe) => {
                 const x = this.slotOf(info.id, w);
@@ -623,12 +674,15 @@
         draw(ctx, w, h) {
             const t = this.anim;
             this.ui.begin();
+            const low = Boolean(this.s.graphics?.low);
             ctx.fillStyle = '#05070f'; ctx.fillRect(0, 0, w, h);
             this.begin(ctx, w, h, 800);
             ctx.fillStyle = '#0a1224'; ctx.fillRect(0, 0, this.W, this.H);
-            ctx.strokeStyle = 'rgba(34,211,238,.1)'; ctx.lineWidth = 1;
-            for (let x = Math.max(0, Math.ceil(this.x0 / 60) * 60); x <= Math.min(this.W, this.x1); x += 60) { ctx.beginPath(); ctx.moveTo(x, Math.max(0, this.y0)); ctx.lineTo(x, Math.min(this.H, this.y1)); ctx.stroke(); }
-            for (let y = Math.max(0, Math.ceil(this.y0 / 60) * 60); y <= Math.min(this.H, this.y1); y += 60) { ctx.beginPath(); ctx.moveTo(Math.max(0, this.x0), y); ctx.lineTo(Math.min(this.W, this.x1), y); ctx.stroke(); }
+            ctx.strokeStyle = low ? 'rgba(34,211,238,.06)' : 'rgba(34,211,238,.1)';
+            ctx.lineWidth = 1;
+            const step = low ? 120 : 60;
+            for (let x = Math.max(0, Math.ceil(this.x0 / step) * step); x <= Math.min(this.W, this.x1); x += step) { ctx.beginPath(); ctx.moveTo(x, Math.max(0, this.y0)); ctx.lineTo(x, Math.min(this.H, this.y1)); ctx.stroke(); }
+            for (let y = Math.max(0, Math.ceil(this.y0 / step) * step); y <= Math.min(this.H, this.y1); y += step) { ctx.beginPath(); ctx.moveTo(Math.max(0, this.x0), y); ctx.lineTo(Math.min(this.W, this.x1), y); ctx.stroke(); }
             for (const wl of this.walls) {
                 if (!this.seenRect(wl.x, wl.y, wl.w, wl.h)) continue;
                 ctx.fillStyle = '#1e293b'; ctx.fillRect(wl.x, wl.y, wl.w, wl.h);
@@ -1283,6 +1337,7 @@
         draw(ctx, w, h) {
             ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, w, h);
             this.begin(ctx, w, h, 1100);
+            const low = Boolean(this.s.graphics?.low);
             const rects = this.ui.rects.length ? this.ui.rects : this.ui.prev;
             const overHud = rects.some(r => this.ui.inside({ ...r, on: true }));
             const pointer = this.mouseWorld();
@@ -1292,18 +1347,22 @@
                 const color = DEFENSE_COLORS[team], path = this.paths[team];
                 if (!this.seenRect(team * 1100, 0, 1100, this.H, 120)) continue;
                 ctx.fillStyle = team ? '#3f4934' : '#354c43'; ctx.fillRect(team * 1100, 0, 1100, this.H);
-                for (const grass of this.grass[team]) {
-                    const px = grass.x, py = grass.y;
-                    if (!this.seen(px, py, 50)) continue;
-                    ctx.strokeStyle = '#6b8e4e'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(px - 7, py + 8); ctx.lineTo(px - 11, py - 2);
-                    ctx.moveTo(px, py + 9); ctx.lineTo(px + 3, py - 6); ctx.moveTo(px + 7, py + 8); ctx.lineTo(px + 13, py); ctx.stroke();
-                    if (grass.rock) { ctx.fillStyle = '#64746b'; ctx.beginPath(); ctx.ellipse(px + 30, py + 30, 12, 8, -.4, 0, TAU); ctx.fill(); }
+                if (!low) {
+                    for (const grass of this.grass[team]) {
+                        const px = grass.x, py = grass.y;
+                        if (!this.seen(px, py, 50)) continue;
+                        ctx.strokeStyle = '#6b8e4e'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(px - 7, py + 8); ctx.lineTo(px - 11, py - 2);
+                        ctx.moveTo(px, py + 9); ctx.lineTo(px + 3, py - 6); ctx.moveTo(px + 7, py + 8); ctx.lineTo(px + 13, py); ctx.stroke();
+                        if (grass.rock) { ctx.fillStyle = '#64746b'; ctx.beginPath(); ctx.ellipse(px + 30, py + 30, 12, 8, -.4, 0, TAU); ctx.fill(); }
+                    }
                 }
-                ctx.strokeStyle = '#293c35'; ctx.lineWidth = 98; ctx.lineJoin = 'round';
+                ctx.strokeStyle = '#293c35'; ctx.lineWidth = low ? 86 : 98; ctx.lineJoin = 'round';
                 ctx.beginPath(); path.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke();
-                ctx.strokeStyle = '#988366'; ctx.lineWidth = 82; ctx.stroke();
-                ctx.strokeStyle = '#bba581'; ctx.lineWidth = 62; ctx.stroke();
-                ctx.strokeStyle = 'rgba(70,53,33,.22)'; ctx.lineWidth = 3; ctx.setLineDash([3, 28]); ctx.stroke(); ctx.setLineDash([]);
+                ctx.strokeStyle = '#988366'; ctx.lineWidth = low ? 72 : 82; ctx.stroke();
+                ctx.strokeStyle = '#bba581'; ctx.lineWidth = low ? 54 : 62; ctx.stroke();
+                if (!low) {
+                    ctx.strokeStyle = 'rgba(70,53,33,.22)'; ctx.lineWidth = 3; ctx.setLineDash([3, 28]); ctx.stroke(); ctx.setLineDash([]);
+                }
                 for (let row = Math.max(0, Math.ceil((this.y0 - this.gridSize - 85) / this.gridSize)); row < Math.min(20, Math.floor((this.y1 + this.gridSize - 85) / this.gridSize) + 1); row++) for (let col = Math.max(0, Math.ceil((this.x0 - this.gridSize - team * 1100 - 95) / this.gridSize)); col < Math.min(14, Math.floor((this.x1 + this.gridSize - team * 1100 - 95) / this.gridSize) + 1); col++) {
                     const x = team * 1100 + 95 + col * this.gridSize, y = 85 + row * this.gridSize;
                     if (!this.seen(x, y, this.gridSize) || !this.buildGrid[team][row * 14 + col]) continue;

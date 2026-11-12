@@ -63,7 +63,7 @@
                 <label>Password (at least 8 characters)<input id="signup-password" type="password" autocomplete="new-password" minlength="8" required></label>
                 <label>Confirm password<input id="signup-password-confirm" type="password" autocomplete="new-password" minlength="8" required></label>
                 <label>School<select id="signup-school" required><option value="">Choose your school…</option><option value="pchs">Parkway Central High School</option><option value="pnhs">Parkway North High School</option><option value="pshs">Parkway South High School</option><option value="pwhs">Parkway West High School</option><option value="other">Other / not listed</option></select></label>
-                <p class="settings-hint">Create your account with a username and password. No email is needed.</p>
+	                <p class="settings-hint">Create your account with a username and password. No email is needed. Don’t use your real name in your username.</p>
                 <button class="primary-btn full-width" type="submit">Create account</button>
             </form>
             <section id="mfa-login-prompt" class="mfa-panel hidden" aria-labelledby="mfa-login-title">
@@ -78,7 +78,7 @@
             </section>
             <p id="auth-status" class="auth-message" role="status" aria-live="polite"></p>
             <p class="auth-switch"><span id="auth-switch-prompt">New to StudBud?</span> <button id="auth-switch-btn" type="button" class="text-btn">Create an account</button></p>
-            <p class="settings-hint auth-legal"><a href="privacy.html" target="_blank" rel="noopener">Privacy policy</a></p>
+	            <p class="settings-hint auth-legal"><a href="privacy.html" target="_blank" rel="noopener">Privacy policy</a> · <a href="terms.html" target="_blank" rel="noopener">Terms</a></p>
             </div></div>
         </div>
         <div id="guest-game-lobby" class="glass-card hidden"></div>
@@ -607,6 +607,12 @@
                         <div class="study-toolbar">
                             <button id="study-star-btn" type="button" class="chip-btn" aria-pressed="false" title="Star this card (S)"><i class="far fa-star"></i> <span>Star</span></button>
                             <label class="chip-toggle" title="Type your answer before revealing (T)"><input id="study-type-toggle" type="checkbox"> <i class="fas fa-keyboard"></i> Type answer</label>
+                            <label class="chip-select" title="Choose cramming or spaced review"><i class="fas fa-graduation-cap" aria-hidden="true"></i> <span>Mode</span>
+                                <select id="study-session-mode" aria-label="Study mode">
+                                    <option value="scheduled">Spaced</option>
+                                    <option value="cram">Cram</option>
+                                </select>
+                            </label>
                             <label class="chip-select" title="Choose which side of each card is the question"><i class="fas fa-right-left" aria-hidden="true"></i> <span>Ask with</span>
                                 <select id="study-direction" aria-label="Ask with">
                                     <option value="front">Term</option>
@@ -955,7 +961,7 @@
                                 <select id="public-grade"><option value="">Prefer not to say</option><option>Freshman</option><option>Sophomore</option><option>Junior</option><option>Senior</option><option>Other</option></select>
                             </div>
                             <div class="form-group"><label for="public-goal">Study goal</label><input type="text" id="public-goal" maxlength="80" autocomplete="off" placeholder="e.g. Get an A in Chemistry"></div>
-                            <label class="settings-check"><input type="checkbox" id="public-show-real-name"> Show my first and last name on my public profile</label>
+	                            <p class="settings-hint"><strong>Usernames only:</strong> StudBud does not require or display real names. Don’t use your real name in your username, bio, or game nickname.</p>
                             <label class="settings-check"><input type="checkbox" id="public-show-school"> Show my school tag on my public profile</label>
                             <label class="settings-check"><input type="checkbox" id="public-show-classmates" disabled> Let students sharing a course find my username</label>
                             <p id="public-classmates-availability" class="settings-hint" role="status">Checking course-discovery availability…</p>
@@ -1079,7 +1085,7 @@
                         <ul class="about-list">
                             <li><strong>Home:</strong> see upcoming work, your automatic study clock and progress at a glance. Add a quiz or test to get a study plan.</li>
                             <li><strong>My classes:</strong> enter classes and grades (decimals like 23.21/25 work). What-if grades lets you try possible scores without changing your actual grades.</li>
-                            <li><strong>Import from Infinite Campus:</strong> open My classes to bring in grades, assignments, categories, class times and the school calendar. The import dialog includes computer and phone instructions.</li>
+                            <li><strong>Import from Infinite Campus:</strong> open My classes to bring in grades, assignments, categories, class times and the school calendar. Use manual paste with district-approved Infinite Campus exports; website helper automation stays off in this release.</li>
                             <li><strong>Planner:</strong> use Day, Week or Month to see deadlines, work dates and personal events. Day suggests what to work on first. Tasks is a separate page for managing assignments, completion and grades.</li>
                             <li><strong>Study:</strong> Practice is for studying, Manage sets is for creating and editing, and Discover is for community materials. Focus practice prioritizes terms needing recall using recent answers. Tests &amp; drills offers more ways to practice.</li>
                             <li><strong>Singleplayer:</strong> play the same game modes on your own with computer players. Host or join a multiplayer room to play with other students. Flashcard quizzes and practice tests remain available separately.</li>
@@ -1115,6 +1121,11 @@
                         </section>
                         <section class="glass-card" data-settings-panel="general">
                             <h3 class="settings-section-heading"><i class="fas fa-layer-group" aria-hidden="true"></i> Flashcard preferences</h3>
+                            <label for="settings-study-approach">Default study mode</label>
+                            <select id="settings-study-approach">
+                                <option value="scheduled">Spaced review (long-term)</option>
+                                <option value="cram">Cram (test prep)</option>
+                            </select>
                             <label for="settings-study-mode">Answer style</label>
                             <select id="settings-study-mode"><option value="reveal">Think, then reveal</option><option value="type">Type before revealing</option></select>
                             <label for="settings-study-direction">Ask with</label>
@@ -1142,21 +1153,13 @@
                         </section>
                         <div class="glass-card hidden settings-school-card" data-settings-panel="school">
                             <section class="settings-field-section">
-                            <h3 class="settings-section-heading"><i class="fas fa-school" aria-hidden="true"></i> School &amp; name</h3>
+	                            <h3 class="settings-section-heading"><i class="fas fa-school" aria-hidden="true"></i> School</h3>
                             <div class="form-group">
                                 <label for="settings-school">School</label>
                                 <select id="settings-school"><option value="pchs">Parkway Central High School</option><option value="pnhs">Parkway North High School</option><option value="pshs">Parkway South High School</option><option value="pwhs">Parkway West High School</option><option value="other">Other / not listed</option></select>
                                 <small class="settings-hint">Your school is private unless you enable its public-profile tag.</small>
                             </div>
-                            <div class="form-group">
-                                <label for="settings-first-name">First name</label>
-                                <input type="text" id="settings-first-name" maxlength="60" autocomplete="given-name">
-                            </div>
-                            <div class="form-group">
-                                <label for="settings-last-name">Last name</label>
-                                <input type="text" id="settings-last-name" maxlength="60" autocomplete="family-name">
-                            </div>
-                            <p class="settings-hint">Your real name stays private unless you share it in Profile.</p>
+	                            <p class="settings-hint"><strong>Usernames only:</strong> StudBud does not collect or store real names. Use a username that does not contain your real name.</p>
                             <div class="form-group">
                                 <label for="settings-grad-year">Graduation Year</label>
                                 <select id="settings-grad-year">
@@ -1265,7 +1268,7 @@
                             <div class="settings-actions">
                                 <button class="secondary-btn open-ic-import-btn" type="button"><i class="fas fa-cloud-arrow-down"></i> Import from Infinite Campus</button>
                             </div>
-                            <p class="settings-hint"><a href="privacy.html" target="_blank" rel="noopener">Privacy policy &amp; advertising</a></p>
+                            <p class="settings-hint"><a href="privacy.html" target="_blank" rel="noopener">Privacy policy &amp; advertising</a> · <a href="terms.html" target="_blank" rel="noopener">Terms of service</a></p>
                             <div class="danger-zone">
                                 <h4>Remove local study data</h4>
                                 <p class="settings-hint">Removes classes, assignments, sets and history on this device. Your online account is not deleted; synced data may download again.</p>
@@ -1306,6 +1309,15 @@
                                     <option value="light">Light</option>
                                 </select>
                                 <p class="settings-hint">New accounts follow your device's light or dark setting. A manual choice stays in effect until you select automatic again.</p>
+                            </div>
+                            <div class="form-group">
+                                <label for="settings-game-quality">Game graphics</label>
+                                <select id="settings-game-quality">
+                                    <option value="auto">Auto (recommended)</option>
+                                    <option value="low">Low (Chromebooks)</option>
+                                    <option value="high">High</option>
+                                </select>
+                                <p class="settings-hint">Auto picks a starting detail level and stays stable during a match. Low reduces effects and resolution for smoother FPS.</p>
                             </div>
                             <label class="setting-toggle"><input type="checkbox" id="ui-compact-mode"> <span>Compact spacing</span></label>
                             <p class="settings-hint">Compact mode fits more information on smaller displays.</p>
@@ -1842,37 +1854,51 @@
                         <p class="ic-safety-note"><i class="fas fa-shield-halved" aria-hidden="true"></i> One-way only. Nothing in Campus is changed. StudBud never asks for your Campus password.</p>
                     </div>
                     <div class="ic-methods" aria-label="Choose how to import">
+                        <details id="ic-manual-method" class="ic-method" open>
+                            <summary><i class="fas fa-paste" aria-hidden="true"></i> Manual paste import <span>No bot or background sync</span></summary>
+                            <p class="settings-hint">Recommended for strict school policy environments: copy your student data export (JSON) from a district-approved source, paste it below, then preview before importing.</p>
+                            <p class="settings-hint"><strong>Do not</strong> enter Infinite Campus credentials into StudBud or any third-party extension/site.</p>
+                            <label for="ic-manual-paste">Paste StudBud-compatible Infinite Campus JSON</label>
+                            <small>Where to get it: in the Infinite Campus web portal, use any district-approved student-data export/download option (for classes, assignments, and schedule/calendar) and copy its JSON output here.</small>
+                            <small>If your portal does not provide an export option, use Add class/manual assignment entry in StudBud.</small>
+                            <textarea id="ic-manual-paste" rows="6" spellcheck="false" placeholder='{"format":"studbud-infinite-campus","version":1,...}' aria-describedby="ic-manual-help"></textarea>
+                            <small id="ic-manual-help">StudBud does not auto-sync in the background. You choose if/when to paste updated data.</small>
+                            <div class="ic-row">
+                                <button id="ic-preview-paste-btn" class="primary-btn" type="button"><i class="fas fa-magnifying-glass"></i> Preview pasted data</button>
+                                <button id="ic-clear-paste-btn" class="secondary-btn" type="button"><i class="fas fa-trash"></i> Clear</button>
+                            </div>
+                        </details>
                         <details id="ic-mobile-recommendation" class="ic-method ic-mobile-recommendation">
                             <summary><i class="fas fa-mobile-screen" aria-hidden="true"></i> Using your phone? Start here</summary>
                             <p><strong>Easiest:</strong> import on a computer once, then sign in to the same StudBud account on your phone. Your synced classes and assignments follow you. Re-import from the computer when grades change.</p>
-                            <p><strong>Phone only?</strong> The Campus native app cannot share its signed-in data with StudBud. You can use the Campus website in Safari or Chrome and follow the guided bookmark steps below instead. There is no direct account connection or background refresh.</p>
+                            <p><strong>Phone only?</strong> The Campus native app cannot share signed-in data with StudBud. Use manual class/assignment entry, or open the Infinite Campus website in a mobile browser and use a district-approved export there when available.</p>
                             <p>No computer or bookmark setup? Add classes and assignments manually; every other StudBud feature still works.</p>
                             <button class="secondary-btn" type="button" data-action="campus-add-manually">Add a class manually</button>
                         </details>
                         <details id="ic-website-method" class="ic-method">
-                            <summary><i class="fas fa-laptop" aria-hidden="true"></i> Import from the Campus website <span>Full import &middot; one-time helper setup</span></summary>
-                            <p class="settings-hint">A small helper runs only when you choose it on your signed-in Campus website. It reads the information available to you and passes a copy back here for review.</p>
+                            <summary><i class="fas fa-laptop" aria-hidden="true"></i> Campus website helper <span>Currently disabled for ToS safety</span></summary>
+	                            <p class="settings-hint">StudBud is not affiliated with Infinite Campus. To avoid workflows that may violate Infinite Campus usage terms, bookmarklet/helper actions are disabled in this release.</p>
+	                            <p class="settings-hint">Use manual paste import above or add classes manually.</p>
                     <ol class="ic-steps">
                         <li>
-                            <strong>Save the import helper (one time only).</strong>
+                            <strong>Helper actions are disabled.</strong>
                             <div class="ic-row">
-                                <a id="ic-bookmarklet-link" class="primary-btn ic-bookmarklet" href="#" draggable="true" title="Drag me to your bookmarks bar"><i class="fas fa-bookmark"></i> StudBud Import</a>
+                                <a id="ic-bookmarklet-link" class="primary-btn ic-bookmarklet is-disabled" href="#" draggable="false" aria-disabled="true" tabindex="-1" title="Disabled"><i class="fas fa-bookmark"></i> StudBud Import</a>
                                 <span class="ic-drag-hint"><i class="fas fa-arrow-up"></i> Drag this up to your bookmarks bar</span>
                             </div>
-                            <small>Don't see a bookmarks bar? Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> (<kbd>⌘</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> on Mac). Already added it? Skip to step 2.</small>
+                            <small>Disabled to keep import workflows within conservative Infinite Campus terms interpretation.</small>
                             <details id="ic-mobile-instructions" class="ic-more">
                                 <summary>On a phone or tablet? Set up the import bookmark</summary>
-                                <small>Use Safari or Chrome in a browser tab, not the Campus app or an in-app browser. Bookmark any page, name it <strong>StudBud Import</strong>, then edit that bookmark and replace its entire address with the URL below. Keep the <code>javascript:</code> at the beginning.</small>
-                                <div class="ic-row"><button id="ic-copy-bookmarklet-btn" class="secondary-btn" type="button"><i class="fas fa-copy"></i> Copy bookmark URL</button></div>
+                                <small>Bookmarklet setup is disabled in this release. Use manual paste import instead.</small>
+                                <div class="ic-row"><button id="ic-copy-bookmarklet-btn" class="secondary-btn" type="button" disabled><i class="fas fa-copy"></i> Copy bookmark URL</button></div>
                                 <textarea id="ic-bookmarklet-url" rows="2" readonly aria-label="StudBud Import bookmark URL" spellcheck="false"></textarea>
-                                <small>Safari: use Share &rarr; Add Bookmark, then Bookmarks &rarr; Edit. Chrome for Android: bookmark a page using the star in the menu, then open Bookmarks and edit its address.</small>
-                                <small>Once you are signed in on the Campus website, run the saved bookmark. In Safari, choose it from Bookmarks. In Chrome for Android, type <strong>StudBud Import</strong> in the address bar and tap the bookmark suggestion, rather than a search result. Do not paste the URL into a search box.</small>
+                                <small>If policy guidance changes in the future, these helper controls may be re-enabled.</small>
                             </details>
                         </li>
                         <li>
-                            <strong>Open Infinite Campus and sign in.</strong>
+                            <strong>Open-campus helper action is disabled.</strong>
                             <div class="ic-row">
-                                <button id="ic-open-campus-btn" class="primary-btn" type="button"><i class="fas fa-arrow-up-right-from-square"></i> Open Infinite Campus</button>
+                                <button id="ic-open-campus-btn" class="primary-btn" type="button" disabled><i class="fas fa-arrow-up-right-from-square"></i> Open Infinite Campus</button>
                             </div>
                             <details class="ic-more">
                                 <summary>Different Campus address?</summary>
@@ -1881,12 +1907,12 @@
                             </details>
                         </li>
                         <li>
-                            <strong>On the Campus tab, run your saved <em>StudBud Import</em> bookmark.</strong>
-                            <small>When the helper finishes, choose <strong>Send to StudBud</strong>. Keep this StudBud tab open.</small>
+                            <strong>Use manual paste import.</strong>
+                            <small>Paste StudBud-compatible JSON above, then choose Preview pasted data.</small>
                         </li>
                         <li>
                             <strong>Return here to review and save.</strong>
-                            <small>Review your class matches and import options, then choose Import into StudBud. No copying, pasting or downloading data needed.</small>
+                            <small>Review your class matches and import options, then choose Import into StudBud.</small>
                         </li>
                     </ol>
                         </details>

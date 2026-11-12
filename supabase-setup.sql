@@ -879,6 +879,11 @@ begin
         when 'palette' then '{"uncommon":50,"rare":35,"epic":13,"legendary":2}'::jsonb
         when 'skin' then '{"common":10,"uncommon":35,"rare":30,"epic":20,"legendary":5}'::jsonb
         when 'animal' then '{"common":35,"uncommon":35,"rare":22,"epic":8}'::jsonb
+	        when 'space' then '{"common":25,"uncommon":35,"rare":25,"epic":12,"legendary":2,"mythic":1}'::jsonb
+	        when 'fantasy' then '{"common":25,"uncommon":35,"rare":25,"epic":12,"legendary":2,"mythic":1}'::jsonb
+	        when 'nature' then '{"common":25,"uncommon":35,"rare":25,"epic":12,"legendary":2,"mythic":1}'::jsonb
+	        when 'ocean' then '{"common":25,"uncommon":35,"rare":25,"epic":12,"legendary":2,"mythic":1}'::jsonb
+	        when 'school' then '{"common":25,"uncommon":35,"rare":25,"epic":12,"legendary":2,"mythic":1}'::jsonb
         when 'mythic' then '{"epic":40,"legendary":45,"mythic":15}'::jsonb
         when 'season' then '{"uncommon":35,"rare":30,"epic":27,"legendary":8}'::jsonb
         else '{"common":25,"uncommon":35,"rare":25,"epic":12,"legendary":2,"mythic":1}'::jsonb
@@ -3205,17 +3210,14 @@ create table if not exists public.studbud_public_profiles (
     favorite_subject text not null default '',
     grade_level text not null default '',
     study_goal text not null default '',
-    first_name text not null default '',
-    last_name text not null default '',
-    show_real_name boolean not null default false,
     school text not null default 'pchs' check (school in ('pchs', 'pnhs', 'pshs', 'pwhs', 'other')),
     show_school boolean not null default false,
     show_stats boolean not null default true,
     updated_at timestamptz not null default now()
 );
-alter table public.studbud_public_profiles add column if not exists first_name text not null default '';
-alter table public.studbud_public_profiles add column if not exists last_name text not null default '';
-alter table public.studbud_public_profiles add column if not exists show_real_name boolean not null default false;
+alter table public.studbud_public_profiles drop column if exists first_name;
+alter table public.studbud_public_profiles drop column if exists last_name;
+alter table public.studbud_public_profiles drop column if exists show_real_name;
 alter table public.studbud_public_profiles add column if not exists school text not null default 'pchs';
 alter table public.studbud_public_profiles add column if not exists show_school boolean not null default false;
 alter table public.studbud_public_profiles add column if not exists show_classmates boolean not null default false;
@@ -3279,11 +3281,10 @@ begin
         v_streak := v_streak + 1;
         v_day := v_day - 1;
     end loop;
-    return jsonb_build_object(
+	    return jsonb_build_object(
         'user_id', p_user_id,
         'username', v_name,
-        'display_name', case when coalesce(v_pub.show_real_name, false)
-            then nullif(trim(concat_ws(' ', nullif(v_pub.first_name, ''), nullif(v_pub.last_name, ''))), '') end,
+	        'display_name', null,
         'bio', coalesce(v_pub.bio, ''),
         'favorite_subject', coalesce(v_pub.favorite_subject, ''),
         'grade_level', coalesce(v_pub.grade_level, ''),
@@ -3319,7 +3320,7 @@ begin
     select * into v from public.studbud_public_profiles where user_id = auth.uid();
     return jsonb_build_object('bio', coalesce(v.bio, ''), 'favorite_subject', coalesce(v.favorite_subject, ''),
         'grade_level', coalesce(v.grade_level, ''), 'study_goal', coalesce(v.study_goal, ''),
-        'show_real_name', coalesce(v.show_real_name, false), 'show_stats', coalesce(v.show_stats, true),
+        'show_stats', coalesce(v.show_stats, true),
         'school', coalesce(v.school, (select a.raw_user_meta_data ->> 'school' from auth.users a where a.id = auth.uid()), 'pchs'),
         'show_school', coalesce(v.show_school, false),
         'show_classmates', coalesce(v.show_classmates, false));
@@ -3329,14 +3330,12 @@ $$;
 drop function if exists public.studbud_set_public_profile(text, text, text, text, boolean);
 drop function if exists public.studbud_set_public_profile(text, text, text, text, text, text, boolean, boolean);
 drop function if exists public.studbud_set_public_profile(text, text, text, text, text, text, boolean, boolean, boolean);
+drop function if exists public.studbud_set_public_profile(text, text, text, text, text, text, boolean, boolean, boolean, boolean);
 create or replace function public.studbud_set_public_profile(
     p_bio text,
     p_favorite_subject text,
     p_grade_level text,
     p_study_goal text,
-    p_first_name text,
-    p_last_name text,
-    p_show_real_name boolean,
     p_show_school boolean,
     p_show_stats boolean,
     p_show_classmates boolean default null
@@ -3349,19 +3348,14 @@ as $$
 begin
     if public.studbud_is_guest() then raise exception 'Create a free account to use this. Your guest data comes with you.'; end if;
     if auth.uid() is null then raise exception 'Sign in first.'; end if;
-    if public.studbud_name_is_blocked(p_first_name) or public.studbud_name_is_blocked(p_last_name) then
-        raise exception 'Name contains inappropriate language. Please choose a different name.';
-    end if;
     insert into public.studbud_public_profiles (
-        user_id, bio, favorite_subject, grade_level, study_goal, first_name, last_name, show_real_name, show_school, show_stats, show_classmates, updated_at
+        user_id, bio, favorite_subject, grade_level, study_goal, show_school, show_stats, show_classmates, updated_at
     )
     values (auth.uid(), left(trim(coalesce(p_bio, '')), 160), left(trim(coalesce(p_favorite_subject, '')), 40),
         left(trim(coalesce(p_grade_level, '')), 20), left(trim(coalesce(p_study_goal, '')), 80),
-        left(trim(coalesce(p_first_name, '')), 60), left(trim(coalesce(p_last_name, '')), 60),
-        coalesce(p_show_real_name, false), coalesce(p_show_school, false), coalesce(p_show_stats, true), coalesce(p_show_classmates, false), now())
+	        coalesce(p_show_school, false), coalesce(p_show_stats, true), coalesce(p_show_classmates, false), now())
     on conflict (user_id) do update set bio = excluded.bio, favorite_subject = excluded.favorite_subject,
-        grade_level = excluded.grade_level, study_goal = excluded.study_goal, first_name = excluded.first_name,
-        last_name = excluded.last_name, show_real_name = excluded.show_real_name,
+        grade_level = excluded.grade_level, study_goal = excluded.study_goal,
         show_school = excluded.show_school, show_stats = excluded.show_stats,
         show_classmates = coalesce(p_show_classmates, studbud_public_profiles.show_classmates), updated_at = now();
     return public.studbud_get_public_profile();
@@ -3387,8 +3381,8 @@ $$;
 
 revoke all on function public.studbud_get_public_profile() from public, anon;
 grant execute on function public.studbud_get_public_profile() to authenticated;
-revoke all on function public.studbud_set_public_profile(text, text, text, text, text, text, boolean, boolean, boolean, boolean) from public, anon;
-grant execute on function public.studbud_set_public_profile(text, text, text, text, text, text, boolean, boolean, boolean, boolean) to authenticated;
+revoke all on function public.studbud_set_public_profile(text, text, text, text, boolean, boolean, boolean) from public, anon;
+grant execute on function public.studbud_set_public_profile(text, text, text, text, boolean, boolean, boolean) to authenticated;
 revoke all on function public.studbud_set_school(text) from public, anon;
 grant execute on function public.studbud_set_school(text) to authenticated;
 revoke all on function public.studbud_has_user_tag(uuid, text) from public, anon, authenticated;
@@ -3556,8 +3550,7 @@ begin
     return jsonb_build_object(
         'user_id', p_user_id,
         'username', v_name,
-        'display_name', case when coalesce(v_pub.show_real_name, false)
-            then nullif(trim(concat_ws(' ', nullif(v_pub.first_name, ''), nullif(v_pub.last_name, ''))), '') end,
+	        'display_name', null,
         'is_me', p_user_id = v_uid,
         'bio', coalesce(v_pub.bio, ''),
         'favorite_subject', coalesce(v_pub.favorite_subject, ''),
@@ -4008,11 +4001,9 @@ set search_path = public, pg_temp
 as $$
     select jsonb_build_object(
         'user_id', a.id,
-        'username', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student'),
-        'first_name', coalesce(pp.first_name, ''),
-        'last_name', coalesce(pp.last_name, '')
+        'username', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student')
     )
-    from auth.users a left join public.studbud_public_profiles pp on pp.user_id = a.id
+    from auth.users a
     where a.id = p_user_id;
 $$;
 revoke all on function public.studbud_class_person(uuid) from public, anon, authenticated;

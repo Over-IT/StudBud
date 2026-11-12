@@ -186,9 +186,9 @@ assert.match(sqlFunction('studbud_my_classes'), /studbud_user_tags where user_id
 
     const markup = harness();
     markup.client.studentData = { classes: [{ id: 'bio', course_code: 'BIO', title: 'Biology', student_count: 2,
-        teacher: { first_name: 'Ada', last_name: 'Teacher' }, decks: [{ id: 'set', title: 'Cells', cards: [{ front: 'Cell', back: 'Life' }] }] }] };
+        teacher: { username: 'AdaTeacher' }, decks: [{ id: 'set', title: 'Cells', cards: [{ front: 'Cell', back: 'Life' }] }] }] };
     markup.root.innerHTML = markup.client.studentSetsMarkup(markup.client.studentData.classes);
-    assert.match(markup.root.innerHTML, /Ada Teacher/);
+    assert.match(markup.root.innerHTML, /AdaTeacher/);
     assert.match(markup.root.innerHTML, /Cells/);
     assert.match(markup.root.innerHTML, /data-class-action="study-class-deck"/);
     markup.state.assignments = [{ courseCode: 'BIO', title: 'Missing lab', status: 'pending', icMissing: true, dueDate: '2000-01-01' },

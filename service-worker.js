@@ -11,6 +11,8 @@ const PUBLIC_DEPENDENCIES = [
 const APP_FILES = [
     './',
     './index.html',
+    './privacy.html',
+    './terms.html',
     './join/',
     './join/index.html',
     './join.js',

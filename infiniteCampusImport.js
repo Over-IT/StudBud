@@ -109,11 +109,11 @@
                     const select = document.createElement('select');
                     select.setAttribute('aria-label', 'Student to import');
                     select.style.cssText = 'width:100%;padding:8px;margin:8px 0;color:#111827;background:#fff';
-                    students.forEach((item, index) => {
+	                    students.forEach((item, index) => {
                         const option = document.createElement('option');
                         option.value = String(index);
-                        option.textContent = `${item.firstName || ''} ${item.lastName || ''}`.trim() || `Student ${index + 1}`;
-                        select.append(option);
+	                        option.textContent = `Student ${index + 1}`;
+	                        select.append(option);
                     });
                     box.insertBefore(select, actions);
                     button('Import student', () => { select.remove(); actions.replaceChildren(); resolve(Number(select.value)); });
@@ -197,7 +197,6 @@
                 version: 1,
                 exportedAt: new Date().toISOString(),
                 source: location.hostname,
-                student: { firstName: String(student.firstName || '').slice(0, 40) },
                 enrollments: current,
                 roster,
                 grades,
@@ -566,7 +565,7 @@
         return {
             exportedAt: text(data.exportedAt, 40),
             source: text(data.source, 100),
-            studentName: text(data.student?.firstName, 40),
+	            studentName: '',
             schoolName: text(enrollments[0]?.schoolName, 80),
             terms: [...terms.values()],
             sections: [...sections.values()].map(section => ({
@@ -940,7 +939,7 @@
                 if (other === course || !list(other.icSectionIDs).some(id => entry.sectionIDs.includes(String(id)))) return;
                 other.icSectionIDs = list(other.icSectionIDs).filter(id => !entry.sectionIDs.includes(String(id)));
                 if (!other.icSectionIDs.length) {
-                    ['icName', 'icCourseNumber', 'icTeacher', 'icRoom'].forEach(key => { delete other[key]; });
+                    ['icName', 'icCourseNumber'].forEach(key => { delete other[key]; });
                 }
                 touchedCodes.push(other.code);
             });
@@ -956,10 +955,10 @@
                 isWeighted: catalogCourse ? Boolean(catalogCourse.isWeighted) : (isNew ? looksWeighted(name) : Boolean(course.isWeighted)),
                 icSectionIDs: [...new Set([...list(course.icSectionIDs).map(String), ...entry.sectionIDs])],
                 icCourseNumber: entry.courseNumbers.join(', '),
-                icName: name,
-                icTeacher: entry.teacher,
-                icRoom: entry.room
+                icName: name
             });
+            delete course.icTeacher;
+            delete course.icRoom;
             touchedCodes.push(course.code);
             entry.sectionIDs.forEach(id => sectionToCourse.set(id, course));
 

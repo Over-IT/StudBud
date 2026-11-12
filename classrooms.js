@@ -30,10 +30,7 @@
         return new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' });
     };
     const daysSince = iso => iso ? (Date.now() - new Date(iso).getTime()) / 86400000 : Infinity;
-    const personName = person => {
-        const full = `${person?.first_name || ''} ${person?.last_name || ''}`.trim();
-        return full || person?.username || 'Student';
-    };
+    const personName = person => person?.username || 'Student';
 
     // "term<TAB>definition", "term - definition", "term: definition" or "term, definition" per line.
     function parseCardLines(text) {
@@ -417,7 +414,7 @@
             };
             const sorters = {
                 attention: (a, b) => this.attentionScore(b) - this.attentionScore(a) || personName(a).localeCompare(personName(b)),
-                name: (a, b) => (a.last_name || personName(a)).localeCompare(b.last_name || personName(b)),
+                name: (a, b) => personName(a).localeCompare(personName(b)),
                 grade: (a, b) => grade(a) - grade(b),
                 missing: (a, b) => Number(b.snapshot?.missing || 0) - Number(a.snapshot?.missing || 0),
                 study: (a, b) => Number(b.week_seconds || 0) - Number(a.week_seconds || 0),
