@@ -66,16 +66,6 @@
                 <p class="settings-hint">Create your account with a username and password. Your password encrypts synced study data; if it is changed or lost, old encrypted data cannot be recovered. No email is needed.</p>
                 <button class="primary-btn full-width" type="submit">Create account</button>
             </form>
-            <section id="data-unlock-panel" class="mfa-panel hidden" aria-labelledby="data-unlock-title">
-                <h2 id="data-unlock-title">Unlock your encrypted data</h2>
-                <p>Enter your account password to decrypt your private study data on this device. StudBud cannot recover it if the password is lost or changed.</p>
-                <form id="data-unlock-form" class="auth-form">
-                    <label for="data-unlock-password">Account password</label>
-                    <input id="data-unlock-password" type="password" autocomplete="current-password" minlength="8" required>
-                    <button class="primary-btn full-width" type="submit">Unlock data</button>
-                </form>
-                <p id="data-unlock-status" class="auth-message error" role="status" aria-live="polite"></p>
-            </section>
             <section id="mfa-login-prompt" class="mfa-panel hidden" aria-labelledby="mfa-login-title">
                 <h2 id="mfa-login-title">Verify your existing authenticator</h2>
                 <p>This account already has authenticator protection. Enter its code to sign in. You can remove it in Settings after signing in.</p>

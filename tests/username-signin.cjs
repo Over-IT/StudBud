@@ -26,7 +26,7 @@ vm.createContext(sandbox);
 vm.runInContext(source('nameModeration.js'), sandbox);
 vm.runInContext(source('cloudSync.js'), sandbox);
 const cloud = sandbox.window.StudBudCloud;
-let factors = [], currentLevel = 'aal1', opened = 0, sessionAvailable = true, passwordError = null, assuranceError = null;
+let factors = [], currentLevel = 'aal1', opened = 0, openedPassword, sessionAvailable = true, passwordError = null, assuranceError = null;
 const requests = [];
 const user = { id: 'student', email: 'student@accounts.studbud.invalid', user_metadata: { username: 'student' } };
 cloud.client = { auth: {
@@ -46,7 +46,7 @@ cloud.client = { auth: {
         }
     }
 } };
-cloud.openAccount = async value => { opened++; cloud.user = value; cloud.accountReady = true; };
+cloud.openAccount = async (value, password) => { opened++; openedPassword = password; cloud.user = value; cloud.accountReady = true; };
 const submit = { preventDefault() {} };
 async function run() {
     node('login-username').value = ' Student ';
@@ -81,15 +81,70 @@ async function run() {
     assert.equal(opened, 2, 'misconfigured server signup does not claim to be signed in');
     factors = [{ id: 'totp', status: 'verified' }];
     cloud.accountReady = false;
-    await cloud.routeAuthenticatedUser(user);
+    await cloud.routeAuthenticatedUser(user, 'password123');
     assert.equal(opened, 2, 'existing second factors are still enforced');
     assert.equal(node('mfa-login-prompt').hidden, false);
+    await cloud.routeAuthenticatedUser(user);
+    assert.equal(node('mfa-login-prompt').hidden, false, 'session events do not interrupt an active MFA challenge');
+    assert.equal(cloud.mfaPendingPassword, 'password123');
+    node('mfa-login-code').value = '000000';
+    await cloud.verifyMfaLogin(submit);
+    assert.equal(cloud.mfaPendingPassword, 'password123', 'a wrong authenticator code can be retried');
     node('mfa-login-code').value = '123456';
     await cloud.verifyMfaLogin(submit);
     assert.equal(opened, 3);
+    assert.equal(openedPassword, 'password123', 'MFA retains the sign-in password only until data is unlocked');
+    assert.equal(cloud.mfaPendingPassword, '');
     cloud.accountReady = false; assuranceError = Error('MFA unavailable');
-    await assert.rejects(cloud.routeAuthenticatedUser(user), /MFA unavailable/);
+    await assert.rejects(cloud.routeAuthenticatedUser(user, 'password123'), /MFA unavailable/);
     assert.equal(opened, 3, 'MFA errors cannot bypass protection');
+    {
+        const recovery = new cloud.constructor();
+        let authCalls = 0, attemptedPassword;
+        recovery.client = {
+            auth: { signInWithPassword: async () => { authCalls++; return { data: { user } }; } },
+            from: () => ({ select() { return this; }, eq() { return this; }, maybeSingle: async () => ({ data: { data: {} }, error: null }) })
+        };
+        recovery.appStarted = true;
+        recovery.bindStateEvents = recovery.queueSync = recovery.endGuestSession = recovery.updateOfflineNotice = () => {};
+        recovery.refreshLegacyMfaSettings = async () => {};
+        sandbox.window.NexusApp.recoverOwnedCommunityDecks = async () => {};
+        node('login-username').value = '';
+        await recovery.routeAuthenticatedUser(user);
+        assert.equal(node('login-username').value, 'student');
+        assert.equal(node('login-form').hidden, false, 'a restored session without a key shows the normal sign-in form');
+        assert.equal(recovery.accountOpening, null, 'the sign-in screen does not leave account loading suspended');
+        recovery.unlockAccountData = async (_user, password) => {
+            attemptedPassword = password;
+            if (password !== 'previous-password') throw Object.assign(new Error('Data could not be unlocked.'), { code: 'STUDBUD_BAD_DATA_PASSWORD' });
+            return null;
+        };
+        node('login-password').value = 'current-password';
+        await recovery.handleLogin(submit);
+        assert.equal(authCalls, 1);
+        assert.equal(recovery.authBusy, false, 'failed data decryption leaves the sign-in form usable');
+        assert.equal(recovery.accountReady, false);
+        assert.match(node('auth-status').textContent, /previous password/);
+        node('login-password').value = 'previous-password';
+        await recovery.handleLogin(submit);
+        assert.equal(authCalls, 1, 'a verified session can unlock old data with its previous password');
+        assert.equal(attemptedPassword, 'previous-password');
+        assert.equal(recovery.accountReady, true);
+        assert.equal(recovery.dataUnlockUser, null);
+        recovery.accountReady = false;
+        recovery.dataUnlockUser = user;
+        const other = { id: 'other', user_metadata: { username: 'other' } };
+        recovery.client.auth.signInWithPassword = async request => {
+            authCalls++;
+            assert.equal(request.email, 'other@accounts.studbud.invalid');
+            return { data: { user: other } };
+        };
+        node('login-username').value = 'other';
+        node('login-password').value = 'previous-password';
+        await recovery.handleLogin(submit);
+        assert.equal(authCalls, 2, 'switching accounts performs a fresh sign-in');
+        assert.equal(recovery.user.id, 'other');
+    }
     cloud.offlineMode = true;
     await cloud.refreshLegacyMfaSettings();
     assert.equal(node('mfa-settings-card').hidden, true);
@@ -100,6 +155,7 @@ async function run() {
         assert.equal(cloud[method], undefined, 'email features are removed, not just hidden');
     }
     assert.match(html, /id="mfa-login-form"/);
+    assert.doesNotMatch(html, /data-unlock-panel/);
     assert.match(html, /id="mfa-settings-card" class="settings-subsection/);
     assert.match(html, /id="login-username"[^>]*maxlength="24"/);
     assert.doesNotMatch(code, /mfa\.enroll/);

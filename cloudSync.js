@@ -24,11 +24,12 @@
             this.restoringSnapshot = false;
             this.offlineMode = false;
             this.mfaPendingUser = null;
+            this.mfaPendingPassword = '';
             this.authBusy = false;
             this.encryptionKey = null;
             this.legacyEncryptionMaterial = null;
             this.encryptionUserId = null;
-            this.encryptionPasswordResolver = null;
+            this.dataUnlockUser = null;
         }
 
         isEncryptedData(data) {
@@ -179,32 +180,14 @@
             };
         }
 
-        requestEncryptionPassword(user) {
+        showDataSignIn(user, message = 'Sign in to unlock your account data on this device.') {
             this.showAuth();
-            ['login-form', 'signup-form', 'mfa-login-prompt', 'auth-switch-prompt', 'auth-switch-btn',
-                'offline-start-btn', 'guest-start-hint', 'auth-divider', 'guest-join'].forEach(id =>
-                document.getElementById(id)?.classList.add('hidden'));
-            const panel = document.getElementById('data-unlock-panel');
-            panel?.classList.remove('hidden');
-            document.getElementById('data-unlock-title').textContent = `Unlock ${user.user_metadata?.username || 'your account'} data`;
-            document.getElementById('data-unlock-status').textContent = '';
-            document.getElementById('data-unlock-password')?.focus();
-            return new Promise(resolve => { this.encryptionPasswordResolver = resolve; });
-        }
-
-        async submitEncryptionPassword(event) {
-            event.preventDefault();
-            const input = document.getElementById('data-unlock-password');
-            const password = input?.value || '';
-            if (password.length < 8) {
-                document.getElementById('data-unlock-status').textContent = 'Enter the password for this account.';
-                return;
-            }
-            const resolve = this.encryptionPasswordResolver;
-            this.encryptionPasswordResolver = null;
-            if (input) input.value = '';
-            document.getElementById('data-unlock-panel')?.classList.add('hidden');
-            if (resolve) resolve(password);
+            this.clearMfaLoginPrompt();
+            this.setAuthMode('login', true);
+            const username = document.getElementById('login-username');
+            if (username && !username.value) username.value = user.user_metadata?.username || '';
+            this.setAuthStatus(message, Boolean(this.dataUnlockUser));
+            document.getElementById('login-password')?.focus();
         }
 
         async getFriendRooms() {
@@ -424,6 +407,9 @@
             this.clearConfigError();
             this.client = window.supabase.createClient(config.url, config.anonKey);
             const { data: authListener } = this.client.auth.onAuthStateChange((event, session) => {
+                if (this.dataUnlockUser && session?.user?.id && session.user.id !== this.dataUnlockUser.id) {
+                    this.dataUnlockUser = null;
+                }
                 if (this.offlineMode) {
                     if (event === 'SIGNED_OUT') {
                         this.user = null;
@@ -442,7 +428,9 @@
                 }
                 if (session?.user && ['INITIAL_SESSION', 'SIGNED_IN', 'TOKEN_REFRESHED', 'USER_UPDATED', 'MFA_CHALLENGE_VERIFIED'].includes(event)) {
                     if (this.authBusy) return;
-                    window.setTimeout(() => this.routeAuthenticatedUser(session.user).catch(error => this.reportAccountError(error)), 0);
+                    window.setTimeout(() => {
+                        if (!this.authBusy) this.routeAuthenticatedUser(session.user).catch(error => this.reportAccountError(error));
+                    }, 0);
                 }
             });
             this.authSubscription = authListener.subscription;
@@ -468,7 +456,6 @@
             document.getElementById('auth-switch-btn')?.addEventListener('click', () => this.setAuthMode(this.authMode === 'login' ? 'signup' : 'login'));
             document.getElementById('login-form')?.addEventListener('submit', event => this.handleLogin(event));
             document.getElementById('signup-form')?.addEventListener('submit', event => this.handleSignup(event));
-            document.getElementById('data-unlock-form')?.addEventListener('submit', event => this.submitEncryptionPassword(event));
             document.getElementById('mfa-login-form')?.addEventListener('submit', event => this.verifyMfaLogin(event));
             document.getElementById('mfa-login-cancel')?.addEventListener('click', () => this.cancelMfaLogin());
             document.getElementById('mfa-disable-btn')?.addEventListener('click', () => this.showMfaDisablePanel());
@@ -592,6 +579,8 @@
 
         async startOffline() {
             if (this.accountOpening || this.syncPromise) throw new Error('Wait for the account operation to finish before opening offline mode.');
+            this.dataUnlockUser = null;
+            this.clearMfaLoginPrompt();
             this.offlineMode = true;
             localStorage.setItem('STUDBUD_LOCAL_MODE', 'true');
             this.initialSnapshot = null;
@@ -697,8 +686,9 @@
             document.getElementById('auth-switch-btn')?.setAttribute('disabled', 'true');
         }
 
-        setAuthMode(mode) {
-            if (this.authBusy || this.mfaPendingUser) return;
+        setAuthMode(mode, force = false) {
+            if (!force && (this.authBusy || this.mfaPendingUser)) return;
+            if (mode === 'signup') this.dataUnlockUser = null;
             this.authMode = mode;
             const signup = mode === 'signup';
             document.getElementById('login-form')?.classList.toggle('hidden', signup);
@@ -729,19 +719,25 @@
                 this.user = user;
                 return;
             }
+            if (!password && this.mfaPendingUser?.id === user.id) return;
+            if (!password && (!this.encryptionKey || this.encryptionUserId !== user.id)) {
+                if (!this.dataUnlockUser) this.showDataSignIn(user);
+                return;
+            }
             if (!this.client?.auth?.mfa?.getAuthenticatorAssuranceLevel) return this.openAccount(user, password);
             const { data, error } = await this.client.auth.mfa.getAuthenticatorAssuranceLevel();
             if (error) throw new Error(this.friendlyAuthError(error, 'Could not check your authenticator status. Please try signing in again.'));
             if (data?.nextLevel === 'aal2' && data?.currentLevel !== 'aal2') {
-                this.showMfaLoginPrompt(user);
+                this.showMfaLoginPrompt(user, password);
                 return;
             }
             this.clearMfaLoginPrompt();
             await this.openAccount(user, password);
         }
 
-        showMfaLoginPrompt(user) {
+        showMfaLoginPrompt(user, password = '') {
             this.mfaPendingUser = user;
+            this.mfaPendingPassword = password;
             this.showAuth();
             document.getElementById('mfa-login-prompt')?.classList.remove('hidden');
             ['login-form', 'signup-form', 'auth-switch-prompt', 'auth-switch-btn', 'offline-start-btn', 'guest-start-hint', 'auth-divider', 'guest-join', 'auth-legal'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
@@ -751,6 +747,7 @@
 
         clearMfaLoginPrompt() {
             this.mfaPendingUser = null;
+            this.mfaPendingPassword = '';
             document.getElementById('mfa-login-prompt')?.classList.add('hidden');
             document.getElementById('login-form')?.classList.toggle('hidden', this.authMode === 'signup');
             document.getElementById('signup-form')?.classList.toggle('hidden', this.authMode !== 'signup');
@@ -771,8 +768,9 @@
                 const { error } = await this.client.auth.mfa.challengeAndVerify({ factorId: factor.id, code });
                 if (error) throw error;
                 const user = this.mfaPendingUser;
+                const password = this.mfaPendingPassword;
                 document.getElementById('mfa-login-code').value = '';
-                await this.routeAuthenticatedUser(user);
+                await this.routeAuthenticatedUser(user, password);
             } catch (error) {
                 console.error('[StudBudCloud] Authenticator verification failed:', error);
                 this.setAuthStatus(this.friendlyAuthError(error, 'That code could not be verified. Check your authenticator and try again.'), true);
@@ -812,6 +810,12 @@
             try {
                 const identifier = document.getElementById('login-username').value.trim();
                 const password = document.getElementById('login-password').value;
+                if (this.dataUnlockUser && identifier.toLowerCase() === String(this.dataUnlockUser.user_metadata?.username || '').toLowerCase()) {
+                    document.getElementById('login-password').value = '';
+                    await this.routeAuthenticatedUser(this.dataUnlockUser, password);
+                    return;
+                }
+                this.dataUnlockUser = null;
                 const { data, error } = await this.client.auth.signInWithPassword({
                     email: this.usernameEmail(identifier),
                     password
@@ -937,6 +941,10 @@
         async openAccount(user, password = '') {
             if (!user?.id) return;
             if (this.accountReady && this.user?.id === user.id) return;
+            if (!password && (!this.encryptionKey || this.encryptionUserId !== user.id)) {
+                if (!this.dataUnlockUser) this.showDataSignIn(user);
+                return;
+            }
             if (this.accountOpening?.userId === user.id) return this.accountOpening.promise;
             if (this.accountOpening) {
                 this.accountVersion++;
@@ -986,28 +994,23 @@
             if (error) throw new Error(`Could not load your cloud data: ${error.message}`);
             if (version !== this.accountVersion) return;
 
-            let remoteSnapshot = null;
-            while (true) {
-                try {
-                    if (!password && this.encryptionKey && this.encryptionUserId === user.id) {
-                        remoteSnapshot = this.isEncryptedData(row?.data)
-                            ? await this.decryptAccountData(row.data, user.id)
-                            : this.sanitizeSnapshot(row?.data || null);
-                    } else {
-                        if (!password) password = await this.requestEncryptionPassword(user);
-                        remoteSnapshot = await this.unlockAccountData(user, password, row?.data || null);
-                    }
-                    break;
-                } catch (unlockError) {
-                    if (unlockError.code !== 'STUDBUD_BAD_DATA_PASSWORD') throw unlockError;
-                    password = '';
-                    const panel = document.getElementById('data-unlock-panel');
-                    panel?.classList.remove('hidden');
-                    document.getElementById('data-unlock-status').textContent = unlockError.message;
-                    document.getElementById('data-unlock-password')?.focus();
+            let remoteSnapshot;
+            try {
+                remoteSnapshot = !password && this.encryptionKey && this.encryptionUserId === user.id
+                    ? this.isEncryptedData(row?.data)
+                        ? await this.decryptAccountData(row.data, user.id)
+                        : this.sanitizeSnapshot(row?.data || null)
+                    : await this.unlockAccountData(user, password, row?.data || null);
+            } catch (unlockError) {
+                if (unlockError.code !== 'STUDBUD_BAD_DATA_PASSWORD') throw unlockError;
+                if (version === this.accountVersion) {
+                    this.dataUnlockUser = user;
+                    this.showDataSignIn(user, `${unlockError.message} If your account password changed, enter the previous password for this account.`);
                 }
+                return;
             }
             if (version !== this.accountVersion) return;
+            this.dataUnlockUser = null;
             const previousAccount = localStorage.getItem('STUDBUD_CLOUD_ACCOUNT_ID');
             const savedBase = previousAccount === user.id ? localStorage.getItem('STUDBUD_CLOUD_SYNC_BASE')
                 : !previousAccount && localStorage.getItem('STUDBUD_LOCAL_ONLY_DATA') ? '{}' : null;
@@ -1314,6 +1317,7 @@
             this.accountVersion++;
             this.accountReady = false;
             this.user = null;
+            this.dataUnlockUser = null;
             this.encryptionKey = null;
             this.legacyEncryptionMaterial = null;
             this.encryptionUserId = null;

@@ -244,6 +244,8 @@ StudBud uses Supabase Auth for username/password accounts and stores each accoun
 
 Private synced snapshots are encrypted in the browser with AES-256-GCM using a PBKDF2-SHA-256 key derived from the account password. Supabase can read only the school/course index and flashcard-set identifiers needed for discovery features; shared content, multiplayer activity and selected summaries are also stored separately to provide those services, so the complete service is not zero-knowledge.
 
+When a saved session needs its encryption key again, use the normal sign-in form. If the account password was changed after the data was encrypted, sign in with the current password first, then enter the previous data password when prompted in that same form.
+
 To connect the deployed static site to a Supabase project:
 
 1. Create a Supabase project and run [`supabase-setup.sql`](./supabase-setup.sql) in the Supabase SQL editor as the default `postgres` role. Username uniqueness uses an RLS-protected app-owned claims table maintained by the auth trigger, not an index on Supabase's managed `auth.users` table. If an older script failed with `42501: must be owner of table users`, rerun the full updated script; do not change ownership of the auth table. Existing case-insensitive duplicate usernames must be resolved before the claims backfill can succeed; the script does not silently discard duplicates.

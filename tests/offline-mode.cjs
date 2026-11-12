@@ -77,7 +77,6 @@ async function run() {
     snapshot.state.courses.find(course => course.code === 'remote').title = 'Local course edit';
     remote.state.courses[0].title = 'Remote course edit';
     cloud.accountReady = false;
-    cloud.requestEncryptionPassword = async () => 'fixture-password';
     cloud.unlockAccountData = async (_user, _password, data) => cloud.sanitizeSnapshot(data);
     cloud.client.auth = { signInWithPassword: async () => ({ data: { user: { id: 'account' } } }) };
     sandbox.document.getElementById('login-username').value = 'student';
