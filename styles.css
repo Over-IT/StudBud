@@ -3809,6 +3809,9 @@ button.podium-spot:hover, button.podium-spot:focus-visible { background: var(--b
 .site-notice { display: flex; align-items: flex-start; gap: 12px; margin: 0 var(--spacing-lg) var(--spacing-md); padding: 12px 16px; border: 1px solid var(--accent-primary); border-radius: 12px; background: color-mix(in srgb, var(--accent-primary) 12%, var(--bg-primary)); color: var(--text-primary); }
 .site-notice > div { flex: 1; min-width: 0; }
 .site-notice p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Announcements can overlap small study layouts; hide while studying. */
+body.studying .site-notice { display: none; }
 .admin-tools { min-width: 0; }
 .admin-tools summary, .admin-deck-details summary { cursor: pointer; color: var(--text-secondary); padding: 6px 0; }
 .admin-tools .admin-actions { margin-top: 8px; }
@@ -3921,6 +3924,8 @@ button.podium-spot:hover, button.podium-spot:focus-visible { background: var(--b
 .ic-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .ic-row input[type="url"] { flex: 1 1 260px; min-width: 0; }
 .ic-bookmarklet { cursor: grab; text-decoration: none; }
+.ic-bookmarklet.is-disabled { pointer-events: none; cursor: not-allowed; }
+.ic-method textarea#ic-manual-paste { min-height: 132px; }
 .ic-drag-hint { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: .9rem; }
 .ic-drag-hint i { animation: ic-nudge 1.4s ease-in-out infinite; }
 @keyframes ic-nudge { 50% { transform: translateY(-4px); } }

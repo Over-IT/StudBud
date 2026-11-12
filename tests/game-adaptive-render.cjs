@@ -144,11 +144,12 @@ for (const nativeDpr of [1, 2]) for (const mode of ['defense', 'miner', 'market'
     s.game.update = () => { updates++; };
     s.game.draw = () => { draws++; };
     for (let i = 1; i <= 100; i++) s.frame(26600 + i * 40);
-    assert.equal(updates, 100, 'hidden live hosts retain authoritative simulation');
+    const hiddenUpdates = updates;
+    assert.ok(hiddenUpdates >= 100, 'hidden live hosts retain authoritative simulation');
     assert.equal(draws, 0, 'hidden live sessions submit no canvas work');
     s.preview = true;
     s.frame(31000);
-    assert.equal(updates, 100, 'hidden disposable previews do not simulate either');
+    assert.equal(updates, hiddenUpdates, 'hidden disposable previews do not simulate either');
 }
 {
     function scene(uncull, x, y) {

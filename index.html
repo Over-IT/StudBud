@@ -88,7 +88,7 @@
             </section>
             <p id="auth-status" class="auth-message" role="status" aria-live="polite"></p>
             <p class="auth-switch"><span id="auth-switch-prompt">New to StudBud?</span> <button id="auth-switch-btn" type="button" class="text-btn">Create an account</button></p>
-            <p class="settings-hint auth-legal"><a href="privacy.html" target="_blank" rel="noopener">Privacy policy</a></p>
+	            <p class="settings-hint auth-legal"><a href="privacy.html" target="_blank" rel="noopener">Privacy policy</a> · <a href="terms.html" target="_blank" rel="noopener">Terms</a></p>
             </div></div>
         </div>
         <div id="guest-game-lobby" class="glass-card hidden"></div>
@@ -612,6 +612,12 @@
                         <div class="study-toolbar">
                             <button id="study-star-btn" type="button" class="chip-btn" aria-pressed="false" title="Star this card (S)"><i class="far fa-star"></i> <span>Star</span></button>
                             <label class="chip-toggle" title="Type your answer before revealing (T)"><input id="study-type-toggle" type="checkbox"> <i class="fas fa-keyboard"></i> Type answer</label>
+                            <label class="chip-select" title="Choose cramming or spaced review"><i class="fas fa-graduation-cap" aria-hidden="true"></i> <span>Mode</span>
+                                <select id="study-session-mode" aria-label="Study mode">
+                                    <option value="scheduled">Spaced</option>
+                                    <option value="cram">Cram</option>
+                                </select>
+                            </label>
                             <label class="chip-select" title="Choose which side of each card is the question"><i class="fas fa-right-left" aria-hidden="true"></i> <span>Ask with</span>
                                 <select id="study-direction" aria-label="Ask with">
                                     <option value="front">Term</option>
@@ -1112,6 +1118,11 @@
                         </section>
                         <section class="glass-card" data-settings-panel="general">
                             <h3 class="settings-section-heading"><i class="fas fa-layer-group" aria-hidden="true"></i> Flashcard preferences</h3>
+                            <label for="settings-study-approach">Default study mode</label>
+                            <select id="settings-study-approach">
+                                <option value="scheduled">Spaced review (long-term)</option>
+                                <option value="cram">Cram (test prep)</option>
+                            </select>
                             <label for="settings-study-mode">Answer style</label>
                             <select id="settings-study-mode"><option value="reveal">Think, then reveal</option><option value="type">Type before revealing</option></select>
                             <label for="settings-study-direction">Ask with</label>

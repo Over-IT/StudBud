@@ -2,7 +2,7 @@
     'use strict';
 
     let pending = Promise.resolve();
-    function request(message, initialValue) {
+    function request(message, initialValue, options = {}) {
         const result = pending.then(() => new Promise(resolve => {
             const previous = document.activeElement;
             const dialog = document.createElement('dialog');
@@ -21,7 +21,7 @@
             let input;
             if (initialValue !== undefined) {
                 input = document.createElement('input');
-                input.type = 'text';
+                input.type = options.type || 'text';
                 input.value = initialValue;
                 input.setAttribute('aria-label', message);
                 form.append(input);
@@ -65,6 +65,7 @@
     window.StudBudDialogs = {
         confirm: message => request(message),
         prompt: (message, initialValue = '') => request(message, initialValue),
+        promptSecret: (message, initialValue = '') => request(message, initialValue, { type: 'password' }),
         notify(message) {
             let notice = document.getElementById('app-notice');
             if (!notice) {

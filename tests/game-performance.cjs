@@ -277,11 +277,11 @@ assert.equal(ticks, 6000, 'all game physics updates survive render throttling');
 assert.equal(draws, 6000, 'full detail renders all 60 Hz display frames');
 frameSession.testing = true;
 frameSession.game.res = { value: 10, max: 100 };
-A.Session.prototype.frame.call(frameSession, 100010);
+A.Session.prototype.frame.call(frameSession, 100020);
 assert.equal(frameSession.game.res.value, 100, 'unlimited tests automatically keep resources full');
 frameSession.limitedTestEnergy = true;
 frameSession.game.res.value = 10;
-A.Session.prototype.frame.call(frameSession, 100020);
+A.Session.prototype.frame.call(frameSession, 100040);
 assert.equal(frameSession.game.res.value, 10, 'limited tests never auto-refill resources');
 frameSession.testing = false;
 frameSession.mode = 'chess';
@@ -289,6 +289,7 @@ A.Session.prototype.frame.call(frameSession, 100100);
 assert.equal(draws, 6002, 'DOM chess avoids redundant canvas frames');
 assert.equal(frameSession.graphics.low, false);
 assert.equal(frameSession.resolutionScale, undefined, 'frame timing never silently lowers render resolution');
+sandbox.window.NexusApp = null;
 const resizeSession = {
     graphics: full, overlay: { clientWidth: 800, clientHeight: 600 },
     canvas: {}, layoutHud() {}

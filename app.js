@@ -297,13 +297,19 @@
         }
 
         normalizeCourseCredits(courses) {
-            return courses.map(course => {
+            return courses.map(originalCourse => {
+                const course = originalCourse && typeof originalCourse === 'object' ? { ...originalCourse } : originalCourse;
+                if (!course || typeof course !== 'object') return course;
+                delete course.icTeacher;
+                delete course.icRoom;
                 if (!['S1', 'S2'].includes(course.term)) return course;
                 const school = course.school || this.state.profile?.school;
                 const catalog = window.STUDBUD_SCHOOLS?.catalog(school).find(item => item.code === (course.catalogCode || course.code));
                 if (!catalog || Number(course.credits) !== Number(catalog.credits)) return course;
                 const credits = window.studbudCatalogCreditsForTerm(catalog, course.term);
-                return credits === Number(course.credits) ? course : { ...course, credits };
+                if (credits === Number(course.credits)) return course;
+                course.credits = credits;
+                return course;
             });
         }
 
@@ -2261,12 +2267,27 @@
             if (source) source.textContent = `${calendar.source}. Year-end review is available after ${calendar.end}.`;
         }
 
-        readSchoolCalendarSettings(school) {
-            const startYear = Number(document.getElementById('settings-academic-year').value);
+        readSchoolCalendarSettings(school, profile = AppState.get('profile') || {}) {
+            const startYearField = document.getElementById('settings-academic-year');
+            const customField = document.getElementById('settings-calendar-custom');
+            const startField = document.getElementById('settings-year-start');
+            const semester2Field = document.getElementById('settings-semester2-start');
+            const endField = document.getElementById('settings-year-end');
+
+            if (!startYearField || !customField || !startField || !semester2Field || !endField) {
+                const calendar = this.schoolCalendar(new Date(), profile);
+                const academicYearStart = Number.isInteger(profile.academicYearStart) ? profile.academicYearStart : calendar.startYear;
+                const savedCalendar = profile.schoolCalendar && profile.schoolCalendar.school === school
+                    ? profile.schoolCalendar
+                    : null;
+                return { academicYearStart, schoolCalendar: savedCalendar };
+            }
+
+            const startYear = Number(startYearField.value);
             if (!Number.isInteger(startYear) || startYear < 2000 || startYear > 2100) {
                 throw new Error('Enter a school year starting between 2000 and 2100.');
             }
-            if (!document.getElementById('settings-calendar-custom').checked) {
+            if (!customField.checked) {
                 return { academicYearStart: startYear, schoolCalendar: null };
             }
             const dates = Object.fromEntries([
@@ -4815,13 +4836,20 @@
             const now = new Date();
             const daysLeft = Math.max(1, Math.ceil((Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1) - now) / 86400000));
             const chances = `<span class="box-chances" aria-label="Rarity drop chances">${Object.entries(games.boxChances(box)).map(([rarity, chance]) => `<span class="rarity-${rarity}">${rarity} <b>${chance}%</b></span>`).join('')}</span>`;
+
+            const seasonMonth = box.seasonal ? box.season.month : null;
+            const seasonKey = seasonMonth && profile.user_id ? `${profile.user_id}:${box.id}:${seasonMonth}` : null;
+            const alreadyOpened = Boolean(seasonKey && this.completedShopBoxes?.has(seasonKey));
+            const actionButton = alreadyOpened
+                ? `<button type="button" class="${featured ? 'primary-btn' : 'secondary-btn'}" disabled aria-disabled="true">Opened this month</button>`
+                : `<button type="button" class="${featured ? 'primary-btn' : 'secondary-btn'}" data-action="multiplayer-mystery" data-id="${box.id}" ${box.seasonal ? `data-season-month="${box.season.month}"` : ''} ${profile.coins < box.price ? 'disabled' : ''}>Open · ${box.price} <i class="fas fa-coins"></i></button>`;
             return `<article class="multiplayer-shop-item box-card box-${box.id}${featured ? ' box-featured' : ''}${complete ? ' collection-complete' : ''}"${style} data-search="${this.escapeHTML(`${box.name} ${box.id} ${all.map(item => item.name).join(' ')}`.toLocaleLowerCase())}">
                         ${capsule}
                         <div class="box-details">${featured ? `<span class="season-badge"><i class="fas fa-hourglass-half" aria-hidden="true"></i> Limited · leaves in ${daysLeft} day${daysLeft === 1 ? '' : 's'}</span>` : ''}<strong>${this.escapeHTML(box.name)}</strong><small>${this.escapeHTML(box.odds)}</small><span class="box-progress">${complete ? 'All rewards collected' : `${all.length - remaining} / ${all.length} collected · ${remaining} left`}</span></div>
                         ${featured ? this.shopSetPreview(profile, all) : ''}
                         <details class="box-odds"><summary>What's inside</summary><div class="box-contents-scroll" tabindex="0" role="region" aria-label="${this.escapeHTML(box.name)} rewards">${chances}<ul class="box-contents">${inside}</ul></div><button type="button" class="ghost-btn" data-action="box-contents-close">Close what's inside</button></details>
                         <small class="box-duplicate-note">Duplicates auto-sell for ${Math.floor(box.price / 2)} coins (50% of box price).</small>
-                        <button type="button" class="${featured ? 'primary-btn' : 'secondary-btn'}" data-action="multiplayer-mystery" data-id="${box.id}" ${box.seasonal ? `data-season-month="${box.season.month}"` : ''} ${profile.coins < box.price ? 'disabled' : ''}>Open · ${box.price} <i class="fas fa-coins"></i></button></article>`;
+                        ${actionButton}</article>`;
         }
 
         renderShopFrame(containerId, tabs, tab, tabAttr, body, query, label, gridClass = '') {
@@ -5619,6 +5647,10 @@
         async runAdminAction(action, data) {
             const games = window.StudBudCommunityGames;
             const status = document.getElementById('admin-status');
+            const dialogs = window.StudBudDialogs || {
+                confirm: async () => true,
+                prompt: async (_message, value = '') => value
+            };
             try {
                 if (['coins', 'save-user-tags', 'publish-notice', 'hide-notice', 'delete-notice'].includes(action) && !this.isAdmin) throw new Error('This action is restricted to administrators.');
                 if (['inspect-deck', 'delete-deck', 'remove-decks', 'ban', 'unban', 'force-rename', 'cancel-rename', 'resolve-report', 'dismiss-report'].includes(action) && !this.canModerateFlashcards) throw new Error('This action requires a moderator or administrator.');
@@ -5658,7 +5690,7 @@
                     await this.openUserProfile(data.id);
                     return;
                 } else if (action === 'delete-notice') {
-                    if (!await window.StudBudDialogs.confirm('Permanently remove this announcement from the banner and history?')) return;
+                    if (!await dialogs.confirm('Permanently remove this announcement from the banner and history?')) return;
                     await games.adminCall('studbud_admin_delete_site_notice', { p_publication_id: data.id });
                     await this.loadSiteNotice(true);
                     await this.loadAnnouncementHistory();
@@ -5672,28 +5704,28 @@
                     await games.adminCall('studbud_admin_resolve_reports', { p_target_type: data.reportType, p_target_id: data.id, p_status: action === 'resolve-report' ? 'resolved' : 'dismissed' });
                     status.textContent = action === 'resolve-report' ? 'Report marked as handled.' : 'Report dismissed.';
                 } else if (action === 'delete-deck') {
-                    if (!await window.StudBudDialogs.confirm(`Remove "${data.name}" from the community and everyone's saved decks? Offline devices will remove it when they reconnect.`)) return;
+                    if (!await dialogs.confirm(`Remove "${data.name}" from the community and everyone's saved decks? Offline devices will remove it when they reconnect.`)) return;
                     await games.adminCall('studbud_admin_delete_deck', { p_deck_id: data.id });
                     await this.reconcileRemovedDecks();
                     if (data.reportType === 'deck') await games.adminCall('studbud_admin_resolve_reports', { p_target_type: 'deck', p_target_id: data.id, p_status: 'resolved' }).catch(() => {});
                 } else if (action === 'remove-decks') {
-                    if (!await window.StudBudDialogs.confirm(`Remove all public decks from ${data.name}, including everyone's saved copies? Offline devices will remove them when they reconnect.`)) return;
+                    if (!await dialogs.confirm(`Remove all public decks from ${data.name}, including everyone's saved copies? Offline devices will remove them when they reconnect.`)) return;
                     await games.adminCall('studbud_admin_remove_user_decks', { p_user_id: data.id });
                     await this.reconcileRemovedDecks();
                 } else if (action === 'ban') {
-                    const reason = await window.StudBudDialogs.prompt(`Ban ${data.name}? They will lose their public decks and can't publish new ones. Reason (optional):`);
+                    const reason = await dialogs.prompt(`Ban ${data.name}? They will lose their public decks and can't publish new ones. Reason (optional):`);
                     if (reason === null) return;
                     await games.adminCall('studbud_admin_set_ban', { p_user_id: data.id, p_banned: true, p_reason: reason });
                     await this.reconcileRemovedDecks();
                 } else if (action === 'force-rename') {
-                    if (!await window.StudBudDialogs.confirm(`Force ${data.name} to choose a new username? They'll be blocked from the app until they do.`)) return;
+                    if (!await dialogs.confirm(`Force ${data.name} to choose a new username? They'll be blocked from the app until they do.`)) return;
                     await games.adminCall('studbud_admin_force_username', { p_user_id: data.id, p_force: true });
                 } else if (action === 'cancel-rename') {
                     await games.adminCall('studbud_admin_force_username', { p_user_id: data.id, p_force: false });
                 } else if (action === 'unban') {
                     await games.adminCall('studbud_admin_set_ban', { p_user_id: data.id, p_banned: false });
                 } else if (action === 'coins') {
-                    const input = await window.StudBudDialogs.prompt(`Add or remove coins for ${data.name} (use a negative number to remove):`, '100');
+                    const input = await dialogs.prompt(`Add or remove coins for ${data.name} (use a negative number to remove):`, '100');
                     if (input === null) return;
                     const amount = Number(input);
                     if (!Number.isInteger(amount) || amount === 0 || Math.abs(amount) > 2147483647) throw new Error('Enter a non-zero whole-number coin adjustment within the supported range.');
@@ -5759,6 +5791,8 @@
                         : action === 'multiplayer-unequip'
                             ? await window.StudBudCommunityGames.unequipSlot(itemId)
                             : await window.StudBudCommunityGames.equipItem(itemId);
+                const hasAppState = typeof AppState !== 'undefined' && AppState && typeof AppState.get === 'function' && typeof AppState.set === 'function';
+                const settings = hasAppState ? (AppState.get('settings') || {}) : {};
                 if (action === 'multiplayer-equip') {
                     const equippedField = {
                         skin: 'equipped_skin',
@@ -5775,6 +5809,19 @@
                     if ((item.type === 'accessory' && profile.equipped_effect !== previousProfile.equipped_effect)
                         || (item.type === 'effect' && profile.equipped_accessory !== previousProfile.equipped_accessory)) {
                         throw new Error('The server changed your other equipped cosmetic. Run the latest supabase-setup.sql and try again.');
+                    }
+
+                    if (hasAppState && item.type === 'palette' && item.color && settings.colorScheme !== item.color) {
+                        AppState.set('settings', { ...settings, colorScheme: item.color, schemePicked: true });
+                        this.applyAppearance();
+                    }
+                }
+                if (hasAppState && action === 'multiplayer-unequip' && itemId === 'palette') {
+                    const previousPalette = window.StudBudCommunityGames.catalog.find(entry => entry.type === 'palette' && entry.id === previousProfile.equipped_palette);
+                    const previousColor = previousPalette?.color;
+                    if (previousColor && settings.colorScheme === previousColor) {
+                        AppState.set('settings', { ...settings, colorScheme: 'studbud', schemePicked: true });
+                        this.applyAppearance();
                     }
                 }
                 const unlockedItem = profile.unlocked_item;
@@ -6764,6 +6811,7 @@
             if (groundIndex >= 0 && groundIndex !== st.i) { st.i = groundIndex; st.jump = null; st.nextThink = demo.clock + (b.ground.crumble || b.ground.w < 180 ? 0 : Math.min(b.ai.reaction, .2)); }
             if (st.progressNode === undefined || st.i > st.progressNode) {
                 st.progressNode = st.i; st.progressAt = demo.clock;
+                st.hardStallCount = 0;
             }
             let target = route.list[st.i + 1] || route.list[st.i];
             let crossingMachine = false;
@@ -6789,7 +6837,7 @@
             const brakingX = b.x + b.vx * Math.abs(b.vx) / (2 * (b.ground?.ice ? 420 : 3400));
             const safeRecharge = b.onGround && b.ground.w >= 180 && !b.ground.crumble && !b.ground.mover
                 && brakingX >= b.ground.x + 4 && brakingX + b.w <= b.ground.x + b.ground.w - 4;
-            if (b.ai.rechargeAt || actor.res.value < .5 || (actor.res.value < 50 && safeRecharge)) {
+            if (b.ai.rechargeAt || actor.res.value < .5 || (actor.res.value < 50 && safeRecharge) || (actor.res.value < 10 && b.onGround)) {
                 b.ai.rechargeAt ||= demo.clock + 1.5 + b.ai.reaction;
                 if (demo.clock < b.ai.rechargeAt) {
                     actor.s.botKeys = { x: b.onGround ? U.clamp(-(b.ground?.belt || 0) / 340, -1, 1) : 0, hold: !b.onGround };
@@ -6845,14 +6893,41 @@
             if (st.stallX === undefined || Math.hypot(b.x - st.stallX, b.y - st.stallY) > 80 || st.stallNode !== st.i) {
                 st.stallX = b.x; st.stallY = b.y; st.stallNode = st.i; st.stallAt = demo.clock;
             }
-            if (b.onGround && (demo.clock - st.stallAt > 12 || demo.clock - st.progressAt > 45)) {
-                keys.reset = true;
-                st.stallAt = demo.clock; st.progressAt = demo.clock; st.progressNode = route.cpNode[actor.cp.id];
+            let skipNode = null;
+            const hardStall = demo.clock - st.progressAt > 45;
+            if ((b.onGround && demo.clock - st.stallAt > 12) || hardStall) {
+                const checkpointNode = route.cpNode[actor.cp.id];
+                if (hardStall && checkpointNode === st.i) {
+                    st.hardStallCount = (st.hardStallCount || 0) + 1;
+                    if (st.hardStallCount >= 2) {
+                        let nextIndex = st.i + 1;
+                        while (route.list[nextIndex]?.off) nextIndex++;
+                        if (route.list[nextIndex]) skipNode = { index: nextIndex, node: route.list[nextIndex] };
+                        st.hardStallCount = 0;
+                    }
+                } else if (!hardStall) {
+                    st.hardStallCount = 0;
+                }
+                if (!skipNode) keys.reset = true;
+                st.stallAt = demo.clock; st.progressAt = demo.clock; st.progressNode = checkpointNode;
             }
             actor.s.botKeys = keys;
             const falling = b.vy >= 0;
             actor.updatePlayer(dt);
-            if (keys.reset) { st.i = route.cpNode[actor.cp.id]; st.jump = null; st.nextThink = 0; }
+            if (skipNode) {
+                actor.res.add(demo.session.rewardAmount());
+                b.ai.rechargeAt = 0;
+                st.i = skipNode.index;
+                st.jump = null;
+                st.nextThink = 0;
+                st.progressNode = st.i;
+                st.progressAt = demo.clock;
+                this.skyPlace(actor, st, skipNode.node, demo.clock);
+            } else if (keys.reset) {
+                actor.res.add(demo.session.rewardAmount());
+                b.ai.rechargeAt = 0;
+                st.i = route.cpNode[actor.cp.id]; st.jump = null; st.nextThink = 0;
+            }
             if (falling && actor.sprung && b.vy < -500) {
                 const springNode = route.list.findIndex(p => Math.abs(p.y - b.y - b.h) < 24
                     && b.x + b.w > p.x && b.x < p.x + p.w);
@@ -7813,8 +7888,9 @@
                         }
                     };
                     const cosmetics = this.profileCosmetics(this.multiplayerProfile || {});
-                    const base = {
-                        preview: true, lowDetail: false, graphics: A.graphicsProfile(), stickJumpHeld: false, seed: 4242, local: { id: 'demo', color: '#38bdf8', nickname: 'You', cos: { skin: cosmetics.skin, hat: cosmetics.hat, acc: cosmetics.acc, effect: cosmetics.effect } }, user: { id: 'demo' }, t: 0, startedAt: Date.now(), done: false, finishMs: 0, over: false, paused: false, question: null, score: 0,
+	                    const base = {
+	                        preview: true, practice: false, spectator: false, isHost: false, testing: false, limitedTestEnergy: false,
+	                        lowDetail: false, graphics: A.graphicsProfile(), stickJumpHeld: false, seed: 4242, local: { id: 'demo', color: '#38bdf8', nickname: 'You', cos: { skin: cosmetics.skin, hat: cosmetics.hat, acc: cosmetics.acc, effect: cosmetics.effect } }, user: { id: 'demo' }, t: 0, startedAt: Date.now(), done: false, finishMs: 0, over: false, paused: false, question: null, score: 0,
                         vw: viewWidth, vh: viewHeight, scale: 1, canvas: mockCanvas, overlay: mockOverlay, roster: new Map(), cards: [], keys: hold, hudBounds() { return { x: 12, y: 12, w: Math.max(1, this.vw - 24), h: Math.max(1, this.vh - 24) }; }, mouse: { x: width / 2, y: height / 2, down: false, pressed: false, touchAt: 0 },
                         down: (...keys) => keys.some(key => hold.has(key)), pressed: (...keys) => keys.some(key => tap.has(key)),
                         axis: () => ({ x: (hold.has('KeyD') || hold.has('ArrowRight') ? 1 : 0) - (hold.has('KeyA') || hold.has('ArrowLeft') ? 1 : 0), y: (hold.has('KeyS') || hold.has('ArrowDown') ? 1 : 0) - (hold.has('KeyW') || hold.has('ArrowUp') ? 1 : 0) }),
@@ -8878,6 +8954,10 @@
             if (start) start.value = settings.startPage || 'dashboard';
             const planner = document.getElementById('settings-planner-default');
             if (planner) planner.value = settings.plannerDefaultStatus || 'todo';
+            const quality = document.getElementById('settings-game-quality');
+            if (quality) quality.value = ['auto', 'low', 'high'].includes(settings.gameQuality) ? settings.gameQuality : 'auto';
+            const approach = document.getElementById('settings-study-approach');
+            if (approach) approach.value = ['scheduled', 'cram'].includes(settings.studyApproach) ? settings.studyApproach : 'scheduled';
             const mode = document.getElementById('settings-study-mode');
             if (mode) mode.value = localStorage.getItem('studbud-type-answer') === '1' ? 'type' : 'reveal';
             const direction = document.getElementById('settings-study-direction');
@@ -9328,7 +9408,7 @@
                 { title: 'Set up your next school day', text: 'Use your own schoolwork: save a deadline, plan a work block, then answer a flashcard. The path checks off real progress, not button clicks. Skip anything you do not need.' },
                 { route: 'gpa', sel: '#add-course-btn', title: 'Save your classes', text: 'Use Add Class to enter your classes and grading details. You can edit or update them whenever you need.', action: '#add-course-btn', goal: 'classes' },
                 { route: 'planner', sel: '[data-action="planner-add-assignment"]', title: 'Save one real deadline', text: 'Add an assignment you actually need to finish. Choose its class, enter its due date, then save. You can edit all your deadlines later in Tasks.', action: '[data-action="planner-add-assignment"]', goal: 'assignment' },
-                { route: 'planner', sel: '.planner-day-controls .planner-budget', title: 'Set your time for today', text: "Choose Try it and enter today's study minutes. Leave it blank to use your usual schedule. Week view lets you set minutes per workday for that week. Defaults and workdays live in General settings. Deadlines stay visible even when over budget.", change: '#planner-current-minutes', goal: 'budget' },
+                { route: 'planner', sel: '.planner-day-controls .planner-budget', title: 'Set your time for today', text: "Choose Try it and enter today's study minutes. Leave it blank to use your usual schedule. Week view sets minutes per workday. Defaults and workdays live in General settings.", change: '#planner-current-minutes', goal: 'budget' },
                 { route: 'planner', sel: '#planner-day-queue', title: 'Start one work block', text: 'Choose Work on this for a task you can do now. Keep this page open while you work. Time pauses when you leave or go idle. Mark done only when finished.', action: '[data-action="planner-start-work"]', goal: 'work' },
                 { route: 'study-manage', sel: '#create-deck-btn', title: 'Save three useful flashcards', text: 'Make a New study set for your next quiz. Give it a topic, add at least three terms with answers, and save. Importing a set works too.', action: '#create-deck-btn', goal: 'deck' },
                 { route: 'flashcard', sel: '#deck-grid', title: 'Answer and rate one card', text: 'Choose Study on a set. Think of the answer, reveal it, then choose Again, Hard, Good or Easy honestly. Opening a set alone does not finish this step. Close study to return here.', action: '[data-action="study-deck"], [data-action="study-focus"]', goal: 'answer' },
@@ -11113,6 +11193,7 @@
             const preference = {
                 'settings-start-page': ['startPage', ['dashboard', 'planner', 'flashcard', 'gpa']],
                 'settings-planner-default': ['plannerDefaultStatus', ['all', 'todo', 'overdue', 'awaiting', 'graded']],
+                'settings-game-quality': ['gameQuality', ['auto', 'low', 'high']],
                 'assignment-sort': ['plannerSort', ['due', 'priority', 'name', 'class']]
             }[event.target.id];
             if (preference) {
@@ -11141,6 +11222,24 @@
                 this.syncPreferences();
                 const status = document.getElementById('preferences-save-status');
                 if (status) status.textContent = 'Flashcard preferences saved on this device.';
+                return;
+            }
+            if (event.target.id === 'settings-study-approach') {
+                if (!['scheduled', 'cram'].includes(event.target.value)) {
+                    window.StudBudDialogs.notify('Choose one of the available study preferences.');
+                    this.syncPreferences();
+                    return;
+                }
+                AppState.set('settings', { ...AppState.get('settings'), studyApproach: event.target.value });
+                const status = document.getElementById('preferences-save-status');
+                if (status) status.textContent = 'Flashcard preferences saved.';
+                return;
+            }
+            if (event.target.id === 'study-session-mode') {
+                const deckId = this.activeDeckId;
+                if (!deckId) return;
+                const mode = ['scheduled', 'cram'].includes(event.target.value) ? event.target.value : 'scheduled';
+                if (mode !== this.studyMode) this.startStudy(deckId, mode);
                 return;
             }
             if (event.target.id === 'admin-game-test-energy') {
@@ -11178,6 +11277,10 @@
                     ...AppState.get('profile'), school: document.getElementById('settings-school').value,
                     academicYearStart: Number(document.getElementById('settings-academic-year').value), schoolCalendar: null
                 });
+                return;
+            }
+            if (event.target.id === 'ic-manual-paste') {
+                this.icManualPaste = String(event.target.value || '');
                 return;
             }
             if (event.target.id === 'school-semester-select') {
@@ -12152,7 +12255,10 @@
                     this.renderDeckEditorCards();
                 }
             }
-            if (action === 'study-deck') this.startStudy(id);
+            if (action === 'study-deck') {
+                const approach = (AppState.get('settings') || {}).studyApproach;
+                this.startStudy(id, approach === 'cram' ? 'cram' : 'scheduled');
+            }
             if (action === 'study-focus') this.startStudy(id, 'focus');
             if (action === 'cram-deck') this.startStudy(id, 'cram');
             if (action === 'cram-starred') this.startStudy(id, 'starred');
@@ -12212,6 +12318,8 @@
             this.enterStudyFocus();
             const toggle = document.getElementById('study-type-toggle');
             if (toggle) toggle.checked = localStorage.getItem('studbud-type-answer') === '1';
+            const modeSelect = document.getElementById('study-session-mode');
+            if (modeSelect) modeSelect.value = ['scheduled', 'cram'].includes(this.studyMode) ? this.studyMode : 'scheduled';
             const direction = document.getElementById('study-direction');
             if (direction) direction.value = this.studyDirection();
             this.renderStudyCard();
@@ -12669,6 +12777,8 @@
                 priorUnweightedGpa: priorCredits > 0 ? priorUnweightedGpa : null,
                 currentTerm: document.getElementById('settings-current-term').value
             };
+            delete profile.firstName;
+            delete profile.lastName;
             delete profile.targetGpa;
             delete profile.firstName;
             delete profile.lastName;

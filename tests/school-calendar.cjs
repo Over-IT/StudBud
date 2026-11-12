@@ -31,7 +31,7 @@ const app = sandbox.app;
 const plain = value => JSON.parse(JSON.stringify(value));
 vm.runInContext(source.slice(source.indexOf('    class AppStateEngine'), source.indexOf('    const AppState ='))
     + '\nglobalThis.creditState = Object.create(AppStateEngine.prototype);', sandbox);
-vm.runInContext(read('data\\schools\\central.js'), sandbox);
+vm.runInContext(read(path.join('data', 'schools', 'central.js')), sandbox);
 sandbox.creditState.state = { profile: { school: 'pchs' } };
 const oldCredits = [
     { code: '057011/057012', term: 'S1', credits: 1 },

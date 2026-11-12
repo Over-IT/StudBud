@@ -3458,7 +3458,7 @@
         // The hill moves every 20 seconds; all clients derive it from the shared start time
         placeAtSpawn(body, point) {
             body.x = clamp(point[0], this.stage.x + 8, this.stage.x + this.stage.w - body.w - 8);
-            const support = this.solids.filter(p => body.x >= p.x + 4 && body.x + body.w <= p.x + p.w - 4 && p.y >= point[1] - 60)
+            const support = this.solids.filter(p => p.y <= this.stage.y && body.x >= p.x + 4 && body.x + body.w <= p.x + p.w - 4 && p.y >= point[1] - 60)
                 .sort((a, b) => a.y - b.y)[0] || this.stage;
             body.y = support.y - body.h;
             body.vx = body.vy = 0; body.onGround = true; body.ground = support;

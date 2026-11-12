@@ -1668,6 +1668,7 @@
             if (this.canvas.width !== Math.floor(w * dpr)) this.canvas.width = Math.floor(w * dpr);
             if (this.canvas.height !== Math.floor(h * dpr)) this.canvas.height = Math.floor(h * dpr);
             this.dpr = dpr;
+            this.lowDetail = Boolean(this.graphics?.low) || (nativeDpr > 0 && (dpr / nativeDpr) <= 0.8);
             this.scale = clamp(h / 720, .65, 1.25);
             this.vw = w / this.scale;
             this.vh = h / this.scale;
@@ -1959,7 +1960,7 @@
             this.justPressed.clear();
             this.mouse.pressed = false;
             this.mouse.rpressed = false;
-            if (!document.hidden && (this.mode !== 'chess' || this.preview) && now - (this.lastDrawAt ?? -Infinity) >= 1000 / (this.graphics?.fps ?? Infinity) - .1) {
+            if (!document.hidden && (this.mode !== 'chess' || this.preview)) {
                 this.lastDrawAt = now;
                 const ctx = this.ctx;
                 ctx.setTransform(this.dpr * this.scale, 0, 0, this.dpr * this.scale, 0, 0);
@@ -2075,11 +2076,12 @@
         const canvases = new Set();
         const visible = new Set();
         const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+        const profile = graphicsProfile();
         let frame = 0, lastTime = -Infinity;
         const draw = time => {
             frame = 0;
             if (document.hidden || motion.matches || !visible.size) return;
-            if (time - lastTime >= 1000 / graphicsProfile().avatarFps) {
+            if (time - lastTime >= 1000 / (profile.avatarFps || 60)) {
                 lastTime = time;
                 for (const canvas of visible) drawAvatar(canvas, { cos: canvas.dataset }, time / 1000);
             }

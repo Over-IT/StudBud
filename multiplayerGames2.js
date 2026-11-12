@@ -849,11 +849,11 @@
             const rideCenter = this.waveCrest(me.y, now, surge) - 40;
             const separation = (me.x - rideCenter) / (this.riding ? 210 : 150);
             const face = separation < 0 ? Math.max(0, 1 + separation / 1.6) : Math.max(0, 1 - separation * .9);
-            const caught = surge.active && !this.whirlpool && this.ejectT <= 0 && face > .2 && shelter > .5;
+            const caught = surge.active && !this.whirlpool && this.ejectT <= 0 && face > (this.riding ? 0.12 : 0.2) && shelter > .5;
             const paddling = caught && steering && canMove && axis.x < -.3;
             this.wavePaddleT = paddling ? Math.min(1.5, (this.wavePaddleT || 0) + dt) : Math.max(0, (this.wavePaddleT || 0) - dt * 2);
             const resistance = this.wavePaddleT / 1.5;
-            const push = caught ? (WAVE_SPEED + clamp((rideCenter - me.x) * 2, -100, 180)) * shelter * (1 - resistance * .85) : 0;
+            const push = caught ? (WAVE_SPEED + clamp((rideCenter - me.x) * 2, -100, 180)) * shelter * Math.max(0.8, 1 - resistance * .55) : 0;
             this.surgePush = lerp(this.surgePush, push, 1 - Math.exp(-dt * 8));
             if (!shelter || this.whirlpool) this.surgePush = 0;
             this.riding = caught;
@@ -868,9 +868,10 @@
             const drift = { x: 24 * shelter + this.surgePush, y: 0 };
             if (this.riding) {
                 const length = Math.hypot(axis.x, axis.y) || 1;
-                drift.x -= axis.x / length * this.baseSpeed * this.speedMul * .85 * (1 - resistance);
+                const withWave = Math.max(0, axis.x / length);
+                drift.x -= withWave * this.baseSpeed * this.speedMul * .85 * (1 - resistance);
             }
-            this.step(dt, this.ejectT > 0 ? 240 : 1800, drift, !this.aimLocked);
+            this.step(dt, this.ejectT > 0 ? 240 : 1800, drift, !this.aimLocked && !(this.riding && axis.x < 0));
             this.updateLogs(now);
             this.castCd -= dt; this.hurt = Math.max(0, this.hurt - dt); this.comboT -= dt; this.poolHitCd = Math.max(0, this.poolHitCd - dt);
             if (this.comboT <= 0) this.combo = 0;

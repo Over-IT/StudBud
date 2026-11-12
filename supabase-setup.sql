@@ -879,6 +879,11 @@ begin
         when 'palette' then '{"uncommon":50,"rare":35,"epic":13,"legendary":2}'::jsonb
         when 'skin' then '{"common":10,"uncommon":35,"rare":30,"epic":20,"legendary":5}'::jsonb
         when 'animal' then '{"common":35,"uncommon":35,"rare":22,"epic":8}'::jsonb
+	        when 'space' then '{"common":25,"uncommon":35,"rare":25,"epic":12,"legendary":2,"mythic":1}'::jsonb
+	        when 'fantasy' then '{"common":25,"uncommon":35,"rare":25,"epic":12,"legendary":2,"mythic":1}'::jsonb
+	        when 'nature' then '{"common":25,"uncommon":35,"rare":25,"epic":12,"legendary":2,"mythic":1}'::jsonb
+	        when 'ocean' then '{"common":25,"uncommon":35,"rare":25,"epic":12,"legendary":2,"mythic":1}'::jsonb
+	        when 'school' then '{"common":25,"uncommon":35,"rare":25,"epic":12,"legendary":2,"mythic":1}'::jsonb
         when 'mythic' then '{"epic":40,"legendary":45,"mythic":15}'::jsonb
         when 'season' then '{"uncommon":35,"rare":30,"epic":27,"legendary":8}'::jsonb
         else '{"common":25,"uncommon":35,"rare":25,"epic":12,"legendary":2,"mythic":1}'::jsonb
@@ -3273,7 +3278,7 @@ begin
         v_streak := v_streak + 1;
         v_day := v_day - 1;
     end loop;
-    return jsonb_build_object(
+	    return jsonb_build_object(
         'user_id', p_user_id,
         'username', v_name,
         'favorite_subject', coalesce(v_pub.favorite_subject, ''),
