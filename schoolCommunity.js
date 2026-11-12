@@ -170,6 +170,7 @@
                 if (this.tab === 'teacher') this.app.classrooms.renderTeacherDetail();
                 else if (!this.classId) this.app.classrooms.renderTeacherHome();
             }
+            this.app.enhanceSetPickers?.(this.root);
             const live = document.getElementById('community-live');
             if (live) this.liveMarkupCache.set(live, this.liveMarkup(data.live || [], this.classId, data.can_announce));
         }
@@ -220,7 +221,7 @@
             return `<section class="community-shared-section"><h3>${this.classId ? 'Class study sets' : 'Sets shared with your school'}</h3>
                 <p class="settings-hint">Latest 100 shares. Each includes a purpose note and its audience. Public sets are discoverable by anyone; course-only and school-only sets stay in their chosen community.</p>
                 ${this.classId && this.data.can_post !== false ? `<details class="glass-card community-new-post"${draft.note || pending ? ' open' : ''}><summary>Share a set <i class="fas fa-plus" aria-hidden="true"></i></summary>
-                    ${own.length ? `<form data-community-share class="community-compose"><label>Your set<select name="deck" required${disabled}>${own.map(deck => `<option value="${esc(deck.id)}"${draft.deck === deck.id ? ' selected' : ''}>${esc(deck.title)}</option>`).join('')}</select></label>
+                    ${own.length ? `<form data-community-share class="community-compose"><label>Your set<select name="deck" required data-set-picker${disabled}>${own.map(deck => `<option value="${esc(deck.id)}"${draft.deck === deck.id ? ' selected' : ''}>${esc(deck.title)}</option>`).join('')}</select></label>
                     <label>What is it for?<textarea name="note" rows="2" required maxlength="300"${disabled} placeholder="For example: Unit 3 vocabulary for Friday's quiz">${esc(draft.note || '')}</textarea></label>
                     <label>Who can view it?<select name="visibility"${disabled}>${[['public', 'Public · anyone can discover it (default)'], ['course', 'This course at this school only'], ['school', 'Everyone at this school']].map(([value, label]) => `<option value="${value}"${(draft.visibility || 'public') === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label>
                     <p class="settings-hint">The course/school association is shared with your chosen audience. Only terms, answers and distractors are copied, not study history, images, attachments or private assessment links. To restrict a set that already has a public copy, unpublish it in Manage sets first.</p>

@@ -236,7 +236,7 @@
                 studyHistory: [],
                 gameMetrics: freshGameMetrics(),
                 settings: {
-                    theme: "system",
+                    theme: "dark",
                     colorScheme: "studbud",
                     gameGraphics: "auto",
                     audioVolume: 0.70,
@@ -651,6 +651,13 @@
         }
 
         init() {
+            document.querySelectorAll('.view').forEach(view => {
+                const lead = view.firstElementChild;
+                if (lead?.matches('.view-header, .workspace-welcome, .multiplayer-topline')) lead.classList.add('view-lead');
+            });
+            const wallet = document.querySelector('#multiplayer-view .multiplayer-wallet');
+            const headerRight = document.querySelector('#top-header .header-right');
+            if (wallet && headerRight) headerRight.prepend(wallet);
             window.addEventListener('hashchange', () => this.handleHashChange());
             this.handleHashChange();
         }
@@ -1384,6 +1391,11 @@
         bindUI() {
             document.addEventListener('click', event => this.handleClick(event));
             document.addEventListener('keydown', event => this.handleKeydown(event));
+            // A focused number field would otherwise eat the wheel and change its value instead of scrolling the page.
+            document.addEventListener('wheel', event => {
+                const field = event.target;
+                if (field instanceof HTMLInputElement && field.type === 'number' && document.activeElement === field) field.blur();
+            }, { passive: true });
             const typingSurface = target => (target?.nodeType === 1 ? target : target?.parentElement)?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"]), code, pre, .selectable');
             document.addEventListener('selectstart', event => { if (!typingSurface(event.target)) event.preventDefault(); });
             document.addEventListener('dragstart', event => {
@@ -1749,7 +1761,7 @@
                 rows, courseCode, sourceText: document.getElementById('campus-paste-assignments').value
             };
             preview.innerHTML = `<ul class="campus-paste-list campus-paste-assignments">${rows.map((row, index) => {
-                const grade = row.incompleteScore ? 'Score needs points possible' : row.pointsEarned === null ? 'No score'
+                const grade = row.excused ? 'Excused' : row.incompleteScore ? 'Score needs points possible' : row.pointsEarned === null ? 'No score'
                     : row.multiplierValue !== 1 && !row.unsupportedMultiplier
                         ? `${row.pointsEarned}/${row.maxPoints} × ${row.multiplierValue} = ${Number((row.pointsEarned * row.multiplierValue).toPrecision(12))}/${Number((row.maxPoints * row.multiplierValue).toPrecision(12))}`
                         : `${row.pointsEarned}/${row.maxPoints}`;
@@ -1818,8 +1830,9 @@
                     graded,
                     dismissed: false,
                     icMissing: Boolean(row.missing),
-                    status: graded && !row.missing ? 'completed' : 'pending',
-                    completedAt: graded && !row.missing ? today : null,
+                    // Excused work never counts toward the grade and needs no further action.
+                    status: (graded || row.excused) && !row.missing ? 'completed' : 'pending',
+                    completedAt: (graded || row.excused) && !row.missing ? today : null,
                     gradedAt: graded ? today : null
                 });
             });
@@ -2125,8 +2138,8 @@
                 const creditNote = `${this.formatNumber(currentGpa.totalCredits)} tracked credits in ${this.termLabel(semester)}`;
                 summary.innerHTML = `
                     <article class="glass-card"><span class="gpa-summary-label">${this.termLabel(semester)} GPA</span><strong>${Number(currentGpa.weighted).toFixed(2)}</strong><small>${creditNote}</small></article>
-                    <article class="glass-card"><span class="gpa-summary-label">Cumulative GPA</span><strong>${Number(cumulative.weighted).toFixed(2)}</strong><small>Past years plus graded current classes</small></article>
-                    <article class="glass-card"><span class="gpa-summary-label">Completed credits</span><strong>${this.formatNumber(earnedCredits)}</strong><small>Past credits plus passed archived classes; excludes current classes</small></article>
+                    <article class="glass-card"><span class="gpa-summary-label">Cumulative GPA</span><strong>${Number(cumulative.weighted).toFixed(2)}</strong><small>All years</small></article>
+                    <article class="glass-card"><span class="gpa-summary-label">Completed credits</span><strong>${this.formatNumber(earnedCredits)}</strong><small title="Past credits plus passed archived classes">Earned so far</small></article>
                     <details class="gpa-secondary"><summary>View unweighted GPA</summary><p>${this.termLabel(semester)}: <strong>${Number(currentGpa.unweighted).toFixed(2)}</strong></p><p>Cumulative: <strong>${Number(cumulative.unweighted).toFixed(2)}</strong></p><small>GPA normally includes Honors/AP weighting. These values leave the extra weighting out.</small></details>
                 `;
             }
@@ -3636,8 +3649,10 @@
             const fallback = scope === 'week' ? settings.plannerDailyMinutes ?? 90
                 : window.PlannerEngine.availableMinutes({ ...settings, plannerDayMinutes: {} }, date);
             input.placeholder = String(fallback);
-            document.getElementById('planner-time-hint').textContent = scope === 'week'
-                ? 'Per selected workday, not a weekly total. Blank uses preferences; day overrides take priority.'
+            const timeHint = document.getElementById('planner-time-hint');
+            timeHint.textContent = '';
+            input.title = scope === 'week'
+                ? 'Per workday, not a weekly total. Blank uses your preferences.'
                 : `Blank uses your usual schedule (${fallback} min).`;
         }
 
@@ -3841,9 +3856,7 @@
             document.querySelector('[data-action="planner-next-day"]').setAttribute('aria-label', `Next ${scope}`);
             this.renderPlannerTime();
             document.getElementById('planner-day-heading').textContent = title;
-            document.getElementById('planner-day-description').textContent = isToday
-                ? 'Start with the first task. Your plan adjusts as you work.'
-                : 'Planned from your current unfinished work.';
+            document.getElementById('planner-day-description').textContent = '';
             const formatMinutes = minutes => {
                 const rounded = Math.ceil(minutes);
                 return rounded >= 60 ? `${Math.floor(rounded / 60)}h${rounded % 60 ? ` ${rounded % 60}m` : ''}` : `${rounded}m`;
@@ -3854,8 +3867,8 @@
                 <div><strong>${formatMinutes(plan.studiedMinutes - plan.workMinutes)}</strong><span>studied</span></div>
                 <div><strong>${formatMinutes(plan.workMinutes)}</strong><span>worked</span></div>
                 <p class="${plan.overBudget ? 'planner-overloaded' : ''}">${plan.overBudget
-                    ? `${formatMinutes(plan.overBudget)} over budget. Move flexible work or adjust estimates.`
-                    : `${formatMinutes(Math.max(0, plan.budget - plan.studiedMinutes - plan.remainingMinutes))} free for breaks or other work.`}</p>`;
+                    ? `${formatMinutes(plan.overBudget)} over budget`
+                    : ''}</p>`;
             const renderCard = (task, index) => {
                 const id = this.escapeHTML(task.id), name = this.escapeHTML(task.title);
                 const due = task.dueDate ? `Due ${this.escapeHTML(String(task.dueDate).slice(0, 10))}` : 'No deadline';
@@ -3881,7 +3894,7 @@
             };
             const visibleCount = plan.manualOrder ? plan.queue.length : Math.max(3, plan.queue.findLastIndex(task => task.urgent) + 1);
             const remaining = plan.queue.slice(visibleCount);
-            queue.innerHTML = plan.queue.length ? `<div class="planner-order-toolbar"><p class="settings-hint">${plan.manualOrder ? 'Your task order for this day.' : 'Automatically prioritized. Drag a numbered grip to change the order.'}</p>${plan.manualOrder ? '<button type="button" class="text-btn" data-action="planner-auto-order">Use automatic order</button>' : ''}</div><ol class="planner-day-list">${plan.queue.slice(0, visibleCount).map(renderCard).join('')}</ol>${remaining.length ? `<details class="planner-remaining"${moreExpanded ? ' open' : ''}><summary>${remaining.length} more planned task${remaining.length === 1 ? '' : 's'}</summary><ol class="planner-day-list" start="${visibleCount + 1}">${remaining.map((task, index) => renderCard(task, index + visibleCount)).join('')}</ol></details>` : ''}`
+            queue.innerHTML = plan.queue.length ? `<div class="planner-order-toolbar">${plan.manualOrder ? '<p class="settings-hint">Custom order</p>' : ''}${plan.manualOrder ? '<button type="button" class="text-btn" data-action="planner-auto-order">Use automatic order</button>' : ''}</div><ol class="planner-day-list">${plan.queue.slice(0, visibleCount).map(renderCard).join('')}</ol>${remaining.length ? `<details class="planner-remaining"${moreExpanded ? ' open' : ''}><summary>${remaining.length} more planned task${remaining.length === 1 ? '' : 's'}</summary><ol class="planner-day-list" start="${visibleCount + 1}">${remaining.map((task, index) => renderCard(task, index + visibleCount)).join('')}</ol></details>` : ''}`
                 : `<div class="glass-card planner-day-empty"><h4>${plan.budget === 0 ? 'A day off from suggested work' : plan.later.length ? 'Your plan is clear' : 'You are caught up'}</h4><p>${plan.budget === 0 ? 'No automatic suggestions with 0 available minutes. Deadlines and work you choose still appear here.' : plan.later.length ? 'Open Upcoming work to add a task, or adjust your available time.' : 'Add your next assignment when you get it.'}</p><button type="button" class="secondary-btn" data-action="planner-add-assignment">Add assignment</button></div>`;
             const laterCard = task => `<li><div><strong>${this.escapeHTML(task.title)}</strong><small>${this.escapeHTML(task.courseTitle)} · ${task.dueDate ? `Due ${this.escapeHTML(String(task.dueDate).slice(0, 10))}` : 'No deadline'}${task.plannedDate ? ` · Work on ${this.escapeHTML(task.plannedDate)}` : ''}</small></div>
                 <div class="planner-card-actions"><button type="button" class="secondary-btn" data-action="planner-add-to-day" data-id="${this.escapeHTML(task.id)}">Add to this day</button><button type="button" class="text-btn" data-action="edit-assignment" data-id="${this.escapeHTML(task.id)}">Edit</button></div></li>`;
@@ -4829,6 +4842,43 @@
             this.openModal('card-studio-modal');
         }
 
+        enhanceSetPickers(root = document, minOptions = 8) {
+            root.querySelectorAll?.('select[data-set-picker]').forEach(select => {
+                const options = [...select.options].filter(option => option.value);
+                let wrap = select.previousElementSibling?.classList?.contains('picker-search') ? select.previousElementSibling : null;
+                if (options.length < minOptions) {
+                    wrap?.remove();
+                    options.forEach(option => { option.hidden = false; });
+                    return;
+                }
+                if (!wrap) {
+                    wrap = document.createElement('div');
+                    wrap.className = 'picker-search';
+                    wrap.innerHTML = '<i class="fas fa-magnifying-glass" aria-hidden="true"></i><input type="search" placeholder="Search sets" aria-label="Search sets" autocomplete="off"><span class="picker-count" aria-live="polite"></span>';
+                    select.insertAdjacentElement('beforebegin', wrap);
+                    wrap.querySelector('input').addEventListener('input', () => this.filterSetPicker(select, wrap));
+                }
+                this.filterSetPicker(select, wrap);
+            });
+        }
+
+        filterSetPicker(select, wrap) {
+            const terms = wrap.querySelector('input').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+            let shown = 0;
+            let firstVisible = null;
+            [...select.options].forEach(option => {
+                if (!option.value) return;
+                const text = option.textContent.toLowerCase();
+                option.hidden = !terms.every(term => text.includes(term));
+                if (!option.hidden) { shown += 1; firstVisible ||= option; }
+            });
+            wrap.querySelector('.picker-count').textContent = terms.length ? `${shown} found` : '';
+            if (firstVisible && select.selectedOptions[0]?.hidden) {
+                select.value = firstVisible.value;
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }
+
         renderHostedGameDecks() {
             const select = document.getElementById('host-game-deck');
             if (!select) return;
@@ -4853,6 +4903,7 @@
                 practiceSelect.disabled = !decks.length;
             });
             if (decks.some(deck => deck.id === previous)) select.value = previous;
+            this.enhanceSetPickers(document.getElementById('multiplayer-view') || document);
             let nickname;
             try {
                 nickname = this.gameNickname();
@@ -5349,7 +5400,7 @@
             const reward = document.getElementById('daily-reward-btn');
             const rewardText = document.getElementById('daily-reward-text');
             if (reward) { reward.disabled = false; reward.textContent = 'Create free account'; reward.dataset.action = 'guest-create-account'; }
-            if (rewardText) rewardText.textContent = 'Accounts earn coins, daily rewards and cosmetics. Your guest decks and progress come with you.';
+            if (rewardText) rewardText.textContent = 'Earn coins and cosmetics. Your guest progress comes with you.';
             ['multiplayer-wallet-coins', 'multiplayer-sidebar-coins', 'shop-wallet-coins'].forEach(id => {
                 const element = document.getElementById(id);
                 if (element) element.textContent = '0';
@@ -5374,8 +5425,8 @@
             button.disabled = claimed;
             button.textContent = claimed ? 'Claimed today' : 'Claim reward';
             text.textContent = claimed
-                ? `Come back tomorrow to keep your ${streak}-day coin-reward streak going. This is separate from your study streak.`
-                : `Claim free coins once a day. Keep a coin-reward streak going for bigger rewards (up to 85 coins). This is separate from your study streak.`;
+                ? `${streak}-day streak · back tomorrow`
+                : `Free coins daily · up to 85 with a streak`;
         }
 
         // ---- Username changes (once a week; the admin can force a rename) ----
@@ -5394,7 +5445,7 @@
                 if (this.isAdmin) hint.textContent = 'The admin account\'s username can\'t be changed.';
                 else if (status.forced) hint.textContent = 'An admin has asked you to pick a new username. Choose one now.';
                 else if (locked && status.next_change_at) hint.textContent = `You can change your username once every 7 days. Next change available ${new Date(status.next_change_at).toLocaleString()}.`;
-                else hint.textContent = 'You can change your username once every 7 days. Use your new username the next time you sign in.';
+                else hint.textContent = 'Changeable once every 7 days.';
                 if (status.forced && !this.isAdmin) this.showForcedUsernameModal();
             } catch (error) {
                 hint.textContent = 'Username changes are unavailable right now. If this persists, re-run supabase-setup.sql in Supabase.';
@@ -5701,7 +5752,7 @@
                         <label>Simulated players (single player only)<select id="admin-game-test-bots"><option value="0">No bots</option><option value="1">1 bot</option><option value="2">2 bots</option><option value="3" selected>3 bots</option></select></label>
                         <label>Map seed (optional)<input id="admin-game-test-seed" type="number" min="0" max="4294967295" step="1" placeholder="Default map"></label>
                         <label>Energy<select id="admin-game-test-energy"><option value="unlimited">Unlimited</option><option value="limited">Limited</option></select></label>
-                        <label id="admin-game-test-reward-label" class="hidden">Energy per question<input id="admin-game-test-reward" type="number" min="5" max="100" step="1" value="20" disabled><small>Question Chess always grants one move per answer.</small></label>
+                        <label id="admin-game-test-reward-label" class="hidden">Energy per question<input id="admin-game-test-reward" type="number" min="5" max="100" step="1" value="20" disabled><small>Chess: one move per answer.</small></label>
                     </div>
                     <div class="admin-actions">
                         <button type="button" class="primary-btn" data-admin-action="test-game"><i class="fas fa-flask" aria-hidden="true"></i> Launch test</button>
@@ -6059,17 +6110,16 @@
                     const slider = document.querySelector(`[data-reward-slider="${prefix}-game-reward"]`);
                     if (slider) slider.value = suggested;
                 }
-                if (mode === 'chess') {
-                    guidance.textContent = 'Chess always awards exactly one move per correct answer. Resource amount does not apply.';
-                    continue;
-                }
                 const amount = Number(input.value);
-                const warning = !Number.isInteger(amount) || amount < 5 || amount > 100 ? ' Choose a whole number from 5 to 100.'
-                    : amount < min ? ' Below recommended: expect more frequent questions.'
-                        : amount > max ? ' Above recommended: expect fewer questions or larger payouts.' : ' Within the recommended range.';
-                guidance.textContent = `Recommended setting: ${min}-${max}. ${explanation}${warning} Recommendations are guidance; the allowed range is 5-100 in steps of 1. Play style affects pacing.`;
+                const invalid = !Number.isInteger(amount) || amount < 5 || amount > 100;
+                guidance.textContent = mode !== 'chess' && invalid ? 'Use a whole number 5–100' : '';
+                guidance.hidden = !guidance.textContent;
+                input.title = mode === 'chess' ? '' : explanation;
                 const button = document.querySelector(`[data-action="recommended-reward"][data-id="${prefix}-game-reward"]`);
-                if (button) button.textContent = `Use recommended: ${suggested}`;
+                if (button) {
+                    button.textContent = 'Reset';
+                    button.hidden = mode === 'chess' || amount === suggested;
+                }
             }
         }
 
@@ -6100,19 +6150,17 @@
             this.updateMultiplayerGoalInputs();
             document.getElementById('chess-setup-note')?.classList.toggle('hidden', !chess);
             const soloNote = document.getElementById('solo-game-note');
-            if (soloNote) soloNote.textContent = chess ? 'You play a computer opponent. One correct answer earns one move. No time limit; checkmate wins.'
-                : mode === 'defense' ? 'Earn your own cash from correct answers, not kills. Buy enemies to add +1 every wave against rivals. Reduce the opposing base to 0 HP.'
-                : 'Same game as multiplayer, with computer players instead of a room. Correct answers earn coins when you are signed in.';
+            if (soloNote) soloNote.textContent = chess ? 'Vs computer · checkmate wins.' : 'Signed-in players earn coins.';
             const labels = {
-                defense: ['Team Tower Defense', 'Red vs blue, 1v1 or teams. Questions earn your own cash; kills do not. Each enemy purchase adds +1 to every future wave against rivals. First base to 0 HP loses.'],
-                skyline: ['Escape to Space', 'Climb rooftop switchbacks, cross a factory and reach space. Lower routes can catch a fall.'],
-                river: ['River Fishing', 'Catch fish, surf waves or hold left to paddle through them. Nearby rivals trigger an 8-second flashcard duel: answer first to steal fish points. Whirlpools spin and launch your boat.'],
+                defense: ['Team Tower Defense', 'Answer for cash, build towers, send enemies at rivals.'],
+                skyline: ['Escape to Space', 'Parkour from the rooftops up to space.'],
+                river: ['River Fishing', 'Catch fish, ride waves and win duels for points.'],
                 market: ['Package Delivery', 'Deliver packages across town and dodge cars.'],
                 miner: ['Crystal Mining', 'Dig crystals, bank them at base, avoid lava.'],
-                duel: ['King of the Hill', 'King of the Hill: hold the glowing zone to score and knock rivals off.'],
+                duel: ['King of the Hill', 'Hold the zone and knock rivals off.'],
                 crypto: ['Crypto Trading', 'Trade six assets and answer questions for cash.'],
-                shooter: ['Arena Shooter', 'Twin-stick combat: dash, upgrade your blaster and battle rival pilots, with drones as a secondary threat.'],
-                chess: ['Question Chess', '1v1 chess: each correct answer earns one move. Checkmate wins; the checked player has priority to escape.']
+                shooter: ['Arena Shooter', 'Dash, upgrade your blaster and outfight rivals.'],
+                chess: ['Question Chess', '1v1 chess · one move per correct answer.']
             };
             const [title, description] = labels[mode] || labels.skyline;
             document.getElementById('multiplayer-preview-title').textContent = title;
@@ -9141,7 +9189,7 @@
                     if (!['light', 'dark'].includes(AppState.get('settings')?.theme)) this.applyAppearance();
                 });
             }
-            const preference = ['light', 'dark'].includes(settings.theme) ? settings.theme : 'system';
+            const preference = ['light', 'dark', 'system'].includes(settings.theme) ? settings.theme : 'dark';
             const theme = preference === 'system' ? (this.systemThemeQuery?.matches ? 'dark' : 'light') : preference;
             const palettes = (window.StudBudCommunityGames?.catalog || []).filter(item => item.type === 'palette');
             const requestedPalette = palettes.find(item => item.color === settings.colorScheme);
@@ -9564,7 +9612,7 @@
         tutorialSteps() {
             return [
                 { title: 'Set up your next school day', text: 'Use your own schoolwork: save a deadline, plan a work block, then answer a flashcard. The path checks off real progress, not button clicks. Skip anything you do not need.' },
-                { route: 'gpa', sel: '#add-course-btn', title: 'Save your classes', text: 'Use Add Class to enter your classes and grading details. You can edit or update them whenever you need.', action: '#add-course-btn', goal: 'classes' },
+                { route: 'gpa', sel: '#add-course-btn', title: 'Save your classes', text: 'Use Add Class, or Import grades to paste your classes and scores straight from your grade portal (Infinite Campus supported). Select all, copy, paste.', action: '#add-course-btn', goal: 'classes' },
                 { route: 'planner', sel: '[data-action="planner-add-assignment"]', title: 'Save one real deadline', text: 'Add an assignment you actually need to finish. Choose its class, enter its due date, then save. You can edit all your deadlines later in Tasks.', action: '[data-action="planner-add-assignment"]', goal: 'assignment' },
                 { route: 'planner', sel: '.planner-day-controls .planner-budget', title: 'Set your time for today', text: "Choose Try it and enter today's study minutes. Leave it blank to use your usual schedule. Week view sets minutes per workday. Defaults and workdays live in General settings.", change: '#planner-current-minutes', goal: 'budget' },
                 { route: 'planner', sel: '#planner-day-queue', title: 'Start one work block', text: 'Choose Work on this for a task you can do now. Keep this page open while you work. Time pauses when you leave or go idle. Mark done only when finished.', action: '[data-action="planner-start-work"]', goal: 'work' },
@@ -11928,8 +11976,8 @@
             const assessment = ['quiz', 'test'].includes(kind);
             const hint = document.getElementById('assignment-remaining-hint');
             if (hint) hint.textContent = assessment
-                ? 'Set a new estimate of study time left. Future active study reduces it automatically. Reaching 100% does not mark the quiz or test done.'
-                : 'Estimate the work left to finish or turn in. Active assignment work reduces it; work time is separate from study time.';
+                ? 'Study time left. Studying reduces it.'
+                : 'Work left to finish.';
             const remaining = document.getElementById('assignment-remaining');
             if (remaining) remaining.placeholder = assessment ? 'Automatic from estimate and study history' : 'Estimated work left';
             const progress = document.getElementById('assignment-time-progress');
@@ -13034,8 +13082,8 @@
             document.getElementById('importer-import-panel').classList.toggle('hidden', manual);
             document.getElementById('importer-manual-panel').classList.toggle('hidden', !manual);
             document.getElementById('importer-mode-hint').textContent = manual
-                ? 'Type each term and definition yourself. Add as many cards as you need.'
-                : 'Paste tabular flashcard text below. Terms and definitions should be separated by your chosen delimiter, with one card per line.';
+                ? 'Type each term and definition.'
+                : 'One card per line: term, delimiter, definition.';
             if (manual && !document.querySelector('#manual-card-rows .manual-card-row')) {
                 for (let i = 0; i < 3; i++) this.addManualCardRow(false);
             }
@@ -13303,7 +13351,10 @@
             const state = seconds >= 21600 ? 'Session limit (6 hr)' : this.studyTracker.running ? (work ? 'Working' : 'Studying') : this.studyTracker.context ? 'Paused' : 'Not tracking';
             document.querySelectorAll('.auto-study-state').forEach(node => { node.textContent = state; });
             const status = document.getElementById('focus-sprint-status');
-            if (status) status.textContent = `${state}. Assignment work and studying save separately. Pauses after 60 seconds without interaction or when hidden / unfocused.`;
+            if (status) {
+                status.textContent = state;
+                status.title = 'Work and study time save separately. Pauses after 60 seconds idle or when StudBud is hidden.';
+            }
             const totals = document.getElementById('focus-time-totals');
             if (totals) totals.textContent = `Total worked: ${this.formatStudyDuration(this.activitySeconds('work'))} · Total studied: ${this.formatStudyDuration(this.activitySeconds('study'))}`;
         }
@@ -13413,10 +13464,9 @@
             }
             content.innerHTML = `
                 <form id="practice-test-config-form" class="practice-test-setup">
-                    <p>Choose a deck, then how many questions of each type you want. Use 0 to skip a type.</p>
-                    <p class="settings-hint">Each matching group counts as one question. Larger tests may repeat cards. Adaptive practice favors lower-accuracy cards without excluding other cards.</p>
+                    <p class="settings-hint">Pick a set and how many of each type. 0 skips a type.</p>
                     <label>Flashcard deck
-                        <select name="deckId" required>${usableDecks.map(deck =>
+                        <select name="deckId" required data-set-picker>${usableDecks.map(deck =>
                             `<option value="${this.escapeHTML(deck.id)}">${this.escapeHTML(deck.title)} · ${(deck.cards || []).filter(card => card.front && card.back).length} cards</option>`
                         ).join('')}</select>
                     </label>
@@ -13428,10 +13478,10 @@
                     </fieldset>
                     <label>Feedback<select name="feedback"><option value="study">Study: feedback after each answer</option><option value="exam">Exam: answers only at the end</option></select></label>
                     <label>Default for cards without answer rules<select name="grading"><option value="strict">Exact wording (ignore case and spacing)</option><option value="lenient">Vocabulary: allow accents and one small typo</option></select></label>
-                    <p class="settings-hint">A card’s saved answer rules take priority. Use keywords for definitions; vocabulary mode is for fixed translations. Numerical values and mathematical signs are never guessed.</p>
                     <label class="settings-check"><input type="checkbox" name="adaptive" checked> Focus on weaker cards using your accuracy</label>
                     <button class="primary-btn" type="submit"><i class="fas fa-play"></i> Start practice test</button>
                 </form>`;
+            this.enhanceSetPickers(content);
         }
 
         beginPracticeTest(form) {

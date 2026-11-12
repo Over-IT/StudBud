@@ -124,6 +124,22 @@ assert.ok(paste.parseAssignments(campusPage, today).every(item => !['Assignment'
 assert.equal(paste.parseDate('2/30/2026', today), '', 'invalid calendar dates are not imported');
 assert.equal(paste.parseDate('2026-02-31', today), '', 'invalid ISO dates are not imported');
 assert.equal(paste.parseDate('11/19', today), '2026-11-19', 'dates without a year use the current year');
+for (const value of ['Mon 11/20/2026 11:59 PM', 'Nov 20 at 11:59pm', 'November 20th, 2026', 'Due: 11-20-2026']) {
+    assert.equal(paste.parseDate(value, today), '2026-11-20', `weekday, time and ordinal noise is ignored: ${value}`);
+}
+assert.deepEqual(paste.parseCourses('Period 1\n1(8:00 AM-8:50 AM)\nBiology I\nSmith, John\nRoom: 204\nA (94.2%)\nCourse Design 88%\nMr. Jones\nTerm 1\nIn Progress\nStudio Art - Ms. Lee', catalog)
+    .map(item => item.name), ['Biology I', 'Course Design', 'Studio Art'], 'select-all schedule noise is filtered from class names');
+assert.deepEqual(paste.parseAssignments('Assignment Title,Due On,Grade,Worth,Assignment Type,Flags\n' +
+    'Quiz 1,Mon 11/16/2026,8 of 10 pts,,Quizzes,Late\nLab,11/17,Excused,20,Labs,Excused\nEssay,11/18,-- / 50,,Writing,Missing\nTest,11/19,A (93%),,Tests,', today), [
+    { title: 'Quiz 1', dueDate: '2026-11-16', pointsEarned: 8, maxPoints: 10, category: 'Quizzes' },
+    { title: 'Lab', dueDate: '2026-11-17', pointsEarned: null, maxPoints: 20, category: 'Labs', excused: true },
+    { title: 'Essay', dueDate: '2026-11-18', pointsEarned: null, maxPoints: 50, category: 'Writing', missing: true },
+    { title: 'Test', dueDate: '2026-11-19', pointsEarned: 93, maxPoints: 100, category: 'Tests' }
+], 'alternate CSV headings, score formats and excused work are understood');
+assert.equal(paste.parseAssignments('Assignment\nVocab\u00a0Quiz\nDue: Fri 11/13/2026\nScore 9 / 10 (90%)\nLate', today)[0].title, 'Vocab Quiz',
+    'non-breaking spaces from copied pages are normalised');
+assert.equal(paste.inferCourse('Period 2 Honors Geometry (Smith)\nGrades\nAssignment\nQuiz', [geometry]), geometry,
+    'a heading that contains the class name with extra words still matches');
 
 {
     const nodes = new Map();

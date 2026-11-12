@@ -5502,3 +5502,93 @@ input[type="button"], input[type="submit"], input[type="checkbox"], input[type="
 .mpg-resource-notice small { font-size: .7rem; }
 .mpg-overlay .mpg-meter.empty { border-color: #f87171; }
 .mpg-overlay .mpg-meter.empty .mpg-meter-value { color: #f87171; }
+
+/* Game HUD: refill lives in the thumb zone; phone top bar collapses to one row of icon buttons. */
+.mpg-hud .mpg-actions .mpg-label { white-space: nowrap; }
+.mpg-hud .mpg-actions i { margin-right: 6px; font-size: .9em; }
+.mpg-overlay .mpg-status .mpg-qbtn { display: none; }
+.mpg-overlay .mpg-touch .mpg-qbtn kbd { display: none; }
+.mpg-overlay:not(.has-touch):not(.mpg-spectator) .mpg-touch { display: flex; pointer-events: none; }
+.mpg-overlay:not(.has-touch) .mpg-touch > :not(.mpg-qbtn) { display: none; }
+.mpg-overlay .mpg-touch .mpg-qbtn {
+    position: absolute; top: auto; left: auto; right: max(12px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom));
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    width: auto; min-width: 128px; height: 48px; padding: 0 16px; border-radius: 999px;
+    border: 2px solid rgba(253,224,71,.85); background: rgba(161,98,7,.92); color: #fff;
+    font-size: .9rem; font-weight: 800; white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,.35);
+    pointer-events: auto; touch-action: none; transform: none;
+}
+.mpg-overlay:not(.has-touch) .mpg-touch .mpg-qbtn kbd { display: inline-block; padding: 1px 6px; border-radius: 5px; background: rgba(0,0,0,.35); font: inherit; font-size: .75rem; }
+.mpg-overlay.has-touch .mpg-touch .mpg-qbtn { bottom: calc(max(12px, env(safe-area-inset-bottom)) + var(--btns-h, 140px) + 14px); }
+.mpg-overlay .mpg-touch .mpg-qbtn span { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: rgba(0,0,0,.35); font-size: .85rem; }
+.mpg-overlay .mpg-touch .mpg-qbtn.on { background: rgba(234,179,8,.95); transform: scale(.96); }
+.mpg-overlay .mpg-touch .mpg-qbtn.low { animation: mpg-refill-pulse 1.2s ease-in-out infinite; }
+@keyframes mpg-refill-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(250,204,21,.7); } 50% { box-shadow: 0 0 0 10px rgba(250,204,21,0); } }
+@media (prefers-reduced-motion: reduce) { .mpg-overlay .mpg-touch .mpg-qbtn.low { animation: none; box-shadow: 0 0 0 4px rgba(250,204,21,.6); } }
+@media (max-width: 700px), (max-height: 520px) and (orientation: landscape) {
+    .mpg-overlay .mpg-hud .mpg-top, .mpg-overlay.hud-collapsed .mpg-hud .mpg-top { grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 6px; }
+    .mpg-overlay .mpg-hud .mpg-chip { grid-column: 1; grid-row: 1; }
+    .mpg-overlay .mpg-hud .mpg-timer, .mpg-overlay.hud-collapsed .mpg-hud .mpg-timer { grid-column: 2; grid-row: 1; align-self: center; justify-self: end; min-height: 38px; padding: 4px 8px; }
+    .mpg-overlay .mpg-hud .mpg-actions, .mpg-overlay.hud-collapsed .mpg-hud .mpg-actions { grid-column: 3; grid-row: 1; align-self: center; flex-wrap: nowrap; max-width: none; gap: 4px; }
+    .mpg-overlay .mpg-hud .mpg-actions > button, .mpg-overlay .mpg-hud .mpg-actions summary { display: grid; place-items: center; width: 40px; min-width: 40px; height: 40px; min-height: 40px; padding: 0; font-size: .95rem; list-style: none; }
+    .mpg-overlay .mpg-hud .mpg-actions summary::-webkit-details-marker { display: none; }
+    .mpg-overlay .mpg-hud .mpg-actions i { margin: 0; }
+    .mpg-overlay .mpg-hud .mpg-actions .mpg-host-mode { width: auto; padding: 0 8px; font-size: .7rem; }
+    .mpg-overlay .mpg-hud .mpg-actions .mpg-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    .mpg-overlay .mpg-hud .mpg-chip strong { font-size: .8rem; }
+    .mpg-overlay .mpg-hud .mpg-status { flex-wrap: nowrap; gap: 6px; }
+    .mpg-overlay .mpg-hud .mpg-score, .mpg-overlay .mpg-hud .mpg-meter,
+    .mpg-overlay.hud-collapsed .mpg-hud .mpg-score, .mpg-overlay.hud-collapsed .mpg-hud .mpg-meter { flex: 1 1 0; min-height: 40px; }
+    .mpg-overlay .mpg-touch .mpg-qbtn { min-width: 112px; height: 46px; font-size: .85rem; }
+}
+@media (max-width: 360px) {
+    .mpg-overlay .mpg-hud .mpg-actions > button, .mpg-overlay .mpg-hud .mpg-actions summary { width: 36px; min-width: 36px; height: 36px; min-height: 36px; }
+}
+
+/* ===== Layout refresh: one title per page, compact toolbars, searchable pickers ===== */
+.view > .view-lead { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 10px; margin: 0 0 14px; padding: 0; min-height: 0; background: none; border: 0; box-shadow: none; }
+.view > .view-lead > h2, .view > .view-lead > p,
+.view > .view-lead > div:first-child:has(> h2) { display: none; }
+.view > .view-lead:not(:has(button, select, input, a, .multiplayer-wallet)) { display: none; }
+.view > .view-lead > .actions, .view > .view-lead .workspace-shortcuts { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+.view > .view-lead .school-semester-switcher { margin-right: auto; }
+.view > .multiplayer-topline.view-lead .multiplayer-wallet { padding: 6px 12px; }
+#offline-notice, #school-year-notice { margin: 10px 0 0; padding: 8px 12px; gap: 10px; font-size: .8rem; line-height: 1.35; color: var(--text-secondary); }
+#offline-notice .offline-notice-actions button, #school-year-notice .offline-notice-actions button { min-height: 34px; padding: 6px 14px; font-size: .8rem; }
+.picker-search { position: relative; display: flex; align-items: center; margin: 6px 0 6px; }
+.picker-search > i { position: absolute; left: 12px; color: var(--text-secondary); font-size: .8rem; pointer-events: none; }
+.picker-search input { width: 100%; min-height: 38px; padding: 8px 76px 8px 32px; font-size: .9rem; }
+.picker-search .picker-count { position: absolute; right: 12px; font-size: .75rem; color: var(--text-secondary); pointer-events: none; }
+@media (min-width: 1500px) { #view-container > .view { max-width: 1360px; margin-inline: auto; } }
+@media (min-width: 900px) { .student-workspace .gpa-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+/* Inner scroll areas keep the wheel/swipe instead of scrolling the page behind them */
+.modal-content, .modal-overlay, .app-confirmation, .app-notice, .user-profile-modal, .unbox-card, .mpg-results-card, .mpg-q-card,
+.scenario-existing-list, .community-deck-results, .shop-grid, #deck-editor-cards, .campus-paste-preview, .ic-class-list,
+.course-suggestions, .teacher-course-results, .admin-deck-cards, .ambience-panel, .matrix-quadrant ul, .course-weight-label,
+#main-nav, #sound-drawer, .flashcard-front, .flashcard-back, #active-study-area, .chess-panel, .mpg-test-panel,
+.mpg-hud .mpg-board, .mpg-hud .mpg-panels > div, #tutorial-root .tutorial-card { overscroll-behavior: contain; }
+html:has(.modal-overlay:not(.hidden)), html:has(.app-confirmation[open]), html:has(body.studying) { overflow: hidden; }
+/* Planner: one row of controls, even stat strip */
+#planner-view .planner-page-header > div:first-child { display: none; }
+#planner-view .planner-page-header { justify-content: flex-end; margin: 0; }
+@media (min-width: 900px) {
+    #planner-view .planner-grid { position: relative; }
+    #planner-view .planner-page-header { position: absolute; top: 0; right: 0; z-index: 2; }
+    #planner-view .planner-day-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 20px; padding-right: 150px; }
+}
+.planner-day-controls .planner-date-controls { margin: 0; }
+.planner-day-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.planner-day-summary > div { padding: 10px 14px; border: 1px solid var(--border-glass); border-radius: 12px; background: var(--bg-base); }
+.planner-day-summary > p:empty, #planner-time-hint:empty, #planner-day-description:empty, #planner-plan-status:empty { display: none; }
+@media (max-width: 560px) { .planner-day-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* Importer: fields side by side */
+.importer-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 14px; }
+.importer-top > p { margin: 0; color: var(--text-secondary); font-size: .9rem; }
+.importer-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 12px 16px; margin-bottom: 8px; }
+.importer-fields > div { display: grid; gap: 6px; min-width: 0; }
+.importer-fields.importer-delimiter { grid-template-columns: minmax(0, 240px); margin-top: 10px; }
+#importer-view .deck-link-hint { margin: 0 0 6px; font-size: .78rem; color: var(--text-secondary); }
+/* Games: coin wallet lives in the top bar while Games is open */
+#top-header .multiplayer-wallet { padding: 6px 12px; }
+body:not(:has(#multiplayer-view.active)) #top-header .multiplayer-wallet { display: none; }
+.importer-fields label { font-size: .85rem; font-weight: 600; }

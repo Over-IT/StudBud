@@ -278,7 +278,7 @@ async function integration() {
     app.studyTracker = { context: homeworkContext, running: true, seconds: () => 120, sessions: new Map() };
     app.updateAutomaticStudyDisplay();
     assert.equal(clock.textContent, '02:00', 'homework displays its work timer');
-    assert.match(nodes.get('focus-sprint-status').textContent, /Working.*save separately/);
+    assert.match(nodes.get('focus-sprint-status').textContent, /^Working$/);
     state.state.assignments.find(item => item.id === 'homework').kind = 'quiz';
     const changedContext = app.automaticStudyContext();
     assert.equal(changedContext.session.activityType, 'study');

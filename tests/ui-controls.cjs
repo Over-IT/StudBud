@@ -155,12 +155,11 @@ assert.match(html, /id="campus-paste-modal"[^>]*class="[^"]*modal-content/,
 assert.doesNotMatch(html, /id="campus-paste-import"/, 'the paste flow no longer occupies the grades page');
 assert.match(html, /href="https:\/\/parkwaymo\.infinitecampus\.org\/campus\/portal\/students\/parkway\.jsp\?status=login"/,
     'the paste flow links to the Parkway student portal');
-assert.match(html, /<strong>Classes:<\/strong> open <b>Schedule<\/b>/,
+assert.match(html, /<strong>Classes:<\/strong> copy your <b>Schedule<\/b>/,
     'class paste instructions identify the Campus Student Schedule page');
-assert.match(html, /<strong>Assignments &amp; grades:<\/strong> open <b>Grades<\/b>, choose a class, and copy its assignment table with the header row/,
-    'assignment paste instructions identify the class Grades page and preserve column headers');
-assert.match(html, /Assignment names are required; dates and categories are optional\. To import grades, include both Score and Points Possible/,
-    'paste instructions identify required and optional assignment fields');
+assert.match(html, /<strong>Assignments &amp; grades:<\/strong> open a class in <b>Grades<\/b> and copy the page/,
+    'assignment paste instructions identify the class Grades page');
+assert.match(html, /Extra text is ignored\./, 'paste instructions say extra copied text is safe');
 assert.match(html, /Never paste passwords or student IDs/);
 assert.match(html, /id="campus-paste-assignments"/);
 assert.match(html, /campusPasteImport\.js/);
@@ -259,14 +258,14 @@ function controlsFor(mode) {
     const elements = { '.mpg-touch': pad, '.mpg-stick-zone': zone, '.mpg-status': status,
         '.mpg-match-details': details, '.mpg-hint': hint, '.mpg-board': board, '.mpg-hud-toggle': toggle };
     overlay.querySelector = selector => selector === '.mpg-qbtn'
-        ? status.children.find(el => el.className?.includes('mpg-qbtn'))
+        ? pad.children.find(el => el.className?.includes('mpg-qbtn'))
         : elements[selector];
     pad.querySelector = selector => selector === '.mpg-stick' ? stick : buttons;
     stick.querySelector = () => knob;
     session.overlay = overlay;
     session.bindTouch(overlay);
     session.applyTouchLayout();
-    return { session, stick, knob, zone, buttons, status, details, hint, board, toggle };
+    return { session, stick, knob, zone, buttons, status, pad, details, hint, board, toggle };
 }
 
 {
@@ -354,7 +353,7 @@ for (const mode of ['miner', 'shooter', 'market', 'river']) {
     assert.equal(session.keys.size, 0);
 }
 
-const { session, details, hint, board, toggle, status } = controlsFor('skyline');
+const { session, details, hint, board, toggle, pad } = controlsFor('skyline');
 for (const collapsed of [true, false, true]) {
     session.setHudCollapsed(collapsed);
     assert.equal(session.overlay.classList.contains('hud-collapsed'), collapsed);
@@ -363,7 +362,7 @@ for (const collapsed of [true, false, true]) {
     assert.equal(board.hidden, collapsed, 'HUD also controls standings');
     assert.equal(toggle.attributes['aria-expanded'], String(!collapsed));
     assert.equal(toggle.attributes['aria-label'], collapsed ? 'Show match details and standings' : 'Hide match details and standings');
-    assert.equal(status.children[0].hidden, undefined, 'refill button remains available');
+    assert.equal(pad.children.find(el => el.className?.includes('mpg-qbtn')).hidden, undefined, 'refill button stays in the touch thumb zone');
 }
 const engineSource = fs.readFileSync(path.join(__dirname, '..', 'multiplayerEngine.js'), 'utf8');
 assert.doesNotMatch(engineSource, /mpg-menu-toggle|mpg-menu-panel|mpg-board-toggle|board-open/);

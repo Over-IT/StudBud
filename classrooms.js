@@ -454,6 +454,7 @@
                     <button type="button" role="tab" class="${this.detailTab === 'settings' ? 'selected' : ''}" aria-selected="${this.detailTab === 'settings'}" data-class-action="tab" data-tab="settings"><i class="fas fa-sliders"></i> Class settings</button>
                 </div>
                 <div id="classes-tab-body">${this.detailTab === 'sets' ? this.setsMarkup() : this.detailTab === 'settings' ? this.settingsMarkup() : this.rosterMarkup(weekStudy)}</div>`;
+            this.app.enhanceSetPickers?.(this.root);
         }
 
         rosterMarkup(weekStudy) {
@@ -542,7 +543,7 @@
                 </article>`).join('') : '<div class="glass-card empty-state">No sets yet. Sets you publish show up for every student in this class.</div>';
             const ownDecks = (this.app.AppState.get('flashcards') || []).filter(deck => (deck.cards || []).length >= 2);
             const fromMine = ownDecks.length && !editing ? `<label class="teacher-from-mine">Or publish one of your sets
-                    <select id="teacher-publish-own"><option value="">Choose a set…</option>${ownDecks.map(deck => `<option value="${esc(deck.id)}">${esc(deck.title)} (${deck.cards.length})</option>`).join('')}</select></label>` : '';
+                    <select id="teacher-publish-own" data-set-picker><option value="">Choose a set…</option>${ownDecks.map(deck => `<option value="${esc(deck.id)}">${esc(deck.title)} (${deck.cards.length})</option>`).join('')}</select></label>` : '';
             return `<div class="teacher-sets-toolbar">${editor}${fromMine}</div><div class="teacher-deck-list">${list}</div>`;
         }
 

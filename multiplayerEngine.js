@@ -1310,21 +1310,21 @@
                     <div class="mpg-timer"></div>
                     <div class="mpg-actions">
                         ${this.isHost && !this.practice ? `<button type="button" class="mpg-host-mode" aria-pressed="${this.spectator}">${this.spectator ? 'Switch to play' : 'Host screen'}</button>` : ''}
-                        ${this.isHost && !this.practice && this.room.goal_type === 'time' && !['chess', 'defense'].includes(this.mode) ? `<details class="mpg-audio-settings"><summary>Add time</summary><div class="mpg-audio-panel">
+                        ${this.isHost && !this.practice && this.room.goal_type === 'time' && !['chess', 'defense'].includes(this.mode) ? `<details class="mpg-audio-settings"><summary aria-label="Add time"><i class="fas fa-clock" aria-hidden="true"></i><span class="mpg-label">Add time</span></summary><div class="mpg-audio-panel">
                             <label>Minutes to add <input class="mpg-add-minutes" type="number" min="1" max="60" step="1" value="1"></label>
                             <small>Maximum match length: 60 minutes.</small>
                             <button type="button" class="mpg-add-time">Add time</button>
                         </div></details>` : ''}
-                        ${this.mode === 'skyline' ? '<button type="button" class="mpg-checkpoint" title="Return to your last saved checkpoint (R)">Return to checkpoint</button>' : ''}
-                        <button type="button" class="mpg-hud-toggle" aria-expanded="true" aria-controls="mpg-match-details mpg-match-standings" aria-label="Hide match details and standings">HUD</button>
-                        <details class="mpg-controls-help"><summary>Controls</summary><div class="mpg-help-panel"><div class="mpg-hint" id="mpg-controls-hint"></div></div></details>
-                        <details class="mpg-audio-settings"><summary>Settings</summary><div class="mpg-audio-panel">
+                        ${this.mode === 'skyline' ? '<button type="button" class="mpg-checkpoint" title="Return to your last saved checkpoint (R)" aria-label="Return to checkpoint"><i class="fas fa-flag" aria-hidden="true"></i><span class="mpg-label">Return to checkpoint</span></button>' : ''}
+                        <button type="button" class="mpg-hud-toggle" aria-expanded="true" aria-controls="mpg-match-details mpg-match-standings" aria-label="Hide match details and standings" title="Show or hide match details"><i class="fas fa-eye" aria-hidden="true"></i><span class="mpg-label">HUD</span></button>
+                        <details class="mpg-controls-help"><summary aria-label="Controls" title="Controls"><i class="fas fa-gamepad" aria-hidden="true"></i><span class="mpg-label">Controls</span></summary><div class="mpg-help-panel"><div class="mpg-hint" id="mpg-controls-hint"></div></div></details>
+                        <details class="mpg-audio-settings"><summary aria-label="Settings" title="Settings"><i class="fas fa-gear" aria-hidden="true"></i><span class="mpg-label">Settings</span></summary><div class="mpg-audio-panel">
                             <label>Game volume <input type="range" min="0" max="100" value="${Math.round((window.StudBudSfx?.settings.volume ?? .7) * 100)}" data-audio="volume"></label>
                             <label>Music volume <input type="range" min="0" max="100" value="${Math.round((window.StudBudSfx?.settings.musicVolume ?? .5) * 100)}" data-audio="musicVolume"></label>
                             <label><input type="checkbox" data-audio="game" ${window.StudBudSfx?.settings.game !== false ? 'checked' : ''}> Game sounds</label>
                             <label><input type="checkbox" data-audio="music" ${window.StudBudSfx?.settings.music !== false ? 'checked' : ''}> Music</label>
                         </div></details>
-                        ${this.testing ? `<details class="mpg-test-tools"><summary>Tools</summary><div class="mpg-test-panel"><div><button type="button" class="mpg-test-pause">Pause</button>${this.onRestart ? '<button type="button" class="mpg-test-restart">Restart</button>' : ''}</div>
+                        ${this.testing ? `<details class="mpg-test-tools"><summary aria-label="Test tools" title="Test tools"><i class="fas fa-wrench" aria-hidden="true"></i><span class="mpg-label">Tools</span></summary><div class="mpg-test-panel"><div><button type="button" class="mpg-test-pause">Pause</button>${this.onRestart ? '<button type="button" class="mpg-test-restart">Restart</button>' : ''}</div>
                             <label><input type="checkbox" data-test-energy ${this.limitedTestEnergy ? '' : 'checked'}> Unlimited energy</label>
                             <label>Energy per question <input type="number" data-test-reward min="5" max="100" step="1" value="${this.rewardAmount()}" ${!this.limitedTestEnergy || this.mode === 'chess' ? 'disabled' : ''}></label>
                             <small>Applies to your test client. ${this.mode === 'chess' ? 'Chess grants one move per answer.' : 'Turn off unlimited energy to test normal costs and question rewards.'}</small>${this.mode === 'skyline' ? `
@@ -1334,8 +1334,8 @@
                             <label><input type="checkbox" data-test-cheat="freeze"> Freeze machinery and moving platforms</label>
                             <label>Biome <select data-test-biome aria-label="Test biome">${window.StudBudArcade.games.skyline.testDestinations.map(place => `<option value="${place.id}">${esc(place.name)}</option>`).join('')}</select></label>
                             <div class="mpg-test-teleport"><button type="button" data-test-action="teleport">Teleport</button><button type="button" data-test-action="checkpoint">Reset checkpoint</button></div>` : ''}<pre class="mpg-test-stats"></pre></div></details>` : ''}
-                        <button type="button" class="mpg-end ${this.isHost && !this.practice ? '' : 'hidden'}">End match</button>
-                        <button type="button" class="mpg-leave">${this.testing ? 'Close test' : this.practice ? 'End game' : 'Leave'}</button>
+                        <button type="button" class="mpg-end ${this.isHost && !this.practice ? '' : 'hidden'}" aria-label="End match" title="End match"><i class="fas fa-flag-checkered" aria-hidden="true"></i><span class="mpg-label">End match</span></button>
+                        <button type="button" class="mpg-leave" aria-label="${this.testing ? 'Close test' : this.practice ? 'End game' : 'Leave'}" title="${this.testing ? 'Close test' : this.practice ? 'End game' : 'Leave'}"><i class="fas fa-right-from-bracket" aria-hidden="true"></i><span class="mpg-label">${this.testing ? 'Close test' : this.practice ? 'End game' : 'Leave'}</span></button>
                     </div>
                     ${this.spectator ? `<section class="mpg-host-banner" aria-label="Host screen">
                         <div><small>JOIN AT ${esc(window.location?.host || 'StudBud')}/join</small><strong>${esc(this.code)}</strong></div>
@@ -1645,9 +1645,11 @@
                     q.dataset.q = '1';
                     const resourceName = this.game.res.label;
                     q.setAttribute('aria-label', this.testing && !this.limitedTestEnergy ? 'Test a flashcard question' : `Answer a question to refill ${resourceName.toLowerCase()}`);
-                    q.innerHTML = `<span aria-hidden="true">?</span> ${this.testing && !this.limitedTestEnergy ? 'Test question' : `Refill ${esc(resourceName)}`}`;
+                    q.innerHTML = `<span aria-hidden="true">?</span> ${this.testing && !this.limitedTestEnergy ? 'Test question' : `Refill ${esc(resourceName)}`} <kbd aria-hidden="true">Q</kbd>`;
                     bindBtn(q);
-                    overlay.querySelector('.mpg-status').appendChild(q);
+                    pad.appendChild(q);
+                    this.refillButton = q;
+                    q.classList.toggle('low', Boolean(this.meterState && !this.meterState.hidden && this.meterState.low));
                 }
                 box.style.setProperty('--cols', String(Math.min(3, Math.max(2, layout.cols || 2))));
                 pad.classList.toggle('no-stick', layout.stick === false);
@@ -1683,11 +1685,11 @@
             if (this.mode === 'chess') this.overlay.style.setProperty('--chess-top', `${top}px`);
             let bottom = 8;
             const touch = this.overlay.classList.contains('has-touch');
-            const selectors = touch ? ['.mpg-stick', '.mpg-btns'] : [];
+            const selectors = touch ? ['.mpg-stick', '.mpg-btns', '.mpg-touch .mpg-qbtn'] : ['.mpg-touch .mpg-qbtn'];
             for (const selector of selectors) {
                 const el = this.overlay.querySelector(selector);
-                const rect = el.getBoundingClientRect();
-                if (el.offsetWidth && el.offsetHeight) bottom = Math.max(bottom, root.bottom - rect.top + 8);
+                if (!el?.offsetWidth || !el.offsetHeight) continue;
+                bottom = Math.max(bottom, root.bottom - el.getBoundingClientRect().top + 8);
             }
             this.hudInsets = { top: top / this.scale, left: 8 / this.scale, right: 8 / this.scale, bottom: bottom / this.scale };
         }
@@ -1778,6 +1780,7 @@
                 if (!previous || previous.hidden || previous.low !== low) elements.box.classList.toggle('low', low);
                 if (!previous || previous.hidden || previous.empty !== empty) elements.box.classList.toggle('empty', empty);
             }
+            if (!previous || previous.hidden !== hidden || previous.low !== low) this.refillButton?.classList.toggle('low', !hidden && low);
             this.meterState = { hidden, value, low, empty, label };
         }
 

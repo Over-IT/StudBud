@@ -93,7 +93,7 @@ async function run() {
     assert.equal(Object.hasOwn(emptySnapshot.state.profile, 'graduationYear'), false);
     assert.equal(emptySnapshot.state.currentView, undefined);
     emptySnapshot.state.settings.theme = 'light';
-    assert.equal(state.emptyCloudSnapshot().state.settings.theme, 'system', 'guest merge defaults follow the device and remain independent fresh state');
+    assert.equal(state.emptyCloudSnapshot().state.settings.theme, 'dark', 'guest merge defaults use dark mode and remain independent fresh state');
     let gradeRefreshes = 0;
     const originalRenderUI = app.renderUI;
     app.renderUI = () => gradeRefreshes++;
@@ -496,13 +496,12 @@ async function run() {
         assert.ok(recommendation.suggested >= min && recommendation.suggested <= max);
         assert.equal(recommendation.suggested % 5, 0);
         assert.ok(recommendation.explanation.length);
-        for (const [amount, expected] of [[Math.max(5, min - 5), 'Below recommended'], [min, 'Within'], [max, 'Within'], [Math.min(100, max + 5), 'Above recommended'], ['', 'whole number']]) {
+        for (const [amount, expected] of [[Math.max(5, min - 5), ''], [min, ''], [max, ''], ['', 'whole number']]) {
             for (const prefix of ['host', 'solo']) elements.get(`${prefix}-game-reward`).value = String(amount);
             app.updateQuestionRewardGuidance(mode);
             const host = elements.get('host-game-reward-guidance').textContent;
-            assert.ok(host.includes(`Recommended setting: ${min}-${max}`));
-            assert.ok(host.includes(expected), `${mode} guidance at ${amount}`);
-            assert.equal(host, elements.get('solo-game-reward-guidance').textContent, 'host and solo recommendations agree');
+            assert.ok(expected ? host.includes(expected) : host === '', `${mode} guidance at ${amount} only appears for invalid input`);
+            assert.equal(host, elements.get('solo-game-reward-guidance').textContent, 'host and solo guidance agree');
             assert.equal(elements.get('host-game-reward').value, String(amount), 'advice never overrides a player-chosen setting');
         }
         for (const prefix of ['host', 'solo']) elements.get(`${prefix}-game-reward`).dataset = {};
