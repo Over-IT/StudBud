@@ -2,9 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { webcrypto } = require('node:crypto');
-
-function fixture(crypto) {
+function fixture() {
     const nodes = new Map(), scripts = [], timers = new Map(), errors = [];
     const node = id => {
         if (!nodes.has(id)) {
@@ -20,7 +18,7 @@ function fixture(crypto) {
     const buttons = [node('login-submit'), node('signup-submit')];
     let created = 0;
     const sandbox = {
-        console: { error: (...args) => errors.push(args) }, crypto, TextEncoder, TextDecoder, btoa, atob,
+        console: { error: (...args) => errors.push(args) },
         localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
         sessionStorage: { setItem() {}, removeItem() {} },
         document: { getElementById: node, querySelectorAll: () => buttons,
@@ -44,15 +42,8 @@ function fixture(crypto) {
 
 (async () => {
     const ready = fixture();
-    await assert.rejects(ready.cloud.encodeSnapshot('user', { secret: 'grades' }), /encryption is unavailable/i,
-        'cloud sync must not upload plaintext when browser encryption is unavailable');
-    const encrypted = fixture(webcrypto);
-    await encrypted.cloud.setAccountKeyFromPassword('user', 'account-password');
-    const envelope = await encrypted.cloud.encodeSnapshot('user', { grades: 'private coursework' });
-    assert.ok(envelope.zk.ct);
-    assert.doesNotMatch(JSON.stringify(envelope), /private coursework/);
-    assert.equal((await encrypted.cloud.decodeSnapshot('user', envelope)).grades, 'private coursework',
-        'the normal account password unlocks the encrypted snapshot');
+    await assert.rejects(ready.cloud.unlockAccountData({ id: 'user' }, 'password', null), /Web Crypto/,
+        'cloud sync must not unlock without browser encryption');
     ready.configure();
     await ready.cloud.bootstrap();
     assert.equal(ready.scripts.length, 0, 'working configuration needs no extra request');

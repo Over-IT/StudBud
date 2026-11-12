@@ -139,9 +139,35 @@ assert.match(publishNoticeFunction, /if v_author_username is null then raise exc
 assert.match(publishNoticeFunction, /values \(btrim\(p_message\), auth.uid\(\), v_author_username\)/,
     'author is taken from the authenticated administrator, not browser input');
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-	assert.doesNotMatch(html, /id="settings-first-name"/, 'StudBud does not collect real names');
-	assert.doesNotMatch(html, /id="settings-last-name"/, 'StudBud does not collect real names');
-	assert.doesNotMatch(html, /id="public-show-real-name"/, 'public profiles cannot opt into showing real names');
+assert.doesNotMatch(html, /id="settings-(?:first-name|last-name|grade|bio)"|id="public-show-real-name"/,
+    'personal profile controls are not exposed in settings');
+assert.match(html, /id="game-graphics"/, 'game performance is configured in Settings');
+assert.doesNotMatch(html, /ui-compact-mode|Compact spacing/, 'the compact-spacing preference is removed');
+assert.doesNotMatch(fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8'), /compact-ui|compactUi|ui-compact-mode/,
+    'appearance behavior no longer applies or stores compact spacing');
+assert.doesNotMatch(fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8'), /compact-ui/,
+    'the interface has a single spacing layout');
+assert.doesNotMatch(html, /campus-helper-view|campus-auto-import/, 'the automatic campus helper remains removed');
+assert.match(html, /id="open-campus-paste-modal-btn"[^>]*data-action="open-campus-paste-modal"/,
+    'school data import opens from a dedicated button');
+assert.match(html, /id="campus-paste-modal"[^>]*class="[^"]*modal-content/,
+    'the paste-and-review flow is contained in its own modal');
+assert.doesNotMatch(html, /id="campus-paste-import"/, 'the paste flow no longer occupies the grades page');
+assert.match(html, /href="https:\/\/parkwaymo\.infinitecampus\.org\/campus\/portal\/students\/parkway\.jsp\?status=login"/,
+    'the paste flow links to the Parkway student portal');
+assert.match(html, /<strong>Classes:<\/strong> open <b>Schedule<\/b>/,
+    'class paste instructions identify the Campus Student Schedule page');
+assert.match(html, /<strong>Assignments &amp; grades:<\/strong> open <b>Grades<\/b>, choose a class, and copy its assignment table with the header row/,
+    'assignment paste instructions identify the class Grades page and preserve column headers');
+assert.match(html, /Assignment names are required; dates and categories are optional\. To import grades, include both Score and Points Possible/,
+    'paste instructions identify required and optional assignment fields');
+assert.match(html, /Never paste passwords or student IDs/);
+assert.match(html, /id="campus-paste-assignments"/);
+assert.match(html, /campusPasteImport\.js/);
+assert.match(html, /<details class="settings-help"><summary>Privacy details<\/summary>/,
+    'long public-profile privacy guidance is collapsed until requested');
+assert.match(html, /self-reported courses with opted-in classmates/,
+    'course sharing stays plainly disclosed without a paragraph-length hint');
 assert.match(html, /<body class="dark-theme" data-color-scheme="studbud">/,
     'the initial page paint uses the StudBud default before app startup');
 {
@@ -152,6 +178,9 @@ assert.match(html, /<body class="dark-theme" data-color-scheme="studbud">/,
     const free = schemeButtons.filter(button => !button.includes('data-shop-item')).map(button => button.match(/data-color-scheme="([^"]+)"/)[1]);
     assert.deepEqual(free, ['studbud', 'monochrome'], 'only default and Black & White are free');
     const css = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8');
+    assert.match(css, /\.settings-hint \{ margin: 6px 0; line-height: 1\.4; font-size: \.84rem; \}/,
+        'helper copy stays visually compact beneath controls');
+    assert.match(css, /\.settings-help > summary \{[^}]*cursor: pointer/);
     const luminance = hex => {
         const rgb = hex.match(/[a-f\d]{2}/gi).map(value => {
             const channel = parseInt(value, 16) / 255;

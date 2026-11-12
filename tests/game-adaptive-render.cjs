@@ -49,18 +49,17 @@ function harness(nativeDpr = 2, uncullEndpoints = false, legacyLava = false) {
         vm.runInContext(source, sandbox, { filename: file });
     }
     const A = sandbox.window.StudBudArcade;
-    function session(mode, fullResolution = false) {
-        const button = { setAttribute: noop };
+    function session(mode) {
         const surface = canvas();
         const s = Object.assign(Object.create(A.Session.prototype), {
             mode, seed: 42, user: { id: 'host' }, local: { id: 'host', color: '#60a5fa', cos: {} },
             room: { host_id: 'host', state: {} }, roster: new Map([['host', { id: 'host' }]]),
             remotes: new Map(), keys: new Set(), justPressed: new Set(),
             isHost: true, practice: true, preview: false, countdown: 0, countdownHidden: true,
-            reward: 20, fullResolution, startedAt: 0, t: 0, lastFrame: 0,
+            reward: 20, graphics: A.graphicsProfile(), startedAt: 0, t: 0, lastFrame: 0,
             mouse: { x: 640, y: 360, active: false },
             overlay: { clientWidth: 1366, clientHeight: 768, classList: { contains: () => false },
-                querySelector: selector => selector === '.mpg-resolution' ? button : null },
+                querySelector: noop },
             canvas: surface, ctx: surface.getContext(), layoutHud: noop, checkEnd: noop, updateMeter: noop,
             axis: () => ({ x: 0, y: 0 }), down: () => false, pressed: () => false, sfx: noop,
             addScore: noop, setGoal: noop, emit: noop, toast: noop, finish: noop,
@@ -75,8 +74,10 @@ function harness(nativeDpr = 2, uncullEndpoints = false, legacyLava = false) {
 
 // Exercise the actual Session.frame -> game.update -> game.draw path, not isolated drawing helpers.
 for (const nativeDpr of [1, 2]) for (const mode of ['defense', 'miner', 'market']) {
-    function run(fullResolution) {
-        const h = harness(nativeDpr), s = h.session(mode, fullResolution);
+    function run(graphicsMode) {
+        const h = harness(nativeDpr);
+        h.A.configureGraphicsProfile(graphicsMode);
+        const s = h.session(mode);
         let updates = 0, draws = 0, finalPixels = 0;
         const update = s.game.update.bind(s.game), draw = s.game.draw.bind(s.game);
         s.game.update = dt => { updates++; update(dt); };
@@ -95,18 +96,17 @@ for (const nativeDpr of [1, 2]) for (const mode of ['defense', 'miner', 'market'
             tiles: s.game.T && Array.from(s.game.T), cash: s.game.wallets
         }) };
     }
-    const full = run(true), auto = run(false);
-    assert.equal(auto.state, full.state, `${mode}: resolution preserves actual game simulation and network state`);
-    assert.equal(auto.draws, 600, 'auto resolution never drops render frames');
-    assert.equal(full.draws, 600, 'full-resolution lock never drops render frames');
-    assert.equal(auto.updates, full.updates, 'auto resolution never changes simulation cadence');
-    assert.ok(auto.updates >= 600, 'simulation never skips a whole session frame worth of work');
-    assert.equal(auto.s.dpr, .75);
-    assert.equal(auto.s.vw, full.s.vw);
-    assert.equal(auto.s.vh, full.s.vh);
-    assert.equal(auto.s.scale, full.s.scale, 'input coordinate conversion is unchanged');
-    assert.ok(auto.finalPixels < full.finalPixels * (nativeDpr === 2 ? .15 : .57));
-    console.log(`${mode}, native DPR ${nativeDpr}: 600 full Session frames, identical simulation; final 100-frame backing pixels ${full.finalPixels.toLocaleString()} -> ${auto.finalPixels.toLocaleString()} (${(100 * (1 - auto.finalPixels / full.finalPixels)).toFixed(2)}% fewer).`);
+    const quality = run('quality'), performance = run('performance');
+    assert.equal(performance.state, quality.state, `${mode}: graphics profile preserves game simulation and network state`);
+    assert.equal(performance.updates, 600);
+    assert.equal(performance.draws, 600, 'performance mode never drops rendering or physics frames');
+    assert.equal(quality.s.dpr, Math.min(nativeDpr, 2));
+    assert.equal(performance.s.dpr, Math.min(nativeDpr, 1));
+    assert.equal(performance.s.vw, quality.s.vw);
+    assert.equal(performance.s.vh, quality.s.vh);
+    assert.equal(performance.s.scale, quality.s.scale, 'input coordinate conversion is unchanged');
+    if (nativeDpr > 1) assert.ok(performance.finalPixels < quality.finalPixels);
+    console.log(`${mode}, native DPR ${nativeDpr}: 600 complete Session frames, identical simulation; graphics profile fixed for session.`);
 }
 {
     function miningDraw(low) {
@@ -141,17 +141,19 @@ for (const nativeDpr of [1, 2]) for (const mode of ['defense', 'miner', 'market'
 }
 
 {
-    const h = harness(), s = h.session('defense');
+    const h = harness();
+    h.A.configureGraphicsProfile('performance');
+    const s = h.session('defense');
+    assert.equal(s.dpr, 1);
+    h.A.configureGraphicsProfile('quality');
+    s.resize();
+    assert.equal(s.dpr, 1, 'a graphics preference change cannot alter an active session');
+    const nextSession = h.session('defense');
+    assert.equal(nextSession.dpr, 2, 'new sessions use the newly configured profile');
     s.frame(16);
-    s.frame(1000); // An isolated long stall must not lower sharpness.
-    assert.equal(s.dpr, 2);
+    s.frame(1000);
     for (let i = 1; i <= 90; i++) s.frame(1000 + i * 40);
-    assert.equal(s.dpr, 1.75);
-    for (let i = 1; i <= 600; i++) s.frame(4600 + i * 1000 / 60);
-    assert.equal(s.dpr, 2, 'healthy frame cadence restores native resolution');
-    s.fullResolution = true;
-    for (let i = 1; i <= 300; i++) s.frame(14600 + i * 40);
-    assert.equal(s.dpr, 2, 'full-resolution lock opts out of adaptation');
+    assert.equal(s.dpr, 1, 'slow or fast frame cadence never changes resolution mid-round');
     h.document.hidden = true;
     let updates = 0, draws = 0;
     s.game.update = () => { updates++; };
@@ -180,4 +182,4 @@ for (const nativeDpr of [1, 2]) for (const mode of ['defense', 'miner', 'market'
     }
     console.log(`Complete Defense.draw, narrow mid-lane viewport: ${before} -> ${after} canvas commands (${before - after} offscreen commands removed). Visible/partial endpoint parity passed.`);
 }
-console.log('Adaptive hysteresis/recovery/opt-out, logical input bounds, hidden live host simulation and preview suspension passed. Pixel/command work measurements only; GPU raster time and Chromebook FPS require browser/device profiling.');
+console.log('Fixed per-session graphics profiles, logical input bounds, hidden live host simulation and preview suspension passed. Pixel/command work measurements only; GPU raster time and device FPS require browser profiling.');

@@ -9,8 +9,6 @@
 (function (window) {
     'use strict';
 
-    const PARKWAY_CAMPUS_URL = 'https://parkwaymo.infinitecampus.org/campus/nav-wrapper/student/portal/student/home?appName=parkway';
-
     // ============================================================================
     // 1. EVENT BUS ENGINE
     // ============================================================================
@@ -226,7 +224,6 @@
 
             this.state = {
                 profile: {
-                    graduationYear: 2026,
                     currentTerm: "auto",
                 },
                 courses: [],
@@ -241,6 +238,7 @@
                 settings: {
                     theme: "system",
                     colorScheme: "studbud",
+                    gameGraphics: "auto",
                     audioVolume: 0.70,
                     audioLevels: { lofi: 0.5, rain: 0.5, white: 0.3, binaural: 0.6 },
                     soundscapePreset: "off",
@@ -285,6 +283,9 @@
                 const { id: _metricsId, ...storedMetrics } = metrics || {};
                 this.state.gameMetrics = currentGameMetrics(metrics ? storedMetrics : null);
                 if (!metrics || this.state.gameMetrics !== storedMetrics) await NexusDB.put('gameMetrics', { id: 'user_metrics', ...this.state.gameMetrics });
+                delete this.state.profile.firstName;
+                delete this.state.profile.lastName;
+                delete this.state.profile.graduationYear;
                 this.state.courses = this.normalizeCourseCredits(this.state.courses);
                 this.saveToLocalStorage();
 
@@ -612,7 +613,7 @@
     ];
     const PAGE_GUIDES = {
         dashboard: ['Home', 'What is due today and what to study next.'],
-        gpa: ['Classes & grades', 'Import grades or add a class.'],
+        gpa: ['Classes & grades', 'Add your classes and grades, then plan toward your goals.'],
         'grade-scenarios': ['What-if grades', 'Try possible scores without changing your saved grades.'],
         analytics: ['Analytics', 'Grades, study time and progress.'],
         planner: ['Planner', 'Know what to work on today, and make room for what is next.'],
@@ -633,7 +634,7 @@
         settings: ['Settings', 'App preferences, study defaults and privacy shortcuts.'],
         'settings-school': ['School & GPA', 'School details, semester and past academic credits.'],
         'settings-data': ['Data & account', 'Save status, syncing, importing and account actions.'],
-        appearance: ['Appearance & performance', 'Colors, spacing and game detail.'],
+        appearance: ['Appearance & performance', 'Colors and game performance.'],
         sound: ['Sound & music', 'Interface sounds, effects and music.'],
         about: ['Help & about', 'How StudBud works.'],
         admin: ['Staff tools', 'Tools for testers, moderators and admins.'],
@@ -1135,6 +1136,8 @@
             this.Router = Router;
             this.Soundscape = Soundscape;
             this.dashboardSprintAssignmentId = '';
+            this.campusCourseDraft = null;
+            this.campusAssignmentDraft = null;
             this.activeDeckId = null;
             this.activeStudyStartedAt = null;
             this.studyLeaderboardPeriod = 'daily';
@@ -1402,13 +1405,6 @@
                 }
             });
             this.bindFlashcardInteraction();
-            window.addEventListener('message', event => this.handleInfiniteCampusMessage(event));
-            document.addEventListener('click', event => {
-                // The bookmarklet only works from the bookmarks bar on the Campus page
-                if (!event.target.closest('#ic-bookmarklet-link')) return;
-                event.preventDefault();
-                this.setInfiniteCampusStatus('Campus helper import is disabled to avoid violating Infinite Campus usage terms. Use manual paste import.', 'warn');
-            });
             document.addEventListener('change', event => {
                 if (event.target.matches('select[data-ic-class]')) {
                     event.target.closest('.ic-class-row')?.classList.toggle('ic-skipped', event.target.value === 'skip');
@@ -1449,6 +1445,8 @@
             waitingCanvas.addEventListener('pointercancel', event => this.finishWaitingHop(event));
             waitingCanvas.addEventListener('contextmenu', event => event.preventDefault());
             document.addEventListener('input', event => {
+                if (event.target.matches('#campus-paste-courses')) this.invalidateCampusPastePreview('courses');
+                if (event.target.matches('#campus-paste-assignments')) this.invalidateCampusPastePreview('assignments');
                 if (event.target.matches('[data-reward-slider]')) {
                     const linked = document.getElementById(event.target.dataset.rewardSlider);
                     linked.value = event.target.value;
@@ -1564,10 +1562,227 @@
             });
         }
 
+        setCampusPasteMode(mode) {
+            if (!['courses', 'assignments'].includes(mode)) throw new Error('Choose classes or assignments to paste.');
+            document.querySelectorAll('[data-campus-paste-mode]').forEach(button => {
+                const active = button.dataset.campusPasteMode === mode;
+                button.classList.toggle('selected', active);
+                button.setAttribute('aria-selected', String(active));
+            });
+            document.getElementById('campus-paste-courses-panel')?.classList.toggle('hidden', mode !== 'courses');
+            document.getElementById('campus-paste-assignments-panel')?.classList.toggle('hidden', mode !== 'assignments');
+        }
+
+        invalidateCampusPastePreview(mode) {
+            if (mode === 'courses') {
+                this.campusCourseDraft = null;
+                document.getElementById('campus-paste-courses-preview')?.replaceChildren();
+                document.getElementById('import-campus-courses-btn')?.classList.add('hidden');
+                document.getElementById('campus-paste-courses-status').textContent = 'Input changed. Preview again before adding.';
+            } else {
+                this.campusAssignmentDraft = null;
+                document.getElementById('campus-paste-assignments-preview')?.replaceChildren();
+                document.getElementById('import-campus-assignments-btn')?.classList.add('hidden');
+                document.getElementById('campus-paste-assignments-status').textContent = 'Input changed. Preview again before adding.';
+            }
+        }
+
+        renderCampusPasteCourseOptions() {
+            const select = document.getElementById('campus-paste-assignment-course');
+            if (!select) return;
+            const previous = select.value;
+            const courses = AppState.get('courses') || [];
+            select.innerHTML = '<option value="">Choose a class</option>' + courses
+                .slice().sort((a, b) => a.title.localeCompare(b.title))
+                .map(course => `<option value="${this.escapeHTML(course.code)}">${this.escapeHTML(course.title)} · ${this.escapeHTML(course.term || 'Full year')}</option>`)
+                .join('');
+            if (courses.some(course => course.code === previous)) select.value = previous;
+        }
+
+        previewCampusCourses() {
+            const status = document.getElementById('campus-paste-courses-status');
+            const preview = document.getElementById('campus-paste-courses-preview');
+            const addButton = document.getElementById('import-campus-courses-btn');
+            const school = this.currentSchool();
+            const catalog = this.isParkwaySchool(school) ? this.schoolCatalog(school) : [];
+            const parsed = window.StudBudCampusPaste?.parseCourses(document.getElementById('campus-paste-courses').value, catalog);
+            if (!parsed) throw new Error('The paste tool is not available. Reload StudBud and try again.');
+            if (!parsed.length) throw new Error('Paste a class list first.');
+            const term = document.getElementById('campus-paste-term').value;
+            const rows = parsed.map(item => {
+                const course = item.match ? {
+                    code: item.match.code, catalogCode: item.match.code, school, title: item.match.title, term
+                } : { code: '', catalogCode: '', school, title: item.name, term };
+                const duplicate = item.match
+                    ? AppState.findDuplicateCourse(course)
+                    : !this.isParkwaySchool(school) && (AppState.get('courses') || []).some(existing =>
+                        (existing.school || school) === school && ['FY', term].includes(existing.term || 'FY')
+                        && existing.title.trim().toLowerCase() === item.name.trim().toLowerCase());
+                return { ...item, duplicate: Boolean(duplicate), include: !duplicate && (Boolean(item.match) || !this.isParkwaySchool(school)) };
+            });
+            this.campusCourseDraft = { rows, term, school, sourceText: document.getElementById('campus-paste-courses').value };
+            preview.innerHTML = `<ul class="campus-paste-list">${rows.map((row, index) => {
+                const label = row.match ? row.match.title
+                    : this.isParkwaySchool(school) ? 'No catalog match' : 'Add as a custom class';
+                return `<li><label><input type="checkbox" data-campus-course-index="${index}"${row.include ? ' checked' : ''}${row.include ? '' : ' disabled'}><span>${this.escapeHTML(row.name)}</span></label><small class="${row.match || !this.isParkwaySchool(school) ? '' : 'campus-paste-warning'}">${this.escapeHTML(row.duplicate ? 'Already added' : label)}</small></li>`;
+            }).join('')}</ul>`;
+            const count = rows.filter(row => row.include).length;
+            status.textContent = `${count} ready to add${rows.length > count ? ` · ${rows.length - count} unmatched or already added` : ''}. Review the matches before importing.`;
+            addButton.classList.toggle('hidden', count === 0);
+        }
+
+        importCampusCourses() {
+            const draft = this.campusCourseDraft;
+            if (!draft) throw new Error('Preview the pasted classes before adding them.');
+            if (document.getElementById('campus-paste-term').value !== draft.term
+                || this.currentSchool() !== draft.school
+                || document.getElementById('campus-paste-courses').value !== draft.sourceText) {
+                this.invalidateCampusPastePreview('courses');
+                throw new Error('The pasted classes or term changed. Preview them again before adding.');
+            }
+            const selected = [...document.querySelectorAll('[data-campus-course-index]:checked')]
+                .map(input => draft.rows[Number(input.dataset.campusCourseIndex)]).filter(Boolean);
+            if (!selected.length) throw new Error('Select at least one class to add.');
+            const existing = AppState.get('courses') || [];
+            const added = [];
+            for (const [index, row] of selected.entries()) {
+                const catalogCourse = row.match;
+                const codeBase = catalogCourse?.code || `OTHER_${Date.now()}_${index}`;
+                const term = draft.term;
+                let code = codeBase;
+                if (existing.some(course => course.code === code) || added.some(course => course.code === code)) {
+                    code = `${codeBase}_${term}_${Date.now()}_${index}`;
+                }
+                const course = catalogCourse ? {
+                    code,
+                    catalogCode: catalogCourse.code,
+                    title: catalogCourse.title,
+                    school: draft.school,
+                    term,
+                    credits: window.studbudCatalogCreditsForTerm(catalogCourse, term),
+                    category: catalogCourse.category || 'Electives',
+                    isWeighted: Boolean(catalogCourse.isWeighted),
+                    targetPct: null
+                } : {
+                    code,
+                    catalogCode: '',
+                    title: row.name.slice(0, 100),
+                    school: draft.school,
+                    term,
+                    credits: 0.5,
+                    category: 'Electives',
+                    isWeighted: false,
+                    targetPct: null
+                };
+                const overlaps = item => item.school === course.school
+                    && (item.term === course.term || !['S1', 'S2'].includes(item.term) || !['S1', 'S2'].includes(course.term));
+                const sameCourse = item => (item.catalogCode || item.code) === (course.catalogCode || course.code)
+                    || ((!item.catalogCode || !course.catalogCode) && item.title.trim().toLowerCase() === course.title.trim().toLowerCase());
+                if (AppState.findDuplicateCourse(course) || added.some(item => overlaps(item) && sameCourse(item))) continue;
+                added.push(course);
+            }
+            if (!added.length) throw new Error('Those classes are already in your list.');
+            if (AppState.get('settings')?.gradeGoalSource === 'gpa') {
+                AppState.saveGradeGoals(this.rebalanceGradeGoals([...existing, ...added]));
+            } else {
+                added.forEach(course => AppState.addCourse(course));
+            }
+            const status = document.getElementById('campus-paste-courses-status');
+            status.textContent = `Added ${added.length} ${added.length === 1 ? 'class' : 'classes'}. You can paste assignments next.`;
+            document.getElementById('campus-paste-courses').value = '';
+            document.getElementById('campus-paste-courses-preview').replaceChildren();
+            document.getElementById('import-campus-courses-btn').classList.add('hidden');
+            this.campusCourseDraft = null;
+        }
+
+        previewCampusAssignments() {
+            const status = document.getElementById('campus-paste-assignments-status');
+            const preview = document.getElementById('campus-paste-assignments-preview');
+            const addButton = document.getElementById('import-campus-assignments-btn');
+            const courseCode = document.getElementById('campus-paste-assignment-course').value;
+            const course = (AppState.get('courses') || []).find(item => item.code === courseCode);
+            if (!course) throw new Error('Choose the class for these assignments.');
+            const parsed = window.StudBudCampusPaste?.parseAssignments(document.getElementById('campus-paste-assignments').value);
+            if (!parsed) throw new Error('The paste tool is not available. Reload StudBud and try again.');
+            if (!parsed.length) throw new Error('Paste an assignment table first.');
+            const normalize = value => String(value || '').normalize('NFKC').trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+            const existing = AppState.get('assignments') || [];
+            const seen = new Set(existing.filter(entry => entry.courseCode === courseCode)
+                .map(entry => `${normalize(entry.title)}|${entry.dueDate || ''}`));
+            const rows = parsed.map(item => {
+                const category = (course.categories || []).find(entry => normalize(entry.name) === normalize(item.category));
+                const key = `${normalize(item.title)}|${item.dueDate}`;
+                const duplicate = seen.has(key);
+                seen.add(key);
+                const invalidScore = item.pointsEarned !== null && (item.pointsEarned < 0 || item.maxPoints <= 0);
+                return { ...item, categoryId: category?.id || null, duplicate, invalidScore, include: !duplicate && !invalidScore };
+            });
+            this.campusAssignmentDraft = {
+                rows, courseCode, sourceText: document.getElementById('campus-paste-assignments').value
+            };
+            preview.innerHTML = `<ul class="campus-paste-list campus-paste-assignments">${rows.map((row, index) => {
+                const grade = row.pointsEarned === null ? 'No score' : `${row.pointsEarned}/${row.maxPoints}`;
+                const detail = [row.dueDate || 'No due date', grade, row.category || 'No category'].join(' · ');
+                const state = row.duplicate ? 'Already added' : row.invalidScore ? 'Check score' : detail;
+                return `<li><label><input type="checkbox" data-campus-assignment-index="${index}"${row.include ? ' checked' : ''}${row.include ? '' : ' disabled'}><span>${this.escapeHTML(row.title)}</span></label><small class="${row.invalidScore ? 'campus-paste-warning' : ''}">${this.escapeHTML(state)}</small></li>`;
+            }).join('')}</ul>`;
+            const count = rows.filter(row => row.include).length;
+            const graded = rows.filter(row => row.include && row.pointsEarned !== null).length;
+            status.textContent = `${count} ready to add · ${graded} with scores${rows.length > count ? ` · ${rows.length - count} skipped` : ''}.`;
+            addButton.classList.toggle('hidden', count === 0);
+        }
+
+        importCampusAssignments() {
+            const draft = this.campusAssignmentDraft;
+            if (!draft) throw new Error('Preview the pasted assignments before adding them.');
+            if (document.getElementById('campus-paste-assignment-course').value !== draft.courseCode
+                || document.getElementById('campus-paste-assignments').value !== draft.sourceText
+                || !(AppState.get('courses') || []).some(course => course.code === draft.courseCode)) {
+                this.invalidateCampusPastePreview('assignments');
+                throw new Error('The selected class or pasted assignments changed. Preview again before adding.');
+            }
+            const selected = [...document.querySelectorAll('[data-campus-assignment-index]:checked')]
+                .map(input => draft.rows[Number(input.dataset.campusAssignmentIndex)]).filter(Boolean);
+            if (!selected.length) throw new Error('Select at least one assignment to add.');
+            const today = localDateKey(new Date());
+            const assignments = AppState.get('assignments') || [];
+            const batchId = Date.now();
+            selected.forEach((row, index) => {
+                const graded = row.pointsEarned !== null;
+                assignments.push({
+                    id: `campus_paste_${batchId}_${index}`,
+                    title: row.title,
+                    courseCode: draft.courseCode,
+                    dueDate: row.dueDate,
+                    pointsEarned: graded ? row.pointsEarned : 0,
+                    maxPoints: graded ? row.maxPoints : 100,
+                    categoryId: row.categoryId,
+                    kind: /\bquiz\b/i.test(row.title) ? 'quiz' : /\b(?:test|exam)\b/i.test(row.title) ? 'test' : 'assignment',
+                    estimatedMinutes: 30,
+                    plannedDate: '',
+                    importance: 3,
+                    priority: 'high',
+                    graded,
+                    dismissed: false,
+                    status: graded ? 'completed' : 'pending',
+                    completedAt: graded ? today : null,
+                    gradedAt: graded ? today : null
+                });
+            });
+            AppState.set('assignments', assignments);
+            document.getElementById('campus-paste-assignments-status').textContent =
+                `Added ${selected.length} assignments to ${(AppState.get('courses') || []).find(item => item.code === draft.courseCode)?.title || 'your class'}.`;
+            document.getElementById('campus-paste-assignments').value = '';
+            document.getElementById('campus-paste-assignments-preview').replaceChildren();
+            document.getElementById('import-campus-assignments-btn').classList.add('hidden');
+            this.campusAssignmentDraft = null;
+        }
+
         renderUI() {
             this.syncSchoolCalendar();
             this.syncPreferences();
             this.renderCourses();
+            this.renderCampusPasteCourseOptions();
             this.renderAcademicHistory();
             this.renderAssignments();
             this.renderDecks();
@@ -2284,9 +2499,8 @@
                 if (!await window.StudBudDialogs.confirm(`Finish ${year.label}? Save ${year.transcript.length} final class grades to cumulative GPA and credits. Current assignments, calendar and scenarios move into the read-only archive. Sets and study history stay saved.`)) return;
                 if (this.schoolYearDraft !== this.schoolYearSnapshot()) throw new Error('Your school data changed during confirmation. Review the year again.');
                 AppState.saveSchoolYear(changes);
-                this.icImport = null;
                 this.closeModal();
-                window.StudBudDialogs.notify(`${year.label} saved. Your cumulative GPA and completed credits are preserved. You can now import next year's classes.`);
+                window.StudBudDialogs.notify(`${year.label} saved. Your cumulative GPA and completed credits are preserved. You can now add next year's classes.`);
             } finally {
                 this.schoolYearSaving = false;
             }
@@ -2662,291 +2876,6 @@
             this.renderSchedulePage();
             this.renderDashboard();
             this.renderCalendar();
-        }
-
-        openInfiniteCampusImport() {
-            if (!window.StudBudIC) throw new Error('The Infinite Campus importer did not load. Refresh the page and try again.');
-            const manualPaste = document.getElementById('ic-manual-paste');
-            if (manualPaste && this.icManualPaste) manualPaste.value = this.icManualPaste;
-            this.setInfiniteCampusStatus('');
-            this.showInfiniteCampusSteps(!this.icImport);
-            this.openModal('ic-import-modal');
-        }
-
-        hasInfiniteCampusAuthorization() {
-            return false;
-        }
-
-        updateInfiniteCampusComplianceUi() {
-            const enabled = false;
-            const bookmarkletLink = document.getElementById('ic-bookmarklet-link');
-            if (bookmarkletLink) {
-                bookmarkletLink.setAttribute('aria-disabled', String(!enabled));
-                bookmarkletLink.classList.toggle('is-disabled', !enabled);
-                if (typeof bookmarkletLink.toggleAttribute === 'function') bookmarkletLink.toggleAttribute('draggable', enabled);
-                else bookmarkletLink.draggable = enabled;
-                if (!enabled) bookmarkletLink.setAttribute('tabindex', '-1');
-                else if (typeof bookmarkletLink.removeAttribute === 'function') bookmarkletLink.removeAttribute('tabindex');
-                else delete bookmarkletLink.tabindex;
-            }
-            for (const id of ['ic-copy-bookmarklet-btn', 'ic-open-campus-btn']) {
-                const button = document.getElementById(id);
-                if (!button) continue;
-                if (typeof button.toggleAttribute === 'function') button.toggleAttribute('disabled', !enabled);
-                else button.disabled = !enabled;
-            }
-        }
-
-        showInfiniteCampusSteps(show) {
-            document.getElementById('ic-import-modal')?.classList.toggle('ic-has-preview', !show);
-        }
-
-        restartInfiniteCampusImport() {
-            this.icImport = null;
-            const preview = document.getElementById('ic-import-preview');
-            if (preview) {
-                preview.innerHTML = '';
-                preview.classList.add('hidden');
-            }
-            this.setInfiniteCampusStatus('');
-            this.showInfiniteCampusSteps(true);
-        }
-
-        setInfiniteCampusStatus(message, tone = '') {
-            const status = document.getElementById('ic-import-status');
-            if (!status) return;
-            status.textContent = message;
-            status.dataset.tone = tone;
-        }
-
-        openInfiniteCampusSite() {
-            if (!this.hasInfiniteCampusAuthorization()) {
-                this.setInfiniteCampusStatus('Campus helper import is disabled to avoid violating Infinite Campus usage terms. Use manual paste import instead.', 'warn');
-                return;
-            }
-            const input = document.getElementById('ic-district-url');
-            let value = String(input?.value || '').trim();
-            if (!value) throw new Error('Open "Different Campus address?" and paste your Infinite Campus address first (it usually ends in infinitecampus.org).');
-            if (!/^https?:\/\//i.test(value)) value = `https://${value}`;
-            let url;
-            try {
-                url = new URL(value);
-            } catch {
-                throw new Error('That Infinite Campus address does not look like a web address.');
-            }
-            if (url.protocol !== 'https:') throw new Error('Use the secure https:// Infinite Campus address.');
-            localStorage.setItem('studbud-ic-url', url.href);
-            this.icAllowedOrigin = url.origin;
-            // Keep the opener link so the helper can hand data straight back to this tab
-            this.icWindow = window.open(url.href, 'studbud-ic');
-            this.setInfiniteCampusStatus(this.icWindow
-                ? 'Campus opened in a new tab. Sign in on the website (not the Campus app), then run your saved StudBud Import bookmark. On Chrome for Android, type the bookmark name in the address bar and tap the saved bookmark suggestion.'
-                : 'Your browser blocked the Campus tab. Allow pop-ups for StudBud, then choose Open Infinite Campus again so Send to StudBud can connect.');
-        }
-
-        async copyInfiniteCampusBookmarklet() {
-            if (!this.hasInfiniteCampusAuthorization()) {
-                this.setInfiniteCampusStatus('Campus helper import is disabled to avoid violating Infinite Campus usage terms. Use manual paste import instead.', 'warn');
-                return;
-            }
-            const origin = /^https?:$/.test(window.location.protocol) ? window.location.origin : '';
-            const input = document.getElementById('ic-bookmarklet-url');
-            input.value = window.StudBudIC.buildBookmarklet(origin);
-            try {
-                if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable.');
-                await navigator.clipboard.writeText(input.value);
-                this.setInfiniteCampusStatus('Bookmark URL copied. Bookmark a page as StudBud Import, edit that bookmark, and replace its entire address with the copied URL. Then run the bookmark on the signed-in Campus website.');
-            } catch {
-                document.getElementById('ic-mobile-instructions').open = true;
-                input.focus();
-                input.select();
-                input.setSelectionRange(0, input.value.length);
-                this.setInfiniteCampusStatus('Automatic copying is blocked. The bookmark URL is selected below: tap and hold and choose Copy on a phone, or press Ctrl+C (Cmd+C on Mac). Paste it into the address of your StudBud Import bookmark.', 'warn');
-            }
-        }
-
-        previewInfiniteCampusPastedData() {
-            const input = document.getElementById('ic-manual-paste');
-            const raw = String(input?.value || '').trim();
-            if (!raw) throw new Error('Paste the Infinite Campus data first.');
-            this.icManualPaste = raw;
-            this.previewInfiniteCampusData(raw);
-        }
-
-        clearInfiniteCampusPastedData() {
-            const input = document.getElementById('ic-manual-paste');
-            if (input) input.value = '';
-            this.icManualPaste = '';
-            this.setInfiniteCampusStatus('Manual import text cleared.');
-        }
-
-        isTrustedInfiniteCampusMessage(event) {
-            if (event.source && this.icWindow && event.source === this.icWindow) return true;
-            if (this.icAllowedOrigin && event.origin === this.icAllowedOrigin) return true;
-            const saved = localStorage.getItem('studbud-ic-url');
-            try {
-                if (saved && new URL(saved).origin === event.origin) return true;
-            } catch { /* ignore a bad saved address */ }
-            try {
-                const host = new URL(event.origin).hostname;
-                return new URL(event.origin).protocol === 'https:' && (host === 'infinitecampus.org' || host.endsWith('.infinitecampus.org') || host.endsWith('.infinitecampus.com'));
-            } catch {
-                return false;
-            }
-        }
-
-        handleInfiniteCampusMessage(event) {
-            const IC = window.StudBudIC;
-            const data = event.data;
-            if (!IC || !data || typeof data !== 'object' || data.format !== IC.FORMAT) return;
-            // Data only opens a preview; nothing is saved until the student confirms the import
-            if (!this.isTrustedInfiniteCampusMessage(event)) return;
-            if (document.getElementById('ic-import-modal')?.classList.contains('hidden')) this.openModal('ic-import-modal');
-            if (!this.previewInfiniteCampusData(data)) return;
-            try {
-                event.source?.postMessage({ format: IC.ACK_FORMAT }, event.origin);
-            } catch (error) {
-                console.warn('[NexusApp] Campus import received, but receipt could not be confirmed:', error);
-                this.setInfiniteCampusStatus('Your import arrived. Review and save below; Campus may not show its confirmation.', 'warn');
-            }
-            window.focus();
-        }
-
-        previewInfiniteCampusData(input) {
-            const IC = window.StudBudIC;
-            let model;
-            try {
-                model = IC.parsePayload(input);
-            } catch (error) {
-                this.setInfiniteCampusStatus(error.message || 'That does not look like StudBud Infinite Campus data.', 'error');
-                return;
-            }
-            const school = this.currentSchool();
-            const catalog = this.schoolCatalog(school);
-            const plan = IC.buildImportPlan(model, { courses: AppState.get('courses') || [] }, { school, catalog });
-            this.icImport = { model, plan };
-            this.renderInfiniteCampusPreview();
-            const warnings = model.warnings.length ? ` ${model.warnings.length} item(s) could not be read from Campus.` : '';
-            this.setInfiniteCampusStatus(`Found ${plan.counts.classes} classes, ${plan.counts.assignments} assignments (${plan.counts.graded} graded), and ${plan.counts.days} calendar days. Check the matches below, then import.${warnings}`, warnings ? 'warn' : 'ok');
-            return true;
-        }
-
-        renderInfiniteCampusPreview() {
-            const container = document.getElementById('ic-import-preview');
-            if (!container || !this.icImport) return;
-            const { plan, model } = this.icImport;
-            const esc = value => this.escapeHTML(value ?? '');
-            const pchs = this.isParkwaySchool(plan.school);
-            const schoolTag = this.schoolShortName(plan.school);
-            const catalog = this.schoolCatalog(plan.school).filter(course => course.code);
-            const byCategory = new Map();
-            catalog.forEach(course => {
-                const key = course.category || 'Other';
-                if (!byCategory.has(key)) byCategory.set(key, []);
-                byCategory.get(key).push(course);
-            });
-            const fullCatalog = [...byCategory.entries()].map(([category, courses]) =>
-                `<optgroup label="${esc(category)}">${courses.map(course => `<option value="${esc(course.code)}">${esc(course.title)}</option>`).join('')}</optgroup>`).join('');
-            const existingCourses = (AppState.get('courses') || []).filter(course => !course.school || course.school === plan.school);
-            const existingTitles = new Map(existingCourses.map(course => [course.code, course.title]));
-            const existingOptions = existingCourses.map(course =>
-                `<option value="existing:${esc(course.code)}">${esc(course.title)} (${esc(course.code)})</option>`).join('');
-            const rows = plan.classes.map((entry, index) => {
-                const suggestionOptions = entry.suggestions.map(course => `<option value="${esc(course.code)}">${esc(course.title)}${entry.match?.code === course.code ? ' (suggested)' : ''}</option>`).join('');
-                const select = `<select data-ic-class="${index}" aria-label="StudBud class for ${esc(entry.name)}">
-                    <option value="skip">Don't import</option>
-                    ${existingOptions ? `<optgroup label="Update one of your classes">${existingOptions}</optgroup>` : ''}
-                    <option value="">Add using Campus name: ${esc(entry.name)}</option>
-                    ${pchs && suggestionOptions ? `<optgroup label="Add / match suggested ${esc(schoolTag)} course">${suggestionOptions}</optgroup>` : ''}
-                    ${pchs ? fullCatalog : ''}
-                </select>`;
-                const confidence = entry.match ? Math.round(entry.match.confidence * 100) : 0;
-                const badge = entry.existingCode ? '<span class="ic-badge ok">Existing class</span>' : !pchs ? ''
-                    : entry.match ? `<span class="ic-badge ${confidence >= 85 ? 'ok' : 'check'}">${entry.match.method === 'number' ? 'Course # match' : `${confidence}% name match`}</span>`
-                        : '<span class="ic-badge check">No catalog match</span>';
-                const grade = entry.grades.length ? entry.grades[entry.grades.length - 1] : null;
-                const details = [
-                    entry.courseNumbers.length ? `#${entry.courseNumbers.join(', ')}` : '',
-                    entry.periods.length ? `Period ${entry.periods.join(', ')}` : '',
-                    entry.times.join(', '),
-                    entry.teacher,
-                    entry.term,
-                    `${entry.assignmentCount} assignments`,
-                    entry.categoryCount ? `${entry.categoryCount} categories` : '',
-                    grade ? `${grade.task || grade.term}: ${grade.score || ''}${Number.isFinite(grade.percent) ? ` (${grade.percent}%)` : ''}` : '',
-                    entry.dropped ? 'dropped' : ''
-                ].filter(Boolean).map(esc).join(' · ');
-                return `<div class="ic-class-row${entry.include ? '' : ' ic-skipped'}">
-                    <div class="ic-class-info"><div><strong>${esc(entry.name)}</strong> ${badge}</div><small>${details}</small>
-                    <small data-ic-effect>${!entry.include ? 'Not imported - choose an existing class or explicitly add it' : entry.existingCode ? `Updates ${esc(existingTitles.get(entry.existingCode) || entry.existingCode)}` : 'Adds a new class'}</small></div>
-                    ${select}
-                </div>`;
-            }).join('');
-            container.innerHTML = `
-                <h3>${esc(model.studentName ? `${model.studentName}'s classes` : 'Classes found')}</h3>
-                ${model.warnings.length ? `<p class="settings-hint">${model.warnings.map(esc).join(' ')}</p>` : ''}
-                <p class="settings-hint">Update your existing classes to refresh grades, assignments and schedules without changing their names or Honors/AP settings. Active academic classes are selected automatically; unmatched classes are added using their Campus names. Review suggested catalog matches, search each dropdown to choose the right class, or choose Don't import to leave a class out.</p>
-                <div class="ic-class-list">${rows || '<p class="empty-state">No classes were found for this school year.</p>'}</div>
-                <fieldset class="ic-options">
-                    <legend>Also import</legend>
-                    <label><input type="checkbox" data-ic-option="categories" checked> Grade categories &amp; weights</label>
-                    <label><input type="checkbox" data-ic-option="graded" checked> Graded work, scores &amp; missing assignments</label>
-                    <label><input type="checkbox" data-ic-option="schedule" checked> Class periods &amp; times</label>
-                    <label><input type="checkbox" data-ic-option="calendar" checked> School calendar (days off, notes)</label>
-                </fieldset>
-                <p class="settings-hint">Citizenship and its assignments are excluded. Only graded or missing work is imported; ungraded upcoming assignments stay unchanged. Missing work stays overdue even when Campus has given it a score. Your study estimates and priorities are kept.</p>
-                <div class="modal-footer"><button id="ic-restart-btn" class="secondary-btn" type="button"><i class="fas fa-rotate-left"></i> Start over</button><button id="ic-apply-import-btn" class="primary-btn" type="button"><i class="fas fa-file-import"></i> Import into StudBud</button></div>`;
-            container.querySelectorAll('select[data-ic-class]').forEach(select => {
-                const entry = plan.classes[Number(select.dataset.icClass)];
-                select.value = entry.include ? (entry.existingCode ? `existing:${entry.existingCode}` : entry.match?.code || '') : 'skip';
-            });
-            container.classList.remove('hidden');
-            this.showInfiniteCampusSteps(false);
-        }
-
-        applyInfiniteCampusImport() {
-            if (!this.icImport) throw new Error('Preview your Infinite Campus data first.');
-            const IC = window.StudBudIC;
-            const { model, plan } = this.icImport;
-            const container = document.getElementById('ic-import-preview');
-            const overrides = {};
-            container.querySelectorAll('select[data-ic-class]').forEach(select => {
-                overrides[plan.classes[Number(select.dataset.icClass)].key] = select.value;
-            });
-            const options = { overrides, catalog: window.STUDBUD_COURSE_CATALOG || window.PCHS_COURSE_CATALOG || [] }; // full catalog so previously saved codes still resolve
-            container.querySelectorAll('[data-ic-option]').forEach(box => { options[box.dataset.icOption] = box.checked; });
-            if (Object.values(overrides).every(value => value === 'skip')) throw new Error('Choose at least one class to import.');
-            const result = IC.applyImportPlan(model, plan, {
-                courses: AppState.get('courses') || [],
-                assignments: AppState.get('assignments') || [],
-                schedule: AppState.get('schedule') || {}
-            }, options);
-            AppState.set('courses', result.courses);
-            AppState.set('assignments', result.assignments);
-            AppState.set('schedule', result.schedule);
-            this.icImport = null;
-            this.icManualPaste = '';
-            const pastedInput = document.getElementById('ic-manual-paste');
-            if (pastedInput) pastedInput.value = '';
-            this.renderUI();
-            if (Router.activeRoute === 'schedule') this.renderSchedulePage();
-            this.renderCalendar();
-            const s = result.summary;
-            const parts = [
-                s.coursesAdded ? `${s.coursesAdded} classes added` : '',
-                s.coursesUpdated ? `${s.coursesUpdated} classes updated` : '',
-                s.categories ? `${s.categories} categories` : '',
-                s.gradedAdded + s.gradedUpdated ? `${s.gradedAdded + s.gradedUpdated} graded assignments` : '',
-                s.upcomingAdded + s.upcomingUpdated ? `${s.upcomingAdded + s.upcomingUpdated} unscored missing assignments` : '',
-                s.periods ? `${s.periods} class periods` : '',
-                s.days ? `${s.days} calendar days` : ''
-            ].filter(Boolean);
-            this.closeModal();
-            const preview = document.getElementById('ic-import-preview');
-            preview.innerHTML = '';
-            preview.classList.add('hidden');
-            this.showInfiniteCampusSteps(true);
-            window.StudBudDialogs.notify(`Import complete: ${parts.join(', ') || 'nothing new to add'}.`);
         }
 
         getScheduleEntries(date) {
@@ -4815,8 +4744,7 @@
         multiplayerDisplayName() {
             const user = window.StudBudCloud?.user;
             const profile = AppState.get('profile') || {};
-            if (window.StudBudCloud?.isGuest?.()) return profile.guestName || 'Guest';
-            return user?.user_metadata?.username || 'Student';
+            return user?.user_metadata?.username || (window.StudBudCloud?.isGuest?.() ? (profile.guestName || 'Guest') : 'Student');
         }
 
         // Player names are optional: a blank name uses your username, so joining never stalls on an empty field.
@@ -5434,12 +5362,10 @@
         }
 
         async loadPublicProfileCard() {
-            if (!document.getElementById('public-bio') || !window.StudBudCloud?.user) return;
+            if (!document.getElementById('public-subject') || !window.StudBudCloud?.user) return;
             try {
                 const p = await window.StudBudCommunityGames.friendCall('studbud_get_public_profile');
-                document.getElementById('public-bio').value = p.bio || '';
                 document.getElementById('public-subject').value = p.favorite_subject || '';
-                document.getElementById('public-goal').value = p.study_goal || '';
                 const classmates = document.getElementById('public-show-classmates');
                 this.classmateDiscoveryAvailable = typeof p.show_classmates === 'boolean';
                 if (classmates) {
@@ -5467,16 +5393,12 @@
             status.textContent = 'Saving…';
             try {
                 await window.StudBudCommunityGames.friendCall('studbud_set_public_profile', {
-                    p_bio: document.getElementById('public-bio').value,
                     p_favorite_subject: document.getElementById('public-subject').value,
-                    p_grade_level: '',
-                    p_study_goal: document.getElementById('public-goal').value,
-                    p_show_school: false,
                     p_show_stats: document.getElementById('public-show-stats').checked,
                     ...(this.classmateDiscoveryAvailable ? { p_show_classmates: document.getElementById('public-show-classmates').checked } : {})
                 });
-                status.textContent = this.classmateDiscoveryAvailable ? 'Saved your public profile and course-discovery preferences.'
-                    : 'Saved your public profile. Course discovery needs a server update before it can be enabled.';
+                status.textContent = this.classmateDiscoveryAvailable ? 'Saved your pseudonymous profile and course-discovery preference.'
+                    : 'Saved your profile. Course discovery needs a server update before it can be enabled.';
             } catch (error) {
                 status.textContent = this.friendlyErrorMessage(error, 'Could not save your profile.');
             }
@@ -8982,8 +8904,6 @@
         renderProfile() {
             this.syncPreferences();
             const profile = AppState.get('profile') || {};
-            const year = document.getElementById('settings-grad-year');
-            if (year && profile.graduationYear) year.value = String(profile.graduationYear);
             const targetGpa = document.getElementById('settings-target-gpa');
             if (targetGpa) {
                 const goal = this.calculateTargetGPA();
@@ -9003,14 +8923,11 @@
                 schoolSetting.value = this.isKnownSchool(stored) ? stored : 'other';
             }
 
-            const classYear = profile.graduationYear || 2026;
             const displayName = this.multiplayerDisplayName();
             const headerName = document.getElementById('multiplayer-header-name');
             if (headerName) headerName.textContent = displayName;
             const accountName = document.getElementById('account-name');
             if (accountName) accountName.innerHTML = `${this.escapeHTML(displayName)} ${this.accountTagMarkup(window.StudBudCloud?.user?.user_metadata?.username, this.userTags)}`;
-            const grade = document.getElementById('header-grade-level');
-            if (grade) grade.textContent = `Class of ${classYear}`;
             const saveStatus = document.getElementById('data-save-status');
             if (saveStatus && !saveStatus.textContent.trim()) saveStatus.textContent = 'Your classes, assignments, profile, and settings sync automatically to your account.';
             this.applyAppearance();
@@ -9074,6 +8991,10 @@
         applyAppearance() {
             this.ensureSchemeButtons();
             const settings = AppState.get('settings') || {};
+            if (!this.graphicsProfileInitialized) {
+                window.StudBudArcade?.configureGraphicsProfile(settings.gameGraphics || 'auto');
+                this.graphicsProfileInitialized = true;
+            }
             if (settings.gameAudio) window.StudBudSfx?.update(settings.gameAudio);
             if (!this.systemThemeQuery && window.matchMedia) {
                 this.systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)');
@@ -9095,7 +9016,6 @@
             document.documentElement.style.colorScheme = theme;
             const themeColor = document.querySelector('meta[name="theme-color"]');
             if (themeColor) themeColor.content = theme === 'dark' ? '#111827' : '#f8fafc';
-            document.body.classList.toggle('compact-ui', Boolean(settings.compactUi));
             document.body.classList.toggle('sidebar-collapsed', Boolean(settings.sidebarCollapsed));
             document.body.dataset.colorScheme = colorScheme;
             const palette = window.StudBudCommunityGames?.catalog.find(item => item.type === 'palette' && item.color === colorScheme && item.hue != null);
@@ -9109,8 +9029,8 @@
             }
             const themeSelect = document.getElementById('ui-theme-select');
             if (themeSelect) themeSelect.value = preference;
-            const compact = document.getElementById('ui-compact-mode');
-            if (compact) compact.checked = Boolean(settings.compactUi);
+            const gameGraphics = document.getElementById('game-graphics');
+            if (gameGraphics) gameGraphics.value = ['auto', 'performance', 'quality'].includes(settings.gameGraphics) ? settings.gameGraphics : 'auto';
             document.querySelectorAll('.scheme-option').forEach(button => {
                 const selected = button.dataset.colorScheme === colorScheme;
                 button.classList.toggle('selected', selected);
@@ -9413,7 +9333,7 @@
                 <label for="report-description">${type === 'profile' ? 'What did this player do?' : 'What happened?'}<textarea id="report-description" name="details" rows="5" required minlength="10" maxlength="${content ? 500 : 2000}" placeholder="${type === 'profile' ? 'Explain what they did, where it happened, and roughly when.' : 'For a bug: what you did, what you expected, and what happened instead. For a player: what they did, where, and roughly when.'}"></textarea></label>
                 <small>Please include enough detail to investigate. Do not include passwords or sensitive personal information.</small>
                 <p class="report-status" role="status"></p>
-                <div class="admin-actions"><button type="submit" class="primary-btn">Send report</button><button type="button" class="secondary-btn" data-report-cancel>Cancel</button><a class="text-btn" data-report-email href="mailto:villareala8873@parkwayschools.net">Email support instead</a></div>
+                <div class="admin-actions"><button type="submit" class="primary-btn">Send report</button><button type="button" class="secondary-btn" data-report-cancel>Cancel</button></div>
             </form>`;
             const form = overlay.firstElementChild;
             const close = () => {
@@ -9425,11 +9345,6 @@
             overlay.addEventListener('keydown', event => event.stopPropagation());
             overlay.addEventListener('click', event => {
                 if (event.target.closest('[data-report-cancel]')) close();
-                if (event.target.closest('[data-report-email]')) {
-                    const subject = content ? `Report ${label}: ${name || id}` : form.elements.subject.value.trim() || 'StudBud report';
-                    const body = `${content ? `Type: ${type}\nItem: ${id}` : `Type: ${form.elements.category.value}\nPlayer: ${form.elements.username.value.trim()}`}\n\n${form.elements.details.value.trim()}`;
-                    event.target.closest('a').href = `mailto:villareala8873@parkwayschools.net?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-                }
             });
             form.addEventListener('change', event => {
                 if (event.target.name !== 'category') return;
@@ -9476,10 +9391,10 @@
                 const p = await window.StudBudCommunityGames.getUserProfile(userId);
                 const avatar = this.multiplayerAvatarMarkup(this.profileCosmetics(p), true);
                 const stat = (label, value) => `<div class="friend-stat"><strong>${value}</strong><small>${label}</small></div>`;
-                const facts = [p.favorite_subject && `⭐ ${p.favorite_subject}`, p.study_goal && `🎯 ${p.study_goal}`].filter(Boolean).map(f => `<span class="friend-chip">${this.escapeHTML(f)}</span>`).join('');
+                const facts = [p.favorite_subject && `⭐ ${p.favorite_subject}`].filter(Boolean).map(f => `<span class="friend-chip">${this.escapeHTML(f)}</span>`).join('');
                 const decks = (p.decks || []).map(d => `<li class="friend-row"><div><strong>${this.escapeHTML(d.title)}</strong>${d.course ? ` <span class="deck-chip"><i class="fas fa-book"></i> ${this.escapeHTML(d.course)}</span>` : ''}<br><small>${Number(d.card_count)} cards · studied by ${Number(d.study_count)}</small></div>${p.is_me && !this.findCommunityDeck(d.id) ? '' : this.communityDeckActionMarkup(d.id)}</li>`).join('');
-                modal.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.username)} ${this.accountTagMarkup(p.username, p.tags)}${p.is_me ? ' <em class="you-badge">you</em>' : ''}</h3>${p.display_name ? `<small class="profile-real-name">${this.escapeHTML(p.display_name)}</small>` : ''}</div><button type="button" class="icon-btn profile-close" data-action="close-user-profile" aria-label="Close profile"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
-                    ${p.bio ? `<p class="friend-bio">${this.escapeHTML(p.bio)}</p>` : ''}${facts ? `<div class="friend-chips">${facts}</div>` : ''}
+                modal.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.username)} ${this.accountTagMarkup(p.username, p.tags)}${p.is_me ? ' <em class="you-badge">you</em>' : ''}</h3></div><button type="button" class="icon-btn profile-close" data-action="close-user-profile" aria-label="Close profile"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
+                    ${facts ? `<div class="friend-chips">${facts}</div>` : ''}
                     <div class="friend-stats">${p.show_stats === false ? stat('Match wins', Number(p.wins) || 0) : `${stat('Studied today', this.formatStudyDuration(p.today_seconds))}${stat('This week', this.formatStudyDuration(p.week_seconds))}${stat('All time', this.formatStudyDuration(p.total_seconds))}${stat('Day streak', `${Number(p.streak_days) || 0} 🔥`)}${stat('Match wins', Number(p.wins) || 0)}`}</div>
                     <h4>Shared flashcard sets</h4>
                     <ul class="friend-list">${decks || '<li class="empty-state">No shared sets yet.</li>'}</ul>
@@ -9496,9 +9411,9 @@
                 const p = await window.StudBudCommunityGames.friendCall('studbud_friend_profile', { p_user_id: userId });
                 const avatar = this.multiplayerAvatarMarkup({ skin: p.skin, hat: p.hat, acc: p.accessory }, true);
                 const stat = (label, value) => `<div class="friend-stat"><strong>${value}</strong><small>${label}</small></div>`;
-                const facts = [p.favorite_subject && `⭐ ${p.favorite_subject}`, p.study_goal && `🎯 ${p.study_goal}`].filter(Boolean).map(f => `<span class="friend-chip">${this.escapeHTML(f)}</span>`).join('');
-                panel.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.username)} ${this.accountTagMarkup(p.username, p.tags)}</h3>${p.display_name ? `<small class="profile-real-name">${this.escapeHTML(p.display_name)}</small>` : ''}<small>Bud</small></div><button type="button" class="icon-btn profile-close" data-action="friend-profile-close" aria-label="Close profile"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
-                    ${p.bio ? `<p class="friend-bio">${this.escapeHTML(p.bio)}</p>` : ''}${facts ? `<div class="friend-chips">${facts}</div>` : ''}
+                const facts = [p.favorite_subject && `⭐ ${p.favorite_subject}`].filter(Boolean).map(f => `<span class="friend-chip">${this.escapeHTML(f)}</span>`).join('');
+                panel.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.username)} ${this.accountTagMarkup(p.username, p.tags)}</h3><small>Bud</small></div><button type="button" class="icon-btn profile-close" data-action="friend-profile-close" aria-label="Close profile"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
+                    ${facts ? `<div class="friend-chips">${facts}</div>` : ''}
                     <div class="friend-stats">${p.show_stats === false ? stat('Match wins', Number(p.wins) || 0) : `${stat('Studied today', this.formatStudyDuration(p.today_seconds))}${stat('This week', this.formatStudyDuration(p.week_seconds))}${stat('All time', this.formatStudyDuration(p.total_seconds))}${stat('Day streak', `${Number(p.streak_days) || 0} 🔥`)}${stat('Match wins', Number(p.wins) || 0)}`}</div>`;
                 panel.classList.remove('hidden');
                 panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -9510,7 +9425,7 @@
         tutorialSteps() {
             return [
                 { title: 'Set up your next school day', text: 'Use your own schoolwork: save a deadline, plan a work block, then answer a flashcard. The path checks off real progress, not button clicks. Skip anything you do not need.' },
-                { route: 'gpa', sel: '#gpa-view .open-ic-import-btn', title: 'Save your classes', text: 'Choose Import grades to paste and review your data, or use Add class. This checks off once a class is saved.', action: '#gpa-view .open-ic-import-btn', goal: 'classes' },
+                { route: 'gpa', sel: '#add-course-btn', title: 'Save your classes', text: 'Use Add Class to enter your classes and grading details. You can edit or update them whenever you need.', action: '#add-course-btn', goal: 'classes' },
                 { route: 'planner', sel: '[data-action="planner-add-assignment"]', title: 'Save one real deadline', text: 'Add an assignment you actually need to finish. Choose its class, enter its due date, then save. You can edit all your deadlines later in Tasks.', action: '[data-action="planner-add-assignment"]', goal: 'assignment' },
                 { route: 'planner', sel: '.planner-day-controls .planner-budget', title: 'Set your time for today', text: "Choose Try it and enter today's study minutes. Leave it blank to use your usual schedule. Week view sets minutes per workday. Defaults and workdays live in General settings.", change: '#planner-current-minutes', goal: 'budget' },
                 { route: 'planner', sel: '#planner-day-queue', title: 'Start one work block', text: 'Choose Work on this for a task you can do now. Keep this page open while you work. Time pauses when you leave or go idle. Mark done only when finished.', action: '[data-action="planner-start-work"]', goal: 'work' },
@@ -10531,6 +10446,10 @@
                 this.updateScenarioScorePreview();
                 return;
             }
+            if (target.matches('[data-campus-paste-mode]')) {
+                this.setCampusPasteMode(target.dataset.campusPasteMode);
+                return;
+            }
 
             if (target.matches('[data-target]')) {
                 event.preventDefault();
@@ -10765,6 +10684,18 @@
                     this.finishTutorial();
                 } else if (action === 'campus-add-manually') {
                     this.openCourseForm();
+                } else if (action === 'open-campus-paste-modal') {
+                    this.setCampusPasteMode('courses');
+                    this.renderCampusPasteCourseOptions();
+                    this.openModal('campus-paste-modal');
+                } else if (action === 'preview-campus-courses') {
+                    this.previewCampusCourses();
+                } else if (action === 'import-campus-courses') {
+                    this.importCampusCourses();
+                } else if (action === 'preview-campus-assignments') {
+                    this.previewCampusAssignments();
+                } else if (action === 'import-campus-assignments') {
+                    this.importCampusAssignments();
                 } else if (action === 'load-classmates') {
                     await this.loadClassmates(target);
                 } else if (action === 'log-study') {
@@ -10856,20 +10787,6 @@
                     await this.saveProfile();
                 } else if (id === 'save-grade-scale-btn') {
                     await this.saveOtherGradeScale();
-                } else if (target.matches('.open-ic-import-btn')) {
-                    this.openInfiniteCampusImport();
-                } else if (id === 'ic-open-campus-btn') {
-                    this.openInfiniteCampusSite();
-                } else if (id === 'ic-copy-bookmarklet-btn') {
-                    await this.copyInfiniteCampusBookmarklet();
-                } else if (id === 'ic-preview-paste-btn') {
-                    this.previewInfiniteCampusPastedData();
-                } else if (id === 'ic-clear-paste-btn') {
-                    this.clearInfiniteCampusPastedData();
-                } else if (id === 'ic-restart-btn') {
-                    this.restartInfiniteCampusImport();
-                } else if (id === 'ic-apply-import-btn') {
-                    this.applyInfiniteCampusImport();
                 } else if (id === 'remove-ic-schedule-btn') {
                     this.removeImportedSchedule();
                 } else if (id === 'factory-reset-btn') {
@@ -11203,6 +11120,14 @@
         }
 
         handleChange(event) {
+            if (event.target.id === 'campus-paste-term' && this.campusCourseDraft) {
+                this.invalidateCampusPastePreview('courses');
+                return;
+            }
+            if (event.target.id === 'campus-paste-assignment-course' && this.campusAssignmentDraft) {
+                this.invalidateCampusPastePreview('assignments');
+                return;
+            }
             if (event.target.id === 'card-browser-filter') this.renderCardBrowser();
             if (event.target.matches?.('[data-goal-grade], [data-goal-lock]')) {
                 const code = event.target.dataset.goalGrade || event.target.dataset.goalLock;
@@ -11447,9 +11372,9 @@
             if (event.target.id === 'ui-theme-select') {
                 AppState.set('settings', { ...AppState.get('settings'), theme: event.target.value });
                 this.applyAppearance();
-            } else if (event.target.id === 'ui-compact-mode') {
-                AppState.set('settings', { ...AppState.get('settings'), compactUi: event.target.checked });
-                this.applyAppearance();
+            } else if (event.target.id === 'game-graphics') {
+                AppState.set('settings', { ...AppState.get('settings'), gameGraphics: event.target.value });
+                window.StudBudDialogs.notify('Game performance preference saved. Close and reopen StudBud to apply it.');
             } else if (event.target.id === 'sfx-ui' || event.target.id === 'sfx-game') {
                 this.updateGameAudio({ [event.target.id === 'sfx-ui' ? 'ui' : 'game']: event.target.checked });
             } else if (event.target.id === 'music-on') {
@@ -12841,11 +12766,7 @@
         }
 
         async saveProfile() {
-            const graduationYear = Number(document.getElementById('settings-grad-year').value);
             const school = document.getElementById('settings-school').value;
-            if (!Number.isInteger(graduationYear) || graduationYear < 2026 || graduationYear > 2030) {
-                throw new Error('Graduation year must be between 2026 and 2030.');
-            }
             if (!this.isKnownSchool(school)) throw new Error('Choose your school from the list.');
             const calendarSettings = this.readSchoolCalendarSettings(school);
             const priorValue = id => {
@@ -12870,7 +12791,6 @@
                 ...AppState.get('profile'),
                 ...calendarSettings,
                 school,
-                graduationYear,
                 priorCredits: priorCredits > 0 ? priorCredits : 0,
                 priorWeightedGpa: priorCredits > 0 ? priorWeightedGpa : null,
                 priorUnweightedGpa: priorCredits > 0 ? priorUnweightedGpa : null,
@@ -12879,6 +12799,9 @@
             delete profile.firstName;
             delete profile.lastName;
             delete profile.targetGpa;
+            delete profile.firstName;
+            delete profile.lastName;
+            delete profile.graduationYear;
             this.semesterView = null;
             AppState.set('profile', profile);
             const savedSchoolSelect = document.getElementById('settings-school');
@@ -12888,7 +12811,7 @@
                 if (schoolStatus) schoolStatus.textContent = 'Saving school…';
                 try {
                     await window.StudBudCommunityGames.friendCall('studbud_set_school', { p_school: school });
-                    if (schoolStatus) schoolStatus.textContent = 'School saved. School and graduation year are not shown on public profiles.';
+                    if (schoolStatus) schoolStatus.textContent = 'School saved for your private course and community settings.';
                 } catch (error) {
                     if (schoolStatus) schoolStatus.textContent = `Your school was saved on this device, but not to your account. ${this.friendlyErrorMessage(error, 'Re-run supabase-setup.sql and try again.')}`;
                     throw error;

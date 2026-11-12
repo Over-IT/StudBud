@@ -30,9 +30,12 @@ app.multiplayerDisplayName = () => 'sh1t';
 assert.throws(() => app.gameNickname(), /inappropriate language/, 'unsafe stored profile defaults cannot enter games');
 const sql = source('supabase-setup.sql');
 const fn = name => sql.slice(sql.indexOf(`create or replace function public.${name}`)).split('$$;')[0];
-for (const name of ['studbud_create_game_room(', 'studbud_join_game_room(', 'studbud_change_username(', 'studbud_set_public_profile(']) {
+for (const name of ['studbud_create_game_room(', 'studbud_join_game_room(', 'studbud_change_username(']) {
     assert.match(fn(name), /studbud_name_is_blocked\(/, `${name} enforces names on the server`);
 }
+const publicProfile = fn('studbud_set_public_profile(');
+assert.doesNotMatch(publicProfile, /p_(?:bio|grade_level|study_goal|first_name|last_name|show_real_name)/,
+    'public profile updates no longer accept identifying information');
 assert.match(fn('studbud_name_is_blocked('), /normalize\(lower\(coalesce\(p_name, ''\)\), NFKD\)/);
 assert.match(sql, /before insert or update of raw_user_meta_data on auth.users/);
 assert.match(fn('studbud_guard_username('), /v_name is not distinct from/, 'unchanged legacy usernames do not prevent login or unrelated metadata changes');

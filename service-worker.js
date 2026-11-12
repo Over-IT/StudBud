@@ -46,6 +46,7 @@ const APP_FILES = [
     './multiplayerGames3.js',
     './chessGame.js',
     './infiniteCampusImport.js',
+    './campusPasteImport.js',
     './classSearch.js',
     './classrooms.js',
     './schoolCommunity.js',

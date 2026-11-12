@@ -288,21 +288,21 @@ for (const [mode, threshold] of Object.entries({
 }
 sandbox.window.matchMedia = () => ({ matches: true });
 sandbox.window.NexusApp = { AppState: { get: () => ({ gameQuality: 'low' }) } };
-const full = A.graphicsProfile('full');
-assert.equal(full.low, false, 'explicit full quality keeps the high-detail profile');
+const full = A.graphicsProfile('quality');
+assert.equal(full.low, false);
 assert.equal(full.maxDpr, 2);
-assert.equal(full.fps, 60, 'game rendering caps at 60fps by default');
-
-const lowSaved = A.graphicsProfile();
-assert.equal(lowSaved.low, true, 'saved low quality activates the low-detail profile');
-assert.equal(lowSaved.maxDpr, 1);
-assert.equal(lowSaved.particleLimit, 80);
-
-const lowAuto = A.graphicsProfile('auto', { hardwareConcurrency: 2, deviceMemory: 2, connection: { saveData: true } });
-assert.equal(lowAuto.low, true, 'low-end hardware activates the low-detail profile');
-const highAuto = A.graphicsProfile('auto', { hardwareConcurrency: 8, deviceMemory: 8, connection: { saveData: false } });
-assert.equal(highAuto.low, false, 'higher-end hardware stays in full detail');
-
+assert.equal(full.fps, Infinity, 'game rendering is not frame capped');
+assert.equal(full.particleScale, 1);
+const performanceProfile = A.graphicsProfile('performance');
+assert.equal(performanceProfile.low, true);
+assert.equal(performanceProfile.maxDpr, 1);
+assert.equal(performanceProfile.particleLimit, 80);
+const automatic = A.graphicsProfile('auto', { hardwareConcurrency: 2, deviceMemory: 2, connection: { saveData: true } });
+assert.equal(automatic.low, true, 'automatic quality uses a fixed startup hardware profile');
+assert.equal(automatic.maxDpr, 1);
+A.configureGraphicsProfile('performance');
+assert.equal(A.graphicsProfile().low, true, 'the selected profile is cached for the app session');
+A.configureGraphicsProfile('quality');
 const particles = new A.Particles({ graphics: full, preview: true });
 for (let i = 0; i < 100; i++) particles.burst(0, 0, '#fff', 100);
 assert.equal(particles.items.length, 320, 'full-detail particle growth is bounded');
@@ -337,13 +337,13 @@ assert.equal(frameSession.graphics.low, false);
 assert.equal(frameSession.resolutionScale, undefined, 'frame timing never silently lowers render resolution');
 sandbox.window.NexusApp = null;
 const resizeSession = {
-    adaptiveLow: true, resolutionScale: .5, overlay: { clientWidth: 800, clientHeight: 600 },
+    graphics: full, overlay: { clientWidth: 800, clientHeight: 600 },
     canvas: {}, layoutHud() {}
 };
 sandbox.window.devicePixelRatio = 2;
 A.Session.prototype.resize.call(resizeSession);
-assert.equal(resizeSession.graphics.low, false, 'stale adaptive low flags cannot affect graphics');
-assert.equal(resizeSession.dpr, 2, 'stale resolution scales cannot degrade rendering');
+assert.equal(resizeSession.graphics.low, false);
+assert.equal(resizeSession.dpr, 2);
 assert.equal(resizeSession.canvas.width, 1600);
 assert.equal(resizeSession.graphics.particleLimit, 320);
 const particleState = (x, y, size = 4) => ({ x, y, size, vx: 0, vy: 0, life: 1, max: 1, color: '#fff' });
@@ -364,9 +364,10 @@ assert.deepEqual(JSON.parse(JSON.stringify(rotated)), { x0: 0, x1: 50, y0: 0, y1
 assert.equal(A.util.canvasView({ getTransform: () => ({ a: 0, b: 0, c: 0, d: 0 }), canvas: paint.canvas }), null);
 assert.equal(A.util.canvasView({}), null, 'lightweight preview contexts retain a safe fallback');
 const uiSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-assert.ok(!uiSource.includes('id="game-quality"'), 'obsolete quality selector is absent');
+assert.ok(uiSource.includes('id="game-graphics"'), 'graphics quality is set in Appearance settings');
+assert.ok(!uiSource.includes('mpg-resolution'), 'there is no in-round resolution control');
 assert.ok(!fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8').includes('low-effects'), 'quality CSS cannot silently suppress effects');
-console.log('Full-quality rendering, legacy preference compatibility, viewport particle culling and unchanged simulation passed.');
+console.log('Fixed startup graphics profiles, viewport particle culling and unchanged simulation passed.');
 {
     const recorder = (transform, width = 200, height = 100) => {
         const log = { rects: [], gradients: 0, images: [], styles: [] };

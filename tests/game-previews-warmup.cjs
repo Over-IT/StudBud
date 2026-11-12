@@ -1062,12 +1062,8 @@ async function checkCommunityAndAdminUi() {
         await app.showFriendProfile('author');
         for (const markup of [profile.innerHTML, friendProfile.innerHTML]) {
             assert.match(markup, /<h3>student /, 'public and bud profiles always lead with the username');
-            if (displayName) {
-                assert.match(markup, /<\/h3><small class="profile-real-name">Ada &lt;Lovelace&gt;<\/small>/,
-                    'the disclosed real name is escaped and displayed below the username');
-            } else {
-                assert.ok(!markup.includes('profile-real-name'), 'private or empty real names have no subtitle');
-            }
+            assert.ok(!markup.includes('Ada') && !markup.includes('profile-real-name'),
+                'public and bud profiles never expose a real name');
         }
         assert.match(profile.innerHTML, /class="you-badge">you<\/em>/, 'own profiles retain their badge');
     }

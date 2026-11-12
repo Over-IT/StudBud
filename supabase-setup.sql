@@ -3206,22 +3206,22 @@ $$;
 -- What a student chooses to show their friends.
 create table if not exists public.studbud_public_profiles (
     user_id uuid primary key references auth.users (id) on delete cascade,
-    bio text not null default '',
     favorite_subject text not null default '',
-    grade_level text not null default '',
-    study_goal text not null default '',
     school text not null default 'pchs' check (school in ('pchs', 'pnhs', 'pshs', 'pwhs', 'other')),
     show_school boolean not null default false,
     show_stats boolean not null default true,
     updated_at timestamptz not null default now()
 );
-alter table public.studbud_public_profiles drop column if exists first_name;
-alter table public.studbud_public_profiles drop column if exists last_name;
-alter table public.studbud_public_profiles drop column if exists show_real_name;
 alter table public.studbud_public_profiles add column if not exists school text not null default 'pchs';
 alter table public.studbud_public_profiles add column if not exists show_school boolean not null default false;
 alter table public.studbud_public_profiles add column if not exists show_classmates boolean not null default false;
--- School remains available privately for course and community features.
+alter table public.studbud_public_profiles
+    drop column if exists bio,
+    drop column if exists grade_level,
+    drop column if exists study_goal,
+    drop column if exists first_name,
+    drop column if exists last_name,
+    drop column if exists show_real_name;
 alter table public.studbud_public_profiles drop constraint if exists studbud_public_profiles_school_check;
 alter table public.studbud_public_profiles add constraint studbud_public_profiles_school_check check (school in ('pchs', 'pnhs', 'pshs', 'pwhs', 'other'));
 alter table public.studbud_public_profiles enable row level security;
@@ -3280,15 +3280,9 @@ begin
 	    return jsonb_build_object(
         'user_id', p_user_id,
         'username', v_name,
-	        'display_name', null,
-        'bio', coalesce(v_pub.bio, ''),
         'favorite_subject', coalesce(v_pub.favorite_subject, ''),
-        'grade_level', '',
-        'study_goal', coalesce(v_pub.study_goal, ''),
         'show_stats', v_show,
         'tags', to_jsonb(public.studbud_user_tags_for(p_user_id)),
-        'school', null,
-        'show_school', false,
         'wins', coalesce(v_prof.wins, 0),
         'skin', coalesce(v_prof.equipped_skin, ''),
         'hat', coalesce(v_prof.equipped_hat, ''),
@@ -3314,26 +3308,21 @@ declare v public.studbud_public_profiles;
 begin
     if auth.uid() is null then raise exception 'Sign in first.'; end if;
     select * into v from public.studbud_public_profiles where user_id = auth.uid();
-    return jsonb_build_object('bio', coalesce(v.bio, ''), 'favorite_subject', coalesce(v.favorite_subject, ''),
-        'grade_level', coalesce(v.grade_level, ''), 'study_goal', coalesce(v.study_goal, ''),
+    return jsonb_build_object('favorite_subject', coalesce(v.favorite_subject, ''),
         'show_stats', coalesce(v.show_stats, true),
         'school', coalesce(v.school, (select a.raw_user_meta_data ->> 'school' from auth.users a where a.id = auth.uid()), 'pchs'),
-        'show_school', false,
         'show_classmates', coalesce(v.show_classmates, false));
 end;
 $$;
 
 drop function if exists public.studbud_set_public_profile(text, text, text, text, boolean);
+drop function if exists public.studbud_set_public_profile(text, text, text, text, boolean, boolean, boolean);
 drop function if exists public.studbud_set_public_profile(text, text, text, text, text, text, boolean, boolean);
 drop function if exists public.studbud_set_public_profile(text, text, text, text, text, text, boolean, boolean, boolean);
 drop function if exists public.studbud_set_public_profile(text, text, text, text, text, text, boolean, boolean, boolean, boolean);
 create or replace function public.studbud_set_public_profile(
-    p_bio text,
-    p_favorite_subject text,
-    p_grade_level text,
-    p_study_goal text,
-    p_show_school boolean,
-    p_show_stats boolean,
+    p_favorite_subject text default '',
+    p_show_stats boolean default true,
     p_show_classmates boolean default null
 )
 returns jsonb
@@ -3345,14 +3334,12 @@ begin
     if public.studbud_is_guest() then raise exception 'Create a free account to use this. Your guest data comes with you.'; end if;
     if auth.uid() is null then raise exception 'Sign in first.'; end if;
     insert into public.studbud_public_profiles (
-        user_id, bio, favorite_subject, grade_level, study_goal, show_school, show_stats, show_classmates, updated_at
+        user_id, favorite_subject, show_stats, show_classmates, updated_at
     )
-    values (auth.uid(), left(trim(coalesce(p_bio, '')), 160), left(trim(coalesce(p_favorite_subject, '')), 40),
-        '', left(trim(coalesce(p_study_goal, '')), 80),
-	        false, coalesce(p_show_stats, true), coalesce(p_show_classmates, false), now())
-    on conflict (user_id) do update set bio = excluded.bio, favorite_subject = excluded.favorite_subject,
-        grade_level = excluded.grade_level, study_goal = excluded.study_goal,
-        show_school = excluded.show_school, show_stats = excluded.show_stats,
+    values (auth.uid(), left(trim(coalesce(p_favorite_subject, '')), 40),
+        coalesce(p_show_stats, true), coalesce(p_show_classmates, false), now())
+    on conflict (user_id) do update set favorite_subject = excluded.favorite_subject,
+        show_stats = excluded.show_stats,
         show_classmates = coalesce(p_show_classmates, studbud_public_profiles.show_classmates), updated_at = now();
     return public.studbud_get_public_profile();
 end;
@@ -3377,8 +3364,8 @@ $$;
 
 revoke all on function public.studbud_get_public_profile() from public, anon;
 grant execute on function public.studbud_get_public_profile() to authenticated;
-revoke all on function public.studbud_set_public_profile(text, text, text, text, boolean, boolean, boolean) from public, anon;
-grant execute on function public.studbud_set_public_profile(text, text, text, text, boolean, boolean, boolean) to authenticated;
+revoke all on function public.studbud_set_public_profile(text, boolean, boolean) from public, anon;
+grant execute on function public.studbud_set_public_profile(text, boolean, boolean) to authenticated;
 revoke all on function public.studbud_set_school(text) from public, anon;
 grant execute on function public.studbud_set_school(text) to authenticated;
 revoke all on function public.studbud_has_user_tag(uuid, text) from public, anon, authenticated;
@@ -3546,16 +3533,10 @@ begin
     return jsonb_build_object(
         'user_id', p_user_id,
         'username', v_name,
-	        'display_name', null,
         'is_me', p_user_id = v_uid,
-        'bio', coalesce(v_pub.bio, ''),
         'favorite_subject', coalesce(v_pub.favorite_subject, ''),
-        'grade_level', '',
-        'study_goal', coalesce(v_pub.study_goal, ''),
         'show_stats', v_show,
         'tags', to_jsonb(public.studbud_user_tags_for(p_user_id)),
-        'school', null,
-        'show_school', false,
         'wins', coalesce(v_prof.wins, 0),
         'skin', coalesce(v_prof.equipped_skin, ''),
         'hat', coalesce(v_prof.equipped_hat, ''),
