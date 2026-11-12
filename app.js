@@ -4180,7 +4180,7 @@
                     <div class="deck-main-actions">
                         ${managing
                             ? `<button class="primary-btn" data-action="edit-deck" data-id="${id}"><i class="fas fa-pen" aria-hidden="true"></i> Edit cards</button><button class="secondary-btn" data-action="add-card" data-id="${id}"><i class="fas fa-plus" aria-hidden="true"></i> Add card</button>`
-                            : `<button class="primary-btn" data-action="study-deck" data-id="${id}" ${studyCount ? '' : 'disabled'}><i class="fas fa-play" aria-hidden="true"></i> Study</button><button class="secondary-btn" data-action="study-focus" data-id="${id}" title="Review only cards below 100% recall" aria-label="Review cards below 100% recall" ${studyCount ? '' : 'disabled'}><i class="fas fa-bullseye" aria-hidden="true"></i> Below 100%</button>`}
+                            : `<button class="primary-btn" data-action="study-deck" data-id="${id}" ${studyCount ? '' : 'disabled'}><i class="fas fa-play" aria-hidden="true"></i> Study</button><button class="secondary-btn" data-action="cram-deck" data-id="${id}" title="Last-minute test prep without changing review dates" ${cardCount ? '' : 'disabled'}><i class="fas fa-bolt" aria-hidden="true"></i> Cram</button>`}
                     </div>
                 </article>`;
             }).join('') : `<div class="empty-state glass-card full-width empty-state-cta">${search
@@ -4389,7 +4389,7 @@
                 panel.classList.toggle('hidden', !panel.dataset.studyPanel.split(' ').includes(page));
             });
             const copy = {
-                practice: ['Review cards', 'Review a set or just the cards below full recall.'],
+                practice: ['Review cards', 'Study a set or cram for an upcoming test.'],
                 manage: ['Manage study sets', 'Create sets, edit cards, organize your library and choose what to share.'],
                 discover: ['Community study sets', 'Browse shared sets. Add a copy to your library to practice at your own pace.']
             }[page];
@@ -9616,7 +9616,7 @@
                 { route: 'planner', sel: '.planner-day-controls .planner-budget', title: 'Set your time for today', text: "Choose Try it and enter today's study minutes. Leave it blank to use your usual schedule. Week view sets minutes per workday. Defaults and workdays live in General settings.", change: '#planner-current-minutes', goal: 'budget' },
                 { route: 'planner', sel: '#planner-day-queue', title: 'Start one work block', text: 'Choose Work on this for a task you can do now. Keep this page open while you work. Time pauses when you leave or go idle. Mark done only when finished.', action: '[data-action="planner-start-work"]', goal: 'work' },
                 { route: 'study-manage', sel: '#create-deck-btn', title: 'Save three useful flashcards', text: 'Make a New study set for your next quiz. Give it a topic, add at least three terms with answers, and save. Importing a set works too.', action: '#create-deck-btn', goal: 'deck' },
-                { route: 'flashcard', sel: '#deck-grid', title: 'Answer and rate one card', text: 'Choose Study, or Below 100% for targeted review. Think of the answer, reveal it, then rate your recall with Again, Hard, Good or Easy.', action: '[data-action="study-deck"], [data-action="study-focus"]', goal: 'answer' },
+                { route: 'flashcard', sel: '#deck-grid', title: 'Answer and rate one card', text: 'Choose Study, or Cram for last-minute test prep. Think of the answer, reveal it, then rate your recall with Again, Hard, Good or Easy.', action: '[data-action="study-deck"], [data-action="cram-deck"]', goal: 'answer' },
                 { route: 'settings', sel: '#settings-start-page', title: 'Choose your starting page', text: 'Choose the page you want to see when you open StudBud. Planner is for deciding what to work on; Tasks is your full list of deadlines. Your choice saves automatically.', change: '#settings-start-page', goal: 'preference' }
             ];
         }
