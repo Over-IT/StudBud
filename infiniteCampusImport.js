@@ -333,6 +333,101 @@
     // ------------------------------------------------------------------
     // 3. Payload parsing and normalization
     // ------------------------------------------------------------------
+    function parsePastedTable(input) {
+        const aliases = {
+            course: ['course', 'course name', 'class', 'class name'],
+            assignment: ['assignment', 'assignment name', 'name'],
+            period: ['period', 'period name', 'block'],
+            start: ['start', 'start time'],
+            end: ['end', 'end time'],
+            due: ['due', 'due date'],
+            score: ['score', 'points earned', 'earned'],
+            possible: ['possible', 'points possible', 'total points', 'out of'],
+            status: ['status', 'flags'],
+            category: ['category', 'category name']
+        };
+        const headerKey = value => String(value).trim().toLowerCase().replace(/[:*]+$/, '').replace(/\s+/g, ' ');
+        const column = (cells, key) => cells.findIndex(cell => aliases[key].includes(headerKey(cell)));
+        const stableId = value => {
+            let hash = 2166136261;
+            for (const char of value) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
+            return (hash >>> 0).toString(36);
+        };
+        const parseTime = value => {
+            const match = String(value || '').trim().match(/^(\d{1,2}):(\d{2})\s*(am|pm)?$/i);
+            if (!match) return '';
+            let hours = Number(match[1]);
+            if (Number(match[2]) > 59 || (match[3] ? hours < 1 || hours > 12 : hours > 23)) return '';
+            if (match[3]) hours = hours % 12 + (match[3].toLowerCase() === 'pm' ? 12 : 0);
+            return `${pad(hours)}:${match[2]}`;
+        };
+        const sections = new Map();
+        const work = new Map();
+        let columns = null;
+        let skipped = 0;
+        for (const line of input.split(/\r?\n/)) {
+            const cells = line.split('\t').map(cell => cell.trim());
+            if (cells.length < 2) continue;
+            const found = Object.fromEntries(Object.keys(aliases).map(key => [key, column(cells, key)]));
+            if (found.course >= 0 && (found.assignment >= 0 || found.period >= 0)) {
+                columns = found;
+                continue;
+            }
+            if (!columns) continue;
+            const get = key => columns[key] < 0 ? '' : cells[columns[key]] || '';
+            const name = text(get('course'), 100);
+            const assignment = text(get('assignment'), 120);
+            const period = get('period');
+            const validPeriod = /^(?:period\s*)?\d{1,2}(?:st|nd|rd|th)?$/i.test(period);
+            if (!name || (!assignment && !validPeriod)) { skipped++; continue; }
+            const score = get('score').match(/^\s*(-?\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*$/);
+            const earned = score ? num(score[1]) : num(get('score'));
+            const possible = score ? num(score[2]) : num(get('possible'));
+            const validScore = earned !== null && possible !== null && earned >= 0 && possible >= 0;
+            const missing = /\bmissing\b/i.test(get('status'));
+            if (assignment && (!validScore && !missing || isCitizenship(get('category')))) { skipped++; continue; }
+            const nameKey = name.toLowerCase().replace(/\s+/g, ' ');
+            const sectionID = `paste_${stableId(nameKey)}`;
+            if (!sections.has(nameKey)) sections.set(nameKey, { sectionID, courseName: name, sectionPlacements: [] });
+            const section = sections.get(nameKey);
+            if (validPeriod) {
+                const placement = { periodName: period, startTime: parseTime(get('start')), endTime: parseTime(get('end')) };
+                if (!section.sectionPlacements.some(item => item.periodName === placement.periodName && item.startTime === placement.startTime)) {
+                    section.sectionPlacements.push(placement);
+                }
+            }
+            if (!assignment) continue;
+            const due = dateKey(get('due'));
+            const key = `${nameKey}|${assignment.toLowerCase()}|${due}`;
+            const record = {
+                objectSectionID: `paste_${stableId(key)}`, sectionID, assignmentName: assignment,
+                dueDate: due, scorePoints: validScore ? earned : null,
+                totalPoints: validScore ? possible : null,
+                missing, late: /\blate\b/i.test(get('status')), categoryName: get('category'),
+                exempt: /\b(?:exempt|excused)\b/i.test(get('status')),
+                dropped: /\bdropped\b/i.test(get('status')),
+                notGraded: /\bnot graded\b/i.test(get('status')),
+                pasteHasStatus: columns.status >= 0
+            };
+            if (work.has(key)) {
+                skipped += work.get(key) ? 2 : 1;
+                work.set(key, null);
+            }
+            else work.set(key, record);
+        }
+        if (!sections.size) throw new Error('That does not look like a recognizable class or assignment table. Copy a table with Course and Period or Assignment column headings, or paste a StudBud JSON export.');
+        const model = normalizePayload({
+            roster: [...sections.values()],
+            assignments: [...work.values()].filter(Boolean),
+            warnings: [
+                'Pasted page data may be incomplete. Review the classes and assignments before importing.',
+                ...(skipped ? [`${skipped} row(s) were incomplete or ambiguous and were skipped.`] : [])
+            ]
+        });
+        model.partialPaste = true;
+        return model;
+    }
+
     function parsePayload(input) {
         let data = input;
         if (typeof input === 'string') {
@@ -341,7 +436,7 @@
             try {
                 data = JSON.parse(trimmed);
             } catch (error) {
-                throw new Error('That does not look like StudBud Infinite Campus data. Copy it again from the Infinite Campus tab.');
+                return parsePastedTable(trimmed);
             }
         }
         if (!data || typeof data !== 'object' || data.format !== FORMAT) {
@@ -381,6 +476,7 @@
             exempt: bool(item.exempt),
             notGraded: bool(item.notGraded),
             turnedIn: bool(item.turnedIn),
+            ...(item.pasteHasStatus === undefined ? {} : { pasteHasStatus: bool(item.pasteHasStatus) }),
             gradedAt: dateKey(item.scoreModifiedDate)
         };
     }
@@ -789,7 +885,7 @@
 
         const groups = new Map();
         model.sections.forEach(section => {
-            if (school === 'pchs' && !section.placements.some(item =>
+            if (school === 'pchs' && !model.partialPaste && !section.placements.some(item =>
                 CENTRAL_CLASS_PERIODS.has(String(periodNumberFrom(item.periodName) ?? '')))) return;
             const match = school !== 'other' ? matchCourse(section.courseNumber, section.name, catalog) : { course: null, confidence: 0, method: 'none', suggestions: [] };
             const nameKey = titleTokens(section.name).join(' ') || section.id;
@@ -949,12 +1045,13 @@
                 school: course.school || school,
                 catalogCode: catalogCourse ? catalogCourse.code : (isNew ? '' : course.catalogCode || ''),
                 title: catalogCourse ? catalogCourse.title : (isNew || !course.title ? name : course.title),
-                term: entry.term,
-                credits: catalogCourse ? window.studbudCatalogCreditsForTerm(catalogCourse, entry.term) : Number(course.credits) || (entry.term === 'FY' ? 1 : 0.5),
+                term: model.partialPaste && !isNew ? course.term || entry.term : entry.term,
+                credits: model.partialPaste && !isNew && course.credits != null ? course.credits
+                    : catalogCourse ? window.studbudCatalogCreditsForTerm(catalogCourse, entry.term) : Number(course.credits) || (entry.term === 'FY' ? 1 : 0.5),
                 category: catalogCourse ? SUBJECT_MAP[catalogCourse.category] || 'Electives' : course.category || guessSubject(name),
                 isWeighted: catalogCourse ? Boolean(catalogCourse.isWeighted) : (isNew ? looksWeighted(name) : Boolean(course.isWeighted)),
                 icSectionIDs: [...new Set([...list(course.icSectionIDs).map(String), ...entry.sectionIDs])],
-                icCourseNumber: entry.courseNumbers.join(', '),
+                icCourseNumber: entry.courseNumbers.join(', ') || course.icCourseNumber || '',
                 icName: name
             });
             delete course.icTeacher;
@@ -1011,6 +1108,14 @@
             if (!include.graded) return;
             const campusId = `ic_${item.id}`;
             let current = assignments.find(entry => entry.id === campusId || entry.icAssignmentID === campusId);
+            if (!current) {
+                const titleKey = value => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+                const candidates = assignments.filter(entry => (model.partialPaste || String(entry.icAssignmentID || '').startsWith('ic_paste_'))
+                    && entry.courseCode === course.code && titleKey(entry.title) === titleKey(item.title)
+                    && (!item.dueDate || !entry.dueDate || String(entry.dueDate).slice(0, 10) === item.dueDate));
+                if (candidates.length > 1) throw new Error(`More than one saved assignment matches "${item.title}". Resolve the duplicate before importing.`);
+                current = candidates[0];
+            }
             if (ignored) {
                 if (current?.source === 'infinite-campus' && current.graded) {
                     if (current.id === campusId) assignments.splice(assignments.indexOf(current), 1);
@@ -1042,12 +1147,15 @@
             if (include.categories && sourceCategory && !category) {
                 throw new Error(`Could not match the grade category for "${item.title}". Preview the import again.`);
             }
-            let earned = scored ? item.scorePoints : 0;
-            let possible = item.totalPoints ?? 0;
-            if (sourceCategory?.usePercent && possible > 0) {
+            const preserveScore = model.partialPaste && !scored && current?.graded;
+            const effectiveGraded = graded || Boolean(preserveScore);
+            const missing = model.partialPaste && !item.pasteHasStatus ? Boolean(current?.icMissing) : item.missing;
+            let earned = preserveScore ? current.pointsEarned : scored ? item.scorePoints : 0;
+            let possible = preserveScore ? current.maxPoints : item.totalPoints ?? 0;
+            if (!preserveScore && sourceCategory?.usePercent && possible > 0) {
                 earned = earned / possible * 100 * item.multiplier;
                 possible = 100 * item.multiplier;
-            } else if (item.multiplier !== 1) {
+            } else if (!preserveScore && item.multiplier !== 1) {
                 earned *= item.multiplier;
                 possible *= item.multiplier;
             }
@@ -1059,7 +1167,7 @@
                 ? 'test' : /\bquiz(zes)?\b/.test(legacyValue) ? 'quiz' : 'assignment';
             const userEditedKind = current?.kind && current.kind !== (current.icKind || legacyKind);
             const kind = (preserveDetails || userEditedKind) && current.kind ? current.kind : importedKind;
-            const status = item.missing ? 'pending' : 'completed';
+            const status = missing ? 'pending' : 'completed';
             const assignment = {
                 ...(current || {}),
                 id,
@@ -1068,10 +1176,10 @@
                 dueDate: current?.dueDate || item.dueDate || '',
                 pointsEarned: round2(Math.max(0, earned)),
                 maxPoints: round2(Math.max(0, possible)),
-                categoryId: preserveDetails && current.categoryId ? current.categoryId : category ? category.id : null,
+                categoryId: (preserveDetails || (model.partialPaste && !item.categoryName)) && current?.categoryId ? current.categoryId : category ? category.id : null,
                 kind,
                 icKind: importedKind,
-                icAssignmentID: campusId,
+                icAssignmentID: model.partialPaste && current?.icAssignmentID ? current.icAssignmentID : campusId,
                 icPreserveDetails: preserveDetails,
                 estimatedMinutes: current?.estimatedMinutes ?? (kind === 'test' ? 90 : kind === 'quiz' ? 45
                     : /\b(project|presentation|paper|essay)\b/i.test(item.title) ? 90
@@ -1079,17 +1187,17 @@
                     : /\b(worksheet|notes|warm[- ]?up|exit ticket)\b/i.test(item.title) ? 20 : 30),
                 importance: current?.importance || (kind === 'test' ? 4 : 3),
                 priority: current?.priority || 'high',
-                graded,
+                graded: effectiveGraded,
                 status,
-                gradedAt: graded ? (item.gradedAt || current?.gradedAt || item.dueDate || today) : null,
+                gradedAt: effectiveGraded ? (item.gradedAt || current?.gradedAt || item.dueDate || today) : null,
                 source: current?.source || 'infinite-campus',
-                icMissing: item.missing,
-                icLate: item.late,
+                icMissing: missing,
+                icLate: model.partialPaste && !item.pasteHasStatus ? Boolean(current?.icLate) : item.late,
                 icExcused: ignored && !graded
             };
             if (current) Object.assign(current, assignment);
             else assignments.push(assignment);
-            const bucket = graded ? 'graded' : 'upcoming';
+            const bucket = effectiveGraded ? 'graded' : 'upcoming';
             summary[`${bucket}${current ? 'Updated' : 'Added'}`]++;
         });
 
@@ -1134,16 +1242,19 @@
             schedule.ic = {
                 importedAt: new Date(now).toISOString(),
                 school,
-                terms: model.terms.map(term => ({ ...term })),
-                sections: include.schedule ? sections : list(previous.sections),
-                calendars: include.calendar ? model.calendars : (previous.calendars || {})
+                terms: model.partialPaste ? list(previous.terms) : model.terms.map(term => ({ ...term })),
+                sections: include.schedule ? (model.partialPaste
+                    ? [...list(previous.sections), ...sections.filter(section => !list(previous.sections).some(item =>
+                        section.courseCode === item.courseCode && periodNumberFrom(section.period) === periodNumberFrom(item.period)))]
+                    : sections) : list(previous.sections),
+                calendars: include.calendar && !model.partialPaste ? model.calendars : (previous.calendars || {})
             };
             summary.days = Object.values(schedule.ic.calendars).reduce((sum, days) => sum + Object.keys(days).length, 0);
 
             if (include.schedule && school !== 'other') {
                 // Fill the period picker too; a class whose term covers today wins a shared period
                 const all = { ...(schedule.all || {}) };
-                Object.keys(all).forEach(period => { if (touchedCodes.includes(all[period])) delete all[period]; });
+                if (!model.partialPaste) Object.keys(all).forEach(period => { if (touchedCodes.includes(all[period])) delete all[period]; });
                 const candidates = sections
                     .map(item => ({ ...item, number: String(periodNumberFrom(item.period) ?? '') }))
                     .filter(item => CENTRAL_CLASS_PERIODS.has(item.number))
@@ -1154,8 +1265,10 @@
                     all[item.number] = item.courseCode;
                 });
                 schedule.all = all;
-                schedule.odd = {};
-                schedule.even = {};
+                if (!model.partialPaste) {
+                    schedule.odd = {};
+                    schedule.even = {};
+                }
             }
             summary.periods = sections.length;
         }

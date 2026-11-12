@@ -1128,7 +1128,7 @@
         }
 
         async encodeSnapshot(userId, snapshot) {
-	        if (!crypto?.subtle) return snapshot;
+            if (!crypto?.subtle) throw new Error('Secure encryption is unavailable in this browser. Cloud sync cannot continue.');
 	        const passphrase = await this.requireZkPassphrase(userId);
 	        return encryptSnapshot(passphrase, snapshot);
         }

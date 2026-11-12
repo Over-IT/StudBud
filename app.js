@@ -608,11 +608,11 @@
         { main: 'flashcard', extraRoutes: ['importer'], tabs: [['flashcard', 'Practice'], ['study-manage', 'Manage sets'], ['study-discover', 'Discover'], ['exam-arcade', 'Tests & drills']] },
         { main: 'multiplayer', tabs: [['multiplayer', 'Games'], ['friends', 'Buds'], ['leaderboard', 'Leaderboards']] },
         { main: 'profile', tabs: [['profile', 'Profile'], ['shop', 'Shop'], ['inventory', 'Locker']] },
-        { main: 'settings', tabs: [['settings', 'General'], ['settings-school', 'School & GPA'], ['appearance', 'Appearance'], ['sound', 'Audio'], ['settings-data', 'Data & account'], ['about', 'Help']] }
+        { main: 'settings', tabs: [['settings', 'General'], ['settings-school', 'School & GPA'], ['appearance', 'Appearance'], ['sound', 'Audio'], ['settings-data', 'Data & account'], ['about', 'Help'], ['admin', 'Staff tools']] }
     ];
     const PAGE_GUIDES = {
         dashboard: ['Home', 'What is due today and what to study next.'],
-        gpa: ['Classes & grades', 'Import from Infinite Campus or add a class.'],
+        gpa: ['Classes & grades', 'Import grades or add a class.'],
         'grade-scenarios': ['What-if grades', 'Try possible scores without changing your saved grades.'],
         analytics: ['Analytics', 'Grades, study time and progress.'],
         planner: ['Planner', 'Know what to work on today, and make room for what is next.'],
@@ -683,7 +683,9 @@
             if (!tabs) return;
             const classrooms = window.NexusApp?.classrooms;
             const pages = (workspace?.tabs || []).filter(([tab]) => {
-                return tab !== 'classes' || classrooms?.available();
+                if (tab === 'classes') return classrooms?.available();
+                if (tab === 'admin') return window.NexusApp?.canAccessStaff && !window.StudBudCloud?.offlineMode;
+                return true;
             });
             const restoreFocus = tabs.contains(document.activeElement);
             tabs.classList.toggle('hidden', pages.length === 0);
@@ -2664,26 +2666,9 @@
 
         openInfiniteCampusImport() {
             if (!window.StudBudIC) throw new Error('The Infinite Campus importer did not load. Refresh the page and try again.');
-            const link = document.getElementById('ic-bookmarklet-link');
-            const origin = /^https?:$/.test(window.location.protocol) ? window.location.origin : '';
-            if (link) link.setAttribute('href', window.StudBudIC.buildBookmarklet(origin));
-            const bookmarkUrl = document.getElementById('ic-bookmarklet-url');
-            if (bookmarkUrl) bookmarkUrl.value = window.StudBudIC.buildBookmarklet(origin);
-            const mobileInstructions = document.getElementById('ic-mobile-instructions');
-            const mobile = window.matchMedia('(pointer: coarse), (max-width: 680px)').matches;
-            if (mobileInstructions && mobile) mobileInstructions.open = true;
-            const phoneAdvice = document.getElementById('ic-mobile-recommendation');
-            if (phoneAdvice) phoneAdvice.open = mobile;
-            const websiteMethod = document.getElementById('ic-website-method');
-            if (websiteMethod) websiteMethod.open = !mobile;
-            const urlInput = document.getElementById('ic-district-url');
-            if (urlInput && !urlInput.value) urlInput.value = localStorage.getItem('studbud-ic-url') || (this.isParkwaySchool() ? PARKWAY_CAMPUS_URL : '');
-            const moreAddress = urlInput?.closest('details');
-            if (moreAddress && !urlInput.value) moreAddress.open = true;
             const manualPaste = document.getElementById('ic-manual-paste');
             if (manualPaste && this.icManualPaste) manualPaste.value = this.icManualPaste;
-            this.updateInfiniteCampusComplianceUi();
-            this.setInfiniteCampusStatus('Use manual paste import from a district-approved Infinite Campus export. Website helper actions are disabled to stay within Infinite Campus usage terms.', 'warn');
+            this.setInfiniteCampusStatus('');
             this.showInfiniteCampusSteps(!this.icImport);
             this.openModal('ic-import-modal');
         }
@@ -2783,7 +2768,7 @@
         previewInfiniteCampusPastedData() {
             const input = document.getElementById('ic-manual-paste');
             const raw = String(input?.value || '').trim();
-            if (!raw) throw new Error('Paste the Infinite Campus JSON data first.');
+            if (!raw) throw new Error('Paste the Infinite Campus data first.');
             this.icManualPaste = raw;
             this.previewInfiniteCampusData(raw);
         }
@@ -2899,6 +2884,7 @@
             }).join('');
             container.innerHTML = `
                 <h3>${esc(model.studentName ? `${model.studentName}'s classes` : 'Classes found')}</h3>
+                ${model.warnings.length ? `<p class="settings-hint">${model.warnings.map(esc).join(' ')}</p>` : ''}
                 <p class="settings-hint">Update your existing classes to refresh grades, assignments and schedules without changing their names or Honors/AP settings. Active academic classes are selected automatically; unmatched classes are added using their Campus names. Review suggested catalog matches, search each dropdown to choose the right class, or choose Don't import to leave a class out.</p>
                 <div class="ic-class-list">${rows || '<p class="empty-state">No classes were found for this school year.</p>'}</div>
                 <fieldset class="ic-options">
@@ -2939,6 +2925,9 @@
             AppState.set('assignments', result.assignments);
             AppState.set('schedule', result.schedule);
             this.icImport = null;
+            this.icManualPaste = '';
+            const pastedInput = document.getElementById('ic-manual-paste');
+            if (pastedInput) pastedInput.value = '';
             this.renderUI();
             if (Router.activeRoute === 'schedule') this.renderSchedulePage();
             this.renderCalendar();
@@ -2957,7 +2946,7 @@
             preview.innerHTML = '';
             preview.classList.add('hidden');
             this.showInfiniteCampusSteps(true);
-            window.StudBudDialogs.notify(`Infinite Campus import complete: ${parts.join(', ') || 'nothing new to add'}.`);
+            window.StudBudDialogs.notify(`Import complete: ${parts.join(', ') || 'nothing new to add'}.`);
         }
 
         getScheduleEntries(date) {
@@ -5427,6 +5416,7 @@
             this.canAccessStaff = this.canModerateFlashcards || this.canTestGames;
             window.NexusApp.isAdmin = this.isAdmin;
             window.NexusApp.canAccessStaff = this.canAccessStaff;
+            this.Router?.renderWorkspaceTabs();
             document.getElementById('admin-nav-item')?.classList.toggle('hidden', !this.canAccessStaff);
             document.getElementById('admin-sidebar-item')?.classList.toggle('hidden', !this.canAccessStaff);
             this.classrooms?.refreshNav();
@@ -5449,9 +5439,7 @@
                 const p = await window.StudBudCommunityGames.friendCall('studbud_get_public_profile');
                 document.getElementById('public-bio').value = p.bio || '';
                 document.getElementById('public-subject').value = p.favorite_subject || '';
-                document.getElementById('public-grade').value = p.grade_level || '';
                 document.getElementById('public-goal').value = p.study_goal || '';
-                document.getElementById('public-show-school').checked = p.show_school === true;
                 const classmates = document.getElementById('public-show-classmates');
                 this.classmateDiscoveryAvailable = typeof p.show_classmates === 'boolean';
                 if (classmates) {
@@ -5468,7 +5456,6 @@
                 document.getElementById('settings-school').value = school;
                 this.updateCourseSchoolFields();
                 this.renderOtherGradeScaleEditor();
-                this.updatePublicSchoolOption();
             } catch (error) {
                 const status = document.getElementById('public-profile-status');
                 if (status) status.textContent = 'Profile sharing is unavailable right now. Re-run supabase-setup.sql in Supabase.';
@@ -5482,9 +5469,9 @@
                 await window.StudBudCommunityGames.friendCall('studbud_set_public_profile', {
                     p_bio: document.getElementById('public-bio').value,
                     p_favorite_subject: document.getElementById('public-subject').value,
-                    p_grade_level: document.getElementById('public-grade').value,
+                    p_grade_level: '',
                     p_study_goal: document.getElementById('public-goal').value,
-                    p_show_school: document.getElementById('public-show-school').checked,
+                    p_show_school: false,
                     p_show_stats: document.getElementById('public-show-stats').checked,
                     ...(this.classmateDiscoveryAvailable ? { p_show_classmates: document.getElementById('public-show-classmates').checked } : {})
                 });
@@ -6310,6 +6297,7 @@
                 else return;
             }
             const steps = Math.max(1, Math.ceil(dt * 240)), tick = dt / steps;
+            let generatedFrom = -1, generatedThrough = -1;
             for (let step = 0; step < steps && !runner.dead; step++) {
                 const before = { x: runner.x, row: runner.rowFloat ?? runner.row }, oldTime = runner.clock;
                 runner.clock += tick;
@@ -6317,7 +6305,11 @@
                 const followAhead = (runner.rowFloat ?? runner.row) - 3.5 - runner.cameraRow;
                 if (followAhead > 0) runner.cameraRow += followAhead * (1 - Math.exp(-7 * tick));
                 const ahead = Math.max(runner.row + 9, Math.ceil(runner.cameraRow + 13));
-                for (let row = Math.max(0, Math.floor(runner.cameraRow) - 2); row <= ahead; row++) this.waitingLane(runner, row);
+                const from = Math.max(0, Math.floor(runner.cameraRow) - 2);
+                if (from !== generatedFrom || ahead !== generatedThrough) {
+                    for (let row = from; row <= ahead; row++) this.waitingLane(runner, row);
+                    generatedFrom = from; generatedThrough = ahead;
+                }
                 let landed = false;
                 if (runner.hop) {
                     const hop = runner.hop;
@@ -6432,7 +6424,11 @@
                     this.multiplayerFrame = requestAnimationFrame(animate);
                     return;
                 }
-                const drawPreviews = now - (this.lastPreviewDrawAt ?? -Infinity) >= 1000 / (window.StudBudArcade?.graphicsProfile().previewFps || 24);
+                const waiting = document.getElementById('waiting-arcade-card');
+                const waitingCanvas = document.getElementById('waiting-runner-canvas');
+                const waitingVisible = waiting && !waiting.classList.contains('hidden') && this.canvasIsVisible(waitingCanvas);
+                const drawPreviews = !(waitingVisible && this.waitingRunner?.running)
+                    && now - (this.lastPreviewDrawAt ?? -Infinity) >= 1000 / (window.StudBudArcade?.graphicsProfile().previewFps || 24);
                 if (drawPreviews) {
                     this.lastPreviewDrawAt = now;
                     for (const canvas of document.querySelectorAll('.mode-preview-canvas')) {
@@ -6446,11 +6442,9 @@
                     const roomCanvas = document.getElementById('multiplayer-room-canvas');
                     if (roomActive && this.canvasIsVisible(roomCanvas)) this.drawLivePreview(roomCanvas, this.hostedGameRoom.mode, now);
                 }
-                const waiting = document.getElementById('waiting-arcade-card');
-                if (waiting && !waiting.classList.contains('hidden') && this.canvasIsVisible(document.getElementById('waiting-runner-canvas'))) {
+                if (waitingVisible) {
                     this.stepWaitingRunner(delta);
-                    // the waiting runner is playable, so it renders every display frame rather than at the thumbnail rate
-                    this.drawWaitingWarmup(document.getElementById('waiting-runner-canvas'), now / 1000);
+                    this.drawWaitingWarmup(waitingCanvas, now / 1000);
                 }
                 this.multiplayerFrame = requestAnimationFrame(animate);
             };
@@ -6950,7 +6944,9 @@
                 const feet = b.y + b.h;
                 if (b.onGround && b.ground === shaft.from) {
                     keys.x = 1;
-                    const blocked = game.solids.some(p => p !== b.ground && !p.off && !p.oneway
+                    const nearbySolids = game.solids.spatialIndex?.items === game.solids
+                        ? game.solids.spatialIndex.query(b.y, b.y + b.h) : game.solids;
+                    const blocked = nearbySolids.some(p => p !== b.ground && !p.off && !p.oneway
                         && p.x >= b.x + b.w - 2 && p.x < b.x + b.w + 70
                         && p.y < b.y + b.h && p.y + p.h > b.y);
                     if (b.x >= shaft.from.x + shaft.from.w - 45 || blocked) keys.jump = true;
@@ -7086,7 +7082,9 @@
             if (actor.res.value < 5) return null;
             const b = actor.me, U = window.StudBudArcade.util;
             const frozen = actor.s.testing === true && actor.s.testFreezeHazards === true;
-            const near = actor.solids.filter(p => p.x < b.x + 1100 && p.x + p.w > b.x - 1100 && p.y < b.y + 900 && p.y + p.h > b.y - 1500);
+            const candidates = actor.solids.spatialIndex?.items === actor.solids
+                ? actor.solids.spatialIndex.query(b.y - 1500, b.y + 900) : actor.solids;
+            const near = candidates.filter(p => p.x < b.x + 1100 && p.x + p.w > b.x - 1100 && p.y < b.y + 900 && p.y + p.h > b.y - 1500);
             const obstacles = near.filter(p => p !== b.ground && !p.off && !p.wall
                 && (p.y < b.y + b.h || (p.prop && p.y < b.y + b.h + 200)) && p.y > b.y - 180
                 && p.x < Math.max(b.x, target.x) + b.w && p.x + p.w > Math.min(b.x, target.x));
@@ -8080,6 +8078,7 @@
                     }
                     for (const blocker of lane.blockers) {
                         const x = left + (blocker.col + .5) * tile;
+                        if (x + tile * .4 + 5 < 0 || x - tile * .4 > width) continue;
                         if (blocker.kind === 'tree') {
                             block(x - tile * .075, y + laneHeight * .5, tile * .15, tile * .25, tile * .13, '#a67840', '#75502d', '#634326');
                             block(x - tile * .3, y + laneHeight * .23, tile * .6, tile * .42, tile * .33, '#5eaa43', '#3c8134', '#326b2c');
@@ -8091,6 +8090,7 @@
                     for (let col = 0; col < 9; col++) ctx.fillRect(left + col * tile + tile * .15, y + laneHeight * .48, tile * .4, 3);
                     for (const vehicle of lane.vehicles) {
                         const x = left + (this.waitingVehicleX(lane, vehicle, clock) + .5) * tile, vw = vehicle.w * tile, truck = vehicle.w > 1.5;
+                        if (x + vw / 2 + 5 < 0 || x - vw / 2 > width) continue;
                         ctx.fillStyle = '#2d343a'; ctx.fillRect(x - vw * .34, y + laneHeight * .69, vw * .17, tile * .12); ctx.fillRect(x + vw * .17, y + laneHeight * .69, vw * .17, tile * .12);
                         block(x - vw / 2, y + laneHeight * .27, vw, laneHeight * .5, tile * .12, vehicle.color, '#404851', '#333b44');
                         if (truck) block(x - vw * .43, y + laneHeight * .28, vw * .6, laneHeight * .44, tile * .24, '#ecded0', '#b5a596', '#948777');
@@ -8103,6 +8103,7 @@
                     for (let col = 0; col < 9; col++) ctx.fillRect(left + this.waitingWrap(col * tile + clock * lane.speed * 12, tile * 9), y + laneHeight * (.23 + col % 3 * .21), tile * .28, 2);
                     for (const platform of lane.platforms) {
                         const x = left + (this.waitingPlatformX(lane, platform, clock) + .5) * tile, pw = platform.w * tile;
+                        if (x + pw / 2 + 5 < 0 || x - pw / 2 > width) continue;
                         if (platform.kind === 'pad') {
                             block(x - pw / 2, y + laneHeight * .21, pw, laneHeight * .61, 3, '#82c954', '#579944', '#407835');
                             ctx.fillStyle = '#3c9bd4'; ctx.beginPath(); ctx.moveTo(x, y + laneHeight * .5); ctx.lineTo(x + pw / 2, y + laneHeight * .5); ctx.lineTo(x + pw / 2, y + laneHeight * .25); ctx.fill();
@@ -8128,6 +8129,7 @@
                         const x = left + (train.x + .5) * tile;
                         for (let car = 0; car < 3; car++) {
                             const tx = x - train.w * tile / 2 + car * train.w * tile / 3;
+                            if (tx + train.w * tile / 3 + 5 < 0 || tx > width) continue;
                             block(tx + 2, y + laneHeight * .18, train.w * tile / 3 - 4, laneHeight * .66, tile * .22, car ? '#e5c45a' : '#ed7852', '#a14834', '#76392e');
                             ctx.fillStyle = '#c8eaf1'; for (let j = 0; j < 3; j++) ctx.fillRect(tx + tile * (.2 + j * .45), y + laneHeight * .29 - tile * .22, tile * .3, laneHeight * .3);
                         }
@@ -8138,6 +8140,7 @@
                 const coin = runner.lanes.get(row)?.coin;
                 if (!coin || coin.taken) continue;
                 const cx = left + (coin.col + .5) * tile, cy = screenY(row) + laneHeight * .48 - Math.sin(clock * 4 + row) * tile * .05;
+                if (cx + tile * .2 + 2 < 0 || cx - tile * .2 - 2 > width || cy + tile * .4 < 0 || cy - tile * .2 > height) continue;
                 const spin = Math.abs(Math.cos(clock * 3 + row));
                 ctx.fillStyle = 'rgba(34,49,38,.22)'; ctx.beginPath(); ctx.ellipse(cx, screenY(row) + laneHeight * .66, tile * .13, tile * .05, 0, 0, Math.PI * 2); ctx.fill();
                 ctx.fillStyle = '#b7791f'; ctx.beginPath(); ctx.ellipse(cx + 2, cy, tile * .15 * spin + 2, tile * .15, 0, 0, Math.PI * 2); ctx.fill();
@@ -9473,7 +9476,7 @@
                 const p = await window.StudBudCommunityGames.getUserProfile(userId);
                 const avatar = this.multiplayerAvatarMarkup(this.profileCosmetics(p), true);
                 const stat = (label, value) => `<div class="friend-stat"><strong>${value}</strong><small>${label}</small></div>`;
-                const facts = [p.grade_level && `🎓 ${p.grade_level}`, p.favorite_subject && `⭐ ${p.favorite_subject}`, p.study_goal && `🎯 ${p.study_goal}`].filter(Boolean).map(f => `<span class="friend-chip">${this.escapeHTML(f)}</span>`).join('');
+                const facts = [p.favorite_subject && `⭐ ${p.favorite_subject}`, p.study_goal && `🎯 ${p.study_goal}`].filter(Boolean).map(f => `<span class="friend-chip">${this.escapeHTML(f)}</span>`).join('');
                 const decks = (p.decks || []).map(d => `<li class="friend-row"><div><strong>${this.escapeHTML(d.title)}</strong>${d.course ? ` <span class="deck-chip"><i class="fas fa-book"></i> ${this.escapeHTML(d.course)}</span>` : ''}<br><small>${Number(d.card_count)} cards · studied by ${Number(d.study_count)}</small></div>${p.is_me && !this.findCommunityDeck(d.id) ? '' : this.communityDeckActionMarkup(d.id)}</li>`).join('');
                 modal.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.username)} ${this.accountTagMarkup(p.username, p.tags)}${p.is_me ? ' <em class="you-badge">you</em>' : ''}</h3>${p.display_name ? `<small class="profile-real-name">${this.escapeHTML(p.display_name)}</small>` : ''}</div><button type="button" class="icon-btn profile-close" data-action="close-user-profile" aria-label="Close profile"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
                     ${p.bio ? `<p class="friend-bio">${this.escapeHTML(p.bio)}</p>` : ''}${facts ? `<div class="friend-chips">${facts}</div>` : ''}
@@ -9493,7 +9496,7 @@
                 const p = await window.StudBudCommunityGames.friendCall('studbud_friend_profile', { p_user_id: userId });
                 const avatar = this.multiplayerAvatarMarkup({ skin: p.skin, hat: p.hat, acc: p.accessory }, true);
                 const stat = (label, value) => `<div class="friend-stat"><strong>${value}</strong><small>${label}</small></div>`;
-                const facts = [p.grade_level && `🎓 ${p.grade_level}`, p.favorite_subject && `⭐ ${p.favorite_subject}`, p.study_goal && `🎯 ${p.study_goal}`].filter(Boolean).map(f => `<span class="friend-chip">${this.escapeHTML(f)}</span>`).join('');
+                const facts = [p.favorite_subject && `⭐ ${p.favorite_subject}`, p.study_goal && `🎯 ${p.study_goal}`].filter(Boolean).map(f => `<span class="friend-chip">${this.escapeHTML(f)}</span>`).join('');
                 panel.innerHTML = `<div class="friend-profile-head">${avatar}<div><h3>${this.escapeHTML(p.username)} ${this.accountTagMarkup(p.username, p.tags)}</h3>${p.display_name ? `<small class="profile-real-name">${this.escapeHTML(p.display_name)}</small>` : ''}<small>Bud</small></div><button type="button" class="icon-btn profile-close" data-action="friend-profile-close" aria-label="Close profile"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
                     ${p.bio ? `<p class="friend-bio">${this.escapeHTML(p.bio)}</p>` : ''}${facts ? `<div class="friend-chips">${facts}</div>` : ''}
                     <div class="friend-stats">${p.show_stats === false ? stat('Match wins', Number(p.wins) || 0) : `${stat('Studied today', this.formatStudyDuration(p.today_seconds))}${stat('This week', this.formatStudyDuration(p.week_seconds))}${stat('All time', this.formatStudyDuration(p.total_seconds))}${stat('Day streak', `${Number(p.streak_days) || 0} 🔥`)}${stat('Match wins', Number(p.wins) || 0)}`}</div>`;
@@ -9507,7 +9510,7 @@
         tutorialSteps() {
             return [
                 { title: 'Set up your next school day', text: 'Use your own schoolwork: save a deadline, plan a work block, then answer a flashcard. The path checks off real progress, not button clicks. Skip anything you do not need.' },
-                { route: 'gpa', sel: '#gpa-view .open-ic-import-btn', title: 'Save your classes', text: 'Import from Infinite Campus by pasting district-approved export JSON into the import dialog, then review and save. You can also use Add class. This checks off once a class is saved.', action: '#gpa-view .open-ic-import-btn', goal: 'classes' },
+                { route: 'gpa', sel: '#gpa-view .open-ic-import-btn', title: 'Save your classes', text: 'Choose Import grades to paste and review your data, or use Add class. This checks off once a class is saved.', action: '#gpa-view .open-ic-import-btn', goal: 'classes' },
                 { route: 'planner', sel: '[data-action="planner-add-assignment"]', title: 'Save one real deadline', text: 'Add an assignment you actually need to finish. Choose its class, enter its due date, then save. You can edit all your deadlines later in Tasks.', action: '[data-action="planner-add-assignment"]', goal: 'assignment' },
                 { route: 'planner', sel: '.planner-day-controls .planner-budget', title: 'Set your time for today', text: "Choose Try it and enter today's study minutes. Leave it blank to use your usual schedule. Week view sets minutes per workday. Defaults and workdays live in General settings.", change: '#planner-current-minutes', goal: 'budget' },
                 { route: 'planner', sel: '#planner-day-queue', title: 'Start one work block', text: 'Choose Work on this for a task you can do now. Keep this page open while you work. Time pauses when you leave or go idle. Mark done only when finished.', action: '[data-action="planner-start-work"]', goal: 'work' },
@@ -11350,7 +11353,6 @@
                 if (event.target.dataset) event.target.dataset.dirty = '1';
                 this.updateCourseSchoolFields();
                 this.renderOtherGradeScaleEditor();
-                this.updatePublicSchoolOption();
                 this.renderSchoolCalendarSettings({ ...AppState.get('profile'), school: event.target.value });
                 return;
             }
@@ -11621,13 +11623,6 @@
         findCatalogCourse(code) {
             if (!code) return null;
             return (window.STUDBUD_COURSE_CATALOG || window.PCHS_COURSE_CATALOG || []).find(item => item.code === code) || null;
-        }
-
-        updatePublicSchoolOption() {
-            const checkbox = document.getElementById('public-show-school');
-            if (!checkbox) return;
-            checkbox.disabled = !this.isParkwaySchool();
-            if (checkbox.disabled) checkbox.checked = false;
         }
 
         updateCourseSchoolFields(school = this.currentSchool()) {
@@ -12893,7 +12888,7 @@
                 if (schoolStatus) schoolStatus.textContent = 'Saving school…';
                 try {
                     await window.StudBudCommunityGames.friendCall('studbud_set_school', { p_school: school });
-                    if (schoolStatus) schoolStatus.textContent = 'School saved. Your school tag remains private unless you enable it on your public profile.';
+                    if (schoolStatus) schoolStatus.textContent = 'School saved. School and graduation year are not shown on public profiles.';
                 } catch (error) {
                     if (schoolStatus) schoolStatus.textContent = `Your school was saved on this device, but not to your account. ${this.friendlyErrorMessage(error, 'Re-run supabase-setup.sql and try again.')}`;
                     throw error;
@@ -12903,7 +12898,6 @@
             }
             this.updateCourseSchoolFields();
             this.renderOtherGradeScaleEditor();
-            this.updatePublicSchoolOption();
             this.classrooms?.refreshNav();
             this.renderUI();
             window.StudBudDialogs.notify('Profile saved.');

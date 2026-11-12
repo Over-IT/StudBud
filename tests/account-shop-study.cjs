@@ -247,8 +247,8 @@ async function run() {
     delete window.StudBudCloud.user;
 
     for (const [id, value] of [
-        ['public-bio', { value: '' }], ['public-subject', { value: '' }], ['public-grade', { value: '' }],
-	    ['public-goal', { value: '' }], ['public-show-school', { checked: false }], ['public-show-stats', { checked: false }],
+        ['public-bio', { value: '' }], ['public-subject', { value: '' }],
+	    ['public-goal', { value: '' }], ['public-show-stats', { checked: false }],
         ['public-show-classmates', { checked: false }],
         ['public-profile-status', { textContent: '' }]
     ]) elements.set(id, value);
@@ -262,13 +262,14 @@ async function run() {
     assert.equal(Object.hasOwn(publicProfileArgs.args, 'p_last_name'), false);
     assert.equal(Object.hasOwn(publicProfileArgs.args, 'p_show_real_name'), false);
     assert.equal(publicProfileArgs.args.p_show_school, false);
+    assert.equal(publicProfileArgs.args.p_grade_level, '', 'the public profile never sends a grade/year');
     assert.equal(publicProfileArgs.args.p_show_classmates, false, 'course discovery is an explicit opt-in');
     app.classmateDiscoveryAvailable = false;
     await app.savePublicProfile();
     assert.equal(Object.hasOwn(publicProfileArgs.args, 'p_show_classmates'), false, 'older servers can still save all existing profile fields');
     assert.match(elements.get('public-profile-status').textContent, /needs a server update/);
     community.friendCall = friendCall;
-	for (const id of ['public-bio', 'public-subject', 'public-grade', 'public-goal', 'public-show-school', 'public-show-stats', 'public-show-classmates', 'public-profile-status']) elements.delete(id);
+	for (const id of ['public-bio', 'public-subject', 'public-goal', 'public-show-stats', 'public-show-classmates', 'public-profile-status']) elements.delete(id);
 
     state.state.profile.school = 'other';
     state.state.profile.gradeScale = clone(window.STUDBUD_OTHER_GRADE_SCALE);
@@ -315,7 +316,7 @@ async function run() {
 	    'settings-grad-year': { value: '2028' }, 'settings-current-term': { value: 'S1' },
         'school-profile-status': { textContent: '' }
     })) elements.set(id, element);
-    const appMethods = ['updateCourseSchoolFields', 'renderOtherGradeScaleEditor', 'updatePublicSchoolOption', 'renderUI'];
+    const appMethods = ['updateCourseSchoolFields', 'renderOtherGradeScaleEditor', 'renderUI'];
     const originalMethods = Object.fromEntries(appMethods.map(method => [method, app[method]]));
     appMethods.forEach(method => { app[method] = () => {}; });
     window.alert = () => {};
@@ -402,9 +403,19 @@ async function run() {
     assert.doesNotMatch(sql, /p_first_name text|p_last_name text|p_show_real_name boolean/);
     assert.match(sql, /tag text not null check \(tag in \('teacher', 'tester', 'moderator'\)\)/);
     assert.match(sql, /revoke all on function public\.studbud_has_user_tag\(uuid, text\) from public, anon, authenticated/);
-    assert.match(sql, /profile\.user_id = p_user_id and profile\.school in \('pchs', 'pnhs', 'pshs', 'pwhs'\) and profile\.show_school/);
-    assert.match(sql, /'school', case when coalesce\(v_pub\.show_school, false\) and v_pub\.school in \('pchs', 'pnhs', 'pshs', 'pwhs'\) then v_pub\.school end/,
-        'public profile payloads include a Parkway school tag only when opted in and never expose Other schools');
+    const sqlFunction = name => sql.slice(sql.indexOf(`create or replace function public.${name}(`), sql.indexOf('\n$$;', sql.indexOf(`create or replace function public.${name}(`)));
+    assert.doesNotMatch(sqlFunction('studbud_user_tags_for'), /profile\.school|show_school/, 'public tags never reveal a school');
+    for (const name of ['studbud_view_profile', 'studbud_friend_profile']) {
+        const profileSql = sqlFunction(name);
+        assert.match(profileSql, /'grade_level', ''/);
+        assert.match(profileSql, /'school', null/);
+        assert.match(profileSql, /'show_school', false/);
+        assert.doesNotMatch(profileSql, /v_pub\.grade_level|v_pub\.school|v_pub\.show_school/);
+    }
+    const setPublicProfile = sqlFunction('studbud_set_public_profile');
+    assert.match(setPublicProfile, /'', left\(trim\(coalesce\(p_study_goal, ''\)\), 80\),\s*false, coalesce\(p_show_stats/);
+    assert.doesNotMatch(setPublicProfile, /coalesce\(p_grade_level|coalesce\(p_show_school/, 'older clients cannot re-enable public school or year');
+    assert.doesNotMatch(source('index.html'), /id="public-grade"|id="public-show-school"/);
     assert.match(sql, /add constraint studbud_public_profiles_school_check check \(school in \('pchs', 'pnhs', 'pshs', 'pwhs', 'other'\)\)/);
     assert.ok(sql.includes("s.rarity = v_rarity") && sql.includes("jsonb_each_text(v_chances)"));
     assert.ok(!sql.includes('abs(rank - target)'));
@@ -553,6 +564,8 @@ async function run() {
     assert.match(fs.readFileSync(path.join(root, 'supabase-setup.sql'), 'utf8'), /p_study_date < date '2026-10-15'/, 'beta-dated study time is ignored by the server');
 
     const cloud = window.StudBudCloud;
+    // Merge/CAS fixtures use readable snapshots; encryption is covered by cloud-config.cjs.
+    cloud.encodeSnapshot = async (userId, snapshot) => snapshot;
     cloud.accountReady = true;
     cloud.user = { id: 'owner' };
     cloud.lastSnapshot = clone(base);
@@ -593,6 +606,7 @@ async function run() {
     assert.deepEqual(JSON.parse(storage.get('STUDBUD_CLOUD_SYNC_BASE')), row.data);
 
     const targetCloud = new Cloud();
+    targetCloud.encodeSnapshot = async (userId, snapshot) => snapshot;
     const previousSyncBase = storage.get('STUDBUD_CLOUD_SYNC_BASE');
     const targetBase = JSON.parse(await state.exportAppState());
     targetBase.state.profile.targetGpa = 4;
@@ -646,6 +660,7 @@ async function run() {
 
     for (const phase of ['export', 'read', 'write', 'account-change']) {
         const syncing = new Cloud();
+        syncing.encodeSnapshot = async (userId, snapshot) => snapshot;
         syncing.accountReady = true;
         syncing.user = { id: 'race-owner' };
         syncing.lastSnapshot = clone(targetBase);
@@ -713,6 +728,7 @@ async function run() {
     storage.set('STUDBUD_CLOUD_SYNC_BASE', previousSyncBase);
 
     const conflictCloud = new Cloud();
+    conflictCloud.encodeSnapshot = async (userId, snapshot) => snapshot;
     const conflictLocal = clone(targetBase);
     conflictLocal.state.courses[0].targetPct = 90;
     const conflictRemote = clone(targetBase);

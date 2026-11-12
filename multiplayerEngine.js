@@ -30,7 +30,7 @@
         const markup = [];
         if (name === 'overit') markup.push('<span class="account-tag account-tag-owner">Owner</span>');
         else if (name === 'andy') markup.push('<span class="account-tag account-tag-co-owner">Co-owner</span>');
-        const labels = { teacher: ['Teacher', 'teacher'], tester: ['Tester', 'tester'], moderator: ['Moderator', 'moderator'], pchs: ['PCHS', 'school'], pnhs: ['PNHS', 'school'], pshs: ['PSHS', 'school'], pwhs: ['PWHS', 'school'] };
+        const labels = { teacher: ['Teacher', 'teacher'], tester: ['Tester', 'tester'], moderator: ['Moderator', 'moderator'] };
         for (const tag of [...new Set(Array.isArray(tags) ? tags : [])]) {
             const item = labels[tag];
             if (item) markup.push(`<span class="account-tag account-tag-${item[1]}">${item[0]}</span>`);
@@ -325,16 +325,16 @@
         if (low) {
             return {
                 low: true,
-                // Clamp backing pixels hard: DPR 2->1.25 is ~60% fewer pixels.
-                maxDpr: 1.25,
+                // Keep low-detail backing stores at most one pixel per CSS pixel.
+                maxDpr: 1,
                 // Allow auto-resolution to go blurrier before giving up.
                 minDpr: 0.6,
                 fps: 60,
                 minFps: 30,
                 previewFps: 24,
                 avatarFps: 30,
-                particleScale: 0.75,
-                particleLimit: 160
+                particleScale: 0.5,
+                particleLimit: 80
             };
         }
         return {

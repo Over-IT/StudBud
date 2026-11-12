@@ -109,6 +109,21 @@ for (const nativeDpr of [1, 2]) for (const mode of ['defense', 'miner', 'market'
     console.log(`${mode}, native DPR ${nativeDpr}: 600 full Session frames, identical simulation; final 100-frame backing pixels ${full.finalPixels.toLocaleString()} -> ${auto.finalPixels.toLocaleString()} (${(100 * (1 - auto.finalPixels / full.finalPixels)).toFixed(2)}% fewer).`);
 }
 {
+    function miningDraw(low) {
+        const h = harness(1), s = h.session('miner');
+        s.graphics = h.A.graphicsProfile(low ? 'low' : 'high');
+        s.lowDetail = low;
+        s.game.cam.y = s.game.me.y = 800;
+        s.game.cam.x = s.game.me.x = 2500;
+        const before = h.calls;
+        s.game.draw(s.ctx, 800, 500);
+        return h.calls - before;
+    }
+    const full = miningDraw(false), low = miningDraw(true);
+    assert.ok(low < full * .7, `low-detail mining reduces visible drawing commands: ${full} -> ${low}`);
+    console.log(`Mining visible-scene commands: ${full} -> ${low} in low detail.`);
+}
+{
     function run(legacy) {
         const h = harness(1, false, legacy), s = h.session('miner', true);
         // Include visible lava so preserving its exact reveal/fade values is checked too.

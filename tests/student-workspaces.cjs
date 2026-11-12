@@ -148,6 +148,22 @@ const settingsView = element('settings-view'), settingsPanels = ['general', 'sch
 });
 settingsView.querySelectorAll = () => settingsPanels;
 elements.set(settingsView.id, settingsView);
+{
+    const tabs = elements.get('workspace-tabs');
+    app.canAccessStaff = false;
+    sandbox.Router.renderWorkspaceTabs('settings');
+    assert.doesNotMatch(tabs.innerHTML, /data-target="admin-view"/, 'non-staff cannot see the staff tab');
+    app.canAccessStaff = true;
+    sandbox.Router.renderWorkspaceTabs('settings');
+    assert.match(tabs.innerHTML, /data-target="admin-view">Staff tools/, 'staff can find their tools in the Settings group');
+    sandbox.Router.renderWorkspaceTabs('admin');
+    assert.match(tabs.innerHTML, /data-target="admin-view" aria-current="page"/, 'staff tools retain the Settings tab group');
+    sandbox.window.StudBudCloud = { offlineMode: true };
+    sandbox.Router.renderWorkspaceTabs('settings');
+    assert.doesNotMatch(tabs.innerHTML, /data-target="admin-view"/, 'offline mode does not offer unavailable staff tools');
+    delete sandbox.window.StudBudCloud;
+    app.canAccessStaff = false;
+}
 for (const id of ['settings-page-title', 'settings-page-description', 'settings-start-page',
     'settings-planner-default', 'settings-study-mode', 'settings-study-direction']) elements.set(id, element(id));
 document.querySelectorAll = selector => selector === '.view' ? [view, settingsView] : [];

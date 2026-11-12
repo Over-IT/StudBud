@@ -96,6 +96,52 @@ console.log('6000-frame meter DOM-query/write bounds, rounding, depleted state, 
     assert.equal(noticeClasses.has('hidden'), true, 'games without a resource do not show a false warning');
 }
 const A = sandbox.window.StudBudArcade;
+assert.equal(A.util.accountTagMarkup('student', ['pchs', 'pnhs', 'pshs', 'pwhs']), '', 'legacy school tags are not rendered');
+assert.match(A.util.accountTagMarkup('student', ['moderator']), /Moderator/, 'staff tags remain visible');
+{
+    const appSource = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+    vm.runInContext(appSource.slice(appSource.indexOf('    class AppOrchestrator {'), appSource.indexOf('    window.NexusApp ='))
+        + '\nwindow.PerformanceApp = AppOrchestrator;', sandbox);
+    let frame, previewQueries = 0, warmupSteps = 0, warmupDraws = 0;
+    sandbox.requestAnimationFrame = callback => { frame = callback; return 1; };
+    sandbox.Router = { activeRoute: 'multiplayer' };
+    sandbox.document.visibilityState = 'visible';
+    sandbox.document.body = { classList: { contains: () => false } };
+    const waiting = { classList: { contains: () => false } }, canvas = {};
+    sandbox.document.getElementById = id => id === 'waiting-arcade-card' ? waiting
+        : id === 'waiting-runner-canvas' ? canvas : { classList: { contains: () => true } };
+    sandbox.document.querySelectorAll = () => { previewQueries++; return []; };
+    const app = Object.create(sandbox.window.PerformanceApp.prototype);
+    app.waitingRunner = { running: true };
+    app.canvasIsVisible = node => node === canvas;
+    app.stepWaitingRunner = () => { warmupSteps++; };
+    app.drawWaitingWarmup = () => { warmupDraws++; };
+    app.startMultiplayerAnimation();
+    frame(performance.now() + 100);
+    assert.equal(previewQueries, 0, 'background previews do not render while the warm-up is being played');
+    assert.equal(warmupSteps, 1);
+    assert.equal(warmupDraws, 1);
+    app.waitingRunner.running = false;
+    frame(performance.now() + 200);
+    assert.equal(previewQueries, 1, 'previews resume when the warm-up is not running');
+}
+{
+    const app = Object.create(sandbox.window.PerformanceApp.prototype);
+    const solids = Array.from({ length: 5000 }, (_, i) => ({ x: 5000, y: i * 256, w: 40, h: 20 }));
+    solids.spatialIndex = new A.util.VerticalIndex(solids);
+    const index = solids.spatialIndex, query = index.query.bind(index);
+    let queries = 0, candidates = 0;
+    index.query = (...args) => { const result = query(...args); queries++; candidates = result.length; return result; };
+    const actor = { me: { x: 0, y: 256000, w: 30, h: 40, ground: null }, solids, res: { value: 30 }, s: {},
+        springs: [], lasers: [], drills: [], debris: [], saws: [], balls: [] };
+    const target = { x: 3000, y: actor.me.y - 100, w: 40, h: 20 };
+    const route = { list: [target] };
+    assert.equal(app.skyPlanJump(actor, target, route, 0), null);
+    assert.equal(queries, 1, 'jump planning queries the vertical index');
+    assert.ok(candidates < 20, `jump planning considers only nearby height bands, not all ${solids.length} solids`);
+    delete solids.spatialIndex;
+    assert.equal(app.skyPlanJump(actor, target, route, 0), null, 'planning still works without a spatial index');
+}
 {
     const now = sandbox.Date.now;
     let time = 10000;
@@ -249,8 +295,8 @@ assert.equal(full.fps, 60, 'game rendering caps at 60fps by default');
 
 const lowSaved = A.graphicsProfile();
 assert.equal(lowSaved.low, true, 'saved low quality activates the low-detail profile');
-assert.equal(lowSaved.maxDpr, 1.25);
-assert.equal(lowSaved.particleLimit, 160);
+assert.equal(lowSaved.maxDpr, 1);
+assert.equal(lowSaved.particleLimit, 80);
 
 const lowAuto = A.graphicsProfile('auto', { hardwareConcurrency: 2, deviceMemory: 2, connection: { saveData: true } });
 assert.equal(lowAuto.low, true, 'low-end hardware activates the low-detail profile');

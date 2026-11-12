@@ -2,6 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { createHash } = require('node:crypto');
 const noop = () => {};
 const context = new Proxy({
     createLinearGradient: () => ({ addColorStop: noop }),
@@ -14,6 +15,28 @@ for (const file of ['multiplayerEngine.js', 'multiplayerGames2.js']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), sandbox, { filename: file });
 }
 const A = sandbox.window.StudBudArcade;
+{
+    const seeds = [
+        [0, 'cf91474d81a9185c42f5c6dc08a884193f8aa617c2024d092e648f7a7129b9df'],
+        [1, '95250afd08b0747990068740507a48249aa020c533ad3facb6491d6557bcb8c9'],
+        [42, 'd4840b971d0fff121529d232abe35f2ab3876ac20568d7f2c93bdfd8d49a7781'],
+        [12345, '2a2476b454e6164cd2e161f94c07f6643449d39196fb3eba736062b681984fe1'],
+        [0xffffffff, '2b7fdff83df787c806ac686e6b6ed9cbbf4181194f2684ef09da73abdf2fbcb7']
+    ];
+    for (const [seed, expected] of seeds) {
+        const game = new A.games.miner({ seed });
+        assert.equal(createHash('sha256').update(game.T).update(game.naturalCaves).digest('hex'), expected,
+            `mining generation preserves the original map for seed ${seed}`);
+    }
+    const game = new A.games.miner({ seed: 42 });
+    let reads = 0;
+    game.T = new Proxy(Array.from(game.T), { get(target, key) {
+        if (typeof key === 'string' && /^\d+$/.test(key)) reads++;
+        return target[key];
+    } });
+    game.carveCaves(A.util.mulberry32(42));
+    assert.ok(reads < 150000, `cave steps inspect local cells rather than repeatedly scanning the full map: ${reads}`);
+}
 function session(mode) {
     const s = {
         seed: 42, mode, startedAt: 0, testPauseAt: 0, preview: false, testing: false,

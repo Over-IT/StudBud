@@ -109,6 +109,54 @@ assert.strictEqual(health.term, 'S2');
 
 const options = { catalog, today: '2026-01-20', now: 1768900000000 };
 {
+    const pasted = IC.parsePayload([
+        'Campus Student\nNavigation and unrelated text',
+        'Course\tPeriod\tStart Time\tEnd Time\tTeacher',
+        'AP CALC AB\t1\t7:35 AM\t8:26 AM\tSomeone',
+        'HEALTH\t2\t1:00 PM\t2:30 PM\tSomeone else',
+        'Assignments\nCourse\tAssignment\tDue Date\tScore\tStatus\tExtra',
+        'AP CALC AB\tUnit 1 Test\t09/12/2025\t45/50\tLate\tignored',
+        'AP CALC AB\tHomework\t09/13/2025\t\tMissing\tignored',
+        'AP CALC AB\tUnscored\t09/14/2025\t\t\tignored',
+        'AP CALC AB\tDuplicate\t09/15/2025\t1/2\t\tignored',
+        'AP CALC AB\tDuplicate\t09/15/2025\t2/2\t\tignored'
+    ].join('\n'));
+    assert.equal(pasted.partialPaste, true);
+    assert.equal(pasted.sections.length, 2);
+    assert.equal(pasted.sections[1].placements[0].start, '13:00');
+    assert.deepEqual(plain(pasted.assignments.map(item => item.title)), ['Unit 1 Test', 'Homework']);
+    assert.match(pasted.warnings.join(' '), /3 row/);
+    const existing = IC.applyImportPlan(model, plan, { courses: [], assignments: [], schedule: {} }, options);
+    const oldSchedule = plain(existing.schedule.ic);
+    const pastedPlan = IC.buildImportPlan(pasted, existing, { school: 'pchs', catalog });
+    const updated = IC.applyImportPlan(pasted, pastedPlan, existing, options);
+    assert.equal(updated.courses.length, existing.courses.length, 'pasted names match existing classes');
+    assert.equal(updated.assignments.filter(item => item.title === 'Unit 1 Test').length, 1, 'pasted work matches existing Campus work');
+    assert.equal(updated.assignments.find(item => item.title === 'Unit 1 Test').id, 'ic_a1');
+    assert.deepEqual(plain(updated.schedule.ic.calendars), oldSchedule.calendars, 'partial paste keeps calendar days');
+    assert.deepEqual(plain(updated.schedule.ic.terms), oldSchedule.terms, 'partial paste keeps calendar terms');
+    const second = IC.applyImportPlan(pasted, IC.buildImportPlan(pasted, updated, { school: 'pchs', catalog }), updated, options);
+    assert.equal(second.assignments.length, updated.assignments.length, 'repeating the paste is idempotent');
+    const withoutStatus = IC.parsePayload('Course\tAssignment\tScore\nAP CALC AB\tUnit 1 Test\t48/50');
+    const last = IC.applyImportPlan(withoutStatus, IC.buildImportPlan(withoutStatus, second, { school: 'pchs', catalog }), second, options);
+    assert.equal(last.assignments.find(item => item.id === 'ic_a1').icLate, true, 'unknown status does not clear a saved flag');
+    assert.deepEqual(plain(last.schedule.ic.sections), plain(second.schedule.ic.sections), 'assignment-only paste retains schedule');
+    const missingOnly = IC.parsePayload('Course\tAssignment\tDue Date\tStatus\nAP CALC AB\tUnit 1 Test\t09/12/2025\tMissing');
+    const flagged = IC.applyImportPlan(missingOnly, IC.buildImportPlan(missingOnly, last, { school: 'pchs', catalog }), last, options);
+    const flaggedTest = flagged.assignments.find(item => item.id === 'ic_a1');
+    assert.equal(flaggedTest.icMissing, true);
+    assert.equal(flaggedTest.graded, true, 'a missing flag without a score does not erase the existing grade');
+    assert.equal(flaggedTest.pointsEarned, 48);
+    const excused = IC.parsePayload('Course\tAssignment\tDue Date\tScore\tStatus\nAP CALC AB\tUnit 1 Test\t09/12/2025\t48/50\tExempt');
+    const excusedResult = IC.applyImportPlan(excused, IC.buildImportPlan(excused, flagged, { school: 'pchs', catalog }), flagged, options);
+    assert.equal(excusedResult.assignments.find(item => item.id === 'ic_a1').graded, false, 'exempt work is not counted as graded work');
+    const pastedFirst = IC.applyImportPlan(pasted, IC.buildImportPlan(pasted, {}, { school: 'pchs', catalog }), {}, options);
+    const realSecond = IC.applyImportPlan(model, IC.buildImportPlan(model, pastedFirst, { school: 'pchs', catalog }), pastedFirst, options);
+    assert.equal(realSecond.assignments.filter(item => item.title === 'Unit 1 Test').length, 1, 'a later full import matches pasted work');
+    assert.throws(() => IC.parsePayload('Course\tAssignment\nAlgebra\tHomework'), /does not look like/, 'unscored rows do not create empty classes');
+    assert.throws(() => IC.parsePayload('Grades\nNavigation\tHome'), /does not look like/);
+}
+{
     const academic = plain(model.sections[0]);
     const defaultsModel = { ...plain(model), assignments: [], sections: [
         { ...academic, id: 'new-academic', name: 'Paleography', courseNumber: 'LOCAL1', placements: [{ periodName: '3' }], grades: [], categories: [] },
@@ -543,14 +591,10 @@ async function mobileImport() {
     app.currentSchool = () => 'other';
     app.openModal = () => {};
     app.openInfiniteCampusImport();
-    assert.strictEqual(elements.get('ic-mobile-instructions').open, true, 'phone setup instructions open automatically');
-    assert.strictEqual(elements.get('ic-mobile-recommendation').open, true, 'phones first explain the easier computer-and-sync alternative');
-    assert.strictEqual(elements.get('ic-website-method').open, false, 'technical steps do not overwhelm the phone introduction');
+    assert.strictEqual(elements.get('ic-import-status').textContent, '', 'the import opens without obsolete helper instructions');
     sandbox.matchMedia = () => ({ matches: false });
     app.openInfiniteCampusImport();
-    assert.strictEqual(elements.get('ic-website-method').open, true, 'desktop users see the working website import steps');
-    assert.strictEqual(elements.get('ic-mobile-recommendation').open, false);
-    assert.strictEqual(elements.get('ic-bookmarklet-url').value, bookmarklet);
+    assert.strictEqual(elements.get('ic-bookmarklet-url').value, '', 'opening import does not prepare disabled helper code');
     await app.copyInfiniteCampusBookmarklet();
     assert.strictEqual(sandbox.copied, undefined, 'bookmarklet helper actions stay disabled for ToS-safe imports');
     assert.match(elements.get('ic-import-status').textContent, /disabled/i);
@@ -666,6 +710,9 @@ async function mobileImport() {
     assert.equal(listeners.size, 0, 'closing the helper removes transfer listeners');
     const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
     assert.doesNotMatch(html, /ic-transfer-method|ic-import-file|ic-import-textarea|ic-copy-script-btn|ic-paste-clipboard-btn/);
+    assert.match(html, /id="ic-import-title"[^>]*>[^<]*<i[^>]*><\/i> Import grades/);
+    assert.match(html, /Currently supports Infinite Campus/);
+    assert.doesNotMatch(html, /id="ic-website-method"|id="ic-bookmarklet-link"/);
     assert.match(html, /Preview pasted data/);
     // Regression: Parkway only gives A+ in weighted (Honors/AP) classes. A regular Campus class must not
 // auto-match a weighted catalog course, and its 97%+ grade must show as A.

@@ -203,7 +203,7 @@
                 course && this.app.classrooms.courseMatches({ code: course.course_code }, item.course_code));
             return `${teacherSets.length ? this.app.classrooms.studentSetsMarkup(teacherSets) : ''}${this.classSetsMarkup()}<section><header class="view-header"><div><h3>Public study sets ${this.classId ? 'for this course' : 'from your school'}</h3><p>Teacher-published and student-shared sets are available together here.</p></div>
                 <button type="button" class="secondary-btn" data-target="study-manage-view">Manage &amp; share your sets</button></header>
-                <p class="settings-hint">Authors must also share their school publicly, or both of you must enable school discovery, to appear in school-scoped lists.</p>
+                <p class="settings-hint">Both you and an author must enable school discovery for their sets to appear in school-scoped lists.</p>
                 <div class="community-set-grid">${(this.data.decks || []).map(deck => `<article class="glass-card"><h4>${esc(deck.title)}</h4>
                     <p>${esc(deck.author)} · ${Number(deck.card_count) || 0} cards${deck.course_title ? ` · ${esc(deck.course_title)}` : ''}</p>
                     <button type="button" class="primary-btn" data-school-action="save-set" data-id="${esc(deck.id)}">Add to my sets</button>

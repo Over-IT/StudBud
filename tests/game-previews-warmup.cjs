@@ -940,6 +940,32 @@ app.waitingRunner.rowFloat -= 1;
 app.waitingRunner.row = Math.floor(app.waitingRunner.rowFloat);
 app.stepWaitingRunner(1 / 60);
 assert.ok(app.waitingRunner.cameraRow > aheadCamera, 'backward movement must not reverse the camera');
+{
+    let queries = 0;
+    app.waitingLane = () => { queries++; return { type: 'grass', blockers: [] }; };
+    app.waitingRunner = runner(100);
+    app.stepWaitingRunner(1 / 60);
+    assert.ok(queries < 45, `visible lane generation is not repeated in each physics substep: ${queries}`);
+}
+{
+    const originalLane = app.waitingLane, originalX = app.waitingVehicleX;
+    let vehicles = [], count = 0;
+    const ctx = new Proxy({ measureText: () => ({ width: 40 }) }, { get(target, key) {
+        return key in target ? target[key] : () => { count++; };
+    } });
+    const surface = { width: 200, height: 200, getContext: () => ctx };
+    app.waitingRunner = { ...runner(0), cameraRow: -2, lanes: new Map(), seed: 1, coins: 0 };
+    app.waitingLane = (r, row) => row === 0
+        ? { type: 'road', blockers: [], vehicles, speed: 1 }
+        : { type: 'grass', blockers: [] };
+    app.waitingVehicleX = (lane, vehicle) => vehicle.x;
+    const draw = list => { vehicles = list; count = 0; app.drawWaitingWarmup(surface, 0); return count; };
+    const empty = draw([]);
+    assert.equal(draw([{ x: -3, w: 1.1, color: '#fff' }]), empty, 'fully offscreen vehicles submit no drawing commands');
+    assert.ok(draw([{ x: 0, w: 1.1, color: '#fff' }]) > empty, 'partially visible vehicles are still drawn');
+    app.waitingLane = originalLane;
+    app.waitingVehicleX = originalX;
+}
 console.log('Continuous camera, bounded recentering, pause loss, and frame-rate regressions passed.');
 
 async function checkCommunityAndAdminUi() {

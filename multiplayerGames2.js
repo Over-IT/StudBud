@@ -240,15 +240,18 @@
                             this.naturalCaves[index] = volcanic ? 2 : 1;
                         }
                     }
-                    // Keep random lava pockets away from dry caves; mining can still expose isolated sources.
-                    for (let y = 10; y < ROWS - 2; y++) for (let x = 2; x < COLS - 2; x++) {
-                        const index = y * COLS + x;
-                        if (tiles[index] !== 6 || this.naturalCaves[index] === 2) continue;
-                        let dry = false;
-                        for (let dy = -2; dy <= 2 && !dry; dy++) for (let dx = -2; dx <= 2; dx++) {
-                            if (this.naturalCaves[(y + dy) * COLS + x + dx] === 1) { dry = true; break; }
+                    // Only cells near this step can have gained a dry neighbor or become lava.
+                    const cx = Math.round(x), cy = Math.round(y);
+                    for (let sy = Math.max(10, cy - 4); sy <= Math.min(ROWS - 3, cy + 4); sy++) {
+                        for (let sx = Math.max(2, cx - 4); sx <= Math.min(COLS - 3, cx + 4); sx++) {
+                            const index = sy * COLS + sx;
+                            if (tiles[index] !== 6 || this.naturalCaves[index] === 2) continue;
+                            let dry = false;
+                            for (let dy = -2; dy <= 2 && !dry; dy++) for (let dx = -2; dx <= 2; dx++) {
+                                if (this.naturalCaves[(sy + dy) * COLS + sx + dx] === 1) { dry = true; break; }
+                            }
+                            if (dry) tiles[index] = 1;
                         }
-                        if (dry) tiles[index] = 1;
                     }
                     angle += (random() - 0.5) * 0.9;
                     x += Math.cos(angle) * 0.95; y += Math.sin(angle) * 0.55;
@@ -539,7 +542,7 @@
         touchHint() { return 'Hold outside the controls to mine in that direction · deposit crystals at the surface depot'; }
 
         draw(ctx, w, h) {
-            const s = this.s, me = this.me;
+            const s = this.s, me = this.me, low = Boolean(s.graphics?.low || s.lowDetail);
             ctx.fillStyle = '#080b12'; ctx.fillRect(0, 0, w, h);
             this.begin(ctx, w, h, 820, 1.4);
             if (this.y0 < 4 * TS) A.util.bandGradient(ctx, this.x0, 0, this.x1 - this.x0, 4 * TS, [[0, '#38bdf8'], [0.72, '#bae6fd'], [1, '#e0f2fe']]);
@@ -559,10 +562,12 @@
                     const caveHash = this.tileHashes[idx], natural = this.naturalCaves[idx];
                     ctx.fillStyle = natural ? '#10252b' : '#211a1b'; ctx.fillRect(x, y, TS, TS);
                     ctx.fillStyle = natural ? '#112d32' : '#100e12'; ctx.fillRect(x + 2, y + 2, TS - 4, TS - 4);
-                    ctx.fillStyle = 'rgba(173,145,126,.12)';
-                    for (let k = 0; k < 3; k++) {
-                        const px = x + 7 + ((caveHash >>> (k * 7)) & 31), py = y + 7 + ((caveHash >>> (k * 5 + 11)) & 29);
-                        ctx.fillRect(px, py, 2 + (k & 1), 1);
+                    if (!low) {
+                        ctx.fillStyle = 'rgba(173,145,126,.12)';
+                        for (let k = 0; k < 3; k++) {
+                            const px = x + 7 + ((caveHash >>> (k * 7)) & 31), py = y + 7 + ((caveHash >>> (k * 5 + 11)) & 29);
+                            ctx.fillRect(px, py, 2 + (k & 1), 1);
+                        }
                     }
                     const seam = [];
                     if (this.solid(this.tile(tx - 1, ty))) seam.push([x + 1, y + 1, x + 1, y + TS - 1]);
@@ -589,10 +594,12 @@
                     if (visibility <= 0) continue;
                     ctx.save(); ctx.globalAlpha = visibility;
                     ctx.fillStyle = '#21140f'; ctx.fillRect(x, y, TS, TS);
-                    const pulse = 0.76 + Math.sin(this.anim * 4 + idx) * 0.12;
-                    const glow = ctx.createRadialGradient(x + 24, y + 24, 3, x + 24, y + 24, 38);
-                    glow.addColorStop(0, `rgba(255,196,55,${pulse})`); glow.addColorStop(0.55, 'rgba(249,115,22,.86)'); glow.addColorStop(1, 'rgba(220,38,38,0)');
-                    ctx.fillStyle = glow; ctx.fillRect(x - 8, y - 8, TS + 16, TS + 16);
+                    if (!low) {
+                        const pulse = 0.76 + Math.sin(this.anim * 4 + idx) * 0.12;
+                        const glow = ctx.createRadialGradient(x + 24, y + 24, 3, x + 24, y + 24, 38);
+                        glow.addColorStop(0, `rgba(255,196,55,${pulse})`); glow.addColorStop(0.55, 'rgba(249,115,22,.86)'); glow.addColorStop(1, 'rgba(220,38,38,0)');
+                        ctx.fillStyle = glow; ctx.fillRect(x - 8, y - 8, TS + 16, TS + 16);
+                    }
                     const level = Math.min(LAVA_SIDE_REACH, this.F[idx]);
                     const surfaceHeight = this.D[idx] || level === 0 ? TS : TS * (1 - level / (LAVA_SIDE_REACH + 1));
                     const surfaceY = y + TS - surfaceHeight;
@@ -610,21 +617,27 @@
                 const rockColor = type === 10 ? '#111827' : type === 2 ? '#475569' : color;
                 ctx.fillStyle = rockColor; ctx.fillRect(x, y, TS, TS);
                 const hash = this.tileHashes[idx];
-                ctx.fillStyle = type === 2 ? 'rgba(226,232,240,.13)' : 'rgba(255,211,153,.09)';
-                for (let k = 0; k < 4; k++) {
-                    const px = x + 5 + ((hash >>> (k * 5)) & 31), py = y + 5 + ((hash >>> (k * 4 + 9)) & 31);
-                    ctx.fillRect(px, py, 2 + (k & 1), 2);
+                if (!low) {
+                    ctx.fillStyle = type === 2 ? 'rgba(226,232,240,.13)' : 'rgba(255,211,153,.09)';
+                    for (let k = 0; k < 4; k++) {
+                        const px = x + 5 + ((hash >>> (k * 5)) & 31), py = y + 5 + ((hash >>> (k * 4 + 9)) & 31);
+                        ctx.fillRect(px, py, 2 + (k & 1), 2);
+                    }
+                    ctx.strokeStyle = 'rgba(0,0,0,.34)'; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, TS - 1, TS - 1);
+                    ctx.strokeStyle = 'rgba(255,240,220,.15)'; ctx.beginPath(); ctx.moveTo(x + 2, y + 2); ctx.lineTo(x + TS - 2, y + 2); ctx.moveTo(x + 2, y + 2); ctx.lineTo(x + 2, y + TS - 2); ctx.stroke();
+                } else {
+                    ctx.strokeStyle = 'rgba(0,0,0,.34)'; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, TS - 1, TS - 1);
                 }
-                ctx.strokeStyle = 'rgba(0,0,0,.34)'; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, TS - 1, TS - 1);
-                ctx.strokeStyle = 'rgba(255,240,220,.15)'; ctx.beginPath(); ctx.moveTo(x + 2, y + 2); ctx.lineTo(x + TS - 2, y + 2); ctx.moveTo(x + 2, y + 2); ctx.lineTo(x + 2, y + TS - 2); ctx.stroke();
                 if (CRYSTALS[type]) {
                     const cc = CRYSTALS[type].color, cx = x + 24, cy = y + 24, shimmer = 0.85 + Math.sin(this.anim * 3 + idx) * 0.12;
-                    const halo = ctx.createRadialGradient(cx, cy, 1, cx, cy, 27);
-                    halo.addColorStop(0, cc); halo.addColorStop(1, 'rgba(255,255,255,0)');
-                    ctx.globalAlpha = 0.32 * shimmer; ctx.fillStyle = halo; ctx.fillRect(x - 3, y - 3, TS + 6, TS + 6); ctx.globalAlpha = 1;
+                    if (!low) {
+                        const halo = ctx.createRadialGradient(cx, cy, 1, cx, cy, 27);
+                        halo.addColorStop(0, cc); halo.addColorStop(1, 'rgba(255,255,255,0)');
+                        ctx.globalAlpha = 0.32 * shimmer; ctx.fillStyle = halo; ctx.fillRect(x - 3, y - 3, TS + 6, TS + 6); ctx.globalAlpha = 1;
+                    }
                     ctx.fillStyle = cc; ctx.beginPath(); ctx.moveTo(cx, y + 7); ctx.lineTo(x + 39, cy); ctx.lineTo(cx, y + 41); ctx.lineTo(x + 9, cy); ctx.closePath(); ctx.fill();
                     ctx.fillStyle = 'rgba(255,255,255,.72)'; ctx.beginPath(); ctx.moveTo(cx, y + 8); ctx.lineTo(x + 22, cy); ctx.lineTo(x + 11, cy); ctx.closePath(); ctx.fill();
-                    if ((hash & 3) === 0) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx + Math.sin(this.anim * 4 + idx) * 7, y + 4); ctx.lineTo(cx, y + 11); ctx.lineTo(cx + 4, y + 7); ctx.stroke(); }
+                    if (!low && (hash & 3) === 0) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx + Math.sin(this.anim * 4 + idx) * 7, y + 4); ctx.lineTo(cx, y + 11); ctx.lineTo(cx + 4, y + 7); ctx.stroke(); }
                     ctx.fillStyle = '#071018'; ctx.fillRect(x + 2, y + 33, TS - 4, 14);
                     ctx.fillStyle = '#f8fafc'; ctx.font = '700 9px system-ui'; ctx.textAlign = 'center';
                     ctx.fillText(`${CRYSTALS[type].value} pts`, cx, y + 44);
@@ -654,7 +667,7 @@
                 const displayCrystals = Object.values(CRYSTALS);
                 for (let i = 0; i < 5; i++) {
                     const crystal = displayCrystals[i % displayCrystals.length], cx = cartX + 38 + i * ((cartW - 76) / 4), cy = cartY + 23 + Math.sin(this.anim * 2.5 + i) * 2;
-                    ctx.save(); ctx.shadowColor = crystal.color; ctx.shadowBlur = 12; ctx.fillStyle = crystal.color;
+                    ctx.save(); ctx.shadowColor = crystal.color; ctx.shadowBlur = low ? 0 : 12; ctx.fillStyle = crystal.color;
                     ctx.beginPath(); ctx.moveTo(cx, cy - 12); ctx.lineTo(cx + 9, cy); ctx.lineTo(cx, cy + 11); ctx.lineTo(cx - 8, cy); ctx.closePath(); ctx.fill(); ctx.restore();
                 }
                 for (const wx of [cartX + 34, cartX + cartW - 34]) {

@@ -89,6 +89,15 @@ const expectedRungs = [];
 for (let y = wall.y + 20; y < wall.y + wall.h; y += 46) if (y >= -27 && y < 220) expectedRungs.push(y);
 assert.deepEqual(rail.calls.filter(c => c[0] === 'fillRect' && c[3] === 15 && c[4] === 5).map(c => c[2]), expectedRungs,
     'partially intersecting ladder rungs are retained on the original lattice');
+const deck = context();
+skyline.viewWidth = 360;
+skyline.drawSpaceDeck(deck, { x: -500000, y: 0, w: 1000000, h: 30, spaceStyle: 1 });
+assert.ok(operations(deck) < 70, `space deck panels must be bounded by the viewport: ${operations(deck)}`);
+const panelXs = deck.calls.filter(c => c[0] === 'fillRect' && c[3] === 22).map(c => c[1]);
+assert.ok(panelXs.length && panelXs.every(x => x + 22 >= -60 && x <= 420), 'edge-straddling space panels remain visible');
+const conveyor = context();
+skyline.drawConveyor(conveyor, { x: -500000, y: 0, w: 1000000, h: 20, belt: 1 });
+assert.ok(operations(conveyor) < 180, 'long conveyor rollers stay bounded to the viewport');
 
 const stops = [[0, 'rgba(255,224,160,.05)'], [.35, 'rgba(2,5,14,.2)'], [1, 'rgba(2,5,14,.7)']];
 const miner = {}, fog = context();

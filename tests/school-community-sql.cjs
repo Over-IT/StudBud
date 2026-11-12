@@ -60,10 +60,9 @@ assert.match(hub, /public\.studbud_course_matches/);
 const deckScopes = hub.match(/from public\.studbud_community_decks d[\s\S]*?limit 20/g) || [];
 assert.equal(deckScopes.length, 2, 'school and class public-set listings are both checked');
 for (const scoped of deckScopes) {
-    assert.match(scoped, /join public\.studbud_public_profiles author_profile on author_profile\.user_id = d\.owner_id\s+and \(author_profile\.show_school or \(v_school_discovery and author_profile\.show_school_discovery\)\)/,
-        'publishing alone never discloses a hidden school affiliation');
-    assert.doesNotMatch(scoped, /author_profile\.show_school or author_profile\.show_school_discovery/,
-        'discovery-only consent is mutual, not public');
+    assert.match(scoped, /join public\.studbud_public_profiles author_profile on author_profile\.user_id = d\.owner_id\s+and v_school_discovery and author_profile\.show_school_discovery/,
+        'school listings require mutual discovery consent');
+    assert.doesNotMatch(scoped, /author_profile\.show_school\b/, 'legacy public-profile consent does not disclose school affiliation');
     assert.match(scoped, /public\.studbud_community_school\(d\.owner_id\) = (?:v_school|v_class\.school)/);
     assert.match(scoped, /not public\.studbud_is_hidden_user\(d\.owner_id\)/);
 }

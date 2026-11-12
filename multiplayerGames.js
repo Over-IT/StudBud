@@ -2771,8 +2771,7 @@
                 ctx.moveTo(x, p.y + 9); ctx.lineTo(x, p.y + 17);
             }
             ctx.stroke();
-            for (let x = p.x + 18; x <= p.x + p.w - 18; x += 60) {
-                if (x < left || x > right) continue;
+            for (let x = visibleRepeatStart(p.x + 18, 60, left); x <= Math.min(right, p.x + p.w - 18); x += 60) {
                 ctx.fillStyle = '#475569'; ctx.beginPath(); ctx.arc(x, p.y + 26, 12, 0, TAU); ctx.fill();
                 ctx.strokeStyle = '#a8a29e'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, p.y + 26, 9, 0, TAU); ctx.stroke();
                 const angle = travel / 12;
@@ -2794,21 +2793,22 @@
         }
 
         drawSpaceDeck(ctx, p) {
+            const left = this.cam.x - 60, right = this.cam.x + (this.viewWidth || 1000) + 60;
             if (p.spaceStyle === 0) {
                 ctx.fillStyle = '#475569'; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + p.w, p.y);
                 ctx.lineTo(p.x + p.w - 12, p.y + p.h);
                 for (let x = p.x + p.w - 30; x > p.x + 10; x -= 35) ctx.lineTo(x, p.y + p.h - (ihash(Math.round(x), Math.round(p.y)) % 12));
                 ctx.lineTo(p.x, p.y + p.h - 8); ctx.closePath(); ctx.fill();
                 ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + p.w, p.y); ctx.stroke();
-                ctx.fillStyle = '#334155'; for (let x = p.x + 24; x < p.x + p.w - 12; x += 70) {
+                ctx.fillStyle = '#334155'; for (let x = visibleRepeatStart(p.x + 24, 70, left - 10); x < Math.min(p.x + p.w - 12, right + 10); x += 70) {
                     ctx.beginPath(); ctx.ellipse(x, p.y + p.h * .6, 10, 5, -.3, 0, TAU); ctx.fill();
                 }
             } else {
                 ctx.fillStyle = p.spaceStyle === 1 ? '#334155' : '#312e81'; roundRect(ctx, p.x, p.y, p.w, p.h, 5); ctx.fill();
                 ctx.fillStyle = p.spaceStyle === 1 ? '#cbd5e1' : '#67e8f9'; ctx.fillRect(p.x, p.y, p.w, 5);
-                ctx.fillStyle = '#0f172a'; for (let x = p.x + 15; x < p.x + p.w - 8; x += 40) ctx.fillRect(x, p.y + 9, 22, Math.min(18, p.h - 12));
+                ctx.fillStyle = '#0f172a'; for (let x = visibleRepeatStart(p.x + 15, 40, left - 22); x < Math.min(p.x + p.w - 8, right); x += 40) ctx.fillRect(x, p.y + 9, 22, Math.min(18, p.h - 12));
                 ctx.fillStyle = p.spaceStyle === 1 ? '#38bdf8' : '#c4b5fd';
-                for (let x = p.x + 17; x < p.x + p.w - 10; x += 40) ctx.fillRect(x, p.y + 12, 18, Math.min(10, p.h - 15));
+                for (let x = visibleRepeatStart(p.x + 17, 40, left - 18); x < Math.min(p.x + p.w - 10, right); x += 40) ctx.fillRect(x, p.y + 12, 18, Math.min(10, p.h - 15));
                 if (p.spaceStyle === 2) {
                     ctx.fillStyle = 'rgba(34,211,238,.3)';
                     for (const x of [p.x + 12, p.x + p.w - 28]) { ctx.beginPath(); ctx.moveTo(x, p.y + p.h); ctx.lineTo(x + 16, p.y + p.h); ctx.lineTo(x + 8, p.y + p.h + 22 + Math.sin(this.anim * 8) * 6); ctx.fill(); }

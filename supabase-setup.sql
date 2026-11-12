@@ -3221,7 +3221,7 @@ alter table public.studbud_public_profiles drop column if exists show_real_name;
 alter table public.studbud_public_profiles add column if not exists school text not null default 'pchs';
 alter table public.studbud_public_profiles add column if not exists show_school boolean not null default false;
 alter table public.studbud_public_profiles add column if not exists show_classmates boolean not null default false;
--- Parkway Central (pchs), North (pnhs), South (pshs) and West (pwhs) each have their own school tag.
+-- School remains available privately for course and community features.
 alter table public.studbud_public_profiles drop constraint if exists studbud_public_profiles_school_check;
 alter table public.studbud_public_profiles add constraint studbud_public_profiles_school_check check (school in ('pchs', 'pnhs', 'pshs', 'pwhs', 'other'));
 alter table public.studbud_public_profiles enable row level security;
@@ -3238,10 +3238,6 @@ as $$
     from (
         select role.tag, case role.tag when 'teacher' then 1 when 'tester' then 2 else 3 end as position
         from public.studbud_user_tags role where role.user_id = p_user_id
-        union all
-        select profile.school, 4
-        from public.studbud_public_profiles profile
-        where profile.user_id = p_user_id and profile.school in ('pchs', 'pnhs', 'pshs', 'pwhs') and profile.show_school
     ) tags;
 $$;
 
@@ -3287,12 +3283,12 @@ begin
 	        'display_name', null,
         'bio', coalesce(v_pub.bio, ''),
         'favorite_subject', coalesce(v_pub.favorite_subject, ''),
-        'grade_level', coalesce(v_pub.grade_level, ''),
+        'grade_level', '',
         'study_goal', coalesce(v_pub.study_goal, ''),
         'show_stats', v_show,
         'tags', to_jsonb(public.studbud_user_tags_for(p_user_id)),
-        'school', case when coalesce(v_pub.show_school, false) and v_pub.school in ('pchs', 'pnhs', 'pshs', 'pwhs') then v_pub.school end,
-        'show_school', coalesce(v_pub.show_school, false) and coalesce(v_pub.school, 'other') in ('pchs', 'pnhs', 'pshs', 'pwhs'),
+        'school', null,
+        'show_school', false,
         'wins', coalesce(v_prof.wins, 0),
         'skin', coalesce(v_prof.equipped_skin, ''),
         'hat', coalesce(v_prof.equipped_hat, ''),
@@ -3322,7 +3318,7 @@ begin
         'grade_level', coalesce(v.grade_level, ''), 'study_goal', coalesce(v.study_goal, ''),
         'show_stats', coalesce(v.show_stats, true),
         'school', coalesce(v.school, (select a.raw_user_meta_data ->> 'school' from auth.users a where a.id = auth.uid()), 'pchs'),
-        'show_school', coalesce(v.show_school, false),
+        'show_school', false,
         'show_classmates', coalesce(v.show_classmates, false));
 end;
 $$;
@@ -3352,8 +3348,8 @@ begin
         user_id, bio, favorite_subject, grade_level, study_goal, show_school, show_stats, show_classmates, updated_at
     )
     values (auth.uid(), left(trim(coalesce(p_bio, '')), 160), left(trim(coalesce(p_favorite_subject, '')), 40),
-        left(trim(coalesce(p_grade_level, '')), 20), left(trim(coalesce(p_study_goal, '')), 80),
-	        coalesce(p_show_school, false), coalesce(p_show_stats, true), coalesce(p_show_classmates, false), now())
+        '', left(trim(coalesce(p_study_goal, '')), 80),
+	        false, coalesce(p_show_stats, true), coalesce(p_show_classmates, false), now())
     on conflict (user_id) do update set bio = excluded.bio, favorite_subject = excluded.favorite_subject,
         grade_level = excluded.grade_level, study_goal = excluded.study_goal,
         show_school = excluded.show_school, show_stats = excluded.show_stats,
@@ -3554,12 +3550,12 @@ begin
         'is_me', p_user_id = v_uid,
         'bio', coalesce(v_pub.bio, ''),
         'favorite_subject', coalesce(v_pub.favorite_subject, ''),
-        'grade_level', coalesce(v_pub.grade_level, ''),
+        'grade_level', '',
         'study_goal', coalesce(v_pub.study_goal, ''),
         'show_stats', v_show,
         'tags', to_jsonb(public.studbud_user_tags_for(p_user_id)),
-        'school', case when coalesce(v_pub.show_school, false) and v_pub.school in ('pchs', 'pnhs', 'pshs', 'pwhs') then v_pub.school end,
-        'show_school', coalesce(v_pub.show_school, false) and coalesce(v_pub.school, 'other') in ('pchs', 'pnhs', 'pshs', 'pwhs'),
+        'school', null,
+        'show_school', false,
         'wins', coalesce(v_prof.wins, 0),
         'skin', coalesce(v_prof.equipped_skin, ''),
         'hat', coalesce(v_prof.equipped_hat, ''),
@@ -4860,7 +4856,7 @@ begin
             join auth.users author on author.id = d.owner_id
             -- A school-scoped listing reveals affiliation, so require the author's school-disclosure consent.
             join public.studbud_public_profiles author_profile on author_profile.user_id = d.owner_id
-                and (author_profile.show_school or (v_school_discovery and author_profile.show_school_discovery))
+                and v_school_discovery and author_profile.show_school_discovery
             join public.studbud_user_data viewer_data on viewer_data.user_id = v_uid
             where coalesce(author.is_anonymous, false) = false
               and not public.studbud_is_hidden_user(d.owner_id)
@@ -4937,7 +4933,7 @@ begin
             join auth.users author on author.id = d.owner_id
             -- Class-scoped public sets imply the class's school; teacher class sets are returned elsewhere.
             join public.studbud_public_profiles author_profile on author_profile.user_id = d.owner_id
-                and (author_profile.show_school or (v_school_discovery and author_profile.show_school_discovery))
+                and v_school_discovery and author_profile.show_school_discovery
             where coalesce(author.is_anonymous, false) = false
               and not public.studbud_is_hidden_user(d.owner_id)
               and public.studbud_community_school(d.owner_id) = v_class.school
