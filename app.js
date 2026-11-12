@@ -4180,7 +4180,7 @@
                     <div class="deck-main-actions">
                         ${managing
                             ? `<button class="primary-btn" data-action="edit-deck" data-id="${id}"><i class="fas fa-pen" aria-hidden="true"></i> Edit cards</button><button class="secondary-btn" data-action="add-card" data-id="${id}"><i class="fas fa-plus" aria-hidden="true"></i> Add card</button>`
-                            : `<button class="primary-btn" data-action="study-deck" data-id="${id}" ${studyCount ? '' : 'disabled'}><i class="fas fa-play" aria-hidden="true"></i> Review set</button><button class="secondary-btn" data-action="study-focus" data-id="${id}" ${studyCount ? '' : 'disabled'}><i class="fas fa-bullseye" aria-hidden="true"></i> Review below 100%</button>`}
+                            : `<button class="primary-btn" data-action="study-deck" data-id="${id}" ${studyCount ? '' : 'disabled'}><i class="fas fa-play" aria-hidden="true"></i> Study</button><button class="secondary-btn" data-action="study-focus" data-id="${id}" title="Review only cards below 100% recall" aria-label="Review cards below 100% recall" ${studyCount ? '' : 'disabled'}><i class="fas fa-bullseye" aria-hidden="true"></i> Below 100%</button>`}
                     </div>
                 </article>`;
             }).join('') : `<div class="empty-state glass-card full-width empty-state-cta">${search
@@ -4435,7 +4435,7 @@
                     <div><strong>${this.escapeHTML(deck.title)}</strong>
                         <span>${exact ? 'For' : 'Same class as'} ${this.escapeHTML(this.deckAssessmentLabel(item))}${when ? ` · ${when}` : ''}</span>
                         <small>${this.escapeHTML(studied)} · suggested ${item.sessionMinutes} min today</small></div>
-                    <button class="primary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}" ${studyCount ? '' : 'disabled'}><i class="fas fa-play"></i> Review set</button>
+                    <button class="primary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}" ${studyCount ? '' : 'disabled'}><i class="fas fa-play"></i> Study</button>
                 </article>`;
             }).join('');
         }
@@ -4681,7 +4681,7 @@
             }).join('') || `<div class="empty-state">${query ? 'No cards match your search. Try another term or clear the search.' : filter === 'weak' ? 'No weak cards in this set. Weak cards appear after at least two recent answers below 75% accuracy.' : filter === 'focus' ? 'No cards need more recall practice right now.' : filter === 'starred' ? 'No starred cards yet. Star cards while studying or in the editor.' : 'This set has no cards yet.'}</div>`;
             const practice = document.getElementById('card-browser-practice');
             practice.disabled = !eligible.some(card => !card.suspended || filter === 'starred');
-            practice.textContent = filter === 'weak' ? 'Review weak cards' : filter === 'focus' ? 'Review below 100%' : filter === 'starred' ? 'Review starred cards' : 'Review set';
+            practice.textContent = filter === 'weak' ? 'Review weak cards' : filter === 'focus' ? 'Review below 100%' : filter === 'starred' ? 'Review starred cards' : 'Study';
         }
 
         renderDeckEditorCards() {
@@ -9616,7 +9616,7 @@
                 { route: 'planner', sel: '.planner-day-controls .planner-budget', title: 'Set your time for today', text: "Choose Try it and enter today's study minutes. Leave it blank to use your usual schedule. Week view sets minutes per workday. Defaults and workdays live in General settings.", change: '#planner-current-minutes', goal: 'budget' },
                 { route: 'planner', sel: '#planner-day-queue', title: 'Start one work block', text: 'Choose Work on this for a task you can do now. Keep this page open while you work. Time pauses when you leave or go idle. Mark done only when finished.', action: '[data-action="planner-start-work"]', goal: 'work' },
                 { route: 'study-manage', sel: '#create-deck-btn', title: 'Save three useful flashcards', text: 'Make a New study set for your next quiz. Give it a topic, add at least three terms with answers, and save. Importing a set works too.', action: '#create-deck-btn', goal: 'deck' },
-                { route: 'flashcard', sel: '#deck-grid', title: 'Answer and rate one card', text: 'Choose Review set or Review below 100%. Think of the answer, reveal it, then rate your recall with Again, Hard, Good or Easy.', action: '[data-action="study-deck"], [data-action="study-focus"]', goal: 'answer' },
+                { route: 'flashcard', sel: '#deck-grid', title: 'Answer and rate one card', text: 'Choose Study, or Below 100% for targeted review. Think of the answer, reveal it, then rate your recall with Again, Hard, Good or Easy.', action: '[data-action="study-deck"], [data-action="study-focus"]', goal: 'answer' },
                 { route: 'settings', sel: '#settings-start-page', title: 'Choose your starting page', text: 'Choose the page you want to see when you open StudBud. Planner is for deciding what to work on; Tasks is your full list of deadlines. Your choice saves automatically.', change: '#settings-start-page', goal: 'preference' }
             ];
         }
@@ -12493,7 +12493,7 @@
                 : mode === 'starred' ? (deck.cards || []).filter(card => card && card.starred) : mode === 'cram' ? (deck.cards || []).filter(Boolean) : active;
             if (!cards.length) {
                 window.StudBudDialogs.notify(mode === 'weak' ? 'No active weak cards to practice. Paused cards remain visible in the viewer; unpause them in Edit set to include them.'
-                    : mode === 'focus' ? 'No active cards below 100% recall. Use Review set, or unpause cards in the editor.'
+                    : mode === 'focus' ? 'No active cards below 100% recall. Use Study, or unpause cards in the editor.'
                     : mode === 'starred' ? 'Star some cards first (press S while studying, or use the set editor).'
                     : (deck.cards || []).length ? 'All cards are paused. Unpause cards in the editor, or use Cram.' : 'This deck has no cards yet.');
                 return;

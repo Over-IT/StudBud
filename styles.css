@@ -5235,6 +5235,9 @@ button.deck-ring:focus-visible { outline: 3px solid var(--accent-primary); outli
 .deck-main-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr)); gap: 8px; margin-top: auto; }
 .deck-main-actions > button { min-width: 0; margin: 0; padding: 10px; justify-content: center; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
 .deck-main-actions > button > i { flex-shrink: 0; }
+.deck-main-actions:has([data-action="study-focus"]) { grid-template-columns: minmax(0, 1fr) minmax(0, .7fr); align-items: center; }
+.deck-main-actions > [data-action="study-deck"] { min-height: 48px; }
+.deck-main-actions > [data-action="study-focus"] { padding: 6px 8px; font-size: .78rem; }
 #flashcard-view[data-study-page="practice"] .deck-reorder-controls { display: none; }
 #flashcard-view[data-study-page="practice"] .deck-card { cursor: auto; }
 .deck-menu { position: relative; flex: 0 0 auto; margin: -4px -6px 0 0; }
