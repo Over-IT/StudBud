@@ -727,7 +727,7 @@
                 p_type: type, p_subject: summary, p_details: explanation, p_username: type === 'player' ? player : null
             });
             if (error) throw new Error(error.code === 'PGRST202' || error.code === '42883'
-                ? 'Reporting needs a server update. Your report has not been sent. Please use Email support instead.'
+                ? 'Reporting needs a server update. Your report has not been sent. Use the GitHub feedback link in About.'
                 : error.message);
             if (data === null || data === undefined) throw new Error('The server did not confirm your report. Please try again.');
             return data;

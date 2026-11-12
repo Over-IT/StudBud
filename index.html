@@ -63,9 +63,19 @@
                 <label>Password (at least 8 characters)<input id="signup-password" type="password" autocomplete="new-password" minlength="8" required></label>
                 <label>Confirm password<input id="signup-password-confirm" type="password" autocomplete="new-password" minlength="8" required></label>
                 <label>School<select id="signup-school" required><option value="">Choose your school…</option><option value="pchs">Parkway Central High School</option><option value="pnhs">Parkway North High School</option><option value="pshs">Parkway South High School</option><option value="pwhs">Parkway West High School</option><option value="other">Other / not listed</option></select></label>
-                <p class="settings-hint">Create your account with a username and password. No email is needed.</p>
+                <p class="settings-hint">Create your account with a username and password. Your password encrypts synced study data; if it is changed or lost, old encrypted data cannot be recovered. No email is needed.</p>
                 <button class="primary-btn full-width" type="submit">Create account</button>
             </form>
+            <section id="data-unlock-panel" class="mfa-panel hidden" aria-labelledby="data-unlock-title">
+                <h2 id="data-unlock-title">Unlock your encrypted data</h2>
+                <p>Enter your account password to decrypt your private study data on this device. StudBud cannot recover it if the password is lost or changed.</p>
+                <form id="data-unlock-form" class="auth-form">
+                    <label for="data-unlock-password">Account password</label>
+                    <input id="data-unlock-password" type="password" autocomplete="current-password" minlength="8" required>
+                    <button class="primary-btn full-width" type="submit">Unlock data</button>
+                </form>
+                <p id="data-unlock-status" class="auth-message error" role="status" aria-live="polite"></p>
+            </section>
             <section id="mfa-login-prompt" class="mfa-panel hidden" aria-labelledby="mfa-login-title">
                 <h2 id="mfa-login-title">Verify your existing authenticator</h2>
                 <p>This account already has authenticator protection. Enter its code to sign in. You can remove it in Settings after signing in.</p>
@@ -180,10 +190,6 @@
                         <span id="burnout-text">Burnout Risk: High</span>
                     </div>
 
-                    <div id="student-class-badge" class="header-badge glass-card">
-                        <i class="fas fa-graduation-cap"></i>
-                        <span id="header-grade-level">Class of 2026</span>
-                    </div>
                     <button id="install-app-button" class="header-badge glass-card hidden" type="button" aria-label="Install StudBud on this device">
                         <i class="fas fa-download"></i>
                         <span>Install app</span>
@@ -298,8 +304,8 @@
                         </label>
                         <div class="actions">
                             <button id="add-course-btn" class="secondary-btn"><i class="fas fa-plus"></i> Add Class</button>
+                            <button id="open-campus-paste-modal-btn" class="secondary-btn" data-action="open-campus-paste-modal"><i class="fas fa-paste" aria-hidden="true"></i> Import from Infinite Campus</button>
                             <button id="open-target-gpa-btn" class="secondary-btn"><i class="fas fa-bullseye"></i> Grade &amp; GPA goals</button>
-                            <button class="primary-btn open-ic-import-btn" type="button"><i class="fas fa-cloud-arrow-down"></i> Import from Infinite Campus</button>
                         </div>
                     </div>
                     <div id="cumulative-gpa-summary" class="gpa-summary-grid"></div>
@@ -532,11 +538,10 @@
                     <div id="ic-schedule-status" class="glass-card ic-schedule-status hidden">
                         <p id="ic-schedule-status-text"></p>
                         <div class="settings-actions">
-                            <button class="secondary-btn open-ic-import-btn" type="button"><i class="fas fa-rotate"></i> Re-import from Infinite Campus</button>
                             <button id="remove-ic-schedule-btn" class="danger-btn" type="button"><i class="fas fa-calendar-xmark"></i> Remove imported schedule</button>
                         </div>
                     </div>
-                    <p class="settings-hint">Uses the Parkway weekday rotation until you import Infinite Campus. Special schedules may differ.</p>
+                    <p class="settings-hint">Uses the Parkway weekday rotation. Special schedules may differ; adjust class periods above when needed.</p>
                 </section>
 
                 <!-- 4. Flashcard Studio View -->
@@ -948,20 +953,13 @@
                         <div id="guest-appearance" class="glass-card guest-only hidden"></div>
                         <div class="glass-card" id="public-profile-card">
                             <div class="card-title-row"><h2>Public profile</h2><button type="button" class="secondary-btn" data-action="preview-public-profile"><i class="fas fa-eye" aria-hidden="true"></i> Preview</button></div>
-                            <p class="settings-hint">Your buds can see this when they open your profile. Don't share personal contact details.</p>
-                            <div class="form-group"><label for="public-bio">About me</label><textarea id="public-bio" maxlength="160" rows="2" placeholder="A short bio"></textarea></div>
-                            <div class="form-group"><label for="public-subject">Favorite subject</label><input type="text" id="public-subject" maxlength="40" autocomplete="off"></div>
-                            <div class="form-group"><label for="public-grade">Grade / year</label>
-                                <select id="public-grade"><option value="">Prefer not to say</option><option>Freshman</option><option>Sophomore</option><option>Junior</option><option>Senior</option><option>Other</option></select>
-                            </div>
-                            <div class="form-group"><label for="public-goal">Study goal</label><input type="text" id="public-goal" maxlength="80" autocomplete="off" placeholder="e.g. Get an A in Chemistry"></div>
-                            <label class="settings-check"><input type="checkbox" id="public-show-real-name"> Show my first and last name on my public profile</label>
-                            <label class="settings-check"><input type="checkbox" id="public-show-school"> Show my school tag on my public profile</label>
+                            <p class="settings-hint">Your username, optional subject and chosen activity stats appear on your profile.</p>
+                            <details class="settings-help"><summary>Privacy details</summary><p>Your real name, school tag, grade/year, bio and study goal are never shown on the profile. School and course discovery are separate opt-ins.</p></details>
+                            <div class="form-group"><label for="public-subject">Favorite subject (optional)</label><input type="text" id="public-subject" maxlength="40" autocomplete="off"></div>
                             <label class="settings-check"><input type="checkbox" id="public-show-classmates" disabled> Let students sharing a course find my username</label>
                             <p id="public-classmates-availability" class="settings-hint" role="status">Checking course-discovery availability…</p>
-                            <p class="settings-hint">Off by default. Course discovery reveals your username and shared course to other opted-in students at your school. It does not reveal grades, assignments, study time or your full course list. Shared courses may have different teachers or periods.</p>
-                            <p id="school-community-privacy" class="settings-hint hidden">Schoolmate discovery is a separate choice. <button type="button" class="text-btn" data-target="classes-view">Manage classroom discovery privacy</button></p>
-                            <small class="settings-hint">Only Parkway high schools have a public school tag. Other schools are never shown publicly.</small>
+                            <p class="settings-hint">Off by default. Shares your username and self-reported courses with opted-in classmates at your school.</p>
+                            <p id="school-community-privacy" class="settings-hint hidden">Schoolmate discovery is a separate choice. <button type="button" class="text-btn" data-target="classes-view">Manage discovery privacy</button></p>
                             <label class="settings-check"><input type="checkbox" id="public-show-stats" checked> Show my study time, streak and match wins</label>
                             <p id="public-profile-status" class="community-status" role="status" aria-live="polite"></p>
                             <button id="save-public-profile-btn" class="primary-btn" type="button">Save public profile</button>
@@ -1078,8 +1076,7 @@
                         <h3>How to use it</h3>
                         <ul class="about-list">
                             <li><strong>Home:</strong> see upcoming work, your automatic study clock and progress at a glance. Add a quiz or test to get a study plan.</li>
-                            <li><strong>My classes:</strong> enter classes and grades (decimals like 23.21/25 work). What-if grades lets you try possible scores without changing your actual grades.</li>
-                            <li><strong>Import from Infinite Campus:</strong> open My classes to bring in grades, assignments, categories, class times and the school calendar. The import dialog includes computer and phone instructions.</li>
+                            <li><strong>My classes:</strong> add classes and grades manually (decimals like 23.21/25 work). What-if grades lets you try possible scores without changing your actual grades.</li>
                             <li><strong>Planner:</strong> use Day, Week or Month to see deadlines, work dates and personal events. Day suggests what to work on first. Tasks is a separate page for managing assignments, completion and grades.</li>
                             <li><strong>Study:</strong> Practice is for studying, Manage sets is for creating and editing, and Discover is for community materials. Focus practice prioritizes terms needing recall using recent answers. Tests &amp; drills offers more ways to practice.</li>
                             <li><strong>Singleplayer:</strong> play the same game modes on your own with computer players. Host or join a multiplayer room to play with other students. Flashcard quizzes and practice tests remain available separately.</li>
@@ -1091,7 +1088,7 @@
                         <h3>Questions or suggestions?</h3>
                         <p>Report a bug, explain a player's behavior, or send another concern privately to staff.</p>
                         <button type="button" class="primary-btn" data-action="report-problem"><i class="fas fa-flag" aria-hidden="true"></i> Report a problem</button>
-                        <p>Contact <a href="mailto:villareala8873@parkwayschools.net">villareala8873@parkwayschools.net</a> or <a href="mailto:nesthusa2047@parkwayschools.net">nesthusa2047@parkwayschools.net</a>. Bug reports, ideas and feedback are all welcome.</p>
+                        <p>Send feedback privately with Report a problem, or open an issue on <a href="https://github.com/Over-IT/StudBud/issues" target="_blank" rel="noopener">GitHub</a>.</p>
                     </div>
                     <div class="glass-card about-card" id="announcement-history-card">
                         <h3>Announcement history</h3>
@@ -1108,10 +1105,10 @@
                             <h3 class="settings-section-heading"><i class="fas fa-sliders" aria-hidden="true"></i> App preferences</h3>
                             <label for="settings-start-page">Open StudBud to</label>
                             <select id="settings-start-page"><option value="dashboard">Home</option><option value="planner">Planner</option><option value="flashcard">Study</option><option value="gpa">School</option></select>
-                            <p class="settings-hint">Used when you open the app without a page link. Direct links still open their own page.</p>
+                            <p class="settings-hint">Used on regular opens; direct links still take priority.</p>
                             <label for="settings-planner-default">Default Tasks status</label>
                             <select id="settings-planner-default"><option value="todo">To do (including overdue)</option><option value="all">All work</option><option value="overdue">Overdue</option><option value="awaiting">Waiting for grade</option><option value="graded">Graded</option></select>
-                            <p class="settings-hint">Preferences save automatically and sync with your account.</p>
+                            <p class="settings-hint">Auto-saved and synced to your account.</p>
                         </section>
                         <section class="glass-card" data-settings-panel="general">
                             <h3 class="settings-section-heading"><i class="fas fa-layer-group" aria-hidden="true"></i> Flashcard preferences</h3>
@@ -1119,15 +1116,15 @@
                             <select id="settings-study-mode"><option value="reveal">Think, then reveal</option><option value="type">Type before revealing</option></select>
                             <label for="settings-study-direction">Ask with</label>
                             <select id="settings-study-direction"><option value="front">Term</option><option value="back">Definition</option><option value="mixed">Mixed sides</option></select>
-                            <p class="settings-hint">Saved on this device. You can also change these during a study session.</p>
+                            <p class="settings-hint">Saved on this device; change them during a session too.</p>
                         </section>
                         <section id="planner-availability" class="glass-card settings-wide" data-settings-panel="general">
                             <h3 class="settings-section-heading"><i class="fas fa-calendar" aria-hidden="true"></i> Study time preferences</h3>
-                            <p class="settings-hint">Your usual schedule for suggested work. Override one day or week in Planner. These preferences do not create calendar events.</p>
+                            <p class="settings-hint">Sets suggested work only. Planner overrides apply; no calendar events are created.</p>
                             <label class="planner-budget" for="planner-daily-minutes"><span>Default minutes per study day</span><span><input id="planner-daily-minutes" type="number" min="0" max="480" step="1" value="90"> min</span></label>
                             <fieldset class="planner-workdays"><legend>Days to work</legend><p class="settings-hint">Select your study days. Optional weekday times replace the default; leave them blank to use it.</p><div id="planner-weekday-controls"></div></fieldset>
                             <p id="planner-availability-status" class="settings-hint" aria-live="polite"></p>
-                            <p class="settings-hint">0 means a day off. Deadlines and chosen work remain visible even when over budget. Changes save automatically.</p>
+                            <p class="settings-hint">0 = day off. Deadlines and chosen work stay visible over budget. Auto-saved.</p>
                         </section>
                         <section class="glass-card" data-settings-panel="general">
                             <h3 class="settings-section-heading"><i class="fas fa-user" aria-hidden="true"></i> Account</h3>
@@ -1142,30 +1139,11 @@
                         </section>
                         <div class="glass-card hidden settings-school-card" data-settings-panel="school">
                             <section class="settings-field-section">
-                            <h3 class="settings-section-heading"><i class="fas fa-school" aria-hidden="true"></i> School &amp; name</h3>
+                            <h3 class="settings-section-heading"><i class="fas fa-school" aria-hidden="true"></i> School</h3>
                             <div class="form-group">
                                 <label for="settings-school">School</label>
                                 <select id="settings-school"><option value="pchs">Parkway Central High School</option><option value="pnhs">Parkway North High School</option><option value="pshs">Parkway South High School</option><option value="pwhs">Parkway West High School</option><option value="other">Other / not listed</option></select>
-                                <small class="settings-hint">Your school is private unless you enable its public-profile tag.</small>
-                            </div>
-                            <div class="form-group">
-                                <label for="settings-first-name">First name</label>
-                                <input type="text" id="settings-first-name" maxlength="60" autocomplete="given-name">
-                            </div>
-                            <div class="form-group">
-                                <label for="settings-last-name">Last name</label>
-                                <input type="text" id="settings-last-name" maxlength="60" autocomplete="family-name">
-                            </div>
-                            <p class="settings-hint">Your real name stays private unless you share it in Profile.</p>
-                            <div class="form-group">
-                                <label for="settings-grad-year">Graduation Year</label>
-                                <select id="settings-grad-year">
-                                    <option value="2026">Class of 2026</option>
-                                    <option value="2027">Class of 2027</option>
-                                    <option value="2028">Class of 2028</option>
-                                    <option value="2029">Class of 2029</option>
-                                    <option value="2030">Class of 2030</option>
-                                </select>
+                                <small class="settings-hint">Used privately for class catalogs and school communities. Your school tag is not shown on your profile.</small>
                             </div>
                             </section>
                             <section class="settings-field-section">
@@ -1262,9 +1240,7 @@
                             <h3>Account &amp; saved data</h3>
                             <p>Your classes, grades, flashcards and history are saved on this device, including offline. Connect an account to sync across devices. Offline sharing updates wait for reconnection; purchases and hosted matches require internet.</p>
                             <p id="data-save-status" class="data-save-status" role="status" aria-live="polite">Checking local save status…</p>
-                            <div class="settings-actions">
-                                <button class="secondary-btn open-ic-import-btn" type="button"><i class="fas fa-cloud-arrow-down"></i> Import from Infinite Campus</button>
-                            </div>
+                            <p class="settings-hint">Add classes and assignments manually from School and Planner.</p>
                             <p class="settings-hint"><a href="privacy.html" target="_blank" rel="noopener">Privacy policy &amp; advertising</a></p>
                             <div class="danger-zone">
                                 <h4>Remove local study data</h4>
@@ -1277,7 +1253,7 @@
 
                 <section id="appearance-view" class="view hidden">
                     <div class="view-header">
-                        <div><h2>Appearance &amp; accessibility</h2><p class="study-guidance-intro">Adjust your theme, layout and visual preferences.</p></div>
+                        <div><h2>Appearance &amp; accessibility</h2><p class="study-guidance-intro">Adjust your theme and visual preferences.</p></div>
                     </div>
                     <div class="appearance-grid">
                         <section class="glass-card">
@@ -1307,9 +1283,15 @@
                                 </select>
                                 <p class="settings-hint">New accounts follow your device's light or dark setting. A manual choice stays in effect until you select automatic again.</p>
                             </div>
-                            <label class="setting-toggle"><input type="checkbox" id="ui-compact-mode"> <span>Compact spacing</span></label>
-                            <p class="settings-hint">Compact mode fits more information on smaller displays.</p>
-
+                            <div class="form-group">
+                                <label for="game-graphics">Game performance</label>
+                                <select id="game-graphics">
+                                    <option value="auto">Automatic (choose when StudBud opens)</option>
+                                    <option value="performance">Performance (reduced visual detail)</option>
+                                    <option value="quality">Quality (higher resolution and detail)</option>
+                                </select>
+                                <p class="settings-hint">The selected profile stays fixed during games. Changes apply after closing and reopening StudBud.</p>
+                            </div>
                         </section>
                     </div>
                 </section>
@@ -1388,6 +1370,45 @@
 
         <!-- MODAL OVERLAYS -->
         <div id="modal-container" class="modal-overlay hidden">
+            <div id="campus-paste-modal" class="glass-card modal-content campus-paste-modal hidden">
+                <div class="modal-header"><h2>Import from Infinite Campus</h2><button class="close-modal-btn icon-btn" aria-label="Close" type="button"><i class="fas fa-times"></i></button></div>
+                <div class="modal-body campus-paste-body">
+                    <p>Open the Parkway Campus Student portal, then copy the rows you need. Menu names can vary by school.</p>
+                    <a class="campus-portal-link" href="https://parkwaymo.infinitecampus.org/campus/portal/students/parkway.jsp?status=login" target="_blank" rel="noopener noreferrer">Open Parkway Infinite Campus <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
+                    <ul class="campus-paste-directions">
+                        <li><strong>Classes:</strong> open <b>Schedule</b> and copy the course-name rows.</li>
+                        <li><strong>Assignments &amp; grades:</strong> open <b>Grades</b>, choose a class, and copy its assignment table with the header row.</li>
+                    </ul>
+                    <p class="settings-hint">Assignment names are required; dates and categories are optional. To import grades, include both Score and Points Possible. Extra columns are ignored. Never paste passwords or student IDs. Parsing stays in your browser; only reviewed fields are saved and synced.</p>
+                    <div class="campus-paste-tabs" role="tablist" aria-label="Paste data type">
+                        <button type="button" class="secondary-btn selected" data-campus-paste-mode="courses" role="tab" aria-selected="true">Classes</button>
+                        <button type="button" class="secondary-btn" data-campus-paste-mode="assignments" role="tab" aria-selected="false">Assignments &amp; grades</button>
+                    </div>
+                    <section id="campus-paste-courses-panel" class="campus-paste-panel" role="tabpanel">
+                        <label for="campus-paste-courses">Copied class list</label>
+                        <textarea id="campus-paste-courses" rows="3" placeholder="Paste copied course rows or one class name per line"></textarea>
+                        <div class="campus-paste-options">
+                            <label for="campus-paste-term">Add classes as</label>
+                            <select id="campus-paste-term"><option value="FY">Full year</option><option value="S1">Semester 1</option><option value="S2">Semester 2</option></select>
+                            <button type="button" class="secondary-btn" data-action="preview-campus-courses">Preview</button>
+                        </div>
+                        <p id="campus-paste-courses-status" class="community-status" role="status" aria-live="polite"></p>
+                        <div id="campus-paste-courses-preview" class="campus-paste-preview"></div>
+                        <button type="button" id="import-campus-courses-btn" class="primary-btn hidden" data-action="import-campus-courses">Add selected classes</button>
+                    </section>
+                    <section id="campus-paste-assignments-panel" class="campus-paste-panel hidden" role="tabpanel">
+                        <label for="campus-paste-assignment-course">Class</label>
+                        <select id="campus-paste-assignment-course"><option value="">Choose a class</option></select>
+                        <label for="campus-paste-assignments">Copied assignments</label>
+                        <textarea id="campus-paste-assignments" rows="4" placeholder="Paste an assignment table with its column headings"></textarea>
+                        <button type="button" class="secondary-btn" data-action="preview-campus-assignments">Preview</button>
+                        <p class="settings-hint">Names, due dates, scores, points possible and matching categories are used; other copied columns are ignored.</p>
+                        <p id="campus-paste-assignments-status" class="community-status" role="status" aria-live="polite"></p>
+                        <div id="campus-paste-assignments-preview" class="campus-paste-preview"></div>
+                        <button type="button" id="import-campus-assignments-btn" class="primary-btn hidden" data-action="import-campus-assignments">Add assignments</button>
+                    </section>
+                </div>
+            </div>
             <div id="calendar-event-modal" class="glass-card modal-content hidden">
                 <div class="modal-header"><h2>Calendar event</h2><button class="close-modal-btn icon-btn" aria-label="Close" type="button"><i class="fas fa-times"></i></button></div>
                 <div class="modal-body">
@@ -1816,7 +1837,7 @@
                 </div>
             </div>
 
-            <!-- Infinite Campus Import Modal -->
+            <!-- School year review modal -->
             <div id="school-year-modal" class="modal-content glass-card hidden">
                 <div class="modal-header"><h2>Finish school year</h2><button type="button" class="close-modal" aria-label="Close school year review"><i class="fas fa-times"></i></button></div>
                 <div class="modal-body">
@@ -1829,73 +1850,6 @@
                     <button type="button" class="primary-btn" data-action="finish-school-year">Save year &amp; start next year</button>
                 </div>
             </div>
-            <div id="ic-import-modal" class="glass-card modal-content hidden" aria-labelledby="ic-import-title">
-                <div class="modal-header">
-                    <h2 id="ic-import-title"><i class="fas fa-cloud-arrow-down"></i> Import from Infinite Campus</h2>
-                    <button class="close-modal-btn icon-btn" type="button" aria-label="Close"><i class="fas fa-times"></i></button>
-                </div>
-                <div class="modal-body">
-                    <div class="ic-intro">
-                        <span class="workspace-eyebrow">Campus &rarr; StudBud</span>
-                        <h3>Your school information, without retyping it</h3>
-                        <p>Copy your classes, scored assignments, grade categories and schedule <strong>into StudBud</strong>. You'll review the class matches and import options before anything is saved.</p>
-                        <p class="ic-safety-note"><i class="fas fa-shield-halved" aria-hidden="true"></i> One-way only. Nothing in Campus is changed. StudBud never asks for your Campus password.</p>
-                    </div>
-                    <div class="ic-methods" aria-label="Choose how to import">
-                        <details id="ic-mobile-recommendation" class="ic-method ic-mobile-recommendation">
-                            <summary><i class="fas fa-mobile-screen" aria-hidden="true"></i> Using your phone? Start here</summary>
-                            <p><strong>Easiest:</strong> import on a computer once, then sign in to the same StudBud account on your phone. Your synced classes and assignments follow you. Re-import from the computer when grades change.</p>
-                            <p><strong>Phone only?</strong> The Campus native app cannot share its signed-in data with StudBud. You can use the Campus website in Safari or Chrome and follow the guided bookmark steps below instead. There is no direct account connection or background refresh.</p>
-                            <p>No computer or bookmark setup? Add classes and assignments manually; every other StudBud feature still works.</p>
-                            <button class="secondary-btn" type="button" data-action="campus-add-manually">Add a class manually</button>
-                        </details>
-                        <details id="ic-website-method" class="ic-method">
-                            <summary><i class="fas fa-laptop" aria-hidden="true"></i> Import from the Campus website <span>Full import &middot; one-time helper setup</span></summary>
-                            <p class="settings-hint">A small helper runs only when you choose it on your signed-in Campus website. It reads the information available to you and passes a copy back here for review.</p>
-                    <ol class="ic-steps">
-                        <li>
-                            <strong>Save the import helper (one time only).</strong>
-                            <div class="ic-row">
-                                <a id="ic-bookmarklet-link" class="primary-btn ic-bookmarklet" href="#" draggable="true" title="Drag me to your bookmarks bar"><i class="fas fa-bookmark"></i> StudBud Import</a>
-                                <span class="ic-drag-hint"><i class="fas fa-arrow-up"></i> Drag this up to your bookmarks bar</span>
-                            </div>
-                            <small>Don't see a bookmarks bar? Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> (<kbd>⌘</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> on Mac). Already added it? Skip to step 2.</small>
-                            <details id="ic-mobile-instructions" class="ic-more">
-                                <summary>On a phone or tablet? Set up the import bookmark</summary>
-                                <small>Use Safari or Chrome in a browser tab, not the Campus app or an in-app browser. Bookmark any page, name it <strong>StudBud Import</strong>, then edit that bookmark and replace its entire address with the URL below. Keep the <code>javascript:</code> at the beginning.</small>
-                                <div class="ic-row"><button id="ic-copy-bookmarklet-btn" class="secondary-btn" type="button"><i class="fas fa-copy"></i> Copy bookmark URL</button></div>
-                                <textarea id="ic-bookmarklet-url" rows="2" readonly aria-label="StudBud Import bookmark URL" spellcheck="false"></textarea>
-                                <small>Safari: use Share &rarr; Add Bookmark, then Bookmarks &rarr; Edit. Chrome for Android: bookmark a page using the star in the menu, then open Bookmarks and edit its address.</small>
-                                <small>Once you are signed in on the Campus website, run the saved bookmark. In Safari, choose it from Bookmarks. In Chrome for Android, type <strong>StudBud Import</strong> in the address bar and tap the bookmark suggestion, rather than a search result. Do not paste the URL into a search box.</small>
-                            </details>
-                        </li>
-                        <li>
-                            <strong>Open Infinite Campus and sign in.</strong>
-                            <div class="ic-row">
-                                <button id="ic-open-campus-btn" class="primary-btn" type="button"><i class="fas fa-arrow-up-right-from-square"></i> Open Infinite Campus</button>
-                            </div>
-                            <details class="ic-more">
-                                <summary>Different Campus address?</summary>
-                                <input id="ic-district-url" type="url" placeholder="https://yourdistrict.infinitecampus.org/campus/..." aria-label="Infinite Campus address">
-                                <small>Paste the address you use for the Campus Student portal.</small>
-                            </details>
-                        </li>
-                        <li>
-                            <strong>On the Campus tab, run your saved <em>StudBud Import</em> bookmark.</strong>
-                            <small>When the helper finishes, choose <strong>Send to StudBud</strong>. Keep this StudBud tab open.</small>
-                        </li>
-                        <li>
-                            <strong>Return here to review and save.</strong>
-                            <small>Review your class matches and import options, then choose Import into StudBud. No copying, pasting or downloading data needed.</small>
-                        </li>
-                    </ol>
-                        </details>
-                    </div>
-                    <p id="ic-import-status" class="ic-import-status" role="status" aria-live="polite"></p>
-                    <div id="ic-import-preview" class="ic-import-preview hidden"></div>
-                </div>
-            </div>
-
         </div>
     </div>
 
@@ -1927,6 +1881,7 @@
     <script src="multiplayerGames3.js" defer></script>
     <script src="chessGame.js" defer></script>
     <script src="infiniteCampusImport.js" defer></script>
+    <script src="campusPasteImport.js" defer></script>
     <script src="classSearch.js" defer></script>
     <script src="classrooms.js" defer></script>
     <script src="schoolCommunity.js" defer></script>

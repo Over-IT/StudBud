@@ -44,6 +44,8 @@ window.NexusApp = { AppState: state };
 const community = window.StudBudCommunityGames;
 app.communityGames = community;
 const Cloud = window.StudBudCloud.constructor;
+Cloud.prototype.encryptAccountData = async function (snapshot) { return snapshot; };
+Cloud.prototype.decryptAccountData = async function (snapshot) { return snapshot; };
 const normal = value => clone(value);
 
 async function run() {
@@ -88,7 +90,7 @@ async function run() {
         elements.delete('waiting-runner-start');
     }
     const emptySnapshot = state.emptyCloudSnapshot();
-    assert.equal(emptySnapshot.state.profile.graduationYear, 2026);
+    assert.equal(Object.hasOwn(emptySnapshot.state.profile, 'graduationYear'), false);
     assert.equal(emptySnapshot.state.currentView, undefined);
     emptySnapshot.state.settings.theme = 'light';
     assert.equal(state.emptyCloudSnapshot().state.settings.theme, 'system', 'guest merge defaults follow the device and remain independent fresh state');
@@ -229,9 +231,7 @@ async function run() {
     }
     state.state.profile.firstName = 'Ada';
     state.state.profile.lastName = 'Lovelace';
-    assert.equal(app.multiplayerDisplayName(), 'Ada Lovelace', 'in-app multiplayer names use the saved real name');
-    state.state.profile.lastName = '';
-    assert.equal(app.multiplayerDisplayName(), 'Ada', 'either saved name can be used without falling back to the username');
+    assert.equal(app.multiplayerDisplayName(), 'student', 'in-app display names use the username, never saved real names');
     const accountTagMarkup = app.accountTagMarkup;
     const applyAppearance = app.applyAppearance;
     app.accountTagMarkup = username => `<span data-account="${app.escapeHTML(username)}"></span>`;
@@ -239,15 +239,15 @@ async function run() {
     elements.set('account-name', {});
     elements.set('multiplayer-header-name', {});
     app.renderProfile();
-    assert.equal(elements.get('multiplayer-header-name').textContent, 'Ada');
-    assert.equal(elements.get('account-name').innerHTML, 'Ada <span data-account="student"></span>',
-        'account display uses the real name but tags still identify the username');
+    assert.equal(elements.get('multiplayer-header-name').textContent, 'student');
+    assert.equal(elements.get('account-name').innerHTML, 'student <span data-account="student"></span>');
     state.state.profile.firstName = '<Ada>';
     app.renderProfile();
-    assert.ok(elements.get('account-name').innerHTML.startsWith('&lt;Ada&gt; '), 'account real names are escaped');
+    assert.equal(elements.get('account-name').innerHTML, 'student <span data-account="student"></span>',
+        'legacy real-name values do not appear in account UI');
     state.state.profile.firstName = '';
     app.renderProfile();
-    assert.ok(elements.get('account-name').innerHTML.startsWith('student '), 'missing real names fall back to the username');
+    assert.ok(elements.get('account-name').innerHTML.startsWith('student '));
     state.state.profile.firstName = 'Ada';
     app.accountTagMarkup = accountTagMarkup;
     app.applyAppearance = applyAppearance;
@@ -256,9 +256,7 @@ async function run() {
     delete window.StudBudCloud.user;
 
     for (const [id, value] of [
-        ['public-bio', { value: '' }], ['public-subject', { value: '' }], ['public-grade', { value: '' }],
-        ['public-goal', { value: '' }], ['settings-first-name', { value: 'Ada' }], ['settings-last-name', { value: 'Lovelace' }],
-        ['public-show-real-name', { checked: true }], ['public-show-school', { checked: false }], ['public-show-stats', { checked: false }],
+        ['public-subject', { value: '' }], ['public-show-stats', { checked: false }],
         ['public-show-classmates', { checked: false }],
         ['public-profile-status', { textContent: '' }]
     ]) elements.set(id, value);
@@ -268,17 +266,17 @@ async function run() {
     community.friendCall = async (name, args) => { publicProfileArgs = { name, args }; };
     await app.savePublicProfile();
     assert.equal(publicProfileArgs.name, 'studbud_set_public_profile');
-    assert.equal(publicProfileArgs.args.p_first_name, 'Ada');
-    assert.equal(publicProfileArgs.args.p_last_name, 'Lovelace');
-    assert.equal(publicProfileArgs.args.p_show_real_name, true);
-    assert.equal(publicProfileArgs.args.p_show_school, false);
+    assert.equal(Object.hasOwn(publicProfileArgs.args, 'p_first_name'), false);
+    assert.equal(Object.hasOwn(publicProfileArgs.args, 'p_last_name'), false);
+    assert.equal(Object.hasOwn(publicProfileArgs.args, 'p_show_real_name'), false);
+    assert.equal(Object.hasOwn(publicProfileArgs.args, 'p_show_school'), false);
     assert.equal(publicProfileArgs.args.p_show_classmates, false, 'course discovery is an explicit opt-in');
     app.classmateDiscoveryAvailable = false;
     await app.savePublicProfile();
-    assert.equal(Object.hasOwn(publicProfileArgs.args, 'p_show_classmates'), false, 'older servers can still save all existing profile fields');
+    assert.equal(Object.hasOwn(publicProfileArgs.args, 'p_show_classmates'), false, 'older servers omit unsupported discovery controls');
     assert.match(elements.get('public-profile-status').textContent, /needs a server update/);
     community.friendCall = friendCall;
-    for (const id of ['public-bio', 'public-subject', 'public-grade', 'public-goal', 'settings-first-name', 'settings-last-name', 'public-show-real-name', 'public-show-school', 'public-show-stats', 'public-show-classmates', 'public-profile-status']) elements.delete(id);
+    for (const id of ['public-subject', 'public-show-stats', 'public-show-classmates', 'public-profile-status']) elements.delete(id);
 
     state.state.profile.school = 'other';
     state.state.profile.gradeScale = clone(window.STUDBUD_OTHER_GRADE_SCALE);
@@ -322,8 +320,8 @@ async function run() {
     sandbox.document.querySelectorAll = undefined;
     for (const [id, element] of Object.entries({
         'settings-school': { value: 'other' }, 'settings-target-gpa': { value: '3.8' },
-        'settings-grad-year': { value: '2028' }, 'settings-first-name': { value: 'Ada' },
-        'settings-last-name': { value: 'Lovelace' }, 'settings-current-term': { value: 'S1' },
+        'settings-academic-year': { value: String(new Date().getFullYear()) },
+        'settings-calendar-custom': { checked: false }, 'settings-current-term': { value: 'S1' },
         'school-profile-status': { textContent: '' }
     })) elements.set(id, element);
     const appMethods = ['updateCourseSchoolFields', 'renderOtherGradeScaleEditor', 'updatePublicSchoolOption', 'renderUI'];
@@ -341,7 +339,7 @@ async function run() {
     assert.equal(state.state.profile.school, 'other');
     community.friendCall = friendCall;
     appMethods.forEach(method => { app[method] = originalMethods[method]; });
-    for (const id of ['settings-school', 'settings-target-gpa', 'settings-grad-year', 'settings-first-name', 'settings-last-name', 'settings-current-term', 'school-profile-status']) elements.delete(id);
+    for (const id of ['settings-school', 'settings-target-gpa', 'settings-academic-year', 'settings-calendar-custom', 'settings-current-term', 'school-profile-status']) elements.delete(id);
 
     elements.set('practice-multiplayer-mode', { value: 'river' });
     elements.set('practice-multiplayer-deck', { value: 'deck-1' });
@@ -405,16 +403,19 @@ async function run() {
     }
     app.shopTab = 'boxes';
     const sql = source('supabase-setup.sql');
-    assert.match(sql, /show_real_name boolean not null default false/);
-    assert.match(sql, /'display_name', case when coalesce\(v_pub\.show_real_name, false\)/,
-        'public profile APIs disclose real names only after explicit opt-in');
-    assert.match(sql, /studbud_set_public_profile\([\s\S]*?p_first_name text,[\s\S]*?p_last_name text,[\s\S]*?p_show_real_name boolean/);
-    assert.match(sql, /grant execute on function public\.studbud_set_public_profile\(text, text, text, text, text, text, boolean, boolean, boolean, boolean\) to authenticated;/);
+    for (const field of ['bio', 'grade_level', 'study_goal', 'first_name', 'last_name', 'show_real_name']) {
+        assert.match(sql, new RegExp(`drop column if exists ${field}`), `${field} is removed from legacy public profiles`);
+    }
+    assert.match(sql, /studbud_set_public_profile\([\s\S]*?p_favorite_subject text default[\s\S]*?p_show_stats boolean default[\s\S]*?p_show_classmates boolean default/);
+    assert.match(sql, /grant execute on function public\.studbud_set_public_profile\(text, boolean, boolean\) to authenticated;/);
+    const publicProfileFunctions = sql.slice(sql.indexOf('create or replace function public.studbud_friend_profile'),
+        sql.indexOf('create or replace function public.studbud_set_public_profile'));
+    assert.doesNotMatch(publicProfileFunctions, /first_name|last_name|grade_level|study_goal|show_real_name/);
+    const classPerson = sql.slice(sql.indexOf('create or replace function public.studbud_class_person'),
+        sql.indexOf('revoke all on function public.studbud_class_person'));
+    assert.doesNotMatch(classPerson, /first_name|last_name|email|school|grade/);
     assert.match(sql, /tag text not null check \(tag in \('teacher', 'tester', 'moderator'\)\)/);
     assert.match(sql, /revoke all on function public\.studbud_has_user_tag\(uuid, text\) from public, anon, authenticated/);
-    assert.match(sql, /profile\.user_id = p_user_id and profile\.school in \('pchs', 'pnhs', 'pshs', 'pwhs'\) and profile\.show_school/);
-    assert.match(sql, /'school', case when coalesce\(v_pub\.show_school, false\) and v_pub\.school in \('pchs', 'pnhs', 'pshs', 'pwhs'\) then v_pub\.school end/,
-        'public profile payloads include a Parkway school tag only when opted in and never expose Other schools');
     assert.match(sql, /add constraint studbud_public_profiles_school_check check \(school in \('pchs', 'pnhs', 'pshs', 'pwhs', 'other'\)\)/);
     assert.ok(sql.includes("s.rarity = v_rarity") && sql.includes("jsonb_each_text(v_chances)"));
     assert.ok(!sql.includes('abs(rank - target)'));
@@ -744,6 +745,8 @@ async function run() {
         recoverOwnedCommunityDecks: async () => {}
     };
     conflictCloud.appStarted = true;
+    conflictCloud.encryptionKey = {};
+    conflictCloud.encryptionUserId = 'conflict-owner';
     conflictCloud.setAuthStatus = conflictCloud.bindStateEvents = conflictCloud.queueSync = () => {};
     conflictCloud.reportAccountError = error => { throw error; };
     conflictCloud.client = { from: () => ({
@@ -780,6 +783,8 @@ async function run() {
     let queued = 0;
     let recovered = 0;
     cloud.appStarted = true;
+    cloud.encryptionKey = {};
+    cloud.encryptionUserId = 'owner';
     cloud.setAuthStatus = () => {};
     cloud.bindStateEvents = () => {};
     cloud.queueSync = () => { queued++; };

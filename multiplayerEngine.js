@@ -295,11 +295,22 @@
         ctx.fillText(name, x, y);
     }
 
-    function graphicsProfile() {
-        // Legacy saved quality preferences do not affect rendering fidelity.
-        // fps: Infinity = draw on every display refresh (no artificial frame cap)
-        return { low: false, maxDpr: 2, fps: Infinity, previewFps: 60,
-            avatarFps: 60, particleScale: 1, particleLimit: 320 };
+    function graphicsProfile(mode = 'auto', hardware = typeof navigator === 'undefined' ? {} : navigator) {
+        const low = mode === 'performance' || (mode === 'auto' && (
+            (Number(hardware?.deviceMemory) > 0 && Number(hardware.deviceMemory) <= 4)
+            || (Number(hardware?.hardwareConcurrency) > 0 && Number(hardware.hardwareConcurrency) <= 4)
+            || Boolean(hardware?.connection?.saveData)
+        ));
+        return low
+            ? { low: true, maxDpr: 1.25, fps: Infinity, previewFps: 30, avatarFps: 30, particleScale: 0.55, particleLimit: 140 }
+            : { low: false, maxDpr: 2, fps: Infinity, previewFps: 60, avatarFps: 60, particleScale: 1, particleLimit: 320 };
+    }
+
+    let activeGraphicsProfile = graphicsProfile();
+
+    function configureGraphicsProfile(mode) {
+        activeGraphicsProfile = graphicsProfile(['auto', 'performance', 'quality'].includes(mode) ? mode : 'auto');
+        return activeGraphicsProfile;
     }
 
     function canvasView(ctx, margin = 0) {
@@ -560,7 +571,7 @@
             this.testing = Boolean(options.testing || this.room.state?.staff_test);
             this.limitedTestEnergy = this.testing && Boolean(options.limitedTestEnergy ?? this.room.state?.limited_test_energy);
             this.preview = Boolean(options.preview);
-            this.graphics = graphicsProfile();
+            this.graphics = activeGraphicsProfile;
             this.returnFocus = document.activeElement;
             this.correct = 0;
             this.reward = Math.min(100, Math.max(5, Math.round(Number(options.questionReward ?? this.room.state?.question_reward) || 20)));
@@ -1222,11 +1233,6 @@
                 else if (target.classList.contains('mpg-hud-toggle')) {
                     this.setHudCollapsed(!this.overlay.classList.contains('hud-collapsed'));
                 }
-                else if (target.classList.contains('mpg-resolution')) {
-                    this.fullResolution = !this.fullResolution;
-                    this.renderDpr = undefined;
-                    this.resize();
-                }
                 else if (target.classList.contains('mpg-checkpoint') && this.mode === 'skyline' && !this.over && !this.question && this.countdown <= 0 && !this.paused) this.game.returnToCheckpoint();
                 else if (target.classList.contains('mpg-test-pause') && this.testing) {
                     if (this.paused) {
@@ -1313,8 +1319,6 @@
                         <button type="button" class="mpg-hud-toggle" aria-expanded="true" aria-controls="mpg-match-details mpg-match-standings" aria-label="Hide match details and standings">HUD</button>
                         <details class="mpg-controls-help"><summary>Controls</summary><div class="mpg-help-panel"><div class="mpg-hint" id="mpg-controls-hint"></div></div></details>
                         <details class="mpg-audio-settings"><summary>Settings</summary><div class="mpg-audio-panel">
-                            ${this.mode !== 'chess' ? `<button type="button" class="mpg-resolution" aria-pressed="false">Auto resolution · 100%</button>
-                            <small>Auto resolution reduces canvas sharpness only when frames stay slow, then restores it when possible. Physics, effects and controls stay unchanged. Click to lock full resolution.</small>` : ''}
                             <label>Game volume <input type="range" min="0" max="100" value="${Math.round((window.StudBudSfx?.settings.volume ?? .7) * 100)}" data-audio="volume"></label>
                             <label>Music volume <input type="range" min="0" max="100" value="${Math.round((window.StudBudSfx?.settings.musicVolume ?? .5) * 100)}" data-audio="musicVolume"></label>
                             <label><input type="checkbox" data-audio="game" ${window.StudBudSfx?.settings.game !== false ? 'checked' : ''}> Game sounds</label>
@@ -1657,9 +1661,8 @@
         }
 
         resize() {
-            this.graphics = graphicsProfile();
             const nativeDpr = Math.min(window.devicePixelRatio || 1, this.graphics.maxDpr);
-            const dpr = this.fullResolution ? nativeDpr : Math.min(nativeDpr, this.renderDpr || nativeDpr);
+            const dpr = nativeDpr;
             this.nativeDpr = nativeDpr;
             const w = this.overlay.clientWidth, h = this.overlay.clientHeight;
             if (this.canvas.width !== Math.floor(w * dpr)) this.canvas.width = Math.floor(w * dpr);
@@ -1668,38 +1671,7 @@
             this.scale = clamp(h / 720, .65, 1.25);
             this.vw = w / this.scale;
             this.vh = h / this.scale;
-            this.renderBudget = null;
-            this.resolutionButton ||= this.overlay.querySelector?.('.mpg-resolution');
-            if (this.resolutionButton) {
-                this.resolutionButton.textContent = this.fullResolution ? 'Full resolution' : `Auto resolution · ${Math.round(dpr / nativeDpr * 100)}%`;
-                this.resolutionButton.setAttribute('aria-pressed', String(Boolean(this.fullResolution)));
-            }
             this.layoutHud();
-        }
-
-        trackRenderBudget(interval, work) {
-            if (this.fullResolution || this.preview || this.mode === 'chess' || this.paused || this.over || this.countdown > 0
-                || document.hidden || interval <= 0 || interval > 250 || !this.nativeDpr) {
-                this.renderBudget = null;
-                return;
-            }
-            const budget = this.renderBudget || (this.renderBudget = { elapsed: 0, work: 0, frames: 0, slow: 0, fast: 0 });
-            budget.elapsed += interval;
-            budget.work += work;
-            budget.frames++;
-            if (budget.elapsed < 1500 || budget.frames < 20) return;
-            const cadence = budget.elapsed / budget.frames, cpu = budget.work / budget.frames;
-            budget.slow = cadence > 25 ? budget.slow + budget.elapsed : 0;
-            budget.fast = cadence < 19 && cpu < 10 ? budget.fast + budget.elapsed : 0;
-            budget.elapsed = budget.work = budget.frames = 0;
-            // Hysteresis avoids resizing on isolated stalls or constantly rebuilding cached layers.
-            const floor = Math.min(.75, this.nativeDpr);
-            const next = budget.slow >= 3000 ? Math.max(floor, this.dpr - .25)
-                : budget.fast >= 8000 ? Math.min(this.nativeDpr, this.dpr + .25) : this.dpr;
-            if (next === this.dpr) return;
-            this.renderDpr = next;
-            this.resize();
-            this.toast?.(`Auto resolution: ${Math.round(next / this.nativeDpr * 100)}% · change in Settings`, '#93c5fd');
         }
 
         layoutHud() {
@@ -1928,7 +1900,7 @@
         frame(now) {
             if (this.destroyed) return;
             if (this.preview && document.hidden) return;
-            const workStart = performance.now(), interval = now - this.lastFrame;
+            const interval = now - this.lastFrame;
             const dt = Math.min(0.05, (now - this.lastFrame) / 1000);
             this.lastFrame = now;
             if (!this.over) {
@@ -1994,7 +1966,6 @@
                 if (this.spectator && ['crypto', 'frenzy', 'fishing'].includes(this.mode)) this.drawSpectatorSummary(ctx, this.vw, this.vh);
                 else this.game.draw(ctx, this.vw, this.vh);
             }
-            this.trackRenderBudget?.(interval, performance.now() - workStart);
             this.raf = requestAnimationFrame(t => this.frame(t));
         }
 
@@ -3327,7 +3298,8 @@
     }
 
     window.StudBudArcade = {
-        graphicsProfile,
+        graphicsProfile: (mode, hardware) => mode === undefined ? activeGraphicsProfile : graphicsProfile(mode, hardware),
+        configureGraphicsProfile,
         Session, BaseGame, Particles, Resource, ENERGY_COSTS, games: {},
         util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, VerticalIndex, slopeY, slopeSurface, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, accountTagMarkup, who, playerCosmetics, avatarUrl, avatarMarkup, animatedCosmetics, drawAvatar, observeAvatars, drawHat, drawFigureSide, drawFigureTop, sceneZoom, canvasView, bandGradient, screenLayer, radialOverlay, parseRgb, questionHistoryMarkup, defaultPlayerColors }
     };
