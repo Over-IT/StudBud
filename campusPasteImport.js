@@ -58,6 +58,20 @@
             .map(normalize).filter(Boolean);
     }
 
+    function inferCourse(text, courses = []) {
+        const raw = String(text || '').replace(/&amp;/gi, '&');
+        const heading = raw.split(/Assignment/)[0].replace(/Classroom|Curriculum|Grades|Schedule/g, '\n');
+        const names = rowsFromText(heading).flat().map(value => normalize(value.replace(/^(?:course|class)(?: name)?\s*:\s*/i, ''))).filter(Boolean);
+        const matches = courses.filter(course => courseAliases(course).some(alias => names.includes(alias)));
+        return matches.length === 1 ? matches[0] : null;
+    }
+
+    function categorySection(value) {
+        const match = String(value || '').match(/(?:In-progress|[\r\n\t)])\s*([\p{L}][\p{L} &/-]{0,60})\s*Weight\s*:/iu)
+            || String(value || '').match(/^([\p{L}][\p{L} &/-]{0,60})\s*Weight\s*:/iu);
+        return match ? match[1].trim() : '';
+    }
+
     function parseCourses(text, catalog = []) {
         const rows = rowsFromText(text);
         if (!rows.length) return [];
@@ -139,13 +153,8 @@
         const markers = [...raw.matchAll(/Assignment/g)].map(match => match.index);
         if (!markers.length || !/Assignment[^\t\r\n]+(?:Due\s*:|Multiplier\s*:)/i.test(raw)) return null;
 
-        const categoryFrom = value => {
-            const match = value.match(/(?:In-progress|[\r\n\t)])\s*([\p{L}][\p{L} &/-]{0,60})\s*Weight\s*:\s*[\d.]+[\s\S]*$/iu)
-                || value.match(/^([\p{L}][\p{L} &/-]{0,60})\s*Weight\s*:\s*[\d.]+[\s\S]*$/iu);
-            return match ? match[1].trim() : '';
-        };
         const result = [];
-        let category = categoryFrom(raw.slice(0, markers[0]));
+        let category = categorySection(raw.slice(0, markers[0]));
         let start = markers[0];
         const add = end => {
             const body = raw.slice(start + 'Assignment'.length, end);
@@ -161,7 +170,7 @@
             if (multiplier) item.multiplier = multiplier[1];
             if (/Missing(?=\s*(?:Score|$))/i.test(details)) item.missing = true;
             result.push(item);
-            category = categoryFrom(details) || category;
+            category = categorySection(details) || category;
             return true;
         };
         for (const marker of markers.slice(1)) {
@@ -199,6 +208,7 @@
 
         const result = [];
         let current = null;
+        let sectionCategory = '';
         const flush = () => {
             if (current) {
                 const item = assignmentResult(current.title, current.due, current.score, current.max, current.category, today);
@@ -209,6 +219,13 @@
         };
         for (let index = 0; index < lines.length; index++) {
             const line = lines[index];
+            const section = categorySection(line) || (/^Weight\s*:/i.test(lines[index + 1] || '') ? line : '');
+            if (section) {
+                flush();
+                current = null;
+                sectionCategory = section;
+                continue;
+            }
             const detail = field(line);
             if (detail) {
                 if (!current) continue;
@@ -233,7 +250,7 @@
                 else if (detail.name === 'missing' || (detail.name === 'status' && /^missing$/i.test(value))) current.missing = true;
             } else if (isTitle(line, lines[index + 1])) {
                 flush();
-                current = { title: line };
+                current = { title: line, category: sectionCategory };
             }
         }
         flush();
@@ -270,19 +287,24 @@
             multiplier: findHeaderIndex(headers, ['multiplier']),
             status: findHeaderIndex(headers, ['status', 'missing'])
         } : { title: 0, due: 1, score: 2, max: 3, category: 4 };
-        const data = hasHeader ? rows.slice(headerRow + 1).filter(row => rows[headerRow].length === 1 || row.length > 1) : rows;
-        return data.map(row => {
+        const data = hasHeader ? rows.slice(headerRow + 1) : rows;
+        let sectionCategory = '';
+        return data.map((row, index) => {
+            const section = categorySection(row.join('\n'))
+                || (/^Weight\s*:/i.test(data[index + 1]?.[0] || '') ? row[0] : '');
+            if (section) { sectionCategory = section; return null; }
+            if (hasHeader && row.length === 1) return null;
             const title = String(row[indexes.title] || '').trim();
             if (!title || /^(?:total|category total|term total|semester total)$/i.test(title)) return null;
             const item = assignmentResult(title, indexes.due >= 0 ? row[indexes.due] : '',
                 indexes.score >= 0 ? row[indexes.score] : '', indexes.max >= 0 ? row[indexes.max] : '',
-                indexes.category >= 0 ? row[indexes.category] : '', today);
+                (indexes.category >= 0 ? row[indexes.category] : '') || sectionCategory, today);
             if (indexes.multiplier >= 0 && row[indexes.multiplier] !== undefined) item.multiplier = String(row[indexes.multiplier]).trim();
             if (indexes.status >= 0 && /^missing$/i.test(row[indexes.status] || '')) item.missing = true;
             return item;
         }).filter(Boolean);
     }
 
-    root.StudBudCampusPaste = { parseCourses, parseAssignments, parseDate, tableTextFromHtml };
+    root.StudBudCampusPaste = { parseCourses, parseAssignments, parseDate, tableTextFromHtml, inferCourse };
     if (typeof module !== 'undefined' && module.exports) module.exports = root.StudBudCampusPaste;
 })(typeof window !== 'undefined' ? window : globalThis);

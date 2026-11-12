@@ -302,8 +302,8 @@
             || Boolean(hardware?.connection?.saveData)
         ));
         return low
-            ? { low: true, maxDpr: 1, fps: Infinity, previewFps: 30, avatarFps: 30, particleScale: 0.5, particleLimit: 80 }
-            : { low: false, maxDpr: 2, fps: Infinity, previewFps: 60, avatarFps: 60, particleScale: 1, particleLimit: 320 };
+            ? { low: true, maxDpr: 1, renderScale: .65, fps: Infinity, previewFps: 30, avatarFps: 30, particleScale: 0.5, particleLimit: 80 }
+            : { low: false, maxDpr: 2, renderScale: 1, fps: Infinity, previewFps: 60, avatarFps: 60, particleScale: 1, particleLimit: 320 };
     }
 
     let activeGraphicsProfile = graphicsProfile();
@@ -1662,7 +1662,7 @@
 
         resize() {
             const nativeDpr = Math.min(window.devicePixelRatio || 1, this.graphics.maxDpr);
-            const dpr = nativeDpr;
+            const dpr = nativeDpr * (this.graphics.renderScale || 1);
             this.nativeDpr = nativeDpr;
             const w = this.overlay.clientWidth, h = this.overlay.clientHeight;
             if (this.canvas.width !== Math.floor(w * dpr)) this.canvas.width = Math.floor(w * dpr);
@@ -1996,6 +1996,7 @@
             }
             this.overlay.remove();
             document.body.classList.remove('mpg-active');
+            window.NexusApp?.scheduleUIRefresh?.();
             if (!this.preview && this.returnFocus?.isConnected) this.returnFocus.focus({ preventScroll: true });
             lockViewportZoom(false);
             if (document.fullscreenElement) document.exitFullscreen?.().catch(() => { });

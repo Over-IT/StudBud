@@ -49,6 +49,13 @@ assert.deepEqual(paste.parseAssignments('Practice\t11/20/2026\t8/10\t\tHomework'
 assert.deepEqual(paste.parseAssignments('Grades\nStudent details\nAssignment\tScore\tPoints Possible\nQuiz\t8\t10\nPage footer', today), [
     { title: 'Quiz', dueDate: '', pointsEarned: 8, maxPoints: 10, category: '' }
 ], 'page text surrounding a recognized assignment table is ignored');
+assert.deepEqual(paste.parseAssignments('Assignment\tDue\tScore\tCategory\nTests\tWeight: 70\nUnit test\t11/20/2026\t8/10\t\n' +
+    'HomeworkWeight: 10\nPractice\t11/21/2026\t5/5\t', today), [
+    { title: 'Unit test', dueDate: '2026-11-20', pointsEarned: 8, maxPoints: 10, category: 'Tests' },
+    { title: 'Practice', dueDate: '2026-11-21', pointsEarned: 5, maxPoints: 5, category: 'Homework' }
+], 'category group headings in copied tables carry through when category cells are empty');
+assert.equal(paste.parseAssignments('Assignment\tDue\tScore\nTestsWeight: 70\nUnit test\t11/20/2026\t8/10', today)[0].category,
+    'Tests', 'section categories also work without a category column');
 assert.deepEqual(paste.parseAssignments(
     'Grades\nStudent details\nAssignment\nAlgebra Review Quiz\nMultiplier: 0.5\nDue: 09/13/2026\n' +
     'Commentsgot a 100 on retake! was a 36 before\nScore\n18/20\n' +
@@ -83,6 +90,21 @@ assert.deepEqual(paste.parseAssignments('Assignment\nHomework\nDue: 11/12/2026\n
 assert.deepEqual(paste.parseAssignments('Assignment\nQuiz\nDue 11/22/2026\nScore 8/10\nStatus Missing', today), [
     { title: 'Quiz', dueDate: '2026-11-22', pointsEarned: 8, maxPoints: 10, category: '', missing: true }
 ], 'unpunctuated labeled details stay attached to the assignment');
+assert.deepEqual(paste.parseAssignments('Grades\nTests\nWeight: 70\n216/250(86.4%)\n' +
+    'Assignment\nUnit test\nDue: 11/20/2026\nScore\n8/10(80%)\n' +
+    'Homework\nWeight: 10\nAssignment\nPractice\nDue: 11/21/2026\nScore\n5/5(100%)', today), [
+    { title: 'Unit test', dueDate: '2026-11-20', pointsEarned: 8, maxPoints: 10, category: 'Tests' },
+    { title: 'Practice', dueDate: '2026-11-21', pointsEarned: 5, maxPoints: 5, category: 'Homework' }
+], 'line-separated category sections apply to the following assignments, not the previous one');
+const geometry = { code: 'geo', title: 'Honors Geometry' };
+assert.equal(paste.inferCourse('Honors GeometryClassroomCurriculumGradesAssignmentQuizDue: 11/20/2026', [geometry, ...catalog]), geometry);
+assert.equal(paste.inferCourse('Class: Honors Geometry\nAssignment\nQuiz\nDue: 11/20/2026', [geometry]), geometry);
+assert.equal(paste.inferCourse('Grades\nHonors Geometry\nClassroom\nAssignment\nQuiz', [geometry]), geometry,
+    'navigation text before the class name does not prevent matching');
+assert.equal(paste.inferCourse('Honors Geometry\nGrades\nAssignment\nQuiz', [geometry, { ...geometry, code: 'geo2' }]), null,
+    'ambiguous semester/section matches require the user to choose');
+assert.equal(paste.inferCourse('Assignment\nHonors Geometry quiz\nDue: 11/20/2026', [geometry]), null,
+    'assignment titles do not determine the class');
 const campusPage = 'Example classGradesTerm 2In-progressTestsWeight: 70120/150(80%)' +
     'AssignmentUnit TestDue: 10/23/2026Score84/100(84%)' +
     'AssignmentReview QuizMultiplier: 0.5Due: 09/13/2026CommentsretakeScore80/100(80%)' +
@@ -117,7 +139,8 @@ assert.equal(paste.parseDate('11/19', today), '2026-11-19', 'dates without a yea
         window: { StudBudCampusPaste: paste },
         document: { getElementById: node, querySelectorAll: () =>
             app.campusAssignmentDraft.rows.map((row, index) => row.include ? { dataset: { campusAssignmentIndex: String(index) } } : null).filter(Boolean) },
-        AppState: { get: key => data[key], set: (key, value) => { data[key] = value; } },
+        AppState: { get: key => data[key], set: (key, value) => { data[key] = value; },
+            updateCourse(code, patch) { Object.assign(data.courses.find(course => course.code === code), patch); } },
         localDateKey: () => '2026-11-12', Date, console
     };
     vm.createContext(sandbox);
@@ -155,6 +178,8 @@ assert.equal(paste.parseDate('11/19', today), '2026-11-19', 'dates without a yea
     const quiz = data.assignments.find(item => item.title === 'Review Quiz');
     assert.equal(quiz.pointsEarned, 40);
     assert.equal(quiz.maxPoints, 50);
+    assert.equal(data.courses[0].categories.find(category => category.id === quiz.categoryId).name, 'Tests',
+        'a copied category not already configured is created when confirmed');
     const tests = data.assignments.filter(item => ['Unit Test', 'Review Quiz'].includes(item.title));
     assert.ok(Math.abs(app.calculateCourseGrade(data.courses[0], tests) - 124 / 150 * 100) < 1e-9,
         'multiplied points contribute the correct weight to grade calculations');
@@ -164,6 +189,57 @@ assert.equal(paste.parseDate('11/19', today), '2026-11-19', 'dates without a yea
     app.previewCampusAssignments();
     assert.equal(app.campusAssignmentDraft.rows[0].include, false, 'a zero multiplier cannot create a misleading zero-point grade');
     assert.match(node('campus-paste-assignments-preview').innerHTML, /Invalid score multiplier/);
+
+    data.courses = [geometry];
+    node('campus-paste-assignment-course').value = '';
+    node('campus-paste-assignments').value = 'Honors GeometryClassroomGradesIn-progressTestsWeight: 708/10(80%)AssignmentQuizDue: 11/20/2026Score8/10(80%)';
+    app.previewCampusAssignments();
+    assert.equal(node('campus-paste-assignment-course').value, 'geo');
+    assert.match(node('campus-paste-assignments-status').textContent, /Matched class: Honors Geometry/);
+    assert.equal(data.courses[0].categories, undefined, 'preview does not change class categories');
+    app.importCampusAssignments();
+    assert.equal(data.courses[0].categories[0].name, 'Tests');
+    assert.equal(data.courses[0].categories[0].weight, null, 'ambiguous concatenated weights are not guessed');
+    const imported = data.assignments.find(item => item.courseCode === 'geo');
+    imported.categoryId = null;
+    imported.pointsEarned = 9;
+    const countBeforeRepair = data.assignments.length;
+    node('campus-paste-assignments').value = 'Honors GeometryClassroomGradesIn-progressTestsWeight: 708/10(80%)AssignmentQuizDue: 11/20/2026Score8/10(80%)';
+    app.previewCampusAssignments();
+    assert.match(node('campus-paste-assignments-preview').innerHTML, /Update category: Tests/);
+    app.importCampusAssignments();
+    assert.equal(data.assignments.length, countBeforeRepair, 'repairing a category does not duplicate the assignment');
+    const repaired = data.assignments.find(item => item.id === imported.id);
+    assert.equal(repaired.pointsEarned, 9, 'repairing a category preserves the saved grade');
+    assert.equal(repaired.categoryId, data.courses[0].categories[0].id);
+    node('campus-paste-assignments').value = 'Honors GeometryClassroomGradesIn-progressHomeworkWeight: 108/10(80%)AssignmentQuizDue: 11/20/2026Score8/10(80%)';
+    app.previewCampusAssignments();
+    assert.equal(app.campusAssignmentDraft.rows[0].include, false, 'reimport does not overwrite an existing explicit category');
+    assert.equal(repaired.categoryId, data.courses[0].categories[0].id);
+
+    data.courses.push({ code: 'other', title: 'Another class' });
+    node('campus-paste-assignment-course').value = 'other';
+    app.previewCampusAssignments();
+    assert.equal(app.campusAssignmentDraft.courseCode, 'other', 'a manual class selection is not overridden by copied headings');
+
+    const pasteListener = appSource.match(/document\.addEventListener\('paste', event => \{([\s\S]*?)\n\s*\}\);/)[1];
+    vm.runInContext(`window.handlePaste = event => {${pasteListener}}`, sandbox);
+    sandbox.window.StudBudCampusPaste = { ...paste, tableTextFromHtml: () => 'Assignment\tDue\tScore\nRich table quiz\t11/21/2026\t8/10' };
+    const target = node('campus-paste-assignments');
+    Object.assign(target, { id: 'campus-paste-assignments', matches: () => true,
+        setRangeText(value) { this.value = value; }, dispatchEvent() {} });
+    sandbox.Event = class {};
+    const pasteEvent = { target, preventDefault() {}, clipboardData: {
+        getData: type => type === 'text/plain' ? 'Honors Geometry\nGrades\nAssignment\nRich table quiz' : '<table></table>'
+    } };
+    node('campus-paste-assignment-course').value = '';
+    sandbox.window.handlePaste(pasteEvent);
+    assert.equal(node('campus-paste-assignment-course').value, 'geo', 'rich table paste retains the class heading from plain clipboard text');
+    app.previewCampusAssignments();
+    assert.equal(app.campusAssignmentDraft.rows.length, 1);
+    node('campus-paste-assignment-course').value = 'other';
+    sandbox.window.handlePaste(pasteEvent);
+    assert.equal(node('campus-paste-assignment-course').value, 'other', 'rich table paste respects the selected class');
 }
 
 console.log('Campus paste parsing: class matching, assignment scores/dates/categories, deduplication and ignored fields passed.');

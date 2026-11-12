@@ -103,6 +103,21 @@ async function integration() {
     vm.runInContext(source.slice(source.indexOf('    function localDateKey'), source.indexOf('    window.NexusApp ='))
         + '\nglobalThis.app = Object.create(AppOrchestrator.prototype);', sandbox);
     const app = sandbox.app, state = sandbox.AppState;
+    {
+        const refresh = app.refreshAutomaticStudy;
+        let activities = 0, scans = 0;
+        app.studyTracker = { activity: () => activities++ };
+        app.refreshAutomaticStudy = () => scans++;
+        for (let index = 0; index < 1000; index++) app.recordStudyActivity({ isTrusted: true, type: 'pointermove' });
+        assert.equal(activities, 1000, 'all trusted activity reaches the time tracker');
+        assert.equal(scans, 1, 'a burst of movement performs only one expensive context refresh');
+        app.recordStudyActivity({ isTrusted: true, type: 'pointerdown' });
+        assert.equal(scans, 2, 'intentional actions update the study context immediately');
+        app.recordStudyActivity({ isTrusted: false, type: 'pointerdown' });
+        assert.equal(scans, 2);
+        app.refreshAutomaticStudy = refresh;
+        delete app.studyTracker;
+    }
     sandbox.window.NexusApp = app;
     app.renderUI = app.renderDashboard = app.renderAssignments = app.renderDecks = () => {};
     const study = { id: 'automatic', title: 'Biology', autoTracked: true, durationSec: 15 };

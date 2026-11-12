@@ -399,12 +399,21 @@
             if (!profile) throw new Error(`Unknown acoustic voice: ${voice}`);
             const ctx = this.ctx, buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 3), ctx.sampleRate);
             const data = buffer.getChannelData(0), weight = profile.weights.reduce((a, b) => a + b, 0);
+            // Advance damped sine waves by recurrence instead of evaluating sin/exp for every sample.
+            const partials = profile.ratios.map((ratio, index) => {
+                const phase = 2 * Math.PI * 220 * ratio / ctx.sampleRate;
+                const decay = Math.exp(-(profile.decay + index * 1.6) / ctx.sampleRate);
+                return { value: 0, next: Math.sin(phase) * decay, a: 2 * decay * Math.cos(phase),
+                    b: decay * decay, weight: profile.weights[index] };
+            });
             for (let i = 0; i < data.length; i++) {
                 const time = i / ctx.sampleRate;
                 let sample = 0;
-                for (let partial = 0; partial < profile.ratios.length; partial++) {
-                    sample += Math.sin(2 * Math.PI * 220 * profile.ratios[partial] * time)
-                        * profile.weights[partial] * Math.exp(-time * (profile.decay + partial * 1.6));
+                for (const partial of partials) {
+                    sample += partial.value * partial.weight;
+                    const next = partial.a * partial.next - partial.b * partial.value;
+                    partial.value = partial.next;
+                    partial.next = next;
                 }
                 data[i] = sample / weight * Math.min(1, time / profile.attack) * Math.min(1, (data.length - i - 1) / (ctx.sampleRate * .02));
             }

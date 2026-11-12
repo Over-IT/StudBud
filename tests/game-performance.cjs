@@ -297,6 +297,17 @@ const performanceProfile = A.graphicsProfile('performance');
 assert.equal(performanceProfile.low, true);
 assert.equal(performanceProfile.maxDpr, 1);
 assert.equal(performanceProfile.particleLimit, 80);
+{
+    A.configureGraphicsProfile('performance');
+    for (const displayFps of [60, 120]) {
+        const app = Object.create(sandbox.window.PerformanceApp.prototype);
+        let frames = 0;
+        for (let i = 0; i <= displayFps * 10; i++) if (app.previewFrameReady(i * 1000 / displayFps)) frames++;
+        assert.equal(frames, 301, '30 FPS previews keep their cadence despite fractional display-frame timestamps');
+        assert.equal(app.previewFrameReady(15000), true, 'a delayed preview resumes with one draw rather than a catch-up burst');
+        assert.equal(app.previewFrameReady(15000), false, 'the same display frame cannot draw twice');
+    }
+}
 const automatic = A.graphicsProfile('auto', { hardwareConcurrency: 2, deviceMemory: 2, connection: { saveData: true } });
 assert.equal(automatic.low, true, 'automatic quality uses a fixed startup hardware profile');
 assert.equal(automatic.maxDpr, 1);

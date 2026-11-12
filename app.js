@@ -1450,6 +1450,13 @@
                 const html = event.clipboardData?.getData('text/html');
                 const pasted = window.StudBudCampusPaste?.tableTextFromHtml(html);
                 if (!pasted) return;
+                if (target.id === 'campus-paste-assignments') {
+                    const courseSelect = document.getElementById('campus-paste-assignment-course');
+                    if (!courseSelect.value) {
+                        const course = window.StudBudCampusPaste.inferCourse(event.clipboardData.getData('text/plain'), AppState.get('courses') || []);
+                        if (course) courseSelect.value = course.code;
+                    }
+                }
                 event.preventDefault();
                 target.setRangeText(pasted, target.selectionStart, target.selectionEnd, 'end');
                 target.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1512,29 +1519,25 @@
                 if (event.target.id === 'modal-container' && !document.querySelector('#modal-container .modal-content:not(.hidden) form')) this.closeModal();
             });
 
-            this.EventBus.on('courses:updated', () => this.renderUI());
-            this.EventBus.on('assignments:updated', () => this.renderUI());
-            this.EventBus.on('state:updated:courses', () => this.renderUI());
-            this.EventBus.on('state:updated:assignments', () => this.renderUI());
+            this.EventBus.on('courses:updated', () => this.scheduleUIRefresh());
+            this.EventBus.on('assignments:updated', () => this.scheduleUIRefresh());
+            this.EventBus.on('state:updated:courses', () => this.scheduleUIRefresh());
+            this.EventBus.on('state:updated:assignments', () => this.scheduleUIRefresh());
             this.EventBus.on('state:updated:calendarEvents', () => {
-                this.renderCalendar();
-                this.renderDailyPlanner();
+                this.scheduleUIRefresh();
             });
             this.EventBus.on('flashcards:updated', () => {
-                this.renderDecks();
-                this.renderHostedGameDecks();
-                this.renderDashboard();
-                this.renderStudyRecommendations('planner-study-list');
+                this.scheduleUIRefresh();
             });
             this.EventBus.on('study:recorded', () => {
-                this.renderDashboard();
-                this.renderAssignments();
-                this.renderStudyRecommendations('planner-study-list');
-                if (Router.activeRoute === 'class') this.renderClassDetail();
-                if (Router.activeRoute === 'analytics') this.renderStudyAnalytics();
+                this.scheduleUIRefresh();
             });
-            this.EventBus.on('state:restored', () => this.renderUI());
+            this.EventBus.on('state:restored', () => this.scheduleUIRefresh());
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden && this.uiRefreshPending) this.scheduleUIRefresh();
+            });
             this.EventBus.on('router:navigated', route => {
+                this.scheduleUIRefresh();
                 if (route === 'planner' || route === 'tasks') this.renderDailyPlanner();
                 if (route !== 'flashcard') this.cancelDeckDrag?.();
                 if (route !== 'sound') this.stopSettingsAudioPreview();
@@ -1709,7 +1712,12 @@
             const status = document.getElementById('campus-paste-assignments-status');
             const preview = document.getElementById('campus-paste-assignments-preview');
             const addButton = document.getElementById('import-campus-assignments-btn');
-            const courseCode = document.getElementById('campus-paste-assignment-course').value;
+            const courseSelect = document.getElementById('campus-paste-assignment-course');
+            const sourceText = document.getElementById('campus-paste-assignments').value;
+            const inferredCourse = !courseSelect.value
+                ? window.StudBudCampusPaste?.inferCourse(sourceText, AppState.get('courses') || []) : null;
+            if (inferredCourse) courseSelect.value = inferredCourse.code;
+            const courseCode = courseSelect.value;
             const course = (AppState.get('courses') || []).find(item => item.code === courseCode);
             if (!course) throw new Error('Choose the class for these assignments.');
             const parsed = window.StudBudCampusPaste?.parseAssignments(document.getElementById('campus-paste-assignments').value);
@@ -1717,12 +1725,16 @@
             if (!parsed.length) throw new Error('Paste an assignment table first.');
             const normalize = value => String(value || '').normalize('NFKC').trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
             const existing = AppState.get('assignments') || [];
+            const existingByKey = new Map(existing.filter(entry => entry.courseCode === courseCode)
+                .map(entry => [`${normalize(entry.title)}|${entry.dueDate || ''}`, entry]));
             const seen = new Set(existing.filter(entry => entry.courseCode === courseCode)
                 .map(entry => `${normalize(entry.title)}|${entry.dueDate || ''}`));
             const rows = parsed.map(item => {
                 const category = (course.categories || []).find(entry => normalize(entry.name) === normalize(item.category));
                 const key = `${normalize(item.title)}|${item.dueDate}`;
                 const duplicate = seen.has(key);
+                const previous = existingByKey.get(key);
+                const categoryRepair = Boolean(item.category && previous && !previous.categoryId);
                 seen.add(key);
                 const invalidScore = item.pointsEarned !== null && (item.pointsEarned < 0 || item.maxPoints <= 0);
                 const multiplier = item.multiplier === undefined ? 1 : Number(item.multiplier);
@@ -1730,7 +1742,8 @@
                     && (item.multiplier === '' || !Number.isFinite(multiplier) || multiplier <= 0
                         || !Number.isFinite(item.pointsEarned * multiplier) || !Number.isFinite(item.maxPoints * multiplier));
                 return { ...item, categoryId: category?.id || null, duplicate, invalidScore, unsupportedMultiplier,
-                    multiplierValue: multiplier, include: !duplicate && !invalidScore && !unsupportedMultiplier };
+                    categoryRepair, existingId: previous?.id,
+                    multiplierValue: multiplier, include: categoryRepair || (!duplicate && !invalidScore && !unsupportedMultiplier) };
             });
             this.campusAssignmentDraft = {
                 rows, courseCode, sourceText: document.getElementById('campus-paste-assignments').value
@@ -1740,17 +1753,17 @@
                     : row.multiplierValue !== 1 && !row.unsupportedMultiplier
                         ? `${row.pointsEarned}/${row.maxPoints} × ${row.multiplierValue} = ${Number((row.pointsEarned * row.multiplierValue).toPrecision(12))}/${Number((row.maxPoints * row.multiplierValue).toPrecision(12))}`
                         : `${row.pointsEarned}/${row.maxPoints}`;
-                const category = row.category ? row.categoryId ? row.category : `${row.category} (not matched)` : 'No category';
+                const category = row.category ? row.categoryId ? row.category : `${row.category} (new category)` : 'No category';
                 const ungradedMultiplier = row.pointsEarned === null && row.multiplier !== undefined && Number(row.multiplier) !== 1;
                 const detail = [row.dueDate || 'No due date', grade, category, row.missing ? 'Missing' : '',
                     ungradedMultiplier ? 'Multiplier not applied to ungraded work' : ''].filter(Boolean).join(' · ');
-                const state = row.duplicate ? 'Already added' : row.invalidScore ? 'Check score'
+                const state = row.categoryRepair ? `Update category: ${row.category}` : row.duplicate ? 'Already added' : row.invalidScore ? 'Check score'
                     : row.unsupportedMultiplier ? 'Invalid score multiplier; enter this assignment manually' : detail;
                 return `<li><label><input type="checkbox" data-campus-assignment-index="${index}"${row.include ? ' checked' : ''}${row.include ? '' : ' disabled'}><span>${this.escapeHTML(row.title)}</span></label><small class="${row.invalidScore || row.unsupportedMultiplier || row.incompleteScore || ungradedMultiplier || (row.category && !row.categoryId) ? 'campus-paste-warning' : ''}">${this.escapeHTML(state)}</small></li>`;
             }).join('')}</ul>`;
             const count = rows.filter(row => row.include).length;
             const graded = rows.filter(row => row.include && row.pointsEarned !== null).length;
-            status.textContent = `${count} ready to add · ${graded} with scores${rows.length > count ? ` · ${rows.length - count} skipped` : ''}.`;
+            status.textContent = `${inferredCourse ? `Matched class: ${course.title}. ` : ''}${count} ready to import · ${graded} with scores${rows.length > count ? ` · ${rows.length - count} skipped` : ''}.`;
             addButton.classList.toggle('hidden', count === 0);
         }
 
@@ -1769,7 +1782,25 @@
             const today = localDateKey(new Date());
             const assignments = AppState.get('assignments') || [];
             const batchId = Date.now();
+            const course = (AppState.get('courses') || []).find(item => item.code === draft.courseCode);
+            const categories = (course.categories || []).slice();
+            const normalizeCategory = value => String(value || '').normalize('NFKC').trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+            selected.forEach(row => {
+                if (!row.category) return;
+                let category = categories.find(item => normalizeCategory(item.name) === normalizeCategory(row.category));
+                if (!category) {
+                    category = { id: `campus_category_${batchId}_${categories.length}`, name: row.category, weight: null };
+                    categories.push(category);
+                }
+                row.categoryId = category.id;
+            });
+            if (categories.length !== (course.categories || []).length) AppState.updateCourse(course.code, { categories });
             selected.forEach((row, index) => {
+                if (row.categoryRepair) {
+                    const existingIndex = assignments.findIndex(item => item.id === row.existingId);
+                    if (existingIndex >= 0) assignments[existingIndex] = { ...assignments[existingIndex], categoryId: row.categoryId };
+                    return;
+                }
                 const graded = row.pointsEarned !== null;
                 assignments.push({
                     id: `campus_paste_${batchId}_${index}`,
@@ -1794,27 +1825,48 @@
             });
             AppState.set('assignments', assignments);
             document.getElementById('campus-paste-assignments-status').textContent =
-                `Added ${selected.length} assignments to ${(AppState.get('courses') || []).find(item => item.code === draft.courseCode)?.title || 'your class'}.`;
+                `Imported ${selected.length} assignments into ${(AppState.get('courses') || []).find(item => item.code === draft.courseCode)?.title || 'your class'}.`;
             document.getElementById('campus-paste-assignments').value = '';
             document.getElementById('campus-paste-assignments-preview').replaceChildren();
             document.getElementById('import-campus-assignments-btn').classList.add('hidden');
             this.campusAssignmentDraft = null;
         }
 
-        renderUI() {
+        scheduleUIRefresh() {
+            this.uiRefreshPending = true;
+            if (document.hidden || document.body?.classList.contains('mpg-active') || this.uiRefreshScheduled) return;
+            this.uiRefreshScheduled = true;
+            const schedule = window.requestAnimationFrame || (callback => window.setTimeout(callback, 16));
+            schedule(() => {
+                this.uiRefreshScheduled = false;
+                if (document.hidden || document.body?.classList.contains('mpg-active')) return;
+                this.uiRefreshPending = false;
+                this.renderUI(true);
+            });
+        }
+
+        renderUI(activeOnly = false) {
+            const route = Router.activeRoute;
+            const needs = routes => !activeOnly || routes.includes(route);
             this.syncSchoolCalendar();
             this.syncPreferences();
-            this.renderCourses();
+            if (needs(['gpa', 'class', 'dashboard'])) this.renderCourses();
             this.renderCampusPasteCourseOptions();
-            this.renderAcademicHistory();
-            this.renderAssignments();
-            this.renderDecks();
-            this.renderHostedGameDecks();
-            this.renderProfile();
-            this.renderDashboard();
-            this.renderGradeScenarios();
-            this.setCloudChartControls();
-            this.renderGradeProgress();
+            if (needs(['gpa'])) this.renderAcademicHistory();
+            if (needs(['planner', 'tasks'])) {
+                this.renderAssignments();
+                if (activeOnly) this.renderDailyPlanner();
+            }
+            if (needs(['flashcard', 'study-manage', 'study-discover'])) this.renderDecks();
+            if (needs(['multiplayer', 'flashcard', 'study-manage', 'study-discover'])) this.renderHostedGameDecks();
+            if (needs(['profile', 'settings'])) this.renderProfile();
+            if (needs(['dashboard'])) this.renderDashboard();
+            if (needs(['grade-scenarios'])) this.renderGradeScenarios();
+            if (needs(['analytics'])) {
+                this.setCloudChartControls();
+                this.renderGradeProgress();
+                if (activeOnly) this.renderStudyAnalytics();
+            }
             if (Router.activeRoute === 'class') this.renderClassDetail();
             if (Router.activeRoute === 'calendar') this.renderCalendar();
             if (Router.activeRoute === 'schedule') this.renderSchedulePage();
@@ -2170,6 +2222,12 @@
                 }).join('') : `<p class="empty-state glass-card">No classes for ${this.escapeHTML(this.termLabel(semester))} yet. Switch semesters or add a class.</p>`;
             }
 
+            this.renderAssignmentCourseOptions();
+            if (!catalog.length) console.error('[StudBud] Parkway course catalog did not load.');
+        }
+
+        renderAssignmentCourseOptions() {
+            const allCourses = AppState.get('courses') || [];
             const options = document.getElementById('assignment-course');
             if (options) {
                 const selected = options.value;
@@ -2178,7 +2236,6 @@
                 ).join('');
                 if (allCourses.some(course => course.code === selected)) options.value = selected;
             }
-            if (!catalog.length) console.error('[StudBud] Parkway course catalog did not load.');
         }
 
         classGradeProgress(course) {
@@ -3125,18 +3182,32 @@
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             const history = (AppState.get('studyHistory') || []).filter(session => session.activityType !== 'work');
+            const historyByAssignment = new Map();
+            for (const session of history) {
+                if (!historyByAssignment.has(session.assignmentId)) historyByAssignment.set(session.assignmentId, []);
+                historyByAssignment.get(session.assignmentId).push(session);
+            }
+            const coursesByCode = new Map(courses.map(course => [course.code, course]));
+            const academicByCourse = new Map();
             // Only quizzes and tests need studying; homework is just done and turned in
             const recommended = assignments.filter(item => this.isOpenAssignment(item) && ['quiz', 'test'].includes(String(item.kind || 'assignment').toLowerCase())).map(item => {
-                const course = courses.find(entry => entry.code === item.courseCode);
-                const grade = course ? this.calculateCourseGrade(course) : null;
-                const target = course ? this.effectiveCourseTarget(course) : NaN;
+                const course = coursesByCode.get(item.courseCode);
+                if (!academicByCourse.has(item.courseCode)) {
+                    academicByCourse.set(item.courseCode, {
+                        grade: course ? this.calculateCourseGrade(course) : null,
+                        target: course ? this.effectiveCourseTarget(course) : NaN,
+                        targetGpa, tracked: trackedGpa
+                    });
+                }
+                const academic = academicByCourse.get(item.courseCode);
+                const { grade, target } = academic;
                 const gradeGap = Number.isFinite(grade) && Number.isFinite(target) ? Math.max(0, target - grade) : 0;
                 const due = item.dueDate ? new Date(`${item.dueDate}T00:00:00`) : null;
                 const daysUntilDue = due && Number.isFinite(due.getTime()) ? Math.round((due - today) / 86400000) : 7;
                 const urgency = daysUntilDue < 0 ? 2 : 1 / Math.max(1, daysUntilDue + 1);
                 const importance = Math.min(5, Math.max(1, Number(item.importance || 3)));
                 const kind = String(item.kind || 'assignment').toLowerCase();
-                const taskSessions = history.filter(session => session.assignmentId === item.id)
+                const taskSessions = (historyByAssignment.get(item.id) || [])
                     .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
                 const minutesStudied = Math.round(taskSessions.reduce((sum, session) =>
                     sum + Math.max(0, Number(session.durationSec || 0)), 0) / 60);
@@ -3144,7 +3215,8 @@
                 const averageEffectiveness = recentRatings.length
                     ? recentRatings.reduce((sum, rating) => sum + rating, 0) / recentRatings.length
                     : null;
-                const timeProgress = this.assignmentTimeProgress(item);
+                const estimate = this.assignmentEstimateMinutes(item, { ...academic, sessions: taskSessions });
+                const timeProgress = this.assignmentTimeProgress(item, estimate);
                 const totalStudyMinutes = timeProgress.totalMinutes;
                 const remainingStudyMinutes = Math.ceil(timeProgress.remainingMinutes);
                 const planningDays = daysUntilDue <= 0 ? 1 : Math.min(3, daysUntilDue);
@@ -3860,21 +3932,21 @@
             return seconds;
         }
 
-        assignmentEstimateMinutes(item) {
+        assignmentEstimateMinutes(item, academic = null) {
             const base = Number(item.estimatedMinutes) > 0 ? Number(item.estimatedMinutes) : 30;
             const kind = String(item.kind || '').toLowerCase();
             if (!['quiz', 'test'].includes(kind)) return base;
-            const course = (AppState.get('courses') || []).find(entry => entry.code === item.courseCode);
-            const grade = course ? this.calculateCourseGrade(course) : null;
-            const target = course ? this.effectiveCourseTarget(course) : NaN;
-            const targetGpa = Number(this.calculateTargetGPA().weighted);
-            const tracked = this.calculateTrackedGPA();
+            const course = academic ? null : (AppState.get('courses') || []).find(entry => entry.code === item.courseCode);
+            const grade = academic ? academic.grade : course ? this.calculateCourseGrade(course) : null;
+            const target = academic ? academic.target : course ? this.effectiveCourseTarget(course) : NaN;
+            const targetGpa = academic ? academic.targetGpa : Number(this.calculateTargetGPA().weighted);
+            const tracked = academic ? academic.tracked : this.calculateTrackedGPA();
             let estimate = Math.max(kind === 'test' ? 90 : 45, base);
             if (/\b(essay|paper|lab|project|presentation)\b/i.test(item.title || '')) estimate = Math.max(estimate, 90);
             if (Number(item.importance || 3) >= 4) estimate += 15;
             if (Number.isFinite(grade) && Number.isFinite(target) && target - grade >= 5) estimate += 15;
             if (Number(tracked.totalCredits) > 0 && targetGpa - Number(tracked.weighted) >= .25) estimate += 15;
-            const ratings = (AppState.get('studyHistory') || []).filter(session => session.activityType !== 'work' && session.assignmentId === item.id)
+            const ratings = (academic ? academic.sessions : (AppState.get('studyHistory') || []).filter(session => session.activityType !== 'work' && session.assignmentId === item.id))
                 .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp))).slice(0, 3)
                 .map(session => Number(session.effectiveness)).filter(rating => rating >= 1 && rating <= 5);
             if (ratings.length && ratings.reduce((sum, value) => sum + value, 0) / ratings.length <= 2) estimate += 15;
@@ -6376,6 +6448,18 @@
             }
         }
 
+        previewFrameReady(now) {
+            const period = 1000 / (window.StudBudArcade?.graphicsProfile().previewFps || 24);
+            if (!Number.isFinite(this.lastPreviewDrawAt)) {
+                this.lastPreviewDrawAt = now;
+                return true;
+            }
+            const frames = Math.floor((now - this.lastPreviewDrawAt + .5) / period);
+            if (frames < 1) return false;
+            this.lastPreviewDrawAt += frames * period;
+            return true;
+        }
+
         startMultiplayerAnimation() {
             if (!this.multiplayerVisibilityHandler) {
                 this.multiplayerVisibilityHandler = () => {
@@ -6404,9 +6488,8 @@
                 const waitingCanvas = document.getElementById('waiting-runner-canvas');
                 const waitingVisible = waiting && !waiting.classList.contains('hidden') && this.canvasIsVisible(waitingCanvas);
                 const drawPreviews = !(waitingVisible && this.waitingRunner?.running)
-                    && now - (this.lastPreviewDrawAt ?? -Infinity) >= 1000 / (window.StudBudArcade?.graphicsProfile().previewFps || 24);
+                    && this.previewFrameReady(now);
                 if (drawPreviews) {
-                    this.lastPreviewDrawAt = now;
                     for (const canvas of document.querySelectorAll('.mode-preview-canvas')) {
                         if (this.canvasIsVisible(canvas)) this.drawLivePreview(canvas, canvas.dataset.previewMode, now);
                         else if (this.livePreviews.has(canvas)) this.livePreviews.delete(canvas);
@@ -7928,7 +8011,9 @@
             A.previewDepth = (A.previewDepth || 0) + 1;
             try {
                 const rect = canvas.getBoundingClientRect();
-                const dpr = Math.min(rect.width < 400 ? 1 : 1.5, Math.max(1, window.devicePixelRatio || 1));
+                const graphics = A.graphicsProfile();
+                const dpr = Math.min(rect.width < 400 ? 1 : 1.5, graphics.maxDpr, Math.max(1, window.devicePixelRatio || 1))
+                    * (graphics.renderScale || 1);
                 const width = Math.max(1, Math.round(rect.width * dpr)), height = Math.max(1, Math.round(rect.height * dpr));
                 if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
                 const context = canvas.getContext('2d');
@@ -11775,6 +11860,7 @@
         }
 
         openAssignmentForm(assignment, courseCode = '', dueDate = '', categoryId = '', kind = '') {
+            this.renderAssignmentCourseOptions();
             const form = document.getElementById('assignment-form');
             form.reset();
             const graded = assignment ? this.isGradedItem(assignment) : false;
@@ -13060,6 +13146,17 @@
             });
         }
 
+        recordStudyActivity(event) {
+            if (!event.isTrusted) return;
+            this.studyTracker.activity();
+            if (['pointermove', 'scroll'].includes(event.type)) {
+                const now = Date.now();
+                if (now - (this.lastStudyActivityRefresh || 0) < 1000) return;
+                this.lastStudyActivityRefresh = now;
+            }
+            this.refreshAutomaticStudy();
+        }
+
         initAutomaticStudy() {
             this.studyTracker = new window.ActiveStudyTracker({
                 save: session => AppState.recordStudySession(session),
@@ -13068,11 +13165,7 @@
                     AppState.setSaveStatus(`Work/study time could not be saved. Keep this page open to retry. ${this.friendlyErrorMessage(error)}`, 'error');
                 }
             });
-            const activity = event => {
-                if (!event.isTrusted) return;
-                this.studyTracker.activity();
-                this.refreshAutomaticStudy();
-            };
+            const activity = event => this.recordStudyActivity(event);
             ['pointerdown', 'pointermove', 'keydown', 'input', 'scroll'].forEach(type =>
                 document.addEventListener(type, activity, { passive: true, capture: true }));
             const visibility = () => {
@@ -13091,7 +13184,9 @@
                 this.studyTracker.setAvailable(false);
                 this.studyTracker.checkpoint();
             });
-            this.automaticStudyInterval = window.setInterval(() => this.refreshAutomaticStudy(), 1000);
+            this.automaticStudyInterval = window.setInterval(() => {
+                if (!document.hidden) this.refreshAutomaticStudy();
+            }, 1000);
             visibility();
         }
 

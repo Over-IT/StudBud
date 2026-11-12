@@ -286,4 +286,25 @@ assert.match(source, /form\.id === 'course-goal-form'\) this\.saveCourseTarget/)
     for (const [name, value] of originals) app[name] = value;
     Object.assign(state, savedState);
 }
+{
+    const backgroundApp = Object.create(Object.getPrototypeOf(app));
+    const rendered = [];
+    for (const name of ['syncSchoolCalendar', 'syncPreferences', 'renderCourses', 'renderCampusPasteCourseOptions',
+        'renderAcademicHistory', 'renderAssignments', 'renderDailyPlanner', 'renderDecks', 'renderHostedGameDecks',
+        'renderProfile', 'renderDashboard', 'renderGradeScenarios', 'setCloudChartControls', 'renderGradeProgress',
+        'renderStudyAnalytics', 'renderClassDetail', 'renderCalendar', 'renderSchedulePage']) {
+        backgroundApp[name] = () => rendered.push(name);
+    }
+    sandbox.Router.activeRoute = 'flashcard';
+    backgroundApp.renderUI(true);
+    assert.ok(rendered.includes('renderDecks'));
+    assert.ok(!rendered.includes('renderGradeProgress'), 'study checkpoint updates do not rebuild hidden charts');
+    assert.ok(!rendered.includes('renderAssignments'), 'inactive task lists are not rendered in the background');
+    rendered.length = 0;
+    sandbox.Router.activeRoute = 'analytics';
+    backgroundApp.renderUI(true);
+    assert.ok(rendered.includes('renderGradeProgress'), 'visible analytics still refreshes');
+    assert.ok(rendered.includes('renderStudyAnalytics'));
+    assert.ok(!rendered.includes('renderDecks'));
+}
 console.log('Grade target scores: points, weights, partial categories, impossible/unknown work, guidance and GPA locks/preview/apply passed.');

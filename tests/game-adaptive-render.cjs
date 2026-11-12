@@ -101,11 +101,12 @@ for (const nativeDpr of [1, 2]) for (const mode of ['defense', 'miner', 'market'
     assert.equal(performance.updates, 600);
     assert.equal(performance.draws, 600, 'performance mode never drops rendering or physics frames');
     assert.equal(quality.s.dpr, Math.min(nativeDpr, 2));
-    assert.equal(performance.s.dpr, Math.min(nativeDpr, 1));
+    assert.equal(performance.s.dpr, Math.min(nativeDpr, 1) * .65);
     assert.equal(performance.s.vw, quality.s.vw);
     assert.equal(performance.s.vh, quality.s.vh);
     assert.equal(performance.s.scale, quality.s.scale, 'input coordinate conversion is unchanged');
-    if (nativeDpr > 1) assert.ok(performance.finalPixels < quality.finalPixels);
+    assert.ok(performance.finalPixels < quality.finalPixels * .43,
+        'performance mode reduces submitted pixels by more than half even on DPR-1 Chromebooks');
     console.log(`${mode}, native DPR ${nativeDpr}: 600 complete Session frames, identical simulation; graphics profile fixed for session.`);
 }
 {
@@ -144,16 +145,16 @@ for (const nativeDpr of [1, 2]) for (const mode of ['defense', 'miner', 'market'
     const h = harness();
     h.A.configureGraphicsProfile('performance');
     const s = h.session('defense');
-    assert.equal(s.dpr, 1);
+    assert.equal(s.dpr, .65);
     h.A.configureGraphicsProfile('quality');
     s.resize();
-    assert.equal(s.dpr, 1, 'a graphics preference change cannot alter an active session');
+    assert.equal(s.dpr, .65, 'a graphics preference change cannot alter an active session');
     const nextSession = h.session('defense');
     assert.equal(nextSession.dpr, 2, 'new sessions use the newly configured profile');
     s.frame(16);
     s.frame(1000);
     for (let i = 1; i <= 90; i++) s.frame(1000 + i * 40);
-    assert.equal(s.dpr, 1, 'slow or fast frame cadence never changes resolution mid-round');
+    assert.equal(s.dpr, .65, 'slow or fast frame cadence never changes resolution mid-round');
     h.document.hidden = true;
     let updates = 0, draws = 0;
     s.game.update = () => { updates++; };

@@ -113,6 +113,37 @@ assert.ok(!documentHandlers.has('change'), 'sliders and settings changes do not 
     } finally { sfx.play = play; }
 }
 let arrangement;
+{
+    sfx.unlock();
+    const sin = sandbox.Math.sin, exp = sandbox.Math.exp;
+    let expensiveCalls = 0;
+    sandbox.Math.sin = (...args) => { expensiveCalls++; return Math.sin(...args); };
+    sandbox.Math.exp = (...args) => { expensiveCalls++; return Math.exp(...args); };
+    const profiles = {
+        guitar: { ratios: [1, 2, 3, 4, 5, 6], weights: [1, .42, .21, .1, .05, .025], decay: 2.1, attack: .004 },
+        piano: { ratios: [1, 2.001, 3.004, 4.01], weights: [1, .32, .13, .045], decay: 1.7, attack: .009 },
+        marimba: { ratios: [1, 4, 9], weights: [1, .09, .012], decay: 5.5, attack: .003 },
+        bass: { ratios: [1, 2, 3], weights: [1, .24, .055], decay: 2.5, attack: .012 }
+    };
+    try {
+        for (const [voice, profile] of Object.entries(profiles)) {
+            const before = expensiveCalls;
+            const buffer = sfx.acousticBuffer(voice), data = buffer.getChannelData(0), rate = sfx.ctx.sampleRate;
+            assert.ok(expensiveCalls - before <= profile.ratios.length * 2, 'instrument generation performs no per-sample sine/exp calls');
+            assert.equal(sfx.acousticBuffer(voice), buffer, 'repeated notes reuse the synthesized instrument');
+            const weight = profile.weights.reduce((a, b) => a + b, 0);
+            for (let i = 0; i < data.length; i++) {
+                const time = i / rate;
+                const sample = profile.ratios.reduce((sum, ratio, partial) => sum
+                    + Math.sin(2 * Math.PI * 220 * ratio * time) * profile.weights[partial]
+                        * Math.exp(-time * (profile.decay + partial * 1.6)), 0);
+                const expected = sample / weight * Math.min(1, time / profile.attack)
+                    * Math.min(1, (data.length - i - 1) / (rate * .02));
+                assert.ok(Math.abs(data[i] - expected) < 1e-6, 'optimized instruments preserve the original acoustic waveform');
+            }
+        }
+    } finally { sandbox.Math.sin = sin; sandbox.Math.exp = exp; }
+}
 const musicStep = sfx.musicStep.bind(sfx);
 sfx.musicStep = (style, ...args) => { arrangement = style; return musicStep(style, ...args); };
 const styles = { skyline: 'summit', river: 'lagoon', market: 'bazaar', miner: 'cavern', duel: 'battle',

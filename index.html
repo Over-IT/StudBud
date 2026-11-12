@@ -1290,7 +1290,7 @@
                                 <label for="game-graphics">Game performance</label>
                                 <select id="game-graphics">
                                     <option value="auto">Automatic (choose when StudBud opens)</option>
-                                    <option value="performance">Performance (reduced visual detail)</option>
+                                    <option value="performance">Performance (less detail, lower canvas resolution)</option>
                                     <option value="quality">Quality (higher resolution and detail)</option>
                                 </select>
                                 <p class="settings-hint">The selected profile stays fixed during games. Changes apply after closing and reopening StudBud.</p>
@@ -1405,7 +1405,7 @@
                         <label for="campus-paste-assignments">Copied assignments</label>
                         <textarea id="campus-paste-assignments" rows="4" placeholder="Paste an assignment table with its column headings"></textarea>
                         <button type="button" class="secondary-btn" data-action="preview-campus-assignments">Preview</button>
-                        <p class="settings-hint">Paste a copied table or assignment list; rows, tabs and labeled details are grouped where recognized. Names, due dates, scores, points possible and matching categories are used; unrelated details are ignored. Scored multipliers adjust earned and possible points. Check the preview before adding.</p>
+                        <p class="settings-hint">Copied category sections are kept. New categories are added when you confirm; existing weights stay unchanged. Leave Class blank to match a copied class heading.</p>
                         <p id="campus-paste-assignments-status" class="community-status" role="status" aria-live="polite"></p>
                         <div id="campus-paste-assignments-preview" class="campus-paste-preview"></div>
                         <button type="button" id="import-campus-assignments-btn" class="primary-btn hidden" data-action="import-campus-assignments">Add assignments</button>

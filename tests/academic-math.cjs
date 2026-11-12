@@ -338,6 +338,32 @@ state.assignments[0].status = 'graded';
 state.assignments[0].pointsEarned = 8;
 state.assignments[0].maxPoints = 10;
 assert.equal(app.getStudyRecommendations().length, 0, 'already graded tests are not recommended as future work');
+{
+    const previous = { ...state };
+    const performanceApp = Object.create(Object.getPrototypeOf(app));
+    let gradeCalls = 0, targetCalls = 0, trackedCalls = 0;
+    performanceApp.calculateCourseGrade = () => { gradeCalls++; return 80; };
+    performanceApp.effectiveCourseTarget = () => 90;
+    performanceApp.calculateTargetGPA = () => { targetCalls++; return { weighted: 4 }; };
+    performanceApp.calculateTrackedGPA = () => { trackedCalls++; return { weighted: 3.5, totalCredits: 1 }; };
+    performanceApp.decksForAssessment = () => [];
+    performanceApp.getStudyMethodKey = () => 'practice';
+    state.courses = [{ code: 'performance', title: 'Performance class' }];
+    state.studyHistory = [];
+    state.assignments = Array.from({ length: 100 }, (_, index) => ({
+        id: `performance-${index}`, courseCode: 'performance', title: `Quiz ${index}`, kind: 'quiz',
+        dueDate: dateKey, status: 'pending', graded: false, estimatedMinutes: 30
+    }));
+    const expectedEstimate = performanceApp.assignmentEstimateMinutes(state.assignments[0]);
+    gradeCalls = targetCalls = trackedCalls = 0;
+    const recommendations = performanceApp.getStudyRecommendations();
+    assert.equal(recommendations.length, 100);
+    assert.ok(recommendations.every(item => item.totalStudyMinutes === expectedEstimate), 'batched calculations preserve study estimates');
+    assert.equal(gradeCalls, 1, '100 recommendations calculate the class grade once, not per task');
+    assert.equal(targetCalls, 1, 'target GPA is calculated once per recommendation batch');
+    assert.equal(trackedCalls, 1, 'current GPA is calculated once per recommendation batch');
+    Object.assign(state, previous);
+}
 
 for (const [a, b] of [['-2', '2'], ['1.5', '15'], ['2^3', '23'], ['x/y', 'xy']]) {
     assert.notEqual(app.answerKey(a), app.answerKey(b), 'math punctuation must not disappear');
