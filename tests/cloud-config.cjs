@@ -21,7 +21,7 @@ function fixture() {
         console: { error: (...args) => errors.push(args) },
         localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
         sessionStorage: { setItem() {}, removeItem() {} },
-        document: { getElementById: node, querySelectorAll: () => buttons,
+        document: { getElementById: node, querySelectorAll: selector => selector.includes('#auth-switch-btn') ? [...buttons, node('auth-switch-btn')] : buttons,
             createElement: () => ({ remove() { this.removed = true; } }),
             head: { appendChild: script => scripts.push(script) } },
         window: { navigator: { onLine: true }, addEventListener() {},
@@ -51,6 +51,11 @@ function fixture() {
 
     const recovered = fixture();
     const startup = recovered.cloud.bootstrap();
+    assert.ok(recovered.buttons.every(button => button.disabled), 'sign-in remains disabled while the connection loads');
+    await recovered.cloud.handleLogin({ preventDefault() {} });
+    assert.match(recovered.node('auth-status').textContent, /connection is not ready/i);
+    await recovered.cloud.handleSignup({ preventDefault() {} });
+    assert.match(recovered.node('auth-status').textContent, /connection is not ready/i);
     assert.equal(recovered.scripts[0].src, 'supabase-config.js');
     recovered.configure(); recovered.scripts[0].onload();
     await startup;
@@ -95,5 +100,54 @@ function fixture() {
     assert.ok(timed.scripts[0].removed);
     assert.equal(timed.timers.size, 0);
     assert.equal(timed.node('auth-config-retry').classes.has('hidden'), false);
-    console.log('Account configuration startup recovery, explicit failure, retry UI, invalid downloads and timeout cleanup passed.');
+
+    const library = fixture();
+    library.configure();
+    delete library.sandbox.window.supabase;
+    const libraryStartup = library.cloud.bootstrap();
+    await Promise.resolve();
+    assert.match(library.scripts[0].src, /supabase-js/);
+    library.scripts[0].onerror();
+    await libraryStartup;
+    assert.equal(library.created(), 0);
+    assert.ok(library.buttons.every(button => button.disabled));
+    assert.equal(library.node('auth-config-retry').classes.has('hidden'), false);
+    assert.match(library.node('auth-config-message').textContent, /retry/i);
+    assert.ok(library.scripts[0].removed);
+    const libraryRetry = library.cloud.connectOnline();
+    await Promise.resolve();
+    library.sandbox.window.supabase = { createClient: () => ({
+        auth: { onAuthStateChange: () => ({ data: { subscription: {} } }),
+            getSession: async () => ({ data: { session: null } }),
+            signInWithPassword: async credentials => ({ data: { user: { id: credentials.email } } }) }
+    }) };
+    library.scripts[1].onload();
+    await libraryRetry;
+    assert.ok(library.cloud.client, 'retry initializes the client after the library loads');
+    assert.ok(library.buttons.every(button => !button.disabled));
+    assert.ok(library.node('auth-config-retry').classes.has('hidden'));
+    library.node('login-username').value = 'student';
+    library.node('login-password').value = 'password123';
+    let signedInUser;
+    library.cloud.routeAuthenticatedUser = async user => { signedInUser = user; };
+    await library.cloud.handleLogin({ preventDefault() {} });
+    assert.equal(signedInUser.id, 'student@accounts.studbud.invalid', 'sign-in works after retry');
+
+    const guest = fixture();
+    guest.configure();
+    let finishSession;
+    guest.sandbox.window.supabase.createClient = () => ({
+        auth: { onAuthStateChange: () => ({ data: { subscription: {} } }),
+            getSession: () => new Promise(resolve => { finishSession = resolve; }) }
+    });
+    const guestStartup = guest.cloud.bootstrap();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.ok(guest.buttons.every(button => button.disabled), 'sign-in waits for the restored session check');
+    let routed = false;
+    guest.cloud.routeAuthenticatedUser = async () => { routed = true; };
+    guest.cloud.offlineMode = true;
+    finishSession({ data: { session: { user: { id: 'student' } } } });
+    await guestStartup;
+    assert.equal(routed, false, 'a pending startup cannot open an account after choosing guest mode');
+    console.log('Account connection startup, unavailable library, retry UI and timeout cleanup passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

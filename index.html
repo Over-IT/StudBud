@@ -56,7 +56,7 @@
             <form id="login-form" class="auth-form">
                 <label>Username<input id="login-username" type="text" autocomplete="username" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" required></label>
                 <label>Password<input id="login-password" type="password" autocomplete="current-password" minlength="8" required></label>
-                <button class="primary-btn full-width" type="submit">Sign in</button>
+                <button class="primary-btn full-width" type="submit" disabled>Sign in</button>
             </form>
             <form id="signup-form" class="auth-form hidden">
                 <label>Username (3–24 letters, numbers, or underscores)<input id="signup-username" type="text" autocomplete="username" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" title="Use 3–24 letters, numbers, or underscores." required></label>
@@ -64,7 +64,7 @@
                 <label>Confirm password<input id="signup-password-confirm" type="password" autocomplete="new-password" minlength="8" required></label>
                 <label>School<select id="signup-school" required><option value="">Choose your school…</option><option value="pchs">Parkway Central High School</option><option value="pnhs">Parkway North High School</option><option value="pshs">Parkway South High School</option><option value="pwhs">Parkway West High School</option><option value="other">Other / not listed</option></select></label>
                 <p class="settings-hint">Create your account with a username and password. Your password encrypts synced study data; if it is changed or lost, old encrypted data cannot be recovered. No email is needed.</p>
-                <button class="primary-btn full-width" type="submit">Create account</button>
+                <button class="primary-btn full-width" type="submit" disabled>Create account</button>
             </form>
             <section id="mfa-login-prompt" class="mfa-panel hidden" aria-labelledby="mfa-login-title">
                 <h2 id="mfa-login-title">Verify your existing authenticator</h2>
@@ -77,7 +77,7 @@
                 <button id="mfa-login-cancel" class="secondary-btn full-width" type="button">Cancel and sign out</button>
             </section>
             <p id="auth-status" class="auth-message" role="status" aria-live="polite"></p>
-            <p class="auth-switch"><span id="auth-switch-prompt">New to StudBud?</span> <button id="auth-switch-btn" type="button" class="text-btn">Create an account</button></p>
+            <p class="auth-switch"><span id="auth-switch-prompt">New to StudBud?</span> <button id="auth-switch-btn" type="button" class="text-btn" disabled>Create an account</button></p>
 	            <p class="settings-hint auth-legal"><a href="privacy.html" target="_blank" rel="noopener">Privacy policy</a> · <a href="terms.html" target="_blank" rel="noopener">Terms</a></p>
             </div></div>
         </div>

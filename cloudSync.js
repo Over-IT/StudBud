@@ -393,19 +393,16 @@
             this.showAuth();
             if (this.authMode === 'signup') this.setAuthMode('signup');
             if (window.navigator?.onLine === false || localStorage.getItem('STUDBUD_LOCAL_MODE') === 'true') return this.startOffline();
-            let config;
+            this.setAuthBusy(false);
             try {
-                config = await this.loadAccountConfig();
+                const config = await this.loadAccountConfig();
+                await this.loadSupabaseLibrary();
+                this.client = window.supabase.createClient(config.url, config.anonKey);
             } catch (error) {
-                console.error('[StudBudCloud] Account settings could not load:', error);
-                this.setConfigError('Sign-in connection settings could not load. Check your connection and try again, or continue as a guest. Your saved data is still on this device.');
+                console.error('[StudBudCloud] Sign-in connection could not load:', error);
+                this.setConfigError('Sign-in connection could not load. Check your connection and retry, or continue as a guest. Your saved data is still on this device.');
                 return;
             }
-            if (!window.supabase?.createClient) {
-                throw new Error('Supabase could not load. Check your internet connection and reload.');
-            }
-            this.clearConfigError();
-            this.client = window.supabase.createClient(config.url, config.anonKey);
             const { data: authListener } = this.client.auth.onAuthStateChange((event, session) => {
                 if (this.dataUnlockUser && session?.user?.id && session.user.id !== this.dataUnlockUser.id) {
                     this.dataUnlockUser = null;
@@ -435,8 +432,9 @@
             });
             this.authSubscription = authListener.subscription;
             const { data, error } = await this.client.auth.getSession();
+            this.clearConfigError();
             if (error) throw error;
-            if (data.session) await this.routeAuthenticatedUser(data.session.user);
+            if (!this.offlineMode && data.session) await this.routeAuthenticatedUser(data.session.user);
         }
 
         bindAuthUI() {
@@ -668,11 +666,38 @@
             }
         }
 
+        async loadSupabaseLibrary() {
+            if (window.supabase?.createClient) return;
+            if (!this.supabaseLoading) {
+                this.supabaseLoading = (async () => {
+                    const script = document.createElement('script');
+                    script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js';
+                    let timeout;
+                    try {
+                        await new Promise((resolve, reject) => {
+                            script.onload = resolve;
+                            script.onerror = () => reject(new Error('The sign-in library could not be downloaded.'));
+                            timeout = window.setTimeout(() => reject(new Error('The sign-in library timed out.')), 8000);
+                            document.head.appendChild(script);
+                        });
+                        if (!window.supabase?.createClient) throw new Error('The sign-in library did not initialize.');
+                    } finally {
+                        window.clearTimeout(timeout);
+                        script.remove();
+                    }
+                })();
+            }
+            try {
+                await this.supabaseLoading;
+            } finally {
+                this.supabaseLoading = null;
+            }
+        }
+
         clearConfigError() {
             document.getElementById('auth-config-message')?.classList.add('hidden');
             document.getElementById('auth-config-retry')?.classList.add('hidden');
-            document.querySelectorAll('#login-form button, #signup-form button').forEach(button => { button.disabled = false; });
-            document.getElementById('auth-switch-btn')?.removeAttribute('disabled');
+            this.setAuthBusy(this.authBusy);
         }
 
         setConfigError(message) {
@@ -798,13 +823,19 @@
 
         setAuthBusy(busy) {
             this.authBusy = busy;
-            document.querySelectorAll('#login-form button, #signup-form button, #auth-switch-btn, #offline-start-btn')
-                .forEach(button => { button.disabled = busy; });
+            document.querySelectorAll('#login-form button, #signup-form button, #auth-switch-btn')
+                .forEach(button => { button.disabled = busy || !this.client; });
+            const guestButton = document.getElementById('offline-start-btn');
+            if (guestButton) guestButton.disabled = busy;
         }
 
         async handleLogin(event) {
             event.preventDefault();
             if (this.authBusy) return;
+            if (!this.client) {
+                this.setAuthStatus('The sign-in connection is not ready. Wait a moment or retry the connection.', true);
+                return;
+            }
             this.setAuthBusy(true);
             this.setAuthStatus('Signing in…');
             try {
@@ -834,6 +865,10 @@
         async handleSignup(event) {
             event.preventDefault();
             if (this.authBusy) return;
+            if (!this.client) {
+                this.setAuthStatus('The sign-in connection is not ready. Wait a moment or retry the connection.', true);
+                return;
+            }
             const username = document.getElementById('signup-username').value.trim().toLowerCase();
             const password = document.getElementById('signup-password').value;
             const school = document.getElementById('signup-school').value;
