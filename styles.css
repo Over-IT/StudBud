@@ -1460,6 +1460,18 @@ tbody tr:hover {
 .class-work-section { margin-bottom: var(--spacing-lg); }
 .study-guidance-list { display: grid; gap: var(--spacing-sm); }
 .study-guidance-list p { margin: 0; }
+.assignment-list-toggle { margin-top: var(--spacing-md); }
+.assignment-title-cell > .assignment-time-progress { display: grid; margin-top: 8px; }
+.assignment-title-cell > .assignment-work-estimate { display: block; margin-top: 8px; line-height: 1.5; color: var(--text-secondary); }
+.study-guidance-card { display: grid; gap: var(--spacing-sm); padding: var(--spacing-md); border: 1px solid var(--border-glass); border-radius: var(--border-radius-sm); min-width: 0; }
+.study-guidance-card h4 { margin: 0; overflow-wrap: anywhere; }
+.study-guidance-metrics { display: flex; flex-wrap: wrap; gap: 8px 16px; color: var(--text-secondary); }
+.study-guidance-metrics strong { color: var(--text-primary); }
+.study-guidance-method { display: grid; gap: 4px; max-width: 65ch; color: var(--text-secondary); line-height: 1.5; }
+.study-guidance-method > strong { color: var(--text-primary); }
+.study-plan-reasons { color: var(--text-secondary); line-height: 1.5; max-width: 65ch; }
+.study-plan-reasons summary { cursor: pointer; color: var(--accent-primary); }
+.study-plan-reasons ul { display: grid; gap: 8px; padding-left: 20px; margin: 8px 0 0; }
 .study-priority-item { align-items: flex-start; padding: var(--spacing-sm) 0; border-bottom: 1px solid var(--border-glass); }
 .study-priority-item > div { display: grid; gap: 2px; }
 .study-priority-item span, .study-priority-item small { color: var(--text-secondary); }

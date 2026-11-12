@@ -244,4 +244,46 @@ assert.doesNotMatch(goalDialog, /id="course-(?:name|credits|term|manual-weighted
 assert.match(source, /data-action="edit-course-goal"[^>]*aria-label="Edit grade target/);
 assert.match(source, /action === 'edit-course-goal'\) this\.openCourseGoal\(id\)/);
 assert.match(source, /form\.id === 'course-goal-form'\) this\.saveCourseTarget/);
+{
+    const savedState = { ...state };
+    const originals = new Map();
+    const stub = (name, value) => { originals.set(name, app[name]); app[name] = value; };
+    state.courses = [course];
+    state.assignments = Array.from({ length: 12 }, (_, index) => future(`work-${index}`, 10));
+    state.settings = {};
+    sandbox.Router = { selectedClassCode: 'math' };
+    stub('schoolSemesterCourses', courses => courses);
+    stub('semesterAssignments', items => items);
+    stub('courseTargetGuidance', () => '');
+    stub('assignmentStatusControl', () => '');
+    stub('assignmentTimeMarkup', () => '<div class="assignment-time-progress">Time remaining</div>');
+    stub('assessmentStudyButton', () => '');
+    stub('updateAutomaticStudyDisplay', () => {});
+    stub('getStudyRecommendations', () => [{
+        title: '<Quiz>', courseCode: 'math', sessionMinutes: 25, remainingStudyMinutes: 75, sessionCount: 3,
+        reason: '7 days until due. 2.41 points below the class target. Review missed answers.',
+        studyMethod: 'Practice <without notes>'
+    }]);
+    app.renderClassDetail();
+    let markup = node('class-detail-content').innerHTML;
+    assert.equal((markup.match(/<tr class="assignment-row">/g) || []).length, 5, 'long class lists initially render only five items');
+    assert.match(markup, /Show all 12 items/);
+    assert.match(markup, /aria-expanded="false"/);
+    assert.match(markup, /study-guidance-card/);
+    assert.match(markup, /&lt;Quiz&gt;/);
+    assert.match(markup, /<li>2\.41 points below the class target\.<\/li>/, 'guidance separates sentences without breaking decimal values');
+    assert.match(markup, /Practice &lt;without notes&gt;/);
+    app.expandedAssignmentLists = new Set(['class:math']);
+    app.renderClassDetail();
+    markup = node('class-detail-content').innerHTML;
+    assert.equal((markup.match(/<tr class="assignment-row">/g) || []).length, 12);
+    assert.match(markup, /aria-expanded="true">Show fewer/);
+    app.expandedAssignmentLists.delete('class:math');
+    app.renderClassDetail();
+    assert.equal((node('class-detail-content').innerHTML.match(/<tr class="assignment-row">/g) || []).length, 5);
+    assert.equal(state.assignments.length, 12, 'collapsing never removes saved assignments');
+    assert.equal(app.assignmentListToggle(state.assignments.slice(0, 5), 'short'), '', 'short lists need no expand control');
+    for (const [name, value] of originals) app[name] = value;
+    Object.assign(state, savedState);
+}
 console.log('Grade target scores: points, weights, partial categories, impossible/unknown work, guidance and GPA locks/preview/apply passed.');

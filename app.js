@@ -2686,6 +2686,28 @@
             return `<div class="grade-target-guidance"><p>${current}</p>${summary}${unknownCount ? `<p class="settings-hint">${unknownCount} other ungraded item${unknownCount === 1 ? ' has' : 's have'} no valid possible points and ${unknownCount === 1 ? 'is' : 'are'} not included. Add points in the assignment editor.</p>${missingPointActions}` : ''}${awaiting ? `<p class="settings-hint">Includes ${awaiting} completed item${awaiting === 1 ? '' : 's'} awaiting a grade, not extra work to do.</p>` : ''}${rows ? `<details><summary>Scores needed on upcoming work</summary>${rows}</details>` : ''}<small>Estimate for saved work only, not a final-semester prediction. Unlisted future work, retakes and extra credit are not assumed. Excluded categories and dismissed ungraded work are not included.</small></div>`;
         }
 
+        assignmentListPreview(items, key) {
+            return this.expandedAssignmentLists?.has(key) ? items : items.slice(0, 5);
+        }
+
+        assignmentListToggle(items, key) {
+            if (items.length <= 5) return '';
+            const expanded = Boolean(this.expandedAssignmentLists?.has(key));
+            return `<button type="button" class="secondary-btn assignment-list-toggle" data-action="toggle-assignment-list" data-list="${this.escapeHTML(key)}" aria-expanded="${expanded}">${expanded ? 'Show fewer' : `Show all ${items.length} items`}</button>`;
+        }
+
+        studyReasonMarkup(item) {
+            const reasons = String(item.reason || '').split(/(?<=[.!?])\s+(?=[A-Z0-9])/).filter(Boolean);
+            return `<details class="study-plan-reasons"><summary>Why this plan?</summary><ul>${reasons.map(reason => `<li>${this.escapeHTML(reason)}</li>`).join('')}</ul></details>`;
+        }
+
+        renderStudyGuidance(item) {
+            return `<article class="study-guidance-card"><h4>${this.escapeHTML(item.title)}</h4>
+                <div class="study-guidance-metrics"><span><strong>${item.sessionMinutes} min</strong> today</span><span><strong>${item.remainingStudyMinutes} min</strong> remaining</span><span><strong>${item.sessionCount}</strong> sessions</span></div>
+                <p class="study-guidance-method"><strong>Study method</strong><span>${this.escapeHTML(item.studyMethod)}</span></p>
+                ${this.studyReasonMarkup(item)}</article>`;
+        }
+
         renderClassDetail() {
             const container = document.getElementById('class-detail-content');
             if (!container) return;
@@ -2717,7 +2739,8 @@
                     <button class="danger-btn" data-action="remove-category" data-id="${this.escapeHTML(category.id)}" aria-label="Remove ${this.escapeHTML(category.name)}">Remove</button>
                 </div>`;
             }).join('');
-            const workRows = assignments.length ? assignments.map(item => `
+            const assignmentListKey = `class:${course.code}`;
+            const workRows = assignments.length ? this.assignmentListPreview(assignments, assignmentListKey).map(item => `
                 <tr class="assignment-row">
                     <td data-label="Status">${this.assignmentStatusControl(item)}</td>
                     <td data-label="Item" class="assignment-title-cell">${this.escapeHTML(item.title)}${this.assignmentTimeMarkup(item)}</td>
@@ -2762,6 +2785,7 @@
                 <section class="glass-card full-width class-work-section">
                     <h3>Assignments, quizzes & tests</h3>
                     <div class="table-responsive" tabindex="0" role="region" aria-label="Class assignments table"><table><thead><tr><th>Status</th><th>Item</th><th>Category</th><th>Type</th><th>Due</th><th>Score</th><th>Actions</th></tr></thead><tbody>${workRows}</tbody></table></div>
+                    ${this.assignmentListToggle(assignments, assignmentListKey)}
                 </section>
                 <section class="glass-card class-focus-panel">
                     <div><h3>Work and study</h3><p>Flashcards and quiz/test preparation track study time. Work on assignments tracks work time separately.</p></div>
@@ -2771,7 +2795,7 @@
                         <span class="auto-study-state">Automatic</span>
                     </div>
                 </section>
-                <section class="glass-card"><h3>Study guidance</h3><div class="study-guidance-list">${this.getStudyRecommendations().filter(item => item.courseCode === course.code).slice(0, 4).map(item => `<p><strong>${this.escapeHTML(item.title)}</strong> — ${item.sessionMinutes} min today (about ${item.totalStudyMinutes} min total). ${this.escapeHTML(item.reason)} <strong>Method:</strong> ${this.escapeHTML(item.studyMethod)}</p>`).join('') || '<p>No quizzes or tests to study for in this class right now.</p>'}</div></section>
+                <section class="glass-card"><h3>Study guidance</h3><div class="study-guidance-list">${this.getStudyRecommendations().filter(item => item.courseCode === course.code).slice(0, 4).map(item => this.renderStudyGuidance(item)).join('') || '<p>No quizzes or tests to study for in this class right now.</p>'}</div></section>
                 <section class="glass-card classmates-panel">
                     <div class="view-header"><div><h3>People sharing this course</h3><p>Find opted-in students at your school. Courses are self-reported and may have different teachers or periods.</p></div><button type="button" class="secondary-btn" data-action="load-classmates" data-id="${this.escapeHTML(course.code)}"><i class="fas fa-users" aria-hidden="true"></i> Find classmates</button></div>
                     <div id="classmate-list" data-course="${this.escapeHTML(course.code)}" aria-live="polite"><p class="settings-hint">Private by default. Discovery shares usernames only, never grades or assignments.</p></div>
@@ -3425,10 +3449,17 @@
                         </td>
                     </tr>`;
                 }).join('');
-            if (body) body.innerHTML = renderRows(visibleAssignments.filter(item => !isAssessment(item)))
+            const workItems = visibleAssignments.filter(item => !isAssessment(item));
+            const assessmentItems = visibleAssignments.filter(isAssessment);
+            const listKey = `planner:${query}:${selectedCourse}:${selectedStatus}:${sort}`;
+            if (body) body.innerHTML = renderRows(this.assignmentListPreview(workItems, `${listKey}:work`))
                 || '<tr><td colspan="6" class="empty-state">No assignments match these filters.</td></tr>';
-            if (assessmentBody) assessmentBody.innerHTML = renderRows(visibleAssignments.filter(isAssessment))
+            if (assessmentBody) assessmentBody.innerHTML = renderRows(this.assignmentListPreview(assessmentItems, `${listKey}:assessments`))
                 || '<tr><td colspan="6" class="empty-state">No quizzes or tests match these filters.</td></tr>';
+            const workToggle = document.getElementById('assignment-list-toggle');
+            const assessmentToggle = document.getElementById('assessment-list-toggle');
+            if (workToggle) workToggle.innerHTML = this.assignmentListToggle(workItems, `${listKey}:work`);
+            if (assessmentToggle) assessmentToggle.innerHTML = this.assignmentListToggle(assessmentItems, `${listKey}:assessments`);
             if (resultCount) resultCount.textContent = `${visibleAssignments.length} of ${assignments.length} work item${assignments.length === 1 ? '' : 's'} across both sections`;
             const awaiting = document.getElementById('planner-awaiting-grades');
             if (awaiting) {
@@ -9846,7 +9877,7 @@
                         `<button class="secondary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}"><i class="fas fa-layer-group"></i> ${this.escapeHTML(deck.title)}</button>`).join('');
                     const studied = item.minutesStudied ? `<small class="study-time-logged"><i class="fas fa-clock"></i> ${item.minutesStudied} min studied${item.flashcardMinutes ? ` (${item.flashcardMinutes} with flashcards)` : ''}</small>` : '';
                     const manage = `<button type="button" class="secondary-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">Edit quiz / test</button>${this.assignmentStatusControl(item)}`;
-                    return `<article class="study-priority-item"><span class="priority-rank">${index + 1}</span><div><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(item.courseTitle)} · ${this.escapeHTML(item.kind || 'assignment')} · ${item.sessionMinutes} min today (about ${item.remainingStudyMinutes} min remaining)</span><div class="assignment-time-progress"><span>${item.completionPct}% of estimated study time</span><progress max="100" value="${item.completionPct}" aria-label="Estimated study time completion">${item.completionPct}%</progress></div>${studied}<small>${this.escapeHTML(item.reason)}</small><p><strong>Study method:</strong> ${this.escapeHTML(item.studyMethod)}</p><div class="study-priority-actions"><button type="button" class="secondary-btn" data-action="work-on-assignment" data-id="${this.escapeHTML(item.id)}">Work on this</button><button class="secondary-btn" data-action="log-study" data-id="${this.escapeHTML(item.id)}"><i class="fas fa-stopwatch"></i> Log offline study</button>${this.assessmentStudyButton(item)}${decks}${manage}</div></div></article>`;
+                    return `<article class="study-priority-item"><span class="priority-rank">${index + 1}</span><div><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(item.courseTitle)} · ${this.escapeHTML(item.kind || 'assignment')} · ${item.sessionMinutes} min today (about ${item.remainingStudyMinutes} min remaining)</span><div class="assignment-time-progress"><span>${item.completionPct}% of estimated study time</span><progress max="100" value="${item.completionPct}" aria-label="Estimated study time completion">${item.completionPct}%</progress></div>${studied}<p class="study-guidance-method"><strong>Study method</strong><span>${this.escapeHTML(item.studyMethod)}</span></p>${this.studyReasonMarkup(item)}<div class="study-priority-actions"><button type="button" class="secondary-btn" data-action="work-on-assignment" data-id="${this.escapeHTML(item.id)}">Work on this</button><button class="secondary-btn" data-action="log-study" data-id="${this.escapeHTML(item.id)}"><i class="fas fa-stopwatch"></i> Log offline study</button>${this.assessmentStudyButton(item)}${decks}${manage}</div></div></article>`;
                 });
                 priorityList.innerHTML = recommendations.length ? (id === 'planner-study-list' && cards.length > 2
                     ? `${cards.slice(0, 2).join('')}<details class="planner-more-study"><summary>More study suggestions (${cards.length - 2})</summary>${cards.slice(2).join('')}</details>`
@@ -10471,6 +10502,18 @@
             }
             if (target.matches('[data-campus-paste-mode]')) {
                 this.setCampusPasteMode(target.dataset.campusPasteMode);
+                return;
+            }
+            if (target.dataset.action === 'toggle-assignment-list') {
+                this.expandedAssignmentLists ||= new Set();
+                const key = target.dataset.list;
+                if (this.expandedAssignmentLists.has(key)) this.expandedAssignmentLists.delete(key);
+                else this.expandedAssignmentLists.add(key);
+                if (key.startsWith('class:')) this.renderClassDetail();
+                else this.renderAssignments();
+                const replacement = [...document.querySelectorAll('[data-action="toggle-assignment-list"]')]
+                    .find(button => button.dataset.list === key);
+                replacement?.focus({ preventScroll: true });
                 return;
             }
 

@@ -112,8 +112,22 @@ const app = sandbox.app;
     app.renderAssignments();
     const studyMarkup = elements.get('planner-study-list').innerHTML;
     assert.match(studyMarkup, /<details class="planner-more-study"><summary>More study suggestions \(1\)<\/summary>/);
-    assert.equal((studyMarkup.slice(0, studyMarkup.indexOf('<details')).match(/class="study-priority-item"/g) || []).length, 2, 'only two suggestions expand by default');
+    assert.equal((studyMarkup.slice(0, studyMarkup.indexOf('<details class="planner-more-study"')).match(/class="study-priority-item"/g) || []).length, 2, 'only two suggestions expand by default');
     assert.match(studyMarkup, /&lt;Extra quiz&gt;/, 'additional suggestions are retained and escaped');
+    const beforeListExpansion = state.assignments.slice();
+    state.assignments.push(...Array.from({ length: 8 }, (_, index) => ({
+        id: `more-${index}`, title: `More work ${index}`, kind: 'assignment', dueDate: '2099-02-01'
+    })));
+    elements.set('assignment-list-toggle', { innerHTML: '' });
+    app.renderAssignments();
+    assert.equal((elements.get('assignment-body').innerHTML.match(/<tr class="assignment-row/g) || []).length, 5);
+    assert.match(elements.get('assignment-list-toggle').innerHTML, /Show all 11 items/);
+    app.expandedAssignmentLists = new Set(['planner:::all:due:work']);
+    app.renderAssignments();
+    assert.equal((elements.get('assignment-body').innerHTML.match(/<tr class="assignment-row/g) || []).length, 11);
+    assert.match(elements.get('assignment-list-toggle').innerHTML, /Show fewer/);
+    app.expandedAssignmentLists.clear();
+    state.assignments = beforeListExpansion;
     state.assignments.pop();
     elements.set('assignment-search', { value: 'test prep' });
     app.renderAssignments();
