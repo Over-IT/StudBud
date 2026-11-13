@@ -1301,7 +1301,7 @@
                                     <option value="performance">Performance (less detail, lower canvas resolution)</option>
                                     <option value="quality">Quality (higher resolution and detail)</option>
                                 </select>
-                                <p class="settings-hint">Applies after reopening StudBud.</p>
+                                <p class="settings-hint">Applies immediately to new games and previews.</p>
                             </div>
                         </section>
                     </div>
@@ -1704,19 +1704,22 @@
                         <button type="button" class="secondary-btn" data-action="editor-add-card">Add card</button>
                         <button id="deck-editor-undo" type="button" class="secondary-btn hidden" data-action="editor-undo-delete">Undo deletion</button>
                     </div>
-                    <form id="deck-quick-add-form" class="deck-quick-add" autocomplete="off">
-                        <span class="deck-quick-add-label"><i class="fas fa-bolt"></i> Quick add</span>
-                        <label for="deck-quick-front" class="sr-only">Term</label>
-                        <input id="deck-quick-front" type="text" maxlength="5000" placeholder="Term or question">
-                        <label for="deck-quick-back" class="sr-only">Definition</label>
-                        <input id="deck-quick-back" type="text" maxlength="5000" placeholder="Definition or answer (Enter adds)">
-                        <button type="submit" class="primary-btn compact-btn"><i class="fas fa-plus"></i> Add</button>
-                    </form>
-                    <details class="deck-editor-bulk-panel"><summary>Paste many cards</summary>
-                        <p class="settings-hint">Paste rows or type Question :: Answer (up to 300).</p>
-                        <label for="deck-editor-bulk">Cards to add</label>
-                        <textarea id="deck-editor-bulk" rows="5" placeholder="Capital of France :: Paris :: geography"></textarea>
-                        <button class="secondary-btn" type="button" data-action="editor-bulk-add">Add pasted cards</button>
+                    <details id="deck-editor-add-panel" class="deck-editor-add-panel">
+                        <summary><i class="fas fa-plus-circle" aria-hidden="true"></i> Add cards quickly</summary>
+                        <form id="deck-quick-add-form" class="deck-quick-add" autocomplete="off">
+                            <span class="deck-quick-add-label"><i class="fas fa-bolt"></i> Quick add</span>
+                            <label for="deck-quick-front" class="sr-only">Term</label>
+                            <input id="deck-quick-front" type="text" maxlength="5000" placeholder="Term or question">
+                            <label for="deck-quick-back" class="sr-only">Definition</label>
+                            <input id="deck-quick-back" type="text" maxlength="5000" placeholder="Definition or answer (Enter adds)">
+                            <button type="submit" class="primary-btn compact-btn"><i class="fas fa-plus"></i> Add</button>
+                        </form>
+                        <div class="deck-editor-bulk-panel">
+                            <p class="settings-hint">Paste rows or type Question :: Answer (up to 300).</p>
+                            <label for="deck-editor-bulk">Cards to add</label>
+                            <textarea id="deck-editor-bulk" rows="5" placeholder="Capital of France :: Paris :: geography"></textarea>
+                            <button class="secondary-btn" type="button" data-action="editor-bulk-add">Add pasted cards</button>
+                        </div>
                     </details>
                     <p class="settings-hint">Paused cards skip scheduled study.</p>
                     <p id="deck-editor-count" role="status"></p>

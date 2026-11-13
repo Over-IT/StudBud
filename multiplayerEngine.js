@@ -608,6 +608,11 @@
             this.countdown = 3.4;
             this.networkLoading = !this.practice && !this.preview;
             this.readyPlayers = new Set();
+            this.fpsEma = 60;
+            this.fpsMin = 60;
+            this.fpsWindowAt = 0;
+            this.fpsReadout = '60 FPS';
+            this.showTestFps = this.testing;
             this.cardsReady = false;
             this.t = 0;
             this.cards = [];
@@ -1329,6 +1334,8 @@
             const overlay = document.createElement('div');
             overlay.className = 'mpg-overlay';
             overlay.classList.toggle('mpg-spectator', this.spectator);
+            const configuredGraphics = window.NexusApp?.AppState?.get?.('settings')?.gameGraphics;
+            const graphicsMode = ['auto', 'performance', 'quality'].includes(configuredGraphics) ? configuredGraphics : 'auto';
             overlay.innerHTML = `
                 <canvas class="mpg-canvas"></canvas>
                 <div class="mpg-top">
@@ -1345,6 +1352,13 @@
                         <button type="button" class="mpg-hud-toggle" aria-expanded="true" aria-controls="mpg-match-details mpg-match-standings" aria-label="Hide match details and standings" title="Show or hide match details"><i class="fas fa-eye" aria-hidden="true"></i><span class="mpg-label">HUD</span></button>
                         <details class="mpg-controls-help"><summary aria-label="Controls" title="Controls"><i class="fas fa-gamepad" aria-hidden="true"></i><span class="mpg-label">Controls</span></summary><div class="mpg-help-panel"><div class="mpg-hint" id="mpg-controls-hint"></div></div></details>
                         <details class="mpg-audio-settings"><summary aria-label="Settings" title="Settings"><i class="fas fa-gear" aria-hidden="true"></i><span class="mpg-label">Settings</span></summary><div class="mpg-audio-panel">
+                            <label>Graphics mode
+                                <select data-video="graphics" aria-label="Graphics mode">
+                                    <option value="auto" ${graphicsMode === 'auto' ? 'selected' : ''}>Auto</option>
+                                    <option value="performance" ${graphicsMode === 'performance' ? 'selected' : ''}>Performance</option>
+                                    <option value="quality" ${graphicsMode === 'quality' ? 'selected' : ''}>Quality</option>
+                                </select>
+                            </label>
                             <label>Game volume <input type="range" min="0" max="100" value="${Math.round((window.StudBudSfx?.settings.volume ?? .7) * 100)}" data-audio="volume"></label>
                             <label>Music volume <input type="range" min="0" max="100" value="${Math.round((window.StudBudSfx?.settings.musicVolume ?? .5) * 100)}" data-audio="musicVolume"></label>
                             <label><input type="checkbox" data-audio="game" ${window.StudBudSfx?.settings.game !== false ? 'checked' : ''}> Game sounds</label>
@@ -1358,6 +1372,7 @@
                             <label class="mpg-test-range">Fly speed <output data-test-speed-label aria-label="Selected fly speed">600 units/s</output><input type="range" min="100" max="3000" step="100" value="600" data-test-speed aria-label="Fly speed"></label>
                             <label><input type="checkbox" data-test-cheat="invincible"> Invincibility</label>
                             <label><input type="checkbox" data-test-cheat="freeze"> Freeze machinery and moving platforms</label>
+                            <label><input type="checkbox" data-test-fps ${this.showTestFps ? 'checked' : ''}> Show FPS readout</label>
                             <label>Biome <select data-test-biome aria-label="Test biome">${window.StudBudArcade.games.skyline.testDestinations.map(place => `<option value="${place.id}">${esc(place.name)}</option>`).join('')}</select></label>
                             <div class="mpg-test-teleport"><button type="button" data-test-action="teleport">Teleport</button><button type="button" data-test-action="checkpoint">Reset checkpoint</button></div>` : ''}<pre class="mpg-test-stats"></pre></div></details>` : ''}
                         <button type="button" class="mpg-end ${this.isHost && !this.practice ? '' : 'hidden'}" aria-label="End match" title="End match"><i class="fas fa-flag-checkered" aria-hidden="true"></i><span class="mpg-label">End match</span></button>
@@ -1405,6 +1420,10 @@
             this.ctx = this.canvas.getContext('2d');
             overlay.querySelector('.mpg-name').textContent = this.game?.title || this.mode;
             const chip = overlay.querySelector('.mpg-chip');
+            const fpsReadout = document.createElement('small');
+            fpsReadout.className = `mpg-fps-readout${this.testing && this.showTestFps ? '' : ' hidden'}`;
+            fpsReadout.textContent = this.fpsReadout;
+            chip?.appendChild(fpsReadout);
             const details = document.createElement('div');
             details.id = 'mpg-match-details';
             details.className = 'mpg-match-details';
@@ -1440,6 +1459,15 @@
                     overlay.querySelector('[data-test-speed-label]').textContent = `${speed} units/s`;
                     return;
                 }
+                if (this.testing && event.target.dataset.testFps !== undefined) {
+                    this.showTestFps = event.target.checked;
+                    this.overlay.querySelector('.mpg-fps-readout')?.classList.toggle('hidden', !this.showTestFps);
+                    return;
+                }
+                if (event.target.dataset.video === 'graphics') {
+                    this.setGraphicsMode(event.target.value);
+                    return;
+                }
                 const key = event.target.dataset.audio;
                 if (!key) return;
                 const value = event.target.type === 'checkbox' ? event.target.checked : Number(event.target.value) / 100;
@@ -1471,6 +1499,15 @@
             });
             this.hudObserver = new ResizeObserver(() => this.layoutHud());
             for (const el of [hud, overlay.querySelector('.mpg-touch'), overlay.querySelector('.mpg-hint'), overlay.querySelector('.mpg-board')]) this.hudObserver.observe(el);
+        }
+
+        setGraphicsMode(mode) {
+            const next = ['auto', 'performance', 'quality'].includes(mode) ? mode : 'auto';
+            this.graphics = configureGraphicsProfile(next);
+            window.NexusApp?.setGameGraphicsPreference?.(next, { notify: false });
+            this.resize();
+            this.layoutHud();
+            this.toast(`Graphics: ${next === 'auto' ? 'Auto' : next[0].toUpperCase() + next.slice(1)}`, '#67e8f9');
         }
 
         defaultHudCollapsed() {
@@ -1791,7 +1828,7 @@
             if (diagnostics) {
                 const me = this.game.me;
                 const position = me ? `${Math.round(me.x)}, ${Math.round(me.y)}` : 'Not applicable';
-                diagnostics.textContent = `Mode: ${this.mode}\nSeed: ${this.seed}\nTime: ${this.t.toFixed(1)}s\nPlayers: ${this.roster.size}\nPosition: ${position}\nResources: infinite\nScore: ${Math.round(this.score)}\nObjective: ${Math.round(this.goal)}${this.mode === 'skyline' ? `\nFly speed: ${this.testFlySpeed || 600} units/s\nCheckpoint: ${this.game.cp.id + 1}/${this.game.checkpoints.length}\nSolids: ${this.game.solids.length}\nMachines: ${this.game.drills.length}` : ''}`;
+                diagnostics.textContent = `Mode: ${this.mode}\nSeed: ${this.seed}\nTime: ${this.t.toFixed(1)}s\nFPS: ${this.fpsReadout}\nPlayers: ${this.roster.size}\nPosition: ${position}\nResources: infinite\nScore: ${Math.round(this.score)}\nObjective: ${Math.round(this.goal)}${this.mode === 'skyline' ? `\nFly speed: ${this.testFlySpeed || 600} units/s\nCheckpoint: ${this.game.cp.id + 1}/${this.game.checkpoints.length}\nSolids: ${this.game.solids.length}\nMachines: ${this.game.drills.length}` : ''}`;
             }
             const boardMarkup = this.standings().slice(0, this.spectator ? 16 : 6).map((row, i) =>
                 `<li class="${row.id === this.user.id ? 'me' : ''}">${avatarMarkup(row, 'mpg-player-avatar')}<span>${i + 1}. ${esc(row.n)} ${accountTagMarkup(row.username, row.tags)}</span><b>${this.valueText(row)}</b></li>`).join('');
@@ -1981,6 +2018,19 @@
                 }
             } else if (!this.paused && !this.spectator) {
                 this.game.settleAfterFinish?.(dt);
+            }
+            if (this.testing) {
+                const instFps = interval > 0 ? 1000 / interval : 60;
+                this.fpsEma += (instFps - this.fpsEma) * 0.08;
+                this.fpsMin = Math.min(this.fpsMin, instFps);
+                if (!this.fpsWindowAt) this.fpsWindowAt = now;
+                if (now - this.fpsWindowAt >= 900) {
+                    this.fpsReadout = `${Math.round(this.fpsEma)} FPS · min ${Math.max(1, Math.round(this.fpsMin))}`;
+                    this.fpsWindowAt = now;
+                    this.fpsMin = this.fpsEma;
+                    const fpsNode = this.overlay?.querySelector('.mpg-fps-readout');
+                    if (fpsNode && fpsNode.textContent !== this.fpsReadout) fpsNode.textContent = this.fpsReadout;
+                }
             }
             if (!this.paused) {
                 for (const r of this.remotes.values()) {

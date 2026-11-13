@@ -173,7 +173,53 @@
             ctx.fillStyle = sun; ctx.beginPath(); ctx.arc(sx0, sy0, 84, 0, TAU); ctx.fill();
             ctx.globalAlpha = 1;
         }
-        if (low) return;
+        if (low) {
+            const stars = weight(3);
+            if (stars > 0) {
+                ctx.globalAlpha = stars * 0.9;
+                ctx.fillStyle = '#f8fafc';
+                for (let i = 0; i < 28; i++) {
+                    const sx = (ihash(i * 13, 91) % 1000) / 1000;
+                    const sy = (ihash(i * 17, 29) % 700) / 700;
+                    const drift = ((anim * (0.8 + (i % 4) * 0.15)) % 1) * 0.015;
+                    const x = ((sx + drift) % 1) * w;
+                    const y = sy * (h * 0.62);
+                    const r = (i % 3 ? 1.6 : 2.2) * (1 + Math.sin(anim * 2 + i) * 0.06);
+                    ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+                }
+                ctx.globalAlpha = 1;
+            }
+            const city = weight(0);
+            if (city > 0) {
+                const baseY = h * 0.82 + Math.min(26, Math.max(0, down) * 0.01);
+                for (const [f, color, alpha, base, span, size] of [[0.24, '#1f2a44', 0.55, 130, 70, 170], [0.42, '#142038', 0.72, 190, 100, 190]]) {
+                    ctx.globalAlpha = city * alpha;
+                    ctx.fillStyle = color;
+                    const shift = cam.x * f;
+                    const start = Math.floor((shift - 120) / size) - 1;
+                    for (let n = start; n < start + w / size + 4; n++) {
+                        const hh = ihash(n, (f * 1000) | 0);
+                        const bw = size - 24 + (hh % 40);
+                        const bh = base + (hh % span);
+                        const bx = n * size - shift;
+                        const by = baseY - bh;
+                        if (bx > w || bx + bw < 0) continue;
+                        ctx.fillRect(bx, by, bw, Math.max(0, h - by));
+                    }
+                }
+                ctx.globalAlpha = 1;
+            }
+            const cl = weight(2);
+            if (cl > 0) {
+                ctx.fillStyle = `rgba(255,255,255,${0.45 * cl})`;
+                for (let i = 0; i < 6; i++) {
+                    const x = (i / 6) * w + ((cam.x * 0.08 + i * 43) % 90) - 45;
+                    const y = h * (0.24 + (i % 3) * 0.11) + ((cam.y * 0.05 + i * 17) % 30) - 15;
+                    ctx.beginPath(); ctx.ellipse(x, y, 85 + (i % 2) * 20, 28 + (i % 3) * 7, 0, 0, TAU); ctx.fill();
+                }
+            }
+            return;
+        }
         const intersects = (x, y, width, height) => x <= w && x + width >= 0 && y <= h && y + height >= 0;
         const cells = (f, size, fn, pad = 0) => {
             const ox = cam.x * f, oy = cam.y * f;
@@ -319,6 +365,10 @@
             this.res = new A.Resource('Energy', '#facc15', 100, 30, 2);
             this.anim = 0; this.finished = false; this.state = 0; this.carry = null;
             this.kick = 0; this.wallDir = 0;
+            this.sceneDetail = 1;
+            this.frameMsEma = 16;
+            this.remotePoseCache = { vx: 0, vy: 0, dashing: false, dashAmount: 0, wallAmount: 0, wallSide: 1, kick: 0, grounded: false, jump: 0, doubleJump: 0, landing: 0 };
+            this.localPoseCache = { vx: 0, vy: 0, grounded: false, dashing: false, dashAmount: 0, landing: 0, jump: 0, doubleJump: 0, wallAmount: 0, wallSide: 1, kick: 0 };
         }
 
         build() {
@@ -1249,6 +1299,17 @@
             this.drawList = [...solids.filter(back), ...solids.filter(p => !back(p))];
             solids.spatialIndex = new A.util.VerticalIndex(solids);
             this.drawIndex = new A.util.VerticalIndex(this.drawList, p => this.drawBounds(p));
+            for (const wz of this.winds) {
+                const ww = Math.max(1, Math.floor(Math.abs(wz.w || 0)));
+                const wh = Math.max(1, Math.floor(Math.abs(wz.h || 0)));
+                const seed = ihash(Math.floor(wz.x || 0), Math.floor(wz.y || 0));
+                wz.streakSeeds = [];
+                for (let i = 0; i < 14; i++) {
+                    const sx = Math.abs(ihash(seed, i * 17 + 3)) % ww;
+                    const sy = Math.abs(ihash(seed, i * 17 + 11)) % wh;
+                    wz.streakSeeds.push([sx, wz.y + sy]);
+                }
+            }
             for (const w of this.saws) { w.x = w.cx; w.y = w.cy; }
             for (const m of this.meteors) if (m.lane) { this.updateLaneRock(m, 0); m.dx = 0; m.dy = 0; }
             for (const d of this.debris) this.updateDebris(d, 0);
@@ -1523,6 +1584,10 @@
         update(dt) {
             const s = this.s, me = this.me, t = s.t;
             this.anim += dt; this.dtLast = dt;
+            const frameMs = Math.max(1, dt * 1000);
+            this.frameMsEma = this.frameMsEma + (frameMs - this.frameMsEma) * 0.08;
+            const targetDetail = this.frameMsEma > 28 ? 0.55 : this.frameMsEma > 23 ? 0.72 : this.frameMsEma > 19 ? 0.86 : 1;
+            this.sceneDetail = clamp(this.sceneDetail + (targetDetail - this.sceneDetail) * Math.min(1, dt * 4), 0.5, 1);
             const freezeHazards = s.testing === true && s.testFreezeHazards === true;
             const hazardDt = freezeHazards ? 0 : dt;
             this.hazardAnim = (this.hazardAnim || 0) + hazardDt;
@@ -2015,30 +2080,35 @@
         }
 
         drawBounds(p) {
-            if (p.cityKit === 'scaffold') return {
-                x: p.frame[0] - 12, w: p.frame[1] - p.frame[0] + 24,
-                y: p.y - 55, h: (p.below || 0) - p.y + 60
-            };
-            if (p.cityKit === 'pole') return { y: Math.min(p.y, p.by ?? p.y) - 30, h: -Math.min(p.y, p.by ?? p.y) + 30 };
-            if (p.cityKit === 'catwalk') return p.board.panel ? { y: p.y - 165, h: p.board.base - p.y + 175 } : { y: p.y - 35, h: 50 };
-            if (p.cityKit === 'beam') return { y: p.jibY - 30, h: p.y - p.jibY + 50 };
-            if (p.lane) return { y: p.lane.y - 20, h: p.h + 40 };
-            if (p.piston) return { y: p.by - p.amp, h: p.amp * 2 + p.h + 130 };
-            if (p.freight) return { y: p.by - p.amp - 90, h: p.amp * 2 + p.h + 120 };
-            if (p.arm) return { y: p.y - 70, h: p.h + 90 };
-            if (p.factoryBelt) return { y: p.y - 10, h: Math.max(p.h, 80) + 20 };
-            if (p.factoryLift) return { y: p.by - p.amp - 180, h: p.h + p.amp * 2 + 205 };
-            if (p.bladeSign) return { y: p.y - 30, h: p.stiltY - p.y + 30 };
-            if (p.gondola) return { y: p.cableTop - 20, h: p.by + p.amp + p.h + 20 - p.cableTop };
-            if (p.sinker) return { y: p.by - 10, h: p.h + p.depth + 100 };
-            if (p.mover && p.vert) return { y: p.by - p.amp, h: p.h + p.amp * 2 + (p.bi === 2 ? 60 : 0) };
-            if (p.fireEscape) return p.stair ? { y: p.y - 40, h: p.h + 60 } : { y: p.y - 42, h: (p.story || 165) * 2 + 60 };
-            if (p.wallX !== undefined) return { y: p.y - 60, h: p.h + 140 };
-            if (p.bi === 2 && !p.prop) return { y: p.y - 10, h: (p.roof ? p.bodyH || p.h : p.h) + 150 };
-            if (p.beams) return { y: p.y - 80, h: Math.max(p.beams[0][2], p.beams[1][2]) - p.y + 90 };
-            if (p.below) return { y: p.y - 10, h: p.below.y - p.y + 30 };
+            const b = p._drawBounds || (p._drawBounds = { x: p.x, y: p.y, w: p.w, h: p.h });
+            b.x = p.x; b.w = p.w; b.y = p.y; b.h = p.h;
+            if (p.cityKit === 'scaffold') {
+                b.x = p.frame[0] - 12; b.w = p.frame[1] - p.frame[0] + 24;
+                b.y = p.y - 55; b.h = (p.below || 0) - p.y + 60;
+                return b;
+            }
+            if (p.cityKit === 'pole') { b.y = Math.min(p.y, p.by ?? p.y) - 30; b.h = -Math.min(p.y, p.by ?? p.y) + 30; return b; }
+            if (p.cityKit === 'catwalk') { b.y = p.board.panel ? p.y - 165 : p.y - 35; b.h = p.board.panel ? p.board.base - p.y + 175 : 50; return b; }
+            if (p.cityKit === 'beam') { b.y = p.jibY - 30; b.h = p.y - p.jibY + 50; return b; }
+            if (p.lane) { b.y = p.lane.y - 20; b.h = p.h + 40; return b; }
+            if (p.piston) { b.y = p.by - p.amp; b.h = p.amp * 2 + p.h + 130; return b; }
+            if (p.freight) { b.y = p.by - p.amp - 90; b.h = p.amp * 2 + p.h + 120; return b; }
+            if (p.arm) { b.y = p.y - 70; b.h = p.h + 90; return b; }
+            if (p.factoryBelt) { b.y = p.y - 10; b.h = Math.max(p.h, 80) + 20; return b; }
+            if (p.factoryLift) { b.y = p.by - p.amp - 180; b.h = p.h + p.amp * 2 + 205; return b; }
+            if (p.bladeSign) { b.y = p.y - 30; b.h = p.stiltY - p.y + 30; return b; }
+            if (p.gondola) { b.y = p.cableTop - 20; b.h = p.by + p.amp + p.h + 20 - p.cableTop; return b; }
+            if (p.sinker) { b.y = p.by - 10; b.h = p.h + p.depth + 100; return b; }
+            if (p.mover && p.vert) { b.y = p.by - p.amp; b.h = p.h + p.amp * 2 + (p.bi === 2 ? 60 : 0); return b; }
+            if (p.fireEscape) { b.y = p.stair ? p.y - 40 : p.y - 42; b.h = p.stair ? p.h + 60 : (p.story || 165) * 2 + 60; return b; }
+            if (p.wallX !== undefined) { b.y = p.y - 60; b.h = p.h + 140; return b; }
+            if (p.bi === 2 && !p.prop) { b.y = p.y - 10; b.h = (p.roof ? p.bodyH || p.h : p.h) + 150; return b; }
+            if (p.beams) { b.y = p.y - 80; b.h = Math.max(p.beams[0][2], p.beams[1][2]) - p.y + 90; return b; }
+            if (p.below) { b.y = p.y - 10; b.h = p.below.y - p.y + 30; return b; }
             const supported = !p.prop && (p.bi === 1 || p.bi === 3 || (p.chamber !== undefined && !p.island && p.bi === 0));
-            return { y: p.y - (supported ? 80 : 0), h: (p.roof ? p.bodyH || p.h : p.h) + (supported ? 160 : 0) };
+            b.y = p.y - (supported ? 80 : 0);
+            b.h = (p.roof ? p.bodyH || p.h : p.h) + (supported ? 160 : 0);
+            return b;
         }
 
         // Scale crossing: a vertical blade billboard on roof stilts faces a climbing rail bolted to the taller tower.
@@ -3056,6 +3126,7 @@
 
         draw(ctx, w, h) {
             const s = this.s, me = this.me, W = this.WIDTH;
+            const detail = this.sceneDetail ?? 1;
             const k = 1 - Math.exp(-6 * (this.drawDt ?? this.dtLast ?? 0.016));
             const cssScale = s.scale || 1, cssW = w * cssScale, cssH = h * cssScale;
             const small = !s.preview && (cssW < 700 || cssH < 550);
@@ -3356,8 +3427,10 @@
             for (const wz of this.winds) {
                 if (wz.y > bottom || wz.y + wz.h < top) continue;
                 ctx.strokeStyle = 'rgba(226,232,240,.35)'; ctx.lineWidth = 2;
-                for (let i = 0; i < 14; i++) {
-                    const sx = (hashStr(`w${wz.y | 0}:${i}`) % wz.w), sy = wz.y + (hashStr(`v${wz.y | 0}:${i}`) % wz.h);
+                const seeds = wz.streakSeeds || [];
+                const count = Math.max(4, Math.round((seeds.length || 14) * detail * (s.graphics?.low ? 0.75 : 1)));
+                for (let i = 0; i < count; i++) {
+                    const [sx, sy] = seeds[i] || [Math.abs(ihash((wz.y | 0) + i, 19)) % Math.max(1, wz.w), wz.y + (Math.abs(ihash((wz.y | 0) + i, 43)) % Math.max(1, wz.h))];
                     const x = wz.x + ((sx + this.anim * wz.fx * 2.2) % wz.w + wz.w) % wz.w;
                     ctx.beginPath(); ctx.moveTo(x, sy); ctx.lineTo(x + Math.sign(wz.fx) * 46, sy); ctx.stroke();
                 }
@@ -3368,7 +3441,8 @@
                 ctx.fillStyle = '#334155'; ctx.beginPath(); ctx.arc(b.px, b.py, 9, 0, TAU); ctx.fill();
                 ctx.fillStyle = '#94a3b8'; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, TAU); ctx.fill();
                 ctx.fillStyle = '#ef4444';
-                for (let i = 0; i < 8; i++) { const a = i * TAU / 8; ctx.beginPath(); ctx.arc(b.x + Math.cos(a) * b.r, b.y + Math.sin(a) * b.r, 4, 0, TAU); ctx.fill(); }
+                const studs = detail < 0.7 ? 6 : 8;
+                for (let i = 0; i < studs; i++) { const a = i * TAU / studs; ctx.beginPath(); ctx.arc(b.x + Math.cos(a) * b.r, b.y + Math.sin(a) * b.r, 4, 0, TAU); ctx.fill(); }
             }
             // summit flag
             const sm = this.summit, sx = sm.x + sm.w / 2;
@@ -3379,11 +3453,20 @@
 
             for (const r of s.remoteList()) {
                 if (r.x > right || r.x + 26 < left || r.y > bottom || r.y + 44 < top) continue;
+                const pose = this.remotePoseCache;
+                pose.vx = r.vx;
+                pose.vy = r.vy;
+                pose.dashing = r.a === 3;
+                pose.dashAmount = Number.isFinite(r.ex?.dp) ? r.ex.dp : 0;
+                pose.wallAmount = Number.isFinite(r.ex?.wa) ? r.ex.wa : 0;
+                pose.wallSide = r.ex?.ws === -1 ? -1 : 1;
+                pose.kick = Number.isFinite(r.ex?.wk) ? r.ex.wk : 0;
+                pose.grounded = r.ex?.g === true;
+                pose.jump = Number.isFinite(r.ex?.jp) ? r.ex.jp : 0;
+                pose.doubleJump = Number.isFinite(r.ex?.j) ? r.ex.j : 0;
+                pose.landing = Number.isFinite(r.ex?.l) ? r.ex.l : 0;
                 drawRunner(ctx, r.x, r.y, 26, 44, r, r.f || 1, this.anim + r.x * 0.01, r.a, 0.8,
-                    { vx: r.vx, vy: r.vy, dashing: r.a === 3, dashAmount: Number.isFinite(r.ex?.dp) ? r.ex.dp : undefined,
-                        wallAmount: Number.isFinite(r.ex?.wa) ? r.ex.wa : 0, wallSide: r.ex?.ws === -1 ? -1 : 1, kick: Number.isFinite(r.ex?.wk) ? r.ex.wk : 0,
-                        grounded: r.ex?.g === true,
-                        jump: Number.isFinite(r.ex?.jp) ? r.ex.jp : 0, doubleJump: Number.isFinite(r.ex?.j) ? r.ex.j : 0, landing: Number.isFinite(r.ex?.l) ? r.ex.l : 0 });
+                    pose);
                 if (!this.s.preview) nameTag(ctx, r.name || '', r.x + 13, r.y - 14, r.color);
             }
             if (!s.spectator && this.dead <= 0) {
@@ -3395,15 +3478,35 @@
                     ctx.beginPath(); ctx.ellipse(me.x + me.w / 2, me.y + me.h + progress * 24, 12 + progress * 26, 4 + progress * 7, 0, 0, TAU); ctx.stroke();
                     ctx.restore();
                 }
+                const localPose = this.localPoseCache;
+                localPose.vx = me.vx;
+                localPose.vy = me.vy;
+                localPose.grounded = me.onGround;
+                localPose.dashing = this.dash > 0;
+                localPose.dashAmount = this.dashPose;
+                localPose.landing = this.landingPose;
+                localPose.jump = this.jumpPulse;
+                localPose.doubleJump = this.airJumpPulse;
+                localPose.wallAmount = this.wallPose;
+                localPose.wallSide = this.wallSide;
+                localPose.kick = this.kick;
                 drawRunner(ctx, me.x, me.y, me.w, me.h, s.local, me.face, this.anim, this.state, blink,
-                    { vx: me.vx, vy: me.vy, grounded: me.onGround, dashing: this.dash > 0, dashAmount: this.dashPose, landing: this.landingPose,
-                        jump: this.jumpPulse, doubleJump: this.airJumpPulse, wallAmount: this.wallPose, wallSide: this.wallSide, kick: this.kick });
+                    localPose);
                 if (!this.s.preview) nameTag(ctx, 'You', me.x + 13, me.y - 14, '#fff');
             }
             this.particles.draw(ctx);
             ctx.restore();
             // foreground: soft vignette and drifting haze for depth
-            if (!s.graphics?.low) {
+            if (s.graphics?.low) {
+                A.util.screenLayer(this, 'foregroundLayerLow', `${w}:${h}:low`, ctx, paint => {
+                    const vg = paint.createRadialGradient(w / 2, h * 0.55, Math.min(w, h) * 0.3, w / 2, h * 0.55, Math.max(w, h) * 0.86);
+                    vg.addColorStop(0, 'rgba(2,6,23,0)'); vg.addColorStop(1, 'rgba(2,6,23,.22)');
+                    const hz = paint.createLinearGradient(0, h * 0.76, 0, h);
+                    hz.addColorStop(0, 'rgba(148,163,184,0)'); hz.addColorStop(1, 'rgba(148,163,184,.09)');
+                    paint.fillStyle = vg; paint.fillRect(0, 0, w, h);
+                    paint.fillStyle = hz; paint.fillRect(0, h * 0.76, w, h * 0.24);
+                });
+            } else {
                 A.util.screenLayer(this, 'foregroundLayer', `${w}:${h}`, ctx, paint => {
                     const vg = paint.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.45, w / 2, h / 2, Math.max(w, h) * 0.8);
                     vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(2,6,23,.38)');

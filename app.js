@@ -4709,6 +4709,8 @@
             if (filter) filter.value = initialFilter;
             const bulk = document.getElementById('deck-editor-bulk');
             if (bulk) bulk.value = '';
+            const addPanel = document.getElementById('deck-editor-add-panel');
+            if (addPanel) addPanel.open = !this.deckEditorDraft.cards.length || this.deckEditorDraft.cards.length < 4;
             this.renderDeckEditorCards();
             this.openModal('deck-editor-modal');
         }
@@ -4778,22 +4780,38 @@
             if (filter === 'focus') cards.sort((a, b) => window.AnkiStudySession.priority(b) - window.AnkiStudySession.priority(a));
             document.getElementById('deck-editor-undo')?.classList.toggle('hidden', !this.deckEditorUndo?.length);
             document.getElementById('deck-editor-count').textContent = `${cards.length} of ${draft.cards.length} cards`;
-            document.getElementById('deck-editor-cards').innerHTML = cards.map(card => `
+            document.getElementById('deck-editor-cards').innerHTML = cards.map(card => {
+                const progress = window.FlashcardTools.cardProgress(card);
+                const attempts = Number(card.practiceStats?.attempts || 0);
+                const accuracyLabel = attempts > 0
+                    ? `${Math.round(progress.accuracy * 100)}% accuracy${progress.recentAttempts ? ` (last ${progress.recentAttempts})` : ' (lifetime)'} · ${attempts} total attempts`
+                    : 'Not practiced yet';
+                const answerModeLabel = card.answerMode === 'keywords' ? 'Definition keywords'
+                    : card.answerMode === 'vocabulary' ? 'Vocabulary / translation'
+                        : card.answerMode === 'exact' ? 'Exact answer' : 'Test grading default';
+                return `
                 <article class="deck-editor-card">
                     <strong>${this.escapeHTML(card.front)}</strong><p>${this.escapeHTML(card.back)}</p>
                     ${card.tags?.length ? `<small>${this.escapeHTML(card.tags.join(', '))}</small>` : ''}
-                    <small>${card.practiceStats?.attempts > 0 ? `${Math.round(window.FlashcardTools.cardProgress(card).accuracy * 100)}% accuracy${window.FlashcardTools.cardProgress(card).recentAttempts ? ` (last ${window.FlashcardTools.cardProgress(card).recentAttempts})` : ' (lifetime)'} · ${Number(card.practiceStats.attempts)} total attempts` : 'Not practiced yet'}${card.suspended ? ' · Paused scheduled study' : ''}${window.FlashcardTools.imageSource(card.answerImage) ? ' · Private image' : ''}</small>
-                    <small>${Math.round(window.FlashcardTools.cardProgress(card).mastery * 100)}% recall estimate · ${this.cardFocusReason(card)}</small>
-                    <small>${card.answerMode === 'keywords' ? 'Definition keywords' : card.answerMode === 'vocabulary' ? 'Vocabulary / translation' : card.answerMode === 'exact' ? 'Exact answer' : 'Test grading default'}${card.acceptedAnswers?.length ? ` · ${card.acceptedAnswers.length} alternative answers` : ''}${card.attachments?.length ? ` · ${card.attachments.length} private attachments` : ''}</small>
+                    <small>${card.suspended ? 'Paused scheduled study' : 'Scheduled study active'}${card.starred ? ' · Starred' : ''}${window.FlashcardTools.imageSource(card.answerImage) ? ' · Private image' : ''}${card.attachments?.length ? ` · ${card.attachments.length} private attachments` : ''}</small>
                     <div class="actions">
                         <button type="button" class="secondary-btn star-toggle${card.starred ? ' is-on' : ''}" data-action="editor-star-card" data-id="${this.escapeHTML(card.id)}" aria-pressed="${card.starred ? 'true' : 'false'}" aria-label="${card.starred ? 'Unstar' : 'Star'} card"><i class="${card.starred ? 'fas' : 'far'} fa-star"></i></button>
                         <button type="button" class="secondary-btn" data-action="editor-edit-card" data-id="${this.escapeHTML(card.id)}">Edit card</button>
-                        <button type="button" class="secondary-btn" data-action="editor-copy-card" data-id="${this.escapeHTML(card.id)}">Duplicate</button>
-                        <button type="button" class="secondary-btn" data-action="editor-reverse-card" data-id="${this.escapeHTML(card.id)}">Reverse copy</button>
-                        <button type="button" class="secondary-btn" data-action="editor-pause-card" data-id="${this.escapeHTML(card.id)}">${card.suspended ? 'Resume' : 'Pause'} scheduled study</button>
-                        <button type="button" class="danger-btn" data-action="editor-delete-card" data-id="${this.escapeHTML(card.id)}">Delete card</button>
+                        <button type="button" class="secondary-btn" data-action="editor-pause-card" data-id="${this.escapeHTML(card.id)}">${card.suspended ? 'Resume' : 'Pause'}</button>
+                        <button type="button" class="danger-btn" data-action="editor-delete-card" data-id="${this.escapeHTML(card.id)}">Delete</button>
                     </div>
-                </article>`).join('') || `<p class="empty-state">${filter === 'focus' && !query ? 'No cards need more recall practice based on your current answers. Come back later for spaced review.' : filter === 'weak' && !query ? 'No weak cards in this set. Cards appear here after at least two recent answers with accuracy below 75%. Older sets use lifetime accuracy until you practice again.' : query || filter !== 'all' ? 'No cards match your search or filter.' : 'No cards yet. Add your first card.'}</p>`;
+                    <details class="deck-editor-card-extra">
+                        <summary>More stats & options</summary>
+                        <small>${accuracyLabel}</small>
+                        <small>${Math.round(progress.mastery * 100)}% recall estimate · ${this.cardFocusReason(card)}</small>
+                        <small>${answerModeLabel}${card.acceptedAnswers?.length ? ` · ${card.acceptedAnswers.length} alternative answers` : ''}</small>
+                        <div class="actions compact">
+                            <button type="button" class="secondary-btn" data-action="editor-copy-card" data-id="${this.escapeHTML(card.id)}">Duplicate</button>
+                            <button type="button" class="secondary-btn" data-action="editor-reverse-card" data-id="${this.escapeHTML(card.id)}">Reverse copy</button>
+                        </div>
+                    </details>
+                </article>`;
+            }).join('') || `<p class="empty-state">${filter === 'focus' && !query ? 'No cards need more recall practice based on your current answers. Come back later for spaced review.' : filter === 'weak' && !query ? 'No weak cards in this set. Cards appear here after at least two recent answers with accuracy below 75%. Older sets use lifetime accuracy until you practice again.' : query || filter !== 'all' ? 'No cards match your search or filter.' : 'No cards yet. Add your first card.'}</p>`;
         }
 
         cardFocusReason(card) {
@@ -9409,6 +9427,13 @@
             if (this.gradeProgressChart) this.renderGradeProgress();
         }
 
+        setGameGraphicsPreference(mode, { notify = true } = {}) {
+            const next = ['auto', 'performance', 'quality'].includes(mode) ? mode : 'auto';
+            AppState.set('settings', { ...AppState.get('settings'), gameGraphics: next });
+            window.StudBudArcade?.configureGraphicsProfile(next);
+            if (notify) window.StudBudDialogs.notify('Game performance updated. New games and previews use this mode now.');
+        }
+
         syncMixerControls() {
             const sfx = window.StudBudSfx?.settings;
             if (sfx) {
@@ -11758,8 +11783,7 @@
                 AppState.set('settings', { ...AppState.get('settings'), theme: event.target.value });
                 this.applyAppearance();
             } else if (event.target.id === 'game-graphics') {
-                AppState.set('settings', { ...AppState.get('settings'), gameGraphics: event.target.value });
-                window.StudBudDialogs.notify('Game performance preference saved. Close and reopen StudBud to apply it.');
+                this.setGameGraphicsPreference(event.target.value);
             } else if (event.target.id === 'game-touch-controls') {
                 if (!['auto', 'on', 'off'].includes(event.target.value)) throw new Error('Choose Auto, Always show, or Always hide for game controls.');
                 AppState.set('settings', { ...AppState.get('settings'), gameTouchControls: event.target.value });
