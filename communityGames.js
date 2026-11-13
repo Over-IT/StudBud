@@ -384,8 +384,8 @@
 
         // Signed-in client when available, otherwise an anonymous guest session (created on first use).
         async publicClient() {
-            if (this.hasAccount()) return window.StudBudCloud.client;
             if (window.navigator?.onLine === false) throw new Error('This feature needs an internet connection. Your saved sets and solo games work offline.');
+            if (this.hasAccount()) return window.StudBudCloud.client;
             await window.StudBudCloud.prepareGuestSession();
             return window.StudBudCloud.guestClient;
         }
@@ -719,7 +719,8 @@
         async reportProblem(type, subject, details, username = '') {
             const summary = String(subject).trim(), explanation = String(details).trim();
             const player = String(username).trim().replace(/^@/, '');
-            if (!['bug', 'player', 'other'].includes(type)) throw new Error('Choose a report type.');
+            if (!['bug', 'player', 'other', 'privacy'].includes(type)) throw new Error('Choose a report type.');
+            if (type === 'privacy' && (!this.hasAccount() || window.StudBudCloud?.isGuest?.())) throw new Error('Sign in to your permanent account to send a private data request.');
             if (summary.length < 3 || summary.length > 120) throw new Error('Enter a summary from 3 to 120 characters.');
             if (explanation.length < 10 || explanation.length > 2000) throw new Error('Explain what happened in 10 to 2,000 characters.');
             if (type === 'player' && (!player || player.length > 50)) throw new Error('Enter the player’s exact username.');
@@ -727,7 +728,7 @@
                 p_type: type, p_subject: summary, p_details: explanation, p_username: type === 'player' ? player : null
             });
             if (error) throw new Error(error.code === 'PGRST202' || error.code === '42883'
-                ? 'Reporting needs a server update. Your report has not been sent. Use the GitHub feedback link in About.'
+                ? 'Reporting needs a server update. Your report has not been sent. Use the GitHub feedback link in About only for non-sensitive feedback; never post account data publicly.'
                 : error.message);
             if (data === null || data === undefined) throw new Error('The server did not confirm your report. Please try again.');
             return data;

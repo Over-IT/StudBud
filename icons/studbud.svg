@@ -1,11 +1,38 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#4f46e5"/>
-  <circle cx="256" cy="256" r="200" fill="#8ab4f8"/>
-  <clipPath id="c"><circle cx="256" cy="256" r="200"/></clipPath>
-  <path clip-path="url(#c)" d="M90 480c0-80 70-124 166-124s166 44 166 124z" fill="#ffffff"/>
-  <circle cx="256" cy="282" r="60" fill="#ffffff"/>
-  <path d="M206 222h100v14c0 10-22 18-50 18s-50-8-50-18z" fill="#1e1b4b"/>
-  <path d="M256 126 394 180 256 234 118 180z" fill="#1e1b4b"/>
-  <path d="M382 186v58" stroke="#fbbf24" stroke-width="10" stroke-linecap="round"/>
-  <circle cx="382" cy="252" r="12" fill="#fbbf24"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="23 21 34 34" role="img" aria-labelledby="title">
+  <title id="title">StudBud Bubblegum mascot</title>
+  <defs>
+    <clipPath id="corners"><rect x="23" y="21" width="34" height="34" rx="6.375"/></clipPath>
+    <radialGradient id="face" gradientUnits="userSpaceOnUse" cx="34" cy="34" r="28">
+      <stop stop-color="#fdd9ed"/>
+      <stop offset="1" stop-color="#fbcfe8"/>
+    </radialGradient>
+    <linearGradient id="cap" gradientUnits="userSpaceOnUse" x1="30" y1="23" x2="50" y2="31">
+      <stop stop-color="#2c3748"/>
+      <stop offset="1" stop-color="#1f2937"/>
+    </linearGradient>
+    <linearGradient id="band" gradientUnits="userSpaceOnUse" x1="32" y1="28" x2="49" y2="35">
+      <stop stop-color="#1b2435"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+  </defs>
+  <g clip-path="url(#corners)">
+    <rect x="23" y="21" width="34" height="34" fill="#4f46e5"/>
+    <g id="character" stroke="#0b1020" stroke-width=".32" stroke-linecap="round" stroke-linejoin="round">
+      <g fill="#be185d">
+        <rect x="32" y="53" width="7" height="14"/>
+        <rect x="41" y="53" width="7" height="14"/>
+      </g>
+      <rect id="collar" x="29" y="42" width="22" height="13" rx="6.5" fill="#f472b6"/>
+      <circle id="head" cx="40" cy="41" r="11" fill="url(#face)"/>
+      <path d="M31.42 27.25H48.58V33.96Q40 35.5 31.42 33.96Z" fill="url(#band)"/>
+      <path d="M40 22.85 53.2 26.7 40 30.55 26.8 26.7Z" fill="url(#cap)"/>
+      <path d="M40 26.7Q45.4 26.65 50.6 27.28Q51.45 27.4 51.45 28.2" fill="none" stroke-width=".48"/>
+      <path d="M51.45 28.1V35.75" fill="none" stroke-width="1.02"/>
+      <path d="M51.45 28.1V35.75" fill="none" stroke="#facc15" stroke-width=".64"/>
+      <path d="M40 26.7Q45.4 26.65 50.6 27.28Q51.45 27.4 51.45 28.2" fill="none" stroke="#facc15" stroke-width=".22"/>
+      <path d="M51.35 28.45V35.4" fill="none" stroke="#fef08a" stroke-width=".10"/>
+      <circle cx="40" cy="26.7" r=".29" fill="#facc15" stroke-width=".13"/>
+      <rect id="eye" x="42.5" y="39" width="3" height="4" rx=".10" fill="#831843" stroke-width=".20"/>
+    </g>
+  </g>
 </svg>

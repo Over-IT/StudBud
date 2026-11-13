@@ -86,7 +86,7 @@
                 this.app.classrooms.requestId++;
                 this.app.classrooms.detail = null;
                 this.app.classrooms.editingDeck = null;
-                this.app.classrooms.detailTab = 'students';
+                this.app.classrooms.detailTab = 'sets';
             }
             this.classId = classId;
             this.classTitle = title;
@@ -99,6 +99,11 @@
             if (!this.root) return;
             if (!this.available()) {
                 this.root.innerHTML = '<div class="glass-card empty-state">Sign in, connect and choose your supported school to use Classrooms.</div>';
+                return;
+            }
+            if (this.classId && !this.app.classrooms.isTeacher() && !this.app.classrooms.courseSharingEnabled()) {
+                this.data = null;
+                this.root.innerHTML = '<div class="glass-card"><h3>Course sharing is off</h3><p>Your classes stay in your encrypted account. Enable course sharing in Profile to use class discussions, shared sets and class games.</p><button type="button" class="secondary-btn" data-action="edit-public-profile">Course privacy settings</button></div>';
                 return;
             }
             const id = ++this.request, key = this.key(), classId = this.classId;
@@ -127,7 +132,11 @@
                 this.teacherClasses = teacherClasses;
                 this.teacherDetail = teacherDetail;
                 this.classes = [...(courses.classes || []), ...teacherClasses.filter(item =>
-                    !(courses.classes || []).some(course => this.app.classrooms.courseMatches({ code: course.course_code }, item.course_code)))];
+                    !(courses.classes || []).some(course => this.app.classrooms.courseMatches({ code: course.course_code }, item.course_code)))].map(item => {
+                        const local = item.community && (this.app.AppState.get('courses') || []).find(course =>
+                            this.app.classrooms.courseMatches(course, item.course_code));
+                        return local ? { ...item, title: local.title || item.title } : item;
+                    });
                 if (this.app.classrooms.isTeacher()) this.app.classrooms.teacherData = listing;
                 else this.app.classrooms.studentData = listing;
                 this.classTitle = this.classes.find(item => item.id === classId)?.title || this.classTitle;
@@ -175,8 +184,11 @@
             if (live) this.liveMarkupCache.set(live, this.liveMarkup(data.live || [], this.classId, data.can_announce));
         }
         courseListMarkup() {
+            if (!this.app.classrooms.isTeacher() && !this.app.classrooms.courseSharingEnabled()) {
+                return '<section class="community-course-list"><h3>My classrooms</h3><p class="settings-hint">Course sharing is off. Enable it to match your courses with classrooms. Your grades, assignments and schedule stay encrypted.</p><button type="button" class="secondary-btn" data-action="edit-public-profile">Course privacy settings</button></section>';
+            }
             const courses = this.classes || [];
-            return `<section class="community-course-list"><h3>My classrooms</h3><p class="settings-hint">Your school + courses. No teacher or join code needed. Teachers add announcements, class sets, live games and private progress tools.</p>
+            return `<section class="community-course-list"><h3>My classrooms</h3><p class="settings-hint">Your school + courses. No teacher or join code needed. Teachers add announcements, class sets and live games, not access to your grades or private study history.</p>
                 ${courses.length ? `<div class="community-set-grid">${courses.map(item => `<article class="glass-card"><span class="eyebrow">${esc(item.course_code)}</span><h4>${esc(item.title)}</h4>
                     <button type="button" class="secondary-btn" data-school-action="open-class" data-class="${esc(item.id)}" data-title="${esc(item.title)}">Open classroom</button></article>`).join('')}</div>`
                     : '<p>Add your courses in My grades and sync your account to find their classrooms.</p><button type="button" class="text-btn" data-target="gpa-view">Manage my courses</button>'}</section>`;
@@ -223,7 +235,7 @@
                 ${this.classId && this.data.can_post !== false ? `<details class="glass-card community-new-post"${draft.note || pending ? ' open' : ''}><summary>Share a set <i class="fas fa-plus" aria-hidden="true"></i></summary>
                     ${own.length ? `<form data-community-share class="community-compose"><label>Your set<select name="deck" required data-set-picker${disabled}>${own.map(deck => `<option value="${esc(deck.id)}"${draft.deck === deck.id ? ' selected' : ''}>${esc(deck.title)}</option>`).join('')}</select></label>
                     <label>What is it for?<textarea name="note" rows="2" required maxlength="300"${disabled} placeholder="For example: Unit 3 vocabulary for Friday's quiz">${esc(draft.note || '')}</textarea></label>
-                    <label>Who can view it?<select name="visibility"${disabled}>${[['public', 'Public · anyone can discover it (default)'], ['course', 'This course at this school only'], ['school', 'Everyone at this school']].map(([value, label]) => `<option value="${value}"${(draft.visibility || 'public') === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label>
+                    <label>Who can view it?<select name="visibility"${disabled}>${[['course', 'This course at this school only (default)'], ['school', 'Everyone at this school'], ['public', 'Public · anyone can discover it']].map(([value, label]) => `<option value="${value}"${(draft.visibility || 'course') === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label>
                     <p class="settings-hint">The course/school association is shared with your chosen audience. Only terms, answers and distractors are copied, not study history, images, attachments or private assessment links. To restrict a set that already has a public copy, unpublish it in Manage sets first.</p>
                     <button type="submit" class="primary-btn"${disabled}>${pending ? 'Sharing…' : 'Share set'}</button></form>` : '<p>Create your own set in Study first. Copies of someone else’s set cannot be reposted.</p>'}</details>` : ''}
                 <div class="community-set-grid">${(this.data.class_sets || []).map(set => `<article class="glass-card community-shared-set">

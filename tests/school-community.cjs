@@ -6,7 +6,7 @@ const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 const gamesWindow = {};
 vm.runInNewContext(read('communityGames.js'), { window: gamesWindow, console });
 function harness() {
-    const elements = new Map(), calls = [], listeners = {}, timers = [], state = { courses: [], flashcards: [] };
+    const elements = new Map(), calls = [], listeners = {}, timers = [], state = { courses: [], flashcards: [], settings: { shareSchoolCourses: true } };
     const node = () => ({ innerHTML: '', textContent: '', isConnected: true,
         classList: { toggle() {} }, dataset: {}, querySelector: () => null,
         setAttribute(name, value) { this[name] = value; } });
@@ -20,6 +20,7 @@ function harness() {
         AppState: { get: key => state[key], saveFlashcardDeck: async deck => state.flashcards.push(deck) },
         updateSavedDeck: async (id, patch) => Object.assign(state.flashcards.find(deck => deck.id === id), patch),
         classrooms: { available: () => available, contextKey: () => account, isTeacher: () => false,
+            courseSharingEnabled: () => state.settings.shareSchoolCourses === true,
             courseCodes: () => ['BIO'], call: async () => ({ classes: [{ id: 'class1', title: 'Biology' }] }),
             courseMatches: (course, code) => course.code === code,
             studentSetsMarkup: () => '<section>Teacher-published sets</section>',
@@ -57,6 +58,11 @@ function harness() {
     assert.equal(h.timers.length, 1);
     assert.match(h.elements.get('school-community-root').innerHTML, /Turn on school discovery/);
     assert.doesNotMatch(h.elements.get('school-community-root').innerHTML, /data-tab="updates"/, 'school has no empty updates tab');
+    const noConsent = harness();
+    noConsent.state.settings.shareSchoolCourses = false;
+    await noConsent.community.open('class1', 'Private class');
+    assert.match(noConsent.elements.get('school-community-root').innerHTML, /Course sharing is off/);
+    assert.equal(noConsent.calls.length, 0, 'opening a classroom without consent sends no course requests');
     h.response({ school_discovery: true, class_discovery: true, can_announce: true,
         people: [{ user_id: 'peer', username: '<script>peer</script>' }],
         decks: [{ id: 'deck', title: '<b>Biology</b>', author: 'Teacher', card_count: 10 }],
@@ -205,6 +211,7 @@ function harness() {
     assert.match(refresh.elements.get('school-community-status').textContent, /Could not refresh.*Offline/);
 
     const courses = harness();
+    courses.state.courses = [{ code: 'BIO', title: 'My private class label' }];
     courses.api.schoolCall = async fn => fn === 'studbud_course_communities'
         ? { classes: [{ id: 'course', title: 'Biology', course_code: 'BIO', community: true }] }
         : { can_post: true, can_announce: false, posts: [], class_sets: [], course_community: true, teacher_classes: [] };
@@ -212,6 +219,9 @@ function harness() {
     assert.match(courses.elements.get('school-community-root').innerHTML, /My classrooms/);
     assert.match(courses.elements.get('school-community-root').innerHTML, /Open classroom/);
     assert.match(courses.elements.get('school-community-root').innerHTML, /No teacher or join code needed/);
+    assert.match(courses.elements.get('school-community-root').innerHTML, /My private class label/,
+        'private local titles still label classrooms without being sent to the server');
+    assert.equal(JSON.stringify(courses.calls).includes('My private class label'), false);
     await courses.community.open('course', 'Biology');
     assert.match(courses.elements.get('school-community-root').innerHTML, /Write a post/);
     assert.doesNotMatch(courses.elements.get('school-community-root').innerHTML, /Open teacher tools/);
@@ -269,7 +279,8 @@ function harness() {
         { front: 'Cell', back: 'Basic unit', practiceStats: { attempts: 20 }, answerImage: 'private' },
         { front: 'ATP', back: 'Energy' }] }];
     const sharing = courses.community.classSetsMarkup();
-    assert.match(sharing, /value="public" selected/);
+    assert.match(sharing, /value="course" selected/, 'class sharing defaults to the course, not the public library');
+    assert.doesNotMatch(sharing, /value="public" selected/);
     assert.match(sharing, /value="course"/);
     assert.match(sharing, /value="school"/);
     assert.match(sharing, /name="note".*required maxlength="300"/);

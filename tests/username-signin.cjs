@@ -71,10 +71,14 @@ async function run() {
     node('signup-password').value = node('signup-password-confirm').value = 'password123';
     node('signup-school').value = 'pchs';
     await cloud.handleSignup(submit);
+    assert.match(node('auth-status').textContent, /at least 12 characters/);
+    assert.equal(requests.length, 2, 'new short passwords are rejected while existing-password sign-in remains compatible');
+    node('signup-password').value = node('signup-password-confirm').value = 'a unique long passphrase';
+    await cloud.handleSignup(submit);
     assert.equal(requests.at(-1).email, 'new_student@accounts.studbud.invalid');
     assert.equal(requests.at(-1).options.data.username, 'new_student');
     assert.equal(opened, 2, 'signup immediately opens an account with no verification step');
-    node('signup-password').value = node('signup-password-confirm').value = 'password123';
+    node('signup-password').value = node('signup-password-confirm').value = 'a unique long passphrase';
     sessionAvailable = false;
     await cloud.handleSignup(submit);
     assert.match(node('auth-status').textContent, /turn off Confirm email/);

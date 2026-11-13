@@ -45,6 +45,23 @@ vm.createContext(sandbox);
 for (const file of ['communityGames.js', 'multiplayerEngine.js']) vm.runInContext(source(file), sandbox);
 const util = sandbox.window.StudBudArcade.util;
 const catalog = sandbox.window.StudBudCommunityGames.catalog;
+for (const radius of [8, 11, 24]) {
+    commands.length = 0;
+    util.drawHat(ctx, 'hat_grad', 40, 30, radius);
+    const points = commands.filter(([name]) => name === 'moveTo' || name === 'lineTo');
+    const xs = points.map(([, x]) => x), ys = points.map(([, , y]) => y);
+    assert.ok(Math.max(...xs) - Math.min(...xs) <= radius * 2.5,
+        'the mortarboard overhang stays within 25% of the head width at every render scale');
+    assert.ok(Math.min(...ys) >= -radius * .75,
+        'the cap sits close to the crown instead of towering above the head');
+    assert.ok(commands.some(([name]) => name === 'quadraticCurveTo'), 'the cap band follows the rounded head');
+}
+for (const face of [-1, 1]) {
+    commands.length = 0;
+    util.drawFigureSide(ctx, { cos: { skin: 'skin_snow', hat: 'hat_grad' } }, 29, 30, 22, 37, face, 0, false);
+    assert.equal(commands.filter(([name]) => name === 'rotate').at(-1)[1], 0,
+        'the graduation cap stays level when facing either direction');
+}
 for (const item of catalog.filter(item => item.type !== 'pet')) {
     assert.ok(typeof item.description === 'string' && item.description.trim().length >= 15,
         `${item.id} has a useful shop description`);

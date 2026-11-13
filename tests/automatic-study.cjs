@@ -359,7 +359,7 @@ async function integration() {
         stores.delete(table);
     };
     sandbox.localStorage.removeItem = key => {
-        assert.equal(cleared.length, 3);
+        if (key === state.STORAGE_KEY) assert.equal(cleared.length, 3);
         storage.delete(key);
     };
     app.studyTracker.setContext({ key: 'clear-device', session: { source: 'flashcards' } });

@@ -1426,6 +1426,7 @@
                 }
             });
             this.bindFlashcardInteraction();
+            document.getElementById('backup-import-file')?.addEventListener('change', event => this.restoreEncryptedBackup(event.target));
             document.addEventListener('change', event => {
                 if (event.target.matches('select[data-ic-class]')) {
                     event.target.closest('.ic-class-row')?.classList.toggle('ic-skipped', event.target.value === 'skip');
@@ -5606,8 +5607,30 @@
         async loadPublicProfileCard() {
             if (!document.getElementById('public-subject') || !window.StudBudCloud?.user) return;
             try {
+                const userId = window.StudBudCloud.user.id;
                 const p = await window.StudBudCommunityGames.friendCall('studbud_get_public_profile');
+                if (window.StudBudCloud?.user?.id !== userId) return;
                 document.getElementById('public-subject').value = p.favorite_subject || '';
+                const courses = document.getElementById('public-share-courses');
+                this.courseIndexConsentAvailable = typeof p.share_courses === 'boolean';
+                if (courses) {
+                    courses.checked = p.share_courses === true;
+                    courses.disabled = !this.courseIndexConsentAvailable;
+                }
+                const courseAvailability = document.getElementById('public-courses-availability');
+                if (courseAvailability && !this.courseIndexConsentAvailable) {
+                    courseAvailability.textContent = 'Course sharing needs a server update. Your course index stays off until it is available.';
+                } else if (courseAvailability) {
+                    courseAvailability.textContent = 'Off by default. Allows the service to read course identifiers and catalog titles for classrooms. Grades, assignments and schedules stay encrypted.';
+                }
+                const settings = AppState.get('settings') || {};
+                const shareSchoolCourses = p.share_courses === true;
+                const courseSharingChanged = settings.shareSchoolCourses !== shareSchoolCourses;
+                if (courseSharingChanged) {
+                    AppState.set('settings', { ...settings, shareSchoolCourses });
+                    this.classrooms?.resetContext();
+                    this.schoolCommunity?.resetContext();
+                }
                 const classmates = document.getElementById('public-show-classmates');
                 this.classmateDiscoveryAvailable = typeof p.show_classmates === 'boolean';
                 if (classmates) {
@@ -5617,13 +5640,14 @@
                 const availability = document.getElementById('public-classmates-availability');
                 if (availability) availability.textContent = this.classmateDiscoveryAvailable ? ''
                     : 'Course discovery needs a server update. Other profile settings still work.';
-                document.getElementById('public-show-stats').checked = p.show_stats !== false;
+                document.getElementById('public-show-stats').checked = p.show_stats === true;
                 const profile = AppState.get('profile') || {};
                 const school = this.isKnownSchool(p.school) ? p.school : 'pchs';
                 if (profile.school !== school) AppState.set('profile', { ...profile, school });
                 document.getElementById('settings-school').value = school;
                 this.updateCourseSchoolFields();
                 this.renderOtherGradeScaleEditor();
+                if (courseSharingChanged && this.Router?.activeRoute === 'classes') await this.schoolCommunity?.render();
             } catch (error) {
                 const status = document.getElementById('public-profile-status');
                 if (status) status.textContent = 'Profile sharing is unavailable right now. Re-run supabase-setup.sql in Supabase.';
@@ -5634,11 +5658,28 @@
             const status = document.getElementById('public-profile-status');
             status.textContent = 'Saving…';
             try {
-                await window.StudBudCommunityGames.friendCall('studbud_set_public_profile', {
+                const shareCourses = document.getElementById('public-share-courses')?.checked === true;
+                if (this.courseIndexConsentAvailable && !shareCourses && document.getElementById('public-show-classmates').checked) {
+                    throw new Error('Enable course sharing before turning on course discovery, or turn discovery off too.');
+                }
+                const userId = window.StudBudCloud?.user?.id;
+                const saved = await window.StudBudCommunityGames.friendCall('studbud_set_public_profile', {
                     p_favorite_subject: document.getElementById('public-subject').value,
                     p_show_stats: document.getElementById('public-show-stats').checked,
-                    ...(this.classmateDiscoveryAvailable ? { p_show_classmates: document.getElementById('public-show-classmates').checked } : {})
+                    ...(this.classmateDiscoveryAvailable ? { p_show_classmates: document.getElementById('public-show-classmates').checked } : {}),
+                    ...(this.courseIndexConsentAvailable ? { p_share_courses: shareCourses } : {})
                 });
+                if (window.StudBudCloud?.user?.id !== userId) return;
+                if (this.courseIndexConsentAvailable) {
+                    if (typeof saved?.share_courses !== 'boolean') throw new Error('The server did not confirm your course-sharing preference. Reload and try again.');
+                    AppState.set('settings', { ...AppState.get('settings'), shareSchoolCourses: saved.share_courses });
+                    this.classrooms?.resetContext();
+                    this.schoolCommunity?.resetContext();
+                    await window.StudBudCloud?.syncNow?.();
+                    if (window.StudBudCloud?.user?.id !== userId) return;
+                }
+                window.StudBudCommunityGames.boardCache?.clear();
+                this.studyLeaderboardSnapshot = null;
                 status.textContent = this.classmateDiscoveryAvailable ? 'Saved your pseudonymous profile and course-discovery preference.'
                     : 'Saved your profile. Course discovery needs a server update before it can be enabled.';
             } catch (error) {
@@ -5779,7 +5820,7 @@
                     status.textContent = rows.length ? `${rows.length} reported item${rows.length === 1 ? '' : 's'} waiting for review.` : 'No open reports. Nice and quiet.';
                     list.innerHTML = rows.map(row => {
                         const isDeck = row.target_type === 'deck';
-                        const category = ({ deck: 'Flashcard set', profile: 'Player', bug: 'Bug', other: 'Other' })[row.target_type] || 'Report';
+                        const category = ({ deck: 'Flashcard set', profile: 'Player', bug: 'Bug', other: 'Other', privacy: 'Private data request' })[row.target_type] || 'Report';
                         const gone = !row.target_name;
                         return `<article class="admin-row report-row">
                         <div><span class="deck-chip">${esc(category)}</span><strong>${esc(row.target_name || (isDeck ? 'Deleted set' : 'Deleted account'))}</strong>
@@ -9577,10 +9618,10 @@
             const content = type === 'deck' || type === 'profile';
             const label = type === 'deck' ? 'flashcard set' : 'player';
             overlay.innerHTML = `<form>
-                <h2 id="report-title"><i class="fas fa-flag" aria-hidden="true"></i> ${content ? `Report ${label}` : 'Report a problem'}</h2>
-                <p class="settings-hint">${content ? `${this.escapeHTML(name || 'This item')} will be reviewed by staff.` : 'Tell us about a bug, player behavior, or another concern.'} Reports are private to staff, not posted publicly. Guests can report too; sending requires an internet connection.</p>
+                <h2 id="report-title"><i class="fas fa-flag" aria-hidden="true"></i> ${content ? `Report ${label}` : type === 'privacy' ? 'Private data request' : 'Report a problem'}</h2>
+                <p class="settings-hint">${type === 'privacy' ? 'Ask about access, correction, deletion or another account-data concern. Only administrators can review data requests. Sign in to your account to send one. Never include your password, grades or student records.' : `${content ? `${this.escapeHTML(name || 'This item')} will be reviewed by staff.` : 'Tell us about a bug, player behavior, or another concern.'} Reports are private to staff, not posted publicly. Guests can report too.`} Sending requires an internet connection.</p>
                 ${content ? `<fieldset class="report-reasons"><legend>What's wrong?</legend>${reasons.map(([value, text], index) => `<label><input type="radio" name="reason" value="${value}"${index === 0 ? ' checked' : ''}> ${text}</label>`).join('')}</fieldset>`
-                    : `<label for="report-category">Report type<select id="report-category" name="category"><option value="bug">Bug or broken feature</option><option value="player">Player behavior</option><option value="other">Other concern or feedback</option></select></label>
+                    : `<label for="report-category">Report type<select id="report-category" name="category"><option value="bug">Bug or broken feature</option><option value="player">Player behavior</option><option value="other">Other concern or feedback</option><option value="privacy"${type === 'privacy' ? ' selected' : ''}>Private account / data request (administrators only)</option></select></label>
                     <label for="report-username" class="hidden" id="report-player-field">Player username<input id="report-username" name="username" maxlength="50" autocomplete="off" placeholder="Their exact StudBud username"></label>
                     <label for="report-subject">Short summary<input id="report-subject" name="subject" required minlength="3" maxlength="120" placeholder="What is the problem?"></label>`}
                 <label for="report-description">${type === 'profile' ? 'What did this player do?' : 'What happened?'}<textarea id="report-description" name="details" rows="5" required minlength="10" maxlength="${content ? 500 : 2000}" placeholder="${type === 'profile' ? 'Explain what they did, where it happened, and roughly when.' : 'For a bug: what you did, what you expected, and what happened instead. For a player: what they did, where, and roughly when.'}"></textarea></label>
@@ -9615,7 +9656,7 @@
                 try {
                     if (content) await window.StudBudCommunityGames.reportContent(type, id, form.elements.reason.value, form.elements.details.value.trim());
                     else await window.StudBudCommunityGames.reportProblem(form.elements.category.value, form.elements.subject.value.trim(), form.elements.details.value.trim(), form.elements.username.value.trim());
-                    form.innerHTML = '<h2>Report sent</h2><p>Thank you. Your explanation has been sent to staff for review.</p><div class="admin-actions"><button type="button" class="primary-btn" data-report-cancel>Done</button></div>';
+                    form.innerHTML = '<h2>Request sent</h2><p>Your message has been sent privately for review.</p><div class="admin-actions"><button type="button" class="primary-btn" data-report-cancel>Done</button></div>';
                     form.querySelector('[data-report-cancel]')?.focus();
                 } catch (error) {
                     status.textContent = this.friendlyErrorMessage(error, 'Could not send the report. Please try again.');
@@ -10263,8 +10304,8 @@
                     : `<div class="podium-spot podium-spot-${i + 1}">${inner}</div>`;
             }).join('')}</li>` : '';
             const empty = friends
-                ? '<li class="empty-state">None of your buds have studied in this period yet. Add buds from the Buds page and challenge them!</li>'
-                : '<li class="empty-state">No study time logged for this period yet. Start a session to be first on the board.</li>';
+                ? '<li class="empty-state">No buds are sharing study time for this period.</li>'
+                : '<li class="empty-state">No shared study time for this period yet.</li>';
             list.innerHTML = board.length ? podium + board.map(row).join('') : empty;
 
             const me = document.getElementById('study-leaderboard-me');
@@ -10277,6 +10318,7 @@
                 const participants = Number(snap.participants) || board.length;
                 let text;
                 if (!this.studyLeaderboardSnapshot) text = '';
+                else if (snap.sharing_enabled === false) text = 'Your study activity is private. Enable sharing in Profile to appear on leaderboards; your personal goals and streak still work.';
                 else if (!myRank) text = `You haven't studied in this period yet. Log ${Math.round((Number(snap.daily_goal_seconds) || 300) / 60)} minutes to get on the board.`;
                 else if (myRank === 1) text = participants > 1 ? `You're #1 of ${participants}! Keep studying to stay ahead.` : 'You\'re #1. Invite buds to compete!';
                 else text = `You're #${myRank} of ${participants} with ${fmt(mySeconds)}.${above ? ` Study about ${Math.ceil(gap / 60)} more min to pass ${above.username || 'the next student'}.` : ''}`;
@@ -10918,6 +10960,8 @@
                     this.openReportDialog(target.dataset.reportType, target.dataset.id, target.dataset.name, target);
                 } else if (action === 'report-problem') {
                     this.openReportDialog('bug', '', '', target);
+                } else if (action === 'privacy-request') {
+                    this.openReportDialog('privacy', '', '', target);
                 } else if (action === 'view-profile') {
                     await this.openUserProfile(target.dataset.id);
                 } else if (action === 'view-my-profile') {
@@ -11056,6 +11100,10 @@
                     this.removeImportedSchedule();
                 } else if (id === 'factory-reset-btn') {
                     await this.factoryReset();
+                } else if (id === 'export-backup-btn') {
+                    await this.exportEncryptedBackup();
+                } else if (id === 'restore-backup-btn') {
+                    document.getElementById('backup-import-file').click();
                 } else if (id === 'change-username-btn') {
                     await this.submitUsernameChange(document.getElementById('settings-username').value, document.getElementById('username-status'));
                 } else if (id === 'save-public-profile-btn') {
@@ -13133,11 +13181,97 @@
             document.getElementById('school-profile-status').textContent = 'Custom grading scale saved.';
         }
 
+        async exportEncryptedBackup() {
+            if (this.backupBusy) return;
+            const status = document.getElementById('backup-status');
+            this.backupBusy = true;
+            let objectUrl;
+            try {
+                const cloud = window.StudBudCloud, userId = cloud.user?.id, version = cloud.accountVersion;
+                const password = await window.StudBudDialogs.promptSecret('Choose a unique backup passphrase of at least 12 characters. It cannot be recovered.');
+                if (password === null) return;
+                if (password.length < 12) throw new Error('Use at least 12 characters for the backup passphrase.');
+                const confirmation = await window.StudBudDialogs.promptSecret('Enter the backup passphrase again.');
+                if (confirmation === null) return;
+                if (confirmation !== password) throw new Error('The backup passphrases did not match.');
+                status.textContent = 'Encrypting your backup…';
+                await this.flushAutomaticStudy();
+                const snapshot = JSON.parse(await AppState.exportAppState());
+                const encrypted = await cloud.encryptBackup(snapshot, password);
+                if (cloud.user?.id !== userId || cloud.accountVersion !== version) throw new Error('The account changed. Start the backup again.');
+                const blob = new Blob([JSON.stringify(encrypted)], { type: 'application/json' });
+                if (blob.size > 10 * 1024 * 1024) throw new Error('This backup exceeds the 10 MB restore limit. Keep your synced account copy; no file was downloaded.');
+                objectUrl = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = objectUrl;
+                link.download = `studbud-encrypted-backup-${localDateKey(new Date())}.json`;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                status.textContent = 'Encrypted backup download started. Keep your passphrase safe and verify the file was saved.';
+            } catch (error) {
+                console.error('[NexusApp] Backup export failed:', error);
+                status.textContent = this.friendlyErrorMessage(error, 'Could not create an encrypted backup.');
+            } finally {
+                if (objectUrl) window.setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
+                this.backupBusy = false;
+            }
+        }
+
+        async restoreEncryptedBackup(input) {
+            if (this.backupBusy) return;
+            const file = input.files?.[0];
+            if (!file) return;
+            const status = document.getElementById('backup-status');
+            this.backupBusy = true;
+            let restored = false;
+            try {
+                const cloud = window.StudBudCloud, userId = cloud.user?.id, version = cloud.accountVersion;
+                if (file.size > 10 * 1024 * 1024) throw new Error('Choose a backup smaller than 10 MB.');
+                const password = await window.StudBudDialogs.promptSecret('Enter this backup’s passphrase.');
+                if (password === null) return;
+                status.textContent = 'Unlocking backup…';
+                const snapshot = await cloud.decryptBackup(JSON.parse(await file.text()), password);
+                if (!await window.StudBudDialogs.confirm('Replace this device’s classes, assignments, sets and study history with this backup? If signed in, the restored data will sync to that account.')) {
+                    status.textContent = 'Restore cancelled. Your study data was not changed.';
+                    return;
+                }
+                if (cloud.user?.id !== userId || cloud.accountVersion !== version) throw new Error('The account changed. Start the restore again.');
+                await this.resetAutomaticStudy();
+                if (cloud.user?.id !== userId || cloud.accountVersion !== version) throw new Error('The account changed. Start the restore again.');
+                snapshot.state.settings = { ...snapshot.state.settings, shareSchoolCourses: AppState.get('settings')?.shareSchoolCourses === true };
+                await AppState.importAppState(snapshot);
+                restored = true;
+                await this.loadPublicProfileCard();
+                this.renderUI();
+                await cloud.syncNow();
+                status.textContent = cloud.accountReady && !cloud.offlineMode && window.navigator?.onLine !== false
+                    ? 'Backup restored and synced.' : 'Backup restored on this device.';
+            } catch (error) {
+                console.error('[NexusApp] Backup restore failed:', error);
+                status.textContent = restored
+                    ? `Backup restored on this device, but account refresh/sync could not complete. ${this.friendlyErrorMessage(error)}`
+                    : this.friendlyErrorMessage(error, 'Could not restore the backup. Check its passphrase and try again.');
+            } finally {
+                input.value = '';
+                this.backupBusy = false;
+            }
+        }
+
         async factoryReset() {
             if (!await window.StudBudDialogs.confirm('Clear classes, assignments, sets and study history on this device? Your online account will not be deleted, and synced data may download again.')) return;
-            await this.resetAutomaticStudy();
-            await Promise.all(['flashcards', 'studyHistory', 'gameMetrics'].map(store => NexusDB.clear(store)));
-            localStorage.removeItem(AppState.STORAGE_KEY);
+            const cloud = window.StudBudCloud;
+            if (cloud?.clearDeviceCache) {
+                cloud.accountReady = false;
+                cloud.accountVersion++;
+                clearTimeout(cloud.syncTimer);
+                await cloud.clearDeviceCache();
+            } else {
+                await this.resetAutomaticStudy();
+                await Promise.all(['flashcards', 'studyHistory', 'gameMetrics'].map(store => NexusDB.clear(store)));
+                localStorage.removeItem(AppState.STORAGE_KEY);
+                localStorage.removeItem('STUDBUD_CLOUD_SYNC_BASE');
+            }
             window.location.reload();
         }
 

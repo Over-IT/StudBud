@@ -126,6 +126,14 @@ assert.doesNotMatch(sqlFunction('studbud_my_classes'), /n <= 40/, 'course aliase
 assert.match(sqlFunction('studbud_my_classes'), /cardinality\(p_course_codes\)/, 'oversized requests fail explicitly');
 assert.match(sqlFunction('studbud_my_classes'), /studbud_user_tags where user_id = auth\.uid\(\) and tag = 'teacher'/,
     'delayed client account tags cannot enroll teachers as students');
+for (const name of ['studbud_teacher_classes', 'studbud_teacher_class_detail']) {
+    assert.doesNotMatch(sqlFunction(name), /snapshot|grade_pct|missing_total|study_time_entries|last_active|'students'|'removed'/,
+        'teacher resources never include academic progress, study activity or private rosters');
+}
+assert.match(sqlFunction('studbud_sync_class_stats'), /raise exception 'Classroom progress sharing has been removed/);
+assert.doesNotMatch(sqlFunction('studbud_sync_class_stats'), /insert into|update public/, 'old clients cannot save new progress');
+assert.match(sql, /alter table public\.studbud_class_members\s+drop column if exists snapshot,\s+drop column if exists snapshot_at/,
+    'migration removes historical readable schoolwork');
 
 (async () => {
     function harness(teacher = false) {
@@ -137,7 +145,7 @@ assert.match(sqlFunction('studbud_my_classes'), /studbud_user_tags where user_id
         const cloud = { user: { id: teacher ? 'teacher' : 'student' }, accountReady: true, offlineMode: false,
             async syncNow() { calls.push(['persist']); } };
         const win = { StudBudCloud: cloud, addEventListener() {} };
-        const state = { courses: [{ code: 'BIO', title: 'Biology' }], assignments: [], flashcards: [] };
+        const state = { courses: [{ code: 'BIO', title: 'Biology' }], assignments: [], flashcards: [], settings: { shareSchoolCourses: true } };
         const calls = [], events = {};
         const app = { userTags: teacher ? ['teacher'] : [], currentSchool: () => 'pchs', isParkwaySchool: () => true,
             AppState: { get: key => state[key] }, EventBus: { on: (event, fn) => { events[event] = fn; } },
@@ -166,11 +174,11 @@ assert.match(sqlFunction('studbud_my_classes'), /studbud_user_tags where user_id
     assert.equal(student.calls[1][0], 'studbud_my_classes');
     assert.equal(student.calls.filter(([fn]) => fn === 'studbud_my_classes').length, 1, 'no duplicate load RPC');
     assert.ok(student.rendered.includes('student'), 'student sees fresh teacher and class info');
-    assert.equal(student.calls[2][0], 'studbud_sync_class_stats');
-    assert.equal(student.calls[2][1].p_snapshots[0].snapshot.grade_pct, 90, 'assignment/grade snapshot reaches teacher');
+    assert.equal(student.calls.length, 2, 'enrollment does not upload academic progress');
+    assert.equal(student.events['assignments:updated'], undefined, 'assignment changes do not trigger classroom uploads');
     student.rendered.length = 0;
-    await student.client.syncSnapshots(true);
-    assert.deepEqual(student.rendered, [], 'snapshot syncing never rebuilds the active classroom or its drafts');
+    await student.client.syncEnrollment(true);
+    assert.deepEqual(student.rendered, [], 'enrollment never rebuilds the active classroom or its drafts');
 
     student.state.courses = Array.from({ length: 55 }, (_, index) => ({ code: 'C' + index }));
     assert.equal(student.client.courseCodes().length, 55, 'no silent course-code limit');
@@ -180,9 +188,12 @@ assert.match(sqlFunction('studbud_my_classes'), /studbud_user_tags where user_id
         return { classes: Array.from({ length: 45 }, (_, index) => ({ id: 'class' + index, course_code: 'C' + index })) };
     };
     student.calls.length = 0;
-    await student.client.syncSnapshots(true);
-    assert.deepEqual(student.calls.filter(([fn]) => fn === 'studbud_sync_class_stats').map(([, args]) => args.p_snapshots.length),
-        [20, 20, 5], 'every class gets progress within the server batch limit');
+    student.state.assignments = [{ title: 'Private assignment', pointsEarned: 75 }];
+    student.state.studyHistory = [{ durationSec: 300, answer: 'Private answer' }];
+    await student.client.syncEnrollment(true);
+    assert.deepEqual(student.calls.map(([fn]) => fn), ['persist', 'studbud_my_classes'],
+        'many classrooms still only refresh membership, without progress batches');
+    assert.equal(JSON.stringify(student.calls).includes('Private'), false);
 
     const markup = harness();
     markup.client.studentData = { classes: [{ id: 'bio', course_code: 'BIO', title: 'Biology', student_count: 2,
@@ -191,36 +202,29 @@ assert.match(sqlFunction('studbud_my_classes'), /studbud_user_tags where user_id
     assert.match(markup.root.innerHTML, /teacher · 2 students/);
     assert.match(markup.root.innerHTML, /Cells/);
     assert.match(markup.root.innerHTML, /data-class-action="study-class-deck"/);
-    markup.state.assignments = [{ courseCode: 'BIO', title: 'Missing lab', status: 'pending', icMissing: true, dueDate: '2000-01-01' },
-        { courseCode: 'BIO', title: 'Future lab', status: 'pending', dueDate: '2999-01-01' },
-        { courseCode: 'OTHER', title: 'Not shared', status: 'pending', icMissing: true }];
-    const snapshot = markup.client.snapshotFor('BIO');
-    assert.equal(snapshot.missing, 1);
-    assert.equal(snapshot.overdue, 1);
-    assert.equal(snapshot.upcoming, 1);
-    assert.equal(snapshot.next_due[0].title, 'Future lab', 'only this course shares upcoming assignments');
-    markup.state.assignments.push(
-        { courseCode: 'BIO', title: 'Scored missing lab', status: 'pending', icMissing: true, graded: true, pointsEarned: 0, dueDate: '2999-01-01' },
-        { courseCode: 'BIO', title: 'Completed missing lab', status: 'completed', icMissing: true, graded: true, pointsEarned: 0 }
-    );
-    const scoredMissing = markup.client.snapshotFor('BIO');
-    assert.equal(scoredMissing.missing, 2, 'a scored missing item remains missing until completed');
-    assert.equal(scoredMissing.overdue, 2, 'Campus missing is overdue even with a future due date');
-    assert.equal(scoredMissing.upcoming, 1, 'scored missing work is not an upcoming task');
+    markup.client.detail = { id: 'bio', title: 'Biology', course_code: 'BIO', decks: [],
+        students: [{ username: 'Old cached student', snapshot: { grade_pct: 75 }, week_seconds: 300 }] };
+    Object.getPrototypeOf(markup.client).renderTeacherDetail.call(markup.client);
+    assert.match(markup.root.innerHTML, /New flashcard set/);
+    assert.doesNotMatch(markup.root.innerHTML, /Old cached student|avg grade|active this week|data-tab="students"|export-roster/,
+        'teacher UI ignores legacy roster data, even against an older backend');
 
     const failure = harness();
     failure.client.call = async fn => {
-        if (fn === 'studbud_sync_class_stats') throw Error('Progress unavailable');
-        return { classes: [{ id: 'class1', course_code: 'BIO' }] };
+        throw Error('Classes unavailable');
     };
     await failure.client.loadStudent();
-    assert.equal(failure.client.lastSync, 0, 'failed progress writes do not throttle retries');
-    assert.ok(failure.rendered.includes('student'), 'progress failure does not hide successfully loaded classes');
-    assert.deepEqual(failure.rendered.at(-1), ['Progress unavailable', 'error']);
+    assert.equal(failure.client.lastSync, 0, 'failed enrollment does not throttle retries');
+    assert.match(failure.root.innerHTML, /Classes unavailable/, 'membership failures remain visible');
     const offline = harness();
     offline.cloud.accountReady = false;
-    await offline.client.syncSnapshots(true);
+    await offline.client.syncEnrollment(true);
     assert.equal(offline.calls.length, 0, 'no enrollment before account state is restored');
+    const privateCourses = harness();
+    delete privateCourses.state.settings.shareSchoolCourses;
+    assert.equal(privateCourses.client.courseCodes().length, 0, 'private courses are never sent as enrollment arguments');
+    await privateCourses.client.syncEnrollment(true);
+    assert.equal(privateCourses.calls.length, 0, 'classroom background polling stays off without consent');
 
     const teacher = harness(true);
     teacher.client.detail = { id: 'class1' };
@@ -245,7 +249,7 @@ assert.match(sqlFunction('studbud_my_classes'), /studbud_user_tags where user_id
     await teacher.client.refreshVisible();
     assert.equal(teacher.calls.length, count, 'polling preserves settings drafts');
     assert.equal(teacher.timers.length, 1, 'one poll timer across repeated renders');
-    teacher.client.detailTab = 'students';
+    teacher.client.detailTab = 'sets';
     let finishPoll;
     teacher.client.call = () => new Promise(resolve => { finishPoll = resolve; });
     const poll = teacher.client.refreshVisible();
@@ -270,7 +274,7 @@ assert.match(sqlFunction('studbud_my_classes'), /studbud_user_tags where user_id
     let resolveAccount, started;
     const rpcStarted = new Promise(resolve => { started = resolve; });
     account.client.call = () => new Promise(resolve => { resolveAccount = resolve; started(); });
-    const pending = account.client.syncSnapshots(true);
+    const pending = account.client.syncEnrollment(true);
     await rpcStarted;
     account.cloud.user = { id: 'another-student' };
     resolveAccount({ classes: [{ id: 'private-class' }] });
@@ -281,5 +285,5 @@ assert.match(sqlFunction('studbud_my_classes'), /studbud_user_tags where user_id
     account.client.resetContext();
     assert.equal(account.client.teacherData, null);
     assert.equal(account.client.detail, null, 'role/school/account changes invalidate all class caches');
-    console.log('Classroom enrollment, RPC visibility, refresh, polling, races and progress regression tests passed.');
+    console.log('Classroom enrollment, academic-data isolation, resources, polling and account races passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

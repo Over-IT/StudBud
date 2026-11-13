@@ -137,16 +137,22 @@
             const school = profile.school || this.user?.user_metadata?.school || '';
             const courses = Array.isArray(state.courses) ? state.courses : [];
             const flashcards = Array.isArray(snapshot?.flashcards) ? snapshot.flashcards : [];
+            const supportedSchool = state.settings?.shareSchoolCourses === true
+                && ['pchs', 'pnhs', 'pshs', 'pwhs'].includes(school);
+            const catalog = supportedSchool ? window.STUDBUD_SCHOOLS?.catalog(school) || [] : [];
             return {
                 state: {
                     profile: { school },
-                    courses: courses.map(course => ({
-                        code: course.code || '',
-                        catalogCode: course.catalogCode || '',
-                        title: course.title || '',
-                        term: course.term || 'FY',
-                        school: course.school || school
-                    }))
+                    courses: supportedSchool ? courses.filter(course => !course.school || course.school === school).map(course => {
+                        const official = catalog.find(item => item.code === course.catalogCode || item.code === course.code);
+                        return {
+                            code: course.code || '',
+                            catalogCode: course.catalogCode || '',
+                            title: official?.title || '',
+                            term: course.term || 'FY',
+                            school
+                        };
+                    }) : []
                 },
                 flashcards: flashcards.map(deck => ({
                     id: deck.id || '',
@@ -178,6 +184,33 @@
                 },
                 ciphertext: this.base64Encode(new Uint8Array(ciphertext))
             };
+        }
+
+        async encryptBackup(snapshot, password) {
+            if (typeof password !== 'string' || password.length < 12) throw new Error('Use at least 12 characters for the backup passphrase.');
+            const backup = new StudBudCloudSync();
+            const id = window.crypto.randomUUID();
+            await backup.unlockAccountData({ id }, password, null);
+            const { encryption, ciphertext } = await backup.encryptAccountData(snapshot, id);
+            return { format: 'studbud-encrypted-backup', version: 1, id, encryption, ciphertext };
+        }
+
+        async decryptBackup(envelope, password) {
+            if (envelope?.format !== 'studbud-encrypted-backup' || envelope.version !== 1
+                || typeof envelope.id !== 'string' || !/^[0-9a-f-]{36}$/i.test(envelope.id)
+                || envelope.encryption?.format !== ENCRYPTION_FORMAT || typeof envelope.ciphertext !== 'string') {
+                throw new Error('Choose a supported encrypted StudBud backup.');
+            }
+            const backup = new StudBudCloudSync();
+            const snapshot = await backup.unlockAccountData({ id: envelope.id }, password,
+                { encryption: envelope.encryption, ciphertext: envelope.ciphertext });
+            if (!snapshot?.version || !snapshot.state || typeof snapshot.state !== 'object'
+                || Array.isArray(snapshot.state)
+                || !Array.isArray(snapshot.state.courses) || !Array.isArray(snapshot.state.assignments)
+                || !Array.isArray(snapshot.flashcards) || !Array.isArray(snapshot.studyHistory)) {
+                throw new Error('This backup does not contain a valid study snapshot.');
+            }
+            return snapshot;
         }
 
         showDataSignIn(user, message = 'Sign in to unlock your account data on this device.') {
@@ -461,6 +494,7 @@
             document.getElementById('mfa-cancel-disable-btn')?.addEventListener('click', () => this.hideMfaDisablePanel());
             document.getElementById('guest-game-form')?.addEventListener('submit', event => this.handleGuestJoin(event));
             document.getElementById('sign-out-btn')?.addEventListener('click', () => this.signOut());
+            document.getElementById('delete-account-btn')?.addEventListener('click', () => this.deleteAccount());
             document.getElementById('offline-start-btn')?.addEventListener('click', () => this.startOffline().catch(error => this.reportAccountError(error)));
             document.getElementById('offline-connect-btn')?.addEventListener('click', () => this.connectOnline(this.isGuest() ? 'signup' : 'login').catch(error => this.reportAccountError(error)));
             document.getElementById('offline-signin-btn')?.addEventListener('click', () => this.connectOnline('login').catch(error => this.reportAccountError(error)));
@@ -858,6 +892,7 @@
                 console.error('[StudBudCloud] Sign-in failed:', error);
                 this.reportAccountError(error);
             } finally {
+                document.getElementById('login-password').value = '';
                 this.setAuthBusy(false);
             }
         }
@@ -879,8 +914,8 @@
                 this.setAuthStatus(error.message, true);
                 return;
             }
-            if (password.length < 8) {
-                this.setAuthStatus('Password must be at least 8 characters.', true);
+            if (password.length < 12) {
+                this.setAuthStatus('Use at least 12 characters. A unique passphrase helps protect your encrypted data.', true);
                 return;
             }
             if (password !== document.getElementById('signup-password-confirm').value) {
@@ -904,13 +939,13 @@
                     this.setAuthStatus('Account creation is waiting for server email confirmation. The site administrator must turn off Confirm email in Supabase so username accounts can be created without email verification.', true);
                     return;
                 }
-                document.getElementById('signup-password').value = '';
-                document.getElementById('signup-password-confirm').value = '';
                 await this.routeAuthenticatedUser(data.user || data.session.user, password);
             } catch (error) {
                 console.error('[StudBudCloud] Sign-up failed:', error);
                 this.reportAccountError(error);
             } finally {
+                document.getElementById('signup-password').value = '';
+                document.getElementById('signup-password-confirm').value = '';
                 this.setAuthBusy(false);
             }
         }
@@ -1318,12 +1353,92 @@
         }
 
         async clearDeviceCache() {
+            await this.endGuestSession();
+            if (window.NexusApp?.resetForCloudAccount) await window.NexusApp.resetForCloudAccount();
+            else await Promise.all(['flashcards', 'studyHistory', 'gameMetrics'].map(store => window.NexusApp.clearLocalStore(store)));
             localStorage.removeItem('PCHS_NEXUS_STATE_V1');
             localStorage.removeItem('STUDBUD_CLOUD_SYNC_BASE');
             localStorage.removeItem('STUDBUD_LOCAL_ONLY_DATA');
             localStorage.removeItem('STUDBUD_LOCAL_MODE');
-            await this.endGuestSession();
-            await Promise.all(['flashcards', 'studyHistory', 'gameMetrics'].map(store => window.NexusApp.clearLocalStore(store)));
+            localStorage.removeItem('STUDBUD_CLOUD_ACCOUNT_ID');
+            window.StudBudCommunityGames?.boardCache?.clear();
+            this.lastSnapshot = null;
+            this.pendingConflict = null;
+        }
+
+        async deleteAccount() {
+            if (this.deletingAccount) return;
+            const status = document.getElementById('account-delete-status');
+            const button = document.getElementById('delete-account-btn');
+            let verificationClient;
+            let deleted = false;
+            this.deletingAccount = true;
+            if (button) button.disabled = true;
+            try {
+                const user = this.user;
+                if (!user || user.is_anonymous || this.offlineMode || window.navigator?.onLine === false) {
+                    throw new Error('Sign in to your account online before deleting it.');
+                }
+                const username = user.user_metadata?.username;
+                if (!username) throw new Error('Reload and sign in again before deleting your account.');
+                if (!await window.StudBudDialogs.confirm('Permanently delete your account, this device’s study data, synced data, purchases, shared sets and authored posts? This cannot be undone. Unsynced changes will be discarded. Download an encrypted backup first if you want to keep your study data. Provider backups and copies saved by others cannot be recalled.')) return;
+                const confirmation = await window.StudBudDialogs.prompt('Type your username to confirm permanent deletion.');
+                if (confirmation === null) return;
+                if (confirmation.trim().toLowerCase() !== username.toLowerCase()) throw new Error('The username did not match. Nothing was deleted.');
+                const password = await window.StudBudDialogs.promptSecret('Enter your current account password to authorize deletion.');
+                if (password === null) return;
+                status.textContent = 'Verifying your account…';
+                const config = await this.loadAccountConfig();
+                await this.loadSupabaseLibrary();
+                verificationClient = window.supabase.createClient(config.url, config.anonKey, {
+                    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'studbud-delete-verification' }
+                });
+                const { data, error } = await verificationClient.auth.signInWithPassword({ email: this.usernameEmail(username), password });
+                if (error) throw new Error(error.message);
+                if (data?.user?.id !== user.id) throw new Error('Account verification did not match. Nothing was deleted.');
+                const { data: assurance, error: assuranceError } = await verificationClient.auth.mfa.getAuthenticatorAssuranceLevel();
+                if (assuranceError) throw new Error(assuranceError.message);
+                if (assurance?.nextLevel === 'aal2' && assurance.currentLevel !== 'aal2') {
+                    const { data: factors, error: factorError } = await verificationClient.auth.mfa.listFactors();
+                    if (factorError) throw new Error(factorError.message);
+                    const factor = factors?.totp?.find(item => item.status === 'verified');
+                    if (!factor) throw new Error('Use a supported enrolled authenticator before deleting this account.');
+                    const code = await window.StudBudDialogs.promptSecret('Enter your current 6-digit authenticator code.');
+                    if (code === null) return;
+                    const { error: codeError } = await verificationClient.auth.mfa.challengeAndVerify({ factorId: factor.id, code: code.trim() });
+                    if (codeError) throw new Error(codeError.message);
+                }
+                if (this.user?.id !== user.id) throw new Error('The signed-in account changed. Nothing was deleted.');
+                status.textContent = 'Deleting your account…';
+                const { data: result, error: deletionError } = await verificationClient.rpc('studbud_delete_my_account', { p_username: username });
+                if (deletionError) throw new Error(['PGRST202', '42883'].includes(deletionError.code)
+                    ? 'Account deletion needs the updated supabase-setup.sql. Nothing was deleted.' : deletionError.message);
+                if (result?.deleted !== true) throw new Error('The server did not confirm deletion. Check your connection before retrying.');
+                deleted = true;
+                const { error: signOutError } = await this.client.auth.signOut({ scope: 'local' });
+                if (signOutError) console.error('[StudBudCloud] Deleted-account sign-out failed:', signOutError);
+                const cleared = await this.handleSignedOut();
+                this.setAuthStatus(signOutError || cleared === false
+                    ? 'Account deleted, but device cleanup is incomplete. Clear this site’s browser data before another person uses it.'
+                    : 'Your account and its active database records were deleted. This device has been cleared.', Boolean(signOutError || cleared === false));
+            } catch (error) {
+                console.error('[StudBudCloud] Account deletion:', error);
+                const message = this.friendlyAuthError(error, 'Could not delete the account. Please try again.');
+                if (deleted) this.setAuthStatus(`Account deleted, but device cleanup needs attention: ${message}`, true);
+                else if (status) status.textContent = message;
+            } finally {
+                try {
+                    if (verificationClient) {
+                        const { error } = await verificationClient.auth.signOut({ scope: 'local' });
+                        if (error) console.warn('[StudBudCloud] Temporary verification session cleanup failed:', error);
+                    }
+                } catch (error) {
+                    console.warn('[StudBudCloud] Temporary verification session cleanup failed:', error);
+                } finally {
+                    this.deletingAccount = false;
+                    if (button) button.disabled = false;
+                }
+            }
         }
 
         async signOut() {
@@ -1357,6 +1472,8 @@
             this.legacyEncryptionMaterial = null;
             this.encryptionUserId = null;
             this.initialSnapshot = null;
+            this.lastSnapshot = null;
+            this.pendingConflict = null;
             window.clearTimeout(this.syncTimer);
             this.syncTimer = null;
             this.clearMfaLoginPrompt();
@@ -1369,9 +1486,12 @@
             this.signOutHandling = (async () => {
             try {
                 await this.clearDeviceCache();
+                window.location?.reload();
+                return true;
             } catch (clearError) {
                 console.error('[StudBudCloud] Could not clear signed-out device cache:', clearError);
                 this.setAuthStatus('Signed out, but could not clear this device’s saved data. Reload before another person signs in.', true);
+                return false;
             } finally {
                 this.signOutHandling = null;
             }

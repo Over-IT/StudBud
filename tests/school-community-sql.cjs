@@ -74,6 +74,22 @@ assert.match(hub, /room\.status in \('waiting', 'playing'\)/);
 assert.match(hub, /room\.expires_at > now\(\)/);
 assert.match(hub, /room\.host_last_seen_at > now\(\) - interval '30 seconds'/);
 assert.doesNotMatch(hub, /snapshot|grade_pct|missing_total|email/i, 'peer discovery returns no private classroom progress');
+assert.match(sql, /add column if not exists share_study_activity boolean not null default false/);
+assert.match(functionSql('studbud_get_public_profile'), /'show_stats', coalesce\(v\.share_study_activity, false\)/);
+assert.match(functionSql('studbud_set_public_profile'), /share_study_activity = excluded\.share_study_activity/);
+assert.match(functionSql('studbud_set_public_profile'), /v_share_activity := coalesce\(p_show_stats, false\) and \(p_share_courses is not null/,
+    'legacy default-on clients cannot establish fresh activity consent');
+for (const name of ['studbud_view_profile', 'studbud_friend_profile']) {
+    assert.match(functionSql(name), /v_show := coalesce\(v_pub\.share_study_activity, false\)/);
+}
+const leaderboard = functionSql('studbud_get_study_leaderboard');
+assert.match(leaderboard, /where not public\.studbud_is_hidden_user\(totals\.user_id\)\s+and coalesce\(\(select p\.share_study_activity/);
+assert.match(leaderboard, /'sharing_enabled'/);
+assert.match(sql, /add column if not exists share_courses boolean not null default false/);
+assert.match(functionSql('studbud_guard_course_index'), /new\.data \? 'encryption' or new\.data \? 'zk'/);
+assert.match(functionSql('studbud_guard_course_index'), /jsonb_set\(new\.data, '\{state,courses\}', '\[\]'::jsonb\)/);
+assert.match(functionSql('studbud_set_public_profile'), /if p_share_courses = false then[\s\S]*delete from public\.studbud_class_members/);
+assert.match(functionSql('studbud_my_classes'), /'course_sharing', false/);
 
 const scope = functionSql('studbud_community_require_class');
 assert.match(scope, /v_class\.school <> v_school/);
@@ -143,10 +159,12 @@ const communities = rpc('studbud_course_communities', '');
 assert.match(communities, /d\.data #> '\{state,courses\}'/);
 assert.match(communities, /c\.teacher_id is null and c\.school = v_school/);
 assert.match(communities, /pg_advisory_xact_lock/);
+assert.match(communities, /pp\.user_id = d\.user_id and pp\.share_courses/);
 assert.match(featureSql, /alter column teacher_id drop not null/);
 assert.match(featureSql, /where teacher_id is null/);
 const member = functionSql('studbud_community_is_member');
 assert.match(member, /public\.studbud_community_school\(p_user_id\) = p_class\.school/);
+assert.match(member, /p\.share_courses/);
 assert.match(member, /course ->> 'school'/, 'retained courses from another school never enroll the student here');
 assert.match(member, /m\.user_id = p_user_id and not m\.removed/);
 assert.match(member, /public\.studbud_course_matches\(course, p_class\.course_code, ''\)/, 'course membership matches codes, not a guessed title');
@@ -156,7 +174,7 @@ assert.match(permission, /p_school = public\.studbud_community_school\(auth\.uid
 assert.match(permission, /s\.user_id = auth\.uid\(\) and s\.school = p_school/);
 assert.match(permission, /public\.studbud_has_user_tag\(auth\.uid\(\), 'moderator'\)/);
 const share = rpc('studbud_share_class_set', 'uuid, text, text, jsonb, text, text');
-assert.match(share, /p_visibility text default 'public'/);
+assert.match(share, /p_visibility text default 'course'/);
 assert.match(share, /public\.studbud_community_is_member\(auth\.uid\(\), v_class\)/);
 assert.match(share, /p_visibility not in \('public', 'school', 'course'\)/);
 assert.match(share, /p_note.*between 1 and 300/);

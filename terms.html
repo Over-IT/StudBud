@@ -20,13 +20,13 @@
 <main>
     <p><a href="./">← Back to StudBud</a></p>
     <h1>Terms</h1>
-    <small>Last updated November 12, 2026</small>
+    <small>Last updated November 13, 2026</small>
 
     <h2>Basics</h2>
     <p>StudBud is provided “as is” without warranties of any kind. You are responsible for how you use the app and for complying with your school’s rules and any applicable laws.</p>
 
     <h2>School deployment notice</h2>
-    <p>If a school or district permits use of StudBud, that permission does not transfer responsibility for user conduct to the school or district. Each user remains responsible for their own account activity, content, and compliance with platform rules and applicable law.</p>
+    <p>StudBud is independently developed. A school allowing access does not imply affiliation, endorsement or FERPA certification. Users and schools retain any responsibilities imposed by applicable law; these terms do not override them.</p>
 
     <h2>Usernames only</h2>
     <p>StudBud is designed to work without real names. Do not use your real name in your username, profile bio, game nickname, or shared posts. Do not share personal contact details.</p>
@@ -37,8 +37,10 @@
     <h2>School compliance responsibilities</h2>
     <p>StudBud is a student productivity tool, not legal advice. Schools and districts are responsible for determining whether and how StudBud should be used in their environment, including FERPA and local policy requirements.</p>
 
-    <h2>Zero-knowledge sync encryption</h2>
-    <p>If you create an account, StudBud stores your synced study data in the cloud as encrypted ciphertext. Encryption and decryption run on your device with keys derived from your StudBud account credentials, and plaintext study data is not stored server-side.</p>
+    <h2>Client-side sync encryption</h2>
+    <p>If you create an account, your private account snapshot is encrypted on your device using AES-256-GCM before cloud sync. Grades, assignments, schedules and the default private course list are not stored as readable server-side fields. Enabling course sharing explicitly uploads limited course identifiers and catalog titles for classrooms; it is separate from opting into peer discovery. Selected school, flashcard identifiers for moderation, shared content, game records and daily study-time totals are stored separately for their features. Classroom tools do not collect private grade or assignment summaries or provide teacher progress rosters. Public study statistics require a separate opt-in.</p>
+    <p>Local browser storage is not encrypted by this mechanism. Supabase receives your password for authentication, so this is not a strict zero-knowledge system. Read the <a href="./privacy.html">Privacy Policy</a> for data categories and sharing limits.</p>
+    <p>You may export an independently passphrase-encrypted study backup or permanently delete your account from Data settings. Keep backup passphrases safe; they cannot be recovered. Account deletion removes active account-linked records and authored shared content, not independent copies, downloaded backups or provider-retained backups/logs. Use the private data-request form, not public issues, for account-specific concerns.</p>
 
     <h2>Infinite Campus import</h2>
     <p>StudBud offers a manual paste import path for district-approved Infinite Campus exports. StudBud does not request or receive your Infinite Campus password.</p>

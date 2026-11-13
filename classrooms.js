@@ -1,24 +1,16 @@
 /**
  * StudBud Classrooms
  * Teachers (account tag "teacher" at a Parkway school) pick the courses they teach from their school's catalog,
- * see a roster with each student's grade, missing work and study activity, and publish flashcard sets to the class.
+ * publish flashcard sets and manage class resources without access to students' private schoolwork or activity.
  * Students at the same school who have that course in their course list get access automatically (no join codes).
  * The visible tab polls every 30 seconds; teacher drafts are left untouched until the user leaves the editor.
  */
 (function (window) {
     'use strict';
 
-    const SNAPSHOT_EVERY_MS = 5 * 60 * 1000;
+    const ENROLLMENT_EVERY_MS = 5 * 60 * 1000;
     const REFRESH_EVERY_MS = 30 * 1000;
     const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
-    const todayKey = () => {
-        const now = new Date();
-        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    };
-    const minutes = seconds => {
-        const total = Math.round((Number(seconds) || 0) / 60);
-        return total >= 60 ? `${Math.floor(total / 60)}h ${total % 60}m` : `${total}m`;
-    };
     const ago = iso => {
         if (!iso) return 'Never';
         const diff = Date.now() - new Date(iso).getTime();
@@ -29,7 +21,6 @@
         if (days < 7) return `${days} days ago`;
         return new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' });
     };
-    const daysSince = iso => iso ? (Date.now() - new Date(iso).getTime()) / 86400000 : Infinity;
     const personName = person => person?.username || 'Student';
 
     // "term<TAB>definition", "term - definition", "term: definition" or "term, definition" per line.
@@ -45,9 +36,7 @@
             this.app = app;
             this.teacherData = null;
             this.detail = null;
-            this.detailTab = 'students';
-            this.rosterSort = 'attention';
-            this.rosterFilter = '';
+            this.detailTab = 'sets';
             this.studentData = null;
             this.editingDeck = null;
             this.lastSync = 0;
@@ -66,6 +55,7 @@
         get root() { return document.getElementById('classes-root'); }
         call(fn, args) { return window.StudBudCommunityGames.classCall(fn, args); }
         isTeacher() { return (this.app.userTags || []).includes('teacher'); }
+        courseSharingEnabled() { return this.app.AppState.get('settings')?.shareSchoolCourses === true; }
 
         available() {
             const cloud = window.StudBudCloud;
@@ -73,7 +63,7 @@
         }
 
         contextKey() {
-            return [window.StudBudCloud?.user?.id || '', this.app.currentSchool?.() || '', this.isTeacher()].join('|');
+            return [window.StudBudCloud?.user?.id || '', this.app.currentSchool?.() || '', this.isTeacher(), this.courseSharingEnabled()].join('|');
         }
 
         resetContext() {
@@ -121,7 +111,7 @@
                     }
                     else { this.teacherData = data; this.renderTeacherHome(); }
                 } else {
-                    await this.syncSnapshots(true);
+                    await this.syncEnrollment(true);
                 }
             } catch (error) {
                 if (this.currentRequest(id, key)) this.status(this.app.friendlyErrorMessage(error), 'error');
@@ -147,7 +137,6 @@
             });
             this.app.EventBus.on('courses:updated', () => { this.studentData = null; this.scheduleSync(350, true); });
             this.app.EventBus.on('state:restored', () => { this.resetContext(); this.scheduleSync(350, true); });
-            this.app.EventBus.on('assignments:updated', () => this.scheduleSync());
             document.addEventListener('visibilitychange', () => {
                 if (document.visibilityState === 'visible') { this.refreshVisible(); this.scheduleSync(); }
             });
@@ -199,7 +188,7 @@
                 const title = document.getElementById('active-view-title');
                 const guide = document.getElementById('page-guide');
                 if (title) title.textContent = 'Teach';
-                if (guide) guide.textContent = 'Your classes, student progress and class flashcard sets.';
+                if (guide) guide.textContent = 'Your classes and shared flashcard sets.';
                 if (this.detail) return this.openClass(this.detail.id);
                 return this.loadTeacher();
             }
@@ -244,7 +233,6 @@
         }
 
         teacherClassCard(item) {
-            const avg = item.average_grade === null || item.average_grade === undefined ? null : Number(item.average_grade);
             return `<article class="glass-card teacher-class-card">
                 <header>
                     <span class="class-code-chip">${esc(item.course_code)}</span>
@@ -252,9 +240,6 @@
                 </header>
                 <h3>${esc(item.title)}</h3>
                 <div class="teacher-class-stats">
-                    <div><strong>${Number(item.student_count || 0)}</strong><small>students</small></div>
-                    <div><strong>${avg === null ? '—' : `${avg.toFixed(1)}%`}</strong><small>avg grade</small></div>
-                    <div class="${Number(item.missing_total) ? 'warn' : ''}"><strong>${Number(item.missing_total || 0)}</strong><small>missing</small></div>
                     <div><strong>${Number(item.deck_count || 0)}</strong><small>sets</small></div>
                 </div>
                 <button type="button" class="primary-btn" data-class-action="open-class" data-id="${esc(item.id)}">Open class <i class="fas fa-arrow-right"></i></button>
@@ -394,45 +379,9 @@
             this.app.Sfx?.play?.('success');
         }
 
-        attentionScore(student) {
-            const snap = student.snapshot || {};
-            let score = 0;
-            const grade = Number(snap.grade_pct);
-            if (Number.isFinite(grade) && snap.grade_pct !== null) score += grade < 70 ? 3 : grade < 80 ? 1 : 0;
-            score += Math.min(4, Number(snap.missing || 0));
-            if (daysSince(student.last_active) > 7) score += 2;
-            return score;
-        }
-
-        sortedStudents() {
-            const students = (this.detail?.students || []).slice();
-            const filter = this.rosterFilter.trim().toLowerCase();
-            const list = filter ? students.filter(student => `${personName(student)} ${student.username}`.toLowerCase().includes(filter)) : students;
-            const grade = student => {
-                const value = Number(student.snapshot?.grade_pct);
-                return student.snapshot?.grade_pct === null || student.snapshot?.grade_pct === undefined || !Number.isFinite(value) ? Infinity : value;
-            };
-            const sorters = {
-                attention: (a, b) => this.attentionScore(b) - this.attentionScore(a) || personName(a).localeCompare(personName(b)),
-                name: (a, b) => personName(a).localeCompare(personName(b)),
-                grade: (a, b) => grade(a) - grade(b),
-                missing: (a, b) => Number(b.snapshot?.missing || 0) - Number(a.snapshot?.missing || 0),
-                study: (a, b) => Number(b.week_seconds || 0) - Number(a.week_seconds || 0),
-                active: (a, b) => daysSince(a.last_active) - daysSince(b.last_active)
-            };
-            return list.sort(sorters[this.rosterSort] || sorters.attention);
-        }
-
         renderTeacherDetail() {
             const item = this.detail;
             if (!item) return this.loadTeacher();
-            const students = item.students || [];
-            const grades = students.map(student => Number(student.snapshot?.grade_pct)).filter(value => Number.isFinite(value) && value > 0);
-            const avg = grades.length ? grades.reduce((sum, value) => sum + value, 0) / grades.length : null;
-            const missing = students.reduce((sum, student) => sum + Number(student.snapshot?.missing || 0), 0);
-            const activeWeek = students.filter(student => daysSince(student.last_active) <= 7).length;
-            const needHelp = students.filter(student => this.attentionScore(student) >= 3).length;
-            const weekStudy = students.reduce((sum, student) => sum + Number(student.week_seconds || 0), 0);
             this.root.innerHTML = `
                 <section class="teacher-hero glass-card">
                     <div>
@@ -441,77 +390,16 @@
                         <p class="class-auto-note"><i class="fas fa-wand-magic-sparkles"></i> Students at ${esc(this.app.schoolShortName?.() || 'your school')} with ${esc(item.course_code)} in their courses are added automatically.</p>
                     </div>
                     <div class="teacher-hero-stats">
-                        <div><strong>${students.length}</strong><small>students</small></div>
-                        <div><strong>${avg === null ? '—' : `${avg.toFixed(1)}%`}</strong><small>avg grade</small></div>
-                        <div class="${missing ? 'warn' : ''}"><strong>${missing}</strong><small>missing</small></div>
-                        <div><strong>${activeWeek}/${students.length}</strong><small>active this week</small></div>
+                        <div><strong>${(item.decks || []).length}</strong><small>shared sets</small></div>
                     </div>
                 </section>
                 <p id="classes-status" class="classes-status" role="status" aria-live="polite"></p>
                 <div class="segmented classes-tabs" role="tablist">
-                    <button type="button" role="tab" class="${this.detailTab === 'students' ? 'selected' : ''}" aria-selected="${this.detailTab === 'students'}" data-class-action="tab" data-tab="students"><i class="fas fa-users"></i> Students${needHelp ? ` <b class="tab-badge">${needHelp}</b>` : ''}</button>
                     <button type="button" role="tab" class="${this.detailTab === 'sets' ? 'selected' : ''}" aria-selected="${this.detailTab === 'sets'}" data-class-action="tab" data-tab="sets"><i class="fas fa-layer-group"></i> Flashcard sets <b class="tab-badge muted">${(item.decks || []).length}</b></button>
                     <button type="button" role="tab" class="${this.detailTab === 'settings' ? 'selected' : ''}" aria-selected="${this.detailTab === 'settings'}" data-class-action="tab" data-tab="settings"><i class="fas fa-sliders"></i> Class settings</button>
                 </div>
-                <div id="classes-tab-body">${this.detailTab === 'sets' ? this.setsMarkup() : this.detailTab === 'settings' ? this.settingsMarkup() : this.rosterMarkup(weekStudy)}</div>`;
+                <div id="classes-tab-body">${this.detailTab === 'settings' ? this.settingsMarkup() : this.setsMarkup()}</div>`;
             this.app.enhanceSetPickers?.(this.root);
-        }
-
-        rosterMarkup(weekStudy) {
-            const students = this.sortedStudents();
-            const total = (this.detail.students || []).length;
-            const removed = this.detail.removed || [];
-            const removedMarkup = removed.length ? `<details class="glass-card roster-removed"><summary>Removed students (${removed.length})</summary>
-                    <ul>${removed.map(person => `<li><span>${esc(personName(person))} <small>@${esc(person.username)}</small></span>
-                        <button type="button" class="secondary-btn compact-btn" data-class-action="restore-student" data-id="${esc(person.user_id)}">Restore</button></li>`).join('')}</ul></details>` : '';
-            if (!total) {
-                return `<div class="glass-card empty-state"><i class="fas fa-user-clock"></i> No students yet. Students at your school show up here automatically after they add <strong>${esc(this.detail.course_code)}</strong> to their courses (or import from Infinite Campus) and open StudBud.</div>${removedMarkup}`;
-            }
-            const rows = students.map(student => {
-                const snap = student.snapshot || {};
-                const grade = Number(snap.grade_pct);
-                const hasGrade = snap.grade_pct !== null && snap.grade_pct !== undefined && Number.isFinite(grade);
-                const tone = !hasGrade ? '' : grade >= 90 ? 'good' : grade >= 80 ? 'ok' : grade >= 70 ? 'meh' : 'bad';
-                const attention = this.attentionScore(student) >= 3;
-                const nextDue = Array.isArray(snap.next_due) ? snap.next_due : [];
-                return `<details class="roster-row${attention ? ' needs-help' : ''}">
-                    <summary>
-                        <span class="roster-name"><span class="roster-avatar">${esc(personName(student).slice(0, 1).toUpperCase())}</span>
-                            <span><strong>${esc(personName(student))}</strong><small>@${esc(student.username)}</small></span></span>
-                        <span class="roster-grade ${tone}">${hasGrade ? `<strong>${esc(snap.letter || '')}</strong> ${grade.toFixed(1)}%` : '<small>No grades yet</small>'}</span>
-                        <span class="roster-missing ${Number(snap.missing) ? 'warn' : ''}">${Number(snap.missing || 0)} <small>missing</small></span>
-                        <span class="roster-study">${minutes(student.week_seconds)} <small>this week</small></span>
-                        <span class="roster-streak"><i class="fas fa-fire"></i> ${Number(student.streak || 0)}</span>
-                        <span class="roster-active">${esc(ago(student.last_active))}</span>
-                    </summary>
-                    <div class="roster-detail">
-                        <div class="roster-facts">
-                            <span><i class="fas fa-clock"></i> Today: ${minutes(student.today_seconds)}</span>
-                            <span><i class="fas fa-list-check"></i> Upcoming: ${Number(snap.upcoming || 0)}</span>
-                            <span><i class="fas fa-triangle-exclamation"></i> Overdue: ${Number(snap.overdue || 0)}</span>
-                            <span><i class="fas fa-user-check"></i> Added ${esc(ago(student.joined_at))}</span>
-                            <span><i class="fas fa-rotate"></i> Grades synced ${esc(ago(student.snapshot_at))}</span>
-                        </div>
-                        ${nextDue.length ? `<ul class="roster-due">${nextDue.map(task => `<li><strong>${esc(task.title)}</strong><small>${esc(task.due || '')}</small></li>`).join('')}</ul>` : '<p class="muted">No upcoming work tracked for this class.</p>'}
-                        <div class="roster-actions">
-                            <button type="button" class="link-btn" data-action="view-profile" data-id="${esc(student.user_id)}"><i class="fas fa-id-card"></i> Profile</button>
-                            <button type="button" class="danger-btn compact-btn" data-class-action="remove-student" data-id="${esc(student.user_id)}" data-name="${esc(personName(student))}">Not in my class</button>
-                        </div>
-                    </div>
-                </details>`;
-            }).join('');
-            return `<div class="roster-toolbar">
-                    <input id="roster-search" type="search" placeholder="Find a student" value="${esc(this.rosterFilter)}" aria-label="Find a student">
-                    <label>Sort <select id="roster-sort">
-                        ${[['attention', 'Needs attention first'], ['name', 'Last name'], ['grade', 'Lowest grade'], ['missing', 'Most missing'], ['study', 'Most study time'], ['active', 'Recently active']]
-                            .map(([value, label]) => `<option value="${value}"${this.rosterSort === value ? ' selected' : ''}>${label}</option>`).join('')}
-                    </select></label>
-                    <button type="button" class="secondary-btn compact-btn" data-class-action="export-roster"><i class="fas fa-file-csv"></i> Export</button>
-                    <span class="muted">${minutes(weekStudy)} studied by the class this week</span>
-                </div>
-                <div class="roster-head" aria-hidden="true"><span>Student</span><span>Grade</span><span>Missing</span><span>Study</span><span>Streak</span><span>Last active</span></div>
-                <div class="roster-list">${rows || `<p class="muted roster-empty">No students match “${esc(this.rosterFilter.trim())}”.</p>`}</div>
-                <p class="muted roster-note">Grades and missing work come from each student's StudBud (usually imported from Infinite Campus) and update when they open the app.</p>${removedMarkup}`;
         }
 
         setsMarkup() {
@@ -559,23 +447,9 @@
                 </form>`;
         }
 
-        exportRoster() {
-            const rows = [['Name', 'Username', 'Grade %', 'Letter', 'Missing', 'Upcoming', 'Today (min)', 'Week (min)', 'Streak', 'Last active']];
-            (this.detail?.students || []).forEach(student => {
-                const snap = student.snapshot || {};
-                rows.push([personName(student), student.username, snap.grade_pct ?? '', snap.letter || '', snap.missing ?? '', snap.upcoming ?? '',
-                    Math.round((student.today_seconds || 0) / 60), Math.round((student.week_seconds || 0) / 60), student.streak || 0, student.last_active || '']);
-            });
-            const csv = rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-            link.download = `${(this.detail.title || 'class').replace(/[^\w-]+/g, '_')}_roster.csv`;
-            link.click();
-            setTimeout(() => URL.revokeObjectURL(link.href), 2000);
-        }
-
         // ------------------------------------------------------------------ STUDENT
         courseCodes() {
+            if (!this.courseSharingEnabled()) return [];
             return Array.from(new Set((this.app.AppState.get('courses') || [])
                 .flatMap(course => this.codesForCourse(course))));
         }
@@ -600,7 +474,7 @@
             this.loading = true;
             this.root.innerHTML = '<div class="classes-skeleton" aria-busy="true"><span></span><span></span></div>';
             try {
-                await this.syncSnapshots(true);
+                await this.syncEnrollment(true);
                 if (this.currentRequest(id, key) && this.studentData) this.renderStudent();
             } catch (error) {
                 if (!this.currentRequest(id, key)) return;
@@ -641,7 +515,7 @@
                     }).join('')}</ul>` : '<p class="muted">Your teacher has not posted any flashcard sets yet.</p>'}
                 </article>`;
             }).join('');
-            return `<section><h3>Teacher-published sets</h3><p class="settings-hint">Teachers of this course can see your course grade, missing work and study progress.</p><div class="student-class-grid">${classCards}</div></section>`;
+            return `<section><h3>Teacher-published sets</h3><p class="settings-hint">Your grades, assignments and private study activity are not shared with teachers.</p><div class="student-class-grid">${classCards}</div></section>`;
         }
 
         findClassDeck(classId, deckId) {
@@ -679,47 +553,23 @@
             return localDeck;
         }
 
-        snapshotFor(courseCode) {
-            const AppState = this.app.AppState;
-            const course = (AppState.get('courses') || []).find(entry => this.courseMatches(entry, courseCode));
-            if (!course) return null;
-            const today = todayKey();
-            const work = (AppState.get('assignments') || []).filter(entry => entry.courseCode === course.code);
-            const open = work.filter(entry => this.app.isOpenAssignment(entry));
-            const dueKey = entry => String(entry.dueDate || '').slice(0, 10);
-            const overdue = open.filter(entry => entry.icMissing || (dueKey(entry) && dueKey(entry) < today));
-            const missing = overdue;
-            const upcoming = open.filter(entry => !entry.icMissing && (!dueKey(entry) || dueKey(entry) >= today))
-                .sort((a, b) => (dueKey(a) || '9999').localeCompare(dueKey(b) || '9999'));
-            const grade = this.app.calculateCourseGrade(course);
-            return {
-                grade_pct: grade === null || !Number.isFinite(grade) ? null : Math.round(grade * 10) / 10,
-                letter: grade === null || !Number.isFinite(grade) ? '' : this.app.gradeForPercentage(grade, course),
-                missing: missing.length,
-                overdue: overdue.length,
-                upcoming: upcoming.length,
-                next_due: upcoming.slice(0, 5).map(entry => ({ title: String(entry.title || 'Assignment').slice(0, 80), due: dueKey(entry) })),
-                course_title: String(course.title || '').slice(0, 80)
-            };
-        }
-
         scheduleSync(delay = 4000, force = false) {
             if (this.isTeacher() || !this.available()) return;
             clearTimeout(this.syncTimer);
-            this.syncTimer = setTimeout(() => this.syncSnapshots(force).catch(error => {
-                console.warn('[Classes] Could not sync class progress:', error.message);
+            this.syncTimer = setTimeout(() => this.syncEnrollment(force).catch(error => {
+                console.warn('[Classes] Could not refresh class membership:', error.message);
                 if (this.visible()) this.status(this.app.friendlyErrorMessage(error), 'error');
             }), delay);
         }
 
-        async syncSnapshots(force = false) {
-            if (this.isTeacher() || !this.available()) return;
+        async syncEnrollment(force = false) {
+            if (this.isTeacher() || !this.available() || !this.courseSharingEnabled()) return;
             if (this.syncing) {
                 await this.syncing;
-                if (force && this.available() && !this.isTeacher()) return this.syncSnapshots(true);
+                if (force && this.available() && !this.isTeacher()) return this.syncEnrollment(true);
                 return;
             }
-            if (!force && Date.now() - this.lastSync < SNAPSHOT_EVERY_MS) return;
+            if (!force && Date.now() - this.lastSync < ENROLLMENT_EVERY_MS) return;
             const key = this.contextKey();
             const request = this.requestId;
             const codes = this.courseCodes();
@@ -733,13 +583,6 @@
                 if (!current()) return;
                 this.studentData = data;
                 this.lastCodesKey = codesKey;
-                const items = (data.classes || [])
-                    .map(item => ({ class_id: item.id, snapshot: this.snapshotFor(item.course_code) }))
-                    .filter(item => item.snapshot);
-                for (let offset = 0; offset < items.length; offset += 20) {
-                    if (!current()) return;
-                    await this.call('studbud_sync_class_stats', { p_snapshots: items.slice(offset, offset + 20) });
-                }
                 if (current()) this.lastSync = Date.now();
             })();
             try {
@@ -754,24 +597,6 @@
             const target = event.target;
             if (target.id === 'teacher-course-search' && event.type === 'input') {
                 this.renderCourseResults(target.value);
-            } else if (target.id === 'roster-search' && event.type === 'input') {
-                this.rosterFilter = target.value;
-                // Only swap the rows so typing doesn't rebuild the page (keeps focus, scroll and the toolbar).
-                const list = this.root?.querySelector('.roster-list');
-                if (list) {
-                    const scratch = document.createElement('div');
-                    scratch.innerHTML = this.rosterMarkup(0);
-                    list.innerHTML = scratch.querySelector('.roster-list')?.innerHTML || '';
-                    return;
-                }
-                const position = target.selectionStart;
-                this.renderTeacherDetail();
-                const input = document.getElementById('roster-search');
-                input?.focus();
-                input?.setSelectionRange(position, position);
-            } else if (target.id === 'roster-sort' && event.type === 'change') {
-                this.rosterSort = target.value;
-                this.renderTeacherDetail();
             } else if (target.name === 'cards' && target.closest('#teacher-deck-form')) {
                 const count = parseCardLines(target.value).length;
                 const preview = document.getElementById('teacher-deck-preview');
@@ -829,25 +654,17 @@
                 if (action === 'add-course') await this.addCourse(button.dataset.code);
                 else if (action === 'add-my-courses') this.app.openCourseForm();
                 else if (action === 'open-class') await this.openClass(id);
-                else if (action === 'back') { this.detail = null; this.detailTab = 'students'; await this.loadTeacher(); }
+                else if (action === 'back') { this.detail = null; this.detailTab = 'sets'; await this.loadTeacher(); }
                 else if (action === 'tab') { this.detailTab = button.dataset.tab; this.renderTeacherDetail(); }
                 else if (action === 'delete-class') {
                     if (!await window.StudBudDialogs.confirm('Stop teaching this course? Its flashcard sets are deleted and students lose access.')) return;
                     await this.call('studbud_teacher_delete_class', { p_class_id: this.detail.id });
                     this.detail = null;
-                    this.detailTab = 'students';
+                    this.detailTab = 'sets';
                     if (this.app.schoolCommunity) await this.app.schoolCommunity.open(null);
                     else await this.loadTeacher();
                     this.status('Course removed.');
-                } else if (action === 'remove-student') {
-                    if (!await window.StudBudDialogs.confirm(`Remove ${button.dataset.name}? They stop seeing this class and you stop seeing their progress. You can restore them later.`)) return;
-                    await this.call('studbud_teacher_remove_student', { p_class_id: this.detail.id, p_user_id: id });
-                    await this.openClass(this.detail.id);
-                } else if (action === 'restore-student') {
-                    await this.call('studbud_teacher_restore_student', { p_class_id: this.detail.id, p_user_id: id });
-                    await this.openClass(this.detail.id);
-                } else if (action === 'export-roster') this.exportRoster();
-                else if (action === 'new-deck') { this.editingDeck = { id: null, title: '', description: '', cards: [] }; this.renderTeacherDetail(); document.querySelector('#teacher-deck-form [name="title"]')?.focus(); }
+                } else if (action === 'new-deck') { this.editingDeck = { id: null, title: '', description: '', cards: [] }; this.renderTeacherDetail(); document.querySelector('#teacher-deck-form [name="title"]')?.focus(); }
                 else if (action === 'edit-deck') { this.editingDeck = (this.detail.decks || []).find(deck => deck.id === id) || null; this.renderTeacherDetail(); }
                 else if (action === 'cancel-deck') { this.editingDeck = null; this.renderTeacherDetail(); }
                 else if (action === 'delete-deck') {

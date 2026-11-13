@@ -29,7 +29,7 @@ const privateSnapshot = {
         profile: { school: 'pchs', firstName: 'Private', lastName: 'Student', graduationYear: 2028 },
         courses: [{ code: 'BIO101', catalogCode: 'BIO101', title: 'Biology', term: 'FY', school: 'pchs' }],
         assignments: [{ id: 'private-assignment', title: 'Sensitive assignment title' }],
-        settings: { theme: 'dark', gameGraphics: 'performance' }
+        settings: { theme: 'dark', gameGraphics: 'performance', shareSchoolCourses: true }
     },
     flashcards: [{ id: 'deck-1', cards: [{ front: 'private question', back: 'private answer' }] }],
     studyHistory: [{ id: 'study-1', answer: 'private response' }]
@@ -59,6 +59,7 @@ const privateSnapshot = {
     await assert.rejects(cloud.unlockAccountData(user, password, { zk: { v: 99 } }), /unsupported encryption format/i);
 
     await cloud.unlockAccountData(user, password, null);
+    sandbox.STUDBUD_SCHOOLS = { catalog: () => [{ code: 'BIO101', title: 'Biology' }] };
     const encrypted = await cloud.encryptAccountData(privateSnapshot, user.id);
     assert.equal(encrypted.encryption.format, 'studbud-aes-gcm');
     assert.equal(encrypted.encryption.version, 1);
@@ -75,6 +76,30 @@ const privateSnapshot = {
     assert.equal(JSON.stringify(encrypted).includes('Sensitive assignment title'), false);
     assert.equal(JSON.stringify(encrypted).includes('private question'), false);
     assert.equal(JSON.stringify(encrypted).includes('private response'), false);
+    const privateCourses = JSON.parse(JSON.stringify(privateSnapshot));
+    delete privateCourses.state.settings.shareSchoolCourses;
+    const defaultPrivate = await cloud.encryptAccountData(privateCourses, user.id);
+    assert.equal(defaultPrivate.state.courses.length, 0, 'course index is off without explicit sharing consent');
+    assert.equal((await cloud.decryptAccountData(defaultPrivate, user.id)).state.courses[0].title, 'Biology',
+        'private course details are still available after decryption');
+    const custom = JSON.parse(JSON.stringify(privateSnapshot));
+    custom.state.courses[0].title = 'Private student name in edited title';
+    custom.state.courses.push(
+        { code: 'CUSTOM', title: 'Private custom class name', term: 'S1', school: 'pchs' },
+        { code: 'OLD', title: 'Old school class', school: 'pwhs' });
+    const limited = await cloud.encryptAccountData(custom, user.id);
+    assert.deepEqual(JSON.parse(JSON.stringify(limited.state.courses)), [
+        { code: 'BIO101', catalogCode: 'BIO101', title: 'Biology', term: 'FY', school: 'pchs' },
+        { code: 'CUSTOM', catalogCode: '', title: '', term: 'S1', school: 'pchs' }
+    ], 'index uses only public catalog titles and excludes courses from another school');
+    assert.equal(JSON.stringify(limited).includes('Private'), false);
+    assert.equal((await cloud.decryptAccountData(limited, user.id)).state.courses[0].title, custom.state.courses[0].title,
+        'private titles remain intact inside encryption');
+    custom.state.profile.school = 'other';
+    const other = await cloud.encryptAccountData(custom, user.id);
+    assert.equal(other.state.courses.length, 0, 'unsupported schools do not need a readable course index');
+    assert.equal((await cloud.decryptAccountData(other, user.id)).state.courses.length, 3,
+        'omitting the public index never deletes private courses');
 
     const decrypted = await cloud.decryptAccountData(encrypted, user.id);
     assert.deepEqual(JSON.parse(JSON.stringify(decrypted)), {
@@ -153,6 +178,24 @@ const privateSnapshot = {
     await cloud.syncNow();
     assert.equal(storedRows[1].data.encryption.format, 'studbud-aes-gcm', 'sync migrates an existing legacy envelope');
     assert.equal((await cloud.decryptAccountData(storedRows[1].data, user.id)).state.assignments[0].id, 'private-assignment');
+    const backupSnapshot = { version: '1.0.0', ...privateSnapshot };
+    const keyBeforeBackup = cloud.encryptionKey;
+    const encryptedBackup = await cloud.encryptBackup(backupSnapshot, 'a separate backup passphrase');
+    assert.equal(encryptedBackup.format, 'studbud-encrypted-backup');
+    assert.equal(Object.hasOwn(encryptedBackup, 'state'), false, 'backups contain no readable school/course index');
+    assert.equal(Object.hasOwn(encryptedBackup, 'flashcards'), false, 'backups contain no readable set identifiers');
+    assert.ok(!JSON.stringify(encryptedBackup).includes('BIO101'));
+    const restoredBackup = await cloud.decryptBackup(encryptedBackup, 'a separate backup passphrase');
+    assert.deepEqual(JSON.parse(JSON.stringify(restoredBackup)), JSON.parse(JSON.stringify(cloud.sanitizeSnapshot(backupSnapshot))));
+    assert.equal(cloud.encryptionKey, keyBeforeBackup, 'backup operations never replace the signed-in account key');
+    assert.equal(cloud.encryptionUserId, user.id);
+    await assert.rejects(cloud.encryptBackup(backupSnapshot, 'short'), /12 characters/);
+    await assert.rejects(cloud.decryptBackup(encryptedBackup, 'wrong backup passphrase'), /did not unlock/);
+    await assert.rejects(cloud.decryptBackup({ ...encryptedBackup, id: webcrypto.randomUUID() }, 'a separate backup passphrase'), /did not unlock/);
+    await assert.rejects(cloud.decryptBackup({ ...encryptedBackup, ciphertext: encryptedBackup.ciphertext.slice(0, -4) + 'AAAA' }, 'a separate backup passphrase'), /did not unlock/);
+    await assert.rejects(cloud.decryptBackup(backupSnapshot, 'a separate backup passphrase'), /supported encrypted/);
+    await assert.rejects(cloud.decryptBackup({ ...backupSnapshot, format: encryptedBackup.format, id: encryptedBackup.id, version: 1 }, 'a separate backup passphrase'),
+        /supported encrypted/, 'a renamed plaintext snapshot cannot bypass authenticated decryption');
     console.log('Encrypted account snapshots round-trip; private content is opaque, projection is limited, and bad credentials/tampering are rejected.');
 })().catch(error => {
     console.error(error);

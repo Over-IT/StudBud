@@ -2424,10 +2424,14 @@
             ctx.fillStyle = '#f8fafc'; ctx.fillRect(-r * 1.05, r * 0.1, r * 2.1, r * 0.34);
             fill('#f8fafc', () => ctx.arc(r * 1.2, -r * 0.3, r * 0.3, 0, TAU));
         } else if (hat === 'hat_grad') {
-            ctx.fillStyle = '#111827'; ctx.fillRect(-r * 0.7, -r * 0.2, r * 1.4, r * 0.6);
-            fill('#1f2937', () => { ctx.moveTo(0, -r * 0.9); ctx.lineTo(r * 1.5, -r * 0.4); ctx.lineTo(0, r * 0.1); ctx.lineTo(-r * 1.5, -r * 0.4); });
-            ctx.strokeStyle = '#facc15'; ctx.lineWidth = r * 0.12;
-            ctx.beginPath(); ctx.moveTo(r * 1.2, -r * 0.35); ctx.lineTo(r * 1.2, r * 0.5); ctx.stroke();
+            fill('#111827', () => {
+                ctx.moveTo(-r * 0.78, -r * 0.25); ctx.lineTo(r * 0.78, -r * 0.25);
+                ctx.lineTo(r * 0.78, r * 0.36); ctx.quadraticCurveTo(0, r * 0.5, -r * 0.78, r * 0.36);
+                ctx.closePath();
+            });
+            fill('#1f2937', () => { ctx.moveTo(0, -r * 0.65); ctx.lineTo(r * 1.2, -r * 0.3); ctx.lineTo(0, r * 0.05); ctx.lineTo(-r * 1.2, -r * 0.3); });
+            ctx.strokeStyle = '#facc15'; ctx.lineWidth = r * 0.09;
+            ctx.beginPath(); ctx.moveTo(r * 1.02, -r * 0.25); ctx.lineTo(r * 1.02, r * 0.55); ctx.stroke();
         } else if (hat === 'hat_propeller') {
             fill('#3b82f6', () => ctx.arc(0, r * 0.4, r * 0.95, Math.PI, TAU));
             ctx.fillStyle = '#ef4444'; ctx.fillRect(-r * 0.12, -r * 0.9, r * 0.24, r * 0.5);
@@ -3146,7 +3150,7 @@
         if (!c.hat && c.skin === SKINS.skin_robot) { ctx.strokeStyle = '#475569'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx, y + bob); ctx.lineTo(cx, y - 7 + bob); ctx.stroke(); ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(cx, y - 8 + bob, 2.5, 0, TAU); ctx.fill(); }
         if (!c.hat && c.skin === SKINS.skin_alien) { ctx.strokeStyle = '#16a34a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx - 5, y + 1 + bob); ctx.lineTo(cx - 8, y - 6 + bob); ctx.moveTo(cx + 5, y + 1 + bob); ctx.lineTo(cx + 8, y - 6 + bob); ctx.stroke(); }
         if (c.skinId?.startsWith('skin_animal_')) drawAnimalHead(ctx, c.skinId.slice('skin_animal_'.length), cx, y + 11 + bob, 11);
-        drawHat(ctx, c.hat, cx, y + bob, 11, face * 0.03, time);
+        drawHat(ctx, c.hat, cx, y + bob, 11, c.hat === 'hat_grad' ? 0 : face * 0.03, time);
         ctx.fillStyle = c.skin?.eye || '#0f172a';
         if (!c.hat.startsWith('hat_animal_') && !c.skinId?.startsWith('skin_animal_') && !['pumpkin', 'ghost', 'sunglasses'].includes(SEASONAL_HATS[c.hat]?.shape)) ctx.fillRect(cx + face * 4 - 1.5, y + 9 + bob, 3, 4);
         if (c.acc === 'acc_shades') { ctx.fillStyle = '#0f172a'; ctx.fillRect(cx + face * 4 - 6, y + 8 + bob, 12, 5); }
