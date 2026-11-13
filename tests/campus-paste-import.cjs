@@ -140,6 +140,42 @@ assert.equal(paste.parseAssignments('Assignment\nVocab\u00a0Quiz\nDue: Fri 11/13
     'non-breaking spaces from copied pages are normalised');
 assert.equal(paste.inferCourse('Period 2 Honors Geometry (Smith)\nGrades\nAssignment\nQuiz', [geometry]), geometry,
     'a heading that contains the class name with extra words still matches');
+assert.deepEqual(paste.parseAssignments('Assignment\tDue Date\tScore\tCategory\nQuiz\t11/20/2026\t8/10\tTests\n' +
+    'Assignment\tScore\tCategory\tDue Date\nLab\t18/20\tLabs\t11/21/2026\nStudent\tStudent ID\t123456\nContact\tEmail\tstudent@example.invalid', today), [
+    { title: 'Quiz', dueDate: '2026-11-20', pointsEarned: 8, maxPoints: 10, category: 'Tests' },
+    { title: 'Lab', dueDate: '2026-11-21', pointsEarned: 18, maxPoints: 20, category: 'Labs' }
+], 'repeated/reordered headers keep their own column mapping and personal/navigation rows are ignored');
+assert.equal(paste.parseAssignments('Assignment\tScore\tStatus\nLab\t18/20\tExcused', today)[0].pointsEarned, null,
+    'an excused status takes precedence over a copied score');
+assert.equal(paste.parseAssignments('Assignment\nLab\nScore: 18/20\nExcused', today)[0].excused, true);
+assert.equal(paste.parseAssignments('AssignmentLabDue: 11/20/2026Comments: not excusedScore18/20', today)[0].pointsEarned, 18,
+    'excused mentioned in copied comments does not erase a real score');
+assert.equal(paste.parseAssignments('AssignmentLabDue: 11/20/2026ExcusedScore18/20', today)[0].pointsEarned, null,
+    'an explicit concatenated status before the score overrides earned points');
+assert.equal(paste.parseAssignments('AssignmentLabDue: 11/20/2026Score18/20(90%)Excused', today)[0].pointsEarned, null,
+    'an explicit status after the displayed score percentage also overrides earned points');
+assert.deepEqual(paste.parseAssignments('Task,Due,Grade\nEssay,11/20/2026,Missing / 10', today), [
+    { title: 'Essay', dueDate: '2026-11-20', pointsEarned: null, maxPoints: 10, category: '', missing: true }
+], 'alternate CSV headers and missing score markers preserve known points without inventing a zero grade');
+assert.equal(paste.inferCourse('honors geometryclassroomgradesassignmentquiz', [geometry]), geometry);
+assert.equal(paste.parseDate('February 30, 2026', today), '', 'named dates cannot roll into another month');
+assert.equal(paste.parseDate('31 April 2026', today), '');
+assert.equal(paste.parseDate('20 November 2026', today), '2026-11-20');
+assert.deepEqual(paste.parseCategoryWeights('Homework\nWeight: 25%\nTestsWeight: 75%\n'), [
+    { name: 'Homework', weight: 25 }, { name: 'Tests', weight: 75 }
+]);
+assert.deepEqual(paste.parseCategoryWeights('Category\tWeight\tScore\nHomework\t25%\t8/10\nTests\t75%\t18/20'), [
+    { name: 'Homework', weight: 25 }, { name: 'Tests', weight: 75 }
+]);
+assert.deepEqual(paste.parseCategoryWeights('TestsWeight: 70120/150(80%)HomeworkWeight: 10185/237(78%)'), [],
+    'concatenated category totals are not guessed as weights');
+assert.deepEqual(paste.parseCategoryWeights('Tests\nWeight: 70%\nTests\nWeight: 75%'), [],
+    'conflicting copied weights require manual review');
+assert.deepEqual(paste.parseAssignments('Tests\nWeight: 75%\nAssignment\tDue Date\tScore\nQuiz\t11/20/2026\t18/20\n' +
+    'Homework\nWeight: 25%\nAssignment\tScore\tDue Date\nPractice\t8/10\t11/21/2026', today).map(item => item.category),
+    ['Tests', 'Homework'], 'category context before the first table header and between tables is retained');
+assert.deepEqual(paste.parseCourses('Name\tStudent ID\nExample Person\t123456\nCourse\tTeacher\nBiology I\tMs. Example', catalog),
+    [{ name: 'Biology I', match: catalog[0] }], 'personal-information tables cannot become the course-name header');
 
 {
     const nodes = new Map();
@@ -153,9 +189,12 @@ assert.equal(paste.inferCourse('Period 2 Honors Geometry (Smith)\nGrades\nAssign
     let app;
     const sandbox = {
         window: { StudBudCampusPaste: paste },
-        document: { getElementById: node, querySelectorAll: () =>
-            app.campusAssignmentDraft.rows.map((row, index) => row.include ? { dataset: { campusAssignmentIndex: String(index) } } : null).filter(Boolean) },
+        document: { getElementById: node, querySelectorAll: selector => selector.includes('campus-course-index')
+            ? app.campusCourseDraft.rows.flatMap((row, index) => row.include ? [{ dataset: { campusCourseIndex: String(index) } }] : [])
+            : app.campusAssignmentDraft.rows.flatMap((row, index) => row.include ? [{ dataset: { campusAssignmentIndex: String(index) } }] : []) },
         AppState: { get: key => data[key], set: (key, value) => { data[key] = value; },
+            saveStateChanges: changes => Object.assign(data, changes),
+            findDuplicateCourse: () => null,
             updateCourse(code, patch) { Object.assign(data.courses.find(course => course.code === code), patch); } },
         localDateKey: () => '2026-11-12', Date, console
     };
@@ -237,6 +276,72 @@ assert.equal(paste.inferCourse('Period 2 Honors Geometry (Smith)\nGrades\nAssign
     node('campus-paste-assignment-course').value = 'other';
     app.previewCampusAssignments();
     assert.equal(app.campusAssignmentDraft.courseCode, 'other', 'a manual class selection is not overridden by copied headings');
+
+    data.courses = [{ code: 'math', title: 'Math', categories: [{ id: 'hw', name: 'Homework', weight: null }] }];
+    data.assignments = [];
+    node('campus-paste-assignment-course').value = 'math';
+    node('campus-paste-assignments').value = 'Homework\nWeight: 25%\nAssignment\tScore\tCategory\nPractice\t8/10\tHomework\n' +
+        'Tests\nWeight: 75%\nAssignment\tCategory\tScore\nQuiz\tTests\t18/20';
+    app.previewCampusAssignments();
+    assert.equal(app.campusAssignmentDraft.completeWeights, true);
+    assert.equal(data.courses[0].categories[0].weight, null, 'preview never changes configured weights');
+    node('campus-apply-category-weights').checked = true;
+    app.importCampusAssignments();
+    assert.deepEqual(data.courses[0].categories.map(item => item.weight), [25, 75],
+        'a complete set of explicit weights is applied only after opting in');
+    node('campus-apply-category-weights').checked = false;
+    data.assignments = [];
+    node('campus-paste-assignments').value = 'Assignment\tScore\tCategory\tStatus\nBonus\t5/0\tHomework\t\nExcused lab\t18/20\tTests\tExcused';
+    app.previewCampusAssignments();
+    assert.ok(app.campusAssignmentDraft.rows.every(row => row.include));
+    app.importCampusAssignments();
+    assert.equal(data.assignments[0].maxPoints, 0, 'zero-point extra credit survives import');
+    assert.equal(data.assignments[0].pointsEarned, 5);
+    assert.equal(data.assignments[1].graded, false, 'scored excused work is never counted toward grades');
+    assert.equal(data.assignments[1].status, 'completed');
+    node('campus-paste-assignments').value = 'Assignment\tScore\tCategory\nAnother quiz\t8/10\tTests';
+    app.previewCampusAssignments();
+    data.assignments.push({ id: 'late', title: 'Another quiz', dueDate: '', courseCode: 'math' });
+    assert.throws(() => app.importCampusAssignments(), /added since the preview/);
+    data.assignments = [];
+    app.previewCampusAssignments();
+    const beforeFailedSave = JSON.stringify(data);
+    const saveChanges = sandbox.AppState.saveStateChanges;
+    sandbox.AppState.saveStateChanges = () => { throw new Error('Device storage full'); };
+    assert.throws(() => app.importCampusAssignments(), /storage full/);
+    assert.equal(JSON.stringify(data), beforeFailedSave, 'failed imports never mutate existing course categories or assignment arrays');
+    assert.ok(app.campusAssignmentDraft, 'failed saves retain the preview for retry');
+    sandbox.AppState.saveStateChanges = saveChanges;
+    data.assignments = [{ id: 'repair-moved', title: 'Another quiz', dueDate: '', courseCode: 'math' }];
+    app.previewCampusAssignments();
+    data.assignments[0].courseCode = 'another-class';
+    assert.throws(() => app.importCampusAssignments(), /changed since the preview/,
+        'category repairs cannot attach a previous class’s category after an assignment moves');
+    assert.equal(data.assignments[0].categoryId, undefined);
+    data.assignments = [];
+    sandbox.window.StudBudCloud = { user: { id: 'first-account' }, accountVersion: 1 };
+    app.previewCampusAssignments();
+    sandbox.window.StudBudCloud.user.id = 'second-account';
+    assert.throws(() => app.importCampusAssignments(), /Preview again/,
+        'an unchanged paste preview cannot import another account’s data');
+    assert.equal(data.assignments.length, 0);
+    delete sandbox.window.StudBudCloud;
+    app.currentSchool = () => 'other';
+    app.isParkwaySchool = () => false;
+    node('campus-paste-courses').value = 'Class One\nClass Two';
+    node('campus-paste-term').value = 'FY';
+    app.previewCampusCourses();
+    const beforeCourseSave = JSON.stringify(data);
+    sandbox.AppState.saveStateChanges = () => { throw new Error('Device storage full'); };
+    assert.throws(() => app.importCampusCourses(), /storage full/);
+    assert.equal(JSON.stringify(data), beforeCourseSave, 'a failed class batch leaves all existing classes intact');
+    let courseSaves = 0;
+    sandbox.AppState.saveStateChanges = changes => { courseSaves++; return saveChanges(changes); };
+    app.importCampusCourses();
+    assert.equal(courseSaves, 1, 'multiple copied classes are persisted as one atomic batch');
+    assert.deepEqual(Array.from(data.courses.slice(-2), course => course.title), ['Class One', 'Class Two']);
+    sandbox.AppState.saveStateChanges = saveChanges;
+    data.courses = [geometry, { code: 'other', title: 'Another class' }];
 
     const pasteListener = appSource.match(/document\.addEventListener\('paste', event => \{([\s\S]*?)\n\s*\}\);/)[1];
     vm.runInContext(`window.handlePaste = event => {${pasteListener}}`, sandbox);

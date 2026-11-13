@@ -1181,7 +1181,12 @@
                     this.keys.add(e.code);
                 },
                 keyup: e => this.keys.delete(e.code),
-                blur: () => { this.keys.clear(); this.mouse.down = false; this.mouse.rdown = false; this.aimPointer = null; this.resetTouchStick?.(); },
+                blur: () => {
+                    this.keys.clear(); this.justPressed.clear();
+                    this.mouse.down = false; this.mouse.rdown = false; this.mouse.pressed = false; this.mouse.rpressed = false;
+                    this.aimPointer = null; this.rightAimPointer = null;
+                    this.resetTouchStick?.(); this.resetTouchButtons?.();
+                },
                 visibility: () => {
                     this.renderBudget = null;
                     this.handlers.blur();
@@ -1214,10 +1219,12 @@
             aimSurface.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' || e.pointerType === 'pen') this.mouse.active = false; });
             canvas.addEventListener('pointerdown', e => {
                 if (this.question || this.over || this.paused) return;
+                if (e.button !== undefined && e.button !== 0 && e.button !== 2) return;
                 this.mouse.active = true;
                 this.mouse.pointerType = e.pointerType;
                 if (e.button !== 2 && this.aimPointer != null) return;
                 if (e.button !== 2) this.aimPointer = e.pointerId;
+                else this.rightAimPointer = e.pointerId;
                 if (e.pointerType === 'touch') this.mouse.touchAt = performance.now();
                 const b = canvas.getBoundingClientRect();
                 this.mouse.x = (e.clientX - b.left) / this.scale;
@@ -1227,8 +1234,15 @@
                 canvas.setPointerCapture?.(e.pointerId);
             });
             const releaseAim = e => {
-                if (e.button === 2) this.mouse.rdown = false;
-                if (e.pointerId === this.aimPointer) { this.aimPointer = null; this.mouse.down = false; }
+                const cancelled = e.type === 'pointercancel' || e.type === 'lostpointercapture';
+                if (e.button === 2 || e.pointerId === this.rightAimPointer && (cancelled || e.buttons === 0)) {
+                    this.rightAimPointer = null; this.mouse.rdown = false;
+                    if (cancelled) this.mouse.rpressed = false;
+                }
+                if (e.pointerId === this.aimPointer && (cancelled || e.button !== 2 || e.buttons === 0)) {
+                    this.aimPointer = null; this.mouse.down = false;
+                    if (cancelled) this.mouse.pressed = false;
+                }
             };
             for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.addEventListener(type, releaseAim);
             canvas.addEventListener('contextmenu', e => e.preventDefault());
@@ -1624,6 +1638,7 @@
                         if (btn.dataset.click) this.mouse.pressed = false;
                     }
                 };
+                end.cancel = () => { if (activeId !== null) end({ pointerId: activeId, type: 'pointercancel' }); };
                 this.touchButtonHandlers ||= [];
                 this.touchButtonHandlers.push(end);
                 window.addEventListener('pointerup', end);
@@ -1631,12 +1646,14 @@
                 for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) btn.addEventListener(type, end);
                 btn.addEventListener('contextmenu', e => e.preventDefault());
             };
+            this.resetTouchButtons = () => { for (const end of this.touchButtonHandlers || []) end.cancel(); };
             // Each game describes its own on-screen controls: { stick, buttons: [{ k, label, cls, click }] }. The recharge button is added automatically.
             const DEFAULT_LAYOUT = { stick: true, buttons: [{ k: 'Space', label: 'Jump', cls: 'main' }, { k: 'ShiftLeft', label: 'Dash' }] };
             this.applyTouchLayout = () => {
                 const layout = this.game?.touchLayout?.() || DEFAULT_LAYOUT;
                 const key = JSON.stringify(layout) + (this.game?.res ? 'q' : '');
                 if (key === this.touchLayoutKey) return;
+                this.resetTouchButtons();
                 for (const end of this.touchButtonHandlers || []) {
                     window.removeEventListener('pointerup', end);
                     window.removeEventListener('pointercancel', end);

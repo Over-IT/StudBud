@@ -235,14 +235,17 @@ Run `node --test tests/cloud-encryption.cjs tests/account-privacy.cjs tests/acco
 Open School → My grades → **Import grades**. Currently supports Infinite Campus.
 
 - Copy classes from **Schedule**, or assignments from a class's **Grades** page.
-- Paste tables, CSV, labeled rows, or Campus pages with or without line breaks. Check the preview before confirming.
+- Select all, copy and paste the page, including rich tables, CSV or labeled rows with or without line breaks. Repeated or reordered table headers and surrounding navigation are filtered out. Check the preview before confirming.
 - If no class is selected, an unambiguous copied class heading selects a saved class. Ambiguous matches require your choice.
-- Copied category sections carry over to their assignments. New categories are created on confirmation, without guessing weights. Existing categories and weights are preserved. Reimporting can fill missing categories without replacing existing grades.
-- Scores need points possible, a fraction, or an explicit percentage. Positive multipliers adjust scored earned and possible points; ungraded multipliers are not applied.
+- Copied category sections carry over to their assignments. New categories are created on confirmation, without guessing weights. Existing weights are preserved unless you explicitly check **Apply these category weights** for a complete copied set totaling 100%. Incomplete, conflicting or ambiguous weights require manual review.
+- Scores need points possible, a fraction, or an explicit percentage. Positive multipliers adjust scored earned and possible points; ungraded multipliers are not applied. Excused work is not graded, zero-point extra credit is supported, and impossible calendar dates are left blank.
+- Reimporting can fill missing categories without replacing existing grades. Class and assignment batches save atomically; failed saves retain the preview for retry. Account changes invalidate previews and clear copied data.
 
 Parsing stays in your browser. Never paste passwords or student IDs. Comments and unrelated details are ignored; only confirmed fields are saved and synced. StudBud does not sign in to Campus or fetch portal pages. Older imported schedules remain visible but are not refreshed.
 
 Background state changes share one scheduled, visible-page UI refresh. Hidden charts and inactive workspace lists are not rebuilt for every saved study checkpoint. Pointer movement and scrolling still record activity, but study-context scans are limited to once per second; deliberate input updates immediately. Study recommendations reuse class grades and GPA calculations within each batch. Saving, cloud sync, and multiplayer heartbeats remain independent of deferred rendering. These reduce redundant work; actual low-end-device FPS has not been measured.
+
+Low-detail idle game warm-ups draw at the preview rate while simulation and active play remain full-rate. Cave edges avoid allocating coordinate arrays per visible tile, without changing their appearance. Pointer cancellation, capture loss and focus loss release controls and discard queued actions; a fresh touch can immediately take control again.
 
 ## Username/password sign-in
 

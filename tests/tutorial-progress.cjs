@@ -67,5 +67,5 @@ check(6, true);
 check(7, false);
 state.settings.startPage = 'planner';
 check(7, true);
-assert.match(source, /\['state:changed', 'courses:updated', 'assignments:updated', 'flashcards:updated'\]/);
+assert.match(source, /\['state:changed', 'state:restored', 'courses:updated', 'assignments:updated', 'flashcards:updated'\]/);
 console.log('Tutorial checks saved setup, real deadlines, valid budgets, selected work, three usable cards and a new rated answer; opening controls is not completion.');

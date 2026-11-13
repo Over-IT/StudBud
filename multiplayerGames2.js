@@ -569,17 +569,29 @@
                             ctx.fillRect(px, py, 2 + (k & 1), 1);
                         }
                     }
-                    const seam = [];
-                    if (this.solid(this.tile(tx - 1, ty))) seam.push([x + 1, y + 1, x + 1, y + TS - 1]);
-                    if (this.solid(this.tile(tx + 1, ty))) seam.push([x + TS - 1, y + 1, x + TS - 1, y + TS - 1]);
-                    if (this.solid(this.tile(tx, ty - 1))) seam.push([x + 1, y + 1, x + TS - 1, y + 1]);
-                    if (this.solid(this.tile(tx, ty + 1))) seam.push([x + 1, y + TS - 1, x + TS - 1, y + TS - 1]);
-                    if (seam.length) {
+                    const edges = (this.solid(this.tile(tx - 1, ty)) ? 1 : 0)
+                        | (this.solid(this.tile(tx + 1, ty)) ? 2 : 0)
+                        | (this.solid(this.tile(tx, ty - 1)) ? 4 : 0)
+                        | (this.solid(this.tile(tx, ty + 1)) ? 8 : 0);
+                    if (edges) {
                         ctx.save();
                         ctx.lineCap = 'square'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(5,5,7,.82)';
-                        ctx.beginPath(); for (const [x1, y1, x2, y2] of seam) { ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); } ctx.stroke();
-                        ctx.lineWidth = natural ? 3 : 1.5; ctx.strokeStyle = natural ? '#67b5ba' : 'rgba(197,145,93,.7)';
-                        ctx.beginPath(); for (const [x1, y1, x2, y2] of seam) { ctx.moveTo(x1 + (x1 === x + 1 ? 2 : -2), y1 + (y1 === y + 1 ? 2 : -2)); ctx.lineTo(x2 + (x2 === x + 1 ? 2 : -2), y2 + (y2 === y + 1 ? 2 : -2)); } ctx.stroke();
+                        for (let pass = 0; pass < 2; pass++) {
+                            if (pass) {
+                                ctx.lineWidth = natural ? 3 : 1.5;
+                                ctx.strokeStyle = natural ? '#67b5ba' : 'rgba(197,145,93,.7)';
+                            }
+                            const inset = pass * 2;
+                            ctx.beginPath();
+                            for (let edge = 0; edge < 4; edge++) {
+                                if (!(edges & (1 << edge))) continue;
+                                const x1 = x + (edge === 1 ? TS - 1 : 1), y1 = y + (edge === 3 ? TS - 1 : 1);
+                                const x2 = x + (edge === 0 ? 1 : TS - 1), y2 = y + (edge === 2 ? 1 : TS - 1);
+                                ctx.moveTo(x1 + (x1 === x + 1 ? inset : -inset), y1 + (y1 === y + 1 ? inset : -inset));
+                                ctx.lineTo(x2 + (x2 === x + 1 ? inset : -inset), y2 + (y2 === y + 1 ? inset : -inset));
+                            }
+                            ctx.stroke();
+                        }
                         ctx.restore();
                     }
                     if (natural && this.solid(this.tile(tx, ty - 1))) {

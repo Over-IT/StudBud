@@ -124,6 +124,19 @@ assert.match(A.util.accountTagMarkup('student', ['moderator']), /Moderator/, 'st
     app.waitingRunner.running = false;
     frame(performance.now() + 200);
     assert.equal(previewQueries, 1, 'previews resume when the warm-up is not running');
+    A.configureGraphicsProfile('performance');
+    app.lastPreviewDrawAt = undefined;
+    warmupDraws = warmupSteps = 0;
+    const base = performance.now() + 300;
+    for (let index = 0; index < 600; index++) frame(base + index * 1000 / 60);
+    assert.equal(warmupSteps, 600, 'idle warm-up timing still advances every animation frame');
+    assert.ok(warmupDraws >= 299 && warmupDraws <= 302, 'low-detail idle warm-up submits roughly half as many canvas frames');
+    app.waitingRunner.running = true;
+    warmupDraws = warmupSteps = 0;
+    for (let index = 0; index < 600; index++) frame(base + 10000 + index * 1000 / 60);
+    assert.equal(warmupSteps, 600);
+    assert.equal(warmupDraws, 600, 'active warm-up controls retain full-rate simulation and drawing');
+    A.configureGraphicsProfile('auto');
 }
 {
     const app = Object.create(sandbox.window.PerformanceApp.prototype);

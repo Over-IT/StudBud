@@ -378,6 +378,13 @@ for (const mode of ['skyline', 'duel']) {
     for (const handler of windowHandlers.get('pointercancel')) handler({ type: 'pointercancel', pointerId: 7 });
     assert.equal(session.keys.has('Space'), false, 'global cancel releases actions even without pointer capture');
     assert.equal(session.justPressed.has('Space'), false, 'cancel discards unconsumed action edges');
+    jump.emit('pointerdown', 0, 0, { pointerId: 9 });
+    session.resetTouchButtons();
+    assert.equal(session.keys.has('Space'), false);
+    assert.equal(session.justPressed.has('Space'), false, 'focus loss discards pending touch actions');
+    jump.emit('pointerdown', 0, 0, { pointerId: 10 });
+    assert.equal(session.keys.has('Space'), true, 'touch buttons accept fresh presses after focus loss');
+    jump.emit('pointerup', 0, 0, { pointerId: 10 });
 }
 
 for (const mode of ['miner', 'shooter', 'market', 'river']) {
@@ -474,6 +481,28 @@ assert.equal(A.games.sports, undefined, 'Soccer has been retired');
     session.keys.clear();
     session.handlers.keydown({ code: 'KeyW', target: text });
     assert.equal(session.keys.size, 0, 'intentional text and numeric input editing remains isolated');
+    canvas.emit('pointerdown', 30, 40, { button: 0 });
+    canvas.emit('pointercancel', 30, 40, { button: -1 });
+    assert.equal(session.mouse.pressed, false, 'cancel before the next game tick discards pending canvas clicks');
+    canvas.emit('pointerdown', 30, 40, { button: 2 });
+    canvas.emit('lostpointercapture', 30, 40, { button: -1 });
+    assert.equal(session.mouse.rdown, false);
+    assert.equal(session.mouse.rpressed, false, 'lost capture releases secondary aim actions');
+    canvas.emit('pointerdown', 30, 40, { button: 0, buttons: 1 });
+    canvas.emit('pointerdown', 30, 40, { button: 2, buttons: 3 });
+    canvas.emit('pointerup', 30, 40, { button: 2, buttons: 1 });
+    assert.equal(session.mouse.down, true, 'releasing secondary aim does not release a still-held primary button');
+    canvas.emit('pointerdown', 30, 40, { button: 2, buttons: 3 });
+    canvas.emit('pointerup', 30, 40, { button: 2, buttons: 0 });
+    assert.equal(session.mouse.down, false, 'the final pointer release clears primary aim after chorded mouse buttons');
+    assert.equal(session.mouse.rdown, false);
+    canvas.emit('pointerdown', 30, 40, { button: 2, buttons: 2 });
+    canvas.emit('pointerup', 30, 40, { button: 0, buttons: 0 });
+    assert.equal(session.mouse.rdown, false, 'a final primary release also clears previously held secondary aim');
+    session.justPressed.add('Space'); session.mouse.pressed = true;
+    session.handlers.blur();
+    assert.equal(session.justPressed.size, 0);
+    assert.equal(session.mouse.pressed, false, 'returning to the game cannot consume an action queued before focus loss');
 }
 
 for (const reward of [5, 40, 65, 100]) {
@@ -487,6 +516,23 @@ for (const reward of [5, 40, 65, 100]) {
 
 const appSource = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 vm.runInContext(appSource.slice(appSource.indexOf('    class AppOrchestrator {'), appSource.indexOf('    window.NexusApp =')) + '\nwindow.TestApp = AppOrchestrator;', sandbox);
+{
+    const app = Object.create(sandbox.window.TestApp.prototype), canvas = new Element();
+    app.waitingRunner = { running: true };
+    const hops = [];
+    app.waitingHop = (...direction) => hops.push(direction);
+    const event = (type, pointerId, x, extra = {}) => ({ type, pointerId, clientX: x, clientY: 20, currentTarget: canvas, preventDefault() {}, ...extra });
+    app.beginWaitingHop(event('pointerdown', 1, 20));
+    app.beginWaitingHop(event('pointerdown', 2, 90, { isPrimary: false }));
+    app.finishWaitingHop(event('pointerup', 2, 90));
+    assert.equal(hops.length, 0, 'a second finger cannot complete the active warm-up gesture');
+    app.finishWaitingHop(event('pointerup', 1, 80));
+    assert.equal(hops[0][0], 1, 'the owning finger still performs its intended swipe');
+    app.beginWaitingHop(event('pointerdown', 3, 20));
+    app.finishWaitingHop(event('lostpointercapture', 3, 20));
+    assert.equal(hops.length, 1, 'lost capture cannot trigger an unintended hop');
+    assert.equal(app.waitingRunner.pointer, null);
+}
 async function checkPracticeGrading() {
     const app = Object.create(sandbox.window.TestApp.prototype);
     const content = new Element();

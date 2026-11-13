@@ -372,6 +372,10 @@
         }
 
         saveSchoolYear(changes) {
+            return this.saveStateChanges(changes);
+        }
+
+        saveStateChanges(changes) {
             const previous = this.state;
             this.state = { ...previous, ...changes };
             try { this.saveToLocalStorage(); }
@@ -1315,6 +1319,19 @@
             this.plannerDate = '';
             this.plannerScope = 'day';
             this.gpaGoalDraft = null;
+            this.campusCourseDraft = null;
+            this.campusAssignmentDraft = null;
+            for (const id of ['campus-paste-courses', 'campus-paste-assignments']) {
+                const input = document.getElementById(id);
+                if (input) input.value = '';
+            }
+            for (const id of ['campus-paste-courses-preview', 'campus-paste-assignments-preview',
+                'campus-paste-courses-status', 'campus-paste-assignments-status']) {
+                document.getElementById(id)?.replaceChildren();
+            }
+            for (const id of ['import-campus-courses-btn', 'import-campus-assignments-btn']) {
+                document.getElementById(id)?.classList.add('hidden');
+            }
             await AppState.resetForCloudAccount();
             this.renderUI();
         }
@@ -1465,6 +1482,7 @@
             waitingCanvas.addEventListener('pointerdown', event => this.beginWaitingHop(event));
             waitingCanvas.addEventListener('pointerup', event => this.finishWaitingHop(event));
             waitingCanvas.addEventListener('pointercancel', event => this.finishWaitingHop(event));
+            waitingCanvas.addEventListener('lostpointercapture', event => this.finishWaitingHop(event));
             waitingCanvas.addEventListener('contextmenu', event => event.preventDefault());
             document.addEventListener('paste', event => {
                 const target = event.target;
@@ -1608,6 +1626,11 @@
             document.getElementById('campus-paste-assignments-panel')?.classList.toggle('hidden', mode !== 'assignments');
         }
 
+        campusPasteContext() {
+            const cloud = window.StudBudCloud;
+            return `${cloud?.user?.id || 'local'}:${cloud?.accountVersion || 0}`;
+        }
+
         invalidateCampusPastePreview(mode) {
             if (mode === 'courses') {
                 this.campusCourseDraft = null;
@@ -1655,7 +1678,8 @@
                         && existing.title.trim().toLowerCase() === item.name.trim().toLowerCase());
                 return { ...item, duplicate: Boolean(duplicate), include: !duplicate && (Boolean(item.match) || !this.isParkwaySchool(school)) };
             });
-            this.campusCourseDraft = { rows, term, school, sourceText: document.getElementById('campus-paste-courses').value };
+            this.campusCourseDraft = { rows, term, school, accountContext: this.campusPasteContext(),
+                sourceText: document.getElementById('campus-paste-courses').value };
             preview.innerHTML = `<ul class="campus-paste-list">${rows.map((row, index) => {
                 const label = row.match ? row.match.title
                     : this.isParkwaySchool(school) ? 'No catalog match' : 'Add as a custom class';
@@ -1670,10 +1694,11 @@
             const draft = this.campusCourseDraft;
             if (!draft) throw new Error('Preview the pasted classes before adding them.');
             if (document.getElementById('campus-paste-term').value !== draft.term
+                || draft.accountContext !== this.campusPasteContext()
                 || this.currentSchool() !== draft.school
                 || document.getElementById('campus-paste-courses').value !== draft.sourceText) {
                 this.invalidateCampusPastePreview('courses');
-                throw new Error('The pasted classes or term changed. Preview them again before adding.');
+                throw new Error('Your account, pasted classes or term changed. Preview them again before adding.');
             }
             const selected = [...document.querySelectorAll('[data-campus-course-index]:checked')]
                 .map(input => draft.rows[Number(input.dataset.campusCourseIndex)]).filter(Boolean);
@@ -1720,7 +1745,7 @@
             if (AppState.get('settings')?.gradeGoalSource === 'gpa') {
                 AppState.saveGradeGoals(this.rebalanceGradeGoals([...existing, ...added]));
             } else {
-                added.forEach(course => AppState.addCourse(course));
+                AppState.saveStateChanges({ courses: [...existing, ...added] });
             }
             const status = document.getElementById('campus-paste-courses-status');
             status.textContent = `Added ${added.length} ${added.length === 1 ? 'class' : 'classes'}. You can paste assignments next.`;
@@ -1746,19 +1771,27 @@
             if (!parsed) throw new Error('The paste tool is not available. Reload StudBud and try again.');
             if (!parsed.length) throw new Error('Paste an assignment table first.');
             const normalize = value => String(value || '').normalize('NFKC').trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+            const categoryWeights = window.StudBudCampusPaste.parseCategoryWeights?.(sourceText) || [];
+            const weightedNames = new Set(categoryWeights.map(item => normalize(item.name)));
+            const completeWeights = categoryWeights.length > 0
+                && Math.abs(categoryWeights.reduce((sum, item) => sum + item.weight, 0) - 100) < .1
+                && parsed.every(item => weightedNames.has(normalize(item.category)))
+                && (course.categories || []).every(item => item.excluded || weightedNames.has(normalize(item.name)));
             const existing = AppState.get('assignments') || [];
             const existingByKey = new Map(existing.filter(entry => entry.courseCode === courseCode)
                 .map(entry => [`${normalize(entry.title)}|${entry.dueDate || ''}`, entry]));
             const seen = new Set(existing.filter(entry => entry.courseCode === courseCode)
                 .map(entry => `${normalize(entry.title)}|${entry.dueDate || ''}`));
+            const repaired = new Set();
             const rows = parsed.map(item => {
                 const category = (course.categories || []).find(entry => normalize(entry.name) === normalize(item.category));
                 const key = `${normalize(item.title)}|${item.dueDate}`;
                 const duplicate = seen.has(key);
                 const previous = existingByKey.get(key);
-                const categoryRepair = Boolean(item.category && previous && !previous.categoryId);
+                const categoryRepair = Boolean(item.category && previous && !previous.categoryId && !repaired.has(previous.id));
+                if (categoryRepair) repaired.add(previous.id);
                 seen.add(key);
-                const invalidScore = item.pointsEarned !== null && (item.pointsEarned < 0 || item.maxPoints <= 0);
+                const invalidScore = item.maxPoints !== null && item.maxPoints < 0 || item.pointsEarned !== null && item.pointsEarned < 0;
                 const multiplier = item.multiplier === undefined ? 1 : Number(item.multiplier);
                 const unsupportedMultiplier = item.pointsEarned !== null && item.multiplier !== undefined
                     && (item.multiplier === '' || !Number.isFinite(multiplier) || multiplier <= 0
@@ -1768,7 +1801,9 @@
                     multiplierValue: multiplier, include: categoryRepair || (!duplicate && !invalidScore && !unsupportedMultiplier) };
             });
             this.campusAssignmentDraft = {
-                rows, courseCode, sourceText: document.getElementById('campus-paste-assignments').value
+                rows, courseCode, categoryWeights, completeWeights, categorySnapshot: JSON.stringify(course.categories || []),
+                accountContext: this.campusPasteContext(),
+                sourceText: document.getElementById('campus-paste-assignments').value
             };
             preview.innerHTML = `<ul class="campus-paste-list campus-paste-assignments">${rows.map((row, index) => {
                 const grade = row.excused ? 'Excused' : row.incompleteScore ? 'Score needs points possible' : row.pointsEarned === null ? 'No score'
@@ -1782,7 +1817,11 @@
                 const state = row.categoryRepair ? `Update category: ${row.category}` : row.duplicate ? 'Already added' : row.invalidScore ? 'Check score'
                     : row.unsupportedMultiplier ? 'Invalid score multiplier; enter this assignment manually' : detail;
                 return `<li><label><input type="checkbox" data-campus-assignment-index="${index}"${row.include ? ' checked' : ''}${row.include ? '' : ' disabled'}><span>${this.escapeHTML(row.title)}</span></label><small class="${row.invalidScore || row.unsupportedMultiplier || row.incompleteScore || ungradedMultiplier || (row.category && !row.categoryId) ? 'campus-paste-warning' : ''}">${this.escapeHTML(state)}</small></li>`;
-            }).join('')}</ul>`;
+            }).join('')}</ul>${categoryWeights.length ? `<details class="assignment-more"><summary>Copied category weights</summary>
+                <p class="settings-hint">${this.escapeHTML(categoryWeights.map(item => `${item.name}: ${item.weight}%`).join(' · '))}</p>
+                ${completeWeights ? '<label><input id="campus-apply-category-weights" type="checkbox"> Apply these category weights to this class (changes grade calculations)</label>'
+                    : '<p class="settings-hint">These are not a complete 100% set for this class. Existing weights will stay unchanged; review them in the class editor.</p>'}
+                </details>` : ''}`;
             const count = rows.filter(row => row.include).length;
             const graded = rows.filter(row => row.include && row.pointsEarned !== null).length;
             status.textContent = `${inferredCourse ? `Matched class: ${course.title}. ` : ''}${count} ready to import · ${graded} with scores${rows.length > count ? ` · ${rows.length - count} skipped` : ''}.`;
@@ -1793,20 +1832,48 @@
             const draft = this.campusAssignmentDraft;
             if (!draft) throw new Error('Preview the pasted assignments before adding them.');
             if (document.getElementById('campus-paste-assignment-course').value !== draft.courseCode
+                || draft.accountContext !== this.campusPasteContext()
                 || document.getElementById('campus-paste-assignments').value !== draft.sourceText
                 || !(AppState.get('courses') || []).some(course => course.code === draft.courseCode)) {
                 this.invalidateCampusPastePreview('assignments');
-                throw new Error('The selected class or pasted assignments changed. Preview again before adding.');
+                throw new Error('Your account, selected class or pasted assignments changed. Preview again before adding.');
             }
             const selected = [...document.querySelectorAll('[data-campus-assignment-index]:checked')]
                 .map(input => draft.rows[Number(input.dataset.campusAssignmentIndex)]).filter(Boolean);
             if (!selected.length) throw new Error('Select at least one assignment to add.');
             const today = localDateKey(new Date());
-            const assignments = AppState.get('assignments') || [];
+            const assignments = (AppState.get('assignments') || []).slice();
             const batchId = Date.now();
             const course = (AppState.get('courses') || []).find(item => item.code === draft.courseCode);
-            const categories = (course.categories || []).slice();
+            const categories = (course.categories || []).map(item => ({ ...item }));
             const normalizeCategory = value => String(value || '').normalize('NFKC').trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+            const applyWeights = document.getElementById('campus-apply-category-weights')?.checked === true;
+            if (applyWeights && (!draft.completeWeights || JSON.stringify(course.categories || []) !== draft.categorySnapshot)) {
+                throw new Error('Class categories changed. Preview again before applying copied weights.');
+            }
+            const key = item => `${normalizeCategory(item.title)}|${item.dueDate || ''}`;
+            const currentKeys = new Set(assignments.filter(item => item.courseCode === draft.courseCode).map(key));
+            for (const row of selected) {
+                if (row.categoryRepair) {
+                    const current = assignments.find(item => item.id === row.existingId);
+                    if (!current || current.categoryId || current.courseCode !== draft.courseCode || key(current) !== key(row)) {
+                        throw new Error('An assignment changed since the preview. Preview again before adding.');
+                    }
+                } else if (currentKeys.has(key(row))) {
+                    throw new Error('An assignment was added since the preview. Preview again to avoid duplicates.');
+                }
+                currentKeys.add(key(row));
+            }
+            if (applyWeights) {
+                for (const weight of draft.categoryWeights) {
+                    let category = categories.find(item => normalizeCategory(item.name) === normalizeCategory(weight.name));
+                    if (!category) {
+                        category = { id: `campus_category_${batchId}_${categories.length}`, name: weight.name };
+                        categories.push(category);
+                    }
+                    category.weight = weight.weight;
+                }
+            }
             selected.forEach(row => {
                 if (!row.category) return;
                 let category = categories.find(item => normalizeCategory(item.name) === normalizeCategory(row.category));
@@ -1816,14 +1883,13 @@
                 }
                 row.categoryId = category.id;
             });
-            if (categories.length !== (course.categories || []).length) AppState.updateCourse(course.code, { categories });
             selected.forEach((row, index) => {
                 if (row.categoryRepair) {
                     const existingIndex = assignments.findIndex(item => item.id === row.existingId);
                     if (existingIndex >= 0) assignments[existingIndex] = { ...assignments[existingIndex], categoryId: row.categoryId };
                     return;
                 }
-                const graded = row.pointsEarned !== null;
+                const graded = !row.excused && row.pointsEarned !== null;
                 assignments.push({
                     id: `campus_paste_${batchId}_${index}`,
                     title: row.title,
@@ -1846,7 +1912,10 @@
                     gradedAt: graded ? today : null
                 });
             });
-            AppState.set('assignments', assignments);
+            AppState.saveStateChanges({
+                courses: (AppState.get('courses') || []).map(item => item.code === course.code ? { ...item, categories } : item),
+                assignments
+            });
             document.getElementById('campus-paste-assignments-status').textContent =
                 `Imported ${selected.length} assignments into ${(AppState.get('courses') || []).find(item => item.code === draft.courseCode)?.title || 'your class'}.`;
             document.getElementById('campus-paste-assignments').value = '';
@@ -6421,16 +6490,19 @@
 
         beginWaitingHop(event) {
             event.preventDefault();
+            if (event.isPrimary === false || this.waitingRunner.pointer
+                || (event.button !== undefined && event.button !== 0)) return;
             if (this.waitingRunner.dead && this.waitingRunner.deathAge < 0.55) return;
             if (!this.waitingRunner.running || this.waitingRunner.dead) this.startWaitingRunner();
-            this.waitingRunner.pointer = this.pointOnCanvas(event.currentTarget, event);
+            this.waitingRunner.pointer = { ...this.pointOnCanvas(event.currentTarget, event), id: event.pointerId };
             event.currentTarget.setPointerCapture?.(event.pointerId);
         }
 
         finishWaitingHop(event) {
             const runner = this.waitingRunner, start = runner.pointer;
+            if (!start || start.id !== event.pointerId) return;
             runner.pointer = null;
-            if (!start || event.type === 'pointercancel') return;
+            if (event.type === 'pointercancel' || event.type === 'lostpointercapture') return;
             const end = this.pointOnCanvas(event.currentTarget, event), dx = end.x - start.x, dy = end.y - start.y;
             const threshold = Math.max(22, event.currentTarget.getBoundingClientRect().width / 18);
             if (Math.max(Math.abs(dx), Math.abs(dy)) < threshold) this.waitingHop(0, 1);
@@ -6656,7 +6728,7 @@
                 }
                 if (waitingVisible) {
                     this.stepWaitingRunner(delta);
-                    this.drawWaitingWarmup(waitingCanvas, now / 1000);
+                    if (this.waitingRunner?.running || drawPreviews) this.drawWaitingWarmup(waitingCanvas, now / 1000);
                 }
                 this.multiplayerFrame = requestAnimationFrame(animate);
             };
@@ -9743,7 +9815,7 @@
             this.tutorialCompletedSteps = new Set();
             this.tutorialInitialAnswers = new Map((AppState.get('flashcards') || []).flatMap(deck =>
                 (deck.cards || []).map(card => [`${deck.id}/${card.id}`, Number(card.practiceStats?.attempts) || 0])));
-            this.tutorialUnsubscribers = ['state:changed', 'courses:updated', 'assignments:updated', 'flashcards:updated'].map(name =>
+            this.tutorialUnsubscribers = ['state:changed', 'state:restored', 'courses:updated', 'assignments:updated', 'flashcards:updated'].map(name =>
                 EventBus.on(name, () => this.checkTutorialProgress()));
             this.tutorialCollapsed = false;
             root.addEventListener('click', event => {
