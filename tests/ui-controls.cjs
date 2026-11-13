@@ -64,11 +64,16 @@ const A = sandbox.window.StudBudArcade;
     const media = (touchOnly, finePointer) => query => ({
         matches: query === '(any-pointer: fine)' ? finePointer : touchOnly
     });
-    assert.equal(A.shouldUseTouchControls('auto', media(true, false)), true, 'phones get on-screen controls');
-    assert.equal(A.shouldUseTouchControls('auto', media(true, true)), false, 'a touchscreen with a mouse does not get phone controls');
-    assert.equal(A.shouldUseTouchControls('auto', media(false, true)), false, 'keyboard/mouse devices do not get phone controls');
-    assert.equal(A.shouldUseTouchControls('on', media(false, true)), true, 'manual show overrides device detection');
-    assert.equal(A.shouldUseTouchControls('off', media(true, false)), false, 'manual hide overrides touch-only detection');
+    const laptop = { userAgent: 'CrOS', maxTouchPoints: 5 };
+    const phone = { userAgent: 'Mozilla/5.0 (Linux; Android 14; Mobile)', maxTouchPoints: 5 };
+    assert.equal(A.shouldUseTouchControls('auto', media(true, false), laptop), true, 'touch-only devices get on-screen controls');
+    assert.equal(A.shouldUseTouchControls('auto', media(true, true), laptop), false, 'a touchscreen with a mouse does not get phone controls');
+    assert.equal(A.shouldUseTouchControls('auto', media(false, true), laptop), false, 'keyboard/mouse devices do not get phone controls');
+    assert.equal(A.shouldUseTouchControls('auto', media(true, true), { userAgent: 'CrOS Android', maxTouchPoints: 5 }), false, 'Android compatibility does not identify a Chromebook as a phone');
+    assert.equal(A.shouldUseTouchControls('auto', media(false, true), phone), true, 'phones get controls even when pointer media queries report a fine pointer');
+    assert.equal(A.shouldUseTouchControls('auto', undefined, { userAgentData: { mobile: true }, maxTouchPoints: 5 }), true, 'mobile client hints identify touch phones');
+    assert.equal(A.shouldUseTouchControls('on', media(false, true), laptop), true, 'manual show overrides device detection');
+    assert.equal(A.shouldUseTouchControls('off', media(true, false), phone), false, 'manual hide overrides phone detection');
 }
 {
     const session = Object.create(A.Session.prototype);

@@ -5476,6 +5476,7 @@ img, svg, canvas, a { -webkit-user-drag: none; user-drag: none; }
 input, textarea, select, [contenteditable]:not([contenteditable="false"]), code, pre, .selectable { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 input[type="button"], input[type="submit"], input[type="checkbox"], input[type="radio"], input[type="range"], input[type="color"], input[type="file"] { -webkit-user-select: none; user-select: none; }
 :focus:not(:focus-visible) { outline: none; }
+html.touch-interaction :focus-visible { outline: none !important; }
 
 /* River duel: both players race the same question. */
 .mpg-q-duel { display: flex; align-items: center; justify-content: center; gap: 10px; margin: -6px -6px 12px; padding: 12px 14px; border-radius: 14px; background: linear-gradient(90deg, #dc2626, #f97316); color: #fff; text-align: center; animation: mpg-duel-in .35s ease-out; }

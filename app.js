@@ -1392,6 +1392,14 @@
         bindUI() {
             document.addEventListener('click', event => this.handleClick(event));
             document.addEventListener('keydown', event => this.handleKeydown(event));
+            document.addEventListener('pointerdown', event => {
+                document.documentElement.classList.toggle('touch-interaction', event.pointerType === 'touch');
+            }, true);
+            document.addEventListener('keydown', event => {
+                if (event.key === 'Tab' || event.key.startsWith('Arrow')) {
+                    document.documentElement.classList.remove('touch-interaction');
+                }
+            }, true);
             // A focused number field would otherwise eat the wheel and change its value instead of scrolling the page.
             document.addEventListener('wheel', event => {
                 const field = event.target;

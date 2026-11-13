@@ -306,9 +306,14 @@
             : { low: false, maxDpr: 2, renderScale: 1, fps: Infinity, previewFps: 60, avatarFps: 60, particleScale: 1, particleLimit: 320 };
     }
 
-    function shouldUseTouchControls(mode = 'auto', matchMedia = window.matchMedia?.bind(window)) {
+    function shouldUseTouchControls(mode = 'auto', matchMedia = window.matchMedia?.bind(window),
+        device = typeof navigator === 'undefined' ? {} : navigator) {
         if (mode === 'on') return true;
-        if (mode === 'off' || !matchMedia) return false;
+        if (mode === 'off') return false;
+        const mobile = !/CrOS/i.test(device.userAgent || '') && (device.userAgentData?.mobile === true
+            || /Android|iPhone|iPad|iPod/i.test(device.userAgent || ''));
+        if (mobile && Number(device.maxTouchPoints) > 0) return true;
+        if (!matchMedia) return false;
         return Boolean(matchMedia('(pointer: coarse) and (hover: none)').matches
             && !matchMedia('(any-pointer: fine)').matches);
     }
