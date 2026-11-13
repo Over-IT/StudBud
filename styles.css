@@ -5557,10 +5557,19 @@ input[type="button"], input[type="submit"], input[type="checkbox"], input[type="
 .view > .multiplayer-topline.view-lead .multiplayer-wallet { padding: 6px 12px; }
 #offline-notice, #school-year-notice { margin: 10px 0 0; padding: 8px 12px; gap: 10px; font-size: .8rem; line-height: 1.35; color: var(--text-secondary); }
 #offline-notice .offline-notice-actions button, #school-year-notice .offline-notice-actions button { min-height: 34px; padding: 6px 14px; font-size: .8rem; }
-.picker-search { position: relative; display: flex; align-items: center; margin: 6px 0 6px; }
-.picker-search > i { position: absolute; left: 12px; color: var(--text-secondary); font-size: .8rem; pointer-events: none; }
-.picker-search input { width: 100%; min-height: 38px; padding: 8px 76px 8px 32px; font-size: .9rem; }
-.picker-search .picker-count { position: absolute; right: 12px; font-size: .75rem; color: var(--text-secondary); pointer-events: none; }
+.set-picker { display: grid; gap: 6px; min-width: 0; width: 100%; }
+.set-picker-toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px; border: 1px solid var(--border-glass); border-radius: 10px; background: var(--bg-secondary); color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; }
+.set-picker-toggle > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.set-picker-toggle[aria-expanded="true"] { border-color: var(--accent-primary); }
+.set-picker-toggle[aria-expanded="true"] > i { transform: rotate(180deg); }
+.set-picker-panel { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--border-glass); border-radius: 12px; background: var(--bg-base); }
+.set-picker-panel[hidden] { display: none; }
+.set-picker-panel input { width: 100%; min-width: 0; min-height: 44px; font-size: 1rem; }
+.set-picker-panel .picker-count { margin: 0; color: var(--text-secondary); font-size: .78rem; }
+.set-picker-options { display: grid; grid-auto-rows: max-content; gap: 4px; max-height: min(260px, 40dvh); overflow: auto; overscroll-behavior: contain; }
+.set-picker-options > button { min-height: 44px; padding: 10px; border: 1px solid transparent; border-radius: 8px; color: var(--text-primary); background: var(--bg-glass); font: inherit; font-size: .85rem; line-height: 1.35; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.set-picker-options > button:hover { background: var(--bg-glass-hover); }
+.set-picker-options > button[aria-selected="true"] { border-color: var(--accent-primary); background: color-mix(in srgb, var(--accent-primary) 18%, var(--bg-base)); }
 @media (min-width: 1500px) { #view-container > .view { max-width: 1360px; margin-inline: auto; } }
 @media (min-width: 900px) { .student-workspace .gpa-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 /* Inner scroll areas keep the wheel/swipe instead of scrolling the page behind them */

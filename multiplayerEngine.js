@@ -306,6 +306,13 @@
             : { low: false, maxDpr: 2, renderScale: 1, fps: Infinity, previewFps: 60, avatarFps: 60, particleScale: 1, particleLimit: 320 };
     }
 
+    function shouldUseTouchControls(mode = 'auto', matchMedia = window.matchMedia?.bind(window)) {
+        if (mode === 'on') return true;
+        if (mode === 'off' || !matchMedia) return false;
+        return Boolean(matchMedia('(pointer: coarse) and (hover: none)').matches
+            && !matchMedia('(any-pointer: fine)').matches);
+    }
+
     let activeGraphicsProfile = graphicsProfile();
 
     function configureGraphicsProfile(mode) {
@@ -1466,14 +1473,26 @@
         bindTouch(overlay) {
             const pad = overlay.querySelector('.mpg-touch');
             if (!pad) return;
-            const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches;
-            const touchCapable = (navigator.maxTouchPoints || 0) > 0 || window.matchMedia?.('(hover: none)').matches;
-            if (coarsePointer && touchCapable) overlay.classList.add('has-touch');
-            overlay.addEventListener('pointerdown', event => {
-                if (event.pointerType !== 'touch' || overlay.classList.contains('has-touch')) return;
-                overlay.classList.add('has-touch');
+            const updateTouch = () => {
+                const enabled = shouldUseTouchControls(window.NexusApp?.AppState?.get('settings')?.gameTouchControls || 'auto');
+                if (overlay.classList.contains('has-touch') === enabled) return;
+                overlay.classList.toggle('has-touch', enabled);
+                this.keys.clear();
+                this.justPressed.clear();
+                this.resetTouchStick?.();
+                overlay.querySelectorAll('.mpg-touch button.on').forEach(button => button.classList.remove('on'));
+                this.mouse.down = false;
+                this.mouse.rdown = false;
+                this.mouse.pressed = false;
+                this.mouse.rpressed = false;
                 this.resize();
-            });
+            };
+            overlay.classList.toggle('has-touch',
+                shouldUseTouchControls(window.NexusApp?.AppState?.get('settings')?.gameTouchControls || 'auto'));
+            const queries = ['(pointer: coarse) and (hover: none)', '(any-pointer: fine)']
+                .map(query => window.matchMedia?.(query)).filter(Boolean);
+            queries.forEach(query => query.addEventListener?.('change', updateTouch));
+            this.touchMediaCleanup = () => queries.forEach(query => query.removeEventListener?.('change', updateTouch));
             const release = btn => {
                 const code = btn.dataset.k;
                 if (code) this.keys.delete(code);
@@ -1978,6 +1997,7 @@
             if (!this.preview) window.StudBudSfx?.endMusic();
             cancelAnimationFrame(this.raf);
             this.hudObserver?.disconnect();
+            this.touchMediaCleanup?.();
             clearInterval(this.sendTimer);
             clearInterval(this.hudTimer);
             clearInterval(this.reportTimer);
@@ -3306,6 +3326,7 @@
     window.StudBudArcade = {
         graphicsProfile: (mode, hardware) => mode === undefined ? activeGraphicsProfile : graphicsProfile(mode, hardware),
         configureGraphicsProfile,
+        shouldUseTouchControls,
         Session, BaseGame, Particles, Resource, ENERGY_COSTS, games: {},
         util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, VerticalIndex, slopeY, slopeSurface, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, accountTagMarkup, who, playerCosmetics, avatarUrl, avatarMarkup, animatedCosmetics, drawAvatar, observeAvatars, drawHat, drawFigureSide, drawFigureTop, sceneZoom, canvasView, bandGradient, screenLayer, radialOverlay, parseRgb, questionHistoryMarkup, defaultPlayerColors }
     };

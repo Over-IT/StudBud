@@ -61,6 +61,16 @@ for (const file of ['flashcardEngine.js', 'multiplayerEngine.js', 'multiplayerGa
 
 const A = sandbox.window.StudBudArcade;
 {
+    const media = (touchOnly, finePointer) => query => ({
+        matches: query === '(any-pointer: fine)' ? finePointer : touchOnly
+    });
+    assert.equal(A.shouldUseTouchControls('auto', media(true, false)), true, 'phones get on-screen controls');
+    assert.equal(A.shouldUseTouchControls('auto', media(true, true)), false, 'a touchscreen with a mouse does not get phone controls');
+    assert.equal(A.shouldUseTouchControls('auto', media(false, true)), false, 'keyboard/mouse devices do not get phone controls');
+    assert.equal(A.shouldUseTouchControls('on', media(false, true)), true, 'manual show overrides device detection');
+    assert.equal(A.shouldUseTouchControls('off', media(true, false)), false, 'manual hide overrides touch-only detection');
+}
+{
     const session = Object.create(A.Session.prototype);
     session.game = { race: true, scoreGoal: false };
     session.user = { id: 'late' };
@@ -260,12 +270,35 @@ function controlsFor(mode) {
     overlay.querySelector = selector => selector === '.mpg-qbtn'
         ? pad.children.find(el => el.className?.includes('mpg-qbtn'))
         : elements[selector];
+    overlay.querySelectorAll = () => [];
     pad.querySelector = selector => selector === '.mpg-stick' ? stick : buttons;
     stick.querySelector = () => knob;
     session.overlay = overlay;
     session.bindTouch(overlay);
     session.applyTouchLayout();
     return { session, stick, knob, zone, buttons, status, pad, details, hint, board, toggle };
+}
+
+{
+    let finePointer = false;
+    const listeners = new Set();
+    sandbox.window.matchMedia = query => ({
+        get matches() { return query === '(any-pointer: fine)' ? finePointer : true; },
+        addEventListener: (type, listener) => listeners.add(listener),
+        removeEventListener: (type, listener) => listeners.delete(listener)
+    });
+    const { session } = controlsFor('market');
+    assert.equal(session.overlay.classList.contains('has-touch'), true, 'touch-only sessions show phone controls');
+    session.keys.add('KeyD');
+    finePointer = true;
+    for (const listener of listeners) listener();
+    assert.equal(session.overlay.classList.contains('has-touch'), false, 'connecting a mouse removes phone controls');
+    assert.equal(session.keys.size, 0, 'switching input modes releases held movement');
+    session.overlay.emit('pointerdown', 0, 0, { pointerType: 'touch' });
+    assert.equal(session.overlay.classList.contains('has-touch'), false, 'a touchscreen tap does not override keyboard/mouse detection');
+    session.touchMediaCleanup();
+    assert.equal(listeners.size, 0, 'input-device observers are removed with the session');
+    sandbox.window.matchMedia = originalMatchMedia;
 }
 
 {

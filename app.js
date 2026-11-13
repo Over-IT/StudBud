@@ -239,6 +239,7 @@
                     theme: "dark",
                     colorScheme: "studbud",
                     gameGraphics: "auto",
+                    gameTouchControls: "auto",
                     audioVolume: 0.70,
                     audioLevels: { lofi: 0.5, rain: 0.5, white: 0.3, binaural: 0.6 },
                     soundscapePreset: "off",
@@ -4842,21 +4843,77 @@
             this.openModal('card-studio-modal');
         }
 
-        enhanceSetPickers(root = document, minOptions = 8) {
+        enhanceSetPickers(root = document) {
+            if (!this.setPickerDismissBound) {
+                document.addEventListener('pointerdown', event => {
+                    document.querySelectorAll('.set-picker').forEach(picker => {
+                        if (!picker.contains(event.target)) {
+                            picker.querySelector('.set-picker-panel').hidden = true;
+                            picker.querySelector('.set-picker-toggle').setAttribute('aria-expanded', 'false');
+                        }
+                    });
+                });
+                this.setPickerDismissBound = true;
+            }
             root.querySelectorAll?.('select[data-set-picker]').forEach(select => {
-                const options = [...select.options].filter(option => option.value);
-                let wrap = select.previousElementSibling?.classList?.contains('picker-search') ? select.previousElementSibling : null;
-                if (options.length < minOptions) {
-                    wrap?.remove();
-                    options.forEach(option => { option.hidden = false; });
-                    return;
-                }
+                let wrap = select.nextElementSibling?.classList?.contains('set-picker') ? select.nextElementSibling : null;
                 if (!wrap) {
                     wrap = document.createElement('div');
-                    wrap.className = 'picker-search';
-                    wrap.innerHTML = '<i class="fas fa-magnifying-glass" aria-hidden="true"></i><input type="search" placeholder="Search sets" aria-label="Search sets" autocomplete="off"><span class="picker-count" aria-live="polite"></span>';
-                    select.insertAdjacentElement('beforebegin', wrap);
-                    wrap.querySelector('input').addEventListener('input', () => this.filterSetPicker(select, wrap));
+                    wrap.className = 'set-picker';
+                    const id = `set-picker-${this.setPickerSequence = (this.setPickerSequence || 0) + 1}`;
+                    wrap.innerHTML = `<button type="button" class="set-picker-toggle" aria-label="Choose flashcard set" aria-expanded="false" aria-controls="${id}"><span></span><i class="fas fa-chevron-down" aria-hidden="true"></i></button><div id="${id}" class="set-picker-panel" hidden><input type="search" placeholder="Search sets" aria-label="Search flashcard sets" autocomplete="off"><p class="picker-count" role="status"></p><div class="set-picker-options" role="listbox" aria-label="Flashcard sets"></div></div>`;
+                    select.insertAdjacentElement('afterend', wrap);
+                    select.classList.add('hidden');
+                    select.tabIndex = -1;
+                    select.setAttribute('aria-hidden', 'true');
+                    const trigger = wrap.querySelector('.set-picker-toggle');
+                    const panel = wrap.querySelector('.set-picker-panel');
+                    const search = wrap.querySelector('input');
+                    const close = () => {
+                        panel.hidden = true;
+                        trigger.setAttribute('aria-expanded', 'false');
+                    };
+                    const open = () => {
+                        panel.hidden = false;
+                        trigger.setAttribute('aria-expanded', 'true');
+                        search.value = '';
+                        this.filterSetPicker(select, wrap);
+                        search.focus();
+                    };
+                    trigger.addEventListener('click', () => panel.hidden ? open() : close());
+                    select.addEventListener('invalid', event => {
+                        event.preventDefault();
+                        open();
+                    });
+                    select.addEventListener('change', () => this.filterSetPicker(select, wrap));
+                    search.addEventListener('input', () => this.filterSetPicker(select, wrap));
+                    wrap.addEventListener('click', event => {
+                        if (event.target.closest('button')) event.preventDefault();
+                        const option = event.target.closest('[data-set-value]');
+                        if (!option) return;
+                        select.value = option.dataset.setValue;
+                        select.dispatchEvent(new Event('change', { bubbles: true }));
+                        close();
+                        trigger.focus();
+                    });
+                    wrap.addEventListener('keydown', event => {
+                        if (event.key === 'Escape') {
+                            event.preventDefault();
+                            close();
+                            trigger.focus();
+                        } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                            event.preventDefault();
+                            if (panel.hidden) open();
+                            const options = [...wrap.querySelectorAll('[data-set-value]')];
+                            const index = options.indexOf(document.activeElement);
+                            const next = index < 0 ? (event.key === 'ArrowDown' ? 0 : options.length - 1)
+                                : (index + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length;
+                            options[next]?.focus();
+                        }
+                    });
+                    wrap.addEventListener('focusout', event => {
+                        if (!wrap.contains(event.relatedTarget)) close();
+                    });
                 }
                 this.filterSetPicker(select, wrap);
             });
@@ -4864,19 +4921,19 @@
 
         filterSetPicker(select, wrap) {
             const terms = wrap.querySelector('input').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-            let shown = 0;
-            let firstVisible = null;
-            [...select.options].forEach(option => {
-                if (!option.value) return;
-                const text = option.textContent.toLowerCase();
-                option.hidden = !terms.every(term => text.includes(term));
-                if (!option.hidden) { shown += 1; firstVisible ||= option; }
-            });
-            wrap.querySelector('.picker-count').textContent = terms.length ? `${shown} found` : '';
-            if (firstVisible && select.selectedOptions[0]?.hidden) {
-                select.value = firstVisible.value;
-                select.dispatchEvent(new Event('change', { bubbles: true }));
+            const options = [...select.options].filter(option => option.value && !option.disabled);
+            const shown = options.filter(option => terms.every(term => option.textContent.toLowerCase().includes(term)));
+            const trigger = wrap.querySelector('.set-picker-toggle');
+            trigger.querySelector('span').textContent = select.selectedOptions[0]?.textContent || 'Choose a set';
+            trigger.setAttribute('aria-label', `Flashcard set: ${trigger.querySelector('span').textContent}`);
+            trigger.disabled = select.disabled || !options.length;
+            if (trigger.disabled) {
+                wrap.querySelector('.set-picker-panel').hidden = true;
+                trigger.setAttribute('aria-expanded', 'false');
             }
+            wrap.querySelector('.picker-count').textContent = shown.length ? `${shown.length} sets` : 'No matching sets';
+            wrap.querySelector('.set-picker-options').innerHTML = shown.map(option =>
+                `<button type="button" role="option" aria-selected="${option.value === select.value}" data-set-value="${this.escapeHTML(option.value)}">${this.escapeHTML(option.textContent)}</button>`).join('');
         }
 
         renderHostedGameDecks() {
@@ -8293,7 +8350,7 @@
                 ctx.textAlign = 'center'; ctx.fillStyle = '#fb923c'; ctx.font = '900 11px system-ui';
                 ctx.fillText('KEEP MOVING - THE TRAIL IS CATCHING UP', width / 2, 40);
             }
-            const touch = window.matchMedia?.('(pointer: coarse)').matches || (navigator.maxTouchPoints || 0) > 0;
+            const touch = window.StudBudArcade?.shouldUseTouchControls(AppState.get('settings')?.gameTouchControls || 'auto');
             const prompt = runner.dead ? (death < 1 ? (splash ? 'Splash!' : 'Ouch!') : runner.deathReason + (touch ? ' - tap to restart' : ' - press a key to restart')) : (touch ? 'TAP FORWARD · SWIPE TO CHANGE LANES' : 'WASD / ARROWS TO MOVE · SPACE TO HOP');
             ctx.font = '700 11px system-ui'; ctx.textAlign = 'center'; const pw = Math.min(width - 16, ctx.measureText(prompt).width + 20);
             ctx.fillStyle = 'rgba(29,48,40,.78)'; ctx.fillRect(width / 2 - pw / 2, height - 28, pw, 22);
@@ -9217,6 +9274,8 @@
             if (themeSelect) themeSelect.value = preference;
             const gameGraphics = document.getElementById('game-graphics');
             if (gameGraphics) gameGraphics.value = ['auto', 'performance', 'quality'].includes(settings.gameGraphics) ? settings.gameGraphics : 'auto';
+            const gameTouchControls = document.getElementById('game-touch-controls');
+            if (gameTouchControls) gameTouchControls.value = ['auto', 'on', 'off'].includes(settings.gameTouchControls) ? settings.gameTouchControls : 'auto';
             document.querySelectorAll('.scheme-option').forEach(button => {
                 const selected = button.dataset.colorScheme === colorScheme;
                 button.classList.toggle('selected', selected);
@@ -9615,7 +9674,7 @@
                 { route: 'planner', sel: '[data-action="planner-add-assignment"]', title: 'Save one real deadline', text: 'Add an assignment you actually need to finish. Choose its class, enter its due date, then save. You can edit all your deadlines later in Tasks.', action: '[data-action="planner-add-assignment"]', goal: 'assignment' },
                 { route: 'planner', sel: '.planner-day-controls .planner-budget', title: 'Set your time for today', text: "Choose Try it and enter today's study minutes. Leave it blank to use your usual schedule. Week view sets minutes per workday. Defaults and workdays live in General settings.", change: '#planner-current-minutes', goal: 'budget' },
                 { route: 'planner', sel: '#planner-day-queue', title: 'Start one work block', text: 'Choose Work on this for a task you can do now. Keep this page open while you work. Time pauses when you leave or go idle. Mark done only when finished.', action: '[data-action="planner-start-work"]', goal: 'work' },
-                { route: 'study-manage', sel: '#create-deck-btn', title: 'Save three useful flashcards', text: 'Make a New study set for your next quiz. Give it a topic, add at least three terms with answers, and save. Importing a set works too.', action: '#create-deck-btn', goal: 'deck' },
+                { route: 'study-manage', sel: '#create-deck-btn', title: 'Save three useful flashcards', text: 'Choose New set for your next quiz. Give it a topic, add at least three terms with answers, and save. Importing a set works too.', action: '#create-deck-btn', goal: 'deck' },
                 { route: 'flashcard', sel: '#deck-grid', title: 'Answer and rate one card', text: 'Choose Study, or Cram for last-minute test prep. Think of the answer, reveal it, then rate your recall with Again, Hard, Good or Easy.', action: '[data-action="study-deck"], [data-action="cram-deck"]', goal: 'answer' },
                 { route: 'settings', sel: '#settings-start-page', title: 'Choose your starting page', text: 'Choose the page you want to see when you open StudBud. Planner is for deciding what to work on; Tasks is your full list of deadlines. Your choice saves automatically.', change: '#settings-start-page', goal: 'preference' }
             ];
@@ -11573,6 +11632,9 @@
             } else if (event.target.id === 'game-graphics') {
                 AppState.set('settings', { ...AppState.get('settings'), gameGraphics: event.target.value });
                 window.StudBudDialogs.notify('Game performance preference saved. Close and reopen StudBud to apply it.');
+            } else if (event.target.id === 'game-touch-controls') {
+                if (!['auto', 'on', 'off'].includes(event.target.value)) throw new Error('Choose Auto, Always show, or Always hide for game controls.');
+                AppState.set('settings', { ...AppState.get('settings'), gameTouchControls: event.target.value });
             } else if (event.target.id === 'sfx-ui' || event.target.id === 'sfx-game') {
                 this.updateGameAudio({ [event.target.id === 'sfx-ui' ? 'ui' : 'game']: event.target.checked });
             } else if (event.target.id === 'music-on') {

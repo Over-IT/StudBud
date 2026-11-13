@@ -539,7 +539,7 @@
                     <div class="view-header workspace-heading">
                         <div><h2 id="study-page-title">Review cards</h2><p id="study-page-description">Study a set or cram for an upcoming test.</p></div>
                         <div class="actions" data-study-panel="practice"><button type="button" class="secondary-btn" data-target="study-manage-view"><i class="fas fa-folder-open" aria-hidden="true"></i> Add or edit sets</button></div>
-                        <div class="actions hidden" data-study-panel="manage"><button id="create-deck-btn" class="primary-btn"><i class="fas fa-folder-plus"></i> New study set</button><button class="secondary-btn" type="button" data-target="importer-view"><i class="fas fa-file-import" aria-hidden="true"></i> Import cards</button></div>
+                        <div class="actions hidden" data-study-panel="manage"><button id="create-deck-btn" class="primary-btn"><i class="fas fa-folder-plus"></i> New set</button><button class="secondary-btn" type="button" data-target="importer-view"><i class="fas fa-file-import" aria-hidden="true"></i> Import cards</button></div>
                     </div>
                     <div data-study-panel="practice">
                     <section id="deck-recommendations" class="glass-card deck-recommendations hidden" aria-labelledby="deck-recommendations-title">
@@ -552,7 +552,7 @@
                     <div class="my-deck-heading">
                         <h3>Your sets</h3>
                         <label for="my-deck-search" class="sr-only">Search your decks by title or class</label>
-                        <input id="my-deck-search" type="search" maxlength="100" placeholder="Search your decks or classes">
+                        <input id="my-deck-search" type="search" maxlength="100" placeholder="Search sets or classes">
                         <div class="my-deck-tools">
                             <label for="my-deck-sort" class="sr-only">Sort your decks</label>
                             <select id="my-deck-sort" title="Pinned decks always stay on top">
@@ -716,8 +716,8 @@
                 <section id="exam-arcade-view" class="view hidden">
                     <div class="view-header">
                         <h2>Practice</h2>
+                        <div class="actions"><button class="primary-btn" type="button" data-action="open-singleplayer"><i class="fas fa-user"></i> Singleplayer</button></div>
                     </div>
-                    <div class="view-header"><p>Flashcard quizzes and solo games.</p><button class="primary-btn" type="button" data-action="open-singleplayer"><i class="fas fa-user"></i> Open Singleplayer</button></div>
                     <div class="arcade-menu">
                         <div class="glass-card arcade-game-card">
                             <i class="fas fa-layer-group game-icon"></i>
@@ -1266,6 +1266,14 @@
                                     <option value="dark">Dark</option>
                                     <option value="light">Light</option>
                                     <option value="system">Match device</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="game-touch-controls">On-screen game controls</label>
+                                <select id="game-touch-controls">
+                                    <option value="auto">Auto (touch-only devices)</option>
+                                    <option value="on">Always show</option>
+                                    <option value="off">Always hide</option>
                                 </select>
                             </div>
                             <div class="form-group">
