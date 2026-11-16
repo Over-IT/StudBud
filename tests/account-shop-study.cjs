@@ -39,6 +39,7 @@ vm.runInContext('globalThis.AppState = new AppStateEngine();', context);
 vm.runInContext(appSource.slice(appSource.indexOf('    class AppOrchestrator'), appSource.indexOf('    window.NexusApp =')), context);
 const app = vm.runInContext('Object.create(AppOrchestrator.prototype)', context);
 app.animateShopAuras = () => {};
+app.inventoryTab = 'all';
 const state = sandbox.AppState;
 window.NexusApp = { AppState: state };
 const community = window.StudBudCommunityGames;
@@ -46,6 +47,7 @@ app.communityGames = community;
 const Cloud = window.StudBudCloud.constructor;
 Cloud.prototype.encryptAccountData = async function (snapshot) { return snapshot; };
 Cloud.prototype.decryptAccountData = async function (snapshot) { return snapshot; };
+Cloud.prototype.saveSyncBase = async function (snapshot) { storage.set('STUDBUD_CLOUD_SYNC_BASE', JSON.stringify(snapshot)); return true; };
 const normal = value => clone(value);
 
 async function run() {
@@ -1101,6 +1103,9 @@ async function run() {
     const backupData = { version: '1.0', state: { settings: { shareSchoolCourses: true } } };
     state.state.settings.shareSchoolCourses = false;
     backupCloud.decryptBackup = async () => clone(backupData);
+    await app.restoreEncryptedBackup(backupInput(), true);
+    assert.equal(restoredData, undefined, 'verification decrypts and checks a file without restoring or syncing study data');
+    assert.match(backupStatus.textContent, /Backup verified.*Nothing.*changed/);
     const firstInput = backupInput();
     await app.restoreEncryptedBackup(firstInput);
     assert.equal(restoredData.state.settings.shareSchoolCourses, false, 'restoring a backup cannot grant course-sharing consent');

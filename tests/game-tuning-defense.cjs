@@ -121,6 +121,24 @@ function session(mode, id = 'host', ids = ['host', 'guest', 'ally', 'rival']) {
     return s;
 }
 {
+    const fillText = ctx.fillText, labels = [];
+    ctx.fillText = (...args) => labels.push(args);
+    try {
+        for (const [w, h] of [[1280, 720], [390, 844], [844, 390]]) {
+            const s = session('miner');
+            s.scale = 1;
+            s.hudBounds = () => ({ x: 8, y: 100, w: w - 16, h: h - 200 });
+            s.placeHud = A.Session.prototype.placeHud;
+            labels.length = 0;
+            s.game.draw(ctx, w, h);
+            const depth = labels.find(([text]) => text.startsWith('DEPTH '));
+            const haul = labels.find(([text]) => text.startsWith('HAUL '));
+            assert.ok(w < 429 ? haul[2] - depth[2] >= 34 : haul[1] - depth[1] >= 200,
+                'mining depth and carried-crystal labels do not overlap at narrow or wide sizes');
+        }
+    } finally { ctx.fillText = fillText; }
+}
+{
     const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
     vm.runInContext(source.slice(source.indexOf('    class AppOrchestrator'), source.indexOf('    window.NexusApp =')), sandbox);
     const app = vm.runInContext('Object.create(AppOrchestrator.prototype)', sandbox);
@@ -788,11 +806,20 @@ console.log('Rounded team-size quotas, unselected startup, owner-only selling, u
         s.hudBounds = A.Session.prototype.hudBounds; s.placeHud = A.Session.prototype.placeHud;
         g.draw(ctx, w, h);
         assert.ok(g.ui.rects.some(r => r.id === 'tower-panel'));
-        assert.equal(g.ui.rects.some(r => r.id === 'shop-panel'), w >= 668, 'narrow displays show management separately rather than overlapping the shop');
+        const shop = g.ui.rects.find(r => r.id === 'shop-panel'), tower = g.ui.rects.find(r => r.id === 'tower-panel');
+        assert.ok(!shop || !A.util.overlap(shop, tower), 'contextual management never overlaps the bottom loadout');
         for (const rect of g.ui.rects) {
             assert.ok(rect.x >= 0 && rect.y >= 0 && rect.x + rect.w <= w + .01 && rect.y + rect.h <= h + .01, 'HUD controls remain inside the viewport');
         }
+        const minimap = g.ui.rects.find(rect => rect.id === 'minimap');
+        assert.ok(!minimap || !g.ui.rects.some(rect => /^(shop|tower)-panel$/.test(rect.id) && A.util.overlap(rect, minimap)),
+            'the minimap never covers tower purchase or management controls on short screens');
     }
+    g.selected = null;
+    g.draw(ctx, 844, 390);
+    const buildButton = g.ui.rects.find(rect => rect.id === 'build:0');
+    assert.ok(buildButton.w >= 80 && buildButton.h >= 36, 'landscape shop buttons remain readable and tappable instead of shrinking the entire portrait panel');
+    assert.equal(g.ui.rects.some(rect => rect.id === 'minimap'), false, 'a crowded landscape shop omits the overlapping minimap');
     s.taps.add('Escape'); g.update(0); s.taps.clear();
     assert.equal(g.selected, null); assert.equal(g.buildType, null);
 }
@@ -1317,6 +1344,11 @@ console.log('Uncapped recurring purchases, next-wave isolation, partial-wave res
     texts.length = 0; g.selected = g.troops[3].id; g.draw(ctx, 1280, 720);
     assert.ok(texts.some(text => text.startsWith('Upgrade: +52.0 dmg · +35 range')), 'upgrade panel describes actual ballista stats');
     assert.ok(g.ui.rects.some(r => r.id === 'tower-panel') && g.ui.rects.some(r => r.id === 'shop-panel'), 'tower management is separate from the shop');
+    s.taps.add('Digit2'); g.selected = null; g.update(0); s.taps.clear();
+    assert.equal(g.buildType, 1, 'loadout number shortcuts select a tower without buying or placing it');
+    assert.equal(g.troops.length, 6);
+    s.question = {}; s.taps.add('Digit3'); g.update(0); s.taps.clear(); s.question = null;
+    assert.equal(g.buildType, 1, 'answering a numbered question cannot select a loadout tower');
     g.selected = null; g.buildType = 0; g.ui.rects = []; g.ui.prev = [];
     s.mouse.active = true; s.mouse.x = 500; s.mouse.y = 400;
     g.update(0); assert.ok(g.previewPoint, 'moving pointer creates a placement ghost');

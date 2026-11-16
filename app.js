@@ -67,7 +67,7 @@
     class NexusDBManager {
         constructor() {
             this.dbName = 'NexusDB';
-            this.version = 1;
+            this.version = 2;
             this.db = null;
         }
 
@@ -79,6 +79,7 @@
 
             return new Promise((resolve, reject) => {
                 const request = indexedDB.open(this.dbName, this.version);
+                let blocked = false;
 
                 request.onupgradeneeded = (e) => {
                     const db = e.target.result;
@@ -101,13 +102,26 @@
                     if (!db.objectStoreNames.contains('gameMetrics')) {
                         db.createObjectStore('gameMetrics', { keyPath: 'id' });
                     }
+                    if (!db.objectStoreNames.contains('deviceAuth')) {
+                        db.createObjectStore('deviceAuth', { keyPath: 'id' });
+                    }
                 };
 
                 request.onsuccess = (e) => {
-                    this.db = e.target.result;
+                    const db = e.target.result;
+                    if (blocked) { db.close(); return; }
+                    this.db = db;
+                    db.onversionchange = () => {
+                        db.close();
+                        if (this.db === db) this.db = null;
+                    };
                     resolve(this.db);
                 };
 
+                request.onblocked = () => {
+                    blocked = true;
+                    reject(new Error('Close other StudBud tabs and reload to update device storage.'));
+                };
                 request.onerror = (e) => {
                     console.error('[NexusDB] Database open error:', e.target.error);
                     reject(e.target.error);
@@ -174,6 +188,34 @@
                 tx.oncomplete = () => resolve(key);
                 tx.onerror = () => reject(tx.error || req.error);
                 tx.onabort = () => reject(tx.error || req.error || new Error(`Saving to ${storeName} was aborted.`));
+            });
+        }
+
+        async patchRecords(storeName, patches) {
+            const db = await this.open();
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(storeName, 'readwrite');
+                tx.oncomplete = () => resolve();
+                tx.onerror = () => reject(tx.error || new Error('Saving your changes failed.'));
+                tx.onabort = () => reject(tx.error || new Error('Saving your changes was aborted.'));
+                const store = tx.objectStore(storeName);
+                try {
+                    for (const [id, changes] of patches) {
+                        const request = store.get(id);
+                        request.onsuccess = () => {
+                            try {
+                                if (!request.result) throw new Error('A flashcard set changed while saving. Refresh your sets and try again.');
+                                store.put({ ...request.result, ...changes, id: request.result.id });
+                            } catch (error) {
+                                tx.abort();
+                                reject(error);
+                            }
+                        };
+                    }
+                } catch (error) {
+                    tx.abort();
+                    reject(error);
+                }
             });
         }
 
@@ -350,22 +392,14 @@
         }
 
         set(key, value) {
-            this.state[key] = value;
-            this.saveToLocalStorage();
+            if (key === 'currentView') this.state = { ...this.state, currentView: value };
+            else this.commitState({ [key]: value });
             EventBus.emit(`state:updated:${key}`, value);
             EventBus.emit('state:changed', { key, value });
         }
 
         saveGradeGoals(courses, preferences = this.state.settings) {
-            const previousCourses = this.state.courses, previousSettings = this.state.settings;
-            this.state.courses = courses;
-            this.state.settings = preferences;
-            try { this.saveToLocalStorage(); }
-            catch (error) {
-                this.state.courses = previousCourses;
-                this.state.settings = previousSettings;
-                throw error;
-            }
+            this.commitState({ courses, settings: preferences });
             EventBus.emit('state:updated:courses', courses);
             EventBus.emit('state:changed', { key: 'courses', value: courses });
             EventBus.emit('state:changed', { key: 'settings', value: preferences });
@@ -375,34 +409,39 @@
             return this.saveStateChanges(changes);
         }
 
-        saveStateChanges(changes) {
+        commitState(changes) {
             const previous = this.state;
             this.state = { ...previous, ...changes };
             try { this.saveToLocalStorage(); }
             catch (error) { this.state = previous; throw error; }
+        }
+
+        saveStateChanges(changes) {
+            this.commitState(changes);
             EventBus.emit('state:restored', this.state);
         }
 
         addCourse(course) {
             if (this.findDuplicateCourse(course)) throw new Error('That class is already saved for an overlapping semester. Open it from My classes instead.');
-            this.state.courses.push(course);
-            this.saveToLocalStorage();
+            this.commitState({ courses: [...this.state.courses, course] });
             EventBus.emit('courses:updated', this.state.courses);
         }
 
         removeCourse(code) {
-            this.state.courses = this.state.courses.filter(c => c.code !== code);
-            this.state.assignments = this.state.assignments.filter(item => item.courseCode !== code);
-            this.state.gradeScenarios = (this.state.gradeScenarios || []).map(scenario => ({
+            const courses = this.state.courses.filter(c => c.code !== code);
+            const assignments = this.state.assignments.filter(item => item.courseCode !== code);
+            const gradeScenarios = (this.state.gradeScenarios || []).map(scenario => ({
                 ...scenario,
                 items: (scenario.items || []).filter(item => item.courseCode !== code)
             }));
-            Object.keys(this.state.schedule || {}).forEach(pattern => {
-                Object.keys(this.state.schedule[pattern] || {}).forEach(period => {
-                    if (this.state.schedule[pattern][period] === code) delete this.state.schedule[pattern][period];
-                });
-            });
-            this.saveToLocalStorage();
+            const schedule = { ...(this.state.schedule || {}) };
+            for (const pattern of ['all', 'odd', 'even']) {
+                schedule[pattern] = Object.fromEntries(Object.entries(schedule[pattern] || {}).filter(([, courseCode]) => courseCode !== code));
+            }
+            if (schedule.meetings) schedule.meetings = schedule.meetings.filter(meeting => meeting.courseCode !== code);
+            if (schedule.ic?.sections) schedule.ic = { ...schedule.ic, sections: schedule.ic.sections.filter(section => section.courseCode !== code) };
+            if (Array.isArray(schedule.icSections)) schedule.icSections = schedule.icSections.filter(section => section.courseCode !== code);
+            this.commitState({ courses, assignments, gradeScenarios, schedule });
             EventBus.emit('courses:updated', this.state.courses);
             EventBus.emit('assignments:updated', this.state.assignments);
         }
@@ -412,8 +451,7 @@
             if (index !== -1) {
                 const next = { ...this.state.courses[index], ...updatedData };
                 if (this.findDuplicateCourse(next, code)) throw new Error('That class is already saved for an overlapping semester. Open the existing class from My classes instead.');
-                this.state.courses[index] = next;
-                this.saveToLocalStorage();
+                this.commitState({ courses: this.state.courses.map((course, position) => position === index ? next : course) });
                 EventBus.emit('courses:updated', this.state.courses);
             }
         }
@@ -432,23 +470,21 @@
         }
 
         addAssignment(assignment) {
-            this.state.assignments.push(assignment);
-            this.saveToLocalStorage();
+            this.commitState({ assignments: [...this.state.assignments, assignment] });
             EventBus.emit('assignments:updated', this.state.assignments);
         }
 
         updateAssignment(id, updatedData) {
             const index = this.state.assignments.findIndex(a => a.id === id);
             if (index !== -1) {
-                this.state.assignments[index] = { ...this.state.assignments[index], ...updatedData };
-                this.saveToLocalStorage();
+                this.commitState({ assignments: this.state.assignments.map((assignment, position) =>
+                    position === index ? { ...assignment, ...updatedData } : assignment) });
                 EventBus.emit('assignments:updated', this.state.assignments);
             }
         }
 
         deleteAssignment(id) {
-            this.state.assignments = this.state.assignments.filter(a => a.id !== id);
-            this.saveToLocalStorage();
+            this.commitState({ assignments: this.state.assignments.filter(a => a.id !== id) });
             EventBus.emit('assignments:updated', this.state.assignments);
         }
 
@@ -471,15 +507,11 @@
 
         /** Applies small field patches (pin/order) to several decks with one save notice and one re-render. */
         async patchFlashcardDecks(patches) {
-            const changed = [];
-            this.state.flashcards = this.state.flashcards.map(deck => {
-                if (!patches.has(deck.id)) return deck;
-                const next = { ...deck, ...patches.get(deck.id) };
-                changed.push(next);
-                return next;
-            });
-            if (!changed.length) return;
-            await Promise.all(changed.map(deck => NexusDB.put('flashcards', deck)));
+            const selected = new Map(this.state.flashcards.filter(deck => patches.has(deck.id)).map(deck => [deck.id, patches.get(deck.id)]));
+            if (!selected.size) return;
+            await NexusDB.patchRecords('flashcards', selected);
+            this.state.flashcards = this.state.flashcards.map(deck =>
+                selected.has(deck.id) ? { ...deck, ...selected.get(deck.id), id: deck.id } : deck);
             this.setSaveStatus('Deck order saved on this device.');
             EventBus.emit('flashcards:updated', this.state.flashcards);
         }
@@ -635,7 +667,7 @@
         leaderboard: ['Leaderboards', 'Study time and progress. Grades stay private.'],
         profile: ['Your profile', 'Your character, rewards and public profile.'],
         shop: ['Shop', 'Open boxes and buy cosmetics.'],
-        inventory: ['Locker', 'Everything you own. Equip it here.'],
+        inventory: ['Character & locker', 'Create your own character, then add your favorite cosmetics.'],
         settings: ['Settings', 'App preferences, study defaults and privacy shortcuts.'],
         'settings-school': ['School & GPA', 'School details, semester and past academic credits.'],
         'settings-data': ['Data & account', 'Save status, syncing, importing and account actions.'],
@@ -1313,7 +1345,16 @@
             await NexusDB.clear(storeName);
         }
 
+        async readDeviceUnlock() {
+            return NexusDB.get('deviceAuth', 'account');
+        }
+
+        async saveDeviceUnlock(record) {
+            return NexusDB.put('deviceAuth', record);
+        }
+
         async resetForCloudAccount() {
+            this.clearCommunitySetContext();
             await this.resetAutomaticStudy();
             this.plannerDefaultsInitialized = false;
             this.plannerDate = '';
@@ -1321,15 +1362,17 @@
             this.gpaGoalDraft = null;
             this.campusCourseDraft = null;
             this.campusAssignmentDraft = null;
-            for (const id of ['campus-paste-courses', 'campus-paste-assignments']) {
+            this.schoolImportDraft = null;
+            this.schoolImportUndo = null;
+            for (const id of ['campus-paste-data', 'campus-paste-courses', 'campus-paste-assignments']) {
                 const input = document.getElementById(id);
                 if (input) input.value = '';
             }
-            for (const id of ['campus-paste-courses-preview', 'campus-paste-assignments-preview',
+            for (const id of ['campus-paste-preview', 'campus-paste-status', 'campus-paste-courses-preview', 'campus-paste-assignments-preview',
                 'campus-paste-courses-status', 'campus-paste-assignments-status']) {
                 document.getElementById(id)?.replaceChildren();
             }
-            for (const id of ['import-campus-courses-btn', 'import-campus-assignments-btn']) {
+            for (const id of ['import-campus-data-btn', 'import-campus-courses-btn', 'import-campus-assignments-btn']) {
                 document.getElementById(id)?.classList.add('hidden');
             }
             await AppState.resetForCloudAccount();
@@ -1436,6 +1479,7 @@
             });
             document.addEventListener('submit', event => this.handleSubmit(event));
             document.addEventListener('change', event => {
+                if (event.target.matches('#campus-paste-term, #campus-paste-course, #campus-paste-weights')) this.invalidateSchoolImport();
                 try { this.handleChange(event); }
                 catch (error) {
                     console.error('[NexusApp] Setting change failed:', error);
@@ -1443,7 +1487,7 @@
                 }
             });
             this.bindFlashcardInteraction();
-            document.getElementById('backup-import-file')?.addEventListener('change', event => this.restoreEncryptedBackup(event.target));
+            document.getElementById('backup-import-file')?.addEventListener('change', event => this.restoreEncryptedBackup(event.target, this.backupVerifyOnly === true));
             document.addEventListener('change', event => {
                 if (event.target.matches('select[data-ic-class]')) {
                     event.target.closest('.ic-class-row')?.classList.toggle('ic-skipped', event.target.value === 'skip');
@@ -1486,24 +1530,25 @@
             waitingCanvas.addEventListener('contextmenu', event => event.preventDefault());
             document.addEventListener('paste', event => {
                 const target = event.target;
-                if (!target.matches?.('#campus-paste-courses, #campus-paste-assignments')) return;
-                const html = event.clipboardData?.getData('text/html');
-                const pasted = window.StudBudCampusPaste?.tableTextFromHtml(html);
-                if (!pasted) return;
-                if (target.id === 'campus-paste-assignments') {
-                    const courseSelect = document.getElementById('campus-paste-assignment-course');
-                    if (!courseSelect.value) {
-                        const course = window.StudBudCampusPaste.inferCourse(event.clipboardData.getData('text/plain'), AppState.get('courses') || []);
-                        if (course) courseSelect.value = course.code;
-                    }
-                }
+                if (!target.matches?.('#campus-paste-data')) return;
                 event.preventDefault();
-                target.setRangeText(pasted, target.selectionStart, target.selectionEnd, 'end');
-                target.dispatchEvent(new Event('input', { bubbles: true }));
+                const parser = window.StudBudCampusPaste;
+                const plain = event.clipboardData?.getData('text/plain') || '';
+                const pasted = parser.tableTextFromHtml(event.clipboardData?.getData('text/html')) || plain;
+                const select = document.getElementById('campus-paste-course');
+                if (!select.value) {
+                    const course = parser.inferCourse(plain, AppState.get('courses') || []);
+                    if (course) select.value = course.code;
+                }
+                target.value = parser.sanitizePaste(target.value.slice(0, target.selectionStart) + pasted + target.value.slice(target.selectionEnd));
+                this.invalidateSchoolImport();
             });
             document.addEventListener('input', event => {
-                if (event.target.matches('#campus-paste-courses')) this.invalidateCampusPastePreview('courses');
-                if (event.target.matches('#campus-paste-assignments')) this.invalidateCampusPastePreview('assignments');
+                if (event.target.matches('#campus-paste-data')) {
+                    const sanitized = window.StudBudCampusPaste.sanitizePaste(event.target.value);
+                    if (sanitized !== event.target.value) event.target.value = sanitized;
+                    this.invalidateSchoolImport();
+                }
                 if (event.target.matches('[data-reward-slider]')) {
                     const linked = document.getElementById(event.target.dataset.rewardSlider);
                     linked.value = event.target.value;
@@ -1603,7 +1648,10 @@
                 }
                 if (['flashcard', 'study-manage', 'study-discover'].includes(route)) {
                     this.renderHostedGameDecks();
-                    if (route === 'study-discover' && !document.getElementById('community-deck-results').dataset.loaded) this.searchCommunityDecks('');
+                    if (route === 'study-discover') {
+                        if (!document.getElementById('community-deck-results').dataset.loaded) this.searchCommunityDecks('');
+                        this.loadBudSets();
+                    }
                 }
                 if (route !== 'flashcard' && this.activeDeckId) this.closeStudy();
                 if (route !== 'exam-arcade' && this.arcadeStudyStartedAt) this.closeArcade();
@@ -1631,6 +1679,211 @@
             return `${cloud?.user?.id || 'local'}:${cloud?.accountVersion || 0}`;
         }
 
+        invalidateSchoolImport() {
+            this.schoolImportDraft = null;
+            document.getElementById('campus-paste-preview')?.replaceChildren();
+            document.getElementById('import-campus-data-btn')?.classList.add('hidden');
+            const status = document.getElementById('campus-paste-status');
+            if (status) status.textContent = 'Preview to review detected classes, assignments, grades and periods. Known identifying fields are discarded locally.';
+        }
+
+        schoolImportState() {
+            return {
+                courses: AppState.get('courses') || [], assignments: AppState.get('assignments') || [],
+                schedule: AppState.get('schedule') || {}
+            };
+        }
+
+        schoolImportDiffMarkup(label, before, after) {
+            const display = value => value === '' || value === null || value === undefined ? 'Not set' : String(value);
+            return `<div><span>${this.escapeHTML(label)}</span><span>${this.escapeHTML(display(before))} <b aria-hidden="true">→</b> ${this.escapeHTML(display(after))}</span></div>`;
+        }
+
+        schoolImportRowDetails(row, draft, baseline) {
+            const plan = draft.plan;
+            const courseAfter = code => plan.rows.find(item => item.kind === 'course' && item.value.code === code)?.value
+                || baseline.courses.find(item => item.code === code);
+            const categoryName = (course, categoryId) => course?.categories?.find(item => item.id === categoryId)?.name || 'Uncategorized';
+            const lines = [];
+            if (row.kind === 'assignment') {
+                const assignment = row.value;
+                const previous = row.action === 'update' ? baseline.assignments.find(item => item.id === assignment.id) : null;
+                const beforeCourse = baseline.courses.find(item => item.code === assignment.courseCode);
+                const afterCourse = courseAfter(assignment.courseCode);
+                const points = item => item && item.graded
+                    ? `${item.pointsEarned ?? 'Not set'} / ${item.maxPoints ?? 'Not set'} points`
+                    : `Not graded · ${item?.maxPoints ?? 'No points'} possible`;
+                lines.push(this.schoolImportDiffMarkup('Grade', previous?.graded ? 'Graded' : previous ? 'Not graded' : 'New', assignment.graded ? 'Graded' : 'Not graded'));
+                lines.push(this.schoolImportDiffMarkup('Points', previous ? points(previous) : 'New', points(assignment)));
+                lines.push(this.schoolImportDiffMarkup('Due date', previous?.dueDate || (previous ? '' : 'New'), assignment.dueDate));
+                lines.push(this.schoolImportDiffMarkup('Status', previous?.status || (previous ? '' : 'New'), assignment.status));
+                lines.push(this.schoolImportDiffMarkup('Category', previous
+                    ? categoryName(beforeCourse, previous.categoryId) : 'New', categoryName(afterCourse, assignment.categoryId)));
+                if (previous) {
+                    const className = beforeCourse?.title || assignment.courseCode;
+                    lines.unshift(`<p class="campus-import-match">Matched existing task: ${this.escapeHTML(previous.title)} · ${this.escapeHTML(className)}</p>`);
+                }
+            } else if (row.kind === 'course') {
+                const course = row.value;
+                const previous = baseline.courses.find(item => item.code === course.code);
+                const beforeCategories = (previous?.categories || []).map(item => item.name).join(', ') || 'None';
+                const afterCategories = (course.categories || []).map(item => item.name).join(', ') || 'None';
+                lines.push(this.schoolImportDiffMarkup('Categories', previous ? beforeCategories : 'New', afterCategories));
+                if (previous || course.importedOverallPct !== undefined) {
+                    lines.push(this.schoolImportDiffMarkup('Overall grade', previous?.importedOverallPct ?? (previous ? '' : 'New'),
+                        course.importedOverallPct ?? ''));
+                }
+                lines.push(this.schoolImportDiffMarkup('Term', previous?.term || (previous ? '' : 'New'), course.term || 'Full year'));
+            } else if (row.kind === 'schedule') {
+                const meeting = row.value;
+                const previous = (baseline.schedule.meetings || []).find(item => item.courseCode === meeting.courseCode
+                    && String(item.pattern || '').toLowerCase() === String(meeting.pattern || '').toLowerCase());
+                const previousPeriod = previous?.period || Object.keys(baseline.schedule[meeting.pattern] || {})
+                    .find(period => baseline.schedule[meeting.pattern][period] === meeting.courseCode) || '';
+                const time = item => item?.start || item?.end ? `${item.start || 'Not set'}–${item.end || 'Not set'}` : '';
+                lines.push(this.schoolImportDiffMarkup('Period / rotation', previous
+                    ? `${previousPeriod || 'Not set'} · ${previous.pattern || meeting.pattern}`
+                    : 'New', `${meeting.period} · ${meeting.pattern}`));
+                lines.push(this.schoolImportDiffMarkup('Meeting time', previous ? time(previous) : 'New', time(meeting)));
+            } else {
+                lines.push(`<div>${this.escapeHTML(row.detail || row.kind)}</div>`);
+            }
+            return lines.join('');
+        }
+
+        previewSchoolImport() {
+            const parser = window.StudBudCampusPaste;
+            const input = document.getElementById('campus-paste-data');
+            input.value = parser.sanitizePaste(input.value);
+            const state = this.schoolImportState(), school = this.currentSchool();
+            const term = document.getElementById('campus-paste-term').value;
+            const defaultCourseCode = document.getElementById('campus-paste-course').value;
+            const applyWeights = document.getElementById('campus-paste-weights').checked;
+            const parsed = parser.parseSchoolData(input.value, {
+                courses: state.courses, catalog: this.isParkwaySchool(school) ? this.schoolCatalog(school) : [],
+                defaultCourseCode, term
+            });
+            const plan = parser.buildImportPlan(parsed, {
+                ...state, school, term, applyWeights,
+                creditsForTerm: (course, selectedTerm) => window.studbudCatalogCreditsForTerm(course, selectedTerm)
+            });
+            this.schoolImportDraft = {
+                plan, baseline: JSON.stringify(state), accountContext: this.campusPasteContext(),
+                sourceText: input.value, school, term, defaultCourseCode, applyWeights
+            };
+            const preview = document.getElementById('campus-paste-preview');
+            const baseline = JSON.parse(this.schoolImportDraft.baseline);
+            preview.innerHTML = `${plan.warnings.length ? `<ul class="campus-paste-warning">${plan.warnings.map(message => `<li>${this.escapeHTML(message)}</li>`).join('')}</ul>` : ''}
+                <ul class="campus-paste-list">${plan.rows.map((row, index) => `<li><label><input type="checkbox" data-school-import-index="${index}"${row.include === false ? '' : ' checked'}><span>${this.escapeHTML(row.label)}</span></label><small>${this.escapeHTML(`${row.action === 'update' ? 'Update' : 'Add'} ${row.kind} · ${row.detail || ''}`)}</small><div class="campus-import-diff">${this.schoolImportRowDetails(row, this.schoolImportDraft, baseline)}</div></li>`).join('')}</ul>`;
+            const count = plan.rows.filter(row => row.include !== false).length;
+            document.getElementById('campus-paste-status').textContent = count
+                ? `${count} changes ready. Review updates before saving. Existing notes and planning are kept; absent rows are never deleted.`
+                : 'No safe new changes detected. Check the warnings, include table headings, or choose the class for an assignment-only paste.';
+            document.getElementById('import-campus-data-btn').classList.toggle('hidden', count === 0);
+        }
+
+        async importSchoolData() {
+            const draft = this.schoolImportDraft;
+            if (!draft) throw new Error('Preview the pasted school data before saving it.');
+            const state = this.schoolImportState();
+            if (draft.accountContext !== this.campusPasteContext() || draft.baseline !== JSON.stringify(state)
+                || draft.school !== this.currentSchool()
+                || draft.sourceText !== document.getElementById('campus-paste-data').value
+                || draft.term !== document.getElementById('campus-paste-term').value
+                || draft.defaultCourseCode !== document.getElementById('campus-paste-course').value
+                || draft.applyWeights !== document.getElementById('campus-paste-weights').checked) {
+                this.invalidateSchoolImport();
+                throw new Error('Your account, school data or import options changed. Preview again before saving.');
+            }
+            const selected = [...document.querySelectorAll('[data-school-import-index]:checked')]
+                .map(input => draft.plan.rows[Number(input.dataset.schoolImportIndex)]?.id).filter(Boolean);
+            if (!selected.length) throw new Error('Select at least one change to save.');
+            const changes = window.StudBudCampusPaste.applyImportPlan(draft.plan, selected, state);
+            AppState.saveStateChanges(changes);
+            this.schoolImportUndo = {
+                baseline: JSON.parse(draft.baseline),
+                imported: JSON.parse(JSON.stringify(this.schoolImportState())),
+                accountContext: draft.accountContext
+            };
+            document.getElementById('undo-campus-import-btn')?.classList.toggle('hidden', false);
+            this.schoolImportDraft = null;
+            document.getElementById('campus-paste-data').value = '';
+            document.getElementById('campus-paste-preview').replaceChildren();
+            document.getElementById('import-campus-data-btn').classList.add('hidden');
+            const status = document.getElementById('campus-paste-status');
+            status.textContent = `Saved ${selected.length} selected changes on this device.`;
+            const cloud = window.StudBudCloud;
+            if (cloud?.accountReady && !cloud.offlineMode && window.navigator?.onLine !== false) {
+                status.textContent += ' Syncing encrypted account data...';
+                try {
+                    await cloud.syncNow();
+                    if (draft.accountContext === this.campusPasteContext()) {
+                        status.textContent = cloud.accountReady && !cloud.offlineMode && window.navigator?.onLine !== false
+                            ? 'School data saved and synced in your encrypted account snapshot.' : 'School data saved on this device. Reconnect to finish syncing.';
+                    }
+                } catch (error) {
+                    console.error('[NexusApp] School import saved locally but cloud sync failed:', error);
+                    if (draft.accountContext === this.campusPasteContext()) status.textContent = 'School data saved on this device, but cloud sync failed. Keep this page open and retry account sync when connected.';
+                }
+            } else {
+                status.textContent = 'School data saved on this device only; encrypted account sync is unavailable while offline or signed out.';
+            }
+        }
+
+        async undoSchoolImport() {
+            const undo = this.schoolImportUndo;
+            const status = document.getElementById('campus-paste-status');
+            const button = document.getElementById('undo-campus-import-btn');
+            if (!undo) {
+                if (status) status.textContent = 'Undo is unavailable; there is no recent school import to reverse.';
+                button?.classList.add('hidden');
+                throw new Error('Undo is unavailable; there is no recent school import to reverse.');
+            }
+            if (undo.accountContext !== this.campusPasteContext()) {
+                this.schoolImportUndo = null;
+                button?.classList.add('hidden');
+                if (status) status.textContent = 'Undo refused because the signed-in account changed. The current school data was left untouched.';
+                throw new Error('Undo refused because the signed-in account changed. Current data was left untouched.');
+            }
+            if (JSON.stringify(this.schoolImportState()) !== JSON.stringify(undo.imported)) {
+                this.schoolImportUndo = null;
+                button?.classList.add('hidden');
+                if (status) status.textContent = 'Undo refused because school data changed after the import. The current data was left untouched.';
+                throw new Error('Undo refused because school data changed after the import. Current data was left untouched.');
+            }
+            try {
+                AppState.saveStateChanges({
+                    courses: JSON.parse(JSON.stringify(undo.baseline.courses)),
+                    assignments: JSON.parse(JSON.stringify(undo.baseline.assignments)),
+                    schedule: JSON.parse(JSON.stringify(undo.baseline.schedule))
+                });
+            } catch (error) {
+                if (status) status.textContent = 'Undo could not be saved on this device; the imported data was kept. Please try again.';
+                throw error;
+            }
+            this.schoolImportUndo = null;
+            button?.classList.add('hidden');
+            if (status) status.textContent = 'Import undone and saved on this device. Syncing encrypted account data...';
+            const cloud = window.StudBudCloud, accountContext = undo.accountContext;
+            if (cloud?.accountReady && !cloud.offlineMode && window.navigator?.onLine !== false) {
+                try {
+                    await cloud.syncNow();
+                    if (accountContext === this.campusPasteContext() && status) {
+                        status.textContent = cloud.accountReady && !cloud.offlineMode && window.navigator?.onLine !== false
+                            ? 'Import undone, saved on this device, and synced in your encrypted account snapshot.'
+                            : 'Import undone and saved on this device only; reconnect to finish syncing.';
+                    }
+                } catch (error) {
+                    console.error('[NexusApp] School import undo saved locally but cloud sync failed:', error);
+                    if (accountContext === this.campusPasteContext() && status) {
+                        status.textContent = 'Import undone and saved on this device, but encrypted cloud sync failed. Retry account sync when connected.';
+                    }
+                }
+            } else if (status) {
+                status.textContent = 'Import undone and saved on this device only; encrypted account sync is unavailable while offline or signed out.';
+            }
+        }
+
         invalidateCampusPastePreview(mode) {
             if (mode === 'courses') {
                 this.campusCourseDraft = null;
@@ -1646,11 +1899,11 @@
         }
 
         renderCampusPasteCourseOptions() {
-            const select = document.getElementById('campus-paste-assignment-course');
+            const select = document.getElementById('campus-paste-course');
             if (!select) return;
             const previous = select.value;
             const courses = AppState.get('courses') || [];
-            select.innerHTML = '<option value="">Choose a class</option>' + courses
+            select.innerHTML = '<option value="">Auto-detect classes from the paste</option>' + courses
                 .slice().sort((a, b) => a.title.localeCompare(b.title))
                 .map(course => `<option value="${this.escapeHTML(course.code)}">${this.escapeHTML(course.title)} · ${this.escapeHTML(course.term || 'Full year')}</option>`)
                 .join('');
@@ -1898,7 +2151,7 @@
                     pointsEarned: graded ? Number((row.pointsEarned * row.multiplierValue).toPrecision(12)) : 0,
                     maxPoints: graded ? Number((row.maxPoints * row.multiplierValue).toPrecision(12)) : row.maxPoints ?? 100,
                     categoryId: row.categoryId,
-                    kind: /\bquiz\b/i.test(row.title) ? 'quiz' : /\b(?:test|exam)\b/i.test(row.title) ? 'test' : 'assignment',
+                    kind: window.StudBudCampusPaste.inferAssignmentKind(row.title, row.category),
                     estimatedMinutes: 30,
                     plannedDate: '',
                     importance: 3,
@@ -1997,6 +2250,7 @@
                 this.openModal('deck-editor-modal');
                 return;
             }
+            this.retainDeckEditorDraft();
             this.deckEditorDraft = null;
             this.cardBrowserDeckId = null;
             this.cardBrowserSharedDeck = null;
@@ -2907,7 +3161,7 @@
 
             container.innerHTML = `
                 <div class="class-detail-summary glass-card">
-                    <div><span class="class-term">${this.escapeHTML(this.termLabel(course.term))}</span><h2>${this.escapeHTML(course.title)}</h2><p>Current grade uses scored work and your category weights.</p></div>
+                    <div><span class="class-term">${this.escapeHTML(this.termLabel(course.term))}</span><h2>${this.escapeHTML(course.title)}</h2><p>Current grade uses scored work and your category weights.</p>${Number.isFinite(course.importedOverallPct) ? `<p class="settings-hint">Copied portal overall: ${this.formatNumber(course.importedOverallPct)}%. Reference only: the current grade is calculated from saved assignments, not an assumed complete import.</p>` : ''}</div>
                     <div class="class-grade-metrics"><div><span>${grade === null ? '—' : `${grade.toFixed(2)}%`}</span><small>Current</small></div><div><span>${Number.isFinite(target) ? `${target.toFixed(2)}%` : '—'}</span><small>Optional target</small></div></div>
                 </div>
                 <div class="class-detail-grid">
@@ -3006,9 +3260,10 @@
             return null;
         }
 
-        getPeriodMap() {
+        getPeriodMap(pattern) {
             // One period per class; legacy odd/even entries are folded in
             const schedule = AppState.get('schedule') || {};
+            if (pattern) return { ...(schedule.all || {}), ...(schedule[pattern] || {}) };
             return { ...(schedule.odd || {}), ...(schedule.even || {}), ...(schedule.all || {}) };
         }
 
@@ -3022,29 +3277,48 @@
                 return;
             }
             const periodMap = this.getPeriodMap();
+            const periods = [...new Set(['1', '2', '3', '5', '6', '7', '8', ...Object.keys(periodMap)])]
+                .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
             const periodOptions = '<option value="">Not scheduled</option>' +
-                [1, 2, 3, 5, 6, 7, 8].map(number => `<option value="${number}">Period ${number} · ${number % 2 ? 'Odd' : 'Even'} days</option>`).join('');
+                periods.map(period => `<option value="${this.escapeHTML(period)}">Period ${this.escapeHTML(period)}</option>`).join('');
             container.innerHTML = `
                 <div class="schedule-pattern-headings"><span>Class</span><span>Period</span></div>
                 ${courses.map(course => `<div class="schedule-course-row">
-                    <strong>${this.escapeHTML(course.title)}</strong>
-                    <label class="schedule-period-select"><select aria-label="${this.escapeHTML(course.title)} period" data-course="${this.escapeHTML(course.code)}">${periodOptions}</select></label>
+                    <div><strong>${this.escapeHTML(course.title)}</strong>
+                    ${(AppState.get('schedule')?.meetings || []).some(meeting => meeting.courseCode === course.code)
+                        ? `<p class="settings-hint">${this.escapeHTML((AppState.get('schedule').meetings || []).filter(meeting => meeting.courseCode === course.code)
+                            .map(meeting => `Copied: period ${meeting.period}, ${meeting.pattern}${meeting.start ? `, ${meeting.start}${meeting.end ? `-${meeting.end}` : ''}` : ''}`).join(' · '))}</p>` : ''}</div>
+                    <label class="schedule-period-select"><select aria-label="${this.escapeHTML(course.title)} period" data-course="${this.escapeHTML(course.code)}"><option value="imported">Keep imported rotation</option>${periodOptions}</select></label>
                 </div>`).join('')}`;
             container.querySelectorAll('select[data-course]').forEach(select => {
-                const assignedPeriod = Object.entries(periodMap).find(([, code]) => code === select.dataset.course)?.[0];
-                if (assignedPeriod) select.value = assignedPeriod;
+                const schedule = AppState.get('schedule') || {};
+                const assigned = [...new Set(['all', 'odd', 'even'].flatMap(pattern =>
+                    Object.entries(schedule[pattern] || {}).filter(([, code]) => code === select.dataset.course).map(([period]) => period)))];
+                select.value = assigned.length > 1 ? 'imported' : assigned[0] || '';
+                select.dataset.originalPeriod = select.value;
+                if (assigned.length <= 1) select.querySelector('option[value="imported"]')?.remove();
             });
         }
 
         saveSchedule() {
-            const all = {};
-            document.querySelectorAll('#schedule-course-list select[data-course]').forEach(select => {
-                if (!select.value) return;
-                if (all[select.value]) throw new Error(`Two classes are set to period ${select.value}. Give each class its own period.`);
-                all[select.value] = select.dataset.course;
-            });
             const current = AppState.get('schedule') || {};
-            AppState.set('schedule', { ...(current.ic ? { ic: current.ic } : {}), all, odd: {}, even: {} });
+            const changes = [...document.querySelectorAll('#schedule-course-list select[data-course]')]
+                .filter(select => select.value !== 'imported' && select.value !== select.dataset.originalPeriod)
+                .map(select => ({ code: select.dataset.course, period: select.value }));
+            const changedCourses = new Set(changes.map(item => item.code));
+            const schedule = { ...current };
+            for (const pattern of ['all', 'odd', 'even']) {
+                schedule[pattern] = Object.fromEntries(Object.entries(current[pattern] || {}).filter(([, code]) => !changedCourses.has(code)));
+            }
+            if (current.meetings) schedule.meetings = current.meetings.filter(meeting => !changedCourses.has(meeting.courseCode));
+            changes.forEach(({ code, period }) => {
+                if (!period) return;
+                if (['all', 'odd', 'even'].some(pattern => schedule[pattern][period] && schedule[pattern][period] !== code)) {
+                    throw new Error(`Period ${period} is already assigned. Move or clear that class first.`);
+                }
+                schedule.all[period] = code;
+            });
+            AppState.set('schedule', schedule);
             this.renderDashboard();
             this.renderCalendar();
             window.StudBudDialogs.notify('Class schedule saved.');
@@ -3054,20 +3328,21 @@
             const card = document.getElementById('ic-schedule-status');
             const text = document.getElementById('ic-schedule-status-text');
             if (!card || !text) return;
-            const ic = (AppState.get('schedule') || {}).ic;
-            const imported = Boolean(window.StudBudIC?.hasImportedSchedule(ic));
+            const schedule = AppState.get('schedule') || {}, ic = schedule.ic;
+            const meetings = schedule.meetings || [];
+            const imported = Boolean(window.StudBudIC?.hasImportedSchedule(ic) || meetings.length);
             card.classList.toggle('hidden', !imported);
             if (!imported) return;
-            const when = new Date(ic.importedAt);
-            const days = Object.values(ic.calendars || {}).reduce((sum, list) => sum + Object.keys(list || {}).length, 0);
-            text.textContent = `Using your Infinite Campus schedule${Number.isFinite(when.getTime()) ? ` from ${when.toLocaleDateString()}` : ''}: ${(ic.sections || []).length} class periods with real times${days ? ` and ${days} school-calendar days` : ''}. The periods above still apply on days Campus doesn't cover.`;
+            const when = new Date(ic?.importedAt);
+            const days = Object.values(ic?.calendars || {}).reduce((sum, list) => sum + Object.keys(list || {}).length, 0);
+            text.textContent = `Imported ${meetings.length + (ic?.sections || []).length} class periods${Number.isFinite(when.getTime()) ? ` from ${when.toLocaleDateString()}` : ''}${days ? ` and ${days} school-calendar days` : ''}. Copied times apply to matching periods; an omitted day rotation is not inferred. Schedule details stay inside your encrypted account snapshot.`;
         }
 
         async removeImportedSchedule() {
             const schedule = AppState.get('schedule') || {};
-            if (!schedule.ic) return;
-            if (!await window.StudBudDialogs.confirm('Remove the imported Infinite Campus times and school calendar? Your class periods above stay saved.')) return;
-            const { ic, ...rest } = schedule;
+            if (!schedule.ic && !schedule.meetings?.length) return;
+            if (!await window.StudBudDialogs.confirm('Remove imported class times and school calendar? Your class periods above stay saved.')) return;
+            const { ic, meetings, ...rest } = schedule;
             AppState.set('schedule', rest);
             this.renderSchedulePage();
             this.renderDashboard();
@@ -3092,13 +3367,19 @@
                 };
             }
             const pattern = this.getSchedulePattern(pchsSchedule);
-            const periodMap = this.getPeriodMap();
+            const periodMap = this.getPeriodMap(pattern);
+            const meetings = (AppState.get('schedule') || {}).meetings || [];
             const entries = (pchsSchedule?.classes || []).map(slot => {
                 const match = String(slot.period).match(/^\s*(\d+)/);
                 const period = match ? Number(match[1]) : null;
                 const courseCode = period ? periodMap[String(period)] : null;
                 const course = courses.find(item => item.code === courseCode);
-                return { ...slot, periodNumber: period, course };
+                const copied = meetings.filter(meeting => meeting.courseCode === courseCode && String(meeting.period) === String(period)
+                    && (meeting.pattern === pattern || meeting.pattern === 'all'));
+                const meeting = copied.find(item => item.pattern === pattern) || copied[0];
+                const time = meeting?.start && meeting?.end
+                    ? `${window.StudBudIC.displayTime(meeting.start)} - ${window.StudBudIC.displayTime(meeting.end)}` : slot.time;
+                return { ...slot, time, periodNumber: period, course };
             });
             return imported ? { pchsSchedule, pattern, entries, note: imported.note || '' } : { pchsSchedule, pattern, entries };
         }
@@ -4191,7 +4472,7 @@
                 const cardCount = (deck.cards || []).length;
                 const mastery = this.deckMastery(deck);
                 // Sets added from the community belong to their author: credit them and don't allow reposting.
-                const borrowed = Boolean((deck.communitySourceId && deck.communitySourceOwnerId && deck.communitySourceOwnerId !== myId) || deck.classDeckId);
+                const borrowed = Boolean(deck.budShareId || (deck.communitySourceId && deck.communitySourceOwnerId && deck.communitySourceOwnerId !== myId) || deck.classDeckId);
                 const author = deck.classDeckId
                     ? `<small class="deck-author teacher-set"><i class="fas fa-chalkboard-user"></i> Class set from ${this.escapeHTML(deck.communitySourceAuthor || 'your teacher')}</small>`
                     : borrowed
@@ -4199,8 +4480,9 @@
                     : deck.communityPublished ? '<small class="deck-author">by you · shared</small>' : '';
                 const share = borrowed
                     ? '<button class="deck-menu-item" type="button" role="menuitem" disabled title="Sets added from other students can\'t be reposted"><i class="fas fa-lock"></i> Not yours to share</button>'
-                    : deck.communityPublished ? `<button class="deck-menu-item" type="button" role="menuitem" data-action="unpublish-community-deck" data-id="${this.escapeHTML(deck.id)}"><i class="fas fa-eye-slash"></i> Stop sharing</button>`
-                        : `<button class="deck-menu-item" type="button" role="menuitem" data-action="publish-community-deck" data-id="${this.escapeHTML(deck.id)}"><i class="fas fa-users"></i> Share with community</button>`;
+                    : deck.communityPublished ? `<button class="deck-menu-item" type="button" role="menuitem" data-action="unpublish-community-deck" data-id="${this.escapeHTML(deck.id)}"><i class="fas fa-eye-slash"></i> Remove from public Discover</button>`
+                        : `<button class="deck-menu-item" type="button" role="menuitem" data-action="open-set-sharing" data-id="${this.escapeHTML(deck.id)}"><i class="fas fa-users"></i> Share with community or Bud</button>`;
+                const budShare = !borrowed && deck.communityPublished ? `<button class="deck-menu-item" type="button" role="menuitem" data-action="open-set-sharing" data-id="${this.escapeHTML(deck.id)}">Share with a Bud</button>` : '';
                 const link = this.deckLinkInfo(deck);
                 const tags = link.course || link.assessment ? `<div class="deck-tags">
                         ${link.course ? `<span class="deck-chip" title="Shown publicly if you share this set"><i class="fas fa-book"></i> ${this.escapeHTML(link.course.title || link.course.code)}</span>` : ''}
@@ -4242,7 +4524,7 @@
                                 <button class="deck-menu-item" type="button" role="menuitem" data-action="view-weak-cards" data-id="${id}"><i class="fas fa-triangle-exclamation"></i> View weak cards (${mastery.weak})</button>
                                 <button class="deck-menu-item" type="button" role="menuitem" data-action="view-focus-cards" data-id="${id}"><i class="fas fa-bullseye"></i> Cards below 100% recall</button>
                                 ${mastery.starred ? `<button class="deck-menu-item" type="button" role="menuitem" data-action="cram-starred" data-id="${id}"><i class="fas fa-star"></i> Review starred (${mastery.starred})</button>` : ''}
-                                ${share}
+                                ${share}${budShare}
                                 ${linkEditor}
                                 <button class="deck-menu-item is-danger" type="button" role="menuitem" data-action="delete-deck" data-id="${id}"><i class="fas fa-trash"></i> Delete set</button>
                             </div>
@@ -4692,7 +4974,70 @@
             }
         }
 
+        communitySetContext() {
+            const cloud = window.StudBudCloud;
+            return JSON.stringify([cloud?.user?.id || null, cloud?.guestUser?.id || null,
+                cloud?.accountVersion || 0, this.communitySetContextVersion || 0]);
+        }
+
+        clearCommunitySetContext() {
+            this.communitySetContextVersion = (this.communitySetContextVersion || 0) + 1;
+            this.deckEditorDraft = null;
+            this.deckEditorDrafts = new Map();
+            this.deckEditorOwner = null;
+            this.deckEditorSaved = true;
+            this.deckEditorOriginalCards = new Map();
+            this.deckEditorUndo = [];
+            this.cardEditorReturnToDeck = false;
+            this.setSharingDeckId = null;
+            this.setSharingOwner = null;
+            this.budSetsRequest = (this.budSetsRequest || 0) + 1;
+            this.communityPreviewRequest = (this.communityPreviewRequest || 0) + 1;
+            for (const id of ['deck-editor-title', 'deck-editor-bulk', 'deck-quick-front', 'deck-quick-back',
+                'card-front', 'card-back', 'card-tags', 'card-distractors', 'card-accepted-answers', 'card-keywords', 'card-attachments']) {
+                const input = document.getElementById(id);
+                if (input) input.value = '';
+            }
+            for (const id of ['deck-editor-cards', 'bud-set-results', 'community-preview-cards']) {
+                const node = document.getElementById(id);
+                if (node) node.innerHTML = '';
+            }
+            for (const id of ['set-sharing-title', 'set-sharing-status', 'community-preview-status']) {
+                const node = document.getElementById(id);
+                if (node) node.textContent = '';
+            }
+            const title = document.getElementById('community-preview-title');
+            if (title) title.textContent = 'Sample cards';
+            const status = document.getElementById('bud-set-status');
+            if (status) status.textContent = 'Sign in and refresh to see received sets and manage sent shares.';
+            const select = document.getElementById('set-sharing-bud');
+            if (select) select.innerHTML = '<option value="">Choose one Bud</option>';
+            const send = document.getElementById('set-sharing-send');
+            if (send) send.disabled = true;
+            if (['deck-editor-modal', 'card-studio-modal', 'set-sharing-modal', 'community-preview-modal']
+                .includes(document.querySelector('#modal-container .modal-content:not(.hidden)')?.id)) this.closeModal();
+        }
+
+        retainDeckEditorDraft() {
+            const owner = this.communitySetContext();
+            const fields = ['title', 'course', 'assessment', 'bulk'];
+            if (this.deckEditorOwner === owner && this.deckEditorDraft && !this.deckEditorSaved) {
+                (this.deckEditorDrafts ||= new Map()).set(this.deckEditorExisting ? this.deckEditorDraft.id : '', {
+                    draft: this.deckEditorDraft, existing: this.deckEditorExisting,
+                    originals: this.deckEditorOriginalCards, undo: this.deckEditorUndo,
+                    values: Object.fromEntries(fields.map(field => [field, document.getElementById(`deck-editor-${field}`)?.value || ''])),
+                    quickFront: document.getElementById('deck-quick-front')?.value || '',
+                    quickBack: document.getElementById('deck-quick-back')?.value || ''
+                });
+            }
+        }
+
         openDeckEditor(deckId = '', initialFilter = 'all') {
+            const owner = this.communitySetContext();
+            this.retainDeckEditorDraft();
+            if (this.deckEditorOwner !== owner) this.deckEditorDrafts = new Map();
+            this.deckEditorOwner = owner;
+            const resumed = this.deckEditorDrafts?.get(deckId);
             const deck = deckId ? (AppState.get('flashcards') || []).find(item => item.id === deckId)
                 : { id: `deck_${window.crypto.randomUUID()}`, title: '', cards: [] };
             if (!deck) throw new Error('The selected deck no longer exists.');
@@ -4711,6 +5056,29 @@
             if (bulk) bulk.value = '';
             const addPanel = document.getElementById('deck-editor-add-panel');
             if (addPanel) addPanel.open = !this.deckEditorDraft.cards.length || this.deckEditorDraft.cards.length < 4;
+            if (resumed) {
+                this.deckEditorDraft = resumed.draft;
+                this.deckEditorExisting = resumed.existing;
+                this.deckEditorOriginalCards = resumed.originals;
+                this.deckEditorUndo = resumed.undo;
+                document.getElementById('deck-editor-course').innerHTML = this.deckCourseOptions(resumed.values.course);
+                document.getElementById('deck-editor-assessment').innerHTML = this.deckAssessmentOptions(resumed.values.course, resumed.values.assessment);
+                for (const field of ['title', 'bulk']) document.getElementById(`deck-editor-${field}`).value = resumed.values[field];
+            }
+            for (const [id, value] of [['deck-quick-front', resumed?.quickFront || ''], ['deck-quick-back', resumed?.quickBack || '']]) {
+                const input = document.getElementById(id);
+                if (input) input.value = value;
+            }
+            this.deckEditorSaved = false;
+            const hint = document.getElementById('deck-editor-sharing-hint');
+            if (hint) hint.textContent = `${resumed ? 'Draft restored. ' : ''}${deck.communityPublished ? 'This set is public: Save also updates its public title, class and cards. Stop sharing in My sets to keep future edits personal.' : 'Save keeps a personal set; sharing is a separate choice.'} Closing keeps your draft in this tab until reload.`;
+            const share = document.getElementById('deck-editor-share');
+            if (share) {
+                const authorId = window.StudBudCloud?.user?.id;
+                share.disabled = Boolean(deck.budShareId || deck.classDeckId || deck.classShareSourceOwnerId && deck.classShareSourceOwnerId !== authorId ||
+                    deck.communitySourceId && deck.communitySourceOwnerId && deck.communitySourceOwnerId !== authorId);
+                share.title = share.disabled ? 'Sets from other authors cannot be reposted. You can still save personal edits.' : '';
+            }
             this.renderDeckEditorCards();
             this.openModal('deck-editor-modal');
         }
@@ -4873,16 +5241,25 @@
 
         async saveDeckEditor() {
             const draft = this.deckEditorDraft;
+            const owner = this.deckEditorOwner;
+            const draftKey = this.deckEditorExisting ? draft?.id : '';
             if (!draft) throw new Error('Open a flashcard set before saving.');
+            if (this.deckEditorOwner !== this.communitySetContext()) {
+                this.clearCommunitySetContext();
+                throw new Error('Your account or guest context changed. Reopen the editor before saving.');
+            }
             const title = document.getElementById('deck-editor-title').value.trim();
             if (!title || title.length > 100) throw new Error('Set names must be between 1 and 100 characters.');
+            if (['deck-quick-front', 'deck-quick-back', 'deck-editor-bulk'].some(id => document.getElementById(id)?.value.trim())) {
+                throw new Error('Add the card or bulk text to the set before saving, or clear those fields. Your draft is still open.');
+            }
             const link = this.validatedDeckLink(document.getElementById('deck-editor-course').value, document.getElementById('deck-editor-assessment').value);
             const current = (AppState.get('flashcards') || []).find(deck => deck.id === draft.id);
-            if (!current && this.deckEditorExisting) throw new Error('This set was removed while you were editing. Reopen the editor.');
+            if (!current && this.deckEditorExisting) throw new Error('This set was removed while you were editing. Your draft cannot replace a removed set. Copy any text you need before discarding the draft.');
             const cards = draft.cards.map(card => {
                 const latest = (current?.cards || []).find(item => item.id === card.id);
                 const original = this.deckEditorOriginalCards.get(card.id);
-                if (current && original && !latest) throw new Error('A card was removed while you were editing. Reopen the editor.');
+                if (current && original && !latest) throw new Error('A card was removed while you were editing. Review your draft, or use Discard draft to load the latest saved version.');
                 if (!latest) return card;
                 const next = { ...latest };
                 for (const field of ['front', 'back', 'tags', 'answerImage', 'distractors', 'suspended', 'starred', 'answerMode', 'acceptedAnswers', 'keywords', 'attachments']) {
@@ -4890,7 +5267,7 @@
                     const edited = JSON.stringify(card[field]);
                     const saved = JSON.stringify(field === 'tags' ? latest.tags || [] : latest[field]);
                     if (original && edited === before) continue;
-                    if (original && saved !== before && saved !== edited) throw new Error('This card was also edited elsewhere. Reopen the editor to review its latest version.');
+                    if (original && saved !== before && saved !== edited) throw new Error('This card was also edited elsewhere. Review your draft, or use Discard draft to load the latest saved version. Your draft is still kept.');
                     next[field] = card[field];
                 }
                 return next;
@@ -4898,9 +5275,12 @@
             cards.push(...(current?.cards || []).filter(card => !this.deckEditorOriginalCards.has(card.id) && !cards.some(item => item.id === card.id)));
             const next = { ...(current || draft), title, ...link, cards };
             await AppState.saveFlashcardDeck(next);
+            if (this.communitySetContext() !== owner) throw new Error('Your account context changed while saving. Reopen the editor in your current account.');
             this.deckEditorExisting = true;
             this.deckEditorDraft = { ...next, cards: cards.map(card => ({ ...card, tags: [...(card.tags || [])] })) };
             this.deckEditorOriginalCards = new Map(this.deckEditorDraft.cards.map(card => [card.id, { ...card, tags: [...card.tags] }]));
+            this.deckEditorDrafts?.delete(draftKey);
+            this.deckEditorSaved = true;
             await this.refreshEditedSharedDeck(next);
         }
 
@@ -5132,7 +5512,125 @@
             const search = this.escapeHTML(`${item.name} ${item.rarity} ${item.description || ''} ${item.set || item.collectionName || ''}`.toLocaleLowerCase());
             const setName = item.set || item.collectionName;
             const setTag = setName ? `<small class="shop-set-tag"><i class="fas ${item.season ? 'fa-calendar' : 'fa-box-open'}" aria-hidden="true"></i> ${this.escapeHTML(setName)} set</small>` : '';
-            return `<article class="multiplayer-shop-item rarity-${item.rarity}${equipped ? ' equipped' : ''}" data-search="${search}"><button type="button" class="shop-preview shop-try-on" data-action="character-try-on" data-id="${this.escapeHTML(item.id)}" aria-label="Try on ${this.escapeHTML(item.name)}"><span aria-hidden="true">${this.shopItemPreview(profile, item)}</span><small>Try on <i class="fas fa-expand" aria-hidden="true"></i></small></button><div><strong>${this.escapeHTML(item.name)}</strong><small class="rarity-label">${item.rarity}${equipped ? ' · Equipped' : has ? ' · Owned' : ''}</small>${setTag}${item.description ? `<small>${this.escapeHTML(item.description)}</small>` : ''}</div>${this.shopItemAction(profile, item)}</article>`;
+            return `<article class="multiplayer-shop-item rarity-${item.rarity}${equipped ? ' equipped' : ''}" data-owned="${has}" data-affordable="${!has && item.price != null && !item.season && profile.coins >= item.price}" data-search="${search}"><button type="button" class="shop-preview shop-try-on" data-action="character-try-on" data-id="${this.escapeHTML(item.id)}" aria-label="Try on ${this.escapeHTML(item.name)}"><span aria-hidden="true">${this.shopItemPreview(profile, item)}</span><small>Try on <i class="fas fa-expand" aria-hidden="true"></i></small></button><div><strong>${this.escapeHTML(item.name)}</strong><small class="rarity-label">${item.rarity}${equipped ? ' · Equipped' : has ? ' · Owned' : ''}</small>${setTag}${item.description ? `<small>${this.escapeHTML(item.description)}</small>` : ''}</div>${this.shopItemAction(profile, item)}</article>`;
+        }
+
+        characterAppearanceDraft(profile) {
+            if (this.personalCharacterDraft?.userId !== profile.user_id) this.personalCharacterDraft = null;
+            return this.personalCharacterDraft?.value || window.StudBudArcade.util.normalizeAppearance(profile.appearance);
+        }
+
+        characterEditorMarkup(profile) {
+            const util = window.StudBudArcade.util, look = this.characterAppearanceDraft(profile);
+            const groups = [
+                ['Your features', [['skinTone', 'Skin tone'], ['hairStyle', 'Hairstyle'], ['hairColor', 'Hair color'], ['eyeColor', 'Eye color'], ['expression', 'Expression']]],
+                ['Your outfit', [['shirtStyle', 'Top style'], ['shirtColor', 'Top color'], ['pantsColor', 'Pants color']]]
+            ];
+            return `<div class="personal-character-editor"><div class="character-editor-intro"><span class="character-eyebrow">Free character creator</span><h3>Build your own look</h3><p>Mix your features and outfit. Every option here is free. Hats and accessories are hidden here so you can see your features; saving keeps them equipped.</p>${profile.equipped_skin ? '<p class="character-editor-note">Saving switches from your costume to your personal character. Your costume stays in your locker.</p>' : ''}</div>
+                ${groups.map(([title, fields]) => `<section class="character-editor-section"><h3>${title}</h3>${fields.map(([key, label]) => `<fieldset class="character-options"><legend>${label}</legend><div>${util.appearanceOptions[key].map(([value, name]) => `<button type="button" class="character-option${value.startsWith('#') ? ' character-swatch' : ''}" data-action="character-option" data-feature="${key}" data-value="${value}" aria-pressed="${look[key] === value}" aria-label="${label}: ${name}" ${value.startsWith('#') ? `style="--swatch:${value}"` : ''}>${value.startsWith('#') ? `<span aria-hidden="true"></span><small>${name}</small>` : name}</button>`).join('')}</div></fieldset>`).join('')}</section>`).join('')}
+                <div class="character-editor-save"><p>${profile.user_id === 'guest' ? 'Saved on this device. Used in solo games and rooms you join.' : 'Saved to your account and used in profiles and games.'}</p><div><button type="button" class="primary-btn" data-action="character-save">Save personal character</button><button type="button" class="ghost-btn" data-action="character-discard">Reset changes</button></div></div></div>`;
+        }
+
+        async savePersonalCharacter() {
+            if (this.shopPurchaseBusy || !this.multiplayerProfile) return;
+            const profile = this.multiplayerProfile, userId = window.StudBudCloud?.user?.id;
+            const look = { ...this.characterAppearanceDraft(profile) };
+            this.shopPurchaseBusy = true;
+            this.setShopControlsBusy(true);
+            try {
+                const saved = await window.StudBudCommunityGames.saveAppearance(look);
+                if (this.multiplayerProfile?.user_id !== profile.user_id || window.StudBudCloud?.user?.id !== userId) return;
+                this.personalCharacterDraft = null;
+                if (profile.user_id === 'guest') this.renderGuestAppearance();
+                else await this.renderMultiplayerProfile(true, saved);
+                const status = document.getElementById('multiplayer-inventory-status');
+                if (status) status.textContent = 'Personal character saved. Your hats and accessories are still equipped.';
+                document.querySelector('[data-action="character-save"]')?.focus({ preventScroll: true });
+            } finally {
+                this.shopPurchaseBusy = false;
+                this.setShopControlsBusy(false);
+            }
+        }
+
+        characterFraming(feature, cos = {}) {
+            let frame = { view: 'full', zoom: 1.1, y: .5, label: 'Full look' };
+            if (feature === 'hat') frame = { view: 'detail', zoom: 1.9, y: .3, label: 'Hat' };
+            else if (['hairStyle', 'hairColor'].includes(feature)) frame = { view: 'detail', zoom: 2.25, y: .39, label: 'Hair' };
+            else if (['skinTone', 'eyeColor', 'expression', 'face'].includes(feature)) frame = { view: 'detail', zoom: 2.8, y: .51, label: 'Face' };
+            else if (['shirtStyle', 'shirtColor'].includes(feature)) frame = { view: 'torso', zoom: 3, y: .635, label: 'Top' };
+            else if (feature === 'pantsColor') frame = { view: 'legs', zoom: 3.5, y: .76, label: 'Pants' };
+            else if (feature === 'accessory' && ['acc_shades', 'acc_glasses', 'acc_monocle', 'acc_eyepatch', 'acc_mask', 'acc_goggles', 'acc_mustache', 'acc_beard', 'acc_headband', 'acc_bandana'].includes(cos.acc)) frame = { view: 'detail', zoom: 2.5, y: .49, label: 'Face accessory' };
+            // The shared renderer moves and shrinks characters to leave space for a storm above a hat.
+            if (cos.effect === 'acc_storm_effect' && cos.hat && frame.view !== 'full') {
+                frame.y = .2 + frame.y * .8;
+                frame.zoom /= .8;
+            }
+            return frame;
+        }
+
+        updateCharacterCamera(studio) {
+            const camera = this.characterCameras?.[studio?.dataset.studio];
+            if (!studio || !camera) return;
+            const frame = this.characterFraming(camera.view === 'auto' ? camera.feature : camera.view === 'detail' ? 'face' : 'full', camera.cos);
+            const zoom = Math.max(.75, Math.min(5, camera.zoom ?? frame.zoom));
+            const stage = studio.querySelector('.character-stage');
+            stage.dataset.camera = frame.view;
+            stage.style.setProperty('--character-zoom', zoom);
+            stage.style.setProperty('--character-offset', `${(0.5 - frame.y) * 100}%`);
+            stage.style.setProperty('--character-pan-x', `${camera.panX || 0}px`);
+            stage.style.setProperty('--character-pan-y', `${camera.panY || 0}px`);
+            studio.querySelectorAll('[data-action="character-camera"]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.camera === camera.view)));
+            const slider = studio.querySelector('.character-zoom input');
+            slider.value = zoom;
+            slider.setAttribute('aria-valuetext', `${Math.round(zoom * 100)} percent`);
+            studio.querySelector('.character-zoom output').textContent = `${Math.round(zoom * 100)}%`;
+            studio.querySelector('.character-stage-label').textContent = `${camera.view === 'auto' ? 'Auto · ' : ''}${frame.label}`;
+        }
+
+        setupCharacterCamera(studio) {
+            const stage = studio.querySelector('.character-stage');
+            const slider = studio.querySelector('.character-zoom input');
+            const camera = this.characterCameras[studio.dataset.studio];
+            const changeZoom = value => {
+                camera.zoom = Math.max(.75, Math.min(5, Number(value)));
+                this.updateCharacterCamera(studio);
+            };
+            slider.addEventListener('input', () => changeZoom(slider.value));
+            let drag;
+            stage.addEventListener('pointerdown', event => {
+                if (event.button !== 0 || drag) return;
+                drag = { id: event.pointerId, x: event.clientX, y: event.clientY, panX: camera.panX || 0, panY: camera.panY || 0 };
+                stage.setPointerCapture(event.pointerId);
+                stage.classList.add('is-dragging');
+            });
+            stage.addEventListener('pointermove', event => {
+                if (!drag || drag.id !== event.pointerId) return;
+                const bounds = stage.getBoundingClientRect();
+                camera.panX = Math.max(-bounds.width / 2, Math.min(bounds.width / 2, drag.panX + event.clientX - drag.x));
+                camera.panY = Math.max(-bounds.height / 2, Math.min(bounds.height / 2, drag.panY + event.clientY - drag.y));
+                this.updateCharacterCamera(studio);
+            });
+            const endDrag = () => { drag = null; stage.classList.remove('is-dragging'); };
+            stage.addEventListener('pointerup', endDrag);
+            stage.addEventListener('pointercancel', endDrag);
+            stage.addEventListener('lostpointercapture', endDrag);
+            stage.addEventListener('keydown', event => {
+                if (['+', '=', '-', '_'].includes(event.key)) {
+                    event.preventDefault();
+                    changeZoom(Number(slider.value) + (['+', '='].includes(event.key) ? .15 : -.15));
+                } else if (event.key === '0' || event.key === 'Home') {
+                    event.preventDefault();
+                    Object.assign(camera, { view: 'auto', zoom: null, panX: 0, panY: 0 });
+                    this.updateCharacterCamera(studio);
+                } else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+                    event.preventDefault();
+                    const bounds = stage.getBoundingClientRect();
+                    camera.panX = Math.max(-bounds.width / 2, Math.min(bounds.width / 2, (camera.panX || 0) + (event.key === 'ArrowLeft' ? -12 : event.key === 'ArrowRight' ? 12 : 0)));
+                    camera.panY = Math.max(-bounds.height / 2, Math.min(bounds.height / 2, (camera.panY || 0) + (event.key === 'ArrowUp' ? -12 : event.key === 'ArrowDown' ? 12 : 0)));
+                    this.updateCharacterCamera(studio);
+                }
+            });
+            this.updateCharacterCamera(studio);
         }
 
         renderCharacterStudio(profile, scope, tab, item = null) {
@@ -5140,25 +5638,38 @@
             if (!container) return;
             const catalog = window.StudBudCommunityGames.catalog;
             const slots = [['skin', 'Character'], ['hat', 'Hat'], ['accessory', 'Accessory'], ['effect', 'Aura'], ['palette', 'Color']];
-            const previewProfile = item ? { ...profile, ...(item.type === 'palette' ? { color: undefined } : {}), [`equipped_${item.type}`]: item.id } : profile;
-            const framing = (item?.type || tab) === 'hat' ? 'detail' : 'full';
+            const editing = scope === 'inventory' && tab === 'customize';
+            const previewProfile = editing ? { ...profile, equipped_skin: '', equipped_hat: '', equipped_accessory: '', appearance: this.characterAppearanceDraft(profile) }
+                : item ? { ...profile, ...(item.type === 'palette' ? { color: undefined } : {}), [`equipped_${item.type}`]: item.id } : profile;
+            const cos = this.profileCosmetics(previewProfile);
+            this.characterCameras ||= {};
+            const camera = this.characterCameras[scope] ||= { view: 'auto', feature: item?.type || tab };
+            if (camera.view === 'auto' && !editing) camera.feature = item?.type || tab;
+            camera.cos = cos;
+            const framing = this.characterFraming(camera.view === 'auto' ? camera.feature : camera.view === 'detail' ? 'face' : 'full', cos).view;
             const guest = profile.user_id === 'guest';
+            container.dataset.studio = scope;
+            container.dataset.editing = String(editing);
             container.innerHTML = `
                 <header class="character-studio-heading"><div><span class="character-eyebrow">${scope === 'shop' ? 'Fitting room' : 'Character editor'}</span><h3>Your character</h3></div><span class="shop-wallet" aria-label="${Number(profile.coins || 0).toLocaleString()} coins"><i class="fas fa-coins" aria-hidden="true"></i> ${Number(profile.coins || 0).toLocaleString()}</span></header>
-                <div class="character-stage" data-camera="${framing}" role="img" aria-label="${item ? `Trying on ${this.escapeHTML(item.name)}` : 'Your equipped character'}">
-                    <span class="character-stage-label">${item ? 'Preview only' : 'Currently equipped'}</span>
+                <div class="character-stage" data-camera="${framing}" tabindex="0" role="group" aria-label="${editing ? 'Personal character preview' : item ? `Trying on ${this.escapeHTML(item.name)}` : 'Your equipped character'}. Drag to move. Use plus or minus to zoom, arrow keys to move, and 0 to reset.">
+                    <span class="character-stage-label">${editing ? 'Personal character preview' : item ? 'Preview only' : 'Currently equipped'}</span>
                     ${this.multiplayerAvatarMarkup(this.profileCosmetics(previewProfile), true, 'character-model', 640)}
                 </div>
                 <div class="character-camera" role="group" aria-label="Character camera">
-                    <button type="button" class="ghost-btn" data-action="character-camera" data-camera="full" aria-pressed="${framing === 'full'}"><i class="fas fa-person" aria-hidden="true"></i> Full look</button>
-                    <button type="button" class="ghost-btn" data-action="character-camera" data-camera="detail" aria-pressed="${framing === 'detail'}"><i class="fas fa-magnifying-glass-plus" aria-hidden="true"></i> Close-up</button>
+                    <button type="button" class="ghost-btn" data-action="character-camera" data-camera="auto" aria-pressed="${camera.view === 'auto'}" title="Frame the selected feature and reset the camera">Auto</button>
+                    <button type="button" class="ghost-btn" data-action="character-camera" data-camera="full" aria-pressed="${camera.view === 'full'}">Full</button>
+                    <button type="button" class="ghost-btn" data-action="character-camera" data-camera="detail" aria-pressed="${camera.view === 'detail'}">Face</button>
                 </div>
-                <div class="character-selection" role="status" aria-live="polite"><strong>${item ? this.escapeHTML(item.name) : 'Make it yours'}</strong><p>${item ? 'Trying on only. Your equipped outfit has not changed.' : 'Select Try on to see an item here. Hats automatically zoom in.'}</p></div>
-                ${item ? `<div class="character-selection-actions">${guest ? '<button type="button" class="primary-btn" data-action="guest-create-account">Create account to collect</button>' : this.shopItemAction(profile, item)}<button type="button" class="ghost-btn" data-action="character-preview-reset">Back to equipped</button></div>` : ''}
+                <label class="character-zoom"><span>Zoom <output>100%</output></span><input type="range" min=".75" max="5" step=".05" value="1.1" aria-label="Character preview zoom"></label>
+                <div class="character-selection" role="status" aria-live="polite"><strong>${editing ? 'Made by you' : item ? this.escapeHTML(item.name) : 'Make it yours'}</strong><p>${editing ? 'Select a feature to frame it automatically. Drag to move; use the zoom slider to explore. Save when ready.' : item ? 'Trying on only. Your equipped outfit has not changed.' : 'Try on an item to frame it automatically. Drag to move or adjust the zoom.'}</p></div>
+                ${editing ? '<div class="character-selection-actions"><button type="button" class="primary-btn" data-action="character-save">Save personal character</button><button type="button" class="ghost-btn" data-action="character-discard">Reset changes</button></div>'
+                    : item ? `<div class="character-selection-actions">${guest ? '<button type="button" class="primary-btn" data-action="guest-create-account">Create account to collect</button>' : this.shopItemAction(profile, item)}<button type="button" class="ghost-btn" data-action="character-preview-reset">Back to equipped</button></div>` : ''}
                 <details class="character-outfit"><summary>Equipped outfit</summary><dl>${slots.map(([slot, label]) => {
                     const equipped = catalog.find(entry => entry.id === profile[`equipped_${slot}`]);
                     return `<div><dt>${label}</dt><dd>${equipped ? this.escapeHTML(equipped.name) : slot === 'skin' || slot === 'palette' ? 'Default' : 'None'}</dd></div>`;
                 }).join('')}</dl></details>`;
+            if (container.querySelector) this.setupCharacterCamera(container);
             if (this.shopPurchaseBusy) this.setShopControlsBusy(true);
         }
 
@@ -5218,10 +5729,12 @@
         renderShopFrame(containerId, tabs, tab, tabAttr, body, query, label, gridClass = '') {
             const container = document.getElementById(containerId);
             if (!container) return;
+            const filters = containerId === 'multiplayer-shop-items' && !['boxes', 'sets'].includes(tab);
             container.innerHTML = `
                 <nav class="shop-tabs" aria-label="${containerId === 'multiplayer-shop-items' ? 'Shop categories' : 'Locker categories'}">${tabs.map(([id, text]) => `<button type="button" class="shop-tab${tab === id ? ' selected' : ''}" aria-pressed="${tab === id}" ${tabAttr}="${id}">${text}</button>`).join('')}</nav>
-                <label class="shop-search"><i class="fas fa-magnifying-glass" aria-hidden="true"></i><span class="sr-only">${label}</span><input class="shop-search-input" data-search-key="${containerId}" type="search" value="${this.escapeHTML(query || '')}" placeholder="Filter by name, rarity or set"></label>
-                <div class="shop-grid ${gridClass}">${body}<p class="shop-search-empty" role="status" hidden>Nothing matches. Try another name or rarity.</p></div>`;
+                ${filters ? `<div class="shop-filter-bar" role="group" aria-label="Item availability">${[['all', 'All items'], ['unowned', 'Not owned'], ['affordable', 'Within budget'], ['owned', 'Owned']].map(([value, text]) => `<button type="button" class="shop-tab" data-action="shop-filter" data-filter="${value}" aria-pressed="${(this.shopAvailability || 'all') === value}">${text}</button>`).join('')}</div>` : ''}
+                ${tab === 'customize' ? '' : `<label class="shop-search"><i class="fas fa-magnifying-glass" aria-hidden="true"></i><span class="sr-only">${label}</span><input class="shop-search-input" data-search-key="${containerId}" type="search" value="${this.escapeHTML(query || '')}" placeholder="Filter by name, rarity or set"></label>`}
+                <div class="shop-grid ${gridClass}">${body}<p class="shop-search-empty" role="status" hidden>No items match these filters. Try another search or availability filter.</p></div>`;
             this.filterShopGrid(container, query);
             if (this.shopPurchaseBusy) this.setShopControlsBusy(true);
         }
@@ -5231,24 +5744,28 @@
             if (!grid?.querySelectorAll) return;
             const term = String(query || '').trim().toLocaleLowerCase();
             const cards = [...grid.querySelectorAll('.multiplayer-shop-item, .season-set-card')];
-            for (const card of cards) card.hidden = Boolean(term) && !card.dataset.search?.includes(term);
+            const filter = container.id === 'multiplayer-shop-items' && grid.querySelector('[data-owned]') ? this.shopAvailability || 'all' : 'all';
+            for (const card of cards) card.hidden = (Boolean(term) && !card.dataset.search?.includes(term))
+                || (filter === 'owned' && card.dataset.owned !== 'true')
+                || (filter === 'unowned' && card.dataset.owned !== 'false')
+                || (filter === 'affordable' && card.dataset.affordable !== 'true');
             for (const heading of grid.querySelectorAll('.shop-category-title')) {
                 let sibling = heading.nextElementSibling, hasItems = false;
                 while (sibling && !sibling.matches('.shop-category-title')) {
                     if (!sibling.hidden && sibling.matches('.multiplayer-shop-item, .season-set-card')) hasItems = true;
                     sibling = sibling.nextElementSibling;
                 }
-                heading.hidden = Boolean(term) && !hasItems;
+                heading.hidden = (Boolean(term) || filter !== 'all') && !hasItems;
             }
             const empty = grid.querySelector('.shop-search-empty');
-            if (empty) empty.hidden = !term || cards.some(card => !card.hidden);
+            if (empty) empty.hidden = (!term && filter === 'all') || cards.some(card => !card.hidden);
         }
 
         renderMultiplayerShop(profile) {
             const games = window.StudBudCommunityGames;
             const Games = games.constructor;
             const owned = profile.owned_items || [];
-            const tabs = [['boxes', 'Boxes'], ['sets', 'Sets'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['effect', 'Auras'], ['palette', 'Colors']];
+            const tabs = [['boxes', 'Boxes'], ['sets', 'Sets'], ['skin', 'Costumes'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['effect', 'Auras'], ['palette', 'Colors']];
             const tab = tabs.some(([id]) => id === this.shopTab) ? this.shopTab : 'boxes';
             const order = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
             const rank = item => { const i = order.indexOf(item.rarity); return i < 0 ? order.length : i; };
@@ -5302,9 +5819,14 @@
         renderInventory(profile) {
             const games = window.StudBudCommunityGames;
             const owned = profile.owned_items || [];
-            const tabs = [['all', 'All'], ['skin', 'Characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['effect', 'Auras'], ['palette', 'Colors']];
-            const tab = tabs.some(([id]) => id === this.inventoryTab) ? this.inventoryTab : 'all';
-            const typeNames = Object.fromEntries(tabs.slice(1));
+            const tabs = [['customize', 'Create character'], ['all', 'All items'], ['skin', 'Costumes'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['effect', 'Auras'], ['palette', 'Colors']];
+            const tab = tabs.some(([id]) => id === this.inventoryTab) ? this.inventoryTab : 'customize';
+            if (tab === 'customize') {
+                this.renderShopFrame('multiplayer-inventory-items', tabs, tab, 'data-inventory-tab', this.characterEditorMarkup(profile), '', '', 'shop-grid-editor');
+                this.renderCharacterStudio(profile, 'inventory', tab);
+                return;
+            }
+            const typeNames = Object.fromEntries(tabs.slice(2));
             const order = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
             const mine = games.catalog.filter(item => item.type !== 'pet' && owned.includes(item.id));
             const total = games.catalog.filter(item => !item.legacy && item.type !== 'pet').length;
@@ -5568,15 +6090,13 @@
             if (!games || !grid) return;
             grid.classList.remove('hidden');
             this.multiplayerProfileRevision = (this.multiplayerProfileRevision || 0) + 1;
-            const browse = { owned_items: [], coins: 0, user_id: 'guest', color: games.guestColor() || games.guestColors[0] };
+            const browse = { owned_items: [], coins: 0, user_id: 'guest', color: games.guestColor() || games.guestColors[0], appearance: games.guestAppearance() };
             this.multiplayerProfile = browse;
             this.lastDrop = null;
             this.renderMultiplayerShop(browse);
             this.renderAppearanceShopSchemes();
-            const locker = document.getElementById('multiplayer-inventory-items');
-            if (locker) locker.innerHTML = '<p class="settings-hint">Your locker fills up as you collect cosmetics. <button type="button" class="primary-btn" data-action="guest-create-account">Create free account</button></p>';
             const current = games.guestColor() || games.guestColors[0];
-            const cosmetics = { color: current };
+            const cosmetics = this.profileCosmetics(browse);
             [document.getElementById('multiplayer-header-avatar'), document.getElementById('multiplayer-large-avatar')].forEach(element => {
                 if (element) element.innerHTML = this.multiplayerAvatarMarkup(cosmetics, element.id === 'multiplayer-large-avatar');
             });
@@ -6165,7 +6685,7 @@
                 return;
             }
             this.shopBusyButtons ||= new Map();
-            document.querySelectorAll('[data-action="multiplayer-buy"], [data-action="multiplayer-equip"], [data-action="multiplayer-unequip"], [data-action="multiplayer-mystery"], .scheme-option[data-shop-item]').forEach(button => {
+            document.querySelectorAll('[data-action="multiplayer-buy"], [data-action="multiplayer-equip"], [data-action="multiplayer-unequip"], [data-action="multiplayer-mystery"], [data-action="character-save"], [data-action="character-discard"], [data-action="character-option"], .scheme-option[data-shop-item]').forEach(button => {
                 if (!this.shopBusyButtons.has(button)) this.shopBusyButtons.set(button, button.disabled);
                 button.disabled = true;
                 button.setAttribute('aria-busy', 'true');
@@ -8319,7 +8839,7 @@
                     const cosmetics = this.profileCosmetics(this.multiplayerProfile || {});
 	                    const base = {
 	                        preview: true, practice: false, spectator: false, isHost: false, testing: false, limitedTestEnergy: false,
-	                        lowDetail: false, graphics: A.graphicsProfile(), stickJumpHeld: false, seed: 4242, local: { id: 'demo', color: '#38bdf8', nickname: 'You', cos: { skin: cosmetics.skin, hat: cosmetics.hat, acc: cosmetics.acc, effect: cosmetics.effect } }, user: { id: 'demo' }, t: 0, startedAt: Date.now(), done: false, finishMs: 0, over: false, paused: false, question: null, score: 0,
+	                        lowDetail: false, graphics: A.graphicsProfile(), stickJumpHeld: false, seed: 4242, local: { id: 'demo', color: '#38bdf8', nickname: 'You', cos: cosmetics }, user: { id: 'demo' }, t: 0, startedAt: Date.now(), done: false, finishMs: 0, over: false, paused: false, question: null, score: 0,
                         vw: viewWidth, vh: viewHeight, scale: 1, canvas: mockCanvas, overlay: mockOverlay, roster: new Map(), cards: [], keys: hold, hudBounds() { return { x: 12, y: 12, w: Math.max(1, this.vw - 24), h: Math.max(1, this.vh - 24) }; }, mouse: { x: width / 2, y: height / 2, down: false, pressed: false, touchAt: 0 },
                         down: (...keys) => keys.some(key => hold.has(key)), pressed: (...keys) => keys.some(key => tap.has(key)),
                         axis: () => ({ x: (hold.has('KeyD') || hold.has('ArrowRight') ? 1 : 0) - (hold.has('KeyA') || hold.has('ArrowLeft') ? 1 : 0), y: (hold.has('KeyS') || hold.has('ArrowDown') ? 1 : 0) - (hold.has('KeyW') || hold.has('ArrowUp') ? 1 : 0) }),
@@ -8342,7 +8862,7 @@
                 }
                 const { session, game, hold, tap } = demo;
                 const cosmetics = this.profileCosmetics(this.multiplayerProfile || {});
-                session.local.cos = { skin: cosmetics.skin, hat: cosmetics.hat, acc: cosmetics.acc, effect: cosmetics.effect };
+                session.local.cos = cosmetics;
                 session.remoteList = () => demo.bots;
                 session.remotes = new Map(demo.bots.map(bot => [bot.id, bot]));
                 const elapsed = Math.min(0.1, Math.max(0, (now - demo.last) / 1000));
@@ -8559,33 +9079,91 @@
             const status = document.getElementById('community-deck-status');
             const results = document.getElementById('community-deck-results');
             if (!status || !results) return;
-            if ((window.StudBudCloud?.offlineMode && !window.StudBudCloud?.isGuest?.()) || window.navigator?.onLine === false) {
+            const request = this.communityDeckSearchRequest = (this.communityDeckSearchRequest || 0) + 1;
+            results.dataset.loaded = '';
+            if (window.StudBudCloud?.offlineMode && !window.StudBudCloud?.isGuest?.()) {
                 status.textContent = 'The community library needs an internet connection. Your saved sets remain available offline.';
-                results.innerHTML = '<p class="empty-state">Open My sets to study, edit or practice offline.</p>';
+                results.innerHTML = '<p class="empty-state">Open My sets to study, edit or practice offline.</p><button type="button" class="secondary-btn" data-action="retry-community-search">Retry connection</button>';
+                results.removeAttribute('aria-busy');
                 return;
             }
             status.textContent = 'Searching shared decks…';
+            results.setAttribute('aria-busy', 'true');
+            results.innerHTML = '<p class="empty-state">Loading public sets…</p>';
             try {
                 const decks = await window.StudBudCommunityGames.searchDecks(query);
+                if (request !== this.communityDeckSearchRequest) return;
+                if (!Array.isArray(decks)) throw new Error('The library returned an invalid list. Please retry.');
+                this.communityDeckSearchResults = decks;
+                const course = document.getElementById('community-deck-course');
+                const selected = course.value;
+                course.innerHTML = '<option value="">All classes</option>' + [...new Set(decks.map(deck => deck.course).filter(Boolean))]
+                    .sort((a, b) => a.localeCompare(b)).map(name => `<option value="${this.escapeHTML(name)}">${this.escapeHTML(name)}</option>`).join('');
+                course.value = [...course.options].some(option => option.value === selected) ? selected : '';
                 results.dataset.loaded = 'true';
-                results.innerHTML = decks.length ? decks.map(deck => `
+                this.renderCommunityDeckResults();
+            } catch (error) {
+                if (request !== this.communityDeckSearchRequest) return;
+                console.error('[NexusApp] Community deck search failed:', error);
+                results.dataset.loaded = '';
+                results.innerHTML = '<p class="empty-state">No results are shown because this search failed.</p><button type="button" class="secondary-btn" data-action="retry-community-search">Retry search</button>';
+                status.textContent = `The community library could not load. ${this.friendlyErrorMessage(error, 'Please check your connection and try again.')}`;
+            } finally {
+                if (request === this.communityDeckSearchRequest) results.removeAttribute('aria-busy');
+            }
+        }
+
+        renderCommunityDeckResults() {
+            const results = document.getElementById('community-deck-results');
+            if (!results.dataset.loaded) return;
+            const all = this.communityDeckSearchResults || [];
+            const course = document.getElementById('community-deck-course').value;
+            const library = document.getElementById('community-deck-library').value;
+            const sort = document.getElementById('community-deck-sort').value;
+            const decks = all.filter(deck => (!course || deck.course === course) &&
+                (library === 'all' || (library === 'saved' ? Boolean(this.findCommunityDeck(deck.id)) : !this.findCommunityDeck(deck.id))));
+            decks.sort((a, b) => sort === 'title' ? a.title.localeCompare(b.title) :
+                sort === 'short' ? Number(a.card_count) - Number(b.card_count) :
+                sort === 'recent' ? (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0) :
+                Number(b.study_count || 0) - Number(a.study_count || 0));
+            results.innerHTML = decks.length ? decks.map(deck => `
                     <article class="community-deck-card">
                         <div><strong>${this.escapeHTML(deck.title)}</strong>${deck.course ? ` <span class="deck-chip"><i class="fas fa-book"></i> ${this.escapeHTML(deck.course)}</span>` : ''}<p>${this.escapeHTML(deck.description || 'A student-shared study set.')}</p>
                             <small>${Number(deck.card_count)} cards · studied by ${Number(deck.study_count)} ${Number(deck.study_count) === 1 ? 'student' : 'students'}</small>
                             <small class="deck-author">by <button type="button" class="link-btn" data-action="view-profile" data-id="${this.escapeHTML(deck.owner_id)}">${this.escapeHTML(deck.author_name || 'Student')}</button> ${this.accountTagMarkup(deck.author_name)}</small></div>
-                        <div class="community-deck-actions">${this.communityDeckActionMarkup(deck.id)}${this.reportButtonMarkup('deck', deck.id, deck.title)}</div>
-                    </article>`).join('') : '<p class="empty-state">No shared decks found. Try another search, or share one of your own after studying it.</p>';
-                status.textContent = `${decks.length} community deck${decks.length === 1 ? '' : 's'} found.`;
+                        <div class="community-deck-actions"><button type="button" class="secondary-btn" data-action="preview-community-set" data-id="${this.escapeHTML(deck.id)}">Preview cards</button>${this.communityDeckActionMarkup(deck.id)}${this.reportButtonMarkup('deck', deck.id, deck.title)}</div>
+                    </article>`).join('') : '<p class="empty-state">No matching sets. Try a broader title or class, clear the filters, or create a personal set.</p>';
+            document.getElementById('community-deck-status').textContent = `${decks.length} of ${all.length} loaded public sets shown. Filters and sorting apply to these results${all.length >= 30 ? '; search more specifically to find other sets' : ''}.`;
+        }
+
+        async previewCommunitySet(deckId, bud = false) {
+            const owner = this.communitySetContext();
+            const request = this.communityPreviewRequest = (this.communityPreviewRequest || 0) + 1;
+            const title = document.getElementById('community-preview-title');
+            const status = document.getElementById('community-preview-status');
+            const cards = document.getElementById('community-preview-cards');
+            title.textContent = 'Sample cards';
+            status.textContent = 'Loading preview…';
+            cards.innerHTML = '';
+            this.openModal('community-preview-modal');
+            try {
+                const deck = bud ? (await window.StudBudCommunityGames.listBudSets(deckId))[0] : await window.StudBudCommunityGames.importDeck(deckId);
+                if (request !== this.communityPreviewRequest || this.communitySetContext() !== owner) return;
+                if (!deck || !Array.isArray(deck.cards)) throw new Error('This shared set is no longer available.');
+                title.textContent = deck.title;
+                status.textContent = `By ${deck.author_name || 'Student'} · Showing ${Math.min(3, deck.cards.length)} of ${deck.cards.length} cards. Previewing does not save a copy.`;
+                cards.innerHTML = deck.cards.slice(0, 3).map(card => `<article><strong>${this.escapeHTML(card.front)}</strong><p>${this.escapeHTML(card.back)}</p></article>`).join('');
             } catch (error) {
-                console.error('[NexusApp] Community deck search failed:', error);
-                results.dataset.loaded = '';
-                status.textContent = `The community library could not load. ${this.friendlyErrorMessage(error, 'Please check your connection and try again.')}`;
+                if (request === this.communityPreviewRequest && this.communitySetContext() === owner) status.textContent = `Could not preview this set. ${this.friendlyErrorMessage(error)}`;
             }
         }
 
         async publishCommunityDeck(deckId) {
+            const owner = this.communitySetContext();
             const deck = (AppState.get('flashcards') || []).find(item => item.id === deckId);
             if (!deck) throw new Error('That deck could not be found.');
+            if (!await window.StudBudDialogs.confirm(`Publish “${deck.title}” to public Discover? Anyone, including guests, can read and copy its title, class label, terms, definitions, distractors and attribution. Private grades, assignments, schedules, study history and other notes are not included. Review card text for personal information. Later saved edits update the public copy. Only publish content you have permission to share.`)) return;
+            if (this.communitySetContext() !== owner) throw new Error('Your account changed. Reopen sharing before publishing.');
             let published;
             try {
                 published = await window.StudBudCommunityGames.publishDeck({ ...deck, courseTitle: this.deckLinkInfo(deck).course?.title || '' });
@@ -8594,6 +9172,7 @@
                 if (/already shared|same title|identical|duplicate|already exists|reposted|reposting/i.test(message)) { window.StudBudDialogs.notify(message); return; }
                 throw error;
             }
+            if (this.communitySetContext() !== owner) return;
             await this.updateSavedDeck(deckId, { communityPublished: true, communityDeckId: published.id });
             window.StudBudDialogs.notify('Deck shared. Its title, class, card terms and definitions, and any source attribution are visible in the public community library, including to guests. Your linked test or quiz stays private. You can stop sharing it at any time.');
         }
@@ -8603,17 +9182,22 @@
             if (!deck) throw new Error('This deck is no longer available.');
             await window.StudBudCommunityGames.unpublishDeck(deckId);
             await this.updateSavedDeck(deckId, { communityPublished: false, communityDeckId: null });
+            window.StudBudDialogs.notify('Removed the public Discover copy. Your personal set and any Bud snapshots are unchanged. Manage or revoke Bud shares separately in Discover.');
         }
 
-        async importCommunityDeck(deckId) {
-            const local = this.findCommunityDeck(deckId);
+        async importCommunityDeck(deckId, bud = false) {
+            const owner = this.communitySetContext();
+            const find = id => bud ? (AppState.get('flashcards') || []).find(deck => deck.budShareId === id) : this.findCommunityDeck(id);
+            const local = find(deckId);
             if (local) {
                 document.getElementById('community-deck-status').textContent = `“${local.title}” is already in your decks.`;
                 this.refreshCommunityDeckActions();
                 return;
             }
-            const shared = await window.StudBudCommunityGames.importDeck(deckId);
-            const existingDeck = this.findCommunityDeck(shared.id);
+            const shared = bud ? (await window.StudBudCommunityGames.listBudSets(deckId))[0] : await window.StudBudCommunityGames.importDeck(deckId);
+            if (this.communitySetContext() !== owner) throw new Error('Your account changed. Reopen Discover before saving a copy.');
+            if (!shared || !Array.isArray(shared.cards) || shared.cards.length < 2) throw new Error('This shared set is no longer available.');
+            const existingDeck = find(shared.id);
             if (existingDeck) {
                 document.getElementById('community-deck-status').textContent = `“${shared.title}” is already in your decks.`;
                 this.refreshCommunityDeckActions();
@@ -8631,7 +9215,7 @@
                     interval: 0,
                     easeFactor: 2.5
                 })),
-                communitySourceId: shared.id,
+                ...(bud ? { budShareId: shared.id } : { communitySourceId: shared.id }),
                 communitySourceOwnerId: shared.owner_id,
                 communitySourceTitle: shared.title,
                 communitySourceAuthor: shared.author_name || 'Student',
@@ -8644,6 +9228,93 @@
             await AppState.saveFlashcardDeck(localDeck);
             this.refreshCommunityDeckActions();
             document.getElementById('community-deck-status').textContent = `Added “${shared.title}” to your private decks.`;
+            if (bud) document.getElementById('bud-set-status').textContent = `Saved a personal copy of “${shared.title}”, credited to ${shared.author_name || 'Student'}.`;
+        }
+
+        async openSetSharing(deckId) {
+            const deck = (AppState.get('flashcards') || []).find(item => item.id === deckId);
+            if (!deck) throw new Error('Save this set before sharing it.');
+            window.StudBudCommunityGames.sharedDeckRow(deck);
+            this.setSharingDeckId = deckId;
+            this.setSharingOwner = this.communitySetContext();
+            const owner = this.setSharingOwner;
+            const select = document.getElementById('set-sharing-bud');
+            const send = document.getElementById('set-sharing-send');
+            const status = document.getElementById('set-sharing-status');
+            document.getElementById('set-sharing-title').textContent = deck.title;
+            document.getElementById('set-sharing-public').textContent = deck.communityPublished ? 'Update public Discover copy' : 'Publish to public Discover';
+            select.innerHTML = '<option value="">Loading Buds…</option>';
+            send.disabled = true;
+            status.textContent = '';
+            this.openModal('set-sharing-modal');
+            try {
+                const data = await window.StudBudCommunityGames.friendCall('studbud_friend_overview');
+                if (this.setSharingDeckId !== deckId || this.communitySetContext() !== owner) return;
+                if (!Array.isArray(data?.friends)) throw new Error('The Bud list was invalid. Close and reopen sharing to retry.');
+                select.innerHTML = '<option value="">Choose one Bud</option>' + data.friends.map(bud =>
+                    `<option value="${this.escapeHTML(bud.user_id)}">${this.escapeHTML(bud.username)}</option>`).join('');
+                send.disabled = !data.friends.length;
+                status.textContent = data.friends.length ? 'Choose a recipient, then send explicitly. This does not publish to Discover.' : 'No Buds yet. Add a Bud first, or keep this set personal.';
+            } catch (error) {
+                if (this.setSharingDeckId !== deckId || this.communitySetContext() !== owner) return;
+                select.innerHTML = '<option value="">Buds unavailable</option>';
+                status.textContent = `Could not load Buds. ${this.friendlyErrorMessage(error)} Your personal set is saved.`;
+            }
+        }
+
+        async sendSetToBud() {
+            const owner = this.setSharingOwner;
+            if (this.communitySetContext() !== owner) throw new Error('Your account changed. Reopen sharing before sending.');
+            const deck = (AppState.get('flashcards') || []).find(item => item.id === this.setSharingDeckId);
+            const select = document.getElementById('set-sharing-bud');
+            const status = document.getElementById('set-sharing-status');
+            if (!select.value) { status.textContent = 'Choose a Bud before sending.'; select.focus(); return; }
+            if (!deck) throw new Error('This set is no longer available.');
+            const recipientId = select.value;
+            const recipient = select.selectedOptions[0].textContent;
+            if (!await window.StudBudDialogs.confirm(`Send a snapshot of “${deck.title}” to ${recipient}? Only its title, terms and definitions are sent, readable by this Bud and the service. It is not public or end-to-end encrypted. No linked school data, study history or other notes are sent. Review card text for personal information; saved copies cannot be recalled. Sending again replaces this Bud's shared snapshot.`)) return;
+            if (this.communitySetContext() !== owner) throw new Error('Your account changed. Reopen sharing before sending.');
+            const button = document.getElementById('set-sharing-send');
+            button.disabled = true;
+            status.textContent = 'Sending snapshot…';
+            try {
+                await window.StudBudCommunityGames.shareDeckWithBud(deck, recipientId);
+                if (this.communitySetContext() !== owner) return;
+                status.textContent = `Sent to ${recipient}. Not published to Discover. Later edits stay personal unless you send again. Manage this share in Discover → Sets shared with Buds.`;
+            } catch (error) {
+                if (this.communitySetContext() === owner) status.textContent = `Not sent. ${this.friendlyErrorMessage(error)} Your personal set is unchanged.`;
+            } finally { if (this.communitySetContext() === owner) button.disabled = false; }
+        }
+
+        async loadBudSets() {
+            const owner = this.communitySetContext();
+            const status = document.getElementById('bud-set-status');
+            const results = document.getElementById('bud-set-results');
+            const request = this.budSetsRequest = (this.budSetsRequest || 0) + 1;
+            if (!window.StudBudCommunityGames.hasAccount()) {
+                status.textContent = 'Sign in to send and receive sets with Buds. Guests can still create personal sets and browse public Discover.';
+                results.innerHTML = '';
+                return;
+            }
+            status.textContent = 'Loading received and sent snapshots…';
+            results.innerHTML = '';
+            results.setAttribute('aria-busy', 'true');
+            try {
+                const shares = await window.StudBudCommunityGames.listBudSets();
+                if (request !== this.budSetsRequest || this.communitySetContext() !== owner) return;
+                results.innerHTML = shares.map(share => `<article class="community-deck-card">
+                    <div><strong>${this.escapeHTML(share.title)}</strong><p>${share.outgoing ? 'Sent to' : 'From'} ${this.escapeHTML(share.outgoing ? share.recipient_name : share.author_name)}</p><small>${Number(share.card_count)} cards · Recipient-scoped snapshot</small></div>
+                    <div class="community-deck-actions">
+                        <button type="button" class="secondary-btn" data-action="preview-bud-set" data-id="${this.escapeHTML(share.id)}">Preview cards</button>
+                        ${share.outgoing ? '' : `<button type="button" class="primary-btn" data-action="import-bud-set" data-id="${this.escapeHTML(share.id)}">${(AppState.get('flashcards') || []).some(deck => deck.budShareId === share.id) ? 'Already saved' : 'Save personal copy'}</button>${this.reportButtonMarkup('profile', share.owner_id, share.author_name)}`}
+                        <button type="button" class="secondary-btn" data-action="remove-bud-set" data-id="${this.escapeHTML(share.id)}" data-outgoing="${Boolean(share.outgoing)}">${share.outgoing ? 'Revoke share' : 'Dismiss share'}</button>
+                    </div></article>`).join('');
+                status.textContent = shares.length ? `${shares.length} shared snapshots. Revoking or dismissing cannot remove copies already saved. Report a sender's profile for harmful content; include the set title.` : 'No active Bud shares. Share one of your own saved sets from its menu in My sets. Only current Buds can access snapshots.';
+            } catch (error) {
+                if (request === this.budSetsRequest && this.communitySetContext() === owner) status.textContent = `Could not load Bud shares. ${this.friendlyErrorMessage(error)} Use Refresh Bud shares to retry.`;
+            } finally {
+                if (request === this.budSetsRequest) results.removeAttribute('aria-busy');
+            }
         }
 
         createRoomCode() {
@@ -8741,7 +9412,7 @@
             const paused = session?.paused;
             if (session) session.paused = true;
             try {
-                await session?.reportScore(true);
+                if (await session?.reportScore(true) === false) throw new Error('Your score has not synced. Check your connection before switching roles.');
                 session?.game.persist?.();
                 await session?.game.persistPromise;
                 const next = await window.StudBudCommunityGames.setHostMode(room.room_code, !room.state?.host_spectator);
@@ -9137,7 +9808,8 @@
                 skin: hasProfile ? cosmetics.skin : roomPlayer.skin || '',
                 hat: hasProfile ? cosmetics.hat : roomPlayer.hat || '',
                 accessory: hasProfile ? cosmetics.acc : roomPlayer.accessory || '',
-                effect: hasProfile ? cosmetics.effect : roomPlayer.effect || ''
+                effect: hasProfile ? cosmetics.effect : roomPlayer.effect || '',
+                appearance: cosmetics.appearance
             };
             if (!hasProfile && window.StudBudCommunityGames?.guestColor?.()) me.color = window.StudBudCommunityGames.guestColor();
             const roomDeck = selectedDeck || this.roomStudyDeck(room);
@@ -10605,6 +11277,30 @@
             }).join('') : '<p class="empty-state">Create a deck and log some study sessions to see your activity here.</p>';
         }
 
+        async loadChartLibrary() {
+            if (window.Chart) return;
+            if (this.chartLibraryLoading) return this.chartLibraryLoading;
+            this.chartLibraryLoading = (async () => {
+                const script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+                let timeout;
+                try {
+                    await new Promise((resolve, reject) => {
+                        script.onload = resolve;
+                        script.onerror = () => reject(new Error('The chart library could not be downloaded.'));
+                        timeout = window.setTimeout(() => reject(new Error('The chart library timed out.')), 8000);
+                        document.head.appendChild(script);
+                    });
+                    if (!window.Chart) throw new Error('The chart library did not initialize.');
+                } finally {
+                    window.clearTimeout(timeout);
+                    script.remove();
+                }
+            })();
+            try { await this.chartLibraryLoading; }
+            finally { this.chartLibraryLoading = null; }
+        }
+
         renderGradeProgress() {
             this.renderStudyAnalytics();
             const canvas = document.getElementById('grade-progress-chart');
@@ -10613,7 +11309,25 @@
             const courseControl = document.getElementById('analytics-course-control');
             const emptyMessage = document.getElementById('grade-progress-empty');
             if (!window.Chart) {
-                document.getElementById('grade-progress-caption').textContent = 'Charts could not load. Check your internet connection and reload.';
+                if (AppState.get('currentView') !== 'analytics' || this.chartRenderLoading) return;
+                const caption = document.getElementById('grade-progress-caption');
+                caption.textContent = 'Loading charts…';
+                this.chartRenderLoading = true;
+                this.loadChartLibrary().then(() => {
+                    this.chartRenderLoading = false;
+                    if (AppState.get('currentView') === 'analytics') this.renderGradeProgress();
+                }).catch(error => {
+                    this.chartRenderLoading = false;
+                    console.error('[NexusApp] Charts could not load:', error);
+                    if (AppState.get('currentView') !== 'analytics') return;
+                    caption.textContent = 'Charts could not load. Your saved grades and study data are unchanged. ';
+                    const retry = document.createElement('button');
+                    retry.type = 'button';
+                    retry.className = 'text-btn';
+                    retry.textContent = 'Retry charts';
+                    retry.addEventListener('click', () => this.renderGradeProgress());
+                    caption.appendChild(retry);
+                });
                 return;
             }
             const courses = this.schoolSemesterCourses();
@@ -10973,18 +11687,44 @@
                     await window.StudBudCloud?.connectOnline?.('signup');
                 } else if (action === 'guest-color') {
                     this.setGuestColor(target.dataset.color);
+                } else if (action === 'character-option') {
+                    if (this.shopPurchaseBusy || !this.multiplayerProfile) return;
+                    const { feature, value } = target.dataset, util = window.StudBudArcade.util;
+                    if (!util.appearanceOptions[feature]?.some(([id]) => id === value)) throw new Error('Choose a valid character option.');
+                    this.personalCharacterDraft = { userId: this.multiplayerProfile.user_id, value: { ...this.characterAppearanceDraft(this.multiplayerProfile), [feature]: value } };
+                    this.characterCameras ||= {};
+                    this.characterCameras.inventory = { view: 'auto', feature };
+                    target.closest('.character-options').querySelectorAll('[data-feature]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.value === value)));
+                    this.renderCharacterStudio(this.multiplayerProfile, 'inventory', 'customize');
+                } else if (action === 'character-save') {
+                    await this.savePersonalCharacter();
+                } else if (action === 'character-discard') {
+                    this.personalCharacterDraft = null;
+                    if (this.characterCameras) delete this.characterCameras.inventory;
+                    this.renderInventory(this.multiplayerProfile);
+                    document.querySelector('[data-action="character-discard"]')?.focus({ preventScroll: true });
+                } else if (action === 'shop-filter') {
+                    this.shopAvailability = target.dataset.filter;
+                    this.renderMultiplayerShop(this.multiplayerProfile);
+                    document.querySelector(`[data-action="shop-filter"][data-filter="${this.shopAvailability}"]`)?.focus({ preventScroll: true });
                 } else if (action === 'character-try-on' || action === 'character-preview-reset') {
                     const scope = target.closest('.character-workspace')?.dataset.studio;
                     const item = action === 'character-try-on' ? window.StudBudCommunityGames.catalog.find(entry => entry.id === target.dataset.id) : null;
                     if (action === 'character-try-on' && !item) throw new Error('That cosmetic is no longer available. Refresh the page and try again.');
                     if (scope && this.multiplayerProfile) {
+                        if (this.characterCameras) delete this.characterCameras[scope];
                         this.renderCharacterStudio(this.multiplayerProfile, scope, scope === 'shop' ? this.shopTab : this.inventoryTab, item);
-                        if (action === 'character-preview-reset') document.getElementById(`${scope}-character-studio`)?.querySelector('[data-action="character-camera"]')?.focus();
+                        const studio = document.getElementById(`${scope}-character-studio`);
+                        if (action === 'character-preview-reset') studio?.querySelector('[data-action="character-camera"]')?.focus({ preventScroll: true });
+                        else if (studio?.getBoundingClientRect().bottom < 0) studio.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                     }
                 } else if (action === 'character-camera') {
                     const studio = target.closest('.character-studio');
-                    studio.querySelector('.character-stage').dataset.camera = target.dataset.camera;
-                    studio.querySelectorAll('[data-action="character-camera"]').forEach(button => button.setAttribute('aria-pressed', String(button === target)));
+                    const camera = this.characterCameras?.[studio.dataset.studio];
+                    if (camera && ['auto', 'full', 'detail'].includes(target.dataset.camera)) {
+                        Object.assign(camera, { view: target.dataset.camera, zoom: null, panX: 0, panY: 0 });
+                        this.updateCharacterCamera(studio);
+                    }
                 } else if (action === 'multiplayer-buy' || action === 'multiplayer-equip') {
                     if (action === 'multiplayer-equip' && target.closest('.unbox-overlay')) this.closeUnboxing();
                     await this.updateMultiplayerShop(action, target.dataset.id);
@@ -10993,10 +11733,12 @@
                 } else if (action === 'multiplayer-mystery') {
                     await this.updateMultiplayerShop(action, target.dataset.id || 'basic', target.dataset.seasonMonth);
                 } else if (target.matches('[data-shop-tab]')) {
+                    if (this.characterCameras) delete this.characterCameras.shop;
                     this.shopTab = target.dataset.shopTab;
                     if (this.multiplayerProfile) this.renderMultiplayerShop(this.multiplayerProfile);
                     document.querySelector(`[data-shop-tab="${this.shopTab}"]`)?.focus();
                 } else if (target.matches('[data-inventory-tab]')) {
+                    if (this.characterCameras) delete this.characterCameras.inventory;
                     this.inventoryTab = target.dataset.inventoryTab;
                     if (this.multiplayerProfile) this.renderInventory(this.multiplayerProfile);
                     document.querySelector(`[data-inventory-tab="${this.inventoryTab}"]`)?.focus();
@@ -11138,9 +11880,15 @@
                 } else if (action === 'campus-add-manually') {
                     this.openCourseForm();
                 } else if (action === 'open-campus-paste-modal') {
-                    this.setCampusPasteMode('courses');
                     this.renderCampusPasteCourseOptions();
+                    this.invalidateSchoolImport();
                     this.openModal('campus-paste-modal');
+                } else if (action === 'preview-campus-data') {
+                    this.previewSchoolImport();
+                } else if (action === 'import-campus-data') {
+                    await this.importSchoolData();
+                } else if (action === 'undo-campus-import') {
+                    await this.undoSchoolImport();
                 } else if (action === 'preview-campus-courses') {
                     this.previewCampusCourses();
                 } else if (action === 'import-campus-courses') {
@@ -11155,6 +11903,40 @@
                     this.openStudyLog(target.dataset.id);
                 } else if (action === 'publish-community-deck') {
                     await this.publishCommunityDeck(target.dataset.id);
+                } else if (action === 'open-set-sharing') {
+                    await this.openSetSharing(target.dataset.id);
+                } else if (action === 'editor-save-share') {
+                    target.disabled = true;
+                    try {
+                        await this.saveDeckEditor();
+                        await this.openSetSharing(this.deckEditorDraft.id);
+                    } finally { target.disabled = false; }
+                } else if (action === 'editor-discard-draft') {
+                    if (await window.StudBudDialogs.confirm('Discard this unsaved draft and reopen the saved set? This cannot be undone.')) {
+                        const deckId = this.deckEditorExisting ? this.deckEditorDraft.id : '';
+                        this.deckEditorDrafts?.delete(deckId);
+                        this.deckEditorSaved = true;
+                        this.deckEditorDraft = null;
+                        if (deckId && !(AppState.get('flashcards') || []).some(deck => deck.id === deckId)) this.closeModal();
+                        else this.openDeckEditor(deckId);
+                    }
+                } else if (action === 'send-bud-set') {
+                    await this.sendSetToBud();
+                } else if (action === 'confirm-public-set') {
+                    await this.publishCommunityDeck(this.setSharingDeckId);
+                } else if (action === 'refresh-bud-sets') {
+                    await this.loadBudSets();
+                } else if (action === 'remove-bud-set') {
+                    if (await window.StudBudDialogs.confirm(`${target.dataset.outgoing === 'true' ? 'Revoke' : 'Dismiss'} this share? Copies already saved by a recipient cannot be removed.`)) {
+                        await window.StudBudCommunityGames.removeBudSet(target.dataset.id);
+                        await this.loadBudSets();
+                    }
+                } else if (action === 'preview-community-set' || action === 'preview-bud-set') {
+                    await this.previewCommunitySet(target.dataset.id, action === 'preview-bud-set');
+                } else if (action === 'import-bud-set') {
+                    await this.importCommunityDeck(target.dataset.id, true);
+                } else if (action === 'retry-community-search') {
+                    await this.searchCommunityDecks(document.getElementById('community-deck-query').value);
                 } else if (action === 'unpublish-community-deck') {
                     await this.unpublishCommunityDeck(target.dataset.id);
                 } else if (action === 'import-community-deck') {
@@ -11246,7 +12028,8 @@
                     await this.factoryReset();
                 } else if (id === 'export-backup-btn') {
                     await this.exportEncryptedBackup();
-                } else if (id === 'restore-backup-btn') {
+                } else if (id === 'restore-backup-btn' || id === 'verify-backup-btn') {
+                    this.backupVerifyOnly = id === 'verify-backup-btn';
                     document.getElementById('backup-import-file').click();
                 } else if (id === 'change-username-btn') {
                     await this.submitUsernameChange(document.getElementById('settings-username').value, document.getElementById('username-status'));
@@ -11302,10 +12085,14 @@
             } catch (error) {
                 console.error('[NexusApp] Button action failed:', error);
                 const message = `That action could not be completed. ${this.friendlyErrorMessage(error)}`;
-                if (['multiplayer-buy', 'multiplayer-equip', 'multiplayer-unequip', 'multiplayer-mystery'].includes(action)
+                if (['multiplayer-buy', 'multiplayer-equip', 'multiplayer-unequip', 'multiplayer-mystery', 'character-save'].includes(action)
                     || target.matches('.scheme-option[data-shop-item]')) {
                     const status = document.getElementById('multiplayer-shop-status');
                     if (status) status.textContent = message;
+                    if (action === 'character-save') {
+                        const inventoryStatus = document.getElementById('multiplayer-inventory-status');
+                        if (inventoryStatus) inventoryStatus.textContent = message;
+                    }
                     this.showLobbyToast(message);
                 } else window.StudBudDialogs.notify(message);
             }
@@ -11577,6 +12364,10 @@
         }
 
         handleChange(event) {
+            if (['community-deck-course', 'community-deck-library', 'community-deck-sort'].includes(event.target.id)) {
+                this.renderCommunityDeckResults();
+                return;
+            }
             if (event.target.id === 'campus-paste-term' && this.campusCourseDraft) {
                 this.invalidateCampusPastePreview('courses');
                 return;
@@ -13351,7 +14142,7 @@
                 document.body.appendChild(link);
                 link.click();
                 link.remove();
-                status.textContent = 'Encrypted backup download started. Keep your passphrase safe and verify the file was saved.';
+                status.textContent = 'Encrypted backup download started. Keep your passphrase safe, then use Verify backup to check the saved file without restoring it.';
             } catch (error) {
                 console.error('[NexusApp] Backup export failed:', error);
                 status.textContent = this.friendlyErrorMessage(error, 'Could not create an encrypted backup.');
@@ -13361,7 +14152,7 @@
             }
         }
 
-        async restoreEncryptedBackup(input) {
+        async restoreEncryptedBackup(input, verifyOnly = false) {
             if (this.backupBusy) return;
             const file = input.files?.[0];
             if (!file) return;
@@ -13375,6 +14166,11 @@
                 if (password === null) return;
                 status.textContent = 'Unlocking backup…';
                 const snapshot = await cloud.decryptBackup(JSON.parse(await file.text()), password);
+                if (cloud.user?.id !== userId || cloud.accountVersion !== version) throw new Error('The account changed. Start the backup check again.');
+                if (verifyOnly) {
+                    status.textContent = `Backup verified: ${snapshot.state.courses?.length || 0} classes, ${snapshot.state.assignments?.length || 0} assignments, ${snapshot.flashcards?.length || 0} sets and ${snapshot.studyHistory?.length || 0} activity records. Nothing on this device or your account was changed.`;
+                    return;
+                }
                 if (!await window.StudBudDialogs.confirm('Replace this device’s classes, assignments, sets and study history with this backup? If signed in, the restored data will sync to that account.')) {
                     status.textContent = 'Restore cancelled. Your study data was not changed.';
                     return;
@@ -13391,13 +14187,14 @@
                 status.textContent = cloud.accountReady && !cloud.offlineMode && window.navigator?.onLine !== false
                     ? 'Backup restored and synced.' : 'Backup restored on this device.';
             } catch (error) {
-                console.error('[NexusApp] Backup restore failed:', error);
+                console.error(`[NexusApp] Backup ${verifyOnly ? 'verification' : 'restore'} failed:`, error);
                 status.textContent = restored
                     ? `Backup restored on this device, but account refresh/sync could not complete. ${this.friendlyErrorMessage(error)}`
-                    : this.friendlyErrorMessage(error, 'Could not restore the backup. Check its passphrase and try again.');
+                    : this.friendlyErrorMessage(error, `Could not ${verifyOnly ? 'verify' : 'restore'} the backup. Check its passphrase and try again.`);
             } finally {
                 input.value = '';
                 this.backupBusy = false;
+                this.backupVerifyOnly = false;
             }
         }
 

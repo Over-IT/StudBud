@@ -359,7 +359,7 @@ async function integration() {
         stores.delete(table);
     };
     sandbox.localStorage.removeItem = key => {
-        if (key === state.STORAGE_KEY) assert.equal(cleared.length, 3);
+        if (key === state.STORAGE_KEY) assert.deepEqual(cleared.slice(0, 3), ['flashcards', 'studyHistory', 'gameMetrics']);
         storage.delete(key);
     };
     app.studyTracker.setContext({ key: 'clear-device', session: { source: 'flashcards' } });
@@ -369,7 +369,7 @@ async function integration() {
     confirmed = true;
     now += 1000;
     await app.factoryReset();
-    assert.deepEqual(cleared, ['flashcards', 'studyHistory', 'gameMetrics']);
+    assert.deepEqual(cleared, ['flashcards', 'studyHistory', 'gameMetrics', 'deviceAuth']);
     assert.equal(storage.has(state.STORAGE_KEY), false);
     assert.equal(reloaded, true);
 

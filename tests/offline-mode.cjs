@@ -13,7 +13,7 @@ const sandbox = {
     document: {
         querySelectorAll: () => [], addEventListener() {},
         getElementById: id => {
-            if (!nodes.has(id)) nodes.set(id, { textContent: '', classList: { toggle() {}, add() {}, remove() {} }, addEventListener() {}, removeAttribute() {} });
+            if (!nodes.has(id)) nodes.set(id, { textContent: '', classList: { toggle() {}, add() {}, remove() {} }, addEventListener() {}, removeAttribute() {}, setAttribute() {} });
             return nodes.get(id);
         }
     },
@@ -21,6 +21,7 @@ const sandbox = {
         navigator: { onLine: false }, clearTimeout() {}, setTimeout() { timers++; return 1; }, setInterval() {},
         addEventListener: (name, callback) => events.set(name, callback),
         NexusApp: {
+            clearLocalStore: async () => {},
             init: async () => initializations++,
             friendlyErrorMessage: (error, fallback) => error?.message || fallback,
             AppState: {
@@ -37,6 +38,8 @@ vm.createContext(sandbox);
 vm.runInContext(source('cloudSync.js'), sandbox);
 vm.runInContext(source('communityGames.js'), sandbox);
 const cloud = sandbox.window.StudBudCloud;
+cloud.saveSyncBase = async snapshot => { storage.set('STUDBUD_CLOUD_SYNC_BASE', JSON.stringify(snapshot)); return true; };
+cloud.deriveAuthCredential = async () => 'test-derived-credential';
 async function run() {
     await cloud.bootstrap();
     assert.equal(cloud.offlineMode, true);

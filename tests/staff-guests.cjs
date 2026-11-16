@@ -147,8 +147,8 @@ async function run() {
     const privateClient = { private: true };
     const guestClient = { auth: { signInAnonymously: async () => {
         guestCalls.push('anonymous'); return { data: { user: { id: 'guest', is_anonymous: true } } };
-    } }, rpc: async (name, args) => { guestCalls.push({ name, args }); return { data: { room_code: args.p_code } }; } };
-    const guestSandbox = { console, Map, Set, window: {
+    } }, rpc: async (name, args) => { guestCalls.push({ name, args }); return { data: { room_code: args.p_code, server_time: new Date().toISOString() } }; } };
+    const guestSandbox = { console, Map, Set, performance, window: {
         navigator: { onLine: true }, STUDBUD_SUPABASE_CONFIG: { url: 'https://example.invalid', anonKey: 'public-test-key' },
         supabase: { createClient: (_, __, config) => { options.push(config); return guestClient; } }
     } };

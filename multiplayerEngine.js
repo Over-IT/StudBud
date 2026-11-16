@@ -626,8 +626,12 @@
             this.finishMs = 0;
             this.done = false;
             this.lastReport = { score: -1, answered: -1, at: 0 };
-            this.startedAt = Date.parse(this.room.started_at) || Date.now();
-            if (!this.practice && !this.preview) this.matchStartAt = this.startedAt + 3400;
+            const roomStart = Date.parse(this.room.started_at);
+            this.startedAt = Number.isFinite(roomStart) ? roomStart : this.practice || this.preview ? Date.now() : Infinity;
+            if (!this.practice && !this.preview) {
+                this.matchStartAt = this.room.state?.start_scheduled && Number.isFinite(Date.parse(this.room.started_at))
+                    ? Date.parse(this.room.started_at) : null;
+            }
             this.deadline = ['chess', 'defense'].includes(this.mode) ? Infinity : this.practice
                 ? Number(options.timeLimitSeconds) > 0 ? this.startedAt + Number(options.timeLimitSeconds) * 1000 : Infinity
                 : this.room.goal_type === 'time'
@@ -687,6 +691,13 @@
                 if (rewards && !this.rewards) { this.rewards = rewards; this.renderResults(); }
             }
             this.room = room;
+            if (!this.practice && !this.preview && room.state?.start_scheduled && Number.isFinite(Date.parse(room.started_at))) {
+                this.matchStartAt = Date.parse(room.started_at);
+                this.startedAt = this.matchStartAt;
+                this.deadline = ['chess', 'defense'].includes(this.mode) ? Infinity
+                    : this.startedAt + (room.goal_type === 'time' ? Number(room.time_limit_seconds) * 1000 : 12 * 60000);
+            }
+            if (Array.isArray(room.state?.ready_players)) this.readyPlayers = new Set(room.state.ready_players);
             if (!this.practice && room.goal_type === 'time' && !['chess', 'defense'].includes(this.mode)) {
                 const deadline = Date.parse(room.started_at) + Number(room.time_limit_seconds) * 1000;
                 if (Number.isFinite(deadline)) this.deadline = Number.isFinite(this.deadline) ? Math.max(this.deadline, deadline) : deadline;
@@ -726,13 +737,38 @@
             if (!this.cardsReady) this.toast('Questions could not load. Rejoin the room to retry.', '#f87171');
         }
 
+        async announceReady() {
+            if (this.readyRequest || performance.now() < (this.readyRetryAt || 0)) return;
+            this.readyRequest = true;
+            try {
+                const room = await this.api.readyRoom(this.code);
+                if (this.destroyed) return;
+                this.startReadyAcknowledged = true;
+                this.updateRoom(room);
+                this.readyRetryAt = performance.now() + 1200;
+            } catch (error) {
+                console.error('[Arcade] Start synchronization failed:', error);
+                this.toast(error.message || 'Could not synchronize the start. Rejoin the room to retry.', '#f87171');
+                this.readyRetryAt = performance.now() + 5000;
+            } finally {
+                this.readyRequest = false;
+            }
+        }
+
         syncStart() {
             if (!this.connected || !this.cardsReady) return false;
-            this.readyPlayers.add(this.user.id);
-            // The server's room start survives late joins and host reconnects.
-            this.matchStartAt = this.startedAt + 3400;
-            this.countdown = Math.max(0, (this.matchStartAt - Date.now()) / 1000);
+            if (!this.startReadyAcknowledged || !Number.isFinite(this.matchStartAt)) {
+                this.announceReady();
+                return false;
+            }
+            if (!Number.isFinite(this.matchStartAt)) return false;
+            this.countdown = Math.max(0, (this.matchStartAt - this.api.serverNow()) / 1000);
+            if (this.countdown === 0) this.networkLoading = false;
             return true;
+        }
+
+        gameNow() {
+            return this.practice || this.preview ? Date.now() : this.api.serverNow();
         }
 
         send(payload) {
@@ -773,7 +809,6 @@
             }
             if (!this.roster.has(p.id)) return;
             if (p.ready) this.readyPlayers?.add(p.id);
-            if (p.id === this.room.host_id && Number.isFinite(p.startAt) && !this.matchStartAt) this.matchStartAt = p.startAt;
             let r = this.remotes.get(p.id);
             const info = this.roster.get(p.id);
             if (!r) { r = { id: p.id, x: p.x, y: p.y, tx: p.x, ty: p.y }; this.remotes.set(p.id, r); }
@@ -784,7 +819,7 @@
             r.seen = performance.now();
             r.networkAge = Number.isFinite(p.sentAt) ? clamp((Date.now() - p.sentAt) / 1000, 0, .15) : 0;
             r.networked = true;
-            if (p.d && !this.firstDone) this.firstDone = Date.now();
+            if (p.d && !this.firstDone) this.firstDone = this.gameNow();
             for (const ev of p.ev || []) this.game.onEvent(ev, r);
             this.game.onState(r.ex, r);
         }
@@ -854,7 +889,7 @@
                 return;
             }
             if (this.over || this.ending || this.extending || !this.isHost || this.countdown > 0) return;
-            const now = Date.now();
+            const now = this.api?.serverNow ? this.api.serverNow() : Date.now();
             const rows = this.standings();
             const limit = Number(this.room.point_limit);
             let end = (!this.game.race && Boolean(this.game.finished)) || now >= this.deadline;
@@ -876,6 +911,7 @@
             this.finish(st);
             setTimeout(async () => {
                 try {
+                    if (await this.reportScore(false) === false) throw new Error('The final score has not been saved.');
                     await this.game.persistPromise;
                     const room = await this.finishRoom();
                     if (room?.state?.coin_rewards) { this.rewards = room.state.coin_rewards; this.renderResults(); }
@@ -915,13 +951,32 @@
         }
 
         async reportScore(force) {
-            if (this.practice || this.spectator) return;
+            if (this.practice || this.spectator || this.countdown > 0) return;
+            if (this.reportRequest) {
+                await this.reportRequest;
+                return this.reportScore(force);
+            }
             const last = this.lastReport;
             const answered = this.answered + Math.floor(this.t / 20);
             const value = this.game?.scoreGoal === false ? Math.max(0, Math.round(this.goal)) : this.score;
-            if (!force && last.score === value && last.answered === answered && last.correct === this.correct) return;
-            this.lastReport = { score: value, answered, correct: this.correct, at: Date.now() };
-            try { await this.api.reportScore(this.code, value, answered, this.correct); } catch (error) { /* rewards are best effort */ }
+            if (!force && last.score === value && last.answered === answered && last.correct === this.correct) return true;
+            const report = { score: value, answered, correct: this.correct, at: Date.now() };
+            this.reportRequest = Promise.resolve().then(async () => {
+                try {
+                    if (await this.api.reportScore(this.code, value, answered, report.correct) === false) {
+                        throw new Error('The server did not confirm your score.');
+                    }
+                    this.lastReport = report;
+                    this.reportFailed = false;
+                    return true;
+                } catch (error) {
+                    console.error('[Arcade] Score upload failed:', error);
+                    if (!this.reportFailed && !this.destroyed) this.toast('Your score has not synced. Keep this page open while we retry.', '#f87171');
+                    this.reportFailed = true;
+                    return false;
+                } finally { this.reportRequest = null; }
+            });
+            return this.reportRequest;
         }
 
         finish(standings) {
@@ -1391,7 +1446,7 @@
                 <div class="mpg-meter hidden">
                     <div class="mpg-meter-head"><span class="mpg-meter-label"></span><b class="mpg-meter-value"></b></div>
                 </div>
-                <button type="button" class="mpg-recharge mpg-resource-notice hidden"><span role="status" aria-live="polite"></span><small>Answer a question to refill · Q</small></button>
+                <div class="mpg-resource-notice hidden"><span role="status" aria-live="polite"></span><small>Answer a question to refill · Q</small></div>
                 <div class="mpg-stick-zone" aria-hidden="true"></div>
                 <div class="mpg-touch" aria-label="Touch controls">
                     <div class="mpg-stick" role="application" aria-label="Movement joystick"><i class="mpg-knob"></i></div>
@@ -1810,7 +1865,9 @@
             setText(scoreBox.querySelector('strong'), objective
                 ? (this.game.formatValue ? this.game.formatValue(Math.round(this.goal)) : Math.round(this.goal).toLocaleString())
                 : Math.round(this.score).toLocaleString());
-            const left = Math.max(0, this.deadline - Date.now());
+            const clock = !this.practice && !this.preview && this.startReadyAcknowledged ? this.api.serverNow() : Date.now();
+            const left = !this.practice && this.countdown > 0 && this.room.goal_type === 'time'
+                ? Number(this.room.time_limit_seconds) * 1000 : Math.max(0, this.deadline - clock);
             const countdownTimer = this.practice ? Number.isFinite(this.deadline) : this.room.goal_type === 'time';
             setText(o.querySelector('.mpg-timer'), countdownTimer && Number.isFinite(left)
                 ? `${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, '0')}`
@@ -1988,7 +2045,7 @@
             if (!this.over) {
                 if (this.countdown > 0) {
                     const waiting = this.networkLoading && !this.syncStart();
-                    if (!this.networkLoading) this.countdown -= dt;
+                    if (!this.networkLoading && !this.startReadyAcknowledged) this.countdown -= dt;
                     const step = this.countdown > 0.4 ? Math.ceil(this.countdown - 0.4) : 0;
                     if (!waiting && step !== this.lastCountStep) {
                         this.lastCountStep = step;
@@ -1996,9 +2053,11 @@
                     }
                     const text = this.countdown > 0.4 ? String(Math.ceil(this.countdown - 0.4)) : 'GO!';
                     const el = this.overlay.querySelector('.mpg-countdown');
+                    const readyCount = [...this.roster.keys()].filter(id => this.readyPlayers.has(id)).length;
                     el.classList.toggle('is-loading', Boolean(waiting));
                     el.textContent = waiting ? !this.connected ? 'Connecting…' : !this.cardsReady ? 'Loading questions…'
-                        : `Loading players… ${this.readyPlayers.size}/${this.roster.size}` : this.countdown > -0.2 ? text : '';
+                        : readyCount === this.roster.size && !this.readyPlayers.has(this.room.host_id) ? 'Waiting for host…'
+                            : `Loading players… ${readyCount}/${this.roster.size}` : this.countdown > -0.2 ? text : '';
                     el.classList.toggle('hidden', !waiting && this.countdown <= 0);
                 } else {
                     if (!this.countdownHidden) {
@@ -2014,7 +2073,8 @@
                         if (this.testing && !this.limitedTestEnergy && this.game.res) this.game.res.value = this.game.res.max;
                     }
                     this.checkEnd();
-                    if (!this.practice && !this.isHost && !this.over && Date.now() > this.deadline + 9000) this.finish(this.standings());
+                    if (!this.practice && !this.isHost && !this.over && Number.isFinite(this.deadline)
+                        && this.api.serverNow() > this.deadline + 9000) this.finish(this.standings());
                 }
             } else if (!this.paused && !this.spectator) {
                 this.game.settleAfterFinish?.(dt);
@@ -2098,15 +2158,33 @@
         }
     }
 
+    const APPEARANCE_OPTIONS = {
+        skinTone: [['#fde7c8', 'Porcelain'], ['#f5d0a9', 'Sand'], ['#ddb892', 'Honey'], ['#b8805b', 'Caramel'], ['#8d5524', 'Chestnut'], ['#5c3828', 'Espresso']],
+        hairStyle: [['crop', 'Crop'], ['swept', 'Side sweep'], ['curls', 'Curls'], ['bob', 'Bob'], ['ponytail', 'Ponytail'], ['bald', 'No hair']],
+        hairColor: [['#292524', 'Onyx'], ['#713f12', 'Walnut'], ['#b45309', 'Copper'], ['#facc15', 'Golden'], ['#e2e8f0', 'Silver'], ['#a78bfa', 'Lilac'], ['#f472b6', 'Rose'], ['#38bdf8', 'Sky']],
+        shirtColor: [['#34d399', 'Mint'], ['#38bdf8', 'Sky'], ['#a78bfa', 'Lilac'], ['#f472b6', 'Rose'], ['#f87171', 'Coral'], ['#fbbf24', 'Gold'], ['#f8fafc', 'Cloud'], ['#334155', 'Slate']],
+        shirtStyle: [['plain', 'Classic tee'], ['stripes', 'Striped tee'], ['jacket', 'Varsity jacket']],
+        pantsColor: [['#1e293b', 'Midnight'], ['#475569', 'Slate'], ['#1e40af', 'Denim'], ['#78716c', 'Stone'], ['#f5f5f4', 'Cream'], ['#713f12', 'Umber']],
+        eyeColor: [['#0f172a', 'Onyx'], ['#713f12', 'Hazel'], ['#2563eb', 'Blue'], ['#15803d', 'Green'], ['#7c3aed', 'Violet']],
+        expression: [['neutral', 'Relaxed'], ['smile', 'Cheerful'], ['focused', 'Focused']]
+    };
+
+    function normalizeAppearance(value = {}) {
+        return Object.fromEntries(Object.entries(APPEARANCE_OPTIONS).map(([key, options]) =>
+            [key, options.some(([id]) => id === value?.[key]) ? value[key] : options[0][0]]));
+    }
+
     function playerCosmetics(player) {
         const legacyAcc = player?.equipped_accessory ?? player?.accessory ?? player?.acc ?? player?.cos?.acc ?? '';
         const explicitEffect = player?.equipped_effect ?? player?.effect ?? player?.cos?.effect ?? '';
         const effect = explicitEffect || (isAuraCosmetic(legacyAcc) ? legacyAcc : '');
+        const appearance = player?.appearance ?? player?.cos?.appearance;
         return {
             skin: player?.equipped_skin ?? player?.skin ?? player?.cos?.skin ?? '',
             hat: player?.equipped_hat ?? player?.hat ?? player?.cos?.hat ?? '',
             acc: isAuraCosmetic(legacyAcc) ? '' : legacyAcc,
             effect,
+            ...(appearance && Object.keys(appearance).length ? { appearance: normalizeAppearance(appearance) } : {}),
             color: player?.color || player?.cos?.color || ((player?.equipped_palette || player?.palette)
                 ? playerColor({ ...player, palette: player.equipped_palette || player.palette }) : '#34d399')
         };
@@ -2149,7 +2227,7 @@
 
     function avatarUrl(player, resolution = 240) {
         const cos = playerCosmetics(player);
-        const key = [cos.skin, cos.hat, cos.acc, cos.effect, cos.color, resolution].join('|');
+        const key = [cos.skin, cos.hat, cos.acc, cos.effect, cos.color, JSON.stringify(cos.appearance), resolution].join('|');
         if (!avatarCache.has(key)) {
             const canvas = document.createElement('canvas');
             canvas.width = resolution; canvas.height = resolution;
@@ -2167,6 +2245,12 @@
     }
 
     let avatarObserver = null;
+    function drawObservedAvatar(canvas, time = 0) {
+        const cos = { ...canvas.dataset };
+        if (cos.appearance) cos.appearance = JSON.parse(cos.appearance);
+        drawAvatar(canvas, { cos }, time);
+    }
+
     function observeAvatars() {
         if (avatarObserver) return;
         const canvases = new Set();
@@ -2179,7 +2263,7 @@
             if (document.hidden || motion.matches || !visible.size) return;
             if (time - lastTime >= 1000 / (profile.avatarFps || 60)) {
                 lastTime = time;
-                for (const canvas of visible) drawAvatar(canvas, { cos: canvas.dataset }, time / 1000);
+                for (const canvas of visible) drawObservedAvatar(canvas, time / 1000);
             }
             frame = requestAnimationFrame(draw);
         };
@@ -2188,7 +2272,7 @@
             frame = 0;
             lastTime = -Infinity;
             if (motion.matches) {
-                for (const canvas of canvases) drawAvatar(canvas, { cos: canvas.dataset });
+                for (const canvas of canvases) drawObservedAvatar(canvas);
             } else if (!document.hidden && visible.size) frame = requestAnimationFrame(draw);
         };
         const intersection = new IntersectionObserver(entries => {
@@ -2209,7 +2293,7 @@
             for (const canvas of document.querySelectorAll('canvas[data-avatar]')) {
                 if (canvases.has(canvas)) continue;
                 canvases.add(canvas);
-                drawAvatar(canvas, { cos: canvas.dataset });
+                drawObservedAvatar(canvas);
                 intersection.observe(canvas);
             }
             if (!visible.size) { cancelAnimationFrame(frame); frame = 0; }
@@ -2223,7 +2307,8 @@
 
     function avatarMarkup(player, className = '', resolution = 240) {
         const cos = playerCosmetics(player);
-        const attrs = ['skin', 'hat', 'acc', 'effect', 'color'].map(key => `data-${key}="${esc(cos[key])}"`).join(' ');
+        const attrs = ['skin', 'hat', 'acc', 'effect', 'color'].map(key => `data-${key}="${esc(cos[key])}"`).join(' ')
+            + (cos.appearance ? ` data-appearance="${esc(JSON.stringify(cos.appearance))}"` : '');
         const classAttr = `class="${esc(className)}"`;
         if (!animatedCosmetics(player)) return `<img ${classAttr} src="${avatarUrl(player, resolution)}" alt="" draggable="false">`;
         observeAvatars();
@@ -2319,7 +2404,43 @@
     function who(p) {
         if (typeof p === 'string') return { color: p, skin: null, hat: '', acc: '', effect: '' };
         const cos = playerCosmetics(p);
-        return { color: cos.color, skinId: cos.skin || '', skin: SKINS[cos.skin] || null, hat: LEGACY_HATS[cos.hat] || cos.hat || '', acc: cos.acc || '', effect: cos.effect || '' };
+        return { color: cos.color, skinId: cos.skin || '', skin: SKINS[cos.skin] || null, hat: LEGACY_HATS[cos.hat] || cos.hat || '', acc: cos.acc || '', effect: cos.effect || '', appearance: SKINS[cos.skin] ? null : cos.appearance };
+    }
+
+    function drawPersonalHair(ctx, look, x, y, radius) {
+        if (look.hairStyle === 'bald') return;
+        ctx.save(); ctx.translate(x, y); ctx.scale(radius / 11, radius / 11);
+        ctx.fillStyle = look.hairColor;
+        if (look.hairStyle === 'ponytail') {
+            ctx.beginPath(); ctx.ellipse(-11, 0, 5, 10, -.25, 0, TAU); ctx.fill();
+        }
+        if (look.hairStyle === 'bob') {
+            ctx.beginPath(); ctx.ellipse(-8, 1, 5, 12, 0, 0, TAU); ctx.fill();
+            ctx.fillRect(-10, -5, 5, 15);
+        }
+        ctx.beginPath(); ctx.arc(0, -2, 11.5, Math.PI, TAU); ctx.fill();
+        if (look.hairStyle === 'swept') {
+            ctx.beginPath(); ctx.moveTo(-11, -3); ctx.quadraticCurveTo(1, -18, 12, -6);
+            ctx.quadraticCurveTo(7, 2, -3, 0); ctx.closePath(); ctx.fill();
+        }
+        if (look.hairStyle === 'curls') {
+            for (let i = 0; i < 5; i++) {
+                const angle = Math.PI + i * Math.PI / 4;
+                ctx.beginPath(); ctx.arc(Math.cos(angle) * 8, Math.sin(angle) * 8 - 3, 4.5, 0, TAU); ctx.fill();
+            }
+        }
+        ctx.restore();
+    }
+
+    function drawPersonalShirt(ctx, look, x, y, w, h) {
+        ctx.save(); ctx.fillStyle = '#f8fafc'; ctx.globalAlpha *= .75;
+        if (look.shirtStyle === 'stripes') {
+            for (const fraction of [.35, .65]) ctx.fillRect(x + 2, y + h * fraction, w - 4, Math.max(1.4, h * .12));
+        } else if (look.shirtStyle === 'jacket') {
+            ctx.fillRect(x + w * .46, y + 1, w * .08, h - 2);
+            ctx.fillRect(x + w * .72, y + h * .3, w * .13, h * .2);
+        }
+        ctx.restore();
     }
 
     function drawAnimalHead(ctx, animal, x, y, r) {
@@ -3127,8 +3248,8 @@
 
     function drawFigureSide(ctx, p, x, y, w, h, face, time, running, alpha = 1, pose = null, grounded = true) {
         const c = who(p);
-        const body = c.skin?.body || c.color;
-        const head = c.skin?.head || '#fde7c8';
+        const body = c.skin?.body || c.appearance?.shirtColor || c.color;
+        const head = c.skin?.head || c.appearance?.skinTone || '#fde7c8';
         const cx = x + w / 2;
         const run = running ? Math.sin(time * 18) : 0;
         const bob = pose ? pose.bob : running ? Math.abs(Math.sin(time * 9)) * 1.5 : Math.sin(time * 3) * 0.8;
@@ -3190,7 +3311,7 @@
             ctx.fillStyle = '#f8fafc';
             ctx.beginPath(); ctx.arc(cx - face * (w * 0.8 + 6), y + h - 30 + bob, 4, 0, TAU); ctx.fill();
         }
-        ctx.fillStyle = c.skin?.trim || '#1e293b';
+        ctx.fillStyle = c.skin?.trim || c.appearance?.pantsColor || '#1e293b';
         if (pose) {
             drawSideLeg(ctx, cx - face * 4.5, y + h - 14 + bob, 14, pose.legs[1], face, ctx.fillStyle, 7);
             drawSideLeg(ctx, cx + face * 4.5, y + h - 14 + bob, 14, pose.legs[0], face, ctx.fillStyle, 7);
@@ -3207,19 +3328,29 @@
         ctx.fillStyle = body;
         roundRect(ctx, x, y + 12 + bob, w, h - 24, 8);
         ctx.fill();
+        if (c.appearance) drawPersonalShirt(ctx, c.appearance, x, y + 12 + bob, w, h - 24);
         drawSkinSignature(ctx, c, cx, y + 27 + bob, w * .42, time);
         if (c.acc === 'acc_animal_cowbell') drawAnimalAccessory(ctx, c.acc, cx, y + 25 + bob, w * .45, time);
         if (c.acc === 'acc_scarf') { ctx.fillStyle = '#ef4444'; ctx.fillRect(x + 1, y + 12 + bob, w - 2, 5); ctx.fillRect(cx - face * 6 - 2, y + 15 + bob, 5, 12); }
         ctx.fillStyle = head;
         ctx.beginPath(); ctx.arc(cx, y + 11 + bob, 11, 0, TAU); ctx.fill();
-        if (!c.hat && !c.skin) { ctx.fillStyle = body; ctx.beginPath(); ctx.arc(cx, y + 8 + bob, 11.5, Math.PI, TAU); ctx.fill(); }
+        if (!c.hat && c.appearance) drawPersonalHair(ctx, c.appearance, cx, y + 11 + bob, 11);
+        else if (!c.hat && !c.skin) { ctx.fillStyle = body; ctx.beginPath(); ctx.arc(cx, y + 8 + bob, 11.5, Math.PI, TAU); ctx.fill(); }
         if (c.skin === SKINS.skin_ninja) { ctx.fillStyle = '#111827'; ctx.fillRect(cx - 11, y + 4 + bob, 22, 5); ctx.fillStyle = '#dc2626'; ctx.fillRect(cx - 11, y + 8 + bob, 22, 2); }
         if (!c.hat && c.skin === SKINS.skin_robot) { ctx.strokeStyle = '#475569'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx, y + bob); ctx.lineTo(cx, y - 7 + bob); ctx.stroke(); ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(cx, y - 8 + bob, 2.5, 0, TAU); ctx.fill(); }
         if (!c.hat && c.skin === SKINS.skin_alien) { ctx.strokeStyle = '#16a34a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx - 5, y + 1 + bob); ctx.lineTo(cx - 8, y - 6 + bob); ctx.moveTo(cx + 5, y + 1 + bob); ctx.lineTo(cx + 8, y - 6 + bob); ctx.stroke(); }
         if (c.skinId?.startsWith('skin_animal_')) drawAnimalHead(ctx, c.skinId.slice('skin_animal_'.length), cx, y + 11 + bob, 11);
         drawHat(ctx, c.hat, cx, y + bob, 11, c.hat === 'hat_grad' ? 0 : face * 0.03, time);
-        ctx.fillStyle = c.skin?.eye || '#0f172a';
+        ctx.fillStyle = c.skin?.eye || c.appearance?.eyeColor || '#0f172a';
         if (!c.hat.startsWith('hat_animal_') && !c.skinId?.startsWith('skin_animal_') && !['pumpkin', 'ghost', 'sunglasses'].includes(SEASONAL_HATS[c.hat]?.shape)) ctx.fillRect(cx + face * 4 - 1.5, y + 9 + bob, 3, 4);
+        if (c.appearance) {
+            ctx.strokeStyle = c.appearance.eyeColor; ctx.lineWidth = 1.2;
+            if (c.appearance.expression === 'smile') {
+                ctx.beginPath(); ctx.arc(cx + face * 4, y + 14 + bob, 3, 0, Math.PI); ctx.stroke();
+            } else if (c.appearance.expression === 'focused') {
+                ctx.beginPath(); ctx.moveTo(cx + face * 2, y + 6 + bob); ctx.lineTo(cx + face * 7, y + 8 + bob); ctx.stroke();
+            }
+        }
         if (c.acc === 'acc_shades') { ctx.fillStyle = '#0f172a'; ctx.fillRect(cx + face * 4 - 6, y + 8 + bob, 12, 5); }
         if (c.acc === 'acc_monocle') { ctx.strokeStyle = '#facc15'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(cx + face * 5, y + 11 + bob, 4.5, 0, TAU); ctx.stroke(); }
         if (c.acc === 'acc_eyepatch') { ctx.fillStyle = '#0f172a'; ctx.fillRect(cx + face * 4 - 3, y + 8 + bob, 6, 5); ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(cx - 11, y + 5 + bob); ctx.lineTo(cx + 11, y + 12 + bob); ctx.stroke(); }
@@ -3302,8 +3433,8 @@
     // Top-down character; the body faces `aim` and hats are drawn upright on top.
     function drawFigureTop(ctx, p, x, y, r, aim, time, alpha = 1, moving = false) {
         const c = who(p);
-        const body = c.skin?.body || c.color;
-        const head = c.skin?.head || '#fde7c8';
+        const body = c.skin?.body || c.appearance?.shirtColor || c.color;
+        const head = c.skin?.head || c.appearance?.skinTone || '#fde7c8';
         ctx.save();
         ctx.globalAlpha = alpha * (c.skin?.alpha || 1);
         ctx.translate(x, y);
@@ -3328,14 +3459,18 @@
         for (const side of [-1, 1]) { ctx.beginPath(); ctx.arc(r * .3 + swing * side, side * r * .9, r * .22, 0, TAU); ctx.fill(); ctx.stroke(); }
         ctx.fillStyle = body;
         ctx.beginPath(); ctx.ellipse(-r * .05, 0, r * .74, r * .98, 0, 0, TAU); ctx.fill(); ctx.stroke();
-        ctx.fillStyle = c.skin?.trim || 'rgba(0,0,0,.22)';
+        ctx.fillStyle = c.skin?.trim || c.appearance?.pantsColor || 'rgba(0,0,0,.22)';
         ctx.beginPath(); ctx.ellipse(-r * .05, 0, r * .74, r * .98, 0, -0.9, 0.9); ctx.lineTo(-r * .05, 0); ctx.fill();
+        if (c.appearance) drawPersonalShirt(ctx, c.appearance, -r * .6, -r * .6, r, r * 1.2);
         drawSkinSignature(ctx, c, 0, 0, r * .7, time);
         if (c.acc === 'acc_animal_cowbell') drawAnimalAccessory(ctx, c.acc, -r * .5, 0, r * .6, time, true);
         if (c.acc === 'acc_scarf') { ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(0, 0, r * 0.8, 0.6, 2.6); ctx.stroke(); }
         ctx.fillStyle = head; ctx.strokeStyle = outline; ctx.lineWidth = Math.max(1, r * .08);
         ctx.beginPath(); ctx.arc(r * 0.1, 0, r * 0.6, 0, TAU); ctx.fill(); ctx.stroke();
-        if (!c.hat && !c.skin) { ctx.fillStyle = body; ctx.beginPath(); ctx.arc(r * 0.1, 0, r * 0.6, Math.PI * .55, Math.PI * 1.45); ctx.fill(); }
+        if (!c.hat && c.appearance) {
+            ctx.save(); ctx.translate(r * .1, 0); ctx.rotate(-Math.PI / 2);
+            drawPersonalHair(ctx, c.appearance, 0, 0, r * .6); ctx.restore();
+        } else if (!c.hat && !c.skin) { ctx.fillStyle = body; ctx.beginPath(); ctx.arc(r * 0.1, 0, r * 0.6, Math.PI * .55, Math.PI * 1.45); ctx.fill(); }
         if (c.skinId?.startsWith('skin_animal_')) {
             ctx.save(); ctx.rotate(-aim);
             drawAnimalHead(ctx, c.skinId.slice('skin_animal_'.length), Math.cos(aim) * r * .1, Math.sin(aim) * r * .1, r * .62);
@@ -3346,7 +3481,7 @@
             drawHat(ctx, c.hat, Math.cos(aim) * r * 0.1, Math.sin(aim) * r * 0.1 - r * 0.62, r * 0.62, 0, time);
             ctx.restore();
         }
-        ctx.fillStyle = c.skin?.eye || '#0f172a';
+        ctx.fillStyle = c.skin?.eye || c.appearance?.eyeColor || '#0f172a';
         if (!c.hat.startsWith('hat_animal_') && !c.skinId?.startsWith('skin_animal_') && !['pumpkin', 'ghost', 'sunglasses'].includes(SEASONAL_HATS[c.hat]?.shape)) {
             ctx.beginPath(); ctx.arc(r * 0.5, -r * 0.2, r * 0.1, 0, TAU); ctx.arc(r * 0.5, r * 0.2, r * 0.1, 0, TAU); ctx.fill();
         }
@@ -3404,6 +3539,6 @@
         configureGraphicsProfile,
         shouldUseTouchControls,
         Session, BaseGame, Particles, Resource, ENERGY_COSTS, games: {},
-        util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, VerticalIndex, slopeY, slopeSurface, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, accountTagMarkup, who, playerCosmetics, avatarUrl, avatarMarkup, animatedCosmetics, drawAvatar, observeAvatars, drawHat, drawFigureSide, drawFigureTop, sceneZoom, canvasView, bandGradient, screenLayer, radialOverlay, parseRgb, questionHistoryMarkup, defaultPlayerColors }
+        util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, VerticalIndex, slopeY, slopeSurface, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, accountTagMarkup, who, playerCosmetics, normalizeAppearance, appearanceOptions: APPEARANCE_OPTIONS, avatarUrl, avatarMarkup, animatedCosmetics, drawAvatar, observeAvatars, drawHat, drawFigureSide, drawFigureTop, sceneZoom, canvasView, bandGradient, screenLayer, radialOverlay, parseRgb, questionHistoryMarkup, defaultPlayerColors }
     };
 })(window);

@@ -31,8 +31,13 @@ const sandbox = { console, Date, Math, Set, Map, document, setTimeout, clearTime
 vm.createContext(sandbox);
 vm.runInContext(source.slice(source.indexOf('    class AppStateEngine'), source.indexOf('    const AppState ='))
     + '\nglobalThis.AppState = Object.create(AppStateEngine.prototype);', sandbox);
-const state = sandbox.AppState.state = { profile: { school: 'pchs' }, courses: [], assignments: [],
+sandbox.AppState.state = { profile: { school: 'pchs' }, courses: [], assignments: [],
     currentView: 'flashcard', settings: {}, flashcards: [] };
+// Transactional commits replace the state root; assertions must observe the current root.
+const state = new Proxy({}, {
+    get: (_, key) => sandbox.AppState.state[key],
+    set: (_, key, value) => { sandbox.AppState.state[key] = value; return true; }
+});
 sandbox.AppState.saveToLocalStorage = () => {};
 sandbox.AppState.saveFlashcardDeck = async () => {};
 vm.runInContext(source.slice(source.indexOf('    class AppOrchestrator'), source.indexOf('    window.NexusApp ='))

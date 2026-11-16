@@ -500,7 +500,7 @@ assert.doesNotMatch(retirement[2], /coins\s*=|equipped_(hat|skin|pet|palette|ava
 for (const id of retiredTrails) assert.doesNotMatch(sql, new RegExp(`\\('${id}',\\s*\\d+\\)`), `${id} cannot be bought or dropped`);
 assert.match(sql, /raise exception 'Trails have been retired/);
 assert.match(source, /\['effect', 'Auras'\]/, 'cosmetic tab displays Auras');
-assert.match(source, /\[\['all', 'All'\],[^\n]*\['effect', 'Auras'\]/, 'inventory category displays Auras');
+assert.match(source, /\['all', 'All items'\],[^\n]*\['effect', 'Auras'\]/, 'inventory category displays Auras');
 assert.doesNotMatch(source, /\['effect', 'Effects'\]|effect: 'Effects'/);
 for (const box of sandbox.window.StudBudCommunityGames.constructor.boxes) {
     const weights = sql.match(new RegExp(`when '${box.id}' then '(\\{[^']+\\})'::jsonb`));
@@ -973,6 +973,9 @@ async function checkCommunityAndAdminUi() {
         const classes = new Set();
         return {
             textContent: '', innerHTML: '', value: '', dataset: {},
+            setAttribute(name, value) { this[name] = String(value); },
+            removeAttribute(name) { delete this[name]; },
+            get options() { return [...this.innerHTML.matchAll(/<option value="([^"]*)"/g)].map(match => ({ value: match[1] })); },
             classList: {
                 add: name => classes.add(name), remove: name => classes.delete(name),
                 contains: name => classes.has(name),
@@ -980,9 +983,11 @@ async function checkCommunityAndAdminUi() {
             }
         };
     };
-    const nodes = new Map(['community-deck-status', 'community-deck-results', 'admin-list', 'admin-status', 'admin-search',
+    const nodes = new Map(['community-deck-status', 'community-deck-results', 'community-deck-course', 'community-deck-library', 'community-deck-sort', 'admin-list', 'admin-status', 'admin-search',
         'admin-search-form', 'admin-notice-message', 'site-notice', 'site-notice-message', 'site-notice-status',
         'announcement-history', 'announcement-history-status', 'dismiss-notice', 'admin-deck-full-set'].map(id => [id, node()]));
+    nodes.get('community-deck-library').value = 'all';
+    nodes.get('community-deck-sort').value = 'popular';
     sandbox.document.querySelector = selector => selector === '[data-action="dismiss-site-notice"]' ? nodes.get('dismiss-notice') : null;
     const profile = node();
     const overlay = node();
@@ -1000,9 +1005,9 @@ async function checkCommunityAndAdminUi() {
     sandbox.AppState = { get: key => state[key], saveFlashcardDeck: async deck => { state.flashcards.push(deck); saves++; } };
     sandbox.window.StudBudCloud = { user: { id: 'qa-user' } };
     const shared = [
-        { id: 'saved-set', title: 'Original shared title', card_count: 1, study_count: 0 },
-        { id: 'owned-set', title: 'My shared set', card_count: 1, study_count: 0 },
-        { id: 'new-set', title: 'New shared set', card_count: 1, study_count: 0 }
+        { id: 'saved-set', title: 'Original shared title', card_count: 2, study_count: 0 },
+        { id: 'owned-set', title: 'My shared set', card_count: 2, study_count: 0 },
+        { id: 'new-set', title: 'New shared set', card_count: 2, study_count: 0 }
     ];
     const calls = [];
     let notice = { publication_id: '1', message: '</textarea><script>not executable</script>', active: true, updated_at: 'first' };
@@ -1010,7 +1015,7 @@ async function checkCommunityAndAdminUi() {
     const history = [{ ...notice, published_at: '2026-10-12T00:00:00Z' }];
     sandbox.window.StudBudCommunityGames = {
         searchDecks: async () => shared,
-        importDeck: async id => { imports++; return { id, title: 'New shared set', owner_id: 'author', cards: [{ front: 'Term', back: 'Definition' }] }; },
+        importDeck: async id => { imports++; return { id, title: 'New shared set', owner_id: 'author', cards: [{ front: 'Term', back: 'Definition' }, { front: 'Second term', back: 'Second definition' }] }; },
         getUserProfile: async () => ({ username: 'Author', show_stats: false, decks: shared }),
         getSiteNotice: async () => ({ ...notice, dismissed: dismissals.has(`${sandbox.window.StudBudCloud.user.id}:${notice.publication_id}`) }),
         dismissSiteNotice: async id => { dismissals.add(`${sandbox.window.StudBudCloud.user.id}:${id}`); },
@@ -1040,6 +1045,8 @@ async function checkCommunityAndAdminUi() {
     app.multiplayerAvatarMarkup = () => '<img alt="">';
     app.isAdmin = true;
     await app.searchCommunityDecks('');
+    assert.equal(nodes.get('community-deck-results')['aria-busy'], undefined, 'completed searches clear the loading state');
+    assert.equal(nodes.get('community-deck-results').dataset.loaded, 'true');
     assert.equal((nodes.get('community-deck-results').innerHTML.match(/In your decks/g) || []).length, 2);
     assert.equal((nodes.get('community-deck-results').innerHTML.match(/data-action="import-community-deck"/g) || []).length, 1);
     await app.openUserProfile('author');

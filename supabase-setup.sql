@@ -354,6 +354,7 @@ begin
             'minutes', floor(ranked.seconds / 60.0)::integer,
             'streak_days', public.studbud_current_streak(ranked.user_id),
             'skin', coalesce(cosmetics.equipped_skin, ''),
+            'appearance', coalesce(to_jsonb(cosmetics) -> 'appearance', '{}'::jsonb),
             'hat', coalesce(cosmetics.equipped_hat, ''),
             'accessory', coalesce(cosmetics.equipped_accessory, ''),
             'effect', coalesce(cosmetics.equipped_effect, ''),
@@ -516,6 +517,7 @@ alter table public.studbud_multiplayer_profiles
     add column if not exists equipped_hat text not null default '',
     add column if not exists equipped_accessory text not null default '',
     add column if not exists equipped_effect text not null default '',
+    add column if not exists appearance jsonb not null default '{}'::jsonb,
     add column if not exists best_wait_score integer not null default 0;
 
 -- Legacy 'accessory_default' placeholder from older versions means "nothing equipped".
@@ -747,6 +749,7 @@ begin
         'equipped_avatar', v_profile.equipped_avatar,
         'equipped_palette', v_profile.equipped_palette,
         'equipped_skin', v_profile.equipped_skin,
+        'appearance', v_profile.appearance,
         'equipped_hat', v_profile.equipped_hat,
         'equipped_accessory', v_profile.equipped_accessory,
         'equipped_effect', v_profile.equipped_effect,
@@ -759,6 +762,65 @@ begin
     );
 end;
 $$;
+
+create or replace function public.studbud_validate_appearance(p_appearance jsonb)
+returns jsonb
+language plpgsql
+immutable
+set search_path = public, pg_temp
+as $$
+declare
+    v_key text;
+    v_value jsonb;
+    v_allowed text[];
+begin
+    if p_appearance is null or jsonb_typeof(p_appearance) <> 'object' or octet_length(p_appearance::text) > 1024 then
+        raise exception 'Choose a valid personal character.';
+    end if;
+    for v_key, v_value in select key, value from jsonb_each(p_appearance)
+    loop
+        v_allowed := case v_key
+            when 'skinTone' then array['#fde7c8', '#f5d0a9', '#ddb892', '#b8805b', '#8d5524', '#5c3828']
+            when 'hairStyle' then array['crop', 'swept', 'curls', 'bob', 'ponytail', 'bald']
+            when 'hairColor' then array['#292524', '#713f12', '#b45309', '#facc15', '#e2e8f0', '#a78bfa', '#f472b6', '#38bdf8']
+            when 'shirtColor' then array['#34d399', '#38bdf8', '#a78bfa', '#f472b6', '#f87171', '#fbbf24', '#f8fafc', '#334155']
+            when 'shirtStyle' then array['plain', 'stripes', 'jacket']
+            when 'pantsColor' then array['#1e293b', '#475569', '#1e40af', '#78716c', '#f5f5f4', '#713f12']
+            when 'eyeColor' then array['#0f172a', '#713f12', '#2563eb', '#15803d', '#7c3aed']
+            when 'expression' then array['neutral', 'smile', 'focused']
+            else null
+        end;
+        if v_allowed is null or jsonb_typeof(v_value) <> 'string' or not ((v_value #>> '{}') = any(v_allowed)) then
+            raise exception 'Invalid personal character option: %.', v_key;
+        end if;
+    end loop;
+    return p_appearance;
+end;
+$$;
+revoke all on function public.studbud_validate_appearance(jsonb) from public, anon, authenticated;
+
+create or replace function public.studbud_save_appearance(p_appearance jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_user_id uuid := auth.uid();
+begin
+    if v_user_id is null or public.studbud_is_guest() then
+        raise exception 'Sign in to save your personal character to an account.';
+    end if;
+    perform public.studbud_validate_appearance(p_appearance);
+    insert into public.studbud_multiplayer_profiles (user_id) values (v_user_id) on conflict (user_id) do nothing;
+    update public.studbud_multiplayer_profiles
+    set appearance = p_appearance, equipped_skin = '', updated_at = now()
+    where user_id = v_user_id;
+    return public.studbud_get_multiplayer_profile();
+end;
+$$;
+revoke all on function public.studbud_save_appearance(jsonb) from public, anon;
+grant execute on function public.studbud_save_appearance(jsonb) to authenticated;
 
 create or replace function public.studbud_claim_daily_reward()
 returns jsonb
@@ -1114,6 +1176,7 @@ as $$
         'avatar', coalesce(profile.equipped_avatar, 'avatar_default'),
         'palette', coalesce(profile.equipped_palette, 'palette_default'),
         'skin', coalesce(profile.equipped_skin, ''),
+        'appearance', profile.appearance,
         'hat', coalesce(profile.equipped_hat, ''),
         'accessory', coalesce(profile.equipped_accessory, ''),
         'effect', coalesce(profile.equipped_effect, ''),
@@ -1253,6 +1316,7 @@ begin
             player || jsonb_build_object(
                 'username', coalesce(account.raw_user_meta_data ->> 'username', ''),
                 'skin', coalesce(profile.equipped_skin, player ->> 'skin', ''),
+                'appearance', coalesce(profile.appearance, player -> 'appearance', '{}'::jsonb),
                 'hat', coalesce(profile.equipped_hat, player ->> 'hat', ''),
                 'accessory', coalesce(profile.equipped_accessory, player ->> 'accessory', ''),
                 'effect', coalesce(profile.equipped_effect, player ->> 'effect', ''),
@@ -1277,7 +1341,7 @@ begin
     end if;
 
     return (to_jsonb(p_room) - 'cards')
-        || jsonb_build_object('state', v_state, 'card_count', jsonb_array_length(p_room.cards));
+        || jsonb_build_object('state', v_state, 'card_count', jsonb_array_length(p_room.cards), 'server_time', clock_timestamp());
 end;
 $$;
 
@@ -1367,6 +1431,7 @@ begin
                 'touchdowns', 0, 'targets', 0, 'wave', 1, 'last_event', '', 'last_action', '',
                 'avatar', v_cosmetics ->> 'avatar', 'palette', v_cosmetics ->> 'palette',
                 'skin', v_cosmetics ->> 'skin', 'hat', v_cosmetics ->> 'hat',
+                'appearance', v_cosmetics -> 'appearance',
                 'accessory', v_cosmetics ->> 'accessory', 'effect', v_cosmetics ->> 'effect',
                 'tags', v_cosmetics -> 'tags', 'pet', v_cosmetics ->> 'pet'
             )),
@@ -1465,6 +1530,7 @@ begin
         'touchdowns', 0, 'targets', 0, 'wave', 1, 'last_event', '', 'last_action', '',
         'avatar', v_cosmetics ->> 'avatar', 'palette', v_cosmetics ->> 'palette',
         'skin', v_cosmetics ->> 'skin', 'hat', v_cosmetics ->> 'hat',
+        'appearance', v_cosmetics -> 'appearance',
         'accessory', v_cosmetics ->> 'accessory', 'effect', v_cosmetics ->> 'effect',
         'tags', v_cosmetics -> 'tags', 'pet', v_cosmetics ->> 'pet'
     ));
@@ -1523,6 +1589,34 @@ end;
 $$;
 revoke all on function public.studbud_set_guest_color(text, text) from public, anon;
 grant execute on function public.studbud_set_guest_color(text, text) to authenticated;
+
+create or replace function public.studbud_set_guest_appearance(p_code text, p_appearance jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_room public.studbud_game_rooms%rowtype;
+begin
+    if auth.uid() is null or not public.studbud_is_guest() then raise exception 'Only guests can set a guest character.'; end if;
+    perform public.studbud_validate_appearance(p_appearance);
+    select * into v_room from public.studbud_game_rooms
+    where room_code = upper(btrim(p_code)) and expires_at > now() for update;
+    if not found or not exists (
+        select 1 from jsonb_array_elements(v_room.state -> 'players') player where player ->> 'id' = auth.uid()::text
+    ) then raise exception 'Join the room before choosing your character.'; end if;
+    update public.studbud_game_rooms
+    set state = jsonb_set(state, '{players}', (
+        select jsonb_agg(case when player ->> 'id' = auth.uid()::text
+            then player || jsonb_build_object('appearance', p_appearance) else player end order by position)
+        from jsonb_array_elements(state -> 'players') with ordinality as members(player, position)
+    )), updated_at = now()
+    where id = v_room.id;
+end;
+$$;
+revoke all on function public.studbud_set_guest_appearance(text, jsonb) from public, anon;
+grant execute on function public.studbud_set_guest_appearance(text, jsonb) to authenticated;
 
 create or replace function public.studbud_get_game_room(p_code text)
 returns jsonb
@@ -1583,10 +1677,12 @@ begin
 
     update public.studbud_game_rooms
     set status = 'playing',
-        started_at = now(),
+        started_at = 'infinity'::timestamptz,
         host_last_seen_at = now(),
         state = jsonb_build_object(
             'players', v_players,
+            'start_scheduled', false,
+            'ready_players', '[]'::jsonb,
             'host_spectator', coalesce((v_room.state ->> 'host_spectator')::boolean, false),
             'host_player', v_room.state -> 'host_player',
             'public_deck_id', v_room.state -> 'public_deck_id',
@@ -1615,6 +1711,51 @@ begin
     return public.studbud_game_room_view(v_room);
 end;
 $$;
+
+create or replace function public.studbud_ready_game_room(p_code text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+    v_room public.studbud_game_rooms%rowtype;
+    v_ready jsonb;
+    v_start timestamptz;
+begin
+    if auth.uid() is null then raise exception 'Join the game before marking ready.'; end if;
+    select * into v_room from public.studbud_game_rooms
+    where room_code = upper(btrim(p_code)) and expires_at > now() for update;
+    if not found or v_room.status <> 'playing' then raise exception 'This game is not preparing to start.'; end if;
+    if auth.uid() is distinct from v_room.host_id and not exists (
+        select 1 from jsonb_array_elements(v_room.state -> 'players') p where p ->> 'id' = auth.uid()::text
+    ) then raise exception 'Only room members can mark ready.'; end if;
+    if coalesce((v_room.state ->> 'start_scheduled')::boolean, false) then
+        return public.studbud_game_room_view(v_room);
+    end if;
+    v_ready := coalesce(v_room.state -> 'ready_players', '[]'::jsonb);
+    if not v_ready @> jsonb_build_array(auth.uid()::text) then
+        v_ready := v_ready || jsonb_build_array(auth.uid()::text);
+    end if;
+    update public.studbud_game_rooms
+    set state = jsonb_set(state, '{ready_players}', v_ready), updated_at = now()
+    where id = v_room.id returning * into v_room;
+    if v_ready @> jsonb_build_array(v_room.host_id::text) and not exists (
+        select 1 from jsonb_array_elements(v_room.state -> 'players') p
+        where not v_ready @> jsonb_build_array(p ->> 'id')
+    ) then
+        v_start := clock_timestamp() + interval '3.4 seconds';
+        update public.studbud_game_rooms
+        set started_at = v_start,
+            state = jsonb_set(jsonb_set(state, '{start_scheduled}', 'true'::jsonb),
+                '{question,started_at}', to_jsonb(v_start)), updated_at = now()
+        where id = v_room.id returning * into v_room;
+    end if;
+    return public.studbud_game_room_view(v_room);
+end;
+$$;
+revoke all on function public.studbud_ready_game_room(text) from public, anon;
+grant execute on function public.studbud_ready_game_room(text) to authenticated;
 
 -- Host authority is independent of membership in the participating roster.
 create or replace function public.studbud_set_host_mode(p_code text, p_spectator boolean)
@@ -1732,6 +1873,7 @@ begin
     where room_code = upper(btrim(p_code)) and expires_at > now()
     for update;
     if not found or v_room.status <> 'playing' then raise exception 'This game is not accepting answers.'; end if;
+    if v_room.started_at > clock_timestamp() then raise exception 'Wait for the shared countdown to finish.'; end if;
     if not exists (select 1 from jsonb_array_elements(v_room.state -> 'players') c(player)
         where player ->> 'id' = auth.uid()::text) then raise exception 'Only participating players can answer.'; end if;
     if v_room.goal_type = 'time'
@@ -1920,6 +2062,7 @@ begin
     for update;
     if not found or v_room.host_id is distinct from auth.uid() then raise exception 'Only the host can advance this game.'; end if;
     if v_room.status <> 'playing' then raise exception 'This game is not in progress.'; end if;
+    if v_room.started_at > clock_timestamp() then raise exception 'Wait for the shared countdown to finish.'; end if;
 
     if v_room.goal_type = 'time'
         and now() >= v_room.started_at + make_interval(secs => v_room.time_limit_seconds) then
@@ -2124,6 +2267,7 @@ begin
     where room_code = upper(btrim(p_code)) and expires_at > now()
     for update;
     if not found or v_room.status <> 'playing' then return; end if;
+    if v_room.started_at > clock_timestamp() then raise exception 'Wait for the shared countdown to finish.'; end if;
     select coalesce(jsonb_agg(
         case when player ->> 'id' = auth.uid()::text
             then player || jsonb_build_object(
@@ -2184,6 +2328,7 @@ begin
         raise exception 'Only the chess host can save this board.';
     end if;
     if v_room.status <> 'playing' then raise exception 'This chess match is not playing.'; end if;
+    if v_room.started_at > clock_timestamp() then raise exception 'Wait for the shared countdown to finish.'; end if;
     if v_board is null or v_board !~ '^[prnbqkPRNBQK.]{64}$' or length(p_state::text) > 4000
         or length(v_board) - length(replace(v_board, 'K', '')) <> 1
         or length(v_board) - length(replace(v_board, 'k', '')) <> 1
@@ -2245,6 +2390,7 @@ begin
         raise exception 'Only the Tower Defense host can save this battle.';
     end if;
     if v_room.status <> 'playing' then raise exception 'This battle is not playing.'; end if;
+    if v_room.started_at > clock_timestamp() then raise exception 'Wait for the shared countdown to finish.'; end if;
     if (p_state ? 'waveNumber' and (
         coalesce(p_state ->> 'waveNumber', '') !~ '^[0-9]{1,5}$'
         or (p_state ->> 'waveNumber')::numeric > 10000)) then
@@ -2948,6 +3094,7 @@ begin
                 'user_id', a.id,
                 'username', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student'),
                 'skin', coalesce(mp.equipped_skin, ''),
+                'appearance', mp.appearance,
                 'hat', coalesce(mp.equipped_hat, ''),
                 'accessory', coalesce(mp.equipped_accessory, ''),
                 'effect', coalesce(mp.equipped_effect, ''),
@@ -2965,6 +3112,7 @@ begin
                 'user_id', a.id,
                 'username', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student'),
                 'skin', coalesce(mp.equipped_skin, ''),
+                'appearance', mp.appearance,
                 'hat', coalesce(mp.equipped_hat, ''),
                 'accessory', coalesce(mp.equipped_accessory, ''),
                 'effect', coalesce(mp.equipped_effect, ''),
@@ -2982,6 +3130,7 @@ begin
                 'user_id', a.id,
                 'username', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student'),
                 'skin', coalesce(mp.equipped_skin, ''),
+                'appearance', mp.appearance,
                 'hat', coalesce(mp.equipped_hat, ''),
                 'accessory', coalesce(mp.equipped_accessory, ''),
                 'effect', coalesce(mp.equipped_effect, ''),
@@ -3320,6 +3469,7 @@ begin
         'tags', to_jsonb(public.studbud_user_tags_for(p_user_id)),
         'wins', coalesce(v_prof.wins, 0),
         'skin', coalesce(v_prof.equipped_skin, ''),
+        'appearance', v_prof.appearance,
         'hat', coalesce(v_prof.equipped_hat, ''),
         'accessory', coalesce(v_prof.equipped_accessory, ''),
         'effect', coalesce(v_prof.equipped_effect, ''),
@@ -3595,6 +3745,7 @@ begin
         'tags', to_jsonb(public.studbud_user_tags_for(p_user_id)),
         'wins', coalesce(v_prof.wins, 0),
         'skin', coalesce(v_prof.equipped_skin, ''),
+        'appearance', v_prof.appearance,
         'hat', coalesce(v_prof.equipped_hat, ''),
         'accessory', coalesce(v_prof.equipped_accessory, ''),
         'effect', coalesce(v_prof.equipped_effect, ''),
@@ -5534,5 +5685,111 @@ end;
 $$;
 revoke all on function public.studbud_delete_my_account(text) from public, anon;
 grant execute on function public.studbud_delete_my_account(text) to authenticated;
+
+-- Bud set sharing (additive migration).
+-- Recipient-scoped snapshots, never rows in the public community library.
+-- No direct table access: RPCs re-check identity, friendship and moderation.
+create table if not exists public.studbud_bud_sets (
+    id uuid primary key default gen_random_uuid(),
+    friendship_id uuid not null references public.studbud_friendships(id) on delete cascade,
+    sender_id uuid not null references auth.users(id) on delete cascade,
+    recipient_id uuid not null references auth.users(id) on delete cascade,
+    source_deck_id text not null check (char_length(source_deck_id) between 1 and 200),
+    title text not null check (char_length(title) between 1 and 100),
+    cards jsonb not null check (jsonb_typeof(cards) = 'array' and jsonb_array_length(cards) between 2 and 200),
+    created_at timestamptz not null default now(),
+    check (sender_id <> recipient_id),
+    unique(sender_id, recipient_id, source_deck_id)
+);
+alter table public.studbud_bud_sets enable row level security;
+revoke all on public.studbud_bud_sets from anon, authenticated;
+create index if not exists studbud_bud_sets_recipient_idx on public.studbud_bud_sets(recipient_id, created_at desc);
+
+create or replace function public.studbud_send_bud_set(p_recipient_id uuid, p_source_deck_id text, p_title text, p_cards jsonb)
+returns uuid language plpgsql security definer set search_path = public, pg_temp as $$
+declare
+    v_uid uuid := auth.uid();
+    v_cards jsonb;
+    v_id uuid;
+    v_friendship_id uuid;
+begin
+    if v_uid is null or public.studbud_is_guest() or public.studbud_is_hidden_user(v_uid) then
+        raise exception 'Sign in with an eligible account to share sets with Buds.';
+    end if;
+    select f.id into v_friendship_id from public.studbud_friendships f where f.status = 'accepted'
+        and ((f.requester_id = v_uid and f.addressee_id = p_recipient_id)
+          or (f.addressee_id = v_uid and f.requester_id = p_recipient_id));
+    if p_recipient_id is null or public.studbud_is_hidden_user(p_recipient_id) or v_friendship_id is null
+    then raise exception 'Choose a current Bud to receive this set.'; end if;
+    if char_length(btrim(coalesce(p_title, ''))) not between 1 and 100
+       or char_length(coalesce(p_source_deck_id, '')) not between 1 and 200 then
+        raise exception 'Check the set title and save it before sharing.';
+    end if;
+    if p_cards is null or jsonb_typeof(p_cards) <> 'array' then raise exception 'Provide complete cards.'; end if;
+    if jsonb_array_length(p_cards) not between 2 and 200 then raise exception 'Bud shares need 2 to 200 complete cards.'; end if;
+    if exists (select 1 from jsonb_array_elements(p_cards) c where jsonb_typeof(c) <> 'object'
+        or jsonb_typeof(c->'front') is distinct from 'string' or jsonb_typeof(c->'back') is distinct from 'string'
+        or char_length(btrim(coalesce(c->>'front', ''))) not between 1 and 5000
+        or char_length(btrim(coalesce(c->>'back', ''))) not between 1 and 5000) then
+        raise exception 'Card terms and definitions must be 1 to 5000 characters.';
+    end if;
+    -- Strip every non-card field even when an outdated or modified client sends it.
+    select jsonb_agg(jsonb_build_object('front', btrim(c->>'front'), 'back', btrim(c->>'back')) order by ordinal)
+        into v_cards from jsonb_array_elements(p_cards) with ordinality as x(c, ordinal);
+    perform pg_advisory_xact_lock(hashtextextended(v_uid::text || ':bud_sets', 0));
+    if (select count(*) from public.studbud_bud_sets where sender_id = v_uid) >= 100
+        and not exists (select 1 from public.studbud_bud_sets where sender_id = v_uid
+            and recipient_id = p_recipient_id and source_deck_id = p_source_deck_id) then
+        raise exception 'Revoke an older share before sending another (100 active shares maximum).';
+    end if;
+    insert into public.studbud_bud_sets(friendship_id, sender_id, recipient_id, source_deck_id, title, cards)
+        values(v_friendship_id, v_uid, p_recipient_id, p_source_deck_id, btrim(p_title), v_cards)
+        on conflict(sender_id, recipient_id, source_deck_id) do update
+        set friendship_id = excluded.friendship_id, title = excluded.title, cards = excluded.cards, created_at = now()
+        returning id into v_id;
+    return v_id;
+end;
+$$;
+
+create or replace function public.studbud_read_bud_sets(p_share_id uuid default null)
+returns jsonb language plpgsql stable security definer set search_path = public, pg_temp as $$
+declare v_uid uuid := auth.uid();
+begin
+    if v_uid is null or public.studbud_is_guest() or public.studbud_is_hidden_user(v_uid) then
+        raise exception 'Sign in with an eligible account to read Bud sets.';
+    end if;
+    return coalesce((select jsonb_agg(payload order by created_at desc) from (
+        select s.created_at, jsonb_build_object(
+            'id', s.id, 'owner_id', s.sender_id, 'recipient_id', s.recipient_id,
+            'title', s.title, 'card_count', jsonb_array_length(s.cards), 'created_at', s.created_at,
+            'outgoing', s.sender_id = v_uid,
+            'author_name', coalesce(nullif(a.raw_user_meta_data->>'username', ''), 'Student'),
+            'recipient_name', coalesce(nullif(r.raw_user_meta_data->>'username', ''), 'Student')
+        ) || case when p_share_id is not null then jsonb_build_object('cards', s.cards) else '{}'::jsonb end payload
+        from public.studbud_bud_sets s
+        join auth.users a on a.id = s.sender_id join auth.users r on r.id = s.recipient_id
+        where v_uid in (s.sender_id, s.recipient_id) and (p_share_id is null or s.id = p_share_id)
+          and not public.studbud_is_hidden_user(s.sender_id) and not public.studbud_is_hidden_user(s.recipient_id)
+          and exists (select 1 from public.studbud_friendships f where f.status = 'accepted'
+            and ((f.requester_id = s.sender_id and f.addressee_id = s.recipient_id)
+              or (f.addressee_id = s.sender_id and f.requester_id = s.recipient_id)))
+        order by s.created_at desc limit 200
+    ) entries), '[]'::jsonb);
+end;
+$$;
+
+create or replace function public.studbud_remove_bud_set(p_share_id uuid)
+returns void language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+    if auth.uid() is null or public.studbud_is_guest() then raise exception 'Sign in first.'; end if;
+    delete from public.studbud_bud_sets where id = p_share_id and auth.uid() in (sender_id, recipient_id);
+end;
+$$;
+revoke all on function public.studbud_send_bud_set(uuid, text, text, jsonb) from public, anon, authenticated;
+revoke all on function public.studbud_read_bud_sets(uuid) from public, anon, authenticated;
+revoke all on function public.studbud_remove_bud_set(uuid) from public, anon, authenticated;
+grant execute on function public.studbud_send_bud_set(uuid, text, text, jsonb) to authenticated;
+grant execute on function public.studbud_read_bud_sets(uuid) to authenticated;
+grant execute on function public.studbud_remove_bud_set(uuid) to authenticated;
 
 notify pgrst, 'reload schema';

@@ -43,4 +43,4 @@ const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
 assert.doesNotMatch(html, /ic-import-modal|ic-bookmarklet|open-ic-import/);
 assert.doesNotMatch(app, /openInfiniteCampusImport|copyInfiniteCampusBookmarklet|handleInfiniteCampusMessage/);
 
-console.log('Previously saved Campus schedules remain visible; new Campus imports and helper controls are removed.');
+console.log('Previously saved Campus schedules remain visible; remote payload/bookmarklet collection controls remain removed.');

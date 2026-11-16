@@ -189,7 +189,7 @@ for (const tab of ['skin', 'hat', 'accessory', 'effect', 'palette', 'inventory']
             `${item.id}'s description is searchable`);
     }
 }
-const studio = { innerHTML: '' };
+const studio = { innerHTML: '', dataset: {} };
 elements.set('shop-character-studio', studio);
 const outfit = { coins: 1000, owned_items: ['hat_cap'], equipped_skin: 'skin_robot',
     equipped_hat: 'hat_cap', equipped_accessory: 'acc_shades', equipped_effect: 'acc_storm_effect' };
@@ -219,7 +219,119 @@ assert.equal(previews.at(-1).color, '#38bdf8', 'palette previews use the propose
 assert.ok(app.shopItemCard(outfit, tryHat).includes(`data-action="character-try-on" data-id="${tryHat.id}" aria-label="Try on ${tryHat.name}"`),
     'every item preview is a keyboard-accessible, explicitly named try-on button');
 elements.delete('shop-character-studio');
+const personal = util.normalizeAppearance({ hairStyle: 'curls', hairColor: '#f472b6', shirtColor: '#38bdf8',
+    shirtStyle: 'stripes', skinTone: '#8d5524', pantsColor: '#f5f5f4', eyeColor: '#15803d', expression: 'smile' });
+assert.deepEqual({ ...util.playerCosmetics({ appearance: personal }).appearance }, { ...personal });
+const outfitColors = [];
+const customContext = new Proxy(ctx, { set(target, key, value) {
+    if (key === 'fillStyle') outfitColors.push(value);
+    target[key] = value; return true;
+} });
+util.drawFigureSide(customContext, { appearance: personal }, 29, 30, 22, 37, 1, 0, false);
+for (const color of [personal.hairColor, personal.shirtColor, personal.skinTone, personal.pantsColor, personal.eyeColor]) {
+    assert.ok(outfitColors.includes(color), `${color} is rendered on a personal side-view character`);
+}
+outfitColors.length = 0;
+util.drawFigureTop(customContext, { cos: { appearance: personal } }, 100, 100, 20, 0, 0);
+for (const color of [personal.hairColor, personal.shirtColor, personal.skinTone, personal.pantsColor, personal.eyeColor]) {
+    assert.ok(outfitColors.includes(color), `${color} is rendered on a personal top-down character`);
+}
+assert.equal(util.who({ equipped_skin: 'skin_robot', appearance: personal }).appearance, null,
+    'personal colors do not overwrite a collected costume design');
+assert.equal(util.playerCosmetics({ appearance: {} }).appearance, undefined, 'existing default characters keep their original appearance');
+assert.equal(util.normalizeAppearance({ hairColor: 'url(javascript:bad)' }).hairColor, '#292524');
+assert.match(util.avatarMarkup({ cos: { appearance: personal, effect: 'acc_storm_effect' } }), /data-appearance="/,
+    'animated avatars carry personal appearance through the shared observer');
+app.personalCharacterDraft = { userId: 'owner-a', value: personal };
+assert.notEqual(app.characterAppearanceDraft({ user_id: 'owner-b' }).hairColor, personal.hairColor,
+    'switching accounts discards another account personal-character draft');
+app.personalCharacterDraft = { userId: 'owner-b', value: personal };
+assert.equal(app.characterAppearanceDraft({ user_id: 'owner-b' }).hairColor, personal.hairColor, 'drafts survive category changes for the same owner');
+app.personalCharacterDraft = null;
+elements.set('inventory-character-studio', studio);
+app.inventoryTab = 'customize';
+app.renderInventory({ ...outfit, user_id: 'owner-b', appearance: personal });
+assert.match(elements.get('multiplayer-inventory-items').innerHTML, /data-feature="hairStyle" data-value="curls" aria-pressed="true"/);
+assert.equal(previews.at(-1).skin, '', 'the personal editor previews the human character, not its equipped costume');
+assert.equal(previews.at(-1).hat, '', 'the personal editor hides hats so hairstyle edits remain visible');
+assert.equal(previews.at(-1).appearance.hairColor, personal.hairColor);
+const featureFrames = Object.fromEntries(['hairStyle', 'hairColor', 'skinTone', 'eyeColor', 'expression', 'shirtStyle', 'shirtColor', 'pantsColor', 'hat', 'effect']
+    .map(feature => [feature, app.characterFraming(feature)]));
+assert.equal(featureFrames.hairStyle.y, featureFrames.hairColor.y, 'hair choices share a crown-centered camera');
+assert.ok(featureFrames.eyeColor.y > featureFrames.hairStyle.y, 'eye and expression framing centers lower than hair');
+assert.equal(featureFrames.expression.y, featureFrames.eyeColor.y);
+assert.ok(featureFrames.shirtColor.y > featureFrames.eyeColor.y, 'tops frame the torso, not the face');
+assert.ok(featureFrames.pantsColor.y > featureFrames.shirtColor.y, 'pants frame the legs, not the entire character');
+for (const [feature, frame] of Object.entries(featureFrames)) {
+    const featureY = { hairStyle: .39, hairColor: .39, skinTone: .51, eyeColor: .51, expression: .51, shirtStyle: .635, shirtColor: .635, pantsColor: .76, hat: .3, effect: .5 }[feature];
+    assert.ok(Math.abs((featureY - frame.y) * frame.zoom) < .1, `${feature} stays centered at every preview size`);
+}
+const stormFrame = app.characterFraming('hat', { hat: 'hat_cap', effect: 'acc_storm_effect' });
+assert.ok(Math.abs((.2 + .3 * .8 - stormFrame.y) * stormFrame.zoom) < .1, 'hat framing follows the storm renderer offset');
+assert.ok((.085 - featureFrames.hat.y) * featureFrames.hat.zoom > -.5, 'tall wizard hats remain inside the close-up');
+assert.equal(app.characterFraming('accessory', { acc: 'acc_shades' }).view, 'detail');
+assert.equal(app.characterFraming('accessory', { acc: 'acc_wings' }).view, 'full', 'wide accessories are not cropped to a face');
+app.characterCameras.inventory = { view: 'auto', feature: 'pantsColor' };
+app.renderCharacterStudio({ ...outfit, appearance: personal }, 'inventory', 'customize');
+assert.match(studio.innerHTML, /data-camera="legs"/);
+app.characterCameras.shop = { view: 'full', feature: 'hat', zoom: 1.4 };
+app.renderCharacterStudio(outfit, 'shop', 'hat', tryHat);
+app.renderCharacterStudio({ ...outfit, appearance: personal }, 'inventory', 'customize');
+assert.equal(app.characterCameras.shop.zoom, 1.4, 'rendering the hidden locker does not steal the shop camera');
+const cameraEvents = {}, zoomEvents = {}, properties = {};
+const zoomInput = { value: 1, setAttribute: noop, addEventListener: (name, handler) => { zoomEvents[name] = handler; } };
+const zoomOutput = {}, stageLabel = {};
+const cameraStage = {
+    dataset: {}, style: { setProperty: (key, value) => { properties[key] = value; } },
+    classList: { add: noop, remove: noop }, setPointerCapture: noop,
+    getBoundingClientRect: () => ({ width: 120, height: 146 }),
+    addEventListener: (name, handler) => { cameraEvents[name] = handler; }
+};
+const interactiveStudio = { dataset: { studio: 'inventory' },
+    querySelector: selector => ({ '.character-stage': cameraStage, '.character-zoom input': zoomInput, '.character-zoom output': zoomOutput, '.character-stage-label': stageLabel })[selector],
+    querySelectorAll: () => []
+};
+app.setupCharacterCamera(interactiveStudio);
+assert.equal(cameraStage.dataset.camera, 'legs');
+assert.equal(stageLabel.textContent, 'Auto · Pants');
+zoomInput.value = 4;
+zoomEvents.input();
+assert.equal(app.characterCameras.inventory.zoom, 4, 'the zoom slider updates the preview without a rerender');
+cameraEvents.pointerdown({ button: 0, pointerId: 1, clientX: 20, clientY: 30 });
+cameraEvents.pointermove({ pointerId: 1, clientX: 45, clientY: 50 });
+assert.equal(properties['--character-pan-x'], '25px');
+assert.equal(properties['--character-pan-y'], '20px', 'pointer drag moves the preview freely');
+cameraEvents.pointerup();
+cameraEvents.keydown({ key: '0', preventDefault: noop });
+assert.equal(app.characterCameras.inventory.zoom, null);
+assert.equal(properties['--character-pan-x'], '0px', 'reset restores automatic framing and clears the drag offset');
+cameraEvents.keydown({ key: '+', preventDefault: noop });
+assert.ok(app.characterCameras.inventory.zoom > featureFrames.pantsColor.zoom, 'keyboard zoom starts from the active auto frame');
+cameraEvents.keydown({ key: 'ArrowDown', preventDefault: noop });
+assert.equal(properties['--character-pan-y'], '12px');
+elements.delete('inventory-character-studio');
+app.inventoryTab = 'all';
+const filterCards = [{ dataset: { search: 'red hat', owned: 'true', affordable: 'false' } },
+    { dataset: { search: 'blue hat', owned: 'false', affordable: 'true' } },
+    { dataset: { search: 'red crown', owned: 'false', affordable: 'false' } }];
+const noResults = {};
+const filterGrid = { querySelectorAll: selector => selector === '.shop-category-title' ? [] : filterCards,
+    querySelector: selector => selector === '[data-owned]' ? filterCards[0] : noResults };
+const filterContainer = { id: 'multiplayer-shop-items', querySelector: () => filterGrid };
+app.shopAvailability = 'affordable';
+app.filterShopGrid(filterContainer, 'hat');
+assert.deepEqual(filterCards.map(card => card.hidden), [true, false, true], 'budget and text filters work together');
+app.shopAvailability = 'owned';
+app.filterShopGrid(filterContainer, 'crown');
+assert.equal(noResults.hidden, false, 'combined filters explain when no items match');
+app.shopAvailability = 'all';
 const shopSql = source('supabase-setup.sql');
+for (const [feature, choices] of Object.entries(util.appearanceOptions)) {
+    const serverChoices = shopSql.match(new RegExp(`when '${feature}' then array\\[([^\\]]+)\\]`));
+    assert.ok(serverChoices, `${feature} has a server-side allowlist`);
+    assert.deepEqual([...serverChoices[1].matchAll(/'([^']+)'/g)].map(([, value]) => value), Array.from(choices, ([value]) => value),
+        `${feature} has identical client/server choices`);
+}
 const pricedSql = shopSql.match(/with priced\(id, price\) as \(values([\s\S]*?)\), pets/)[1];
 const sqlPrices = new Map([...pricedSql.matchAll(/\('([^']+)', (\d+)\)/g)].map(([, id, price]) => [id, Number(price)]));
 for (const item of catalog.filter(item => item.price != null && !item.legacy)) {
@@ -238,8 +350,33 @@ assert.match(source('supabase-setup.sql'), /priced\.price < 200 then 'uncommon'.
 
 (async () => {
     const community = sandbox.window.StudBudCommunityGames;
+    const savedStorage = new Map(), originalClient = community.getClient, originalHasAccount = community.hasAccount;
+    sandbox.window.localStorage = { getItem: key => savedStorage.get(key) || null, setItem: (key, value) => savedStorage.set(key, value) };
+    community.hasAccount = () => false;
+    const guestCharacter = await community.saveAppearance(personal);
+    assert.equal(guestCharacter.user_id, 'guest');
+    assert.deepEqual({ ...community.guestAppearance() }, { ...personal }, 'guest personal characters survive a fresh read from device storage');
+    const originalConsole = sandbox.console, warnings = [];
+    sandbox.console = { ...console, warn: (...args) => warnings.push(args) };
+    savedStorage.set('studbud-guest-appearance', '{invalid');
+    try {
+        assert.equal(community.guestAppearance(), null, 'damaged cosmetic storage cannot prevent opening the profile or joining games');
+        assert.equal(warnings.length, 1, 'invalid stored appearances are logged rather than silently ignored');
+    } finally { sandbox.console = originalConsole; }
+    await community.saveAppearance(personal);
+    await assert.rejects(community.saveAppearance({ ...personal, hairStyle: 'invalid' }), /valid option/);
+    community.hasAccount = () => true;
+    let savedPayload;
+    community.getClient = () => ({ rpc: async (name, payload) => {
+        assert.equal(name, 'studbud_save_appearance'); savedPayload = payload; return { data: { appearance: payload.p_appearance } };
+    } });
+    await community.saveAppearance(personal);
+    assert.deepEqual({ ...savedPayload.p_appearance }, { ...personal }, 'account appearances are sent to the dedicated persistence RPC');
+    community.getClient = () => ({ rpc: async () => ({ error: { message: 'Network error' } }) });
+    await assert.rejects(community.saveAppearance(personal), /Could not save your character.*Network error/, 'failed saves never return a success-shaped profile');
+    community.getClient = originalClient; community.hasAccount = originalHasAccount;
     const getElementById = document.getElementById;
-    document.getElementById = id => elements.get(id) || { textContent: '' };
+    document.getElementById = id => elements.get(id) || { textContent: '', dataset: {} };
     sandbox.window.StudBudSfx = { play: noop };
     app.multiplayerProfile = { equipped_accessory: 'acc_shades', equipped_effect: '' };
     community.equipItem = async () => ({ equipped_accessory: 'acc_shades', equipped_effect: 'acc_storm_effect' });

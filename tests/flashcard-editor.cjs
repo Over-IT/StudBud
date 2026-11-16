@@ -116,7 +116,9 @@ async function run() {
     app.deckEditorDraft.cards[0].front = 'Discard this';
     app.closeModal();
     assert.equal(app.deckEditorDraft, null);
-    assert.deepEqual(deck(), snapshot, 'Cancel discards changes');
+    assert.deepEqual(deck(), snapshot, 'closing keeps saved cards unchanged');
+    assert.equal(app.deckEditorDrafts.get('set').draft.cards[0].front, 'Discard this', 'closing retains the unsaved draft');
+    app.deckEditorDrafts.delete('set');
 
     app.openCardForm('set', 'original');
     value('card-front', ' ');
@@ -160,6 +162,8 @@ async function run() {
 }
 
 async function linksAndSharing() {
+    app.deckEditorSaved = true;
+    app.deckEditorDrafts = new Map();
     state.flashcards = [{ id: 'set', title: 'Editor tools', cards: [{ ...clone(progress), answerImage: 'data:image/png;base64,aGVsbG8=', distractors: ['Other'] }] }];
     app.openDeckEditor('set');
     value('deck-editor-bulk', 'First :: Definition :: unit\nSecond\tOther definition\nFirst :: Definition');
@@ -169,6 +173,7 @@ async function linksAndSharing() {
     value('deck-editor-bulk', 'Valid :: Answer\nMalformed row');
     assert.throws(() => app.addBulkEditorCards(), /Row 2/);
     assert.equal(app.deckEditorDraft.cards.length, 3, 'invalid bulk paste is atomic');
+    value('deck-editor-bulk', '');
     app.copyEditorCard('original');
     const copied = app.deckEditorDraft.cards[1];
     assert.notEqual(copied.id, 'original');
@@ -354,6 +359,26 @@ async function linksAndSharing() {
     assert.match(sql, /d\.owner_id <> new\.owner_id/);
 }
 
+async function retainedCreationDraft() {
+    app.deckEditorSaved = true;
+    app.deckEditorDrafts = new Map();
+    app.openDeckEditor();
+    value('deck-editor-title', 'Retained personal draft');
+    value('deck-editor-bulk', 'Pending :: Definition');
+    app.deckEditorDraft.cards.push({ id: 'draft-card', front: 'Saved term', back: 'Saved answer', tags: [] });
+    app.retainDeckEditorDraft();
+    app.deckEditorDraft = null;
+    app.openDeckEditor();
+    assert.equal(elements.get('deck-editor-title').value, 'Retained personal draft');
+    assert.equal(elements.get('deck-editor-bulk').value, 'Pending :: Definition');
+    assert.equal(app.deckEditorDraft.cards[0].front, 'Saved term');
+    await assert.rejects(app.saveDeckEditor(), /bulk text to the set before saving/);
+    value('deck-editor-bulk', '');
+    await app.saveDeckEditor();
+    app.openDeckEditor();
+    assert.equal(elements.get('deck-editor-title').value, '', 'saving finishes the draft rather than resurrecting it on Create');
+}
+
 async function privateAnswerTools() {
     for (const id of ['card-answer-mode', 'card-accepted-answers', 'card-keywords', 'card-attachments', 'card-remove-attachments']) {
         elements.set(id, { value: '', checked: false, files: [], textContent: '', classList: { toggle() {} } });
@@ -485,6 +510,6 @@ async function weakCardViewing() {
     await assert.rejects(app.handleDataAction('view-weak-cards', 'missing'), /no longer exists/);
 }
 
-run().then(linksAndSharing).then(privateAnswerTools).then(weakCardViewing).then(() => {
+run().then(retainedCreationDraft).then(linksAndSharing).then(privateAnswerTools).then(weakCardViewing).then(() => {
     console.log('Flashcard drafts, editing/deletion, progress preservation, write failures, class/test switching and shared-set identity checks passed.');
 }).catch(error => { console.error(error); process.exitCode = 1; });

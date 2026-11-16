@@ -4,7 +4,7 @@
     const A = window.StudBudArcade;
     const { TAU, clamp, lerp, dist, overlap, mulberry32, pushCircleOutOfRect, roundRect, nameTag, drawFigureTop } = A.util;
 
-    const clock = s => ((typeof s.testPauseAt === 'number' ? s.testPauseAt : Date.now()) - s.startedAt) / 1000;
+    const clock = s => s.countdown > 0 ? 0 : Math.max(0, ((typeof s.testPauseAt === 'number' ? s.testPauseAt : s.gameNow?.() ?? Date.now()) - s.startedAt) / 1000);
     const mod = (n, m) => ((n % m) + m) % m;
     const rampDistance = (time, capTime, gain) => {
         const t = Math.max(0, time), ramped = Math.min(t, capTime);
@@ -749,16 +749,16 @@
             mineFog(this, ctx, px, py, r * 0.45, r * 1.75,
                 [[0, 'rgba(255,224,160,.05)'], [0.35, `rgba(2,5,14,${(fogA * 0.35).toFixed(3)})`], [1, `rgba(2,5,14,${fogA})`]], w, h);
             if (s.preview || s.spectator) return;
-            s.placeHud(ctx, 0, 0, 230, 34, 'top-center');
+            const compactHud = (s.hudBounds?.().w ?? w) < 413 * Math.max(1, 1 / (s.scale || 1));
+            const haulX = compactHud ? 27 : 238, haulY = compactHud ? 42 : 0;
+            s.placeHud(ctx, 0, 0, compactHud ? 230 : 413, compactHud ? 74 : 34, 'top-center');
             ctx.fillStyle = 'rgba(8,12,24,.76)'; A.util.roundRect(ctx, 0, 0, 230, 34, 10); ctx.fill();
             ctx.strokeStyle = 'rgba(148,163,184,.35)'; ctx.lineWidth = 1; A.util.roundRect(ctx, .5, .5, 229, 33, 10); ctx.stroke();
             ctx.fillStyle = '#cbd5e1'; ctx.font = '800 12px system-ui'; ctx.textAlign = 'center';
             ctx.fillText(`DEPTH ${depth * 5}m`, 115, 22, 220);
-            ctx.restore();
-            s.placeHud(ctx, 0, 0, 175, 32, 'top-right');
-            ctx.fillStyle = 'rgba(8,12,24,.78)'; A.util.roundRect(ctx, 0, 0, 175, 32, 9); ctx.fill();
+            ctx.fillStyle = 'rgba(8,12,24,.78)'; A.util.roundRect(ctx, haulX, haulY, 175, 32, 9); ctx.fill();
             ctx.fillStyle = '#fef3c7'; ctx.font = '800 12px system-ui'; ctx.textAlign = 'center';
-            ctx.fillText(`HAUL ${this.carry}c  ·  ${this.items}/${this.cap}`, 87, 21, 166);
+            ctx.fillText(`HAUL ${this.carry}c  ·  ${this.items}/${this.cap}`, haulX + 87, haulY + 21, 166);
             ctx.restore();
             if (depth === 0 && this.carry > 0 && me.y < 4 * TS) {
                 s.placeHud(ctx, 0, 0, 270, 24, 'bottom-center');

@@ -46,24 +46,26 @@
                 </figure>
             </aside>
             <div class="auth-account"><div class="auth-account-content">
-            <h1 id="auth-title">Welcome to StudBud</h1>
-            <p id="auth-description">Sync across devices, or continue as a guest.</p>
-            <button id="offline-start-btn" class="primary-btn full-width guest-start-btn" type="button"><i class="fas fa-user-clock" aria-hidden="true"></i> Continue as guest</button>
-            <p class="settings-hint guest-start-hint">Saves on this device. Sync later with an account.</p>
-            <div id="auth-divider" class="auth-divider" role="presentation"><span>or sign in</span></div>
+            <h1 id="auth-title">Welcome back</h1>
+            <p id="auth-description">Pick up where you left off. Your classes, study sets and progress, together.</p>
             <p id="auth-config-message" class="auth-message error hidden" role="alert"></p>
             <button id="auth-config-retry" class="secondary-btn full-width hidden" type="button">Retry sign-in connection</button>
             <form id="login-form" class="auth-form">
-                <label>Username<input id="login-username" type="text" autocomplete="username" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" required></label>
-                <label>Password<input id="login-password" type="password" autocomplete="current-password" minlength="8" required></label>
+                <label>Username<input id="login-username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" required></label>
+                <label>Password<span class="auth-password-field"><input id="login-password" name="password" type="password" autocomplete="current-password" minlength="8" required><button id="login-password-toggle" class="auth-password-toggle" type="button" aria-label="Show password" aria-controls="login-password" aria-pressed="false">Show</button></span></label>
+                <label class="auth-remember"><input id="login-remember-device" name="remember-device" type="checkbox" aria-describedby="login-device-hint"><span>Remember this device for 30 days</span></label>
+                <p id="login-device-hint" class="settings-hint auth-device-hint">Only on a private device. Leave unchecked on school or shared computers.</p>
                 <button class="primary-btn full-width" type="submit" disabled>Sign in</button>
+                <details class="auth-compatibility"><summary>Older account sign-in</summary><label class="auth-remember"><input id="login-legacy-auth" type="checkbox"><span>Allow one-time compatibility sign-in</span></label><p class="settings-hint">Only for an account created before private sign-in. This may send your original password to the authentication provider once, then upgrade the account after it unlocks. New accounts do not need this.</p></details>
             </form>
             <form id="signup-form" class="auth-form hidden">
                 <label>Username (3–24 letters, numbers, or underscores)<input id="signup-username" type="text" autocomplete="username" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" title="Use 3–24 letters, numbers, or underscores." required></label>
                 <label>Password (at least 12 characters)<input id="signup-password" type="password" autocomplete="new-password" minlength="12" required></label>
                 <label>Confirm password<input id="signup-password-confirm" type="password" autocomplete="new-password" minlength="12" required></label>
                 <label>School<select id="signup-school" required><option value="">Choose your school…</option><option value="pchs">Parkway Central High School</option><option value="pnhs">Parkway North High School</option><option value="pshs">Parkway South High School</option><option value="pwhs">Parkway West High School</option><option value="other">Other / not listed</option></select></label>
-                <p class="settings-hint">Use a unique passphrase, not your school password. Your password encrypts synced data and can't be recovered if lost. No email needed.</p>
+                <p class="settings-hint">Use a unique passphrase, not your school password. It encrypts your private synced data and is not sent during private sign-in. Lost encryption passwords cannot be recovered. After setup, download and verify an encrypted backup in Settings → Account &amp; saved data. No email needed.</p>
+                <label class="auth-remember"><input id="signup-remember-device" name="remember-device" type="checkbox" aria-describedby="signup-device-hint"><span>Remember this device for 30 days</span></label>
+                <p id="signup-device-hint" class="settings-hint auth-device-hint">Only on a private device. Leave unchecked on school or shared computers.</p>
                 <button class="primary-btn full-width" type="submit" disabled>Create account</button>
             </form>
             <section id="mfa-login-prompt" class="mfa-panel hidden" aria-labelledby="mfa-login-title">
@@ -78,6 +80,9 @@
             </section>
             <p id="auth-status" class="auth-message" role="status" aria-live="polite"></p>
             <p class="auth-switch"><span id="auth-switch-prompt">New to StudBud?</span> <button id="auth-switch-btn" type="button" class="text-btn" disabled>Create an account</button></p>
+            <div id="auth-divider" class="auth-divider" role="presentation"><span>or use without an account</span></div>
+            <button id="offline-start-btn" class="secondary-btn full-width guest-start-btn" type="button"><i class="fas fa-user-clock" aria-hidden="true"></i> Continue as guest</button>
+            <p id="guest-start-hint" class="settings-hint guest-start-hint">Saves on this device. Create an account to sync later.</p>
 	            <p class="settings-hint auth-legal"><a href="privacy.html" target="_blank" rel="noopener">Privacy policy</a> · <a href="terms.html" target="_blank" rel="noopener">Terms</a></p>
             </div></div>
         </div>
@@ -206,6 +211,7 @@
             </aside>
 
             <!-- VIEW CONTAINERS -->
+            <aside id="account-privacy-notice" class="offline-notice hidden" role="status"></aside>
             <aside id="school-year-notice" class="offline-notice hidden" role="status">
                 <span id="school-year-notice-text"></span>
                 <div class="offline-notice-actions">
@@ -294,7 +300,7 @@
                         </label>
                         <div class="actions">
                             <button id="add-course-btn" class="secondary-btn"><i class="fas fa-plus"></i> Add Class</button>
-                            <button id="open-campus-paste-modal-btn" class="secondary-btn" data-action="open-campus-paste-modal"><i class="fas fa-paste" aria-hidden="true"></i> Import grades</button>
+                            <button id="open-campus-paste-modal-btn" class="secondary-btn" data-action="open-campus-paste-modal"><i class="fas fa-paste" aria-hidden="true"></i> Import school data</button>
                             <button id="open-target-gpa-btn" class="secondary-btn"><i class="fas fa-bullseye"></i> Grade &amp; GPA goals</button>
                         </div>
                     </div>
@@ -521,7 +527,7 @@
                     <form id="schedule-form" class="glass-card schedule-editor">
                         <div id="schedule-course-list"></div>
                         <div class="schedule-actions">
-                            <p>Leave a class on “Not scheduled” if it has no set period.</p>
+                            <p>Leave a class on “Not scheduled” if it has no set period. Unchanged imported rotations and times are kept; changing a class’s period replaces its copied rotation and times.</p>
                             <button type="submit" class="primary-btn"><i class="fas fa-save"></i> Save Schedule</button>
                         </div>
                     </form>
@@ -572,16 +578,28 @@
                     <details class="study-library-help" data-study-panel="practice"><summary><i class="fas fa-circle-info" aria-hidden="true"></i> How recall &amp; study time work</summary><p><strong>Study</strong> uses your default study mode. <strong>Cram</strong> goes through all cards for last-minute test prep without changing review dates. Recall uses up to four recent answers; study time tracks active practice.</p></details>
                     <section class="glass-card community-deck-browser hidden" data-study-panel="discover" aria-label="Discover community sets">
                         <div class="community-heading">
-                            <div><h3>Community sets</h3><p>Your sets stay private unless you share them.</p></div>
+                            <div><h3>Community sets</h3><p>Browse public sets, preview cards, then save a personal copy. Creating a set does not publish it.</p></div>
                             <span class="community-badge"><i class="fas fa-users"></i> Shared library</span>
                         </div>
                         <form id="community-deck-search-form" class="community-search-form">
                             <label class="sr-only" for="community-deck-query">Search community decks</label>
-                            <input id="community-deck-query" type="search" maxlength="100" placeholder="Search public deck titles">
+                            <input id="community-deck-query" type="search" maxlength="100" placeholder="Search public titles or classes">
                             <button class="secondary-btn" type="submit"><i class="fas fa-search"></i> Search</button>
                         </form>
+                        <div class="community-set-filters">
+                            <label>Class <select id="community-deck-course"><option value="">All classes</option></select></label>
+                            <label>Library <select id="community-deck-library"><option value="all">All sets</option><option value="new">Not in my sets</option><option value="saved">Already saved</option></select></label>
+                            <label>Sort <select id="community-deck-sort"><option value="popular">Most studied</option><option value="recent">Recently updated</option><option value="title">Title A–Z</option><option value="short">Fewest cards</option></select></label>
+                            <button type="button" class="secondary-btn" data-action="create-deck">Create a personal set</button>
+                        </div>
                         <p id="community-deck-status" class="community-status" role="status" aria-live="polite">Search for a set, or browse the most-studied decks.</p>
                         <div id="community-deck-results" class="community-deck-results" role="region" aria-label="Community deck results" tabindex="0"></div>
+                        <section class="bud-set-section" aria-labelledby="bud-set-heading">
+                            <div class="community-heading"><h3 id="bud-set-heading">Sets shared with Buds</h3><button type="button" class="secondary-btn" data-action="refresh-bud-sets">Refresh Bud shares</button></div>
+                            <p class="settings-hint">Only the sender, selected Bud and service can read a shared snapshot. Not public or end-to-end encrypted. Removing a Bud deletes shared snapshots; saved personal copies cannot be recalled. Share your own saved sets from My sets → set menu.</p>
+                            <p id="bud-set-status" role="status">Sign in and refresh to see received sets and manage sent shares.</p>
+                            <div id="bud-set-results" class="community-deck-results" aria-label="Bud set shares"></div>
+                        </section>
                     </section>
                     
                     <aside class="ad-slot" data-ad-placement="decks" aria-label="Advertisement" hidden></aside>
@@ -975,7 +993,7 @@
                     <div class="character-workspace" data-studio="inventory">
                         <aside id="inventory-character-studio" class="glass-card character-studio" aria-label="Locker character preview"></aside>
                         <section class="glass-card multiplayer-shop character-catalog">
-                            <header class="character-catalog-heading"><div><span class="character-eyebrow">Your collection</span><h2>Locker</h2><p>Try on your items, then equip your favorites. Changes save when you equip.</p></div><button type="button" class="secondary-btn" data-target="shop-view">Visit shop <i class="fas fa-arrow-right" aria-hidden="true"></i></button></header>
+                            <header class="character-catalog-heading"><div><span class="character-eyebrow">Your character, your way</span><h2>Character &amp; locker</h2><p>Create a personal character for free, or mix costumes, hats and accessories from your collection.</p></div><button type="button" class="secondary-btn" data-target="shop-view">Visit shop <i class="fas fa-arrow-right" aria-hidden="true"></i></button></header>
                             <p id="multiplayer-inventory-status" class="community-status" role="status" aria-live="polite"></p>
                             <div id="multiplayer-inventory-items" class="multiplayer-shop-items"></div>
                         </section>
@@ -1239,11 +1257,14 @@
                             <p>Saved on this device, even offline. Connect an account to sync.</p>
                             <p id="data-save-status" class="data-save-status" role="status" aria-live="polite">Checking local save status…</p>
                             <p class="settings-hint">Add classes and assignments manually from School and Planner.</p>
+                            <p class="settings-hint">Your offline study copy is readable in this browser profile. Cloud snapshots and the saved sync baseline are encrypted, but a remembered unlock is not a lock for a shared device. Use a private browser profile and clear device study data before sharing it.</p>
                             <p class="settings-hint"><a href="privacy.html" target="_blank" rel="noopener">Privacy policy &amp; advertising</a></p>
                             <h4>Encrypted backup</h4>
                             <p class="settings-hint">Download a private copy protected by a separate passphrase. Keep that passphrase safe: it cannot be recovered. Restoring replaces this device's study data and syncs it if signed in.</p>
+                            <p class="settings-hint">Keep the file and passphrase separately. Verify a saved file before relying on it; verification never replaces or syncs your current data. A password reset cannot recover encrypted school data without its original password or a usable backup.</p>
                             <div class="admin-actions">
                                 <button id="export-backup-btn" class="secondary-btn" type="button">Download encrypted backup</button>
+                                <button id="verify-backup-btn" class="secondary-btn" type="button">Verify backup</button>
                                 <button id="restore-backup-btn" class="secondary-btn" type="button">Restore encrypted backup</button>
                             </div>
                             <input id="backup-import-file" type="file" accept=".json,application/json" hidden>
@@ -1391,41 +1412,26 @@
         <!-- MODAL OVERLAYS -->
         <div id="modal-container" class="modal-overlay hidden">
             <div id="campus-paste-modal" class="glass-card modal-content campus-paste-modal hidden">
-                <div class="modal-header"><h2>Import grades</h2><button class="close-modal-btn icon-btn" aria-label="Close" type="button"><i class="fas fa-times"></i></button></div>
+                <div class="modal-header"><h2>Import school data</h2><button class="close-modal-btn icon-btn" aria-label="Close" type="button"><i class="fas fa-times"></i></button></div>
                 <div class="modal-body campus-paste-body">
-                    <p>Supports Infinite Campus. Select all (Ctrl+A), copy (Ctrl+C) and paste the whole page — only classes and grades are kept.</p>
+                    <p>Paste a whole grades, assignment or schedule page, or several tables together. StudBud detects the school records and shows a review before saving.</p>
                     <a class="campus-portal-link" href="https://parkwaymo.infinitecampus.org/campus/portal/students/parkway.jsp?status=login" target="_blank" rel="noopener noreferrer">Open Parkway Infinite Campus <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>
-                    <ul class="campus-paste-directions">
-                        <li><strong>Classes:</strong> copy your <b>Schedule</b> or <b>Grades</b> page.</li>
-                        <li><strong>Assignments &amp; grades:</strong> open a class in <b>Grades</b> and copy the page.</li>
-                    </ul>
-                    <p class="settings-hint">Extra text is ignored. Never paste passwords or student IDs.</p>
-                    <div class="campus-paste-tabs" role="tablist" aria-label="Paste data type">
-                        <button type="button" class="secondary-btn selected" data-campus-paste-mode="courses" role="tab" aria-selected="true">Classes</button>
-                        <button type="button" class="secondary-btn" data-campus-paste-mode="assignments" role="tab" aria-selected="false">Assignments &amp; grades</button>
-                    </div>
-                    <section id="campus-paste-courses-panel" class="campus-paste-panel" role="tabpanel">
-                        <label for="campus-paste-courses">Copied class list</label>
-                        <textarea id="campus-paste-courses" rows="3" placeholder="Paste your schedule page or one class per line"></textarea>
+                    <p class="settings-hint">Processing stays in your browser. Known student/contact/teacher fields are discarded immediately. Review titles for personal details that cannot be identified automatically. Never paste passwords. Only confirmed records enter encrypted account sync.</p>
+                    <section class="campus-paste-panel">
+                        <label for="campus-paste-data">Copied school data</label>
+                        <textarea id="campus-paste-data" rows="6" placeholder="Paste classes, assignment details, scores and periods here. Include table headings or class names when available." autocomplete="off" spellcheck="false"></textarea>
                         <div class="campus-paste-options">
-                            <label for="campus-paste-term">Add classes as</label>
+                            <label for="campus-paste-term">Term for new classes</label>
                             <select id="campus-paste-term"><option value="FY">Full year</option><option value="S1">Semester 1</option><option value="S2">Semester 2</option></select>
-                            <button type="button" class="secondary-btn" data-action="preview-campus-courses">Preview</button>
                         </div>
-                        <p id="campus-paste-courses-status" class="community-status" role="status" aria-live="polite"></p>
-                        <div id="campus-paste-courses-preview" class="campus-paste-preview"></div>
-                        <button type="button" id="import-campus-courses-btn" class="primary-btn hidden" data-action="import-campus-courses">Add selected classes</button>
-                    </section>
-                    <section id="campus-paste-assignments-panel" class="campus-paste-panel hidden" role="tabpanel">
-                        <label for="campus-paste-assignment-course">Class</label>
-                        <select id="campus-paste-assignment-course"><option value="">Choose a class</option></select>
-                        <label for="campus-paste-assignments">Copied assignments</label>
-                        <textarea id="campus-paste-assignments" rows="4" placeholder="Paste a class's grades page or assignment table"></textarea>
-                        <button type="button" class="secondary-btn" data-action="preview-campus-assignments">Preview</button>
-                        <p class="settings-hint">Leave Class blank to detect it from the paste.</p>
-                        <p id="campus-paste-assignments-status" class="community-status" role="status" aria-live="polite"></p>
-                        <div id="campus-paste-assignments-preview" class="campus-paste-preview"></div>
-                        <button type="button" id="import-campus-assignments-btn" class="primary-btn hidden" data-action="import-campus-assignments">Add assignments</button>
+                        <label for="campus-paste-course">Class fallback for assignment-only data</label>
+                        <select id="campus-paste-course"><option value="">Auto-detect classes from the paste</option></select>
+                        <label><input id="campus-paste-weights" type="checkbox"> Apply complete copied category weights (changes grade calculations)</label>
+                        <button type="button" class="secondary-btn" data-action="preview-campus-data">Preview detected changes</button>
+                        <p id="campus-paste-status" class="community-status" role="status" aria-live="polite"></p>
+                        <div id="campus-paste-preview" class="campus-paste-preview"></div>
+                        <button type="button" id="import-campus-data-btn" class="primary-btn hidden" data-action="import-campus-data">Save selected changes</button>
+                        <button type="button" id="undo-campus-import-btn" class="secondary-btn hidden" data-action="undo-campus-import">Undo last school import</button>
                     </section>
                 </div>
             </div>
@@ -1689,7 +1695,7 @@
                     <button class="close-modal-btn icon-btn" aria-label="Close editor"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="modal-body">
-                    <p class="deck-link-hint">Review progress is kept.</p>
+                    <p class="deck-link-hint" id="deck-editor-sharing-hint">Save keeps a personal set; sharing is a separate choice. Review progress is kept. Closing keeps your draft in this tab until reload.</p>
                     <form id="deck-editor-form">
                         <div class="form-group">
                             <label for="deck-editor-title">Set name</label>
@@ -1735,9 +1741,31 @@
                     <div id="deck-editor-cards"></div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="secondary-btn cancel-modal-btn">Cancel</button>
-                    <button type="submit" form="deck-editor-form" class="primary-btn">Save changes</button>
+                    <button type="button" class="secondary-btn cancel-modal-btn">Close (keep draft)</button>
+                    <button type="button" class="ghost-btn" data-action="editor-discard-draft">Discard draft</button>
+                    <button type="button" class="secondary-btn" id="deck-editor-share" data-action="editor-save-share">Save &amp; sharing options</button>
+                    <button type="submit" form="deck-editor-form" class="primary-btn">Save set</button>
                 </div>
+            </div>
+
+            <div id="set-sharing-modal" class="glass-card modal-content hidden">
+                <div class="modal-header"><h2>Share a saved set</h2><button type="button" class="close-modal-btn" aria-label="Close sharing">&times;</button></div>
+                <div class="modal-body">
+                    <h3 id="set-sharing-title"></h3>
+                    <p>Your personal Save is separate from sharing. Share only material you own or have permission to share. Review card text for personal information first.</p>
+                    <h3>Send to one Bud</h3>
+                    <p class="settings-hint">Sends only the set title, terms and definitions as a snapshot, readable by that Bud and the service, not end-to-end encrypted. No linked class, grades, assignments, schedules, study history, images, attachments or other notes are included. Later edits are not sent automatically. Revoking removes access here, not copies already saved.</p>
+                    <label for="set-sharing-bud">Recipient</label><select id="set-sharing-bud"><option value="">Loading Buds…</option></select>
+                    <button type="button" class="primary-btn" data-action="send-bud-set" id="set-sharing-send" disabled>Send snapshot to selected Bud</button>
+                    <h3>Publish publicly</h3>
+                    <p class="settings-hint">Public sharing includes the title, class label, card terms, definitions, distractors and attribution. Anyone, including guests, can read and copy it. Saving later edits also updates the public copy.</p>
+                    <button type="button" class="secondary-btn" data-action="confirm-public-set" id="set-sharing-public">Publish to public Discover</button>
+                    <p id="set-sharing-status" role="status"></p>
+                </div>
+            </div>
+            <div id="community-preview-modal" class="glass-card modal-content hidden">
+                <div class="modal-header"><h2 id="community-preview-title">Sample cards</h2><button type="button" class="close-modal-btn" aria-label="Close preview">&times;</button></div>
+                <div class="modal-body"><p id="community-preview-status" role="status"></p><div id="community-preview-cards"></div></div>
             </div>
 
             <!-- Card Studio Builder Modal -->
@@ -1876,9 +1904,7 @@
         </div>
     </div>
 
-    <!-- Chart.js CDN for Analytics (Required for analyticsEngine.js rendering) -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js" defer></script>
+    <!-- Charts and account libraries load only when their features need them. -->
     <script src="supabase-config.js" defer></script>
     
     <!-- Application Scripts (Zero Dependency strict vanilla logic apart from Chart rendering on canvas) -->

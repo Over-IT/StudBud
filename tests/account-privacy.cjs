@@ -20,6 +20,7 @@ sandbox.window = sandbox;
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'cloudSync.js'), 'utf8'), sandbox);
 const cloud = sandbox.StudBudCloud;
+cloud.deriveAuthCredential = async () => 'test-derived-credential';
 const user = { id: 'owner', user_metadata: { username: 'student', school: 'other' } };
 let answer = 'student', secret = 'a unique long password', confirmed = true;
 let verificationError, deletionError, assurance = { currentLevel: 'aal1', nextLevel: 'aal1' }, cleanupFails = false;
@@ -33,7 +34,7 @@ const verifier = {
     auth: {
         signInWithPassword: async credentials => {
             steps.push('verify');
-            assert.equal(credentials.password, secret);
+            assert.equal(credentials.password, 'test-derived-credential');
             assert.equal(credentials.email, 'student@accounts.studbud.invalid');
             if (switchAccount) cloud.user = { id: 'another-account' };
             return { data: { user: verificationUser }, error: verificationError };
@@ -64,6 +65,7 @@ sandbox.supabase = { createClient(url, key, options) {
 sandbox.location = { reload() { steps.push('reload'); } };
 sandbox.StudBudCommunityGames = { boardCache: new Map([['private', 42]]) };
 sandbox.NexusApp = {
+    clearLocalStore: async () => {},
     flushAutomaticStudy: async () => steps.push('flush'),
     resetForCloudAccount: async () => {
         if (cleanupFails) throw new Error('device storage unavailable');

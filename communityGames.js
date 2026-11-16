@@ -492,6 +492,7 @@
         }
 
         sharedDeckRow(deck) {
+            if (deck.budShareId) throw new Error('Sets received from Buds cannot be reposted. Make your own set to share it.');
             if (deck.classShareSourceOwnerId && deck.classShareSourceOwnerId !== this.getUserId()) {
                 throw new Error('This set was shared by someone else. Make your own set to share it.');
             }
@@ -539,8 +540,41 @@
                 const { course, ...withoutCourse } = row;
                 ({ data, error } = await save(withoutCourse));
             }
+
             if (error) throw new Error(`Could not share this deck: ${error.message}`);
             return data;
+        }
+
+        async budSetCall(name, args = {}) {
+            const { data, error } = await this.getClient().rpc(name, args);
+            if (error) {
+                if (['PGRST202', '42883', '42P01', '42703'].includes(error.code) || /schema cache|does not exist|could not find the function/i.test(error.message || '')) {
+                    throw new Error('Bud set sharing needs a server update. Ask the site owner to run the Bud set sharing section of supabase-setup.sql. Your personal set is still saved.');
+                }
+                throw new Error(error.message);
+            }
+            return data;
+        }
+
+        async shareDeckWithBud(deck, recipientId) {
+            const row = this.sharedDeckRow(deck);
+            if (row.cards.length > 200) throw new Error('Bud shares support up to 200 cards. Make a smaller set before sending.');
+            const id = await this.budSetCall('studbud_send_bud_set', {
+                p_recipient_id: recipientId, p_source_deck_id: row.source_deck_id,
+                p_title: row.title, p_cards: row.cards.map(card => ({ front: card.front, back: card.back }))
+            });
+            if (typeof id !== 'string' || !id) throw new Error('Bud sharing returned an invalid receipt. Refresh Bud shares to check whether the snapshot was sent.');
+            return id;
+        }
+
+        async listBudSets(shareId = null) {
+            const rows = await this.budSetCall('studbud_read_bud_sets', { p_share_id: shareId });
+            if (!Array.isArray(rows)) throw new Error('Bud sharing returned an invalid list. Please retry.');
+            return rows;
+        }
+
+        async removeBudSet(shareId) {
+            return this.budSetCall('studbud_remove_bud_set', { p_share_id: shareId });
         }
 
         async ownedDecks() {
@@ -668,6 +702,34 @@
             });
             if (error) throw new Error(`Could not equip item: ${error.message}`);
             return data;
+        }
+
+        async saveAppearance(appearance) {
+            const options = window.StudBudArcade.util.appearanceOptions;
+            if (!appearance || Object.keys(appearance).some(key => !Object.hasOwn(options, key))
+                || Object.entries(options).some(([key, choices]) => !choices.some(([id]) => id === appearance[key]))) {
+                throw new Error('Choose a valid option for each part of your character.');
+            }
+            if (window.StudBudCloud?.isGuest?.() || (!this.hasAccount() && !window.StudBudCloud?.user)) {
+                window.localStorage.setItem('studbud-guest-appearance', JSON.stringify(appearance));
+                return { owned_items: [], coins: 0, user_id: 'guest', color: this.guestColor() || this.guestColors[0], appearance: { ...appearance } };
+            }
+            const { data, error } = await this.getClient().rpc('studbud_save_appearance', { p_appearance: appearance });
+            if (error) throw new Error(`Could not save your character. Make sure the latest supabase-setup.sql has been applied. ${error.message}`);
+            return data;
+        }
+
+        guestAppearance() {
+            const saved = window.localStorage?.getItem('studbud-guest-appearance');
+            if (!saved) return null;
+            let appearance;
+            try { appearance = JSON.parse(saved); }
+            catch (error) {
+                if (!(error instanceof SyntaxError)) throw error;
+                console.warn('[Community] Invalid saved guest character; using the default character:', error);
+                return null;
+            }
+            return window.StudBudArcade.util.normalizeAppearance(appearance);
         }
 
         async buyMysteryItem(box = 'basic', seasonMonth = StudBudCommunityGames.currentSeason().month) {
@@ -838,6 +900,15 @@
         }
 
         async applyGuestColor(roomCode, room) {
+            const appearance = this.hasAccount() ? null : this.guestAppearance();
+            if (!this.hasAccount() && appearance) {
+                const client = await this.gameClient();
+                const { error } = await client.rpc('studbud_set_guest_appearance', { p_code: roomCode, p_appearance: appearance });
+                if (error) throw new Error(`Could not apply your guest character. Ask the site admin to apply the latest supabase-setup.sql. ${error.message}`);
+                const { data, error: roomError } = await client.rpc('studbud_get_game_room', { p_code: roomCode });
+                if (roomError) throw new Error(`Could not load your updated character: ${roomError.message}`);
+                room = data;
+            }
             const color = this.guestColor();
             if (this.hasAccount() || !color) return room;
             try {
@@ -861,20 +932,44 @@
             return this.applyGuestColor(roomCode, data);
         }
 
+        recordRoomClock(room, sentAt, receivedAt = performance.now()) {
+            const serverTime = Date.parse(room?.server_time);
+            if (!Number.isFinite(serverTime)) throw new Error('Synchronized games need the latest supabase-setup.sql. Ask the site admin to apply it.');
+            const rtt = Math.max(0, receivedAt - sentAt);
+            if (!this.roomClock || rtt <= this.roomClock.rtt || receivedAt - this.roomClock.receivedAt > 60000) {
+                this.roomClock = { serverTime: serverTime + rtt / 2, receivedAt, rtt };
+            }
+            return room;
+        }
+
+        serverNow() {
+            if (!this.roomClock) throw new Error('The game clock has not synchronized. Rejoin the room to retry.');
+            return this.roomClock.serverTime + performance.now() - this.roomClock.receivedAt;
+        }
+
         async getRoom(roomCode) {
-            const { data, error } = await (await this.gameClient()).rpc('studbud_get_game_room', {
+            const client = await this.gameClient(), sentAt = performance.now();
+            const { data, error } = await client.rpc('studbud_get_game_room', {
                 p_code: roomCode
             });
             if (error) throw new Error(`Could not refresh the game: ${error.message}`);
-            return data;
+            return this.recordRoomClock(data, sentAt);
         }
 
         async startRoom(roomCode) {
-            const { data, error } = await (await this.gameClient()).rpc('studbud_start_game_room', {
+            const client = await this.gameClient(), sentAt = performance.now();
+            const { data, error } = await client.rpc('studbud_start_game_room', {
                 p_code: roomCode
             });
             if (error) throw new Error(`Could not start the game: ${error.message}`);
-            return data;
+            return this.recordRoomClock(data, sentAt);
+        }
+
+        async readyRoom(roomCode) {
+            const client = await this.gameClient(), sentAt = performance.now();
+            const { data, error } = await client.rpc('studbud_ready_game_room', { p_code: roomCode });
+            if (error) throw new Error(`Could not synchronize the game start. Check your connection and apply the latest supabase-setup.sql. ${error.message}`);
+            return this.recordRoomClock(data, sentAt);
         }
 
         async setHostMode(roomCode, spectator) {
@@ -953,7 +1048,8 @@
                 p_answered: Math.max(0, Math.round(answered)),
                 p_correct: Math.max(0, Math.round(correct))
             });
-            return !error;
+            if (error) throw new Error(`Could not save your score: ${error.message}`);
+            return true;
         }
 
         async unequipSlot(slot) {

@@ -160,35 +160,65 @@ assert.match(A.util.accountTagMarkup('student', ['moderator']), /Moderator/, 'st
     let time = 10000;
     sandbox.Date.now = () => time;
     try {
-        const host = { connected: true, cardsReady: true, user: { id: 'host' }, isHost: true,
-            readyPlayers: new Set(), roster: new Map([['host', {}], ['guest', {}]]), startedAt: 9000, deadline: 69000, countdown: 3.4 };
+        const host = { connected: true, cardsReady: true, startReadyAcknowledged: true,
+            api: { serverNow: () => time }, user: { id: 'host' }, isHost: true, matchStartAt: 12400,
+            readyPlayers: new Set(), roster: new Map([['host', {}], ['guest', {}]]), startedAt: 12400, deadline: 72400, countdown: 3.4 };
         const sync = actor => A.Session.prototype.syncStart.call(actor);
         assert.equal(sync(host), true, 'ready clients use the server round start, not local readiness timing');
         assert.equal(host.countdown, 2.4, 'countdown is relative to the shared server epoch');
-        const guest = { ...host, user: { id: 'guest' }, isHost: false, readyPlayers: new Set(), matchStartAt: undefined };
+        const guest = { ...host, user: { id: 'guest' }, isHost: false, readyPlayers: new Set() };
         sync(guest);
         assert.equal(guest.countdown, host.countdown, 'all clients show the same countdown at the same instant');
         time += 2000; sync(host); sync(guest);
         assert.equal(host.countdown, .4);
         assert.equal(guest.countdown, host.countdown, 'slow initial loading does not add a private countdown');
-        assert.equal(host.startedAt, 9000, 'loading preserves the authoritative server start time');
-        assert.equal(host.deadline, 69000, 'loading never extends the client deadline beyond the server deadline');
+        assert.equal(host.startedAt, 12400, 'loading preserves the authoritative server start time');
+        assert.equal(host.deadline, 72400, 'loading never extends the client deadline beyond the server deadline');
         assert.equal(guest.deadline, host.deadline, 'clients retain the same server match deadline');
         time = host.matchStartAt; sync(host); sync(guest);
         assert.equal(host.countdown, 0); assert.equal(guest.countdown, 0);
-        const late = { ...guest, matchStartAt: undefined, startedAt: 9000, deadline: 69000 };
+        const late = { ...guest };
         time += 20000; sync(late);
         assert.equal(late.countdown, 0, 'late joiners enter the running match without a countdown');
-        const rejoiningHost = { ...late, isHost: true, user: { id: 'host' }, matchStartAt: undefined };
+        const rejoiningHost = { ...late, isHost: true, user: { id: 'host' } };
         sync(rejoiningHost);
         assert.equal(rejoiningHost.countdown, 0, 'host reconnects never restart the countdown either');
         assert.equal(late.startedAt, host.startedAt);
         assert.equal(sync({ ...host, cardsReady: false }), false, 'question loading is part of readiness');
         assert.equal(sync({ ...host, connected: false }), false, 'network subscription is part of readiness');
+        let announced = 0;
+        const loading = { ...host, matchStartAt: null, announceReady: () => announced++ };
+        assert.equal(sync(loading), false, 'a loaded player cannot start before the server schedules everyone');
+        assert.equal(announced, 1, 'readiness is recorded on the server, not trusted from a broadcast');
+        sandbox.Date.now = () => time + 5 * 60000;
+        time = 12300;
+        sync(host); sync(guest);
+        assert.equal(host.countdown, .1, 'a fast local wall clock cannot start the game early');
+        sandbox.Date.now = () => time - 5 * 60000;
+        sync(guest);
+        assert.equal(guest.countdown, host.countdown, 'a slow local wall clock cannot delay the shared countdown');
         const departed = { user: { id: 'host' }, roster: new Map([['guest', {}]]), remotes: new Map(), readyPlayers: new Set(['guest']) };
         A.Session.prototype.updateRoster.call(departed, { state: { players: [] } });
         assert.equal(departed.readyPlayers.size, 0, 'departed players cannot leave stale readiness behind');
     } finally { sandbox.Date.now = now; }
+}
+{
+    let hostNow = 1100, guestNow = 9100;
+    const makeClient = now => {
+        const context = { window: {}, performance: { now } };
+        vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'communityGames.js'), 'utf8'), context);
+        return context.window.StudBudCommunityGames;
+    };
+    const host = makeClient(() => hostNow), guest = makeClient(() => guestNow);
+    host.recordRoomClock({ server_time: new Date(1000050).toISOString() }, 1000, 1100);
+    guest.recordRoomClock({ server_time: new Date(1000050).toISOString() }, 9000, 9100);
+    assert.equal(host.serverNow(), guest.serverNow(), 'different device monotonic origins converge on the same server clock');
+    hostNow += 500; guestNow += 500;
+    assert.equal(host.serverNow(), 1000600);
+    assert.equal(guest.serverNow(), host.serverNow(), 'both clocks advance without consulting device wall clocks');
+    host.recordRoomClock({ server_time: new Date(1000400).toISOString() }, 1100, 1600);
+    assert.equal(host.serverNow(), 1000600, 'a noisier high-latency sample does not disturb the best clock estimate');
+    assert.throws(() => host.recordRoomClock({}, 1500, 1600), /Synchronized games need/, 'an outdated server cannot silently start unsynchronized games');
 }
 {
     const createElement = sandbox.document.createElement;

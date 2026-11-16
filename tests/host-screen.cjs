@@ -25,11 +25,80 @@ function spectator() {
         score: 0, goal: 0, answered: 0, correct: 0, outbox: [], keys: new Set(), justPressed: new Set(),
         spectatorAuto: true, spectatorClock: 0, t: 10, countdown: 0, startedAt: 1000,
         game: { cam: { x: 0, y: 0 }, me: { x: 0, y: 0 }, net: () => ({ ex: {} }) },
-        toast: noop, send: noop, sfx: noop
+        toast: noop, send: noop, sfx: noop, gameNow: () => Date.now()
     });
     return s;
 }
 (async () => {
+    {
+        const api = sandbox.window.StudBudCommunityGames, gameClient = api.gameClient;
+        api.gameClient = async () => ({ rpc: async () => ({ error: { message: 'Connection lost' } }) });
+        await assert.rejects(api.reportScore('ABCDEF', 12, 2, 1), /Could not save your score.*Connection lost/,
+            'score RPC failures must not look like a successful save');
+        api.gameClient = gameClient;
+        const notices = [], logs = [], savedConsole = sandbox.console;
+        sandbox.console = { ...console, error: (...args) => logs.push(args) };
+        try {
+            let attempts = 0;
+            const s = Object.assign(Object.create(P), {
+                code: 'ABCDEF', score: 12, answered: 2, correct: 1, t: 0, countdown: 0,
+                lastReport: { score: -1, answered: -1, at: 0 }, game: {},
+                toast: message => notices.push(message),
+                api: { reportScore: async () => { if (++attempts < 3) throw new Error('Connection lost'); return true; } }
+            });
+            assert.equal(await s.reportScore(false), false);
+            assert.equal(s.lastReport.score, -1, 'a failed request does not mark its score as saved');
+            assert.equal(await s.reportScore(false), false);
+            assert.equal(attempts, 2, 'unchanged scores retry after a network failure');
+            assert.equal(notices.length, 1, 'a connection outage does not flood the screen with notices');
+            assert.equal(await s.reportScore(false), true);
+            assert.equal(s.lastReport.score, 12);
+            await s.reportScore(false);
+            assert.equal(attempts, 3, 'confirmed unchanged scores do not upload again');
+            assert.equal(logs.length, 2, 'each failed upload is logged');
+
+            const uploads = [];
+            let release;
+            s.score = 20;
+            s.api.reportScore = async (code, score) => {
+                uploads.push(score);
+                if (score === 20) await new Promise(resolve => { release = resolve; });
+                return true;
+            };
+            const first = s.reportScore(false);
+            await Promise.resolve();
+            s.score = 30;
+            const final = s.reportScore(true);
+            assert.deepEqual(uploads, [20], 'score requests cannot reach the server out of order');
+            release();
+            await Promise.all([first, final]);
+            assert.deepEqual(uploads, [20, 30], 'a final flush sends changes made during an in-flight save');
+            assert.equal(s.lastReport.score, 30);
+            assert.equal(s.reportRequest, null, 'finished uploads release the in-flight request');
+            const timeout = sandbox.setTimeout;
+            let finalize, finishCalls = 0, releaseFinal;
+            sandbox.setTimeout = callback => { finalize = callback; };
+            const host = Object.assign(Object.create(P), {
+                isHost: true, user: { id: 'host' }, game: {},
+                standings: () => [], send: noop, finish: noop, toast: noop,
+                reportScore: () => new Promise(resolve => { releaseFinal = resolve; }),
+                finishRoom: async () => { finishCalls++; }
+            });
+            try {
+                host.hostEnd();
+                const pending = finalize();
+                assert.equal(finishCalls, 0, 'match finalization waits for the final score request');
+                releaseFinal(true);
+                await pending;
+                assert.equal(finishCalls, 1);
+                host.ending = false;
+                host.reportScore = async () => false;
+                host.hostEnd();
+                await finalize();
+                assert.equal(finishCalls, 1, 'a failed final upload cannot finalize an outdated score');
+            } finally { sandbox.setTimeout = timeout; }
+        } finally { sandbox.console = savedConsole; }
+    }
     {
         const s = spectator();
         const room = { host_id: 'host', state: { host_spectator: true, players: [
@@ -87,6 +156,7 @@ function spectator() {
         assert.equal(s.spectatorId, 'b', 'departed watched players fall back to a remaining seat');
         s.roster.clear(); s.updateSpectator(.1); assert.equal(s.spectatorId, null);
         s.connected = true; s.cardsReady = true; s.startedAt = Date.now() - 60000;
+        s.matchStartAt = s.startedAt; s.startReadyAcknowledged = true; s.api = { serverNow: Date.now };
         assert.equal(s.syncStart(), true); assert.equal(s.countdown, 0, 'reconnecting host does not restart the countdown');
     }
     {
@@ -144,11 +214,17 @@ function spectator() {
             toast: () => errors++ };
         app.destroyArcadeSession = () => { destroyed++; app.arcadeSession.destroyed = true; };
         app.renderHostedGameRoom = () => rendered++;
+        app.arcadeSession.reportScore = async () => false;
+        sandbox.window.StudBudCommunityGames.setHostMode = async () => assert.fail('an unsaved score must block role changes');
+        await app.toggleHostedHostMode();
+        assert.equal(destroyed, 0); assert.equal(app.arcadeSession.paused, false);
+        assert.equal(errors, 1, 'unsynced scores keep the playing role and show a retry message');
+        app.arcadeSession.reportScore = async () => true;
         sandbox.window.StudBudCommunityGames.setHostMode = async () => { throw new Error('Seats full'); };
         await app.toggleHostedHostMode();
         assert.equal(app.arcadeSession.paused, false); assert.equal(destroyed, 0);
         assert.equal(app.hostedGameRoom, room, 'RPC failure leaves playing identity and room intact');
-        assert.equal(errors, 1); assert.equal(app.hostRoleBusy, false);
+        assert.equal(errors, 2); assert.equal(app.hostRoleBusy, false);
         sandbox.window.StudBudCommunityGames.setHostMode = async () => ({ ...room, state: { host_spectator: true } });
         await app.toggleHostedHostMode();
         assert.equal(destroyed, 1); assert.equal(rendered, 1);

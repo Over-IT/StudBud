@@ -4,6 +4,7 @@
     const ENCRYPTION_VERSION = 1;
     const ENCRYPTION_ITERATIONS = 600000;
     const ENCRYPTION_FORMAT = 'studbud-aes-gcm';
+    const DEVICE_UNLOCK_DURATION = 30 * 24 * 60 * 60 * 1000;
 
     class StudBudCloudSync {
         constructor() {
@@ -30,6 +31,83 @@
             this.legacyEncryptionMaterial = null;
             this.encryptionUserId = null;
             this.dataUnlockUser = null;
+            this.rememberDeviceRequested = null;
+            this.pendingCredentialUpgrade = null;
+            this.authPrivacyWarning = '';
+        }
+
+        async deriveAuthCredential(password) {
+            const crypto = window.crypto?.subtle;
+            if (!crypto) throw new Error('Private sign-in needs Web Crypto. Open StudBud over HTTPS or continue as a guest.');
+            const key = await crypto.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+            const bits = await crypto.deriveBits({
+                // The authentication purpose stays stable when an account's username changes.
+                name: 'PBKDF2', salt: new TextEncoder().encode('studbud-authentication:v1'),
+                iterations: ENCRYPTION_ITERATIONS, hash: 'SHA-256'
+            }, key, 256);
+            return `Sb1!${this.base64Encode(new Uint8Array(bits))}`;
+        }
+
+        async signInCredentials(client, username, password, { allowLegacy = false } = {}) {
+            const email = this.usernameEmail(username);
+            const credential = await this.deriveAuthCredential(password);
+            let result = await client.auth.signInWithPassword({ email, password: credential });
+            let legacy = false;
+            if (allowLegacy && (result.error?.code === 'invalid_credentials' || /invalid login credentials/i.test(result.error?.message || ''))) {
+                result = await client.auth.signInWithPassword({ email, password });
+                legacy = !result.error;
+            }
+            return { ...result, legacy, credential };
+        }
+
+        async upgradeAuthCredential(user) {
+            const pending = this.pendingCredentialUpgrade;
+            if (!pending || pending.userId !== user.id) return;
+            this.pendingCredentialUpgrade = null;
+            try {
+                const { error } = await this.client.auth.updateUser({
+                    password: pending.credential, data: { auth_credential_version: 1 }
+                });
+                if (error) throw error;
+                this.authPrivacyWarning = '';
+            } catch (error) {
+                console.error('[StudBudCloud] Private sign-in upgrade failed:', error);
+                this.authPrivacyWarning = 'Your account opened, but its private sign-in upgrade could not finish. Sign out and sign in again when connected to retry. Your study data is still encrypted.';
+            }
+        }
+
+        async restoreDeviceUnlock(user) {
+            const version = this.accountVersion;
+            const record = await window.NexusApp.readDeviceUnlock();
+            if (version !== this.accountVersion || this.offlineMode) return false;
+            if (!record) return false;
+            const now = Date.now();
+            if (record.userId !== user.id || !Number.isFinite(record.createdAt) || !Number.isFinite(record.expiresAt)
+                || record.createdAt > now || record.expiresAt <= now
+                || record.expiresAt - record.createdAt !== DEVICE_UNLOCK_DURATION
+                || record.key?.type !== 'secret' || record.key.extractable !== false
+                || record.key.algorithm?.name !== 'AES-GCM') {
+                await window.NexusApp.clearLocalStore('deviceAuth');
+                return false;
+            }
+            this.encryptionKey = record.key;
+            this.legacyEncryptionMaterial = record.legacyMaterial;
+            this.encryptionUserId = user.id;
+            return true;
+        }
+
+        async updateDeviceUnlock(user) {
+            if (this.rememberDeviceRequested === null) return;
+            if (this.rememberDeviceRequested) {
+                const createdAt = Date.now();
+                await window.NexusApp.saveDeviceUnlock({
+                    id: 'account', userId: user.id, createdAt, expiresAt: createdAt + DEVICE_UNLOCK_DURATION,
+                    key: this.encryptionKey, legacyMaterial: this.legacyEncryptionMaterial
+                });
+            } else {
+                await window.NexusApp.clearLocalStore('deviceAuth');
+            }
+            this.rememberDeviceRequested = null;
         }
 
         isEncryptedData(data) {
@@ -46,6 +124,37 @@
                 delete profile.graduationYear;
             }
             return clean;
+        }
+
+        snapshotContent(snapshot) {
+            if (!snapshot) return '';
+            const { exportedAt, ...content } = snapshot;
+            return JSON.stringify(content);
+        }
+
+        async saveSyncBase(snapshot, userId, encryptedData = null) {
+            const version = this.accountVersion;
+            const data = encryptedData || await this.encryptAccountData(snapshot, userId);
+            if (version !== this.accountVersion || this.encryptionUserId !== userId) return false;
+            if (!data?.encryption || typeof data.ciphertext !== 'string') throw new Error('Your sync history could not be encrypted.');
+            localStorage.setItem('STUDBUD_CLOUD_SYNC_BASE', JSON.stringify({
+                format: 'studbud-encrypted-sync-base', userId, encryption: data.encryption, ciphertext: data.ciphertext
+            }));
+            return true;
+        }
+
+        async readSyncBase(userId) {
+            const raw = localStorage.getItem('STUDBUD_CLOUD_SYNC_BASE');
+            if (!raw) return null;
+            const saved = JSON.parse(raw);
+            if (saved?.format === 'studbud-encrypted-sync-base') {
+                if (saved.userId !== userId) throw new Error('This device’s sync history belongs to a different account. Sign in with that account or clear device data.');
+                return this.decryptAccountData(saved, userId);
+            }
+            if (!saved || typeof saved !== 'object' || Array.isArray(saved)) throw new Error('This device’s sync history is invalid. Keep a backup before clearing device data.');
+            const snapshot = this.sanitizeSnapshot(saved);
+            await this.saveSyncBase(snapshot, userId);
+            return snapshot;
         }
 
         base64Encode(bytes) {
@@ -444,6 +553,14 @@
                     if (event === 'SIGNED_OUT') {
                         this.user = null;
                         this.accountReady = false;
+                        window.NexusApp?.clearCommunitySetContext?.();
+                        this.encryptionKey = null;
+                        this.legacyEncryptionMaterial = null;
+                        this.encryptionUserId = null;
+                        window.NexusApp.clearLocalStore('deviceAuth').catch(error => {
+                            console.error('[StudBudCloud] Remembered-device cleanup failed:', error);
+                            this.setCloudStatus('Signed out, but remembered-device cleanup failed. Clear this site’s browser data before sharing this device.', true);
+                        });
                         this.setCloudStatus('Offline data is retained. Sign in again after reconnecting to sync.');
                     }
                     return;
@@ -486,6 +603,9 @@
             });
             document.getElementById('auth-switch-btn')?.addEventListener('click', () => this.setAuthMode(this.authMode === 'login' ? 'signup' : 'login'));
             document.getElementById('login-form')?.addEventListener('submit', event => this.handleLogin(event));
+            document.getElementById('login-password-toggle')?.addEventListener('click', () => {
+                this.setPasswordVisible(document.getElementById('login-password').type === 'password');
+            });
             document.getElementById('signup-form')?.addEventListener('submit', event => this.handleSignup(event));
             document.getElementById('mfa-login-form')?.addEventListener('submit', event => this.verifyMfaLogin(event));
             document.getElementById('mfa-login-cancel')?.addEventListener('click', () => this.cancelMfaLogin());
@@ -752,10 +872,10 @@
             const signup = mode === 'signup';
             document.getElementById('login-form')?.classList.toggle('hidden', signup);
             document.getElementById('signup-form')?.classList.toggle('hidden', !signup);
-            document.getElementById('auth-title').textContent = signup ? 'Create your free account' : 'Welcome to StudBud';
+            document.getElementById('auth-title').textContent = signup ? 'Create your free account' : 'Welcome back';
             document.getElementById('auth-description').textContent = signup
                 ? 'Sync your classes and sets across devices, earn coins and share sets. Anything saved as a guest on this device comes with you.'
-                : 'Sign in to sync across devices, or continue as a guest. No account needed.';
+                : 'Pick up where you left off. Your classes, study sets and progress, together.';
             document.getElementById('auth-switch-prompt').textContent = signup ? 'Already have an account?' : 'New to StudBud?';
             document.getElementById('auth-switch-btn').textContent = signup ? 'Sign in' : 'Create an account';
             this.setAuthStatus('');
@@ -770,6 +890,7 @@
 
         async routeAuthenticatedUser(user, password = '') {
             if (!user?.id) return;
+            const version = this.accountVersion;
             if (this.pendingConflict?.user?.id === user.id) {
                 this.renderConflictResolution(this.pendingConflict, this.pendingConflict.message);
                 return;
@@ -780,11 +901,24 @@
             }
             if (!password && this.mfaPendingUser?.id === user.id) return;
             if (!password && (!this.encryptionKey || this.encryptionUserId !== user.id)) {
-                if (!this.dataUnlockUser) this.showDataSignIn(user);
-                return;
+                let restored;
+                try {
+                    restored = await this.restoreDeviceUnlock(user);
+                } catch (error) {
+                    if (version !== this.accountVersion || this.offlineMode) return;
+                    console.error('[StudBudCloud] Remembered device could not unlock:', error);
+                    this.showDataSignIn(user, 'This device could not restore your saved sign-in. Close other StudBud tabs, check browser storage permissions, then sign in again.');
+                    return;
+                }
+                if (version !== this.accountVersion || this.offlineMode) return;
+                if (!restored) {
+                    if (!this.dataUnlockUser) this.showDataSignIn(user);
+                    return;
+                }
             }
             if (!this.client?.auth?.mfa?.getAuthenticatorAssuranceLevel) return this.openAccount(user, password);
             const { data, error } = await this.client.auth.mfa.getAuthenticatorAssuranceLevel();
+            if (version !== this.accountVersion || this.offlineMode) return;
             if (error) throw new Error(this.friendlyAuthError(error, 'Could not check your authenticator status. Please try signing in again.'));
             if (data?.nextLevel === 'aal2' && data?.currentLevel !== 'aal2') {
                 this.showMfaLoginPrompt(user, password);
@@ -829,6 +963,7 @@
                 const user = this.mfaPendingUser;
                 const password = this.mfaPendingPassword;
                 document.getElementById('mfa-login-code').value = '';
+                this.clearMfaLoginPrompt();
                 await this.routeAuthenticatedUser(user, password);
             } catch (error) {
                 console.error('[StudBudCloud] Authenticator verification failed:', error);
@@ -863,6 +998,17 @@
             if (guestButton) guestButton.disabled = busy;
         }
 
+        setPasswordVisible(visible) {
+            const input = document.getElementById('login-password');
+            const button = document.getElementById('login-password-toggle');
+            if (input) input.type = visible ? 'text' : 'password';
+            if (button) {
+                button.textContent = visible ? 'Hide' : 'Show';
+                button.setAttribute('aria-pressed', String(visible));
+                button.setAttribute('aria-label', visible ? 'Hide password' : 'Show password');
+            }
+        }
+
         async handleLogin(event) {
             event.preventDefault();
             if (this.authBusy) return;
@@ -875,24 +1021,28 @@
             try {
                 const identifier = document.getElementById('login-username').value.trim();
                 const password = document.getElementById('login-password').value;
+                this.rememberDeviceRequested = document.getElementById('login-remember-device')?.checked === true;
                 if (this.dataUnlockUser && identifier.toLowerCase() === String(this.dataUnlockUser.user_metadata?.username || '').toLowerCase()) {
                     document.getElementById('login-password').value = '';
                     await this.routeAuthenticatedUser(this.dataUnlockUser, password);
                     return;
                 }
                 this.dataUnlockUser = null;
-                const { data, error } = await this.client.auth.signInWithPassword({
-                    email: this.usernameEmail(identifier),
-                    password
-                });
+                const allowLegacy = document.getElementById('login-legacy-auth')?.checked === true;
+                const { data, error, legacy, credential } = await this.signInCredentials(this.client, identifier, password, { allowLegacy });
                 if (error) throw error;
+                this.pendingCredentialUpgrade = legacy ? { userId: (data.user || data.session?.user)?.id, credential } : null;
                 document.getElementById('login-password').value = '';
                 await this.routeAuthenticatedUser(data.user || data.session?.user, password);
             } catch (error) {
                 console.error('[StudBudCloud] Sign-in failed:', error);
                 this.reportAccountError(error);
+                if (error.code === 'invalid_credentials' || /invalid login credentials/i.test(error.message || '')) {
+                    this.setAuthStatus('Check your username and password. If this account predates private sign-in, open Older account sign-in and allow one-time compatibility sign-in to upgrade it.', true);
+                }
             } finally {
                 document.getElementById('login-password').value = '';
+                this.setPasswordVisible(false);
                 this.setAuthBusy(false);
             }
         }
@@ -927,12 +1077,13 @@
                 return;
             }
             this.setAuthBusy(true);
+            this.rememberDeviceRequested = document.getElementById('signup-remember-device')?.checked === true;
             this.setAuthStatus('Creating your account...');
             try {
                 const { data, error } = await this.client.auth.signUp({
                     email: this.usernameEmail(username),
-                    password,
-                    options: { data: { username, school } }
+                    password: await this.deriveAuthCredential(password),
+                    options: { data: { username, school, auth_credential_version: 1 } }
                 });
                 if (error) throw error;
                 if (!data.session) {
@@ -1016,6 +1167,7 @@
                 return;
             }
             if (this.accountOpening?.userId === user.id) return this.accountOpening.promise;
+            if (this.user?.id !== user.id) window.NexusApp?.clearCommunitySetContext?.();
             if (this.accountOpening) {
                 this.accountVersion++;
                 this.accountReady = false;
@@ -1081,9 +1233,19 @@
             }
             if (version !== this.accountVersion) return;
             this.dataUnlockUser = null;
+            await this.upgradeAuthCredential(user);
+            if (version !== this.accountVersion) return;
+            try {
+                await this.updateDeviceUnlock(user);
+            } catch (error) {
+                console.error('[StudBudCloud] Remembered-device preference could not save:', error);
+                throw new Error('Could not save your remembered-device choice. Close other StudBud tabs, check browser storage permissions and retry.');
+            }
+            if (version !== this.accountVersion) return;
             const previousAccount = localStorage.getItem('STUDBUD_CLOUD_ACCOUNT_ID');
-            const savedBase = previousAccount === user.id ? localStorage.getItem('STUDBUD_CLOUD_SYNC_BASE')
-                : !previousAccount && localStorage.getItem('STUDBUD_LOCAL_ONLY_DATA') ? '{}' : null;
+            const savedBase = previousAccount === user.id ? await this.readSyncBase(user.id)
+                : !previousAccount && localStorage.getItem('STUDBUD_LOCAL_ONLY_DATA') ? {} : null;
+            if (version !== this.accountVersion) return;
             this.initialSnapshot = savedBase ? null : remoteSnapshot;
             this.lastSnapshot = remoteSnapshot ? JSON.parse(JSON.stringify(remoteSnapshot)) : null;
             this.user = user;
@@ -1111,7 +1273,7 @@
                 try {
                     const base = !previousAccount
                         ? window.NexusApp.AppState.emptyCloudSnapshot()
-                        : JSON.parse(savedBase);
+                        : savedBase;
                     const merged = StudBudCloudSync.mergeData(base, local, remoteSnapshot);
                     await window.NexusApp.restoreCloudSnapshot(merged);
                     this.initialSnapshot = remoteSnapshot;
@@ -1138,6 +1300,11 @@
             this.updateOfflineNotice();
             document.getElementById('auth-screen')?.classList.add('hidden');
             document.getElementById('app-container')?.classList.remove('hidden');
+            const privacyNotice = document.getElementById('account-privacy-notice');
+            if (privacyNotice) {
+                privacyNotice.textContent = this.authPrivacyWarning;
+                privacyNotice.classList.toggle('hidden', !this.authPrivacyWarning);
+            }
             this.setCloudStatus(this.initialSnapshot ? 'Synced to your account.' : 'Saving your account data…');
             this.queueSync();
             window.NexusApp?.syncPendingStudyTime?.().catch(error => {
@@ -1193,7 +1360,7 @@
                 try {
                     await window.NexusApp.restoreCloudSnapshot(conflict.local);
                     localStorage.setItem('STUDBUD_CLOUD_ACCOUNT_ID', conflict.user.id);
-                    localStorage.setItem('STUDBUD_CLOUD_SYNC_BASE', JSON.stringify(conflict.remoteSnapshot));
+                    await this.saveSyncBase(conflict.remoteSnapshot, conflict.user.id);
                     await this.openAccount(conflict.user);
                     await this.syncNow();
                 } catch (err) {
@@ -1234,7 +1401,10 @@
         bindStateEvents() {
             if (this.stateEventsBound) return;
             const syncEvents = ['state:changed', 'state:restored', 'courses:updated', 'assignments:updated', 'flashcards:updated', 'study:recorded', 'metrics:updated'];
-            syncEvents.forEach(eventName => window.NexusApp.EventBus.on(eventName, () => this.queueSync()));
+            syncEvents.forEach(eventName => window.NexusApp.EventBus.on(eventName, change => {
+                if (eventName === 'state:changed' && change?.key === 'currentView') return;
+                this.queueSync();
+            }));
             this.stateEventsBound = true;
             document.addEventListener('visibilitychange', () => {
                 if (document.visibilityState === 'hidden') {
@@ -1295,6 +1465,23 @@
                         if (completedRevision !== this.syncRevision) break;
                         const currentSnapshot = current ? this.sanitizeSnapshot(await this.decryptAccountData(current.data, userId)) : null;
                         const merged = current ? StudBudCloudSync.mergeData(this.lastSnapshot || {}, backup, currentSnapshot) : backup;
+                        if (current?.data?.encryption?.format === ENCRYPTION_FORMAT
+                            && current.data.encryption.version === ENCRYPTION_VERSION
+                            && this.snapshotContent(merged) === this.snapshotContent(currentSnapshot)) {
+                            if (!this.accountReady || this.user?.id !== userId || this.accountVersion !== version) return;
+                            if (completedRevision !== this.syncRevision) break;
+                            if (this.snapshotContent(merged) !== this.snapshotContent(backup)) {
+                                this.restoringSnapshot = true;
+                                try { await window.NexusApp.restoreCloudSnapshot(merged); }
+                                finally { this.restoringSnapshot = false; }
+                                if (!this.accountReady || this.user?.id !== userId || this.accountVersion !== version) return;
+                            }
+                            this.lastSnapshot = merged;
+                            await this.saveSyncBase(merged, userId, current.data);
+                            if (!this.accountReady || this.user?.id !== userId || this.accountVersion !== version) return;
+                            saved = true;
+                            break;
+                        }
                         const encryptedData = await this.encryptAccountData(merged, userId);
                         if (!this.accountReady || this.user?.id !== userId || this.accountVersion !== version) return;
                         if (completedRevision !== this.syncRevision) break;
@@ -1307,7 +1494,8 @@
                         if (error && error.code !== '23505') throw new Error(error.message);
                         if (error || !data?.length) continue;
                         this.lastSnapshot = merged;
-                        localStorage.setItem('STUDBUD_CLOUD_SYNC_BASE', JSON.stringify(merged));
+                        await this.saveSyncBase(merged, userId, encryptedData);
+                        if (!this.accountReady || this.user?.id !== userId || this.accountVersion !== version) return;
                         saved = true;
                         if (completedRevision !== this.syncRevision) {
                             const latestLocal = this.sanitizeSnapshot(JSON.parse(await window.NexusApp.AppState.exportAppState()));
@@ -1327,7 +1515,7 @@
                                 await window.NexusApp.restoreCloudSnapshot(merged);
                                 if (!this.accountReady || this.user?.id !== userId || this.accountVersion !== version) return;
                                 this.lastSnapshot = merged;
-                                localStorage.setItem('STUDBUD_CLOUD_SYNC_BASE', JSON.stringify(merged));
+                                await this.saveSyncBase(merged, userId, encryptedData);
                             }
                             finally { this.restoringSnapshot = false; }
                         }
@@ -1354,8 +1542,12 @@
 
         async clearDeviceCache() {
             await this.endGuestSession();
-            if (window.NexusApp?.resetForCloudAccount) await window.NexusApp.resetForCloudAccount();
-            else await Promise.all(['flashcards', 'studyHistory', 'gameMetrics'].map(store => window.NexusApp.clearLocalStore(store)));
+            try {
+                if (window.NexusApp?.resetForCloudAccount) await window.NexusApp.resetForCloudAccount();
+                else await Promise.all(['flashcards', 'studyHistory', 'gameMetrics'].map(store => window.NexusApp.clearLocalStore(store)));
+            } finally {
+                await window.NexusApp.clearLocalStore('deviceAuth');
+            }
             localStorage.removeItem('PCHS_NEXUS_STATE_V1');
             localStorage.removeItem('STUDBUD_CLOUD_SYNC_BASE');
             localStorage.removeItem('STUDBUD_LOCAL_ONLY_DATA');
@@ -1364,6 +1556,11 @@
             window.StudBudCommunityGames?.boardCache?.clear();
             this.lastSnapshot = null;
             this.pendingConflict = null;
+            this.rememberDeviceRequested = null;
+            ['login-remember-device', 'signup-remember-device', 'login-legacy-auth'].forEach(id => {
+                const input = document.getElementById(id);
+                if (input) input.checked = false;
+            });
         }
 
         async deleteAccount() {
@@ -1393,7 +1590,9 @@
                 verificationClient = window.supabase.createClient(config.url, config.anonKey, {
                     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'studbud-delete-verification' }
                 });
-                const { data, error } = await verificationClient.auth.signInWithPassword({ email: this.usernameEmail(username), password });
+                const { data, error } = await this.signInCredentials(verificationClient, username, password, {
+                    allowLegacy: user.user_metadata?.auth_credential_version !== 1
+                });
                 if (error) throw new Error(error.message);
                 if (data?.user?.id !== user.id) throw new Error('Account verification did not match. Nothing was deleted.');
                 const { data: assurance, error: assuranceError } = await verificationClient.auth.mfa.getAuthenticatorAssuranceLevel();
@@ -1467,10 +1666,13 @@
             this.accountVersion++;
             this.accountReady = false;
             this.user = null;
+            window.NexusApp?.clearCommunitySetContext?.();
             this.dataUnlockUser = null;
             this.encryptionKey = null;
             this.legacyEncryptionMaterial = null;
             this.encryptionUserId = null;
+            this.pendingCredentialUpgrade = null;
+            this.authPrivacyWarning = '';
             this.initialSnapshot = null;
             this.lastSnapshot = null;
             this.pendingConflict = null;

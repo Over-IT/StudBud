@@ -170,13 +170,13 @@ assert.match(html, /id="campus-paste-modal"[^>]*class="[^"]*modal-content/,
 assert.doesNotMatch(html, /id="campus-paste-import"/, 'the paste flow no longer occupies the grades page');
 assert.match(html, /href="https:\/\/parkwaymo\.infinitecampus\.org\/campus\/portal\/students\/parkway\.jsp\?status=login"/,
     'the paste flow links to the Parkway student portal');
-assert.match(html, /<strong>Classes:<\/strong> copy your <b>Schedule<\/b>/,
-    'class paste instructions identify the Campus Student Schedule page');
-assert.match(html, /<strong>Assignments &amp; grades:<\/strong> open a class in <b>Grades<\/b> and copy the page/,
-    'assignment paste instructions identify the class Grades page');
-assert.match(html, /Extra text is ignored\./, 'paste instructions say extra copied text is safe');
-assert.match(html, /Never paste passwords or student IDs/);
-assert.match(html, /id="campus-paste-assignments"/);
+assert.match(html, /Paste a whole grades, assignment or schedule page, or several tables together/,
+    'one workflow accepts mixed school records');
+assert.match(html, /Review titles for personal details that cannot be identified automatically/,
+    'privacy guidance does not promise perfect free-text identification');
+assert.match(html, /Never paste passwords/);
+assert.match(html, /id="campus-paste-data"/);
+assert.doesNotMatch(html, /id="campus-paste-(?:assignments|courses)"/, 'separate textareas are replaced by one importer');
 assert.match(html, /campusPasteImport\.js/);
 assert.match(html, /<details class="settings-help"><summary>Privacy details<\/summary>/,
     'long public-profile privacy guidance is collapsed until requested');

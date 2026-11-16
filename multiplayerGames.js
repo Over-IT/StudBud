@@ -1591,7 +1591,7 @@
             const freezeHazards = s.testing === true && s.testFreezeHazards === true;
             const hazardDt = freezeHazards ? 0 : dt;
             this.hazardAnim = (this.hazardAnim || 0) + hazardDt;
-            const elapsed = ((typeof s.testPauseAt === 'number' ? s.testPauseAt : Date.now()) - s.startedAt) / 1000;
+            const elapsed = s.countdown > 0 ? 0 : Math.max(0, ((typeof s.testPauseAt === 'number' ? s.testPauseAt : s.gameNow?.() ?? Date.now()) - s.startedAt) / 1000);
             if (freezeHazards) this.hazardOffset = (this.hazardOffset || 0) + Math.max(0, elapsed - (this.lastHazardElapsed ?? elapsed));
             this.lastHazardElapsed = elapsed;
             const clock = this.hazardClock = elapsed - (this.hazardOffset || 0);
@@ -3569,7 +3569,7 @@
         }
 
         hill() {
-            const elapsed = Math.max(0, Date.now() - this.s.startedAt) / 1000;
+            const elapsed = this.s.countdown > 0 ? 0 : Math.max(0, (this.s.gameNow?.() ?? Date.now()) - this.s.startedAt) / 1000;
             const index = Math.floor(elapsed / 20) % this.zones.length;
             return { zone: this.zones[index], left: 20 - (elapsed % 20) };
         }

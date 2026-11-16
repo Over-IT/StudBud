@@ -345,22 +345,283 @@ assert.deepEqual(paste.parseCourses('Name\tStudent ID\nExample Person\t123456\nC
 
     const pasteListener = appSource.match(/document\.addEventListener\('paste', event => \{([\s\S]*?)\n\s*\}\);/)[1];
     vm.runInContext(`window.handlePaste = event => {${pasteListener}}`, sandbox);
+    sandbox.invalidateSchoolImport = () => {};
     sandbox.window.StudBudCampusPaste = { ...paste, tableTextFromHtml: () => 'Assignment\tDue\tScore\nRich table quiz\t11/21/2026\t8/10' };
-    const target = node('campus-paste-assignments');
-    Object.assign(target, { id: 'campus-paste-assignments', matches: () => true,
+    const target = node('campus-paste-data');
+    Object.assign(target, { id: 'campus-paste-data', value: '', selectionStart: 0, selectionEnd: 0, matches: () => true,
         setRangeText(value) { this.value = value; }, dispatchEvent() {} });
     sandbox.Event = class {};
     const pasteEvent = { target, preventDefault() {}, clipboardData: {
         getData: type => type === 'text/plain' ? 'Honors Geometry\nGrades\nAssignment\nRich table quiz' : '<table></table>'
     } };
-    node('campus-paste-assignment-course').value = '';
+    node('campus-paste-course').value = '';
     sandbox.window.handlePaste(pasteEvent);
-    assert.equal(node('campus-paste-assignment-course').value, 'geo', 'rich table paste retains the class heading from plain clipboard text');
-    app.previewCampusAssignments();
-    assert.equal(app.campusAssignmentDraft.rows.length, 1);
-    node('campus-paste-assignment-course').value = 'other';
+    assert.equal(node('campus-paste-course').value, 'geo', 'rich table paste retains the class heading from plain clipboard text');
+    assert.equal(paste.parseSchoolData(target.value, { defaultCourseCode: 'geo' }).assignments.length, 1);
+    node('campus-paste-course').value = 'other';
     sandbox.window.handlePaste(pasteEvent);
-    assert.equal(node('campus-paste-assignment-course').value, 'other', 'rich table paste respects the selected class');
+    assert.equal(node('campus-paste-course').value, 'other', 'rich table paste respects the selected class');
 }
 
 console.log('Campus paste parsing: class matching, assignment scores/dates/categories, deduplication and ignored fields passed.');
+
+// Unified imports exercise the pure core independently of the legacy UI above.
+{
+    const classes = [
+        { code: 'BIO101', title: 'Biology I', categories: [{ id: 'tests', name: 'Tests', weight: null }], customSetting: { keep: true } },
+        { code: 'ENG202', title: 'English Literature', categories: [] }
+    ];
+    const manual = { id: 'manual-test', title: 'Unit 3 Test', courseCode: 'BIO101', dueDate: '2026-11-20',
+        graded: true, pointsEarned: 0, maxPoints: 20, icMissing: true, status: 'pending', categoryId: 'tests',
+        notes: 'Keep my manual notes', estimatedMinutes: 45, plannedDate: '2026-11-18', unknown: { retain: ['yes'] } };
+    const state = { courses: classes, assignments: [manual], schedule: { all: { 7: 'ENG202' }, customSetting: 'keep' } };
+    const mixed = 'Progress for a private person\nStudent Name\nJane Sensitive\nStudent ID\t12345678\n' +
+        'Email: jane.sensitive@example.invalid\nPhone: (314) 555-1212\n' +
+        'Course\tOverall\tTeacher\tRoom\nBiology I\t94.2%\tMr Private\t221\n' +
+        'English Literature\t88%\tMs Private\t222\n' +
+        'Course,Assignment,Due,Score,Category,Status,Comments,Student ID\n' +
+        'Biology I,TEST: UNIT 3,11/20/2026,18/20,Tests,Turned in,Jane private retake,12345678\n' +
+        'Assignment\tScore\tCourse\tDue\tStatus\tTeacher\n' +
+        'Essay 2\t-- / 50\tEnglish Literature\t11/22/2026\tMissing\tMs Private\n' +
+        'Course\tPeriod\tStart\tEnd\tPattern\tRoom\tTeacher\n' +
+        'Biology I\t2\t8:05 AM\t8:55 AM\tOdd\t221\tMr Private\n' +
+        'English Literature\t3\t13:00\t13:50\tEven\t222\tMs Private\n' +
+        'Comments\nJane Sensitive needs to call (314) 555-1212\nFooter';
+    const sanitized = paste.sanitizePaste(mixed);
+    for (const secret of ['Jane', 'Sensitive', '12345678', 'example.invalid', '555-1212', 'Mr Private', 'Ms Private', '221', '222', 'retake']) {
+        assert.ok(!sanitized.includes(secret), `sanitizer immediately drops private content: ${secret}`);
+    }
+    assert.match(sanitized, /Privacy warning/);
+    assert.match(sanitized, /TEST: UNIT 3/);
+    assert.equal(paste.sanitizePaste(sanitized), sanitized, 'sanitizing repeatedly is stable');
+    const parsed = paste.parseSchoolData(sanitized, { courses: classes, catalog, today });
+    assert.equal(parsed.courses.length, 2);
+    assert.equal(parsed.courses[0].importedOverallPct, 94.2);
+    assert.equal(parsed.assignments.length, 2);
+    assert.equal(parsed.assignments[1].courseCode, 'ENG202');
+    assert.deepEqual(parsed.meetings.map(item => [item.period, item.start, item.end, item.pattern]), [
+        ['2', '08:05', '08:55', 'odd'], ['3', '13:00', '13:50', 'even']
+    ]);
+    const frozen = JSON.stringify(state);
+    const plan = paste.buildImportPlan(parsed, { ...state, today });
+    assert.equal(new Set(plan.rows.map(row => row.id)).size, plan.rows.length);
+    assert.ok(plan.rows.every(row => row.include && ['add', 'update'].includes(row.action)));
+    assert.ok(!JSON.stringify(plan).includes('Private') && !JSON.stringify(plan).includes('Sensitive'));
+    const selected = plan.rows.map(row => row.id);
+    const imported = paste.applyImportPlan(plan, new Set(selected), state);
+    assert.equal(JSON.stringify(state), frozen, 'preview and applying never mutate caller state');
+    const updated = imported.assignments.find(item => item.id === manual.id);
+    assert.equal(updated.title, manual.title, 'reordered informative tokens match without replacing manual titles');
+    assert.equal(updated.pointsEarned, 18);
+    assert.equal(updated.graded, true);
+    assert.equal(updated.icMissing, false);
+    assert.equal(updated.status, 'completed');
+    for (const field of ['notes', 'estimatedMinutes', 'plannedDate', 'unknown', 'categoryId']) assert.deepEqual(updated[field], manual[field]);
+    assert.equal(imported.assignments[1].pointsEarned, null, 'missing never invents a zero');
+    assert.equal(imported.assignments[1].graded, false);
+    assert.equal(imported.assignments[1].icMissing, true);
+    assert.equal(imported.assignments[1].status, 'pending');
+    assert.equal(imported.courses[0].importedOverallPct, 94.2);
+    assert.equal(imported.schedule.odd[2], 'BIO101');
+    assert.equal(imported.schedule.even[3], 'ENG202');
+    assert.equal(imported.schedule.all[7], 'ENG202');
+    assert.equal(imported.schedule.customSetting, 'keep');
+    assert.equal(imported.schedule.meetings.length, 2);
+    assert.deepEqual(paste.applyImportPlan(plan, [], state), state, 'unselected rows do nothing');
+    const repeat = paste.buildImportPlan(paste.parseSchoolData(sanitized, { courses: imported.courses, catalog, today }), { ...imported, today });
+    assert.equal(repeat.rows.length, 0, 'a repeated complete import is a no-op');
+    assert.deepEqual(paste.applyImportPlan(repeat, [], imported), imported);
+    const ungraded = paste.parseSchoolData('Class: Biology I\nAssignment\tScore\tDue\nTEST: UNIT 3\t--\t11/23/2026', { courses: classes, today });
+    const ungradedPlan = paste.buildImportPlan(ungraded, { ...imported, today });
+    const incomplete = paste.applyImportPlan(ungradedPlan, ungradedPlan.rows.map(row => row.id), imported).assignments[0];
+    assert.equal(incomplete.pointsEarned, 18, 'an ungraded copy preserves an existing score');
+    assert.equal(incomplete.maxPoints, 20);
+    assert.equal(incomplete.graded, true);
+    assert.equal(incomplete.categoryId, 'tests', 'an absent category does not overwrite explicit categories');
+    assert.equal(incomplete.dueDate, '2026-11-23', 'a unique informative reordered title updates the date without duplicating work');
+    const noContext = paste.parseSchoolData('Course\tOverall\nBiology I\t94%\nEnglish Literature\t88%\nAssignment\tScore\nQuiz\t8/10', { courses: classes });
+    assert.equal(noContext.assignments.length, 0, 'a multiclass overview cannot silently choose its last class for an assignment');
+    assert.match(noContext.warnings.join(' '), /class context/);
+    const headerless = paste.parseSchoolData('Practice 3\t11/20/2026\t8/10\t\tHomework', { defaultCourseCode: 'BIO101', today });
+    assert.equal(headerless.assignments[0].courseCode, 'BIO101');
+    assert.equal(headerless.assignments[0].title, 'Practice 3');
+    const duplicateState = { courses: classes, assignments: [
+        { ...manual, id: 'dup1' }, { ...manual, id: 'dup2' }
+    ] };
+    const ambiguous = paste.buildImportPlan(parsed, duplicateState);
+    assert.ok(!ambiguous.rows.some(row => row.kind === 'assignment' && row.value.courseCode === 'BIO101'));
+    assert.match(ambiguous.warnings.join(' '), /Ambiguous assignment/);
+    const unit4 = paste.parseSchoolData('Assignment\tScore\nTEST: UNIT 4\t8/10', { defaultCourseCode: 'BIO101', today });
+    const differentUnit = paste.buildImportPlan(unit4, state);
+    assert.equal(differentUnit.rows.find(row => row.kind === 'assignment').action, 'add', 'numeric unit identifiers are not fuzzy matched');
+    const compact = paste.buildImportPlan(paste.parseSchoolData('Assignment\tScore\nTEST: UNIT 3\t8/10', { defaultCourseCode: 'BIO101' }),
+        { courses: classes, assignments: [{ ...manual, title: 'Unit3Test' }] });
+    assert.equal(compact.rows.find(row => row.kind === 'assignment').value.id, manual.id);
+    const conflictingDate = paste.buildImportPlan(paste.parseSchoolData('Assignment\tScore\tDue\nTEST: UNIT 3\t8/10\t11/25/2026',
+        { defaultCourseCode: 'BIO101', today }), { ...state, assignments: [manual, { ...manual, id: 'retake', dueDate: '2026-11-22' }] });
+    assert.equal(conflictingDate.rows.length, 0, 'multiple informative title matches with conflicting dates require review');
+    assert.match(conflictingDate.warnings.join(' '), /conflicting due date/);
+    for (const title of ['Homework', 'Quiz', 'Practice', 'Daily Homework', 'Unit Test']) {
+        const recurringState = { courses: classes, assignments: [{ ...manual, title }] };
+        const recurring = paste.parseSchoolData(`Assignment\tScore\tDue\n${title}\t8/10\t11/25/2026`,
+            { defaultCourseCode: 'BIO101', today });
+        const recurringPlan = paste.buildImportPlan(recurring, recurringState);
+        assert.equal(recurringPlan.rows.length, 0, `${title} on another date cannot silently replace earlier recurring work`);
+        assert.match(recurringPlan.warnings.join(' '), /conflicting due date/);
+        recurring.assignments[0].dueDate = manual.dueDate;
+        const sameDatePlan = paste.buildImportPlan(recurring, recurringState);
+        assert.equal(sameDatePlan.rows[0].value.id, manual.id, 'recurring titles still match on the same explicit date');
+    }
+    const informativeDateChange = paste.buildImportPlan(paste.parseSchoolData('Assignment\tScore\tDue\nUnit3 Test\t8/10\t11/25/2026',
+        { defaultCourseCode: 'BIO101', today }), { courses: classes, assignments: [{ ...manual, title: 'Unit3 Test' }] });
+    assert.equal(informativeDateChange.rows[0].value.id, manual.id);
+    assert.equal(informativeDateChange.rows[0].value.dueDate, '2026-11-25', 'informative exact titles retain explicit due-date updates');
+    const duplicateClasses = paste.parseSchoolData('Class: Biology I\nAssignment\tScore\nQuiz\t8/10',
+        { courses: [classes[0], { ...classes[0], code: 'other-bio' }] });
+    assert.equal(duplicateClasses.assignments.length, 0);
+    assert.match(duplicateClasses.warnings.join(' '), /Ambiguous class/);
+    const statusCases = paste.parseSchoolData('Assignment\tScore\tStatus\n' +
+        'Excused task\t18/20\tExcused\nMissing task\t0/10\tMissing\n' +
+        'Handed in task\t-- / 10\tTurned in\nUnscored missing\tMissing / 10\t\nBonus\t5/0\t',
+    { defaultCourseCode: 'BIO101', today });
+    const statuses = paste.buildImportPlan(statusCases, { courses: classes }).rows.filter(row => row.kind === 'assignment').map(row => row.value);
+    assert.equal(statuses[0].graded, false);
+    assert.equal(statuses[0].status, 'completed');
+    assert.equal(statuses[1].graded, true);
+    assert.equal(statuses[1].status, 'pending');
+    assert.equal(statuses[2].status, 'completed');
+    assert.equal(statuses[3].pointsEarned, null);
+    assert.equal(statuses[3].icMissing, true);
+    assert.equal(statuses[4].pointsEarned, 5);
+    assert.equal(statuses[4].maxPoints, 0, 'zero denominator extra credit is valid');
+    for (const multiplier of ['0', '-1', 'Infinity', 'nonsense']) {
+        const invalid = paste.buildImportPlan(paste.parseSchoolData(`Assignment\tScore\tMultiplier\nQuiz\t8/10\t${multiplier}`,
+            { defaultCourseCode: 'BIO101' }), { courses: classes });
+        assert.equal(invalid.rows.length, 0);
+        assert.match(invalid.warnings.join(' '), /Invalid score multiplier/);
+    }
+    const weighted = paste.buildImportPlan(paste.parseSchoolData('Assignment\tScore\tMultiplier\nWeighted Quiz\t8/10\t0.5',
+        { defaultCourseCode: 'BIO101' }), { courses: classes });
+    assert.equal(weighted.rows[0].value.pointsEarned, 4);
+    assert.equal(weighted.rows[0].value.maxPoints, 5);
+    const blockStatus = paste.parseSchoolData('Class: Biology I\nAssignment\nHanded in task\nScore: --\nStatus: Turned in', { courses: classes });
+    assert.equal(paste.buildImportPlan(blockStatus, { courses: classes }).rows[0].value.status, 'completed');
+    const campus = paste.parseSchoolData('Biology IClassroomGradesIn-progressTestsWeight: 708/10(80%)AssignmentQuizDue: 11/20/2026Score8/10(80%)',
+        { courses: classes, today });
+    assert.equal(campus.assignments[0].courseCode, 'BIO101');
+    assert.equal(campus.assignments[0].category, 'Tests');
+    assert.equal(campus.assignments[0].pointsEarned, 8);
+    const singleColumn = paste.parseSchoolData('Course\tTeacher\tRoom\nBiology I\tPrivate Teacher\t198\n' +
+        'Name\tDue Date\tScore\nQuiz 7\t11/20/2026\t9/10', { courses: classes, today });
+    assert.equal(singleColumn.courses.length, 1);
+    assert.equal(singleColumn.assignments[0].courseCode, 'BIO101');
+    assert.equal(singleColumn.assignments[0].title, 'Quiz 7');
+    const renamed = paste.parseSchoolData('Class: Biology I\nAssignment\tScore\nQuiz\t8/10',
+        { courses: [{ code: 'BIO101', title: 'My science' }], catalog });
+    assert.equal(renamed.assignments[0].courseCode, 'BIO101', 'catalog codes preserve manually renamed class identity');
+    const legacyBlock = paste.parseSchoolData('Class: Biology I\nAssignment\nReview Quiz\nDue 11/22/2026\nScore8/10\nMissing',
+        { courses: classes, today });
+    assert.equal(legacyBlock.assignments[0].title, 'Review Quiz');
+    assert.equal(legacyBlock.assignments[0].pointsEarned, 8);
+    assert.equal(legacyBlock.assignments[0].missing, true);
+    assert.ok(!paste.sanitizePaste('Class: Biology I - Ms. Hidden Person\nAssignment\tScore\nQuiz\t8/10').includes('Hidden Person'));
+    const sanitizedTyped = paste.sanitizePaste('Assignment\tScore\tStatus\tTeacher\n' +
+        'Quiz\tcall Jane Sensitive\tJane Sensitive\tMs Private');
+    assert.ok(!sanitizedTyped.includes('Sensitive') && !sanitizedTyped.includes('Private'));
+    const repeatedConflict = paste.buildImportPlan(paste.parseSchoolData('Assignment\tScore\nQuiz\t8/10\nQuiz\t9/10',
+        { defaultCourseCode: 'BIO101' }), { courses: classes });
+    assert.equal(repeatedConflict.rows.length, 0, 'conflicting repeated identities are skipped, not silently last-write-wins');
+    assert.match(repeatedConflict.warnings.join(' '), /Conflicting repeated assignment/);
+}
+
+{
+    const source = 'Student Name\nHidden Student\nClass: Biology I\nHomework\nWeight: 25%\n' +
+        'Assignment\tScore\tCategory\nPractice\t8/10\tHomework\nTests\nWeight: 75%\n' +
+        'Assignment\tCategory\tScore\nQuiz\tTests\t18/20';
+    const parsed = paste.parseSchoolData(source, { catalog, today });
+    assert.deepEqual(parsed.assignments.map(item => item.title), ['Practice', 'Quiz']);
+    assert.deepEqual(parsed.categoryWeights.map(item => item.weight), [25, 75]);
+    let creditArgs;
+    const options = { courses: [], assignments: [], schedule: {}, term: 'S1', school: 'test',
+        creditsForTerm: (...args) => { creditArgs = args; return 0.25; } };
+    const plan = paste.buildImportPlan(parsed, options);
+    assert.deepEqual(creditArgs, [catalog[0], 'S1']);
+    const course = plan.rows.find(row => row.kind === 'course');
+    assert.equal(course.value.credits, 0.25);
+    assert.ok(course.value.categories.every(item => item.weight === null), 'copied weights require explicit opt-in');
+    const assignmentRows = plan.rows.filter(row => row.kind === 'assignment');
+    assert.ok(assignmentRows.every(row => row.dependsOn.includes(course.id)));
+    assert.throws(() => paste.applyImportPlan(plan, [assignmentRows[0].id], options), /dependency/);
+    const imported = paste.applyImportPlan(plan, plan.rows.map(row => row.id), options);
+    assert.equal(imported.courses.length, 1);
+    assert.equal(imported.assignments.length, 2);
+    const weightPlan = paste.buildImportPlan(parsed, { ...imported, applyWeights: true });
+    assert.deepEqual(weightPlan.rows.find(row => row.kind === 'course').value.categories.map(item => item.weight), [25, 75]);
+    const partial = { ...parsed, categoryWeights: parsed.categoryWeights.slice(0, 1) };
+    const partialPlan = paste.buildImportPlan(partial, { ...imported, applyWeights: true });
+    assert.ok(!partialPlan.rows.some(row => row.kind === 'course'));
+    assert.match(partialPlan.warnings.join(' '), /incomplete/);
+    const conflicting = { ...parsed, categoryWeights: [...parsed.categoryWeights, { ...parsed.categoryWeights[0], weight: 35 }] };
+    assert.match(paste.buildImportPlan(conflicting, { ...imported, applyWeights: true }).warnings.join(' '), /conflicting/);
+    const custom = paste.buildImportPlan(paste.parseSchoolData('Class: Creative Lab\nAssignment\tScore\nProject\t8/10'), {});
+    assert.equal(custom.rows.find(row => row.kind === 'course').value.credits, 0.5);
+    const independentPlans = ['Creative Lab', 'Robotics Studio'].map((name, index) => paste.buildImportPlan(
+        paste.parseSchoolData(`Class: ${name}\nAssignment\tScore\tCategory\nProject ${index + 1}\t8/10\tProjects`), {}));
+    const generatedIds = plan => plan.rows.flatMap(row => row.kind === 'course'
+        ? [row.value.code, ...row.value.categories.map(category => category.id)]
+        : row.kind === 'assignment' ? [row.value.id] : []);
+    const firstIds = new Set(generatedIds(independentPlans[0]));
+    assert.equal(firstIds.size, 3, 'a new custom class generates class, category and assignment identities');
+    assert.ok(generatedIds(independentPlans[1]).every(id => !firstIds.has(id)),
+        'independent device/import plans for different work cannot reuse sequence-only record identities');
+    const existing = { courses: [{ code: 'BIO101', title: 'Biology I' }], assignments: [], schedule: {
+        all: { 1: 'other' }, odd: { 2: 'BIO101' },
+        meetings: [{ courseCode: 'BIO101', period: '2', start: '08:00', end: '08:50', pattern: 'odd' }],
+        unknown: { keep: true }
+    } };
+    const meeting = { courseCode: 'BIO101', period: '3', start: '09:00', end: '09:50', pattern: 'odd' };
+    const moved = paste.buildImportPlan({ meetings: [meeting] }, existing);
+    const updated = paste.applyImportPlan(moved, moved.rows.map(row => row.id), existing);
+    assert.equal(updated.schedule.odd[2], undefined);
+    assert.equal(updated.schedule.odd[3], 'BIO101');
+    assert.deepEqual(updated.schedule.meetings, [meeting]);
+    assert.deepEqual(updated.schedule.unknown, { keep: true });
+    const conflict = paste.buildImportPlan({ meetings: [{ ...meeting, period: '1' }] }, existing);
+    assert.equal(conflict.rows.length, 0);
+    assert.match(conflict.warnings.join(' '), /conflict/);
+    const invalid = paste.parseSchoolData('Course\tPeriod\tStart\tEnd\tPattern\tTeacher\tRoom\nBiology I\t1\t25:00\t26:00\todd\tPrivate Teacher\t199',
+        { courses: existing.courses });
+    assert.equal(invalid.meetings.length, 0);
+    assert.match(invalid.warnings.join(' '), /Invalid schedule/);
+    const unknownRotation = paste.parseSchoolData('Class: Biology I\nPeriod\tStart\tEnd\tPattern\n1\t08:00\t08:50\tA day',
+        { courses: existing.courses });
+    assert.equal(unknownRotation.meetings.length, 0, 'A/B labels cannot be assumed to mean odd/even school-day rotation');
+    assert.match(unknownRotation.warnings.join(' '), /school-day rotation.*rather than guessing/);
+    const selectedState = paste.applyImportPlan(plan, [course.id], options);
+    assert.equal(selectedState.courses.length, 1);
+    assert.equal(selectedState.assignments.length, 0);
+}
+{
+    const options = { courses: [{ code: 'math', title: 'Math' }], assignments: [
+        { id: 'manual-kind', title: 'Unit 3 Test', courseCode: 'math', kind: 'assignment', estimatedMinutes: 75,
+            graded: false, status: 'pending', completedAt: null }
+    ], schedule: {}, today };
+    const text = 'Class: Math\nAssignment\tScore\tCategory\tStatus\n' +
+        'Quiz 2\t-- / 10\tTests\t\nUnit5Test\t--\t\t\nUnit 4 Test Review\t--\tTests\t\nPractice4\t--\tTests\t\n' +
+        'Unit 3 Test\t18/20\tTests\tSubmitted\n';
+    const plan = paste.buildImportPlan(paste.parseSchoolData(text, { ...options, defaultCourseCode: 'math' }), options);
+    const result = paste.applyImportPlan(plan, plan.rows.map(row => row.id), options);
+    assert.equal(result.assignments.find(item => item.title === 'Quiz 2').kind, 'quiz', 'new upcoming assessments retain study behavior');
+    assert.equal(result.assignments.find(item => item.title === 'Quiz 2').graded, false);
+    assert.equal(result.assignments.find(item => item.title === 'Unit5Test').kind, 'test', 'compact numeric titles keep assessment behavior without a category hint');
+    for (const title of ['Unit 4 Test Review', 'Practice4']) {
+        assert.equal(result.assignments.find(item => item.title === title).kind, 'assignment', 'review/practice remains work despite broad test categories');
+    }
+    const manual = result.assignments.find(item => item.id === 'manual-kind');
+    assert.equal(manual.kind, 'assignment', 'a manual assessment-type override is never replaced');
+    assert.equal(manual.estimatedMinutes, 75);
+    assert.ok(manual.completedAt && manual.gradedAt, 'imported completion and grade changes remain visible in activity summaries');
+    const repeat = paste.buildImportPlan(paste.parseSchoolData(text, { ...options, courses: result.courses }), { ...options, ...result });
+    assert.equal(repeat.rows.length, 0, 'task defaults and completion dates do not produce repeated changes');
+}
+console.log('Unified privacy-first school import: sanitization, conservative updates, dependencies, weights, schedules and idempotence passed.');

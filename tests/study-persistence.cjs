@@ -5,12 +5,15 @@ const vm = require('node:vm');
 const read = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
 const clone = value => JSON.parse(JSON.stringify(value));
 const stores = new Map(), storage = new Map();
-let failWrite = false, releaseWrite;
+let failWrite = false, failLocalWrite = false, releaseWrite;
 const sandbox = {
     console, Date, Math, setTimeout, clearTimeout,
     window: { addEventListener() {}, setTimeout, clearTimeout, setInterval() {}, navigator: { onLine: true } },
     document: { addEventListener() {}, getElementById: () => null },
-    localStorage: { getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, value) },
+    localStorage: { getItem: key => storage.get(key) || null, setItem: (key, value) => {
+        if (failLocalWrite) throw new Error('Storage quota reached');
+        storage.set(key, value);
+    } },
     EventBus: { emit() {} },
     NexusDB: {
         async put(table, row) {
@@ -23,6 +26,13 @@ const sandbox = {
         async getAll(table) { return clone([...(stores.get(table)?.values() || [])]); },
         async replaceStores(records) {
             for (const [name, rows] of Object.entries(records)) stores.set(name, new Map(rows.map(row => [row.id, clone(row)])));
+        },
+        async patchRecords(name, patches) {
+            if (failWrite) throw new Error('Storage full');
+            if (!stores.has(name)) stores.set(name, new Map());
+            for (const [id, changes] of patches) {
+                stores.get(name).set(id, { ...stores.get(name).get(id), ...changes });
+            }
         }
     }
 };
@@ -285,6 +295,50 @@ async function run() {
     assert.equal(app.isRemovedCommunityDeck({ id: 'historical-copy', communitySourceId: removedId }), true,
         'historical deletions can block imported copies without an original local ID');
     assert.equal(app.isRemovedCommunityDeck({ id: null }), false, 'unknown source identity never matches an unrelated deck');
+
+    const savedState = clone(state.state);
+    savedState.courses = [{ code: 'math', title: 'Math' }, { code: 'bio', title: 'Biology' }];
+    savedState.assignments = [{ id: 'task', courseCode: 'math', title: 'Task' }];
+    savedState.schedule = { all: { 1: 'math', 2: 'bio' }, odd: {}, even: {},
+        meetings: [{ courseCode: 'math' }, { courseCode: 'bio' }],
+        ic: { sections: [{ courseCode: 'math' }, { courseCode: 'bio' }], calendars: { keep: true } } };
+    for (const edit of [
+        () => state.set('settings', { theme: 'new' }),
+        () => state.addCourse({ code: 'art', title: 'Art' }),
+        () => state.updateCourse('math', { title: 'Changed' }),
+        () => state.removeCourse('math'),
+        () => state.addAssignment({ id: 'new' }),
+        () => state.updateAssignment('task', { title: 'Changed' }),
+        () => state.deleteAssignment('task')
+    ]) {
+        state.state = clone(savedState);
+        failLocalWrite = true;
+        assert.throws(edit, /quota/);
+        assert.deepEqual(clone(state.state), savedState, 'a failed ordinary edit cannot leave unsaved changes in memory');
+    }
+    state.set('currentView', 'planner');
+    assert.equal(state.get('currentView'), 'planner', 'navigation stays usable when device storage is full and does not serialize study data');
+    failLocalWrite = false;
+    state.removeCourse('math');
+    assert.deepEqual(Array.from(state.get('schedule').meetings, meeting => meeting.courseCode), ['bio']);
+    assert.deepEqual(Array.from(state.get('schedule').ic.sections, section => section.courseCode), ['bio']);
+    assert.equal(state.get('schedule').ic.calendars.keep, true);
+    assert.equal(state.get('schedule').all[2], 'bio');
+    state.state.flashcards = [{ id: 'first', sortIndex: 0 }, { id: 'second', sortIndex: 1 }];
+    failWrite = true;
+    await assert.rejects(state.patchFlashcardDecks(new Map([['first', { sortIndex: 1 }], ['second', { sortIndex: 0 }]])), /Storage full/);
+    assert.deepEqual(Array.from(state.get('flashcards'), deck => deck.sortIndex), [0, 1], 'failed batch deck saves preserve the visible order');
+    failWrite = false;
+    let finishPatch;
+    sandbox.NexusDB.patchRecords = async () => new Promise(resolve => { finishPatch = resolve; });
+    const pendingPatch = state.patchFlashcardDecks(new Map([['first', { sortIndex: 2 }]]));
+    state.state.flashcards[0] = { ...state.state.flashcards[0], title: 'Edited while saving' };
+    state.state.flashcards.push({ id: 'new-deck', title: 'Created while saving' });
+    finishPatch();
+    await pendingPatch;
+    assert.equal(state.get('flashcards')[0].title, 'Edited while saving');
+    assert.equal(state.get('flashcards')[0].sortIndex, 2);
+    assert.equal(state.get('flashcards').at(-1).id, 'new-deck', 'finishing an order save cannot discard new or edited decks');
 
     const sql = read('supabase-setup.sql');
     assert.match(sql, /alter table public\.studbud_removed_decks alter column source_deck_id drop not null/);

@@ -7,7 +7,7 @@ const nodes = new Map();
 function node(id) {
     if (!nodes.has(id)) {
         const classes = new Set();
-        nodes.set(id, { value: '', textContent: '', disabled: false, focus() {},
+        nodes.set(id, { value: '', textContent: '', disabled: false, focus() {}, setAttribute(name, value) { this[name] = value; },
             classList: { add: name => classes.add(name), remove: name => classes.delete(name),
                 contains: name => classes.has(name), toggle(name, on) { if (on) classes.add(name); else classes.delete(name); } },
             get hidden() { return classes.has('hidden'); }
@@ -20,12 +20,14 @@ const sandbox = {
     document: { getElementById: node, querySelectorAll: () => [] },
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     window: { navigator: { onLine: true }, setTimeout, clearTimeout,
-        NexusApp: { friendlyErrorMessage: (error, fallback) => error.message || fallback } }
+        NexusApp: { friendlyErrorMessage: (error, fallback) => error.message || fallback,
+            readDeviceUnlock: async () => null, clearLocalStore: async () => {} } }
 };
 vm.createContext(sandbox);
 vm.runInContext(source('nameModeration.js'), sandbox);
 vm.runInContext(source('cloudSync.js'), sandbox);
 const cloud = sandbox.window.StudBudCloud;
+cloud.deriveAuthCredential = async () => 'test-derived-credential';
 let factors = [], currentLevel = 'aal1', opened = 0, openedPassword, sessionAvailable = true, passwordError = null, assuranceError = null;
 const requests = [];
 const user = { id: 'student', email: 'student@accounts.studbud.invalid', user_metadata: { username: 'student' } };
@@ -54,7 +56,7 @@ async function run() {
     await cloud.handleLogin(submit);
     assert.equal(opened, 1);
     assert.equal(requests[0].email, 'student@accounts.studbud.invalid');
-    assert.equal(requests[0].password, 'password123');
+    assert.equal(requests[0].password, 'test-derived-credential', 'authentication receives a derived credential, not the encryption password');
     assert.equal(node('login-password').value, '');
     assert.equal(cloud.authBusy, false);
     node('login-username').value = 'student@example.com';
@@ -64,7 +66,7 @@ async function run() {
     node('login-username').value = 'student';
     passwordError = Error('Invalid login credentials');
     await cloud.handleLogin(submit);
-    assert.match(node('auth-status').textContent, /username or password/);
+    assert.match(node('auth-status').textContent, /username and password/);
     assert.equal(cloud.authBusy, false);
     passwordError = null;
     node('signup-username').value = 'new_student';
@@ -72,7 +74,7 @@ async function run() {
     node('signup-school').value = 'pchs';
     await cloud.handleSignup(submit);
     assert.match(node('auth-status').textContent, /at least 12 characters/);
-    assert.equal(requests.length, 2, 'new short passwords are rejected while existing-password sign-in remains compatible');
+    assert.equal(requests.length, 2, 'new short passwords are rejected without silently sending a legacy plaintext password');
     node('signup-password').value = node('signup-password-confirm').value = 'a unique long passphrase';
     await cloud.handleSignup(submit);
     assert.equal(requests.at(-1).email, 'new_student@accounts.studbud.invalid');
@@ -104,6 +106,7 @@ async function run() {
     assert.equal(opened, 3, 'MFA errors cannot bypass protection');
     {
         const recovery = new cloud.constructor();
+        recovery.deriveAuthCredential = cloud.deriveAuthCredential;
         let authCalls = 0, attemptedPassword;
         recovery.client = {
             auth: { signInWithPassword: async () => { authCalls++; return { data: { user } }; } },

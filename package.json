@@ -1,0 +1,11 @@
+{
+  "name": "studbud",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/*.cjs",
+    "test:browser": "node tests/browser/smoke.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.65.1"
+  }
+}

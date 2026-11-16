@@ -130,6 +130,7 @@ function fixture() {
     library.node('login-password').value = 'password123';
     let signedInUser;
     library.cloud.routeAuthenticatedUser = async user => { signedInUser = user; };
+    library.cloud.deriveAuthCredential = async () => 'test-derived-credential';
     await library.cloud.handleLogin({ preventDefault() {} });
     assert.equal(signedInUser.id, 'student@accounts.studbud.invalid', 'sign-in works after retry');
 
