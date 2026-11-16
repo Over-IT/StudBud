@@ -5098,9 +5098,9 @@
             return window.StudBudArcade?.util?.playerCosmetics?.(profile) || {};
         }
 
-        multiplayerAvatarMarkup(cos = {}, large = false, extraClass = '') {
+        multiplayerAvatarMarkup(cos = {}, large = false, extraClass = '', resolution = 240) {
             const util = window.StudBudArcade?.util;
-            const avatar = util?.avatarMarkup({ color: cos.color, cos });
+            const avatar = util?.avatarMarkup({ color: cos.color, cos }, '', resolution);
             return `<span class="player-avatar char-avatar${large ? ' player-avatar-large' : ''}${extraClass ? ` ${this.escapeHTML(extraClass)}` : ''}">${avatar || '<i class="fas fa-user" aria-hidden="true"></i>'}</span>`;
         }
 
@@ -5113,22 +5113,53 @@
             return this.multiplayerAvatarMarkup({ ...base, [slotKey[item.type]]: item.id }, large, item.type === 'effect' ? 'aura-preview' : '');
         }
 
-        shopItemCard(profile, item) {
+        shopItemAction(profile, item) {
             const owned = profile.owned_items || [];
             const equippedBy = { skin: profile.equipped_skin, hat: profile.equipped_hat, accessory: profile.equipped_accessory, effect: profile.equipped_effect, palette: profile.equipped_palette };
             const has = owned.includes(item.id);
             const equipped = equippedBy[item.type] === item.id;
             const price = item.price == null ? '' : ` · ${item.price} <i class="fas fa-coins"></i>`;
-            let button;
-            if (has && equipped) button = `<button type="button" class="ghost-btn" data-action="multiplayer-unequip" data-slot="${item.type}">Unequip</button>`;
-            else if (has) button = `<button type="button" class="secondary-btn" data-action="multiplayer-equip" data-id="${this.escapeHTML(item.id)}">Equip</button>`;
-            else if (item.season) button = `<button type="button" class="secondary-btn" disabled>${this.escapeHTML(item.set)} box</button>`;
-            else if (item.price == null) button = '<button type="button" class="secondary-btn" disabled>Box only</button>';
-            else button = `<button type="button" class="secondary-btn" data-action="multiplayer-buy" data-id="${this.escapeHTML(item.id)}" ${profile.coins < item.price ? 'disabled' : ''}>Buy${price}</button>`;
+            if (has && equipped) return `<button type="button" class="ghost-btn" data-action="multiplayer-unequip" data-slot="${item.type}">Unequip</button>`;
+            if (has) return `<button type="button" class="secondary-btn" data-action="multiplayer-equip" data-id="${this.escapeHTML(item.id)}">Equip</button>`;
+            if (item.season) return `<button type="button" class="secondary-btn" disabled>${this.escapeHTML(item.set)} box</button>`;
+            if (item.price == null) return '<button type="button" class="secondary-btn" disabled>Box only</button>';
+            return `<button type="button" class="secondary-btn" data-action="multiplayer-buy" data-id="${this.escapeHTML(item.id)}" ${profile.coins < item.price ? 'disabled' : ''}>Buy${price}</button>`;
+        }
+
+        shopItemCard(profile, item) {
+            const has = (profile.owned_items || []).includes(item.id);
+            const equipped = profile[`equipped_${item.type}`] === item.id;
             const search = this.escapeHTML(`${item.name} ${item.rarity} ${item.description || ''} ${item.set || item.collectionName || ''}`.toLocaleLowerCase());
             const setName = item.set || item.collectionName;
             const setTag = setName ? `<small class="shop-set-tag"><i class="fas ${item.season ? 'fa-calendar' : 'fa-box-open'}" aria-hidden="true"></i> ${this.escapeHTML(setName)} set</small>` : '';
-            return `<article class="multiplayer-shop-item rarity-${item.rarity}${equipped ? ' equipped' : ''}" data-search="${search}"><span class="shop-preview" aria-hidden="true">${this.shopItemPreview(profile, item)}</span><div><strong>${this.escapeHTML(item.name)}</strong><small class="rarity-label">${item.rarity}${equipped ? ' · Equipped' : has ? ' · Owned' : ''}</small>${setTag}${item.description ? `<small>${this.escapeHTML(item.description)}</small>` : ''}</div>${button}</article>`;
+            return `<article class="multiplayer-shop-item rarity-${item.rarity}${equipped ? ' equipped' : ''}" data-search="${search}"><button type="button" class="shop-preview shop-try-on" data-action="character-try-on" data-id="${this.escapeHTML(item.id)}" aria-label="Try on ${this.escapeHTML(item.name)}"><span aria-hidden="true">${this.shopItemPreview(profile, item)}</span><small>Try on <i class="fas fa-expand" aria-hidden="true"></i></small></button><div><strong>${this.escapeHTML(item.name)}</strong><small class="rarity-label">${item.rarity}${equipped ? ' · Equipped' : has ? ' · Owned' : ''}</small>${setTag}${item.description ? `<small>${this.escapeHTML(item.description)}</small>` : ''}</div>${this.shopItemAction(profile, item)}</article>`;
+        }
+
+        renderCharacterStudio(profile, scope, tab, item = null) {
+            const container = document.getElementById(`${scope}-character-studio`);
+            if (!container) return;
+            const catalog = window.StudBudCommunityGames.catalog;
+            const slots = [['skin', 'Character'], ['hat', 'Hat'], ['accessory', 'Accessory'], ['effect', 'Aura'], ['palette', 'Color']];
+            const previewProfile = item ? { ...profile, ...(item.type === 'palette' ? { color: undefined } : {}), [`equipped_${item.type}`]: item.id } : profile;
+            const framing = (item?.type || tab) === 'hat' ? 'detail' : 'full';
+            const guest = profile.user_id === 'guest';
+            container.innerHTML = `
+                <header class="character-studio-heading"><div><span class="character-eyebrow">${scope === 'shop' ? 'Fitting room' : 'Character editor'}</span><h3>Your character</h3></div><span class="shop-wallet" aria-label="${Number(profile.coins || 0).toLocaleString()} coins"><i class="fas fa-coins" aria-hidden="true"></i> ${Number(profile.coins || 0).toLocaleString()}</span></header>
+                <div class="character-stage" data-camera="${framing}" role="img" aria-label="${item ? `Trying on ${this.escapeHTML(item.name)}` : 'Your equipped character'}">
+                    <span class="character-stage-label">${item ? 'Preview only' : 'Currently equipped'}</span>
+                    ${this.multiplayerAvatarMarkup(this.profileCosmetics(previewProfile), true, 'character-model', 640)}
+                </div>
+                <div class="character-camera" role="group" aria-label="Character camera">
+                    <button type="button" class="ghost-btn" data-action="character-camera" data-camera="full" aria-pressed="${framing === 'full'}"><i class="fas fa-person" aria-hidden="true"></i> Full look</button>
+                    <button type="button" class="ghost-btn" data-action="character-camera" data-camera="detail" aria-pressed="${framing === 'detail'}"><i class="fas fa-magnifying-glass-plus" aria-hidden="true"></i> Close-up</button>
+                </div>
+                <div class="character-selection" role="status" aria-live="polite"><strong>${item ? this.escapeHTML(item.name) : 'Make it yours'}</strong><p>${item ? 'Trying on only. Your equipped outfit has not changed.' : 'Select Try on to see an item here. Hats automatically zoom in.'}</p></div>
+                ${item ? `<div class="character-selection-actions">${guest ? '<button type="button" class="primary-btn" data-action="guest-create-account">Create account to collect</button>' : this.shopItemAction(profile, item)}<button type="button" class="ghost-btn" data-action="character-preview-reset">Back to equipped</button></div>` : ''}
+                <details class="character-outfit"><summary>Equipped outfit</summary><dl>${slots.map(([slot, label]) => {
+                    const equipped = catalog.find(entry => entry.id === profile[`equipped_${slot}`]);
+                    return `<div><dt>${label}</dt><dd>${equipped ? this.escapeHTML(equipped.name) : slot === 'skin' || slot === 'palette' ? 'Default' : 'None'}</dd></div>`;
+                }).join('')}</dl></details>`;
+            if (this.shopPurchaseBusy) this.setShopControlsBusy(true);
         }
 
         shopSetPreview(profile, items) {
@@ -5188,7 +5219,7 @@
             const container = document.getElementById(containerId);
             if (!container) return;
             container.innerHTML = `
-                <div class="shop-tabs" role="tablist">${tabs.map(([id, text]) => `<button type="button" class="shop-tab${tab === id ? ' selected' : ''}" role="tab" aria-selected="${tab === id}" ${tabAttr}="${id}">${text}</button>`).join('')}</div>
+                <nav class="shop-tabs" aria-label="${containerId === 'multiplayer-shop-items' ? 'Shop categories' : 'Locker categories'}">${tabs.map(([id, text]) => `<button type="button" class="shop-tab${tab === id ? ' selected' : ''}" aria-pressed="${tab === id}" ${tabAttr}="${id}">${text}</button>`).join('')}</nav>
                 <label class="shop-search"><i class="fas fa-magnifying-glass" aria-hidden="true"></i><span class="sr-only">${label}</span><input class="shop-search-input" data-search-key="${containerId}" type="search" value="${this.escapeHTML(query || '')}" placeholder="Filter by name, rarity or set"></label>
                 <div class="shop-grid ${gridClass}">${body}<p class="shop-search-empty" role="status" hidden>Nothing matches. Try another name or rarity.</p></div>`;
             this.filterShopGrid(container, query);
@@ -5263,6 +5294,7 @@
                 }).join('')}`;
             }
             this.renderShopFrame('multiplayer-shop-items', tabs, tab, 'data-shop-tab', body, this.shopSearch, 'Filter shop items', tab === 'boxes' ? 'shop-grid-boxes' : tab === 'sets' ? 'shop-grid-sets' : '');
+            this.renderCharacterStudio(profile, 'shop', tab);
             this.renderInventory(profile);
             this.animateShopAuras();
         }
@@ -5279,12 +5311,13 @@
             const equippedBy = { skin: profile.equipped_skin, hat: profile.equipped_hat, accessory: profile.equipped_accessory, effect: profile.equipped_effect };
             const sections = Object.keys(typeNames).filter(type => tab === 'all' || tab === type).map(type => {
                 const list = mine.filter(item => item.type === type).sort((a, b) => order.indexOf(b.rarity) - order.indexOf(a.rarity));
-                if (!list.length) return tab === 'all' ? '' : `<p class="settings-hint">No ${typeNames[type].toLocaleLowerCase()} yet. Find them in the shop.</p>`;
+                if (!list.length) return tab === 'all' ? '' : `<p class="settings-hint">No ${typeNames[type].toLocaleLowerCase()} yet. <button type="button" class="text-btn" data-target="shop-view">Find them in the shop</button>.</p>`;
                 const remove = equippedBy[type] ? `<button type="button" class="ghost-btn shop-unequip" data-action="multiplayer-unequip" data-slot="${type}">Remove</button>` : '';
                 return `<h4 class="shop-category-title">${typeNames[type]} · ${list.length} ${remove}</h4>${list.map(item => this.shopItemCard(profile, item)).join('')}`;
             }).join('');
-            const body = `<h4 class="shop-category-title">${mine.filter(item => !item.legacy).length} / ${total} items collected</h4>${sections || '<p class="settings-hint">Your locker is empty. Open a mystery box or buy something in the shop!</p>'}`;
+            const body = `<h4 class="shop-category-title">${mine.filter(item => !item.legacy).length} / ${total} items collected</h4>${sections || '<p class="settings-hint">Your locker is empty. <button type="button" class="text-btn" data-target="shop-view">Visit the shop</button> to buy an item or open a box.</p>'}`;
             this.renderShopFrame('multiplayer-inventory-items', tabs, tab, 'data-inventory-tab', body, this.inventorySearch, 'Filter your items');
+            this.renderCharacterStudio(profile, 'inventory', tab);
         }
 
         // Full-screen unboxing: the box shakes while the server rolls, then a reel spins onto the reward.
@@ -5535,7 +5568,7 @@
             if (!games || !grid) return;
             grid.classList.remove('hidden');
             this.multiplayerProfileRevision = (this.multiplayerProfileRevision || 0) + 1;
-            const browse = { owned_items: [], coins: 0, user_id: 'guest' };
+            const browse = { owned_items: [], coins: 0, user_id: 'guest', color: games.guestColor() || games.guestColors[0] };
             this.multiplayerProfile = browse;
             this.lastDrop = null;
             this.renderMultiplayerShop(browse);
@@ -10940,6 +10973,18 @@
                     await window.StudBudCloud?.connectOnline?.('signup');
                 } else if (action === 'guest-color') {
                     this.setGuestColor(target.dataset.color);
+                } else if (action === 'character-try-on' || action === 'character-preview-reset') {
+                    const scope = target.closest('.character-workspace')?.dataset.studio;
+                    const item = action === 'character-try-on' ? window.StudBudCommunityGames.catalog.find(entry => entry.id === target.dataset.id) : null;
+                    if (action === 'character-try-on' && !item) throw new Error('That cosmetic is no longer available. Refresh the page and try again.');
+                    if (scope && this.multiplayerProfile) {
+                        this.renderCharacterStudio(this.multiplayerProfile, scope, scope === 'shop' ? this.shopTab : this.inventoryTab, item);
+                        if (action === 'character-preview-reset') document.getElementById(`${scope}-character-studio`)?.querySelector('[data-action="character-camera"]')?.focus();
+                    }
+                } else if (action === 'character-camera') {
+                    const studio = target.closest('.character-studio');
+                    studio.querySelector('.character-stage').dataset.camera = target.dataset.camera;
+                    studio.querySelectorAll('[data-action="character-camera"]').forEach(button => button.setAttribute('aria-pressed', String(button === target)));
                 } else if (action === 'multiplayer-buy' || action === 'multiplayer-equip') {
                     if (action === 'multiplayer-equip' && target.closest('.unbox-overlay')) this.closeUnboxing();
                     await this.updateMultiplayerShop(action, target.dataset.id);
@@ -10950,9 +10995,11 @@
                 } else if (target.matches('[data-shop-tab]')) {
                     this.shopTab = target.dataset.shopTab;
                     if (this.multiplayerProfile) this.renderMultiplayerShop(this.multiplayerProfile);
+                    document.querySelector(`[data-shop-tab="${this.shopTab}"]`)?.focus();
                 } else if (target.matches('[data-inventory-tab]')) {
                     this.inventoryTab = target.dataset.inventoryTab;
                     if (this.multiplayerProfile) this.renderInventory(this.multiplayerProfile);
+                    document.querySelector(`[data-inventory-tab="${this.inventoryTab}"]`)?.focus();
                 } else if (action === 'unbox-shake') {
                     this.shakeUnboxing();
                 } else if (action === 'box-contents-close') {

@@ -2147,12 +2147,12 @@
         ctx.restore();
     }
 
-    function avatarUrl(player) {
+    function avatarUrl(player, resolution = 240) {
         const cos = playerCosmetics(player);
-        const key = [cos.skin, cos.hat, cos.acc, cos.effect, cos.color].join('|');
+        const key = [cos.skin, cos.hat, cos.acc, cos.effect, cos.color, resolution].join('|');
         if (!avatarCache.has(key)) {
             const canvas = document.createElement('canvas');
-            canvas.width = 240; canvas.height = 240;
+            canvas.width = resolution; canvas.height = resolution;
             drawAvatar(canvas, player);
             if (avatarCache.size >= 300) avatarCache.delete(avatarCache.keys().next().value);
             avatarCache.set(key, canvas.toDataURL('image/png'));
@@ -2221,13 +2221,13 @@
         sync();
     }
 
-    function avatarMarkup(player, className = '') {
+    function avatarMarkup(player, className = '', resolution = 240) {
         const cos = playerCosmetics(player);
         const attrs = ['skin', 'hat', 'acc', 'effect', 'color'].map(key => `data-${key}="${esc(cos[key])}"`).join(' ');
         const classAttr = `class="${esc(className)}"`;
-        if (!animatedCosmetics(player)) return `<img ${classAttr} src="${avatarUrl(player)}" alt="" draggable="false">`;
+        if (!animatedCosmetics(player)) return `<img ${classAttr} src="${avatarUrl(player, resolution)}" alt="" draggable="false">`;
         observeAvatars();
-        return `<canvas ${classAttr} width="240" height="240" data-avatar ${attrs} aria-hidden="true"></canvas>`;
+        return `<canvas ${classAttr} width="${resolution}" height="${resolution}" data-avatar ${attrs} aria-hidden="true"></canvas>`;
     }
 
     // ---------- cosmetics ----------

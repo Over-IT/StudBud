@@ -2934,6 +2934,64 @@ body[data-color-scheme="monochrome"].light-theme {
 }
 
 /* --- Shop screen --- */
+.character-workspace { display: grid; grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); align-items: start; gap: 20px; }
+.character-workspace > * { min-width: 0; }
+.character-workspace .character-catalog { margin-top: 0; }
+.character-catalog-heading, .character-studio-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.character-catalog-heading { flex-wrap: wrap; margin-bottom: 16px; }
+.character-catalog-heading h2, .character-studio-heading h3 { margin: 4px 0 8px; }
+.character-catalog-heading p, .character-selection p { margin: 0; color: var(--text-secondary); font-size: .82rem; line-height: 1.6; }
+.character-catalog-heading p { max-width: 48ch; }
+.character-eyebrow { color: var(--accent-primary); font-size: .66rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.character-studio { position: sticky; top: 16px; padding: 18px; max-height: calc(100dvh - 120px); overflow-y: auto; }
+.character-studio-heading { align-items: center; }
+.character-studio-heading .shop-wallet { padding: 6px 9px; font-size: .82rem; }
+.character-stage { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; isolation: isolate; height: 340px; margin: 14px 0 10px; overflow: hidden; border: 1px solid var(--border-glass); border-radius: 16px; background: radial-gradient(ellipse at 50% 45%, color-mix(in srgb, var(--accent-primary) 16%, transparent), transparent 70%), linear-gradient(0deg, color-mix(in srgb, var(--accent-primary) 8%, var(--bg-base)), var(--bg-base)); }
+.character-stage::after { content: ''; position: absolute; z-index: -1; width: 65%; height: 18%; bottom: 8%; border: 1px solid color-mix(in srgb, var(--accent-primary) 30%, transparent); border-radius: 50%; background: color-mix(in srgb, var(--accent-primary) 6%, transparent); }
+.character-stage-label { position: absolute; z-index: 1; top: 12px; left: 12px; padding: 4px 8px; border-radius: 6px; color: var(--text-secondary); background: var(--bg-base); font-size: .65rem; font-weight: 700; }
+.character-stage .character-model { width: 320px; height: 320px; max-width: none; border: 0; border-radius: 0; background: none; box-shadow: none; transform: scale(1.08); transform-origin: 50% 30%; transition: transform .25s ease; }
+.character-stage[data-camera="detail"] .character-model { transform: scale(2.1); }
+.character-camera { display: flex; gap: 6px; padding: 4px; border-radius: 10px; background: var(--bg-glass); }
+.character-camera button { flex: 1; min-height: 40px; padding: 6px; font-size: .74rem; }
+.character-camera button[aria-pressed="true"] { color: var(--accent-on-primary); background: var(--accent-primary); }
+.character-selection { display: grid; gap: 5px; margin-top: 16px; overflow-wrap: anywhere; }
+.character-selection-actions { display: grid; gap: 6px; margin-top: 12px; }
+.character-selection-actions button { min-height: 44px; width: 100%; }
+.character-outfit { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-glass); font-size: .78rem; }
+.character-outfit summary { padding: 5px 0; color: var(--text-secondary); cursor: pointer; }
+.character-outfit dl { display: grid; gap: 8px; margin: 12px 0 0; }
+.character-outfit dl > div { display: flex; justify-content: space-between; gap: 12px; }
+.character-outfit dt { color: var(--text-secondary); }
+.character-outfit dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.character-workspace .shop-tabs { padding-bottom: 10px; border-bottom: 1px solid var(--border-glass); }
+.character-workspace .shop-tab { min-height: 44px; padding: 8px 12px; }
+.multiplayer-shop .multiplayer-shop-item > .shop-try-on { display: grid; place-items: center; align-content: center; gap: 2px; padding: 0; border: 0; color: var(--text-secondary); font: inherit; cursor: pointer; }
+.shop-try-on > span { display: grid; place-items: center; }
+.shop-try-on > small { font-size: .65rem; }
+.shop-try-on:hover > small { color: var(--accent-primary); }
+.shop-try-on:focus-visible, .character-camera button:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 3px; }
+#multiplayer-large-avatar > .char-avatar { width: clamp(150px, 18vw, 220px); height: clamp(150px, 18vw, 220px); }
+.multiplayer-player-card > [data-target="inventory-view"] { margin-top: 14px; }
+@container workspace (max-width: 1000px) {
+    .character-workspace { grid-template-columns: minmax(230px, 270px) minmax(0, 1fr); gap: 14px; }
+    .character-studio { padding: 14px; }
+}
+@container workspace (max-width: 800px) {
+    .character-workspace { grid-template-columns: minmax(0, 1fr); }
+    .character-studio { display: grid; grid-template-columns: minmax(120px, 38%) minmax(0, 1fr); gap: 8px 14px; top: 8px; z-index: 5; max-height: 52dvh; overflow-y: auto; background: var(--bg-base); }
+    .character-studio-heading { grid-column: 1 / -1; }
+    .character-studio-heading h3 { margin: 2px 0 0; font-size: 1rem; }
+    .character-stage { grid-column: 1; grid-row: 2 / span 3; height: 176px; margin: 0; }
+    .character-stage .character-model { width: 180px; height: 180px; }
+    .character-stage-label { top: 6px; left: 6px; font-size: .58rem; padding: 3px 5px; }
+    .character-camera { grid-column: 2; align-self: start; }
+    .character-camera button { font-size: .66rem; }
+    .character-selection { grid-column: 2; margin-top: 0; align-self: start; font-size: .82rem; }
+    .character-selection p { font-size: .72rem; line-height: 1.4; }
+    .character-selection-actions { grid-column: 2; margin-top: 0; }
+    .character-selection-actions button { min-height: 36px; padding: 5px; font-size: .72rem; }
+    .character-outfit { grid-column: 1 / -1; margin-top: 0; padding-top: 4px; }
+}
 .multiplayer-shop { margin-top: var(--spacing-md); }
 .solo-game-settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); align-items: end; gap: 10px; margin: 10px 0 12px; padding: 12px; border: 1px solid var(--border-glass); border-radius: 12px; background: color-mix(in srgb, var(--accent-primary) 5%, var(--bg-glass)); }
 .solo-game-settings label { display: grid; gap: 5px; color: var(--text-secondary); font-size: .8rem; font-weight: 700; }

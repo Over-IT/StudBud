@@ -934,6 +934,7 @@
                             <h3 id="multiplayer-player-name">Student</h3>
                             <p>Match wins: <strong id="multiplayer-wins">0</strong></p>
                             <div class="shop-wallet"><i class="fas fa-coins"></i> <strong id="shop-wallet-coins">0</strong></div>
+                            <button type="button" class="primary-btn" data-target="inventory-view"><i class="fas fa-shirt" aria-hidden="true"></i> Edit character</button>
                         </section>
                         <section class="glass-card daily-reward-card">
                             <div><h3><i class="fas fa-gift"></i> Daily reward</h3><p id="daily-reward-text">Free coins once a day.</p></div>
@@ -971,18 +972,26 @@
                 </section>
 
                 <section id="inventory-view" class="view hidden">
-                    <section class="glass-card multiplayer-shop">
-                        <p id="multiplayer-inventory-status" class="community-status" role="status" aria-live="polite"></p>
-                        <div id="multiplayer-inventory-items" class="multiplayer-shop-items"></div>
-                    </section>
+                    <div class="character-workspace" data-studio="inventory">
+                        <aside id="inventory-character-studio" class="glass-card character-studio" aria-label="Locker character preview"></aside>
+                        <section class="glass-card multiplayer-shop character-catalog">
+                            <header class="character-catalog-heading"><div><span class="character-eyebrow">Your collection</span><h2>Locker</h2><p>Try on your items, then equip your favorites. Changes save when you equip.</p></div><button type="button" class="secondary-btn" data-target="shop-view">Visit shop <i class="fas fa-arrow-right" aria-hidden="true"></i></button></header>
+                            <p id="multiplayer-inventory-status" class="community-status" role="status" aria-live="polite"></p>
+                            <div id="multiplayer-inventory-items" class="multiplayer-shop-items"></div>
+                        </section>
+                    </div>
                 </section>
 
                 <!-- Shop -->
                 <section id="shop-view" class="view hidden">
-                    <section class="glass-card multiplayer-shop" id="multiplayer-shop">
-                        <p id="multiplayer-shop-status" class="community-status" role="status" aria-live="polite"></p>
-                        <div id="multiplayer-shop-items" class="multiplayer-shop-items"></div>
-                    </section>
+                    <div class="character-workspace" data-studio="shop">
+                        <aside id="shop-character-studio" class="glass-card character-studio" aria-label="Shop character preview"></aside>
+                        <section class="glass-card multiplayer-shop character-catalog" id="multiplayer-shop">
+                            <header class="character-catalog-heading"><div><span class="character-eyebrow">Find your next look</span><h2>Shop</h2><p>Try on before you buy. Buying adds an item to your locker; equip it to wear it.</p></div><button type="button" class="secondary-btn" data-target="inventory-view">Open locker <i class="fas fa-arrow-right" aria-hidden="true"></i></button></header>
+                            <p id="multiplayer-shop-status" class="community-status" role="status" aria-live="polite"></p>
+                            <div id="multiplayer-shop-items" class="multiplayer-shop-items"></div>
+                        </section>
+                    </div>
                     <aside class="ad-slot" data-ad-placement="shop" aria-label="Advertisement" hidden></aside>
                 </section>
 

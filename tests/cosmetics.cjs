@@ -81,6 +81,13 @@ assert.match(util.avatarMarkup({ cos: { hat: 'hat_fedora' } }), /^<img /);
 assert.match(util.avatarMarkup({ cos: { acc: 'acc_storm_effect' } }), /^<canvas .*data-avatar/);
 assert.match(util.avatarMarkup({ cos: { acc: 'acc_shades', effect: 'acc_storm_effect' } }), /data-acc="acc_shades" data-effect="acc_storm_effect"/);
 assert.match(util.avatarMarkup({ cos: { acc: 'acc_aura', color: '" onload="bad' } }), /data-color="&quot; onload=&quot;bad"/);
+assert.match(util.avatarMarkup({ cos: { effect: 'acc_storm_effect' } }, '', 640), /width="640" height="640"/,
+    'large editor previews keep animated cosmetics sharp without changing normal avatar sizes');
+commands.length = 0;
+util.avatarUrl({ cos: { hat: 'hat_fedora' } }, 640);
+assert.ok(commands.some(([name, x, y]) => name === 'clearRect' && x === 0 && y === 0)
+    && commands.some(([name, x, y]) => name === 'scale' && x === 8 && y === 8),
+    'static editor previews render at the requested resolution instead of reusing a thumbnail');
 
 const canvas = makeCanvas({ skin: 'skin_cosmic', hat: 'hat_fedora', acc: 'acc_shades', effect: 'acc_storm_effect', color: '#123456' });
 tracked.add(canvas);
@@ -182,6 +189,36 @@ for (const tab of ['skin', 'hat', 'accessory', 'effect', 'palette', 'inventory']
             `${item.id}'s description is searchable`);
     }
 }
+const studio = { innerHTML: '' };
+elements.set('shop-character-studio', studio);
+const outfit = { coins: 1000, owned_items: ['hat_cap'], equipped_skin: 'skin_robot',
+    equipped_hat: 'hat_cap', equipped_accessory: 'acc_shades', equipped_effect: 'acc_storm_effect' };
+const originalOutfit = JSON.stringify(outfit);
+const tryHat = catalog.find(item => item.id === 'hat_fedora');
+app.renderCharacterStudio(outfit, 'shop', 'hat', tryHat);
+assert.match(studio.innerHTML, /data-camera="detail"/, 'hat editing automatically uses a close-up');
+assert.equal(previews.at(-1).hat, 'hat_fedora');
+assert.equal(previews.at(-1).skin, 'skin_robot');
+assert.equal(previews.at(-1).acc, 'acc_shades');
+assert.equal(previews.at(-1).effect, 'acc_storm_effect', 'try-on preserves every other equipped slot');
+assert.equal(JSON.stringify(outfit), originalOutfit, 'try-on never mutates the saved outfit or balance');
+assert.match(studio.innerHTML, /Preview only/);
+assert.match(studio.innerHTML, /data-action="multiplayer-buy"/);
+app.renderCharacterStudio(outfit, 'shop', 'effect');
+assert.match(studio.innerHTML, /data-camera="full"/, 'auras keep the whole character visible');
+assert.equal(previews.at(-1).hat, 'hat_cap', 'returning to equipped discards the try-on');
+app.renderCharacterStudio(outfit, 'shop', 'hat', catalog.find(item => item.id === 'hat_cap'));
+assert.match(studio.innerHTML, /data-action="multiplayer-unequip"/, 'the preview uses the same ownership actions as cards');
+app.renderCharacterStudio({ ...outfit, owned_items: ['hat_fedora'] }, 'shop', 'hat', tryHat);
+assert.match(studio.innerHTML, /data-action="multiplayer-equip"/);
+app.renderCharacterStudio({ ...outfit, user_id: 'guest' }, 'shop', 'hat', tryHat);
+assert.match(studio.innerHTML, /data-action="guest-create-account"/);
+assert.doesNotMatch(studio.innerHTML, /data-action="multiplayer-buy"/, 'guests can preview without a purchase action');
+app.renderCharacterStudio({ ...outfit, color: '#34d399' }, 'shop', 'palette', catalog.find(item => item.id === 'palette_ocean'));
+assert.equal(previews.at(-1).color, '#38bdf8', 'palette previews use the proposed palette, not the guest color override');
+assert.ok(app.shopItemCard(outfit, tryHat).includes(`data-action="character-try-on" data-id="${tryHat.id}" aria-label="Try on ${tryHat.name}"`),
+    'every item preview is a keyboard-accessible, explicitly named try-on button');
+elements.delete('shop-character-studio');
 const shopSql = source('supabase-setup.sql');
 const pricedSql = shopSql.match(/with priced\(id, price\) as \(values([\s\S]*?)\), pets/)[1];
 const sqlPrices = new Map([...pricedSql.matchAll(/\('([^']+)', (\d+)\)/g)].map(([, id, price]) => [id, Number(price)]));
@@ -295,7 +332,7 @@ assert.match(source('supabase-setup.sql'), /priced\.price < 200 then 'uncommon'.
     assert.equal(elements.get('shop-wallet-coins').innerHTML, '725');
     app.shopTab = 'hat'; app.shopSearch = 'fedora'; app.inventoryTab = 'hat'; app.inventorySearch = 'fedora';
     app.renderMultiplayerShop(purchased);
-    assert.match(elements.get('multiplayer-shop-items').innerHTML, /aria-selected="true" data-shop-tab="hat"/);
+    assert.match(elements.get('multiplayer-shop-items').innerHTML, /aria-pressed="true" data-shop-tab="hat"/);
     assert.match(elements.get('multiplayer-shop-items').innerHTML, /value="fedora"/);
     assert.match(elements.get('multiplayer-inventory-items').innerHTML, /value="fedora"/);
     const guestGrid = { classList: { remove: noop, add: noop } };
