@@ -5462,13 +5462,16 @@
             return `<button type="button" class="secondary-btn" data-action="multiplayer-buy" data-id="${this.escapeHTML(item.id)}" ${profile.coins < item.price ? 'disabled' : ''}>Buy${price}</button>`;
         }
 
-        shopItemCard(profile, item) {
+        shopItemCard(profile, item, tryOn = false) {
             const has = (profile.owned_items || []).includes(item.id);
             const equipped = profile[`equipped_${item.type}`] === item.id;
             const search = this.escapeHTML(`${item.name} ${item.rarity} ${item.description || ''} ${item.set || item.collectionName || ''}`.toLocaleLowerCase());
             const setName = item.set || item.collectionName;
             const setTag = setName ? `<small class="shop-set-tag"><i class="fas ${item.season ? 'fa-calendar' : 'fa-box-open'}" aria-hidden="true"></i> ${this.escapeHTML(setName)} set</small>` : '';
-            return `<article class="multiplayer-shop-item rarity-${item.rarity}${equipped ? ' equipped' : ''}" data-owned="${has}" data-affordable="${!has && item.price != null && !item.season && profile.coins >= item.price}" data-search="${search}"><button type="button" class="shop-preview shop-try-on" data-action="character-try-on" data-id="${this.escapeHTML(item.id)}" aria-label="Try on ${this.escapeHTML(item.name)}"><span aria-hidden="true">${this.shopItemPreview(profile, item)}</span><small>Try on <i class="fas fa-expand" aria-hidden="true"></i></small></button><div><strong>${this.escapeHTML(item.name)}</strong><small class="rarity-label">${item.rarity}${equipped ? ' · Equipped' : has ? ' · Owned' : ''}</small>${setTag}${item.description ? `<small>${this.escapeHTML(item.description)}</small>` : ''}</div>${this.shopItemAction(profile, item)}</article>`;
+            const preview = tryOn
+                ? `<button type="button" class="shop-preview shop-try-on" data-action="character-try-on" data-id="${this.escapeHTML(item.id)}" aria-label="Try on ${this.escapeHTML(item.name)}"><span aria-hidden="true">${this.shopItemPreview(profile, item)}</span><small>Try on <i class="fas fa-expand" aria-hidden="true"></i></small></button>`
+                : `<span class="shop-preview" aria-hidden="true">${this.shopItemPreview(profile, item)}</span>`;
+            return `<article class="multiplayer-shop-item rarity-${item.rarity}${equipped ? ' equipped' : ''}" data-owned="${has}" data-affordable="${!has && item.price != null && !item.season && profile.coins >= item.price}" data-search="${search}">${preview}<div><strong>${this.escapeHTML(item.name)}</strong><small class="rarity-label">${item.rarity}${equipped ? ' · Equipped' : has ? ' · Owned' : ''}</small>${setTag}${item.description ? `<small>${this.escapeHTML(item.description)}</small>` : ''}</div>${this.shopItemAction(profile, item)}</article>`;
         }
 
         characterAppearanceDraft(profile) {
@@ -5779,7 +5782,6 @@
                 }).join('')}`;
             }
             this.renderShopFrame('multiplayer-shop-items', tabs, tab, 'data-shop-tab', body, this.shopSearch, 'Filter shop items', tab === 'boxes' ? 'shop-grid-boxes' : tab === 'sets' ? 'shop-grid-sets' : '');
-            this.renderCharacterStudio(profile, 'shop', tab);
             this.renderInventory(profile);
             this.animateShopAuras();
         }
@@ -5804,7 +5806,7 @@
                 const list = mine.filter(item => item.type === type).sort((a, b) => order.indexOf(b.rarity) - order.indexOf(a.rarity));
                 if (!list.length) return tab === 'all' ? '' : `<p class="settings-hint">No ${typeNames[type].toLocaleLowerCase()} yet. <button type="button" class="text-btn" data-target="shop-view">Find them in the shop</button>.</p>`;
                 const remove = equippedBy[type] ? `<button type="button" class="ghost-btn shop-unequip" data-action="multiplayer-unequip" data-slot="${type}">Remove</button>` : '';
-                return `<h4 class="shop-category-title">${typeNames[type]} · ${list.length} ${remove}</h4>${list.map(item => this.shopItemCard(profile, item)).join('')}`;
+                return `<h4 class="shop-category-title">${typeNames[type]} · ${list.length} ${remove}</h4>${list.map(item => this.shopItemCard(profile, item, true)).join('')}`;
             }).join('');
             const body = `<h4 class="shop-category-title">${mine.filter(item => !item.legacy).length} / ${total} items collected</h4>${sections || '<p class="settings-hint">Your locker is empty. <button type="button" class="text-btn" data-target="shop-view">Visit the shop</button> to buy an item or open a box.</p>'}`;
             this.renderShopFrame('multiplayer-inventory-items', tabs, tab, 'data-inventory-tab', body, this.inventorySearch, 'Filter your items');

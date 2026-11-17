@@ -13,11 +13,18 @@ A student home base for planning schoolwork, studying flashcards and playing stu
 - **Import:** paste school data, review matched records and changes, then import or undo the last batch.
 
 Accounts are optional for local study. Sign in for cloud sync and social features.
-In **Locker → Customize**, the default character has free feature and clothing options. Collected costumes keep their designed features; style them with shop hats, accessories, auras and colors. Switching costumes preserves your saved default look, and the preview keeps equipped items visible.
-Guests can try on shop items without purchasing; create an account to earn coins and collect items or open boxes.
+In **Locker → Customize**, the default character has free feature and clothing options. Collected costumes keep their designed features; style them with shop hats, accessories, auras and colors. Switching costumes preserves your saved default look, and the preview keeps equipped items visible. The large character preview, editor and try-on controls are only in the Locker; the Shop keeps item thumbnails, and profile and game avatars are unchanged.
+Guests can customize their default character locally; create an account to earn coins and collect items or open boxes.
+General settings keeps app and account controls visible, with expandable Flashcard preferences and Study time preferences sections.
 Choose **Other / prefer not to say** for school to use custom classes without selecting a school. Optional public profile details can be left blank.
 Install from your browser's menu, or use **Share → Add to Home Screen** on iOS.
 Open the app online once to cache offline assets; online features still require a connection.
+
+### Logo variants
+
+Use `icons/studbud.svg` for rounded-square marks in the app, `icons/studbud-square.svg` for square or externally rounded surfaces, and `icons/studbud-circle.svg` for circular marks. The circular version has its own inner frame and torso clipping rather than cropping the square artwork. Logo images should not be cropped to a different shape with CSS.
+
+Run `npm run icons` after editing the main SVG. It regenerates the variants and PNGs. The Apple icon has a full-bleed background for the system's corner mask; the maskable icon uses a circular inner frame inside the central 80% safe circle, with its outer background extending to every edge.
 
 ## Run locally
 

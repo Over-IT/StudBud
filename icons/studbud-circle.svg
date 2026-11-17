@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title description">
+  <title id="title">StudBud</title>
+  <desc id="description">A friendly, dot-eyed lavender graduate with a plum cap and gold tassel, framed by a pale lavender square.</desc>
+  <defs>
+    <clipPath id="inner-frame">
+      <circle cx="256" cy="256" r="208"/>
+    </clipPath>
+  </defs>
+  <circle cx="256" cy="256" r="256" fill="#af83ef"/>
+  <circle cx="256" cy="256" r="208" fill="#d9bdf9"/>
+  <g clip-path="url(#inner-frame)">
+    <g transform="translate(256 256) scale(.92) translate(-256 -256)">
+  <g stroke="#3b2c50" stroke-linejoin="round" stroke-width="24" fill="#af83ef">
+    <path d="M96 512c0-127 70-215 160-215s160 88 160 215Z"/>
+    <circle cx="256" cy="256" r="113"/>
+  </g>
+  <g fill="#3b2c50">
+    <circle cx="219" cy="256" r="17"/>
+    <circle cx="293" cy="256" r="17"/>
+  </g>
+  <g stroke="#3b2c50" stroke-width="15" stroke-linejoin="round">
+    <path d="M159 146h194v48q-97 32-194 0Z" fill="#30263f"/>
+    <path d="m256 86 151 50-151 50-151-50Z" fill="#493b62"/>
+  </g>
+  <g fill="#edc567">
+    <path d="m256 132 104 14q9 1 9 12v40h-8v-40q0-4-3-4l-103-14Z"/>
+    <circle cx="256" cy="136" r="8" stroke="#3b2c50" stroke-width="5"/>
+    <path d="M357 194h16l4 34-12-7-12 7Z"/>
+  </g>
+    </g>
+  </g>
+  <circle cx="256" cy="256" r="208" fill="none" stroke="#3b2c50" stroke-width="25"/>
+</svg>

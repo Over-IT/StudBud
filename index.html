@@ -1013,14 +1013,11 @@
 
                 <!-- Shop -->
                 <section id="shop-view" class="view hidden">
-                    <div class="character-workspace" data-studio="shop">
-                        <aside id="shop-character-studio" class="glass-card character-studio" aria-label="Shop character preview"></aside>
-                        <section class="glass-card multiplayer-shop character-catalog" id="multiplayer-shop">
-                            <header class="character-catalog-heading"><div><span class="character-eyebrow">Find your next look</span><h2>Shop</h2><p>Try on before you buy. Buying adds an item to your locker; equip it to wear it.</p></div><button type="button" class="secondary-btn" data-target="inventory-view">Open locker <i class="fas fa-arrow-right" aria-hidden="true"></i></button></header>
-                            <p id="multiplayer-shop-status" class="community-status" role="status" aria-live="polite"></p>
-                            <div id="multiplayer-shop-items" class="multiplayer-shop-items"></div>
-                        </section>
-                    </div>
+                    <section class="glass-card multiplayer-shop character-catalog" id="multiplayer-shop">
+                        <header class="character-catalog-heading"><div><span class="character-eyebrow">Find your next look</span><h2>Shop</h2><p>Buying adds an item to your locker. Open the locker to preview, customize and equip your look.</p></div><button type="button" class="secondary-btn" data-target="inventory-view">Open locker <i class="fas fa-arrow-right" aria-hidden="true"></i></button></header>
+                        <p id="multiplayer-shop-status" class="community-status" role="status" aria-live="polite"></p>
+                        <div id="multiplayer-shop-items" class="multiplayer-shop-items"></div>
+                    </section>
                     <aside class="ad-slot" data-ad-placement="shop" aria-label="Advertisement" hidden></aside>
                 </section>
 
@@ -1134,31 +1131,35 @@
                             <p class="settings-hint">Auto-saved and synced to your account.</p>
                         </section>
                         <section class="glass-card" data-settings-panel="general">
-                            <h3 class="settings-section-heading"><i class="fas fa-layer-group" aria-hidden="true"></i> Flashcard preferences</h3>
-                            <label for="settings-study-approach">Default study mode</label>
-                            <select id="settings-study-approach">
-                                <option value="scheduled">Spaced review (long-term)</option>
-                                <option value="cram">Cram (test prep)</option>
-                            </select>
-                            <label for="settings-study-mode">Answer style</label>
-                            <select id="settings-study-mode"><option value="reveal">Think, then reveal</option><option value="type">Type before revealing</option></select>
-                            <label for="settings-study-direction">Ask with</label>
-                            <select id="settings-study-direction"><option value="front">Term</option><option value="back">Definition</option><option value="mixed">Mixed sides</option></select>
-                            <p class="settings-hint">Saved on this device; change them during a session too.</p>
-                        </section>
-                        <section id="planner-availability" class="glass-card settings-wide" data-settings-panel="general">
-                            <h3 class="settings-section-heading"><i class="fas fa-calendar" aria-hidden="true"></i> Study time preferences</h3>
-                            <p class="settings-hint">Only affects suggested work.</p>
-                            <label class="planner-budget" for="planner-daily-minutes"><span>Default minutes per study day</span><span><input id="planner-daily-minutes" type="number" min="0" max="480" step="1" value="90"> min</span></label>
-                            <fieldset class="planner-workdays"><legend>Days to work</legend><p class="settings-hint">Optional times override the default.</p><div id="planner-weekday-controls"></div></fieldset>
-                            <p id="planner-availability-status" class="settings-hint" aria-live="polite"></p>
-                            <p class="settings-hint">0 = day off.</p>
-                        </section>
-                        <section class="glass-card" data-settings-panel="general">
                             <h3 class="settings-section-heading"><i class="fas fa-user" aria-hidden="true"></i> Account</h3>
                             <p>Signed in as <strong id="account-name">—</strong></p>
                             <button id="sign-out-btn" class="secondary-btn" type="button"><i class="fas fa-right-from-bracket" aria-hidden="true"></i> Sign out</button>
                         </section>
+                        <details class="glass-card settings-wide settings-disclosure" data-settings-panel="general">
+                            <summary class="settings-section-heading"><i class="fas fa-layer-group" aria-hidden="true"></i> Flashcard preferences</summary>
+                            <div class="settings-disclosure-body">
+                                <label for="settings-study-approach">Default study mode</label>
+                                <select id="settings-study-approach">
+                                    <option value="scheduled">Spaced review (long-term)</option>
+                                    <option value="cram">Cram (test prep)</option>
+                                </select>
+                                <label for="settings-study-mode">Answer style</label>
+                                <select id="settings-study-mode"><option value="reveal">Think, then reveal</option><option value="type">Type before revealing</option></select>
+                                <label for="settings-study-direction">Ask with</label>
+                                <select id="settings-study-direction"><option value="front">Term</option><option value="back">Definition</option><option value="mixed">Mixed sides</option></select>
+                                <p class="settings-hint">Saved on this device; change them during a session too.</p>
+                            </div>
+                        </details>
+                        <details id="planner-availability" class="glass-card settings-wide settings-disclosure" data-settings-panel="general">
+                            <summary class="settings-section-heading"><i class="fas fa-calendar" aria-hidden="true"></i> Study time preferences</summary>
+                            <div class="settings-disclosure-body">
+                                <p class="settings-hint">Only affects suggested work.</p>
+                                <label class="planner-budget" for="planner-daily-minutes"><span>Default minutes per study day</span><span><input id="planner-daily-minutes" type="number" min="0" max="480" step="1" value="90"> min</span></label>
+                                <fieldset class="planner-workdays"><legend>Days to work</legend><p class="settings-hint">Optional times override the default.</p><div id="planner-weekday-controls"></div></fieldset>
+                                <p id="planner-availability-status" class="settings-hint" aria-live="polite"></p>
+                                <p class="settings-hint">0 = day off.</p>
+                            </div>
+                        </details>
                         <section class="glass-card settings-wide" data-settings-panel="general">
                             <h3 class="settings-section-heading"><i class="fas fa-shield-halved" aria-hidden="true"></i> Privacy &amp; personalization</h3>
                             <div class="settings-actions"><button type="button" class="secondary-btn" data-action="edit-public-profile">Public profile &amp; privacy</button><button type="button" class="secondary-btn" data-target="appearance-view">Appearance &amp; accessibility</button><button type="button" class="secondary-btn" data-target="sound-view">Audio preferences</button><button id="admin-nav-item" type="button" class="secondary-btn hidden" data-target="admin-view"><i class="fas fa-user-shield" aria-hidden="true"></i> Staff tools</button></div>

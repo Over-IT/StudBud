@@ -4,6 +4,10 @@ module.exports = async function runHomeChecks(page) {
     const saved = await page.evaluate(() => structuredClone(window.NexusApp.AppState.state));
     try {
         await page.locator('#sidebar [data-target="dashboard-view"]').click();
+        const logo = page.locator('#dashboard-view .home-welcome-mark');
+        await logo.waitFor({ state: 'visible' });
+        assert.ok(await logo.evaluate(image => image.complete && image.naturalWidth > 0),
+            'Home displays the StudBud logo on every screen size');
         await page.evaluate(() => {
             const app = window.NexusApp;
             app.AppState.saveStateChanges({ courses: [], assignments: [], flashcards: [] });
@@ -65,6 +69,33 @@ module.exports = async function runHomeChecks(page) {
             await page.waitForFunction(route => window.NexusApp.AppState.get('currentView') === route, route);
             await page.locator('#sidebar [data-target="dashboard-view"]').click();
         }
+        await page.locator('.header-settings-button').click();
+        await page.locator('#settings-view.active').waitFor();
+        const flashcards = page.locator('#settings-view details').filter({ has: page.locator('#settings-study-mode') });
+        const availability = page.locator('#planner-availability');
+        for (const panel of [flashcards, availability]) {
+            assert.equal(await panel.getAttribute('open'), null, 'Secondary settings start collapsed');
+            const collapsedHeight = (await panel.boundingBox()).height;
+            await panel.locator('summary').focus();
+            await page.keyboard.press('Enter');
+            assert.ok(await panel.evaluate(element => element.open), 'Settings sections expand with the keyboard');
+            assert.ok((await panel.boundingBox()).height > collapsedHeight + 60, 'Collapsed settings save meaningful vertical space');
+            await panel.locator('summary').click();
+        }
+        await flashcards.locator('summary').click();
+        const answerStyle = page.locator('#settings-study-mode');
+        const originalStyle = await answerStyle.inputValue();
+        const nextStyle = originalStyle === 'type' ? 'reveal' : 'type';
+        await answerStyle.selectOption(nextStyle);
+        await flashcards.locator('summary').click();
+        await flashcards.locator('summary').click();
+        assert.equal(await answerStyle.inputValue(), nextStyle, 'Collapsing preferences preserves saved selections');
+        assert.equal(await page.evaluate(() => localStorage.getItem('studbud-type-answer')), nextStyle === 'type' ? '1' : '0',
+            'Expanded preference controls still save normally');
+        await answerStyle.selectOption(originalStyle);
+        await flashcards.locator('summary').click();
+        assert.equal(await page.locator('#settings-start-page').isVisible(), true, 'Common app preferences stay visible');
+        assert.equal(await page.locator('#sign-out-btn').isVisible(), true, 'Account controls stay visible');
     } finally {
         await page.evaluate(saved => {
             const app = window.NexusApp;

@@ -761,7 +761,7 @@ input:focus, select:focus, textarea:focus {
 .logo-mark {
     width: 40px;
     height: 40px;
-    border-radius: 11px;
+    border-radius: 19.53125%;
     flex-shrink: 0;
     box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
 }
@@ -1223,8 +1223,8 @@ input:focus, select:focus, textarea:focus {
 }
 @media (max-width: 600px) {
     .home-welcome { padding: 22px 18px; gap: 18px; border-radius: 18px; }
-    .home-welcome-copy { grid-column: 1 / -1; }
-    .home-welcome-mark { display: none; }
+    .home-welcome-copy { grid-column: 1 / -1; grid-row: 2; }
+    .home-welcome-mark { grid-column: 1 / -1; grid-row: 1; width: 64px; height: 64px; }
     .home-at-a-glance > button { padding: 0 10px; }
     .home-at-a-glance strong { font-size: 1.4rem; }
     .home-at-a-glance span { font-size: .75rem; }
@@ -4637,7 +4637,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent-primary);
 #sidebar { background: var(--bg-surface, var(--bg-glass)); border-right: 2px solid var(--border-glass); }
 .sidebar-header { border-bottom: 0; }
 .logo-text { font-weight: 900; font-size: 1.4rem; letter-spacing: -.02em; }
-.logo-mark { box-shadow: 0 4px 0 color-mix(in srgb, var(--accent-primary) 55%, #000); border-radius: 12px; }
+.logo-mark { box-shadow: 0 4px 0 color-mix(in srgb, var(--accent-primary) 55%, #000); border-radius: 19.53125%; }
 .nav-links { gap: 4px; }
 .nav-item {
     --nav-c: var(--accent-primary);
@@ -5221,11 +5221,16 @@ details.planner-grade-inbox { display: block; }
 .planner-work-filters .assignment-status-summary { grid-template-columns: repeat(auto-fit, minmax(min(125px, 100%), 1fr)); }
 .settings-grid > [data-settings-panel] { min-width: 0; }
 .settings-grid > [data-settings-panel] > .glass-card { padding: 24px; }
-.settings-grid [data-settings-panel] > label { font-size: .85rem; font-weight: 700; }
+.settings-grid :is([data-settings-panel], .settings-disclosure-body) > label { font-size: .85rem; font-weight: 700; }
 #settings-view .settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
 #settings-view .settings-wide, #settings-view [data-settings-panel="school"], #settings-view [data-settings-panel="data"] { grid-column: 1 / -1; }
 .settings-section-heading { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; font-size: 1.05rem; }
 .settings-section-heading > i { display: grid; place-items: center; flex: 0 0 34px; height: 34px; border-radius: 10px; background: var(--bg-glass-hover); color: var(--accent-primary); font-size: 1rem; }
+.settings-disclosure > summary { min-height: 44px; margin: 0; cursor: pointer; list-style: none; font-weight: 700; }
+.settings-disclosure > summary::-webkit-details-marker { display: none; }
+.settings-disclosure > summary::after { content: ''; flex: 0 0 8px; height: 8px; margin-left: auto; margin-right: 4px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); }
+.settings-disclosure[open] > summary { margin-bottom: 16px; }
+.settings-disclosure[open] > summary::after { transform: rotate(225deg); }
 #settings-view .settings-school-card { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
 .settings-field-section { display: grid; gap: 16px; align-content: start; min-width: 0; }
 .settings-school-card > :not(.settings-field-section) { grid-column: 1 / -1; }

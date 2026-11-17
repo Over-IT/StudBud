@@ -9,6 +9,7 @@ const runGameChecks = require('./games.cjs');
 const runPersistenceChecks = require('./persistence.cjs');
 const runCommunityChecks = require('./community-sets.cjs');
 const runHomeChecks = require('./home.cjs');
+const runBrandingChecks = require('./branding.cjs');
 
 const root = path.resolve(__dirname, '../..');
 const types = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css',
@@ -70,6 +71,7 @@ async function serve(request, response) {
                 page.on('pageerror', error => errors.push(error.message));
                 await page.goto(origin);
                 await page.waitForFunction(() => window.StudBudCloud?.appStarted);
+                if (name === 'desktop') await runBrandingChecks(page);
                 assert.equal(chartRequests, 0, 'studying does not load the chart library at startup');
                 assert.equal(accountLibraryRequests, 0, 'offline guest startup does not download the account SDK');
                 await runHomeChecks(page);

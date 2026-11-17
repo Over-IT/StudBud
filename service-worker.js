@@ -1,4 +1,4 @@
-const CACHE_NAME = 'studbud-shell-v237';
+const CACHE_NAME = 'studbud-shell-v240';
 let offlineNavigation = false;
 const PUBLIC_DEPENDENCIES = [
     'https://cdn.jsdelivr.net/npm/chart.js',
@@ -20,6 +20,8 @@ const APP_FILES = [
     './assets/fonts/nunito-latin.woff2',
     './manifest.webmanifest',
     './icons/studbud.svg',
+    './icons/studbud-square.svg',
+    './icons/studbud-circle.svg',
     './icons/icon-192.png',
     './icons/icon-512.png',
     './icons/icon-maskable-512.png',

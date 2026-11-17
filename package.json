@@ -2,6 +2,7 @@
   "name": "studbud",
   "private": true,
   "scripts": {
+    "icons": "node scripts/generate-icons.cjs",
     "test": "node --test tests/*.cjs",
     "test:browser": "node tests/browser/smoke.cjs"
   },

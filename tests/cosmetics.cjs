@@ -228,8 +228,13 @@ assert.match(studio.innerHTML, /data-action="guest-create-account"/);
 assert.doesNotMatch(studio.innerHTML, /data-action="multiplayer-buy"/, 'guests can preview without a purchase action');
 app.renderCharacterStudio({ ...outfit, color: '#34d399' }, 'shop', 'palette', catalog.find(item => item.id === 'palette_ocean'));
 assert.equal(previews.at(-1).color, '#38bdf8', 'palette previews use the proposed palette, not the guest color override');
-assert.ok(app.shopItemCard(outfit, tryHat).includes(`data-action="character-try-on" data-id="${tryHat.id}" aria-label="Try on ${tryHat.name}"`),
-    'every item preview is a keyboard-accessible, explicitly named try-on button');
+assert.doesNotMatch(app.shopItemCard(outfit, tryHat), /data-action="character-try-on"/,
+    'shop thumbnails do not offer a try-on control outside the locker');
+assert.ok(app.shopItemCard(outfit, tryHat, true).includes(`data-action="character-try-on" data-id="${tryHat.id}" aria-label="Try on ${tryHat.name}"`),
+    'locker item previews remain keyboard-accessible, explicitly named try-on buttons');
+studio.innerHTML = '';
+app.renderMultiplayerShop(outfit);
+assert.equal(studio.innerHTML, '', 'rendering the shop does not mount a character studio');
 elements.delete('shop-character-studio');
 const personal = util.normalizeAppearance({ hairStyle: 'curls', hairColor: '#f472b6', shirtColor: '#38bdf8',
     shirtStyle: 'stripes', skinTone: '#8d5524', pantsColor: '#f5f5f4', eyeColor: '#15803d', expression: 'smile' });

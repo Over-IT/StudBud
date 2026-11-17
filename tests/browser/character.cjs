@@ -81,6 +81,10 @@ async function runCharacterChecks(page) {
     await page.locator('#inventory-view [data-action="character-try-on"][data-id="hat_wizard"]').click();
     assert.equal(await page.evaluate(() => window.NexusApp.characterCameras.inventory.cos.hat), 'hat_wizard', `${diagnostic}: locker try-on previews the proposed hat`);
     assert.equal(await page.evaluate(() => window.NexusApp.multiplayerProfile.equipped_hat), 'hat_cap', `${diagnostic}: locker try-on leaves the saved hat untouched`);
+    assert.equal(await studio.locator('.character-stage').getAttribute('data-camera'), 'detail', `${diagnostic}: locker hats automatically frame the crown`);
+    await studio.locator('[data-action="character-preview-reset"]').click();
+    assert.equal(await studio.locator('.character-selection strong').textContent(), 'Make it yours', `${diagnostic}: locker try-on resets without equipping`);
+    assert.equal(await page.evaluate(() => window.NexusApp.characterCameras.inventory.cos.hat), 'hat_cap', `${diagnostic}: reset restores the equipped hat`);
     await page.evaluate(profile => {
         const app = window.NexusApp;
         app.multiplayerProfile = profile;
@@ -90,15 +94,19 @@ async function runCharacterChecks(page) {
     assert.equal(await page.locator('#inventory-view [data-feature="hairStyle"][data-value="curls"]').getAttribute('aria-pressed'), 'true', `${diagnostic}: default features survive costume changes`);
     await page.evaluate(() => { location.hash = '#shop'; });
     await page.locator('#shop-view [data-shop-tab="hat"]').click();
-    await page.locator('#shop-view [data-action="character-try-on"][data-id="hat_wizard"]').click();
-    assert.equal(await page.locator('#shop-character-studio .character-stage').getAttribute('data-camera'), 'detail', `${diagnostic}: hats automatically frame the crown`);
-    await page.locator('#shop-character-studio [data-action="character-preview-reset"]').click();
-    assert.equal(await page.locator('#shop-character-studio .character-selection strong').textContent(), 'Make it yours', `${diagnostic}: try-on resets without equipping`);
+    assert.equal(await page.locator('#shop-view .character-studio, #shop-view .character-stage, #shop-view [data-action="character-try-on"]').count(), 0,
+        `${diagnostic}: the shop has no large character preview or editor controls`);
+    assert.ok(await page.locator('#shop-view .shop-preview .player-avatar').count() > 0, `${diagnostic}: shop item thumbnails remain visible`);
+    const shopBox = await page.locator('#multiplayer-shop').boundingBox();
+    const shopViewBox = await page.locator('#shop-view').boundingBox();
+    assert.ok(shopBox.width >= shopViewBox.width - 2, `${diagnostic}: the shop uses the space freed by the character panel`);
     assert.equal(await page.locator('#shop-view [data-action="multiplayer-buy"]').count(), 0, `${diagnostic}: guests are not shown unusable purchase actions`);
     assert.ok(await page.locator('#shop-view .multiplayer-shop-item [data-action="guest-create-account"]').count() > 0, `${diagnostic}: guests can create an account from item cards`);
     await page.locator('#shop-view .shop-tabs [data-shop-tab="boxes"]').click();
     assert.equal(await page.locator('#shop-view [data-action="multiplayer-mystery"]').count(), 0, `${diagnostic}: guests cannot attempt a paid box opening`);
     assert.ok(await page.locator('#shop-view .box-card [data-action="guest-create-account"]').count() > 0, `${diagnostic}: guest box cards explain how to collect rewards`);
+    await page.locator('#shop-view [data-target="inventory-view"]').click();
+    await studio.locator('.character-stage').waitFor();
     return { viewport, frames, controls: 'zoom, pointer/keyboard pan, full/auto/reset, focus, guest save, hat try-on/reset' };
 }
 
