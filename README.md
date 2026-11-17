@@ -13,6 +13,7 @@ A student home base for planning schoolwork, studying flashcards and playing stu
 - **Import:** paste school data, review matched records and changes, then import or undo the last batch.
 
 Accounts are optional for local study. Sign in for cloud sync and social features.
+Choose **Other / prefer not to say** for school to use custom classes without selecting a school. Optional public profile details can be left blank.
 Install from your browser's menu, or use **Share → Add to Home Screen** on iOS.
 Open the app online once to cache offline assets; online features still require a connection.
 

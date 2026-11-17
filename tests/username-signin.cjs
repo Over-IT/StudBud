@@ -76,9 +76,18 @@ async function run() {
     assert.match(node('auth-status').textContent, /at least 12 characters/);
     assert.equal(requests.length, 2, 'new short passwords are rejected without silently sending a legacy plaintext password');
     node('signup-password').value = node('signup-password-confirm').value = 'a unique long passphrase';
+    const schoolMarkup = source('index.html');
+    for (const id of ['signup-school', 'settings-school']) {
+        const select = schoolMarkup.match(new RegExp(`<select id="${id}"[^>]*>([\\s\\S]*?)</select>`))[1];
+        const option = select.match(/<option value="([^"]+)">Other \/ prefer not to say<\/option>/);
+        assert.ok(option, `${id} offers a non-disclosing school choice`);
+        assert.equal(option[1], 'other', 'opting out uses the existing Other behavior without storing a separate refusal flag');
+        if (id === 'signup-school') node(id).value = option[1];
+    }
     await cloud.handleSignup(submit);
     assert.equal(requests.at(-1).email, 'new_student@accounts.studbud.invalid');
     assert.equal(requests.at(-1).options.data.username, 'new_student');
+    assert.equal(requests.at(-1).options.data.school, 'other', 'signup sends Other when the student prefers not to disclose their school');
     assert.equal(opened, 2, 'signup immediately opens an account with no verification step');
     node('signup-password').value = node('signup-password-confirm').value = 'a unique long passphrase';
     sessionAvailable = false;

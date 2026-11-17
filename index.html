@@ -62,7 +62,8 @@
                 <label>Username (3–24 letters, numbers, or underscores)<input id="signup-username" type="text" autocomplete="username" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" title="Use 3–24 letters, numbers, or underscores." required></label>
                 <label>Password (at least 12 characters)<input id="signup-password" type="password" autocomplete="new-password" minlength="12" required></label>
                 <label>Confirm password<input id="signup-password-confirm" type="password" autocomplete="new-password" minlength="12" required></label>
-                <label>School<select id="signup-school" required><option value="">Choose your school…</option><option value="pchs">Parkway Central High School</option><option value="pnhs">Parkway North High School</option><option value="pshs">Parkway South High School</option><option value="pwhs">Parkway West High School</option><option value="other">Other / not listed</option></select></label>
+                <label>School<select id="signup-school" required aria-describedby="signup-school-hint"><option value="">Choose your school…</option><option value="pchs">Parkway Central High School</option><option value="pnhs">Parkway North High School</option><option value="pshs">Parkway South High School</option><option value="pwhs">Parkway West High School</option><option value="other">Other / prefer not to say</option></select></label>
+                <p id="signup-school-hint" class="auth-hint">School not listed, or rather keep it to yourself? Choose Other / prefer not to say. You can still add your own classes and study sets.</p>
                 <p class="settings-hint">Use a unique passphrase, not your school password. It encrypts your private synced data and is not sent during private sign-in. Lost encryption passwords cannot be recovered. After setup, download and verify an encrypted backup in Settings → Account &amp; saved data. No email needed.</p>
                 <label class="auth-remember"><input id="signup-remember-device" name="remember-device" type="checkbox" aria-describedby="signup-device-hint"><span>Remember this device for 30 days</span></label>
                 <p id="signup-device-hint" class="settings-hint auth-device-hint">Only on a private device. Leave unchecked on school or shared computers.</p>
@@ -980,7 +981,7 @@
                             <div class="card-title-row"><h2>Public profile</h2><button type="button" class="secondary-btn" data-action="preview-public-profile"><i class="fas fa-eye" aria-hidden="true"></i> Preview</button></div>
                             <p class="settings-hint">Shown on your public profile.</p>
                             <details class="settings-help"><summary>Privacy details</summary><p>Use a username that does not identify you. Course matching, discovery and study activity sharing are optional.</p></details>
-                            <div class="form-group"><label for="public-subject">Favorite subject (optional)</label><input type="text" id="public-subject" maxlength="40" autocomplete="off"></div>
+                            <div class="form-group"><label for="public-subject">Favorite subject (optional)</label><input type="text" id="public-subject" maxlength="40" autocomplete="off" placeholder="Leave blank if you prefer not to say" aria-describedby="public-subject-hint"><small id="public-subject-hint" class="settings-hint">Leave blank to keep this off your public profile.</small></div>
                             <label class="settings-check"><input type="checkbox" id="public-share-courses" disabled> Enable course sharing for classrooms</label>
                             <p id="public-courses-availability" class="settings-hint">Off by default. Allows the service to read course identifiers and catalog titles for class discussions, shared sets and games. Grades, assignments and schedules stay encrypted.</p>
                             <label class="settings-check"><input type="checkbox" id="public-show-classmates" disabled> Let students sharing a course find my username</label>
@@ -1173,8 +1174,8 @@
                             <h3 class="settings-section-heading"><i class="fas fa-school" aria-hidden="true"></i> School</h3>
                             <div class="form-group">
                                 <label for="settings-school">School</label>
-                                <select id="settings-school"><option value="pchs">Parkway Central High School</option><option value="pnhs">Parkway North High School</option><option value="pshs">Parkway South High School</option><option value="pwhs">Parkway West High School</option><option value="other">Other / not listed</option></select>
-                                <small class="settings-hint">Private. Not shown on your profile.</small>
+                                <select id="settings-school" aria-describedby="settings-school-hint"><option value="pchs">Parkway Central High School</option><option value="pnhs">Parkway North High School</option><option value="pshs">Parkway South High School</option><option value="pwhs">Parkway West High School</option><option value="other">Other / prefer not to say</option></select>
+                                <small id="settings-school-hint" class="settings-hint">Not shown on your public profile. Other / prefer not to say uses custom classes and calendar dates instead of a school catalog. School-specific communities and discovery require a supported school.</small>
                             </div>
                             </section>
                             <section class="settings-field-section">
