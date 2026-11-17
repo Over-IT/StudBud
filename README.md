@@ -22,9 +22,9 @@ Open the app online once to cache offline assets; online features still require 
 
 ### Logo variants
 
-Use `icons/studbud.svg` everywhere for the same rounded-square logo. Its dark outline is inset from the canvas so it stays visible instead of being clipped by the image edge. Do not apply a CSS shape mask to logo images. The square and circle SVG paths are retained as aliases and render the same logo.
+Use `icons/studbud.svg` for rounded-square marks, `icons/studbud-square.svg` for square marks, and `icons/studbud-circle.svg` for circular marks. Each variant has a matching outer frame that reaches its shape's edge. Do not apply a CSS shape mask to logo images.
 
-Run `npm run icons` after replacing `icons/studbud-source.png`. It regenerates the SVG aliases and PNGs. The Apple icon uses the logo's lavender background, while the maskable icon keeps the square-framed artwork inside the central safe area on that same background.
+Run `npm run icons` after replacing `icons/studbud-source.png`. It regenerates the SVG variants and PNGs. Standard app PNGs use the square frame; the Apple icon has a small inset for its rounded-corner mask, and the maskable icon keeps the square frame inside the central safe area.
 
 ## Run locally
 
