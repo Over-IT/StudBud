@@ -6880,6 +6880,20 @@
             this.updateMultiplayerGoalInputs();
         }
 
+        scrollToMultiplayerSettings() {
+            const settings = this.multiplayerScreen === 'solo'
+                ? document.getElementById('solo-game-settings')
+                : document.getElementById('host-game-form');
+            if (!settings || settings.classList.contains('hidden')) return;
+            const rect = settings.getBoundingClientRect();
+            const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+            const comfortablyVisible = rect.top >= 84 && rect.bottom <= viewportHeight - 24;
+            if (comfortablyVisible) return;
+            requestAnimationFrame(() => {
+                settings.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+        }
+
         stopWaitingRunner() {
             this.waitingRunner.running = false;
             this.waitingRunner.started = false;
@@ -11605,6 +11619,7 @@
                     document.querySelectorAll('.multiplayer-mode').forEach(button =>
                         button.classList.toggle('selected', button === target)
                     );
+                    this.scrollToMultiplayerSettings();
                 } else if (target.matches('[data-multiplayer-tab]')) {
                     this.setMultiplayerScreen(target.dataset.multiplayerTab);
                 } else if (id === 'waiting-practice-btn') {

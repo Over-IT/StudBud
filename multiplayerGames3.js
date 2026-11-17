@@ -817,17 +817,31 @@
         sellValue(troop) {
             return this.unlimitedTestCash ? 0 : Math.floor(DEFENSE_TROOPS[troop.type].cost * (1 + troop.level * (troop.level - 1) / 2) * .75);
         }
+        waveReinforcementPressure() {
+            const boosted = Math.max(...this.waveArmy.map(army => army.reduce((sum, value) => sum + value, 0)));
+            return boosted;
+        }
+        nextWaveDelay() {
+            return clamp(22 - this.waveNumber * 0.85, 9, 22);
+        }
         waveEnemyHealth(type, wave) {
             const n = Math.max(0, wave - 1);
-            return DEFENSE_ENEMIES[type].hp * (1 + n * .22 + n * n * .04);
+            const early = n * 0.17;
+            const mid = n * n * 0.022;
+            const late = Math.max(0, n - 10) * 0.03;
+            return DEFENSE_ENEMIES[type].hp * (1 + early + mid + late);
         }
         waveEnemySpeed(enemy) {
-            return DEFENSE_ENEMIES[enemy.type].speed * (1 + Math.min(.5, Math.max(0, (enemy.wave || 1) - 1) * .025));
+            const n = Math.max(0, (enemy.wave || 1) - 1);
+            const speedScale = 1 + Math.min(0.52, n * 0.02 + Math.max(0, n - 8) * 0.01);
+            return DEFENSE_ENEMIES[enemy.type].speed * speedScale;
         }
         waveEnemyDamage(enemy) {
-            return Math.ceil(DEFENSE_ENEMIES[enemy.type].damage * (1 + Math.floor(Math.max(0, (enemy.wave || 1) - 1) / 3) * .2));
+            const n = Math.max(0, (enemy.wave || 1) - 1);
+            const scale = 1 + Math.floor(n / 4) * 0.18 + Math.max(0, n - 12) * 0.015;
+            return Math.ceil(DEFENSE_ENEMIES[enemy.type].damage * scale);
         }
-        waveSize() { return 4 + this.waveNumber + Math.max(...this.waveArmy.map(army => army.reduce((a, b) => a + b, 0))); }
+        waveSize() { return 4 + this.waveNumber + this.waveReinforcementPressure(); }
         waveTypeFor(team, slot) {
             for (let type = 0; type < DEFENSE_ENEMIES.length; type++) {
                 if (slot < this.waveArmy[team][type]) return type;
@@ -981,7 +995,7 @@
                     }
                     this.waveSpawnRemaining--;
                     if (this.waveSpawnRemaining > 0) this.waveSpawnTimer += Math.min(.7, 8 / this.waveSize());
-                    else { this.waveTimer = 20; this.waveSpawnTimer = 0; }
+                    else { this.waveTimer = this.nextWaveDelay(); this.waveSpawnTimer = 0; }
                 }
             } else {
                 this.waveTimer -= dt;

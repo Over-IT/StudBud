@@ -742,6 +742,9 @@
             const depth = this.depthAt(me.y + me.h);
             const px = w / 2 + (me.x + me.w / 2 - this.camX) * this.zoom;
             const py = h / 2 + (me.y + me.h / 2 - this.camY) * this.zoom;
+            const depotTarget = this.base;
+            const depotX = w / 2 + (depotTarget.x + depotTarget.w / 2 - this.camX) * this.zoom;
+            const depotY = h / 2 + (depotTarget.y + depotTarget.h * 0.55 - this.camY) * this.zoom;
             // Lantern fog: the deeper you go, the smaller the circle you can see.
             const fog = s.preview ? clamp(depth / 66, 0.03, 0.5) : clamp(0.25 + depth / 14, 0.25, 0.95);
             const inner = (s.preview ? 260 : clamp(230 - depth * 1.4, 150, 230)) * this.zoom;
@@ -749,6 +752,36 @@
             mineFog(this, ctx, px, py, r * 0.45, r * 1.75,
                 [[0, 'rgba(255,224,160,.05)'], [0.35, `rgba(2,5,14,${(fogA * 0.35).toFixed(3)})`], [1, `rgba(2,5,14,${fogA})`]], w, h);
             if (s.preview || s.spectator) return;
+            const edgeInset = 26;
+            const markerX = clamp(depotX, edgeInset, w - edgeInset);
+            const markerY = clamp(depotY, edgeInset, h - edgeInset);
+            if (Math.abs(markerX - depotX) > 0.5 || Math.abs(markerY - depotY) > 0.5) {
+                const angle = Math.atan2(depotY - markerY, depotX - markerX);
+                ctx.save();
+                ctx.translate(markerX, markerY);
+                ctx.rotate(angle);
+                ctx.fillStyle = 'rgba(8,12,24,.8)';
+                ctx.beginPath();
+                ctx.arc(0, 0, 16, 0, TAU);
+                ctx.fill();
+                ctx.strokeStyle = '#facc15';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(0, 0, 15, 0, TAU);
+                ctx.stroke();
+                ctx.fillStyle = '#fde047';
+                ctx.beginPath();
+                ctx.moveTo(12, 0);
+                ctx.lineTo(-6, -7);
+                ctx.lineTo(-6, 7);
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+                ctx.fillStyle = '#fde68a';
+                ctx.font = '800 11px system-ui';
+                ctx.textAlign = 'center';
+                ctx.fillText('DEPOT', clamp(markerX, 44, w - 44), markerY + (markerY < h * 0.5 ? 26 : -18));
+            }
             const compactHud = (s.hudBounds?.().w ?? w) < 413 * Math.max(1, 1 / (s.scale || 1));
             const haulX = compactHud ? 27 : 238, haulY = compactHud ? 42 : 0;
             s.placeHud(ctx, 0, 0, compactHud ? 230 : 413, compactHud ? 74 : 34, 'top-center');

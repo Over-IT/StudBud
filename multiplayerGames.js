@@ -18,11 +18,47 @@
         A.util.screenLayer(game, 'backdropLayer', `duel:${low}:${w}:${h}`, ctx, paint => {
             if (low) { paint.fillStyle = '#0b1230'; paint.fillRect(0, 0, w, h); }
             else A.util.bandGradient(paint, 0, 0, w, h, [[0, '#0b1230'], [1, '#3b1a5c']]);
+            if (!low) {
+                const glow = paint.createRadialGradient(w * 0.22, h * 0.2, 20, w * 0.22, h * 0.2, h * 0.7);
+                glow.addColorStop(0, 'rgba(56,189,248,.16)');
+                glow.addColorStop(1, 'rgba(15,23,42,0)');
+                paint.fillStyle = glow;
+                paint.fillRect(0, 0, w, h);
+                const glow2 = paint.createRadialGradient(w * 0.82, h * 0.28, 15, w * 0.82, h * 0.28, h * 0.65);
+                glow2.addColorStop(0, 'rgba(236,72,153,.13)');
+                glow2.addColorStop(1, 'rgba(15,23,42,0)');
+                paint.fillStyle = glow2;
+                paint.fillRect(0, 0, w, h);
+            }
             for (let i = 0; i < (low ? 16 : 70); i++) {
                 paint.fillStyle = `rgba(255,255,255,${0.2 + (i % 5) * 0.12})`;
                 paint.fillRect((hashStr(`st${i}`) % 1000) / 1000 * w, (hashStr(`sy${i}`) % 600) / 600 * h * 0.8, 2, 2);
             }
         });
+    }
+
+    function drawDuelAtmosphere(ctx, game, bounds) {
+        if (game.s.graphics?.low) return;
+        const left = bounds ? bounds.x0 : 0;
+        const right = bounds ? bounds.x1 : game.W;
+        const top = bounds ? bounds.y0 : 0;
+        const bottom = bounds ? bounds.y1 : game.H;
+        const width = right - left;
+        const height = bottom - top;
+        const t = game.anim;
+        for (let i = 0; i < 14; i++) {
+            const p = hashStr(`duel-fx-${i}`) / 0xffffffff;
+            const q = hashStr(`duel-fy-${i}`) / 0xffffffff;
+            const drift = (t * (18 + (i % 5) * 7)) % (width + 220);
+            const x = left - 110 + drift + p * 150;
+            const y = top + 40 + q * height * 0.75 + Math.sin(t * 0.9 + i * 1.7) * 8;
+            const radius = 26 + (i % 4) * 8;
+            const alpha = 0.045 + (i % 3) * 0.018;
+            ctx.fillStyle = i % 2 ? `rgba(96,165,250,${alpha})` : `rgba(236,72,153,${alpha})`;
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, TAU);
+            ctx.fill();
+        }
     }
 
     function updateDashPose(game, active, dt) {
@@ -3548,6 +3584,7 @@
             this.lastHit = { by: null, at: 0 }; this.anim = 0; this.orb = { x: this.W / 2, y: 150, t: 0 }; this.state = 0; this.shake = 0;
             this.hitFlash = 0; this.hitlag = 0; this.dropTimer = 0; this.dodge = 0; this.dodgeCd = 0; this.shieldBreak = 0;
             this.shield = 100; this.guardT = 0; this.shieldRest = 0; this.pendingHeavy = [];
+            this.combatWaves = [];
             this.view = { z: 1, x: this.me.x + 17, y: this.me.y + 28 }; this.aim = 0; this.swingAim = 0; this.offX = 0; this.offY = 0; this.touchAim = null;
             this.hillTick = 0; this.hillState = 'away';
             this.zones = [
@@ -3596,10 +3633,24 @@
             }
         }
 
+        addCombatWave(x, y, color = '#fde68a', radius = 22, growth = 240, life = 0.35) {
+            this.combatWaves.push({ x, y, color, r: radius, g: growth, t: life, life });
+            if (this.combatWaves.length > 28) this.combatWaves.shift();
+        }
+
+        updateCombatWaves(dt) {
+            for (const wave of this.combatWaves) {
+                wave.t = Math.max(0, wave.t - dt);
+                wave.r += wave.g * dt;
+            }
+            compactAlive(this.combatWaves, 't');
+        }
+
         update(dt) {
             const s = this.s, me = this.me;
             this.updateCamera(s.vw, s.vh, dt);
             this.anim += dt; this.shake = Math.max(0, this.shake - dt); this.hitFlash = Math.max(0, this.hitFlash - dt);
+            this.updateCombatWaves(dt);
             this.orb.t = Math.max(0, this.orb.t - dt);
             this.invuln = Math.max(0, this.invuln - dt);
             this.hammer = Math.max(0, this.hammer - dt);
@@ -3651,6 +3702,8 @@
             if (this.stun <= 0 && this.dodgeCd <= 0 && s.pressed('ShiftLeft', 'ShiftRight', 'KeyF')) {
                 this.dodge = 0.18; this.dodgeCd = 0.85; this.invuln = Math.max(this.invuln, 0.16);
                 me.vx = (ax || me.face || 1) * 760; me.vy *= 0.45; this.guard = false; s.sfx('dash');
+                this.particles.burst(me.x + 17, me.y + 40, '#7dd3fc', 10, 180, 0.32, 4);
+                this.addCombatWave(me.x + 17, me.y + 34, '#67e8f9', 16, 220, 0.26);
             }
             if (this.stun <= 0 && me.onGround && me.ground?.oneway && s.pressed('ArrowDown')) {
                 this.dropTimer = 0.24; me.y += 3; me.vy = 120;
@@ -3684,6 +3737,7 @@
                 this.swingT = heavy ? 0.45 : 0.22; this.swingCd = heavy ? 1 : 0.52; s.sfx(heavy ? 'hammerSpecial' : 'hammerSwing'); this.swingAim = this.aim;
                 s.emit({ k: 'sw', x: Math.round(me.x + 17), y: Math.round(me.y + 28), d: me.face, a: +this.aim.toFixed(2), p: (this.hammer > 0 ? 1.6 : 1) * (heavy ? 3 : 1), h: heavy ? 1 : 0, by: s.user.id, c: (this.dmg | 0) });
                 this.particles.burst(me.x + 17 + Math.cos(this.aim) * 70, me.y + 28 + Math.sin(this.aim) * 70, '#fde68a', heavy ? 32 : 8, heavy ? 420 : 200, heavy ? .65 : .25, heavy ? 7 : 4);
+                this.addCombatWave(me.x + 17 + Math.cos(this.aim) * 50, me.y + 28 + Math.sin(this.aim) * 50, heavy ? '#fbbf24' : '#fde68a', heavy ? 32 : 16, heavy ? 340 : 200, heavy ? 0.46 : 0.22);
             }
             const wasAir = !me.onGround, landingSpeed = me.vy;
             moveBody(me, this.solids, dt);
@@ -3806,6 +3860,7 @@
                 from.swing = performance.now();
                 from.swingAim = typeof ev.a === 'number' ? ev.a : (ev.d > 0 ? 0 : Math.PI);
                 from.swingHeavy = ev.h === 1;
+                this.addCombatWave(ev.x, ev.y, ev.h === 1 ? '#fbbf24' : '#fde68a', ev.h === 1 ? 34 : 18, ev.h === 1 ? 360 : 220, ev.h === 1 ? 0.44 : 0.25);
                 const distance = dist(me.x + 17, me.y + 28, ev.x, ev.y);
                 if (distance < 900) s.sfx(ev.h === 1 ? 'hammerSpecial' : 'hammerSwing', 60, .6 * (1 - distance / 900) ** 2);
                 if (this.respawn > 0) return;
@@ -3816,12 +3871,14 @@
                 if (ev.parry) {
                     this.stun = Math.max(this.stun, 0.55); this.swingT = 0; this.shake = 0.2;
                     s.toast('Parried!', '#7dd3fc'); s.sfx('shieldParry', 60);
+                    this.addCombatWave(from.x + 17, from.y + 28, '#bae6fd', 20, 260, 0.34);
                     return;
                 }
                 this.specialCharge = Math.min(100, this.specialCharge + (ev.blocked ? 10 : 35));
                 this.hitlag = Math.max(this.hitlag, 0.04); this.shake = 0.18;
                 s.addScore(ev.blocked ? 3 : 10); s.sfx(ev.broke ? 'shieldBreak' : ev.blocked ? 'shieldBlock' : 'hammerHit', 60);
                 this.particles.burst(from.x + 17, from.y + 28, '#fde68a', 8, 200, 0.3, 4);
+                this.addCombatWave(from.x + 17, from.y + 28, ev.broke ? '#f87171' : ev.blocked ? '#7dd3fc' : '#fda4af', ev.broke ? 28 : 18, ev.broke ? 320 : 230, ev.broke ? 0.42 : 0.3);
                 if (ev.broke) s.toast(`Shield broken! ${from.name || 'Rival'} is open`, '#fbbf24');
             } else if (ev.k === 'ko' && ev.by === s.user.id) {
                 this.kos++; s.addScore(100); s.sfx('fighterKO'); s.toast(`KO! ${from.name} launched out`, '#facc15');
@@ -3849,6 +3906,7 @@
             this.stun = Math.max(this.stun, 0.45); this.shieldRest = Duel.SHIELD.regenDelay;
             this.s.sfx('shieldBreak', 60); this.s.toast('Shield broken!', '#f87171');
             this.particles.burst(this.me.x + 17, this.me.y + 28, '#7dd3fc', 22, 380, 0.55, 5);
+            this.addCombatWave(this.me.x + 17, this.me.y + 28, '#f87171', 36, 360, 0.48);
         }
 
         // Apply an attack to the local fighter; returns true when it connected.
@@ -3865,6 +3923,7 @@
                 this.shield = Math.min(100, this.shield + 10); this.hitlag = 0.05; this.hitFlash = 0.1;
                 s.sfx('shieldParry', 60);
                 this.particles.burst(me.x + 17 + me.face * 20, me.y + 28, '#e0f2fe', 18, 360, 0.4, 4);
+                this.addCombatWave(me.x + 17 + me.face * 16, me.y + 28, '#bae6fd', 24, 320, 0.36);
                 s.emit({ k: 'hit', by: ev.by, blocked: true, parry: true });
                 return true;
             }
@@ -3882,6 +3941,7 @@
             if (!broke) s.sfx(blocked ? 'shieldBlock' : 'hammerHit', 60);
             this.lastHit = { by: ev.by, at: Date.now() };
             this.particles.burst(me.x + 17, me.y + 28, blocked ? '#7dd3fc' : '#fca5a5', 14, 320, 0.45, 5);
+            this.addCombatWave(me.x + 17, me.y + 28, broke ? '#f87171' : blocked ? '#7dd3fc' : '#fca5a5', broke ? 30 : 20, broke ? 320 : 240, broke ? 0.4 : 0.3);
             s.emit({ k: 'hit', by: ev.by, blocked, broke });
             return true;
         }
@@ -3968,6 +4028,18 @@
             ctx.scale(z, z);
             const bounds = A.util.canvasView(ctx, 120);
             const visible = (x, y, width = 0, height = 0) => !bounds || (x + width >= bounds.x0 && x <= bounds.x1 && y + height >= bounds.y0 && y <= bounds.y1);
+            drawDuelAtmosphere(ctx, this, bounds);
+            for (const wave of this.combatWaves) {
+                const life = wave.life > 0 ? clamp(wave.t / wave.life, 0, 1) : 0;
+                if (life <= 0 || !visible(wave.x - wave.r, wave.y - wave.r, wave.r * 2, wave.r * 2)) continue;
+                ctx.globalAlpha = 0.75 * life;
+                ctx.strokeStyle = wave.color;
+                ctx.lineWidth = 2 + (1 - life) * 4;
+                ctx.beginPath();
+                ctx.arc(wave.x, wave.y, wave.r, 0, TAU);
+                ctx.stroke();
+            }
+            ctx.globalAlpha = 1;
             for (const p of this.solids) {
                 if (!visible(p.x, p.y, p.w, p.h)) continue;
                 if (p.main) {
@@ -4067,6 +4139,7 @@
             this.res = new A.Resource('Ammo', '#67e8f9', 150, 60, 3);
             this.cam = { x: this.me.x, y: this.me.y }; this.anim = 0; this.shake = 0; this.hitmark = 0; this.flash = 0; this.dx = 1; this.dy = 0;
             this.weapon = 'blaster'; this.weaponT = 0; this.damageTexts = []; this.streak = 0; this.streakT = 0; this.wave = 1;
+            this.lastDashAt = -99;
             this.pickups = [];
             const types = ['shotgun', 'rapid', 'rail', 'health'];
             for (let i = 0; i < 8; i++) {
@@ -4113,10 +4186,10 @@
 
         weaponInfo(type = this.weapon) {
             return {
-                blaster: { name: 'Blaster', sound: 'laserBlaster', cd: 0.16, speed: 950, dmg: 25, life: 0.9, color: '#67e8f9', pellets: 1, cost: 1 },
-                shotgun: { name: 'Scattergun', sound: 'laserScatter', cd: 0.55, speed: 820, dmg: 16, life: 0.48, color: '#fbbf24', pellets: 5, cost: 3 },
-                rapid: { name: 'Rapid pulse', sound: 'laserRapid', cd: 0.065, speed: 1050, dmg: 16, life: 0.85, color: '#a78bfa', pellets: 1, cost: 1 },
-                rail: { name: 'Rail sniper', sound: 'laserRail', cd: 0.75, speed: 1900, dmg: 85, life: 0.85, color: '#f472b6', pellets: 1, cost: 4 }
+                blaster: { name: 'Blaster', sound: 'laserBlaster', cd: 0.16, speed: 950, dmg: 25, life: 0.9, color: '#67e8f9', pellets: 1, spread: 0.04, cost: 1, move: 270, dash: 760, dashCd: 1.1 },
+                shotgun: { name: 'Scattergun', sound: 'laserScatter', cd: 0.52, speed: 860, dmg: 16, life: 0.5, color: '#fbbf24', pellets: 5, spread: 0.065, cost: 3, move: 320, dash: 900, dashCd: 0.85 },
+                rapid: { name: 'Rapid pulse', sound: 'laserRapid', cd: 0.065, speed: 1050, dmg: 16, life: 0.85, color: '#a78bfa', pellets: 1, spread: 0.05, cost: 1, move: 286, dash: 800, dashCd: 1.0 },
+                rail: { name: 'Rail sniper', sound: 'laserRail', cd: 0.78, speed: 1900, dmg: 85, life: 0.85, color: '#f472b6', pellets: 1, spread: 0, cost: 4, move: 220, dash: 620, dashCd: 1.45 }
             }[type] || this.weaponInfo('blaster');
         }
 
@@ -4160,13 +4233,22 @@
                 if (!s.overlay.classList.contains('has-touch') || s.mouse.down || s.mouse.pressed) me.aim = Math.atan2(my - me.y, mx - me.x);
                 const a = s.axis();
                 const len = Math.hypot(a.x, a.y) || 1;
-                const speed = this.dashT > 0 ? 760 : 270;
+                const weapon = this.weaponInfo();
+                const speed = this.dashT > 0 ? weapon.dash : weapon.move;
                 const tx = this.dashT > 0 ? this.dx * speed : (a.x / len) * speed * (a.x || a.y ? 1 : 0);
                 const ty = this.dashT > 0 ? this.dy * speed : (a.y / len) * speed * (a.x || a.y ? 1 : 0);
                 const acc = 2600 * dt;
                 me.vx += clamp(tx - me.vx, -acc, acc); me.vy += clamp(ty - me.vy, -acc, acc);
                 if (a.x || a.y) { this.dx = a.x / len; this.dy = a.y / len; }
-                if (s.pressed('ShiftLeft', 'ShiftRight') && this.dashCd <= 0) { this.dashT = 0.16; this.dashCd = 1.1; this.invuln = Math.max(this.invuln, 0.2); this.particles.burst(me.x, me.y, '#7dd3fc', 12, 200, 0.3, 4); }
+                if (s.pressed('ShiftLeft', 'ShiftRight') && this.dashCd <= 0) {
+                    this.dashT = 0.14;
+                    const since = Math.max(0, s.t - this.lastDashAt);
+                    const spamPenalty = since < 2.5 ? (2.5 - since) * 0.4 : 0;
+                    this.dashCd = weapon.dashCd + spamPenalty;
+                    this.lastDashAt = s.t;
+                    this.invuln = Math.max(this.invuln, 0.2);
+                    this.particles.burst(me.x, me.y, '#7dd3fc', 12, 200, 0.3, 4);
+                }
                 if (s.pressed('Space', 'KeyE') && this.novaCd <= 0 && s.spend(A.ENERGY_COSTS.shooter.nova)) {
                     this.novaCd = 7; this.nova = 0.45;                     this.shake = 0.25; s.sfx('boom'); this.particles.burst(me.x, me.y, '#67e8f9', 40, 520, 0.5, 5);
                     for (const d of this.drones) if (dist(d.x, d.y, me.x, me.y) < 280) { d.hp -= 60; d.hit = 0.2; this.showDamage(d.x, d.y - d.r, 60); const a = Math.atan2(d.y - me.y, d.x - me.x); d.vx = Math.cos(a) * 500; d.vy = Math.sin(a) * 500; if (d.hp <= 0) this.killDrone(d); }
@@ -4175,12 +4257,14 @@
                 this.dashT = Math.max(0, this.dashT - dt);
                 me.x += me.vx * dt; me.y += me.vy * dt;
                 for (const w of this.walls) pushCircleOutOfRect(me, w);
-                const weapon = this.weaponInfo();
                 const cd = this.overdrive > 0 ? weapon.cd * 0.55 : weapon.cd;
                 if ((s.mouse.down || s.down('KeyF')) && this.fireCd <= 0 && this.jam <= 0 && s.spend(weapon.cost)) {
                     this.fireCd = cd; s.sfx(weapon.sound, 30);
                     for (let i = 0; i < weapon.pellets; i++) {
-                        const spread = weapon.pellets > 1 ? (i - 2) * 0.12 : (Math.random() - 0.5) * (this.weapon === 'rail' ? 0 : 0.04);
+                        const center = (weapon.pellets - 1) / 2;
+                        const spread = weapon.pellets > 1
+                            ? (i - center) * weapon.spread
+                            : (Math.random() - 0.5) * weapon.spread;
                         const angle = me.aim + spread;
                         this.fire(angle, weapon.speed, true, s.user.id, weapon.dmg, weapon.color, weapon.life);
                         s.emit({ k: 'sh', x: Math.round(me.x + Math.cos(angle) * 24), y: Math.round(me.y + Math.sin(angle) * 24), a: +angle.toFixed(3), by: s.user.id, w: this.weapon, v: weapon.speed, dmg: weapon.dmg, life: weapon.life });

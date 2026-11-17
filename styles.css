@@ -5849,6 +5849,151 @@ html:has(.modal-overlay:not(.hidden)), html:has(.app-confirmation[open]), html:h
     #top-header .multiplayer-wallet span { font-size: .68rem; }
 }
 body:not(:has(#multiplayer-view.active)) #top-header .multiplayer-wallet { display: none; }
+
+/* Final layout guardrails: keep top bars anchored and readable on all screens. */
+:root { --safe-top: env(safe-area-inset-top, 0px); }
+
+#top-header {
+    position: sticky;
+    top: 0;
+    z-index: calc(var(--z-header) + 2);
+    padding-top: calc(max(10px, var(--safe-top)) + 6px);
+    padding-bottom: 12px;
+}
+
+#top-header .header-left h1 {
+    font-size: clamp(1.12rem, 2.4vw, 1.45rem);
+    line-height: 1.25;
+}
+
+#arcade-canvas-container {
+    width: 100%;
+    max-width: 100%;
+    padding: clamp(10px, 2.4vw, 18px);
+}
+
+.arcade-header {
+    position: sticky;
+    top: calc(var(--safe-top) + 4px);
+    z-index: 6;
+    max-width: 100%;
+    min-height: 52px;
+    padding: 8px 10px;
+    margin: 0 0 var(--spacing-md);
+    border: 1px solid var(--border-glass);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--bg-base) 78%, transparent);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    align-items: center;
+    gap: 10px;
+}
+
+#arcade-game-title {
+    margin: 0;
+    font-size: clamp(1rem, 2.8vw, 1.35rem);
+    line-height: 1.25;
+}
+
+.arcade-game-content {
+    width: min(100%, 960px);
+    padding-inline: clamp(8px, 2vw, 20px);
+}
+
+.mpg-overlay .mpg-hud {
+    top: 0;
+    left: 0;
+    right: 0;
+    padding: calc(var(--safe-top) + 6px) max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left));
+}
+
+.mpg-hud .mpg-chip strong {
+    font-size: clamp(.82rem, 1.8vw, 1rem);
+}
+
+@media (max-width: 700px) {
+    #top-header {
+        padding-top: calc(max(8px, var(--safe-top)) + 4px);
+        padding-inline: 12px;
+        gap: 8px;
+    }
+
+    .arcade-header {
+        top: calc(var(--safe-top) + 2px);
+        min-height: 48px;
+        padding: 7px 9px;
+    }
+
+    #arcade-game-title { font-size: clamp(.96rem, 4.2vw, 1.15rem); }
+
+    .mpg-overlay .mpg-hud {
+        padding-top: calc(var(--safe-top) + 4px);
+        padding-left: max(6px, env(safe-area-inset-left));
+        padding-right: max(6px, env(safe-area-inset-right));
+    }
+}
+
+@media (max-height: 520px) and (orientation: landscape) {
+    #top-header {
+        padding-top: calc(max(4px, var(--safe-top)) + 2px);
+        padding-bottom: 8px;
+    }
+
+    .arcade-header {
+        top: max(0px, var(--safe-top));
+        min-height: 42px;
+        padding: 5px 8px;
+    }
+}
+
+/* Compact high-option selectors so settings stay within quick reach. */
+.multiplayer-mode-picker {
+    align-content: start;
+    max-height: min(48dvh, 440px);
+    overflow: auto;
+    padding-right: 2px;
+}
+
+.multiplayer-mode {
+    min-height: 0;
+    align-content: start;
+}
+
+.game-action-picker {
+    max-height: min(40dvh, 320px);
+    overflow: auto;
+    padding-right: 2px;
+    align-content: start;
+}
+
+@media (max-width: 760px) {
+    .multiplayer-mode-picker {
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(210px, 74vw);
+        grid-template-columns: none;
+        max-height: none;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding-bottom: 4px;
+        scroll-snap-type: x mandatory;
+    }
+
+    .multiplayer-mode {
+        scroll-snap-align: start;
+        min-height: 0;
+        padding: 10px;
+        gap: 6px;
+    }
+
+    .multiplayer-mode .mode-preview-canvas { height: 64px; }
+    .multiplayer-mode small { font-size: .72rem; }
+
+    .game-action-picker {
+        max-height: none;
+        overflow: visible;
+    }
+}
 .importer-fields label { font-size: .85rem; font-weight: 600; }
 
 :is(.multiplayer-tabs, .importer-mode-tabs, .campus-paste-tabs) { flex-wrap: wrap; gap: 6px; padding: 6px; border: 1px solid var(--border-glass); border-radius: 14px; background: var(--bg-base); }
