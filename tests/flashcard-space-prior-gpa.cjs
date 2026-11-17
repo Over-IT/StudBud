@@ -49,7 +49,7 @@ const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 // Usual GPA displays use weighted values; unweighted figures require opening a disclosure.
 {
     const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-    const dashboard = html.slice(html.indexOf('<div class="glass-card widget gpa-widget">'), html.indexOf('<details class="glass-card widget full-width study-history-disclosure">'));
+    const dashboard = html.slice(html.indexOf('<div class="glass-card widget gpa-widget">'), html.indexOf('<details class="glass-card widget study-history-disclosure">'));
     assert.match(dashboard, /id="dash-weighted-gpa"[\s\S]*?stat-label">GPA</);
     assert.match(dashboard, /<details class="gpa-secondary"><summary>View unweighted GPA<\/summary>[\s\S]*?id="dash-unweighted-gpa"/);
     assert.doesNotMatch(dashboard.replace(/<details\b[\s\S]*?<\/details>/g, ''), /[Uu]nweighted/);
