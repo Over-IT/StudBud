@@ -8,6 +8,7 @@ const runSchoolImportChecks = require('./school-import.cjs');
 const runGameChecks = require('./games.cjs');
 const runPersistenceChecks = require('./persistence.cjs');
 const runCommunityChecks = require('./community-sets.cjs');
+const runHomeChecks = require('./home.cjs');
 
 const root = path.resolve(__dirname, '../..');
 const types = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css',
@@ -71,6 +72,7 @@ async function serve(request, response) {
                 await page.waitForFunction(() => window.StudBudCloud?.appStarted);
                 assert.equal(chartRequests, 0, 'studying does not load the chart library at startup');
                 assert.equal(accountLibraryRequests, 0, 'offline guest startup does not download the account SDK');
+                await runHomeChecks(page);
                 if (name === 'desktop') await runPersistenceChecks(page);
                 await runSchoolImportChecks(page);
                 await runCharacterChecks(page);
@@ -86,7 +88,7 @@ async function serve(request, response) {
                 assert.equal(chartRequests, 2, 'on-demand chart loading can recover without a page reload');
                 if (name === 'desktop') await runGameChecks(page);
                 assert.deepEqual(errors, [], `${name}: no uncaught browser errors`);
-                console.log(`${name}: import review/undo, character camera/layout, community discovery/sharing, and chart lazy-load/retry passed.`);
+                console.log(`${name}: Home actions/layout, import review/undo, character camera/layout, community discovery/sharing, and chart lazy-load/retry passed.`);
             } finally { await context.close(); }
         }
     } finally {

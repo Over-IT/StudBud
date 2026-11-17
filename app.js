@@ -3930,9 +3930,11 @@
                     .sort((a, b) => this.assignmentPriority(b, courses).score - this.assignmentPriority(a, courses).score)
                     .slice(0, 3);
                 priorityList.classList.toggle('empty-list', upcoming.length === 0);
-                priorityList.innerHTML = upcoming.length ? upcoming.map(item =>
-                    `<li><button type="button" class="text-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">${this.escapeHTML(item.title)}</button> <small>${this.escapeHTML(item.dueDate || '')}</small>${this.assignmentStatusControl(item)}</li>`
-                ).join('') : '<li class="empty-state">No upcoming tasks.</li>';
+                priorityList.innerHTML = upcoming.length ? upcoming.map(item => {
+                    const due = this.dueLabel(item.dueDate);
+                    const course = courses.find(course => course.code === item.courseCode);
+                    return `<li class="home-task"><div class="home-task-heading"><button type="button" class="text-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">${this.escapeHTML(item.title)}</button><span class="home-task-due ${due.tone}">${this.escapeHTML(due.text)}</span></div><small>${this.escapeHTML(course?.title || item.courseCode || 'Personal task')}</small><div class="home-task-actions">${this.assignmentStatusControl(item)}</div></li>`;
+                }).join('') : '<li class="empty-state">Your task list is clear. Add your next assignment whenever you\'re ready.</li>';
             }
 
             this.renderDailyPlanner();
@@ -10889,7 +10891,34 @@
             this.syncTutorialUI();
         }
 
+        renderHomeWelcome() {
+            const greeting = document.getElementById('home-greeting');
+            if (!greeting) return;
+            const now = new Date(), today = localDateKey(now);
+            const courses = AppState.get('courses') || [];
+            const open = (AppState.get('assignments') || []).filter(item => this.isOpenAssignment(item));
+            const dueToday = open.filter(item => String(item.dueDate || '').slice(0, 10) === today).length;
+            const overdue = open.filter(item => this.assignmentState(item) === 'overdue').length;
+            const sets = (AppState.get('flashcards') || []).length;
+            document.getElementById('home-date').textContent = now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+            greeting.textContent = courses.length || sets ? "Let's make today easier." : 'Welcome to your home base.';
+            document.getElementById('home-summary').textContent = !courses.length && !sets && !open.length
+                ? 'Start with a class or a study set. Make this space your own, one step at a time.'
+                : dueToday ? `You have ${dueToday} task${dueToday === 1 ? '' : 's'} due today. Pick one small step to get started.`
+                    : overdue ? 'Nothing is due today. Your past-due work is here when you’re ready to make a plan.'
+                        : open.length ? 'A little breathing room today. Get ahead on a task or practice a few cards.'
+                            : 'No unfinished tasks. Practice a few cards, play with your Buds, or enjoy the breathing room.';
+            document.getElementById('home-due-today').textContent = dueToday;
+            document.getElementById('home-overdue').textContent = overdue;
+            document.getElementById('home-set-count').textContent = sets;
+            const primary = document.getElementById('home-primary-action');
+            const setup = !courses.length && !open.length && !sets;
+            primary.dataset.target = setup ? 'gpa-view' : 'planner-view';
+            primary.innerHTML = `${setup ? 'Add your first class' : "Open today's plan"} <i class="fas fa-arrow-right" aria-hidden="true"></i>`;
+        }
+
         renderDashboard() {
+            this.renderHomeWelcome();
             this.loadSiteNotice();
             this.renderHomeGradeInbox();
             const courses = AppState.get('courses') || [];
@@ -10898,13 +10927,13 @@
                 const gpa = this.calculateTrackedGPA(courses);
                 const weighted = document.getElementById('dash-weighted-gpa');
                 const unweighted = document.getElementById('dash-unweighted-gpa');
-                if (weighted) weighted.textContent = Number(gpa.weighted).toFixed(2);
-                if (unweighted) unweighted.textContent = Number(gpa.unweighted).toFixed(2);
+                if (weighted) weighted.textContent = courses.length ? Number(gpa.weighted).toFixed(2) : '—';
+                if (unweighted) unweighted.textContent = courses.length ? Number(gpa.unweighted).toFixed(2) : '—';
             }
             this.renderDailySchedule(new Date());
             this.renderTodayStudyPlan();
             this.renderFocusSprint();
-            this.renderStudyRecommendations('study-priority-list', 5);
+            this.renderStudyRecommendations('study-priority-list', 2);
             this.renderStudyProgress();
             this.renderDailyStudyHabit();
             this.syncTutorialUI();
@@ -10915,6 +10944,10 @@
             if (priorityList) {
                 const recommendations = this.getStudyRecommendations().slice(0, limit);
                 const cards = recommendations.map((item, index) => {
+                    if (id === 'study-priority-list') {
+                        const due = this.dueLabel(item.dueDate);
+                        return `<article class="home-assessment"><strong>${this.escapeHTML(item.title)}</strong><span>${this.escapeHTML(item.courseTitle)} · ${this.escapeHTML(due.text)}</span><small>${item.sessionMinutes} min suggested today</small><div class="study-priority-actions">${this.assessmentStudyButton(item)}<button type="button" class="text-btn" data-action="edit-assignment" data-id="${this.escapeHTML(item.id)}">View details</button></div></article>`;
+                    }
                     const decks = (item.deckLinks || []).slice(0, 2).map(({ deck }) =>
                         `<button class="secondary-btn" data-action="study-deck" data-id="${this.escapeHTML(deck.id)}"><i class="fas fa-layer-group"></i> ${this.escapeHTML(deck.title)}</button>`).join('');
                     const studied = item.minutesStudied ? `<small class="study-time-logged"><i class="fas fa-clock"></i> ${item.minutesStudied} min studied${item.flashcardMinutes ? ` (${item.flashcardMinutes} with flashcards)` : ''}</small>` : '';
