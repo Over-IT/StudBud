@@ -100,9 +100,8 @@ const privateSnapshot = {
     assert.equal(typeof encrypted.ciphertext, 'string');
     assert.notEqual(encrypted.ciphertext, JSON.stringify(privateSnapshot));
     assert.deepEqual(JSON.parse(JSON.stringify(encrypted.state.profile)), { school: 'pchs' });
-    assert.deepEqual(JSON.parse(JSON.stringify(encrypted.state.courses)), [{
-        code: 'BIO101', catalogCode: 'BIO101', title: 'Biology', term: 'FY', school: 'pchs'
-    }]);
+    assert.deepEqual(JSON.parse(JSON.stringify(encrypted.state.courses)), [],
+        'even a legacy opted-in account never uploads readable course identifiers');
     assert.deepEqual(JSON.parse(JSON.stringify(encrypted.flashcards)), [{ id: 'deck-1', communityDeckId: '', communitySourceId: '' }]);
     assert.equal(JSON.stringify(encrypted).includes('Sensitive assignment title'), false);
     assert.equal(JSON.stringify(encrypted).includes('private question'), false);
@@ -121,10 +120,8 @@ const privateSnapshot = {
         { code: 'CUSTOM', title: 'Private custom class name', term: 'S1', school: 'pchs' },
         { code: 'OLD', title: 'Old school class', school: 'pwhs' });
     const limited = await cloud.encryptAccountData(custom, user.id);
-    assert.deepEqual(JSON.parse(JSON.stringify(limited.state.courses)), [
-        { code: 'BIO101', catalogCode: 'BIO101', title: 'Biology', term: 'FY', school: 'pchs' },
-        { code: 'CUSTOM', catalogCode: '', title: '', term: 'S1', school: 'pchs' }
-    ], 'index uses only public catalog titles and excludes courses from another school');
+    assert.deepEqual(JSON.parse(JSON.stringify(limited.state.courses)), [],
+        'official, custom and old-school courses all stay encrypted');
     assert.equal(JSON.stringify(limited).includes('Private'), false);
     assert.equal((await cloud.decryptAccountData(limited, user.id)).state.courses[0].title, custom.state.courses[0].title,
         'private titles remain intact inside encryption');

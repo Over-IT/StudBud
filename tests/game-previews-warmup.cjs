@@ -628,11 +628,75 @@ assert.equal(deliveryBot.deliveries || 0, 0, 'a target timeout cannot score an u
 
 const mining = demoFor('miner');
 const miningBot = mining.bots[0];
+assert.equal(miningBot.ai.fuel, mining.game.res.value, 'mining bots start with the player fuel budget');
+assert.equal(miningBot.fuel, mining.game.res.value);
 const untouchedTiles = mining.game.T.slice();
 miningBot.ai.ore = { x: 12, y: 24 }; miningBot.ai.oreUntil = 1000;
 for (let i = 0; i < 360; i++) { mining.clock += 1 / 60; app.stepAmbientBot(mining, miningBot, 0, 1 / 60); }
 assert.ok(mining.game.T.some((tile, i) => tile !== untouchedTiles[i]), 'mining bots must dig a path toward distant ore');
 console.log('Safe delivery recesses, real delivery credit, and active mining bots passed.');
+
+{
+    const demo = demoFor('miner'), bot = demo.bots[0];
+    demo.session.preview = false;
+    demo.session.mode = 'miner'; demo.session.reward = 30;
+    demo.session.rewardAmount = A.Session.prototype.rewardAmount;
+    demo.clock = 10;
+    bot.x = demo.game.base.x - 200;
+    bot.ai.fuel = bot.fuel = 7;
+    app.stepAmbientBot(demo, bot, 0, 1 / 60);
+    assert.ok(bot.ai.rechargeAt > demo.clock, 'low fuel starts a recharge');
+    demo.clock = bot.ai.rechargeAt + .01;
+    app.stepAmbientBot(demo, bot, 0, 1 / 60);
+    assert.equal(bot.ai.fuel, 47, 'one answer adds the same fuel as a player');
+    assert.equal(bot.ai.rechargeAt, 0, 'a bot resumes after one sufficient answer');
+    Object.assign(bot, { x: demo.game.base.x + 30, y: demo.game.base.y + 10, fuel: 25 });
+    bot.ai.fuel = 25; demo.clock += 1;
+    app.stepAmbientBot(demo, bot, 0, 1 / 60);
+    assert.ok(bot.ai.rechargeAt, 'a returned miner refuels at the depot instead of stalling');
+    demo.clock = bot.ai.rechargeAt + .01;
+    app.stepAmbientBot(demo, bot, 0, 1 / 60);
+    assert.equal(bot.ai.fuel, 65);
+    assert.equal(bot.ai.rechargeAt, 0);
+}
+for (const mode of ['frenzy', 'fishing']) {
+    const demo = demoFor(mode), bot = demo.bots[0], ai = bot.ai;
+    demo.session.preview = false; demo.session.mode = mode; demo.session.reward = 30;
+    demo.session.rewardAmount = A.Session.prototype.rewardAmount;
+    ai.rng = () => .5; ai.reaction = .2; ai.fishingTimer = 0;
+    bot.vx = 100;
+    assert.equal(ai.energy, demo.game.res.value, `${mode} starts with the player bait budget`);
+    let casts = 0, completedSecondCast = false, rechargeDuringCast = false;
+    for (let frame = 0; frame < 60 * 40; frame++) {
+        demo.clock = frame / 60;
+        const before = ai.fishingState, bait = ai.energy;
+        app.stepAmbientBot(demo, bot, 0, 1 / 60);
+        if (before === 0 && ai.fishingState === 1) {
+            casts++;
+            assert.equal(ai.energy, bait - A.ENERGY_COSTS.fishing.cast, 'a cast spends the shared cost once');
+        } else if (before !== 0) {
+            assert.equal(ai.energy, bait, 'bait is not drained while casting, waiting or reeling');
+            rechargeDuringCast ||= Boolean(ai.rechargeAt);
+            if (casts === 2 && ai.fishingState === 0) completedSecondCast = true;
+        }
+        if (completedSecondCast && ai.rechargeAt) break;
+    }
+    assert.equal(casts, 2, 'the starting bait funds exactly two casts');
+    assert.ok(completedSecondCast, 'the second cast completes with empty bait');
+    assert.equal(rechargeDuringCast, false, 'bots do not pause to recharge mid-cast');
+    assert.ok(ai.rechargeAt, 'the next cast waits for another answer');
+    demo.clock = ai.rechargeAt + .01;
+    app.stepAmbientBot(demo, bot, 0, 1 / 60);
+    assert.equal(ai.energy, 20, 'an answer restores the same bait as for a player');
+    ai.energy = 9; ai.fishingTimer = 0; ai.rechargeAt = 0;
+    app.stepAmbientBot(demo, bot, 0, 1 / 60);
+    assert.equal(ai.fishingState, 0, 'a bot cannot cast with less than the full bait cost');
+    assert.ok(ai.rechargeAt);
+    demo.session.testing = true; demo.session.limitedTestEnergy = false;
+    app.stepAmbientBot(demo, bot, 0, 1 / 60);
+    assert.equal(ai.fishingState, 1, 'unlimited test mode can cast without an answer');
+    assert.equal(ai.energy, demo.game.res.max, 'unlimited test casts do not spend bait');
+}
 
 const arena = demoFor('shooter');
 arena.game.me.x = 1300; arena.game.me.y = 850;

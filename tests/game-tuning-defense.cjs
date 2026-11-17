@@ -143,21 +143,8 @@ function session(mode, id = 'host', ids = ['host', 'guest', 'ally', 'rival']) {
     vm.runInContext(source.slice(source.indexOf('    class AppOrchestrator'), source.indexOf('    window.NexusApp =')), sandbox);
     const app = vm.runInContext('Object.create(AppOrchestrator.prototype)', sandbox);
     const costs = A.ENERGY_COSTS;
-    const rates = {
-        skyline: costs.skyline.run,
-        duel: costs.duel.swing + costs.duel.guard / 10,
-        miner: .7 * costs.miner.dig + .23 * costs.miner.jet,
-        river: costs.river.walk + costs.river.cast / 4,
-        frenzy: costs.fishing.cast / 6.5,
-        fishing: costs.fishing.cast / 6.5,
-        market: .8 * costs.market.walk + .2 * costs.market.sprint,
-        shooter: session('shooter').game.weaponInfo().cost / session('shooter').game.weaponInfo().cd
-    };
-    for (const [mode, rate] of Object.entries(rates)) {
-        const reward = app.questionRewardRecommendation(mode).suggested;
-        const seconds = reward / rate;
-        assert.ok(seconds >= 8 && seconds <= 12, `${mode}: default answer buys ${seconds.toFixed(2)} seconds of representative active play`);
-    }
+    for (const mode of ['skyline', 'duel', 'miner', 'river', 'frenzy', 'fishing', 'market', 'shooter'])
+        assert.equal(app.questionRewardRecommendation(mode).suggested, 30, `${mode} uses the common default budget`);
     for (const fps of [30, 60, 120]) {
         const s = session('skyline'), g = s.game;
         const floor = { x: 0, y: -100, w: 20000, h: 100, bi: 0 };

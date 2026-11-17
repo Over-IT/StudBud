@@ -244,24 +244,11 @@
             const state = snapshot?.state || {};
             const profile = state.profile || {};
             const school = profile.school || this.user?.user_metadata?.school || '';
-            const courses = Array.isArray(state.courses) ? state.courses : [];
             const flashcards = Array.isArray(snapshot?.flashcards) ? snapshot.flashcards : [];
-            const supportedSchool = state.settings?.shareSchoolCourses === true
-                && ['pchs', 'pnhs', 'pshs', 'pwhs'].includes(school);
-            const catalog = supportedSchool ? window.STUDBUD_SCHOOLS?.catalog(school) || [] : [];
             return {
                 state: {
                     profile: { school },
-                    courses: supportedSchool ? courses.filter(course => !course.school || course.school === school).map(course => {
-                        const official = catalog.find(item => item.code === course.catalogCode || item.code === course.code);
-                        return {
-                            code: course.code || '',
-                            catalogCode: course.catalogCode || '',
-                            title: official?.title || '',
-                            term: course.term || 'FY',
-                            school
-                        };
-                    }) : []
+                    courses: []
                 },
                 flashcards: flashcards.map(deck => ({
                     id: deck.id || '',

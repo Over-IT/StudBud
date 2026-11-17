@@ -101,28 +101,17 @@
                 this.root.innerHTML = '<div class="glass-card empty-state">Sign in, connect and choose your supported school to use Classrooms.</div>';
                 return;
             }
-            if (this.classId && !this.app.classrooms.isTeacher() && !this.app.classrooms.courseSharingEnabled()) {
-                this.data = null;
-                this.root.innerHTML = '<div class="glass-card"><h3>Course sharing is off</h3><p>Your classes stay in your encrypted account. Enable course sharing in Profile to use class discussions, shared sets and class games.</p><button type="button" class="secondary-btn" data-action="edit-public-profile">Course privacy settings</button></div>';
-                return;
-            }
             const id = ++this.request, key = this.key(), classId = this.classId;
             if (!this.data) this.root.innerHTML = '<p role="status">Loading classrooms…</p>';
             else this.status('Refreshing class updates…');
             try {
-                // Student enrollment must be synchronized before checking access to a class board.
-                const listing = await this.app.classrooms.call(this.app.classrooms.isTeacher() ? 'studbud_teacher_classes' : 'studbud_my_classes',
-                    this.app.classrooms.isTeacher() ? {} : { p_course_codes: this.app.classrooms.courseCodes() });
-                if (!this.current(id, key)) return;
-                const courses = await this.call('studbud_course_communities');
+                const listing = await this.app.classrooms.call(this.app.classrooms.isTeacher() ? 'studbud_teacher_classes' : 'studbud_my_classes');
                 if (!this.current(id, key)) return;
                 const data = await this.call('studbud_school_community', { p_class_id: classId });
                 if (!this.current(id, key)) return;
                 const teacherClasses = listing.classes || [];
-                const course = [...(courses.classes || []), ...teacherClasses].find(item => item.id === classId);
                 const ownedClass = this.app.classrooms.isTeacher() && classId && data.can_announce
-                    ? teacherClasses.find(item => item.id === classId || course && this.app.classrooms.courseMatches(
-                        { code: course.course_code }, item.course_code)) : null;
+                    ? teacherClasses.find(item => item.id === classId) : null;
                 let teacherDetail = null;
                 if (ownedClass) {
                     teacherDetail = await this.app.classrooms.call('studbud_teacher_class_detail', { p_class_id: ownedClass.id });
@@ -131,12 +120,7 @@
                 this.data = data;
                 this.teacherClasses = teacherClasses;
                 this.teacherDetail = teacherDetail;
-                this.classes = [...(courses.classes || []), ...teacherClasses.filter(item =>
-                    !(courses.classes || []).some(course => this.app.classrooms.courseMatches({ code: course.course_code }, item.course_code)))].map(item => {
-                        const local = item.community && (this.app.AppState.get('courses') || []).find(course =>
-                            this.app.classrooms.courseMatches(course, item.course_code));
-                        return local ? { ...item, title: local.title || item.title } : item;
-                    });
+                this.classes = teacherClasses;
                 if (this.app.classrooms.isTeacher()) this.app.classrooms.teacherData = listing;
                 else this.app.classrooms.studentData = listing;
                 this.classTitle = this.classes.find(item => item.id === classId)?.title || this.classTitle;
@@ -151,7 +135,7 @@
         }
         paint() {
             const data = this.data;
-            const tabs = this.classId ? [['updates', 'Updates'], ['people', 'Classmates'], ['sets', 'Shared sets']]
+            const tabs = this.classId ? [['updates', 'Updates'], ['sets', 'Shared sets']]
                 : [['people', 'Schoolmates'], ['sets', 'Shared sets']];
             if (this.teacherDetail) tabs.push(['teacher', 'Teacher tools']);
             if (!tabs.some(([tab]) => tab === this.tab)) this.tab = this.classId ? 'updates' : 'people';
@@ -162,11 +146,11 @@
                     `<option value="${esc(item.id)}"${item.id === this.classId ? ' selected' : ''}>${esc(item.title)}${item.section ? ` · ${esc(item.section)}` : ''}</option>`).join('')}</select></label>
                 <button type="button" class="text-btn" data-target="friends-view">Manage buds &amp; requests</button>
                 ${this.classId ? '<button type="button" class="text-btn" data-school-action="open-class" data-class="">All classrooms</button>' : ''}</div>
+                ${this.classId && !this.app.classrooms.isTeacher() && (this.classes || []).some(item => item.id === this.classId)
+                    ? '<button type="button" class="text-btn" data-school-action="leave-class">Leave classroom</button>' : ''}
                 <p id="school-community-status" role="status" aria-live="polite"></p>
                 ${this.classId && data.can_moderate ? `<div class="community-review-banner"><p><i class="fas fa-shield-halved" aria-hidden="true"></i> Moderation access · ${esc(SCHOOL_NAMES[data.school] || data.school)} · Shared content only; no private grades.${data.can_post === false ? ' Review only: you are not a member of this course.' : ''}</p><button type="button" class="text-btn" data-target="admin-view">Back to class search</button></div>` : ''}
                 ${!this.classId ? this.courseListMarkup() : ''}
-                ${this.classId && data.course_community ? `<p class="settings-hint">This classroom is for students taking this course at this school, with or without a teacher.</p>
-                    ${(data.teacher_classes || []).length ? `<p class="settings-hint">Teachers: ${data.teacher_classes.map(item => `@${esc(item.teacher)}`).join(', ')}. Teacher announcements, class sets and live games are available here.</p>` : ''}` : ''}
                 <div id="community-live">${this.liveMarkup(data.live || [], this.classId, data.can_announce)}</div>
                 <nav class="community-tabs" aria-label="Classroom sections">${tabs.map(([tab, label]) =>
                     `<button type="button" class="secondary-btn${this.tab === tab ? ' selected' : ''}" data-school-action="tab" data-tab="${tab}"${this.tab === tab ? ' aria-current="page"' : ''}>${label}</button>`).join('')}</nav>
@@ -184,14 +168,15 @@
             if (live) this.liveMarkupCache.set(live, this.liveMarkup(data.live || [], this.classId, data.can_announce));
         }
         courseListMarkup() {
-            if (!this.app.classrooms.isTeacher() && !this.app.classrooms.courseSharingEnabled()) {
-                return '<section class="community-course-list"><h3>My classrooms</h3><p class="settings-hint">Course sharing is off. Enable it to match your courses with classrooms. Your grades, assignments and schedule stay encrypted.</p><button type="button" class="secondary-btn" data-action="edit-public-profile">Course privacy settings</button></section>';
-            }
             const courses = this.classes || [];
-            return `<section class="community-course-list"><h3>My classrooms</h3><p class="settings-hint">Your school + courses. No teacher or join code needed. Teachers add announcements, class sets and live games, not access to your grades or private study history.</p>
+            return `<section class="community-course-list"><h3>My classrooms</h3><p class="settings-hint">Join only the classrooms you choose using a code from your teacher. Your personal course list, grades, assignments and schedule are never shared.</p>
+                ${!this.app.classrooms.isTeacher() ? `<form data-classroom-join class="glass-card">
+                    <label>Teacher's classroom code<input name="code" required maxlength="6" minlength="6" pattern="[A-HJ-NP-Za-hj-np-z2-9]{6}" autocomplete="off" autocapitalize="characters"></label>
+                    <p class="settings-hint">Joining shares your username and membership in this classroom. Posts and sets you choose to share are visible to its members and authorized moderators.</p>
+                    <button type="submit" class="primary-btn">Join classroom</button></form>` : ''}
                 ${courses.length ? `<div class="community-set-grid">${courses.map(item => `<article class="glass-card"><span class="eyebrow">${esc(item.course_code)}</span><h4>${esc(item.title)}</h4>
                     <button type="button" class="secondary-btn" data-school-action="open-class" data-class="${esc(item.id)}" data-title="${esc(item.title)}">Open classroom</button></article>`).join('')}</div>`
-                    : '<p>Add your courses in My grades and sync your account to find their classrooms.</p><button type="button" class="text-btn" data-target="gpa-view">Manage my courses</button>'}</section>`;
+                    : '<p>No classrooms yet.</p>'}</section>`;
         }
         liveMarkup(rooms, classId, teacher = false) {
             if (!rooms.length) return classId ? '<p class="settings-hint">No class game is live right now. Your teacher can host from a class set.</p>' : '';
@@ -201,11 +186,11 @@
                 ${teacher && room.can_manage !== false ? `<button type="button" class="text-btn" data-school-action="unlist" data-class="${esc(room.class_id || classId)}">Remove listing</button>` : ''}</div></article>`).join('');
         }
         peopleMarkup() {
-            const opted = this.classId ? this.data.class_discovery : this.data.school_discovery;
-            return `<section class="glass-card"><h3>${this.classId ? 'People sharing this class' : 'Meet schoolmates'}</h3>
-                <p class="settings-hint">${this.classId ? 'Only students who enable course discovery appear. Teachers, periods and enrollment may differ.' : 'School discovery is off by default. Turning it on shares only your username and school with other opted-in schoolmates, not your grades, real name or schedule.'}</p>
-                ${this.classId ? `<button type="button" class="text-btn" data-action="edit-public-profile">Manage course discovery privacy</button>` :
-                    `<button type="button" class="secondary-btn" data-school-action="discovery" data-enabled="${!opted}">${opted ? 'Turn off school discovery' : 'Turn on school discovery'}</button>`}
+            if (this.classId) return '';
+            const opted = this.data.school_discovery;
+            return `<section class="glass-card"><h3>Meet schoolmates</h3>
+                <p class="settings-hint">School discovery is off by default. Turning it on shares only your username and school with other opted-in schoolmates, not your grades, real name or schedule.</p>
+                <button type="button" class="secondary-btn" data-school-action="discovery" data-enabled="${!opted}">${opted ? 'Turn off school discovery' : 'Turn on school discovery'}</button>
                 ${!opted ? '<p>Discovery is off. Enable it to find others and let them find you.</p>' : `<ul class="community-people">${(this.data.people || []).map(person =>
                     `<li><button type="button" class="text-btn" data-action="view-profile" data-id="${esc(person.user_id)}">@${esc(person.username)}</button><button type="button" class="secondary-btn compact-btn" data-school-action="add-bud" data-name="${esc(person.username)}">Add bud</button></li>`).join('') || '<li>No opted-in schoolmates yet. Invite a friend to turn discovery on.</li>'}</ul>`}</section>`;
         }
@@ -213,7 +198,7 @@
             const course = (this.classes || []).find(item => item.id === this.classId);
             const listing = this.app.classrooms.isTeacher() ? this.teacherClasses : this.app.classrooms.studentData?.classes || this.teacherClasses;
             const teacherSets = this.teacherDetail ? [this.teacherDetail] : (listing || []).filter(item =>
-                course && this.app.classrooms.courseMatches({ code: course.course_code }, item.course_code));
+                course && item.id === course.id);
             return `${teacherSets.length ? this.app.classrooms.studentSetsMarkup(teacherSets) : ''}${this.classSetsMarkup()}<section><header class="view-header"><div><h3>Public study sets ${this.classId ? 'for this course' : 'from your school'}</h3><p>Teacher-published and student-shared sets are available together here.</p></div>
                 <button type="button" class="secondary-btn" data-target="study-manage-view">Manage &amp; share your sets</button></header>
                 <p class="settings-hint">Both you and an author must enable school discovery for their sets to appear in school-scoped lists.</p>
@@ -231,15 +216,15 @@
             const pending = this.posting.has(this.draftKey('share'));
             const disabled = pending ? ' disabled' : '';
             return `<section class="community-shared-section"><h3>${this.classId ? 'Class study sets' : 'Sets shared with your school'}</h3>
-                <p class="settings-hint">Latest 100 shares. Each includes a purpose note and its audience. Public sets are discoverable by anyone; course-only and school-only sets stay in their chosen community.</p>
+                <p class="settings-hint">Latest 100 shares. Each includes a purpose note and its audience. Public sets are discoverable by anyone; classroom-only and school-only sets stay in their chosen community.</p>
                 ${this.classId && this.data.can_post !== false ? `<details class="glass-card community-new-post"${draft.note || pending ? ' open' : ''}><summary>Share a set <i class="fas fa-plus" aria-hidden="true"></i></summary>
                     ${own.length ? `<form data-community-share class="community-compose"><label>Your set<select name="deck" required data-set-picker${disabled}>${own.map(deck => `<option value="${esc(deck.id)}"${draft.deck === deck.id ? ' selected' : ''}>${esc(deck.title)}</option>`).join('')}</select></label>
                     <label>What is it for?<textarea name="note" rows="2" required maxlength="300"${disabled} placeholder="For example: Unit 3 vocabulary for Friday's quiz">${esc(draft.note || '')}</textarea></label>
-                    <label>Who can view it?<select name="visibility"${disabled}>${[['course', 'This course at this school only (default)'], ['school', 'Everyone at this school'], ['public', 'Public · anyone can discover it']].map(([value, label]) => `<option value="${value}"${(draft.visibility || 'course') === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label>
+                    <label>Who can view it?<select name="visibility"${disabled}>${[['course', 'Members of this classroom only (default)'], ['school', 'Everyone at this school'], ['public', 'Public · anyone can discover it']].map(([value, label]) => `<option value="${value}"${(draft.visibility || 'course') === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label>
                     <p class="settings-hint">The course/school association is shared with your chosen audience. Only terms, answers and distractors are copied, not study history, images, attachments or private assessment links. To restrict a set that already has a public copy, unpublish it in Manage sets first.</p>
                     <button type="submit" class="primary-btn"${disabled}>${pending ? 'Sharing…' : 'Share set'}</button></form>` : '<p>Create your own set in Study first. Copies of someone else’s set cannot be reposted.</p>'}</details>` : ''}
                 <div class="community-set-grid">${(this.data.class_sets || []).map(set => `<article class="glass-card community-shared-set">
-                    <span class="deck-chip">${esc(({ public: 'Public', school: 'School only', course: 'Course only' })[set.visibility] || set.visibility)}</span>
+                    <span class="deck-chip">${esc(({ public: 'Public', school: 'School only', course: 'Classroom only' })[set.visibility] || set.visibility)}</span>
                     <h4>${esc(set.title)}</h4><p class="community-body">${esc(set.note)}</p><small>${Number(set.card_count) || 0} cards · @${esc(set.author)}${!this.classId ? ` · ${esc(set.course_title)}` : ''}</small>
                     <div class="actions"><button type="button" class="secondary-btn" data-school-action="preview-set" data-id="${esc(set.id)}">View cards</button>
                     <button type="button" class="text-btn" data-school-action="report-share" data-id="${esc(set.id)}">Report</button>
@@ -367,7 +352,7 @@
                 <button type="submit" class="primary-btn"${pending ? ' disabled' : ''}>${pending ? 'Posting…' : parent ? 'Reply' : 'Post to class'}</button></form>`;
         }
         updatesMarkup() {
-            return `<section class="community-update-header"><h3>Class updates</h3><p class="settings-hint">Shared with this class. Keep private information out of posts. Course membership is self-reported.</p>
+            return `<section class="community-update-header"><h3>Class updates</h3><p class="settings-hint">Shared with members who explicitly joined this classroom. Keep private information out of posts.</p>
                 ${this.data.can_post === false ? '' : `<details class="glass-card community-new-post"${this.drafts.get(this.draftKey(''))?.body ? ' open' : ''}><summary>Write a post <i class="fas fa-plus" aria-hidden="true"></i></summary>${this.composeMarkup()}</details>`}</section>
                 <div id="community-posts" class="community-posts">${(this.data.posts || []).map(post => this.postMarkup(post)).join('') || '<p class="glass-card empty-state">No updates yet. Start with a study question.</p>'}</div>
                 ${this.moreMarkup(this.data.next_before, 'posts')}`;
@@ -427,6 +412,22 @@
         }
         async onSubmit(event) {
             const form = event.target;
+            if (form.matches?.('[data-classroom-join]')) {
+                event.preventDefault();
+                const button = form.querySelector('[type="submit"]');
+                if (button.disabled) return;
+                button.disabled = true;
+                const id = this.request, key = this.key();
+                try {
+                    const joined = await this.app.classrooms.call('studbud_join_class', { p_code: form.elements.code.value.trim().toUpperCase() });
+                    if (this.current(id, key)) await this.open(joined.id, joined.title);
+                } catch (error) {
+                    if (this.current(id, key)) this.status(this.app.friendlyErrorMessage(error), true);
+                } finally {
+                    if (button.isConnected) button.disabled = false;
+                }
+                return;
+            }
             if (form.matches?.('[data-community-share]')) return this.onShare(event);
             if (form.matches?.('[data-community-scope]')) return this.onScopeSubmit(event);
             if (!form.matches?.('[data-community-compose]')) return;
@@ -521,6 +522,12 @@
             const id = this.request, key = this.key();
             try {
                 if (action === 'open-class') await this.open(button.dataset.class || null, button.dataset.title);
+                else if (action === 'leave-class') {
+                    if (!await window.StudBudDialogs.confirm('Leave this classroom? You will lose access to its discussions and sets. Previously shared posts and sets remain unless you remove them. Saved personal copies are kept.')) return;
+                    if (!this.current(id, key)) return;
+                    await this.app.classrooms.call('studbud_leave_class', { p_class_id: this.classId });
+                    if (this.current(id, key)) await this.open(null);
+                }
                 else if (action === 'refresh') await this.render();
                 else if (action === 'moderation-page') await this.renderModeration(this.moderationQuery, Number(button.dataset.offset));
                 else if (action === 'tab') {

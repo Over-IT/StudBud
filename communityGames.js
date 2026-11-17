@@ -830,14 +830,13 @@
         async friendCall(fn, args = {}) {
             const { data, error } = await this.getClient().rpc(fn, args);
             if (error) throw new Error(error.message.includes('Could not find the function')
-                ? fn === 'studbud_classmates' ? 'Course discovery needs a server update. Re-run supabase-setup.sql in Supabase.'
-                    : 'Friends are not set up yet. Re-run supabase-setup.sql in Supabase.' : error.message);
+                ? 'Profiles and Buds need a server update. Re-run supabase-setup.sql in Supabase.' : error.message);
             return data;
         }
 
-        // Classroom RPCs (teacher classes, student joins, class flashcard sets, progress snapshots).
+        // Classroom resources and explicit membership changes.
         async classCall(fn, args = {}) {
-            if (!/^studbud_(teacher_\w+|my_classes|sync_class_stats)$/.test(fn)) throw new Error('Unknown class action.');
+            if (!/^studbud_(teacher_\w+|my_classes|join_class|leave_class)$/.test(fn)) throw new Error('Unknown class action.');
             const { data, error } = await this.getClient().rpc(fn, args);
             if (error) throw new Error(error.message.includes('Could not find the function')
                 ? 'Classes are not set up yet. Re-run supabase-setup.sql in Supabase.' : error.message);

@@ -75,8 +75,10 @@ async function serve(request, response) {
                 await runHomeChecks(page);
                 if (name === 'desktop') await runPersistenceChecks(page);
                 await runSchoolImportChecks(page);
+                await runGameChecks.runLayoutChecks(page);
                 await runCharacterChecks(page);
                 await runCommunityChecks(page);
+                await runCommunityChecks.runClassroomChecks(page);
                 await page.evaluate(() => {
                     window.NexusApp.closeModal();
                     document.querySelector('[data-target="analytics-view"]').click();

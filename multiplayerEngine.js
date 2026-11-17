@@ -512,8 +512,7 @@
         add(n) { this.value += n; }
     }
 
-    // Resource costs shared by players and bots. Tuned so the recommended answer reward lasts roughly
-    // 10 seconds of typical play in every mode (see questionRewardRecommendation in app.js).
+    // Resource costs shared by players and bots.
     const ENERGY_COSTS = Object.freeze({
         skyline: Object.freeze({ run: 3, air: 2, jump: 2, wallJump: 3, airJump: 3, dash: 8 }),
         duel: Object.freeze({ swing: 3, special: 10, guard: 5 }),
@@ -523,6 +522,13 @@
         market: Object.freeze({ walk: 4, sprint: 10 }),
         shooter: Object.freeze({ nova: 30 })
     });
+
+    // The reward setting is a common play budget; games use different resource units.
+    const REWARD_MULTIPLIERS = Object.freeze({
+        skyline: 1, duel: 4 / 3, miner: 4 / 3, river: 4 / 3,
+        frenzy: 2 / 3, fishing: 2 / 3, market: 5 / 3, shooter: 2
+    });
+    const resourceRewardMultiplier = mode => REWARD_MULTIPLIERS[mode] ?? 1;
 
     // Roughly half a recommended answer's resources; bait must cover at least one cast.
     // Team cash uses the defense answer's 3x payout rather than the raw reward setting.
@@ -559,7 +565,7 @@
                 duel: 'Joystick to move · Hold steeply up to jump on landing · Jump button for an air jump · Tap to swing · Heavy, Guard or Dodge',
                 shooter: 'Joystick to move · Hold the arena to aim and fire · Dash between cover · Recharge behind cover',
                 market: 'Joystick to move · Hold Sprint for speed · Pick up and deliver packages · Building recesses are away from traffic',
-                river: 'Joystick to steer (2 Energy/s) · Tap water to cast (4 Energy) · Pale shallows shelter from waves · Recharge to answer',
+                river: 'Joystick to steer (3 Energy/s) · Tap water to cast (4 Energy) · Pale shallows shelter from waves · Recharge to answer',
                 crypto: 'Tap an asset to select it · Buy low and sell high · Recharge to keep trading',
                 hack: 'Joystick to move · Use nearby terminals · Recharge between hacks'
             }[this.s.mode] || 'Use the on-screen controls · Recharge opens a flashcard';
@@ -586,8 +592,9 @@
             this.graphics = activeGraphicsProfile;
             this.returnFocus = document.activeElement;
             this.correct = 0;
-            this.reward = Math.min(100, Math.max(5, Math.round(Number(options.questionReward ?? this.room.state?.question_reward) || 20)));
             this.mode = this.room.mode;
+            const defaultReward = ['crypto', 'hack', 'defense'].includes(this.mode) ? 20 : 30;
+            this.reward = Math.min(100, Math.max(5, Math.round(Number(options.questionReward ?? this.room.state?.question_reward) || defaultReward)));
             if (this.mode === 'chess') this.reward = 1;
             this.code = this.room.room_code;
             const seed = options.seed ?? this.room.state?.seed;
@@ -1043,7 +1050,7 @@
         }
 
         // Amount of the game's resource a correct answer is worth (host-configured).
-        rewardAmount() { return Math.max(1, Math.round(this.reward)); }
+        rewardAmount() { return Math.max(1, Math.round(this.reward * resourceRewardMultiplier(this.mode))); }
 
         refill() {
             const res = this.game.res;
@@ -1359,15 +1366,15 @@
             else {
                 const reward = Number(input.value);
                 if (!Number.isInteger(reward) || reward < 5 || reward > 100) {
-                    input.value = String(this.rewardAmount());
-                    this.toast('Energy per question must be a whole number from 5 to 100', '#fbbf24');
+                    input.value = String(this.reward);
+                    this.toast('Reward setting must be a whole number from 5 to 100', '#fbbf24');
                     return;
                 }
                 this.reward = this.mode === 'chess' ? 1 : reward;
             }
             const rewardInput = this.overlay.querySelector('[data-test-reward]');
             rewardInput.disabled = !this.limitedTestEnergy || this.mode === 'chess';
-            rewardInput.value = String(this.rewardAmount());
+            rewardInput.value = String(this.reward);
             const indicator = this.overlay.querySelector('.mpg-practice-indicator');
             indicator.textContent = `Staff testing · ${this.limitedTestEnergy ? 'limited' : 'infinite'} resources`;
             if (!this.limitedTestEnergy && this.game.res) this.game.res.value = this.game.res.max;
@@ -1421,7 +1428,7 @@
                         </div></details>
                         ${this.testing ? `<details class="mpg-test-tools"><summary aria-label="Test tools" title="Test tools"><i class="fas fa-wrench" aria-hidden="true"></i><span class="mpg-label">Tools</span></summary><div class="mpg-test-panel"><div><button type="button" class="mpg-test-pause">Pause</button>${this.onRestart ? '<button type="button" class="mpg-test-restart">Restart</button>' : ''}</div>
                             <label><input type="checkbox" data-test-energy ${this.limitedTestEnergy ? '' : 'checked'}> Unlimited energy</label>
-                            <label>Energy per question <input type="number" data-test-reward min="5" max="100" step="1" value="${this.rewardAmount()}" ${!this.limitedTestEnergy || this.mode === 'chess' ? 'disabled' : ''}></label>
+                            <label>Reward setting <input type="number" data-test-reward min="5" max="100" step="1" value="${this.reward}" ${!this.limitedTestEnergy || this.mode === 'chess' ? 'disabled' : ''}></label>
                             <small>Applies to your test client. ${this.mode === 'chess' ? 'Chess grants one move per answer.' : 'Turn off unlimited energy to test normal costs and question rewards.'}</small>${this.mode === 'skyline' ? `
                             <label><input type="checkbox" data-test-cheat="flight"> Flight (W/S or Up/Down; Shift = fast)</label>
                             <label class="mpg-test-range">Fly speed <output data-test-speed-label aria-label="Selected fly speed">600 units/s</output><input type="range" min="100" max="3000" step="100" value="600" data-test-speed aria-label="Fly speed"></label>
@@ -3538,7 +3545,7 @@
         graphicsProfile: (mode, hardware) => mode === undefined ? activeGraphicsProfile : graphicsProfile(mode, hardware),
         configureGraphicsProfile,
         shouldUseTouchControls,
-        Session, BaseGame, Particles, Resource, ENERGY_COSTS, games: {},
+        Session, BaseGame, Particles, Resource, ENERGY_COSTS, resourceRewardMultiplier, games: {},
         util: { TAU, clamp, lerp, dist, overlap, mulberry32, hashStr, VerticalIndex, slopeY, slopeSurface, moveBody, pushCircleOutOfRect, roundRect, nameTag, esc, accountTagMarkup, who, playerCosmetics, normalizeAppearance, appearanceOptions: APPEARANCE_OPTIONS, avatarUrl, avatarMarkup, animatedCosmetics, drawAvatar, observeAvatars, drawHat, drawFigureSide, drawFigureTop, sceneZoom, canvasView, bandGradient, screenLayer, radialOverlay, parseRgb, questionHistoryMarkup, defaultPlayerColors }
     };
 })(window);

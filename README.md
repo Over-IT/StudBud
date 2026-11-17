@@ -45,12 +45,17 @@ The setup preserves existing administrator IDs. Resolve duplicate usernames befo
 
 - Private cloud snapshots and saved sync baselines are encrypted in the browser. The service is **not strictly zero-knowledge**, and the working offline browser copy is **not encrypted at rest**.
 - Optional **Remember this device for 30 days** saves non-extractable unlock keys, not your password. Session expiry or required MFA can still prompt sooner. Use only a private browser profile.
-- Course discovery and public study statistics require separate opt-ins. Public/community content and Bud-shared cards are readable to their audience and the service; Bud sharing is **not end-to-end encrypted**.
+- Personal course lists are not uploaded as readable indexes or used for people discovery. Teacher classrooms use explicit code-based Join/Leave actions, never automatic enrollment from private courses. Applying the updated SQL purges old readable indexes and inferred memberships; students must explicitly rejoin.
+- School discovery and public study statistics remain optional. Username Buds and explicitly shared flashcards remain available. Public/community content and Bud-shared cards are readable to their audience and the service; Bud sharing is **not end-to-end encrypted**.
 - The school importer removes known identifying fields locally. Review remaining free text before saving. Raw pasted pages are not uploaded.
 - **Settings → Data & account** offers encrypted backup download, verification without restoring, restore, device clearing and account deletion. Keep a verified backup and its separate passphrase safe: lost encryption passwords/passphrases cannot be recovered.
 - Revoking a share cannot recall independent copies others saved. Clearing browser data can remove unsynced work; sign-out clears this device's account copy.
 
 See the [privacy policy](./privacy.html) for audiences, storage and deletion details. Send private account/data requests through the app, never public issues containing student records or passwords.
+
+## Game resource balance
+
+The default reward setting targets about 10 seconds of representative active play per correct answer. Each game converts that common setting to its own energy, fuel, bait or ammo units; custom rewards scale proportionally. Movement, actions and skill affect actual duration. Cash-based strategy modes retain their spending-based rewards, and Chess grants one move per answer.
 
 ## Tests and deployment
 

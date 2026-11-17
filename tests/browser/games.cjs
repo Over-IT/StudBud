@@ -1,5 +1,48 @@
 const assert = require('node:assert/strict');
 
+async function runGameLayoutChecks(page) {
+    const { width, height } = page.viewportSize(), diagnostic = `${width}x${height}`;
+    await page.locator('#sidebar [data-target="multiplayer-view"]').click();
+    await page.locator('#multiplayer-view.active').waitFor();
+    for (const screen of ['host', 'join', 'solo']) {
+        await page.locator(`[data-multiplayer-tab="${screen}"]`).click();
+        const layout = await page.evaluate(() => {
+            const title = document.getElementById('active-view-title');
+            const titleBox = title.getBoundingClientRect();
+            const visible = element => element.getClientRects().length > 0;
+            const measure = element => {
+                const box = element.getBoundingClientRect(), style = getComputedStyle(element);
+                return { text: element.textContent.trim(), width: box.width, height: box.height,
+                    contentWidth: box.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - 2,
+                    font: style.font };
+            };
+            const workspace = document.getElementById('workspace-tabs');
+            const tabs = [...workspace.querySelectorAll('button')].filter(visible);
+            const context = document.createElement('canvas').getContext('2d');
+            const cramped = [...tabs, ...document.querySelectorAll('.multiplayer-tab')].filter(visible)
+                .map(measure).filter(item => {
+                    context.font = item.font;
+                    return item.text.split(/\s+/).some(word => context.measureText(word).width > item.contentWidth + 1);
+                }).map(item => item.text);
+            const lastTab = tabs.at(-1).getBoundingClientRect(), workspaceBox = workspace.getBoundingClientRect();
+            return { titleWidth: titleBox.width, cramped,
+                unusedTabSpace: workspaceBox.right - lastTab.right,
+                cards: [...document.querySelectorAll('.multiplayer-mode')].filter(visible).map(measure),
+                overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 };
+        });
+        assert.equal(layout.overflow, false, `${diagnostic}/${screen}: Games never scrolls horizontally`);
+        assert.deepEqual(layout.cramped, [], `${diagnostic}/${screen}: navigation labels never split inside a word`);
+        if (width <= 600) {
+            assert.ok(layout.titleWidth >= 180, `${diagnostic}/${screen}: heading has room beside or above the wallet`);
+            assert.ok(layout.unusedTabSpace < 16, `${diagnostic}/${screen}: hidden guest tabs do not leave empty columns`);
+        }
+        for (const card of layout.cards) {
+            assert.ok(card.width >= 160, `${diagnostic}/${screen}: ${card.text} has readable card width`);
+        }
+    }
+    await page.locator('[data-multiplayer-tab="host"]').click();
+}
+
 module.exports = async function runGameChecks(page) {
     await page.evaluate(() => window.NexusApp.AppState.set('flashcards', [{
         id: 'browser-game-deck', title: 'Browser checks',
@@ -45,3 +88,5 @@ module.exports = async function runGameChecks(page) {
         assert.equal(await page.evaluate(() => window.StudBudSfx.mus === null), true, `${mode}: music is released on exit`);
     }
 };
+
+module.exports.runLayoutChecks = runGameLayoutChecks;

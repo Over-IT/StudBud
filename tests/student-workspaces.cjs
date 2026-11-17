@@ -257,47 +257,7 @@ assert.deepEqual(Array.from(selected), ['weak'], 'weak practice includes only we
 assert.ok(app.studySession);
 assert.equal(app.cramMode, false, 'weak practice retains the normal spaced-review scheduler');
 app.exitStudyFocus();
-const list = element('classmate-list'), button = element();
-list.dataset.course = course.code;
-button.dataset.id = course.code;
-elements.set(list.id, list);
-sandbox.window.StudBudCloud = { user: { id: 'me' }, isGuest: () => false };
-app.isParkwaySchool = () => true;
-app.schoolSemester = () => 'S1';
-app.friendlyErrorMessage = error => error.message;
-let response = { visible: false, students: [] };
-sandbox.window.StudBudCommunityGames = { friendCall: async () => response };
-async function run() {
-    await app.loadClassmates(button);
-    assert.match(list.innerHTML, /Course discovery is off/);
-    response = { visible: true, students: [{ user_id: 'other', username: '<img src=x>' }] };
-    await app.loadClassmates(button);
-    assert.match(list.innerHTML, /&lt;img src=x&gt;/);
-    assert.doesNotMatch(list.innerHTML, /<img/);
-    response = { students: [] };
-    await app.loadClassmates(button);
-    assert.match(list.textContent, /invalid response/);
-    let firstResolve, secondResolve;
-    sandbox.window.StudBudCommunityGames.friendCall = () => new Promise(resolve => {
-        if (!firstResolve) firstResolve = resolve; else secondResolve = resolve;
-    });
-    const first = app.loadClassmates(button), second = app.loadClassmates(button);
-    firstResolve({ visible: true, students: [] });
-    await first;
-    assert.equal(button.disabled, true, 'an old response cannot re-enable controls during a new request');
-    secondResolve({ visible: true, students: [] });
-    await second;
-    assert.equal(button.disabled, false);
-    sandbox.window.StudBudCloud.offlineMode = true;
-    await app.loadClassmates(button);
-    assert.match(list.innerHTML, /internet connection/);
-    const sql = read('supabase-setup.sql');
-    const rpc = sql.slice(sql.indexOf('create or replace function public.studbud_classmates('),
-        sql.indexOf('-- Reconcile only this teacher'));
-    for (const pattern of [/auth\.uid\(\)/, /studbud_is_guest\(\)/, /pp\.show_classmates/,
-        /not public\.studbud_is_hidden_user/, /p_semester not in \('S1', 'S2'\)/,
-        /state,profile,school.*= v_school/, /limit 50/, /'user_id'.*'username'/]) assert.match(rpc, pattern);
-    assert.match(sql, /show_classmates boolean not null default false/);
-    console.log('Study page routing, duplicate prevention, grade meters, live system theme, study focus, scheduler filtering and classmate privacy/races passed.');
-}
-run().catch(error => { console.error(error); process.exitCode = 1; });
+assert.equal(app.loadClassmates, undefined);
+assert.doesNotMatch(read('app.js'), /data-action="load-classmates"|People sharing this course/);
+assert.doesNotMatch(read('index.html'), /public-share-courses|public-show-classmates/);
+console.log('Study workspaces, scheduler filtering and removal of private-course discovery passed.');

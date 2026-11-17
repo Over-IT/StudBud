@@ -2,7 +2,7 @@
  * StudBud Classrooms
  * Teachers (account tag "teacher" at a Parkway school) pick the courses they teach from their school's catalog,
  * publish flashcard sets and manage class resources without access to students' private schoolwork or activity.
- * Students at the same school who have that course in their course list get access automatically (no join codes).
+ * Students explicitly join teacher classrooms by code; private course lists never determine access.
  * The visible tab polls every 30 seconds; teacher drafts are left untouched until the user leaves the editor.
  */
 (function (window) {
@@ -40,7 +40,6 @@
             this.studentData = null;
             this.editingDeck = null;
             this.lastSync = 0;
-            this.lastCodesKey = '';
             this.syncTimer = null;
             this.loading = false;
             this.courseIndex = -1;
@@ -55,7 +54,6 @@
         get root() { return document.getElementById('classes-root'); }
         call(fn, args) { return window.StudBudCommunityGames.classCall(fn, args); }
         isTeacher() { return (this.app.userTags || []).includes('teacher'); }
-        courseSharingEnabled() { return this.app.AppState.get('settings')?.shareSchoolCourses === true; }
 
         available() {
             const cloud = window.StudBudCloud;
@@ -63,7 +61,7 @@
         }
 
         contextKey() {
-            return [window.StudBudCloud?.user?.id || '', this.app.currentSchool?.() || '', this.isTeacher(), this.courseSharingEnabled()].join('|');
+            return [window.StudBudCloud?.user?.id || '', this.app.currentSchool?.() || '', this.isTeacher()].join('|');
         }
 
         resetContext() {
@@ -73,7 +71,6 @@
             this.requestId++;
             this.teacherData = this.studentData = this.detail = this.editingDeck = null;
             this.lastSync = 0;
-            this.lastCodesKey = '';
             this.loading = false;
             clearTimeout(this.syncTimer);
             return true;
@@ -135,7 +132,6 @@
             document.addEventListener('click', event => {
                 if (!event.target.closest?.('.teacher-course-combobox')) this.hideCourseResults();
             });
-            this.app.EventBus.on('courses:updated', () => { this.studentData = null; this.scheduleSync(350, true); });
             this.app.EventBus.on('state:restored', () => { this.resetContext(); this.scheduleSync(350, true); });
             document.addEventListener('visibilitychange', () => {
                 if (document.visibilityState === 'visible') { this.refreshVisible(); this.scheduleSync(); }
@@ -375,7 +371,7 @@
                 box?.removeAttribute('aria-busy');
             }
             await this.loadTeacher();
-            this.status(`Added ${course.title}. Students with this course are added automatically.`, 'success');
+            this.status(`Added ${course.title}. Share its classroom code so students can choose to join.`, 'success');
             this.app.Sfx?.play?.('success');
         }
 
@@ -387,7 +383,7 @@
                     <div>
                         <span class="eyebrow"><span class="class-code-chip">${esc(item.course_code)}</span> ${item.section ? esc(item.section) : ''}</span>
                         <h2>${esc(item.title)}</h2>
-                        <p class="class-auto-note"><i class="fas fa-wand-magic-sparkles"></i> Students at ${esc(this.app.schoolShortName?.() || 'your school')} with ${esc(item.course_code)} in their courses are added automatically.</p>
+                        <p class="class-auto-note">Give students this classroom code: <strong>${esc(item.join_code || '')}</strong>. They choose whether to join; private courses and grades are never shared.</p>
                     </div>
                     <div class="teacher-hero-stats">
                         <div><strong>${(item.decks || []).length}</strong><small>shared sets</small></div>
@@ -448,12 +444,6 @@
         }
 
         // ------------------------------------------------------------------ STUDENT
-        courseCodes() {
-            if (!this.courseSharingEnabled()) return [];
-            return Array.from(new Set((this.app.AppState.get('courses') || [])
-                .flatMap(course => this.codesForCourse(course))));
-        }
-
         codesForCourse(course) {
             const normalize = text => String(text || '').toLowerCase().replace(/[^a-z0-9]/g, '');
             const catalog = this.app.schoolCatalog?.() || [];
@@ -563,7 +553,7 @@
         }
 
         async syncEnrollment(force = false) {
-            if (this.isTeacher() || !this.available() || !this.courseSharingEnabled()) return;
+            if (this.isTeacher() || !this.available()) return;
             if (this.syncing) {
                 await this.syncing;
                 if (force && this.available() && !this.isTeacher()) return this.syncEnrollment(true);
@@ -572,17 +562,11 @@
             if (!force && Date.now() - this.lastSync < ENROLLMENT_EVERY_MS) return;
             const key = this.contextKey();
             const request = this.requestId;
-            const codes = this.courseCodes();
-            const codesKey = codes.join('|');
-            const current = () => this.currentRequest(request, key) && codesKey === this.courseCodes().join('|');
+            const current = () => this.currentRequest(request, key);
             this.syncing = (async () => {
-                // Persist school/course changes before the teacher reconciles this enrollment against cloud data.
-                if (!this.studentData || codesKey !== this.lastCodesKey) await window.StudBudCloud?.syncNow?.();
-                if (!current()) return;
-                const data = await this.call('studbud_my_classes', { p_course_codes: codes });
+                const data = await this.call('studbud_my_classes');
                 if (!current()) return;
                 this.studentData = data;
-                this.lastCodesKey = codesKey;
                 if (current()) this.lastSync = Date.now();
             })();
             try {

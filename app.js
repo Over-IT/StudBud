@@ -3198,55 +3198,8 @@
                         <span class="auto-study-state">Automatic</span>
                     </div>
                 </section>
-                <section class="glass-card"><h3>Study guidance</h3><div class="study-guidance-list">${this.getStudyRecommendations().filter(item => item.courseCode === course.code).slice(0, 4).map(item => this.renderStudyGuidance(item)).join('') || '<p>No quizzes or tests to study for in this class right now.</p>'}</div></section>
-                <section class="glass-card classmates-panel">
-                    <div class="view-header"><div><h3>People sharing this course</h3><p>Find opted-in students at your school. Courses are self-reported and may have different teachers or periods.</p></div><button type="button" class="secondary-btn" data-action="load-classmates" data-id="${this.escapeHTML(course.code)}"><i class="fas fa-users" aria-hidden="true"></i> Find classmates</button></div>
-                    <div id="classmate-list" data-course="${this.escapeHTML(course.code)}" aria-live="polite"><p class="settings-hint">Private by default. Discovery shares usernames only, never grades or assignments.</p></div>
-                </section>`;
+                <section class="glass-card"><h3>Study guidance</h3><div class="study-guidance-list">${this.getStudyRecommendations().filter(item => item.courseCode === course.code).slice(0, 4).map(item => this.renderStudyGuidance(item)).join('') || '<p>No quizzes or tests to study for in this class right now.</p>'}</div></section>`;
             this.updateAutomaticStudyDisplay();
-        }
-
-        async loadClassmates(button) {
-            const list = document.getElementById('classmate-list');
-            if (!list || list.dataset.course !== button.dataset.id) return;
-            const cloud = window.StudBudCloud;
-            if (!cloud?.user || cloud.offlineMode || cloud.isGuest?.() || !this.isParkwaySchool()) {
-                list.innerHTML = '<p class="community-status">Sign in and choose a supported school in Settings to discover shared courses. This feature needs an internet connection.</p>';
-                return;
-            }
-            const course = (AppState.get('courses') || []).find(item => item.code === button.dataset.id);
-            if (!course) throw new Error('This class no longer exists. Return to your class list.');
-            const userId = cloud.user.id, semester = this.schoolSemester();
-            const request = this.classmateRequest = (this.classmateRequest || 0) + 1;
-            const current = () => request === this.classmateRequest && cloud.user?.id === userId
-                && !cloud.offlineMode && list.isConnected && this.schoolSemester() === semester;
-            button.disabled = true;
-            list.setAttribute('aria-busy', 'true');
-            list.textContent = 'Finding opted-in students…';
-            try {
-                const result = await window.StudBudCommunityGames.friendCall('studbud_classmates', {
-                    p_course_code: course.catalogCode || course.code, p_semester: semester
-                });
-                if (!current()) return;
-                if (!result || typeof result.visible !== 'boolean' || !Array.isArray(result.students)
-                    || result.students.some(student => !student || typeof student.user_id !== 'string' || typeof student.username !== 'string')) {
-                    throw new Error('Course discovery returned an invalid response. Refresh and try again.');
-                }
-                if (!result.visible) {
-                    list.innerHTML = '<p class="settings-hint">Course discovery is off. To find others, enable “Let students sharing a course find my username” in Profile. This also makes your username and shared course visible to other opted-in students at your school.</p><button type="button" class="secondary-btn" data-action="edit-public-profile">Review privacy settings</button>';
-                } else {
-                    list.innerHTML = result.students.length
-                        ? `<ul class="classmate-list">${result.students.map(student => `<li><span class="classmate-initial" aria-hidden="true">${this.escapeHTML(student.username.slice(0, 1).toUpperCase())}</span><strong>${this.escapeHTML(student.username)}</strong><button type="button" class="secondary-btn" data-action="view-profile" data-id="${this.escapeHTML(student.user_id)}" aria-label="View ${this.escapeHTML(student.username)}'s profile">View profile</button></li>`).join('')}</ul><p class="settings-hint">Showing up to 50 opted-in students with this course saved for ${this.escapeHTML(this.termLabel(semester))}. This is not an official class roster.</p>`
-                        : '<p class="settings-hint">No other opted-in students found yet. They need to enable course discovery and sync this course to their account.</p>';
-                }
-            } catch (error) {
-                if (current()) list.textContent = this.friendlyErrorMessage(error, 'Could not load classmates. Try again.');
-            } finally {
-                if (request === this.classmateRequest) {
-                    if (list.isConnected) list.removeAttribute('aria-busy');
-                    if (button.isConnected) button.disabled = false;
-                }
-            }
         }
 
         getSchoolSchedule(date) {
@@ -6267,35 +6220,6 @@
                 const p = await window.StudBudCommunityGames.friendCall('studbud_get_public_profile');
                 if (window.StudBudCloud?.user?.id !== userId) return;
                 document.getElementById('public-subject').value = p.favorite_subject || '';
-                const courses = document.getElementById('public-share-courses');
-                this.courseIndexConsentAvailable = typeof p.share_courses === 'boolean';
-                if (courses) {
-                    courses.checked = p.share_courses === true;
-                    courses.disabled = !this.courseIndexConsentAvailable;
-                }
-                const courseAvailability = document.getElementById('public-courses-availability');
-                if (courseAvailability && !this.courseIndexConsentAvailable) {
-                    courseAvailability.textContent = 'Course sharing needs a server update. Your course index stays off until it is available.';
-                } else if (courseAvailability) {
-                    courseAvailability.textContent = 'Off by default. Allows the service to read course identifiers and catalog titles for classrooms. Grades, assignments and schedules stay encrypted.';
-                }
-                const settings = AppState.get('settings') || {};
-                const shareSchoolCourses = p.share_courses === true;
-                const courseSharingChanged = settings.shareSchoolCourses !== shareSchoolCourses;
-                if (courseSharingChanged) {
-                    AppState.set('settings', { ...settings, shareSchoolCourses });
-                    this.classrooms?.resetContext();
-                    this.schoolCommunity?.resetContext();
-                }
-                const classmates = document.getElementById('public-show-classmates');
-                this.classmateDiscoveryAvailable = typeof p.show_classmates === 'boolean';
-                if (classmates) {
-                    classmates.checked = p.show_classmates === true;
-                    classmates.disabled = !this.classmateDiscoveryAvailable;
-                }
-                const availability = document.getElementById('public-classmates-availability');
-                if (availability) availability.textContent = this.classmateDiscoveryAvailable ? ''
-                    : 'Course discovery needs a server update. Other profile settings still work.';
                 document.getElementById('public-show-stats').checked = p.show_stats === true;
                 const profile = AppState.get('profile') || {};
                 const school = this.isKnownSchool(p.school) ? p.school : 'pchs';
@@ -6303,7 +6227,6 @@
                 document.getElementById('settings-school').value = school;
                 this.updateCourseSchoolFields();
                 this.renderOtherGradeScaleEditor();
-                if (courseSharingChanged && this.Router?.activeRoute === 'classes') await this.schoolCommunity?.render();
             } catch (error) {
                 const status = document.getElementById('public-profile-status');
                 if (status) status.textContent = 'Profile sharing is unavailable right now. Re-run supabase-setup.sql in Supabase.';
@@ -6314,30 +6237,15 @@
             const status = document.getElementById('public-profile-status');
             status.textContent = 'Saving…';
             try {
-                const shareCourses = document.getElementById('public-share-courses')?.checked === true;
-                if (this.courseIndexConsentAvailable && !shareCourses && document.getElementById('public-show-classmates').checked) {
-                    throw new Error('Enable course sharing before turning on course discovery, or turn discovery off too.');
-                }
                 const userId = window.StudBudCloud?.user?.id;
-                const saved = await window.StudBudCommunityGames.friendCall('studbud_set_public_profile', {
+                await window.StudBudCommunityGames.friendCall('studbud_save_public_profile', {
                     p_favorite_subject: document.getElementById('public-subject').value,
-                    p_show_stats: document.getElementById('public-show-stats').checked,
-                    ...(this.classmateDiscoveryAvailable ? { p_show_classmates: document.getElementById('public-show-classmates').checked } : {}),
-                    ...(this.courseIndexConsentAvailable ? { p_share_courses: shareCourses } : {})
+                    p_show_stats: document.getElementById('public-show-stats').checked
                 });
                 if (window.StudBudCloud?.user?.id !== userId) return;
-                if (this.courseIndexConsentAvailable) {
-                    if (typeof saved?.share_courses !== 'boolean') throw new Error('The server did not confirm your course-sharing preference. Reload and try again.');
-                    AppState.set('settings', { ...AppState.get('settings'), shareSchoolCourses: saved.share_courses });
-                    this.classrooms?.resetContext();
-                    this.schoolCommunity?.resetContext();
-                    await window.StudBudCloud?.syncNow?.();
-                    if (window.StudBudCloud?.user?.id !== userId) return;
-                }
                 window.StudBudCommunityGames.boardCache?.clear();
                 this.studyLeaderboardSnapshot = null;
-                status.textContent = this.classmateDiscoveryAvailable ? 'Saved your pseudonymous profile and course-discovery preference.'
-                    : 'Saved your profile. Course discovery needs a server update before it can be enabled.';
+                status.textContent = 'Saved your profile and study activity preference.';
             } catch (error) {
                 status.textContent = this.friendlyErrorMessage(error, 'Could not save your profile.');
             }
@@ -6836,7 +6744,7 @@
 
         questionRewardInfo(mode) {
             const resource = ({ miner: 'Fuel', frenzy: 'Bait', fishing: 'Bait', shooter: 'Ammo', crypto: 'Research cash', hack: 'Crypto', defense: 'Your cash' })[mode] || 'Energy';
-            const multiplier = mode === 'crypto' ? 8 : ['hack', 'defense'].includes(mode) ? 3 : 1;
+            const multiplier = mode === 'crypto' ? 8 : ['hack', 'defense'].includes(mode) ? 3 : window.StudBudArcade?.resourceRewardMultiplier?.(mode) ?? 1;
             return { resource, multiplier };
         }
 
@@ -6848,15 +6756,15 @@
 
         questionRewardRecommendation(mode) {
             const recommendations = {
-                skyline: [20, 35, 'Default 30 energy buys 10 seconds of walking at 3 energy/s, or about 8-10 seconds of mixed climbing. Air steering costs 2/s, jumps 2, air/wall jumps 3 and dashes 8. Waiting is free.'],
-                duel: [25, 45, 'About 10 seconds of fighting: swings cost 3, the Special 10 and shielding 5 per second.'],
+                skyline: [25, 35, 'Default 30 buys about 10 seconds of walking at 3 energy/s. Jumps and dashes spend extra; waiting is free.'],
+                duel: [25, 35, 'Default 30 converts to 40 energy: about 10 seconds of fighting, depending on swings, Specials and guarding.'],
                 defense: [20, 40, 'Pays $60-120 into your own wallet; troops, enemies and upgrades all cost your cash.'],
-                miner: [30, 45, 'About 10 seconds of active mining: 7 seconds digging at 2.8 fuel/s plus 2.3 seconds jetting at 9 fuel/s uses about 40 fuel.'],
-                river: [30, 50, 'Default 40 energy buys about 10 seconds of moving and casting: steering costs 3 energy/s and a net costs 4 energy. Waiting and riding a wave forward remain free.'],
-                frenzy: [10, 20, 'About 10 seconds of fishing: each cast costs 10 bait and a full cast, bite and reel takes about 6-7 seconds.'],
-                fishing: [10, 20, 'About 10 seconds of fishing: each cast costs 10 bait and a full cast, bite and reel takes about 6-7 seconds.'],
-                market: [40, 60, 'Default 50 energy buys about 10 seconds of deliveries: walking costs 4 energy/s and sprinting 10/s. Walking without sprinting lasts 12.5 seconds; waiting is free.'],
-                shooter: [50, 70, 'Default 60 ammo buys about 10 seconds of continuous basic fire at one shot per 0.16 seconds. Rapid weapons and the 30-ammo shockwave use it faster.'],
+                miner: [25, 35, 'Default 30 converts to 40 fuel: about 10 seconds of mixed digging and jetting.'],
+                river: [25, 35, 'Default 30 converts to 40 energy: about 10 seconds of steering and casting. Waiting and riding a wave forward remain free.'],
+                frenzy: [25, 35, 'Default 30 converts to 20 bait, enough for two casts. Cast, bite and reel times vary with skill and luck.'],
+                fishing: [25, 35, 'Default 30 converts to 20 bait, enough for two casts. Cast, bite and reel times vary with skill and luck.'],
+                market: [25, 35, 'Default 30 converts to 50 energy: about 10 seconds of walking with occasional sprinting. Waiting is free.'],
+                shooter: [25, 35, 'Default 30 converts to 60 ammo: about 10 seconds of continuous basic fire. Rapid weapons and the shockwave use it faster.'],
                 crypto: [15, 30, 'Pays 120-240 research cash before analyst bonuses. Trading has no refill cycle.'],
                 hack: [10, 25, 'Pays 30-75 crypto per mining answer. This changes payouts, not question frequency.']
             };
@@ -6931,7 +6839,8 @@
             document.getElementById('multiplayer-preview-title').textContent = title;
             document.getElementById('multiplayer-preview-description').textContent = description;
             const { resource, multiplier } = this.questionRewardInfo(mode);
-            const resourceLabel = `${resource} per correct answer${multiplier > 1 ? ` (${multiplier}x setting${mode === 'crypto' ? ' + analysts' : ''})` : ''}`;
+            const factor = ({ [4 / 3]: '4/3', [5 / 3]: '5/3', [2 / 3]: '2/3' })[multiplier] || multiplier;
+            const resourceLabel = `${resource} per correct answer${multiplier !== 1 ? ` (${factor}x setting, rounded${mode === 'crypto' ? ' + analysts' : ''})` : ''}`;
             for (const id of ['host-game-resource-label', 'solo-game-resource-label']) {
                 const label = document.getElementById(id);
                 if (label) label.textContent = resourceLabel;
@@ -7418,7 +7327,7 @@
                 const bot = {
                     id, name, color, cos: { skin: ['skin_robot', 'skin_ninja', 'skin_alien'][i] }, i, x: 0, y: 0, vx: 0, vy: 0, f: 0, a: 0, hp: 100, ex: {}, score: 0,
                     tx: 0, ty: 0, respawn: 0, invuln: 0, stun: 0, cd: rng(), seen: performance.now(),
-                    ai: { rng, speed: 0.82 + rng() * 0.42, aggression: 0.25 + rng() * 0.65, reaction: 0.16 + rng() * 0.48,
+                    ai: { rng, energy: game.res?.value, speed: 0.82 + rng() * 0.42, aggression: 0.25 + rng() * 0.65, reaction: 0.16 + rng() * 0.48,
                         area: (i + rng() * 0.55) / names.length, lane: i, side: i % 2 ? 1 : -1, phase: rng() * Math.PI * 2,
                         nextThink: 0, target: null, targetUntil: 0, lastX: 0, lastY: 0, stuck: 0, route: i }
                 };
@@ -7428,7 +7337,7 @@
                     const sector = this.minerSectors(game)[i];
                     bot.w = 26; bot.h = 40; bot.x = ((sector[0] + sector[1]) / 2) * 48 - bot.w / 2;
                     bot.y = 4 * 48 - bot.h; bot.vx = 0; bot.vy = 0;
-                    bot.ai.sector = sector; bot.ai.dig = null; bot.ai.fuel = 100;
+                    bot.ai.sector = sector; bot.ai.dig = null; bot.ai.fuel = game.res?.value ?? 40;
                 } else if (mode === 'market') {
                     bot.r = 15;
                     bot.x = game.roadsX[i + 1]; bot.y = game.roadsY[1];
@@ -7450,7 +7359,7 @@
                     else if (ev.k === 'ko') { attacker.score += 100; attacker.playerKills = (attacker.playerKills || 0) + 1; }
                 };
             } else if (mode === 'miner') {
-                bots.forEach((b, i) => { b.x = (game.spawnCol ?? 35) * 48 + (i - 1) * 76; b.y = 3.6 * 48; b.fuel = 100; b.carry = 0; b.items = 0; b.ai.sector = this.minerSectors(game)[i]; });
+                bots.forEach((b, i) => { b.x = (game.spawnCol ?? 35) * 48 + (i - 1) * 76; b.y = 3.6 * 48; b.fuel = b.ai.fuel; b.carry = 0; b.items = 0; b.ai.sector = this.minerSectors(game)[i]; });
             } else if (mode === 'market') {
                 const shops = game.shops || [], houses = game.houses || [];
                 bots.forEach((b, i) => {
@@ -8453,7 +8362,10 @@
             const ai = bot.ai || (bot.ai = { rng: U.mulberry32(U.hashStr(`${mode}:${bot.id}`)), speed: 1, aggression: 0.5, reaction: 0.3, area: (index + 0.5) / 3, phase: index, stuck: 0, lastX: bot.x, lastY: bot.y });
             const rand = ai.rng || Math.random, W = game.W || game.WIDTH || 1600, H = game.H || 800;
             const costs = window.StudBudArcade.ENERGY_COSTS, moving = Math.hypot(bot.vx, bot.vy) > 20;
-            const ready = mode === 'miner' || this.botResourceReady(demo, bot, dt, !moving ? 0 : mode === 'river' ? costs.river.walk : costs.market.walk);
+            const fishing = mode === 'frenzy' || mode === 'fishing';
+            const drain = moving && mode === 'river' ? costs.river.walk : moving && mode === 'market' ? costs.market.walk : 0;
+            const ready = mode === 'miner' || (fishing && ai.fishingState !== 0)
+                || this.botResourceReady(demo, bot, dt, drain, fishing ? costs.fishing.cast : 8);
             const speed = ready ? (mode === 'miner' ? 74 : mode === 'market' ? game.baseSpeed : mode === 'river' ? 115 : mode === 'hack' ? 112 : 84) * (ai.speed || 1) : 0;
             const setTarget = (target, duration = 2.2) => { ai.target = target; ai.targetUntil = clock + duration; };
             let target = ai.target;
@@ -8523,11 +8435,13 @@
             } else if (mode === 'miner' && game.T) {
                 const TS = 48, crystalValues = { 3: 5, 4: 12, 5: 25, 7: 50, 8: 90, 9: 160 };
                 bot.w = 26; bot.h = 40; bot.fuel = (demo.session.testing && !demo.session.limitedTestEnergy) || demo.session.preview ? 100 : ai.fuel ?? (game.res?.value ?? 40); bot.carry = bot.carry || 0; bot.items = bot.items || 0;
-                if (!(demo.session.testing && !demo.session.limitedTestEnergy) && !demo.session.preview && (bot.fuel < 35 || ai.rechargeAt)) {
+                const atDepot = U.overlap(bot, game.base);
+                const rechargeGoal = atDepot ? 55 : 8;
+                if (!(demo.session.testing && !demo.session.limitedTestEnergy) && !demo.session.preview && (bot.fuel < 8 || (atDepot && bot.fuel < 28) || ai.rechargeAt)) {
                     ai.rechargeAt = ai.rechargeAt || clock + 1 + ai.reaction;
                     if (clock >= ai.rechargeAt) {
                         bot.fuel += demo.session.rewardAmount();
-                        ai.rechargeAt = bot.fuel < 85 ? clock + 1 + ai.reaction : 0;
+                        ai.rechargeAt = bot.fuel < rechargeGoal ? clock + 1 + ai.reaction : 0;
                     }
                     ai.fuel = bot.fuel; bot.vx = bot.vy = 0;
                     bot.ex = { c: bot.carry, n: bot.items }; bot.seen = now;
@@ -8646,7 +8560,8 @@
                 if (ready) ai.fishingTimer -= dt;
                 if (ready && ai.fishingTimer <= 0 && ai.fishingState !== 4) {
                     if (ai.fishingState === 0) {
-                        ai.energy = Math.max(0, ai.energy - 10); ai.fishingState = 1; ai.power = 0;
+                        if (!demo.session.preview && !(demo.session.testing && !demo.session.limitedTestEnergy)) ai.energy -= costs.fishing.cast;
+                        ai.fishingState = 1; ai.power = 0;
                     } else if (ai.fishingState === 3) {
                         const depth = ai.depth || .5, weights = [.62 - depth * .5, .3 + depth * .05, .07 + depth * .3, .01 + depth * .15];
                         let roll = rand() * weights.reduce((sum, weight) => sum + weight, 0), type = 0;
@@ -8796,7 +8711,7 @@
             if (Math.abs(dx) + Math.abs(dy) > 0) bot.f = Math.atan2(dy, dx);
         }
 
-        botResourceReady(demo, bot, dt, drain = 0) {
+        botResourceReady(demo, bot, dt, drain = 0, minimum = 8) {
             const ai = bot.ai;
             const max = demo.game.res?.max || 100;
             if (!demo.game.res || (demo.session.testing && !demo.session.limitedTestEnergy) || demo.session.preview) { ai.energy = max; ai.rechargeAt = 0; return true; }
@@ -8806,7 +8721,7 @@
                 ai.energy += demo.session.rewardAmount();
                 ai.rechargeAt = 0;
             }
-            if (ai.energy < 8) { ai.rechargeAt = demo.clock + 1 + ai.reaction; return false; }
+            if (ai.energy < minimum) { ai.rechargeAt = demo.clock + 1 + ai.reaction; return false; }
             ai.energy = Math.max(0, ai.energy - drain * dt);
             return true;
         }
@@ -9849,7 +9764,7 @@
                 studySet: { deckId: roomDeck?.id, title: roomDeck?.title, publicId: roomDeck?.communityDeckId || roomDeck?.communitySourceId },
                 onLeave: () => this.closePractice(),
                 onRestart: config.testing ? () => {
-                    const nextConfig = { ...config, limitedTestEnergy: s.limitedTestEnergy, questionReward: s.rewardAmount() };
+                    const nextConfig = { ...config, limitedTestEnergy: s.limitedTestEnergy, questionReward: s.reward };
                     this.closePractice(); this.startPractice(room.mode, nextConfig);
                 } : undefined
             });
@@ -11949,8 +11864,6 @@
                     this.previewCampusAssignments();
                 } else if (action === 'import-campus-assignments') {
                     this.importCampusAssignments();
-                } else if (action === 'load-classmates') {
-                    await this.loadClassmates(target);
                 } else if (action === 'log-study') {
                     this.openStudyLog(target.dataset.id);
                 } else if (action === 'publish-community-deck') {

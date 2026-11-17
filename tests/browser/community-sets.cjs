@@ -139,3 +139,57 @@ module.exports = async function runCommunitySetChecks(page) {
         });
     }
 };
+
+module.exports.runClassroomChecks = async function runClassroomChecks(page) {
+    await page.evaluate(() => {
+        const app = window.NexusApp, classes = app.classrooms, community = app.schoolCommunity;
+        const names = ['available', 'isTeacher', 'contextKey', 'call'];
+        const originals = Object.fromEntries(names.map(name => [name, classes[name]]));
+        const api = window.StudBudCommunityGames;
+        const data = window.__classroomBrowser = { originals, schoolCall: api.schoolCall, calls: [], joined: false };
+        classes.available = () => true;
+        classes.isTeacher = () => false;
+        classes.contextKey = () => 'browser-classroom';
+        classes.call = async (fn, args) => {
+            data.calls.push({ fn, args });
+            if (fn === 'studbud_join_class') {
+                data.joined = true;
+                return { id: 'browser-classroom', title: 'Biology classroom' };
+            }
+            if (fn === 'studbud_leave_class') data.joined = false;
+            return { classes: data.joined ? [{ id: 'browser-classroom', title: 'Biology classroom', course_code: 'BIO', decks: [] }] : [] };
+        };
+        api.schoolCall = async () => ({ can_post: true, people: [], decks: [], posts: [], live: [], class_sets: [] });
+        community.resetContext();
+        app.Router.navigate('classes');
+    });
+    try {
+        const join = page.locator('[data-classroom-join]');
+        await join.waitFor({ state: 'visible' });
+        assert.match(await join.textContent(), /Joining shares your username and membership/);
+        assert.equal(await page.locator('#public-share-courses, #public-show-classmates, [data-action="load-classmates"]').count(), 0);
+        await join.getByLabel("Teacher's classroom code").fill('abc234');
+        await join.getByRole('button', { name: 'Join classroom', exact: true }).click();
+        await page.locator('[data-school-action="leave-class"]').waitFor({ state: 'visible' });
+        assert.equal(await page.locator('.community-tabs [data-tab="people"]').count(), 0);
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+        assert.equal(overflow, false, 'explicit classroom controls fit the viewport');
+        await page.locator('[data-school-action="leave-class"]').click();
+        await page.locator('dialog.app-confirmation button[value="confirm"]').click();
+        await join.waitFor({ state: 'visible' });
+        const calls = await page.evaluate(() => window.__classroomBrowser.calls);
+        assert.deepEqual(calls.find(call => call.fn === 'studbud_join_class').args, { p_code: 'ABC234' });
+        assert.ok(calls.filter(call => call.fn === 'studbud_my_classes').every(call => call.args === undefined));
+        assert.deepEqual(calls.find(call => call.fn === 'studbud_leave_class').args, { p_class_id: 'browser-classroom' });
+    } finally {
+        await page.evaluate(() => {
+            const app = window.NexusApp, data = window.__classroomBrowser;
+            app.closeModal();
+            Object.assign(app.classrooms, data.originals);
+            window.StudBudCommunityGames.schoolCall = data.schoolCall;
+            app.schoolCommunity.resetContext();
+            app.Router.navigate('home');
+            delete window.__classroomBrowser;
+        });
+    }
+};

@@ -18,7 +18,7 @@ window.StudBudSfx = { settings: {}, update(patch) { Object.assign(this.settings,
 const sandbox = {
     window, console, Math: math, Date, setTimeout, clearTimeout,
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
-    document: { documentElement: { dataset: {}, style: {} }, getElementById: id => elements.get(id) || null, querySelector: () => null },
+    document: { documentElement: { dataset: {}, style: {} }, addEventListener() {}, getElementById: id => elements.get(id) || null, querySelector: () => null },
     EventBus: {
         on(name, handler) { if (!listeners.has(name)) listeners.set(name, []); listeners.get(name).push(handler); },
         emit(name, data) { events.push({ name, data }); for (const handler of listeners.get(name) || []) handler(data); }
@@ -32,7 +32,7 @@ const sandbox = {
     StudBudSfx: { settings: {}, save() {} }
 };
 const context = vm.createContext(sandbox);
-for (const file of ['nameModeration.js', 'communityGames.js', 'cloudSync.js', 'flashcardEngine.js', 'parkwayData.js', 'data/schools/central.js', 'data/schools/north.js', 'data/schools/south.js', 'data/schools/west.js']) vm.runInContext(source(file), context, { filename: file });
+for (const file of ['nameModeration.js', 'communityGames.js', 'cloudSync.js', 'flashcardEngine.js', 'multiplayerEngine.js', 'parkwayData.js', 'data/schools/central.js', 'data/schools/north.js', 'data/schools/south.js', 'data/schools/west.js']) vm.runInContext(source(file), context, { filename: file });
 const appSource = source('app.js');
 vm.runInContext(appSource.slice(appSource.indexOf('    const ACTIVITY_RESET_ID'), appSource.indexOf('    const AppState =')), context);
 vm.runInContext('globalThis.AppState = new AppStateEngine();', context);
@@ -285,106 +285,59 @@ async function run() {
 
     for (const [id, value] of [
         ['public-subject', { value: '' }], ['public-show-stats', { checked: false }],
-        ['public-show-classmates', { checked: false }],
         ['public-profile-status', { textContent: '' }]
     ]) elements.set(id, value);
     let publicProfileArgs;
-    app.classmateDiscoveryAvailable = true;
     const friendCall = community.friendCall;
     community.friendCall = async (name, args) => { publicProfileArgs = { name, args }; };
     await app.savePublicProfile();
-    assert.equal(publicProfileArgs.name, 'studbud_set_public_profile');
+    assert.equal(publicProfileArgs.name, 'studbud_save_public_profile');
     assert.equal(Object.hasOwn(publicProfileArgs.args, 'p_first_name'), false);
     assert.equal(Object.hasOwn(publicProfileArgs.args, 'p_last_name'), false);
     assert.equal(Object.hasOwn(publicProfileArgs.args, 'p_show_real_name'), false);
     assert.equal(Object.hasOwn(publicProfileArgs.args, 'p_show_school'), false);
-    assert.equal(publicProfileArgs.args.p_show_classmates, false, 'course discovery is an explicit opt-in');
-    app.classmateDiscoveryAvailable = false;
-    await app.savePublicProfile();
-    assert.equal(Object.hasOwn(publicProfileArgs.args, 'p_show_classmates'), false, 'older servers omit unsupported discovery controls');
-    assert.equal(Object.hasOwn(publicProfileArgs.args, 'p_share_courses'), false, 'older servers cannot enable an unsupported course index');
-    assert.match(elements.get('public-profile-status').textContent, /needs a server update/);
+    assert.deepEqual(Object.keys(publicProfileArgs.args).sort(), ['p_favorite_subject', 'p_show_stats']);
+    assert.match(elements.get('public-profile-status').textContent, /Saved your profile/);
     {
         const oldSync = window.StudBudCloud.syncNow, oldSettings = clone(state.get('settings'));
-        const oldClassrooms = app.classrooms, oldSchoolCommunity = app.schoolCommunity;
-        const oldRouter = app.Router, oldCourseFields = app.updateCourseSchoolFields, oldScaleEditor = app.renderOtherGradeScaleEditor;
-        let syncs = 0, resets = 0, renders = 0, calls = 0, finishSync;
-        app.classrooms = { resetContext() { resets++; } };
-        app.schoolCommunity = { resetContext() { resets++; }, async render() { renders++; } };
-        app.Router = { activeRoute: 'classes' };
+        const oldCourseFields = app.updateCourseSchoolFields, oldScaleEditor = app.renderOtherGradeScaleEditor;
+        let syncs = 0;
         app.updateCourseSchoolFields = app.renderOtherGradeScaleEditor = () => {};
-        app.courseIndexConsentAvailable = app.classmateDiscoveryAvailable = true;
-        window.StudBudCloud.user = { id: 'course-consent-a' };
-        elements.set('public-share-courses', { checked: true });
-        elements.set('public-courses-availability', {});
+        window.StudBudCloud.user = { id: 'profile-a' };
         elements.set('settings-school', {});
-        state.set('settings', { ...oldSettings, shareSchoolCourses: false });
-        community.friendCall = async (name, args) => {
-            calls++;
-            publicProfileArgs = { name, args };
-            return { share_courses: args.p_share_courses };
-        };
-        window.StudBudCloud.syncNow = () => { syncs++; return new Promise(resolve => { finishSync = resolve; }); };
-        const saving = app.savePublicProfile();
-        await new Promise(resolve => setImmediate(resolve));
-        assert.equal(publicProfileArgs.args.p_share_courses, true);
-        assert.equal(state.get('settings').shareSchoolCourses, true);
-        assert.equal(resets, 2, 'confirmed sharing changes invalidate classroom and community requests');
-        assert.equal(elements.get('public-profile-status').textContent, 'Saving…', 'save feedback waits for the encrypted snapshot/index sync');
-        finishSync();
-        await saving;
         window.StudBudCloud.syncNow = async () => { syncs++; };
-        elements.get('public-share-courses').checked = false;
+        elements.get('public-show-stats').checked = true;
         await app.savePublicProfile();
-        assert.equal(publicProfileArgs.args.p_share_courses, false);
-        assert.equal(state.get('settings').shareSchoolCourses, false, 'revocation disables the client course projection');
-        assert.equal(syncs, 2);
-        const beforeInvalid = calls;
-        elements.get('public-show-classmates').checked = true;
+        assert.equal(publicProfileArgs.args.p_show_stats, true);
+        assert.equal(syncs, 0, 'saving public preferences never uploads private academic data');
+        community.friendCall = async () => { throw new Error('Apply the server update'); };
         await app.savePublicProfile();
-        assert.equal(calls, beforeInvalid, 'discovery cannot bypass the explicit course-sharing choice');
-        assert.match(elements.get('public-profile-status').textContent, /Enable course sharing/);
-        elements.get('public-show-classmates').checked = false;
-        elements.get('public-share-courses').checked = true;
-        community.friendCall = async () => ({});
-        await app.savePublicProfile();
-        assert.equal(state.get('settings').shareSchoolCourses, false, 'an unconfirmed preference never enables readable course uploads');
-        assert.equal(syncs, 2);
-        assert.match(elements.get('public-profile-status').textContent, /did not confirm/);
+        assert.match(elements.get('public-profile-status').textContent, /server update/);
         let finishRequest;
         community.friendCall = () => new Promise(resolve => { finishRequest = resolve; });
         const staleSave = app.savePublicProfile();
-        window.StudBudCloud.user = { id: 'course-consent-b' };
+        window.StudBudCloud.user = { id: 'profile-b' };
         finishRequest({ share_courses: true });
         await staleSave;
-        assert.equal(state.get('settings').shareSchoolCourses, false, 'a previous account save cannot opt the new account in');
-        assert.equal(syncs, 2);
+        assert.equal(elements.get('public-profile-status').textContent, 'Saving…', 'a previous account cannot confirm the new account save');
         const staleLoad = app.loadPublicProfileCard();
-        window.StudBudCloud.user = { id: 'course-consent-c' };
+        window.StudBudCloud.user = { id: 'profile-c' };
         finishRequest({ share_courses: true, favorite_subject: 'Stale account' });
         await staleLoad;
-        assert.equal(state.get('settings').shareSchoolCourses, false, 'a previous account profile load cannot opt the new account in');
         assert.equal(elements.get('public-subject').value, '');
-        community.friendCall = async () => ({ share_courses: true, show_classmates: false, school: 'pchs' });
+        community.friendCall = async () => ({ share_courses: true, show_classmates: true, school: 'pchs', favorite_subject: 'Science', show_stats: false });
         await app.loadPublicProfileCard();
-        assert.equal(state.get('settings').shareSchoolCourses, true);
-        assert.equal(elements.get('public-share-courses').disabled, false);
-        assert.equal(renders, 1, 'a changed server preference refreshes an open classroom instead of leaving it blank');
-        community.friendCall = async () => ({ school: 'pchs' });
-        await app.loadPublicProfileCard();
-        assert.equal(state.get('settings').shareSchoolCourses, false, 'unsupported servers keep the local course index off');
-        assert.equal(elements.get('public-share-courses').disabled, true);
-        assert.match(elements.get('public-courses-availability').textContent, /server update/);
-        state.set('settings', oldSettings);
+        assert.equal(elements.get('public-subject').value, 'Science');
+        assert.equal(elements.get('public-show-stats').checked, false);
+        assert.deepEqual(state.get('settings'), oldSettings, 'legacy course flags are ignored');
+        assert.equal(syncs, 0);
         window.StudBudCloud.syncNow = oldSync;
         delete window.StudBudCloud.user;
-        app.classrooms = oldClassrooms; app.schoolCommunity = oldSchoolCommunity;
-        app.Router = oldRouter; app.updateCourseSchoolFields = oldCourseFields; app.renderOtherGradeScaleEditor = oldScaleEditor;
-        app.courseIndexConsentAvailable = false;
-        for (const id of ['public-share-courses', 'public-courses-availability', 'settings-school']) elements.delete(id);
+        app.updateCourseSchoolFields = oldCourseFields; app.renderOtherGradeScaleEditor = oldScaleEditor;
+        elements.delete('settings-school');
     }
     community.friendCall = friendCall;
-    for (const id of ['public-subject', 'public-show-stats', 'public-show-classmates', 'public-profile-status']) elements.delete(id);
+    for (const id of ['public-subject', 'public-show-stats', 'public-profile-status']) elements.delete(id);
 
     state.state.profile.school = 'other';
     state.state.profile.gradeScale = clone(window.STUDBUD_OTHER_GRADE_SCALE);
@@ -550,16 +503,16 @@ async function run() {
 
     const setupIds = ['multiplayer-preview-title', 'multiplayer-preview-description', 'host-game-resource-label', 'solo-game-resource-label'];
     for (const id of setupIds) elements.set(id, {});
-    for (const [mode, resource, multiplier] of [
-        ['market', 'Energy', 1], ['miner', 'Fuel', 1], ['shooter', 'Ammo', 1],
-        ['river', 'Energy', 1], ['frenzy', 'Bait', 1], ['fishing', 'Bait', 1],
-        ['crypto', 'Research cash', 8], ['hack', 'Crypto', 3]
+    for (const [mode, resource, multiplier, factor] of [
+        ['market', 'Energy', 5 / 3, '5/3'], ['miner', 'Fuel', 4 / 3, '4/3'], ['shooter', 'Ammo', 2, '2'],
+        ['river', 'Energy', 4 / 3, '4/3'], ['frenzy', 'Bait', 2 / 3, '2/3'], ['fishing', 'Bait', 2 / 3, '2/3'],
+        ['crypto', 'Research cash', 8, '8'], ['hack', 'Crypto', 3, '3']
     ]) {
         assert.deepEqual(normal(app.questionRewardInfo(mode)), { resource, multiplier });
         app.updateMultiplayerModeSetup(mode);
         const label = elements.get('host-game-resource-label').textContent;
         assert.ok(label.startsWith(`${resource} per correct answer`));
-        if (multiplier > 1) assert.ok(label.includes(`${multiplier}x setting`), 'cash/crypto bonuses explain their setting multiplier');
+        assert.ok(label.includes(`${factor}x setting`), 'the resource conversion is shown on both setup screens');
         assert.equal(elements.get('solo-game-resource-label').textContent, label, 'host and solo setup agree on question rewards');
     }
     for (const id of setupIds) elements.delete(id);
@@ -568,9 +521,9 @@ async function run() {
         elements.set(`${prefix}-game-reward-guidance`, {});
     }
     for (const [mode, min, max] of [
-        ['skyline', 20, 35], ['duel', 25, 45], ['miner', 30, 45], ['river', 30, 50],
-        ['frenzy', 10, 20], ['fishing', 10, 20], ['market', 40, 60],
-        ['shooter', 50, 70], ['crypto', 15, 30], ['hack', 10, 25]
+        ['skyline', 25, 35], ['duel', 25, 35], ['miner', 25, 35], ['river', 25, 35],
+        ['frenzy', 25, 35], ['fishing', 25, 35], ['market', 25, 35],
+        ['shooter', 25, 35], ['crypto', 15, 30], ['hack', 10, 25]
     ]) {
         const recommendation = app.questionRewardRecommendation(mode);
         assert.equal(recommendation.min, min);

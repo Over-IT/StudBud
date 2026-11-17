@@ -20,8 +20,11 @@ function harness() {
         AppState: { get: key => state[key], saveFlashcardDeck: async deck => state.flashcards.push(deck) },
         updateSavedDeck: async (id, patch) => Object.assign(state.flashcards.find(deck => deck.id === id), patch),
         classrooms: { available: () => available, contextKey: () => account, isTeacher: () => false,
-            courseSharingEnabled: () => state.settings.shareSchoolCourses === true,
-            courseCodes: () => ['BIO'], call: async () => ({ classes: [{ id: 'class1', title: 'Biology' }] }),
+            call: async (fn, args) => {
+                calls.push([fn, args]);
+                return fn === 'studbud_join_class' ? { id: 'class1', title: 'Biology' }
+                    : { classes: [{ id: 'class1', title: 'Biology' }] };
+            },
             courseMatches: (course, code) => course.code === code,
             studentSetsMarkup: () => '<section>Teacher-published sets</section>',
             status: message => elements.get('school-community-status').textContent = message },
@@ -58,11 +61,24 @@ function harness() {
     assert.equal(h.timers.length, 1);
     assert.match(h.elements.get('school-community-root').innerHTML, /Turn on school discovery/);
     assert.doesNotMatch(h.elements.get('school-community-root').innerHTML, /data-tab="updates"/, 'school has no empty updates tab');
-    const noConsent = harness();
-    noConsent.state.settings.shareSchoolCourses = false;
-    await noConsent.community.open('class1', 'Private class');
-    assert.match(noConsent.elements.get('school-community-root').innerHTML, /Course sharing is off/);
-    assert.equal(noConsent.calls.length, 0, 'opening a classroom without consent sends no course requests');
+    assert.match(h.elements.get('school-community-root').innerHTML, /data-classroom-join/);
+    const membership = h.calls.find(([fn]) => fn === 'studbud_my_classes');
+    assert.equal(membership[1], undefined, 'personal courses are never sent to membership reads');
+    const joiner = harness(), joinButton = { disabled: false, isConnected: true };
+    const joinForm = {
+        matches: selector => selector === '[data-classroom-join]',
+        elements: { code: { value: ' abc234 ' } }, querySelector: () => joinButton
+    };
+    await joiner.community.render();
+    await joiner.community.onSubmit({ target: joinForm, preventDefault() {} });
+    assert.equal(joiner.community.classId, 'class1');
+    assert.deepEqual(JSON.parse(JSON.stringify(joiner.calls.find(([fn]) => fn === 'studbud_join_class'))),
+        ['studbud_join_class', { p_code: 'ABC234' }]);
+    assert.equal(joinButton.disabled, false);
+    await joiner.click('leave-class');
+    assert.deepEqual(JSON.parse(JSON.stringify(joiner.calls.find(([fn]) => fn === 'studbud_leave_class'))),
+        ['studbud_leave_class', { p_class_id: 'class1' }]);
+    assert.equal(joiner.community.classId, null);
     h.response({ school_discovery: true, class_discovery: true, can_announce: true,
         people: [{ user_id: 'peer', username: '<script>peer</script>' }],
         decks: [{ id: 'deck', title: '<b>Biology</b>', author: 'Teacher', card_count: 10 }],
@@ -75,7 +91,8 @@ function harness() {
     assert.doesNotMatch(h.elements.get('school-community-root').innerHTML, /<script>|<b>Class review/);
     assert.match(h.elements.get('school-community-root').innerHTML, /Join game/);
     c.tab = 'people'; c.paint();
-    assert.match(h.elements.get('school-community-root').innerHTML, /&lt;script&gt;peer/);
+    assert.doesNotMatch(h.elements.get('school-community-root').innerHTML, /peer|data-tab="people"/,
+        'legacy class-discovery data cannot reveal people in the classroom UI');
     c.tab = 'sets'; c.paint();
     assert.match(h.elements.get('school-community-root').innerHTML, /&lt;b&gt;Biology/);
     await h.click('save-set', { id: 'deck' });
@@ -127,7 +144,7 @@ function harness() {
     assert.equal(enrollment.calls.length, 0, 'class board access waits for enrollment synchronization');
     enroll({ classes: [] });
     await opening;
-    assert.deepEqual(enrollment.calls.map(row => row[0]), ['studbud_course_communities', 'studbud_school_community']);
+    assert.deepEqual(enrollment.calls.map(row => row[0]), ['studbud_school_community']);
 
     const submit = harness();
     await submit.community.open('class1', 'Biology');
@@ -212,15 +229,13 @@ function harness() {
 
     const courses = harness();
     courses.state.courses = [{ code: 'BIO', title: 'My private class label' }];
-    courses.api.schoolCall = async fn => fn === 'studbud_course_communities'
-        ? { classes: [{ id: 'course', title: 'Biology', course_code: 'BIO', community: true }] }
-        : { can_post: true, can_announce: false, posts: [], class_sets: [], course_community: true, teacher_classes: [] };
+    courses.api.schoolCall = async () => ({ can_post: true, can_announce: false, posts: [], class_sets: [] });
     await courses.community.render();
     assert.match(courses.elements.get('school-community-root').innerHTML, /My classrooms/);
     assert.match(courses.elements.get('school-community-root').innerHTML, /Open classroom/);
-    assert.match(courses.elements.get('school-community-root').innerHTML, /No teacher or join code needed/);
-    assert.match(courses.elements.get('school-community-root').innerHTML, /My private class label/,
-        'private local titles still label classrooms without being sent to the server');
+    assert.match(courses.elements.get('school-community-root').innerHTML, /code from your teacher/);
+    assert.doesNotMatch(courses.elements.get('school-community-root').innerHTML, /My private class label/,
+        'private courses do not become classroom associations');
     assert.equal(JSON.stringify(courses.calls).includes('My private class label'), false);
     await courses.community.open('course', 'Biology');
     assert.match(courses.elements.get('school-community-root').innerHTML, /Write a post/);
@@ -238,15 +253,13 @@ function harness() {
         }
         return { classes: [{ id: 'own-teaching-class', course_code: 'BIO', title: 'Biology' }] };
     };
-    teacher.api.schoolCall = async fn => fn === 'studbud_course_communities'
-        ? { classes: [{ id: 'course-bio', course_code: 'BIO', title: 'Biology', community: true }] }
-        : { can_announce: true, course_community: true, posts: [], people: [], decks: [], live: [] };
+    teacher.api.schoolCall = async () => ({ can_announce: true, posts: [], people: [], decks: [], live: [] });
     await teacher.community.render();
     assert.ok(managed.includes('add-course'), 'course creation stays inside the classroom overview');
     assert.equal(teacher.community.classes.length, 1, 'a teacher does not create a duplicate classroom card');
-    assert.equal(teacher.community.classes[0].id, 'course-bio');
-    await teacher.community.open('course-bio', 'Biology');
-    assert.ok(managed.includes('own-teaching-class'), 'private tools use the owned teaching ID, not the public course ID');
+    assert.equal(teacher.community.classes[0].id, 'own-teaching-class');
+    await teacher.community.open('own-teaching-class', 'Biology');
+    assert.ok(managed.includes('own-teaching-class'), 'private tools use only the owned teaching ID');
     assert.match(teacher.elements.get('school-community-root').innerHTML, /data-tab="teacher"/);
     teacher.community.tab = 'teacher'; teacher.community.paint();
     assert.ok(managed.includes('tools'));

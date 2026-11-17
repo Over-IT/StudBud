@@ -180,8 +180,10 @@ assert.doesNotMatch(html, /id="campus-paste-(?:assignments|courses)"/, 'separate
 assert.match(html, /campusPasteImport\.js/);
 assert.match(html, /<details class="settings-help"><summary>Privacy details<\/summary>/,
     'long public-profile privacy guidance is collapsed until requested');
-assert.match(html, /self-reported courses with opted-in classmates/,
-    'course sharing stays plainly disclosed without a paragraph-length hint');
+assert.doesNotMatch(html, /public-share-courses|public-show-classmates/,
+    'retired course-sharing and course-discovery controls are absent');
+assert.match(html, /Your personal courses and grades stay private/,
+    'profile privacy guidance describes private academic data');
 assert.match(html, /<body class="dark-theme" data-color-scheme="studbud">/,
     'the initial page paint uses the StudBud default before app startup');
 {

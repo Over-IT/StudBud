@@ -76,7 +76,7 @@ picker.status = () => {};
     assert.equal(created.length, 1, 'already-taught course is not added twice');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 
-// Server: classes are teacher-only to create, students get access automatically by school + course, and every RPC is granted to signed-in users only.
+// Teacher-owned resources use explicit student membership, never private course inference.
 const sql = source('supabase-setup.sql');
 ['studbud_classes', 'studbud_class_members', 'studbud_class_decks'].forEach(table => {
     assert.match(sql, new RegExp(`create table if not exists public\\.${table}`));
@@ -86,15 +86,15 @@ assert.match(sql, /function public\.studbud_require_teacher\(\)[\s\S]*?'teacher'
 ['studbud_teacher_create_class', 'studbud_teacher_class_detail', 'studbud_teacher_save_deck', 'studbud_teacher_restore_student', 'studbud_my_classes', 'studbud_sync_class_stats']
     .forEach(fn => assert.match(sql, new RegExp(`grant execute on function public\\.${fn}\\([^)]*\\) to authenticated`)));
 assert.match(sql, /drop function if exists public\.studbud_join_class\(text, uuid\)/);
-assert.doesNotMatch(sql, /grant execute on function public\.studbud_join_class/);
-const myClasses = sql.slice(sql.indexOf('create or replace function public.studbud_my_classes'));
-assert.match(myClasses, /insert into public\.studbud_class_members[\s\S]*?c\.school = v_school[\s\S]*?studbud_course_matches/);
+assert.match(sql, /grant execute on function public\.studbud_join_class\(text\) to authenticated/);
+const myClasses = sql.slice(sql.indexOf('create or replace function public.studbud_my_classes')).split('$$;')[0];
+assert.doesNotMatch(myClasses, /insert into|delete from|unnest|studbud_course_matches/);
 assert.match(myClasses, /state,profile,school/);
 assert.match(sql, /not coalesce\(a\.is_anonymous, false\)/, 'teacher backfill excludes actual Supabase anonymous users');
 assert.match(sql, /c\.teacher_id = auth\.uid\(\)[\s\S]*?studbud_course_matches/);
 assert.match(sql, /revoke all on function public\.studbud_refresh_teacher_roster\(\) from public, anon, authenticated/);
-assert.match(myClasses, /delete from public\.studbud_class_members[\s\S]*?not m\.removed/);
-assert.doesNotMatch(source('classrooms.js'), /join_code|studbud_join_class/);
+assert.match(myClasses, /m\.explicit_join and c\.school = v_school/);
+assert.match(source('classrooms.js'), /item\.join_code/);
 assert.match(sql, /revoke all on function public\.studbud_class_person\(uuid\) from public, anon, authenticated/);
 
 // Client wiring.
@@ -120,10 +120,13 @@ assert.match(sqlFunction('studbud_teacher_class_detail'), /id = p_class_id and t
 assert.match(sqlFunction('studbud_my_classes'), /m\.user_id = auth\.uid\(\) and not m\.removed/);
 assert.match(sqlFunction('studbud_class_summary'), /'teacher', public\.studbud_class_person\(p_class\.teacher_id\)/);
 assert.match(sqlFunction('studbud_require_teacher'), /state,profile,school/);
-assert.match(sqlFunction('studbud_refresh_teacher_roster'), /latest\.updated_at >= m\.joined_at/,
-    'older saved data cannot undo a new student enrollment');
-assert.doesNotMatch(sqlFunction('studbud_my_classes'), /n <= 40/, 'course aliases are not silently truncated');
-assert.match(sqlFunction('studbud_my_classes'), /cardinality\(p_course_codes\)/, 'oversized requests fail explicitly');
+assert.doesNotMatch(sqlFunction('studbud_refresh_teacher_roster'), /studbud_user_data|insert into|delete from/,
+    'teachers cannot infer rosters from old or new private course snapshots');
+assert.match(sqlFunction('studbud_join_class'), /c\.join_code = upper\(btrim\(p_code\)\) and c\.school = v_school/);
+assert.match(sqlFunction('studbud_join_class'), /class_id = v_class\.id and user_id = auth\.uid\(\) and removed/);
+assert.match(sqlFunction('studbud_join_class'), /values \(v_class\.id, auth\.uid\(\), true\)/);
+assert.match(sqlFunction('studbud_leave_class'), /user_id = auth\.uid\(\) and not removed/);
+assert.match(sql, /delete from public\.studbud_class_members where not explicit_join/);
 assert.match(sqlFunction('studbud_my_classes'), /studbud_user_tags where user_id = auth\.uid\(\) and tag = 'teacher'/,
     'delayed client account tags cannot enroll teachers as students');
 for (const name of ['studbud_teacher_classes', 'studbud_teacher_class_detail']) {
@@ -167,21 +170,21 @@ assert.match(sql, /alter table public\.studbud_class_members\s+drop column if ex
     const student = harness();
     student.doc.visibilityState = 'hidden';
     student.client.refreshNav();
-    assert.ok(student.events['courses:updated'], 'course updates are observed before the student first opens Classes');
+    assert.equal(student.events['courses:updated'], undefined, 'private course changes never trigger classroom enrollment');
     student.doc.visibilityState = 'visible';
     await student.client.loadStudent();
-    assert.equal(student.calls[0][0], 'persist', 'save courses/school before enrollment');
-    assert.equal(student.calls[1][0], 'studbud_my_classes');
+    assert.equal(student.calls[0][0], 'studbud_my_classes');
+    assert.equal(student.calls[0][1], undefined, 'membership reads never send private course codes');
     assert.equal(student.calls.filter(([fn]) => fn === 'studbud_my_classes').length, 1, 'no duplicate load RPC');
     assert.ok(student.rendered.includes('student'), 'student sees fresh teacher and class info');
-    assert.equal(student.calls.length, 2, 'enrollment does not upload academic progress');
+    assert.equal(student.calls.length, 1, 'membership does not sync or upload academic data');
     assert.equal(student.events['assignments:updated'], undefined, 'assignment changes do not trigger classroom uploads');
     student.rendered.length = 0;
     await student.client.syncEnrollment(true);
     assert.deepEqual(student.rendered, [], 'enrollment never rebuilds the active classroom or its drafts');
 
     student.state.courses = Array.from({ length: 55 }, (_, index) => ({ code: 'C' + index }));
-    assert.equal(student.client.courseCodes().length, 55, 'no silent course-code limit');
+    assert.equal(student.client.courseCodes, undefined, 'no projection of private course lists for enrollment');
     assert.equal(student.client.courseMatches({ code: 'bio' }, ' BIO '), true, 'client matches server code normalization');
     student.client.call = async (fn, args) => {
         student.calls.push([fn, args]);
@@ -191,8 +194,8 @@ assert.match(sql, /alter table public\.studbud_class_members\s+drop column if ex
     student.state.assignments = [{ title: 'Private assignment', pointsEarned: 75 }];
     student.state.studyHistory = [{ durationSec: 300, answer: 'Private answer' }];
     await student.client.syncEnrollment(true);
-    assert.deepEqual(student.calls.map(([fn]) => fn), ['persist', 'studbud_my_classes'],
-        'many classrooms still only refresh membership, without progress batches');
+    assert.deepEqual(student.calls.map(([fn]) => fn), ['studbud_my_classes'],
+        'private course changes do not upload course codes or progress batches');
     assert.equal(JSON.stringify(student.calls).includes('Private'), false);
 
     const markup = harness();
@@ -222,9 +225,9 @@ assert.match(sql, /alter table public\.studbud_class_members\s+drop column if ex
     assert.equal(offline.calls.length, 0, 'no enrollment before account state is restored');
     const privateCourses = harness();
     delete privateCourses.state.settings.shareSchoolCourses;
-    assert.equal(privateCourses.client.courseCodes().length, 0, 'private courses are never sent as enrollment arguments');
     await privateCourses.client.syncEnrollment(true);
-    assert.equal(privateCourses.calls.length, 0, 'classroom background polling stays off without consent');
+    assert.equal(privateCourses.calls.length, 1, 'explicit memberships work without retired course-sharing consent');
+    assert.equal(privateCourses.calls[0][1], undefined);
 
     const teacher = harness(true);
     teacher.client.detail = { id: 'class1' };

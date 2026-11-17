@@ -3392,8 +3392,7 @@ set search_path = public, pg_temp
 as $$
 begin
     -- Only the readable projection is changed; never modify a legacy plaintext account's private courses.
-    if (new.data ? 'encryption' or new.data ? 'zk')
-        and not coalesce((select p.share_courses from public.studbud_public_profiles p where p.user_id = new.user_id), false) then
+    if (new.data ? 'encryption' or new.data ? 'zk') then
         new.data := jsonb_set(new.data, '{state,courses}', '[]'::jsonb);
     end if;
     return new;
@@ -3408,8 +3407,10 @@ update public.studbud_user_data d
 set data = jsonb_set(d.data, '{state,courses}', '[]'::jsonb),
     updated_at = greatest(clock_timestamp(), d.updated_at + interval '1 microsecond')
 where (d.data ? 'encryption' or d.data ? 'zk')
-    and coalesce(d.data #> '{state,courses}', '[]'::jsonb) <> '[]'::jsonb
-    and not coalesce((select p.share_courses from public.studbud_public_profiles p where p.user_id = d.user_id), false);
+    and coalesce(d.data #> '{state,courses}', '[]'::jsonb) <> '[]'::jsonb;
+
+update public.studbud_public_profiles set share_courses = false, show_classmates = false
+where share_courses or show_classmates;
 
 create or replace function public.studbud_user_tags_for(p_user_id uuid)
 returns text[]
@@ -3496,8 +3497,7 @@ begin
     return jsonb_build_object('favorite_subject', coalesce(v.favorite_subject, ''),
         'show_stats', coalesce(v.share_study_activity, false),
         'school', coalesce(v.school, (select a.raw_user_meta_data ->> 'school' from auth.users a where a.id = auth.uid()), 'pchs'),
-        'show_classmates', coalesce(v.show_classmates, false) and coalesce(v.share_courses, false),
-        'share_courses', coalesce(v.share_courses, false));
+        'show_classmates', false, 'share_courses', false);
 end;
 $$;
 
@@ -3507,49 +3507,47 @@ drop function if exists public.studbud_set_public_profile(text, text, text, text
 drop function if exists public.studbud_set_public_profile(text, text, text, text, text, text, boolean, boolean, boolean);
 drop function if exists public.studbud_set_public_profile(text, text, text, text, text, text, boolean, boolean, boolean, boolean);
 drop function if exists public.studbud_set_public_profile(text, boolean, boolean);
-create or replace function public.studbud_set_public_profile(
-    p_favorite_subject text default '',
-    p_show_stats boolean default false,
-    p_show_classmates boolean default null,
-    p_share_courses boolean default null
+create or replace function public.studbud_save_public_profile(
+    p_favorite_subject text,
+    p_show_stats boolean
 )
 returns jsonb
 language plpgsql
 security definer
 set search_path = public, pg_temp
 as $$
-declare
-    v_share_activity boolean;
 begin
     if public.studbud_is_guest() then raise exception 'Create a free account to use this. Your guest data comes with you.'; end if;
     if auth.uid() is null then raise exception 'Sign in first.'; end if;
-    -- Older clients defaulted statistics on; they cannot establish fresh consent.
-    v_share_activity := coalesce(p_show_stats, false) and (p_share_courses is not null
-        or coalesce((select p.share_study_activity from public.studbud_public_profiles p where p.user_id = auth.uid()), false));
-    if p_show_classmates and not coalesce(p_share_courses,
-        (select share_courses from public.studbud_public_profiles where user_id = auth.uid()), false) then
-        raise exception 'Enable course sharing before turning on course discovery.';
-    end if;
     insert into public.studbud_public_profiles (
         user_id, favorite_subject, show_stats, share_study_activity, show_classmates, share_courses, updated_at
     )
     values (auth.uid(), left(trim(coalesce(p_favorite_subject, '')), 40),
-        v_share_activity, v_share_activity, coalesce(p_show_classmates, false), coalesce(p_share_courses, false), now())
+        coalesce(p_show_stats, false), coalesce(p_show_stats, false), false, false, now())
     on conflict (user_id) do update set favorite_subject = excluded.favorite_subject,
         show_stats = excluded.show_stats,
         share_study_activity = excluded.share_study_activity,
-        share_courses = coalesce(p_share_courses, studbud_public_profiles.share_courses),
-        show_classmates = case when p_share_courses = false then false
-            else coalesce(p_show_classmates, studbud_public_profiles.show_classmates) end, updated_at = now();
-    if p_share_courses = false then
-        update public.studbud_user_data set data = jsonb_set(data, '{state,courses}', '[]'::jsonb),
-            updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')
-        where user_id = auth.uid() and (data ? 'encryption' or data ? 'zk');
-        delete from public.studbud_class_members where user_id = auth.uid();
-    end if;
+        share_courses = false, show_classmates = false, updated_at = now();
     return public.studbud_get_public_profile();
 end;
 $$;
+
+-- Old clients cannot restore course sharing or establish fresh default-on study consent.
+create or replace function public.studbud_set_public_profile(
+    p_favorite_subject text default '',
+    p_show_stats boolean default false,
+    p_show_classmates boolean default null,
+    p_share_courses boolean default null
+)
+returns jsonb language plpgsql security definer set search_path = public, pg_temp
+as $$
+begin
+    return public.studbud_save_public_profile(p_favorite_subject, coalesce(p_show_stats, false)
+        and coalesce((select p.share_study_activity from public.studbud_public_profiles p where p.user_id = auth.uid()), false));
+end;
+$$;
+revoke all on function public.studbud_save_public_profile(text, boolean) from public, anon;
+grant execute on function public.studbud_save_public_profile(text, boolean) to authenticated;
 
 create or replace function public.studbud_set_school(p_school text)
 returns jsonb
@@ -4234,7 +4232,7 @@ as $$
 $$;
 revoke all on function public.studbud_course_matches(jsonb, text, text) from public, anon, authenticated;
 
--- Discovery is mutual opt-in and returns usernames, never private class progress.
+-- Retired for old clients: private courses must never be used to discover people.
 create or replace function public.studbud_classmates(p_course_code text, p_semester text)
 returns jsonb
 language plpgsql
@@ -4242,59 +4240,13 @@ stable
 security definer
 set search_path = public, pg_temp
 as $$
-declare
-    v_uid uuid := auth.uid();
-    v_school text;
-    v_course jsonb;
-    v_data jsonb;
-    v_visible boolean;
 begin
-    if v_uid is null or public.studbud_is_guest() then raise exception 'Sign in to discover students sharing a course.'; end if;
-    if public.studbud_is_hidden_user(v_uid) then raise exception 'Course discovery is unavailable for this account.'; end if;
-    if p_course_code is null or char_length(btrim(p_course_code)) not between 1 and 200
-        or p_semester is null or p_semester not in ('S1', 'S2') then raise exception 'Choose a valid class and semester.'; end if;
-    select coalesce(pp.show_classmates, false) and coalesce(pp.share_courses, false), d.data into v_visible, v_data
-    from auth.users a
-    left join public.studbud_public_profiles pp on pp.user_id = a.id
-    left join public.studbud_user_data d on d.user_id = a.id
-    where a.id = v_uid;
-    if not coalesce(v_visible, false) then return jsonb_build_object('visible', false, 'students', '[]'::jsonb); end if;
-    v_school := v_data #>> '{state,profile,school}';
-    if v_school is null or v_school not in ('pchs', 'pnhs', 'pshs', 'pwhs') then raise exception 'Choose a supported school and sync your classes first.'; end if;
-    select c.value into v_course
-    from jsonb_array_elements(coalesce(v_data #> '{state,courses}', '[]'::jsonb)) c(value)
-    where public.studbud_course_matches(c.value, p_course_code, '')
-      and coalesce(c.value ->> 'term', 'FY') in ('FY', p_semester)
-    limit 1;
-    if v_course is null then raise exception 'Sync this class to your account before finding classmates.'; end if;
-    return jsonb_build_object('visible', true, 'students', coalesce((
-        select jsonb_agg(jsonb_build_object('user_id', classmates.user_id, 'username', classmates.username)
-            order by lower(classmates.username), classmates.user_id)
-        from (
-            select pp.user_id, coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student') as username
-            from public.studbud_public_profiles pp
-            join auth.users a on a.id = pp.user_id
-            join public.studbud_user_data d on d.user_id = pp.user_id
-            where pp.show_classmates and pp.share_courses and pp.user_id <> v_uid
-              and d.data #>> '{state,profile,school}' = v_school
-              and not coalesce(a.is_anonymous, false)
-              and not public.studbud_is_hidden_user(pp.user_id)
-              and exists (
-                  select 1 from jsonb_array_elements(coalesce(d.data #> '{state,courses}', '[]'::jsonb)) c(value)
-                  where public.studbud_course_matches(c.value, coalesce(nullif(v_course ->> 'catalogCode', ''), v_course ->> 'code'), v_course ->> 'title')
-                    and coalesce(c.value ->> 'term', 'FY') in ('FY', p_semester)
-              )
-            order by lower(coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student')), pp.user_id
-            limit 50
-        ) classmates
-    ), '[]'::jsonb));
+    raise exception 'Course-based discovery has been removed. Add Buds by username instead.';
 end;
 $$;
-revoke all on function public.studbud_classmates(text, text) from public, anon;
-grant execute on function public.studbud_classmates(text, text) to authenticated;
+revoke all on function public.studbud_classmates(text, text) from public, anon, authenticated;
 
--- Reconcile only this teacher's rosters. Never expose students' saved course lists to clients.
--- A teacher must not undo a student's new enrollment using an older cloud snapshot.
+-- Retain the internal hook without inferring membership from private account data.
 create or replace function public.studbud_refresh_teacher_roster()
 returns void
 language plpgsql
@@ -4303,38 +4255,6 @@ set search_path = public, pg_temp
 as $$
 begin
     perform public.studbud_require_teacher();
-    delete from public.studbud_class_members m using public.studbud_classes c
-    where c.id = m.class_id and c.teacher_id = auth.uid() and not m.removed
-      and exists (select 1 from public.studbud_user_data latest
-          where latest.user_id = m.user_id and latest.updated_at >= m.joined_at)
-      and not exists (
-          select 1 from public.studbud_user_data d
-          join auth.users a on a.id = d.user_id
-          left join public.studbud_public_profiles pp on pp.user_id = d.user_id
-          cross join lateral jsonb_array_elements(
-              case when jsonb_typeof(d.data #> '{state,courses}') = 'array'
-                  then d.data #> '{state,courses}' else '[]'::jsonb end) as course(value)
-          where d.user_id = m.user_id
-            and coalesce(nullif(d.data #>> '{state,profile,school}', ''), pp.school, a.raw_user_meta_data ->> 'school', 'pchs') = c.school
-            and pp.share_courses
-            and public.studbud_course_matches(course.value, c.course_code, c.title)
-      );
-    insert into public.studbud_class_members (class_id, user_id)
-    select distinct c.id, d.user_id
-    from public.studbud_classes c
-    join public.studbud_user_data d on d.user_id <> c.teacher_id
-    join auth.users a on a.id = d.user_id
-    left join public.studbud_public_profiles pp on pp.user_id = d.user_id
-    cross join lateral jsonb_array_elements(
-        case when jsonb_typeof(d.data #> '{state,courses}') = 'array'
-            then d.data #> '{state,courses}' else '[]'::jsonb end) as course(value)
-    where c.teacher_id = auth.uid()
-      and coalesce(nullif(d.data #>> '{state,profile,school}', ''), pp.school, a.raw_user_meta_data ->> 'school', 'pchs') = c.school
-      and pp.share_courses
-      and public.studbud_course_matches(course.value, c.course_code, c.title)
-      and not exists (select 1 from public.studbud_user_tags t where t.user_id = d.user_id and t.tag = 'teacher')
-      and not coalesce(a.is_anonymous, false)
-    on conflict do nothing;
 end;
 $$;
 revoke all on function public.studbud_refresh_teacher_roster() from public, anon, authenticated;
@@ -4529,12 +4449,62 @@ begin
 end;
 $$;
 
--- Access is automatic: a student is in every class at their own school whose course is in their course list.
--- Classes for courses they no longer take (or at another school) are dropped; teacher removals stick.
+-- Private course lists never enroll students. Retire inferred memberships once, preserving future explicit joins.
+alter table public.studbud_class_members add column if not exists explicit_join boolean not null default false;
+delete from public.studbud_class_members where not explicit_join;
 drop function if exists public.studbud_join_class(text, uuid);
 drop function if exists public.studbud_leave_class(uuid);
 drop function if exists public.studbud_my_classes(text[]);
 
+create or replace function public.studbud_join_class(p_code text)
+returns jsonb language plpgsql security definer set search_path = public, pg_temp
+as $$
+declare
+    v_class public.studbud_classes;
+    v_school text;
+begin
+    if auth.uid() is null or public.studbud_is_guest() or public.studbud_is_hidden_user(auth.uid()) then
+        raise exception 'Sign in with an available account to join a classroom.';
+    end if;
+    if exists (select 1 from public.studbud_user_tags where user_id = auth.uid() and tag = 'teacher') then
+        raise exception 'Teacher accounts manage their own classrooms.';
+    end if;
+    if p_code is null or upper(btrim(p_code)) !~ '^[A-HJ-NP-Z2-9]{6}$' then
+        raise exception 'Enter the six-character classroom code from your teacher.';
+    end if;
+    select coalesce(nullif(d.data #>> '{state,profile,school}', ''), pp.school, a.raw_user_meta_data ->> 'school', 'pchs') into v_school
+    from auth.users a
+    left join public.studbud_public_profiles pp on pp.user_id = a.id
+    left join public.studbud_user_data d on d.user_id = a.id where a.id = auth.uid();
+    select c.* into v_class from public.studbud_classes c
+    where c.join_code = upper(btrim(p_code)) and c.school = v_school
+      and not public.studbud_is_hidden_user(c.teacher_id)
+      and public.studbud_has_user_tag(c.teacher_id, 'teacher');
+    if not found then raise exception 'Classroom not found at your school. Check the code with your teacher.'; end if;
+    if exists (select 1 from public.studbud_class_members where class_id = v_class.id and user_id = auth.uid() and removed) then
+        raise exception 'Your teacher has removed access to this classroom.';
+    end if;
+    insert into public.studbud_class_members (class_id, user_id, explicit_join)
+    values (v_class.id, auth.uid(), true) on conflict do nothing;
+    return public.studbud_class_summary(v_class);
+end;
+$$;
+revoke all on function public.studbud_join_class(text) from public, anon;
+grant execute on function public.studbud_join_class(text) to authenticated;
+
+create or replace function public.studbud_leave_class(p_class_id uuid)
+returns void language plpgsql security definer set search_path = public, pg_temp
+as $$
+begin
+    if auth.uid() is null or public.studbud_is_guest() then raise exception 'Sign in first.'; end if;
+    -- Keep teacher removals so leaving cannot bypass a classroom ban.
+    delete from public.studbud_class_members where class_id = p_class_id and user_id = auth.uid() and not removed;
+end;
+$$;
+revoke all on function public.studbud_leave_class(uuid) from public, anon;
+grant execute on function public.studbud_leave_class(uuid) to authenticated;
+
+-- Keep the old argument for compatibility, but never read or enroll from it.
 create or replace function public.studbud_my_classes(p_course_codes text[] default array[]::text[])
 returns jsonb
 language plpgsql
@@ -4543,41 +4513,18 @@ set search_path = public, pg_temp
 as $$
 declare
     v_school text;
-    v_codes text[];
 begin
     if public.studbud_is_guest() or auth.uid() is null then return jsonb_build_object('classes', '[]'::jsonb); end if;
     -- Account tags may arrive after the client first renders. Teachers never enroll as students.
     if exists (select 1 from public.studbud_user_tags where user_id = auth.uid() and tag = 'teacher') then
         return jsonb_build_object('classes', '[]'::jsonb);
     end if;
-    if not coalesce((select share_courses from public.studbud_public_profiles where user_id = auth.uid()), false) then
-        return jsonb_build_object('classes', '[]'::jsonb, 'course_sharing', false);
-    end if;
+    if public.studbud_is_hidden_user(auth.uid()) then raise exception 'Classrooms are unavailable for this account.'; end if;
     select coalesce(nullif(d.data #>> '{state,profile,school}', ''), pp.school, a.raw_user_meta_data ->> 'school', 'pchs') into v_school
     from auth.users a
     left join public.studbud_public_profiles pp on pp.user_id = a.id
     left join public.studbud_user_data d on d.user_id = a.id
     where a.id = auth.uid();
-    if coalesce(cardinality(p_course_codes), 0) > 1000 then raise exception 'Too many course codes.'; end if;
-    select coalesce(array_agg(distinct btrim(code)), array[]::text[]) into v_codes
-    from unnest(coalesce(p_course_codes, array[]::text[])) as t(code)
-    where char_length(btrim(coalesce(code, ''))) between 1 and 40;
-
-    delete from public.studbud_class_members m using public.studbud_classes c
-    where m.class_id = c.id and m.user_id = auth.uid() and not m.removed
-      and (c.school <> v_school or not exists (
-          select 1 from unnest(v_codes) as code(value)
-          where public.studbud_course_matches(jsonb_build_object('code', code.value), c.course_code, '')
-      ));
-
-    insert into public.studbud_class_members (class_id, user_id)
-    select c.id, auth.uid() from public.studbud_classes c
-    where c.school = v_school and c.teacher_id <> auth.uid()
-      and exists (
-          select 1 from unnest(v_codes) as code(value)
-          where public.studbud_course_matches(jsonb_build_object('code', code.value), c.course_code, '')
-      )
-    on conflict do nothing;
 
     return jsonb_build_object(
         'school', v_school,
@@ -4587,6 +4534,9 @@ begin
                     from public.studbud_class_decks d where d.class_id = c.id), '[]'::jsonb)
             ) order by c.title)
             from public.studbud_classes c join public.studbud_class_members m on m.class_id = c.id and m.user_id = auth.uid() and not m.removed
+            where m.explicit_join and c.school = v_school
+                and public.studbud_has_user_tag(c.teacher_id, 'teacher')
+                and not public.studbud_is_hidden_user(c.teacher_id)
         ), '[]'::jsonb)
     );
 end;
@@ -4608,9 +4558,6 @@ $$;
 alter table public.studbud_class_members
     drop column if exists snapshot,
     drop column if exists snapshot_at;
-
-delete from public.studbud_class_members m
-where not coalesce((select p.share_courses from public.studbud_public_profiles p where p.user_id = m.user_id), false);
 
 revoke all on function public.studbud_teacher_create_class(text, text, text) from public, anon;
 grant execute on function public.studbud_teacher_create_class(text, text, text) to authenticated;
@@ -4635,7 +4582,7 @@ grant execute on function public.studbud_my_classes(text[]) to authenticated;
 revoke all on function public.studbud_sync_class_stats(jsonb) from public, anon;
 grant execute on function public.studbud_sync_class_stats(jsonb) to authenticated;
 
--- School community privacy is separate from the existing mutual course/classmate opt-in.
+-- School community privacy is separate from private course data.
 alter table public.studbud_public_profiles
     add column if not exists show_school_discovery boolean not null default false;
 create index if not exists studbud_public_profiles_school_discovery_idx
@@ -4733,7 +4680,7 @@ as $$
 $$;
 revoke all on function public.studbud_community_school(uuid) from public, anon, authenticated;
 
--- Course communities exist without an instructor. Teacher-led classrooms remain separate.
+-- Retain historical community rows for shared-content moderation, not inferred course access.
 alter table public.studbud_classes alter column teacher_id drop not null;
 alter table public.studbud_classes alter column join_code drop not null;
 create unique index if not exists studbud_course_community_identity_idx
@@ -4770,11 +4717,7 @@ returns boolean language sql stable security definer set search_path = public, p
 as $$
     select coalesce(public.studbud_has_user_tag(auth.uid(), 'teacher')
         and public.studbud_community_school(auth.uid()) = p_class.school
-        and (p_class.teacher_id = auth.uid() or (p_class.teacher_id is null and exists (
-            select 1 from public.studbud_classes t where t.teacher_id = auth.uid()
-                and t.school = p_class.school
-                and public.studbud_course_matches(jsonb_build_object('code', t.course_code), p_class.course_code, '')
-        ))), false);
+        and p_class.teacher_id = auth.uid(), false);
 $$;
 revoke all on function public.studbud_community_is_teacher(public.studbud_classes) from public, anon, authenticated;
 
@@ -4785,21 +4728,11 @@ as $$
         and not public.studbud_is_hidden_user(p_user_id)
         and (
             (p_class.teacher_id = p_user_id and public.studbud_has_user_tag(p_user_id, 'teacher'))
-            or (p_class.teacher_id is null and public.studbud_has_user_tag(p_user_id, 'teacher') and exists (
-                select 1 from public.studbud_classes t where t.teacher_id = p_user_id
-                    and t.school = p_class.school
-                    and public.studbud_course_matches(jsonb_build_object('code', t.course_code), p_class.course_code, '')
-            ))
-            or (coalesce((select p.share_courses from public.studbud_public_profiles p where p.user_id = p_user_id), false) and exists (
-                select 1 from public.studbud_user_data d,
-                    lateral jsonb_array_elements(coalesce(d.data #> '{state,courses}', '[]'::jsonb)) course
-                where d.user_id = p_user_id
-                    and coalesce(nullif(course ->> 'school', ''), p_class.school) = p_class.school
-                    and public.studbud_course_matches(course, p_class.course_code, '')
-            ) and (p_class.teacher_id is null or exists (
+            or (public.studbud_has_user_tag(p_class.teacher_id, 'teacher')
+                and not public.studbud_is_hidden_user(p_class.teacher_id) and exists (
                 select 1 from public.studbud_class_members m
-                where m.class_id = p_class.id and m.user_id = p_user_id and not m.removed
-            )))
+                where m.class_id = p_class.id and m.user_id = p_user_id and not m.removed and m.explicit_join
+            ))
         ), false);
 $$;
 revoke all on function public.studbud_community_is_member(uuid, public.studbud_classes) from public, anon, authenticated;
@@ -4809,44 +4742,16 @@ returns jsonb language plpgsql security definer set search_path = public, pg_tem
 as $$
 declare
     v_school text := public.studbud_community_school(auth.uid());
-    v_course record;
-    v_class public.studbud_classes;
 begin
     if auth.uid() is null or public.studbud_is_guest() or public.studbud_is_hidden_user(auth.uid()) then
         raise exception 'Sign in with an available account to open course communities.';
     end if;
-    if v_school not in ('pchs', 'pnhs', 'pshs', 'pwhs') then raise exception 'Choose a supported school and sync your courses first.'; end if;
-    perform pg_advisory_xact_lock(hashtextextended('studbud-course|' || v_school, 0));
-    for v_course in
-        select distinct upper(btrim(coalesce(nullif(course ->> 'catalogCode', ''), course ->> 'code'))) as code,
-            left(btrim(course ->> 'title'), 100) as title
-        from public.studbud_user_data d
-        join public.studbud_public_profiles pp on pp.user_id = d.user_id and pp.share_courses
-        cross join lateral jsonb_array_elements(coalesce(d.data #> '{state,courses}', '[]'::jsonb)) course
-        where d.user_id = auth.uid() and coalesce(nullif(course ->> 'school', ''), v_school) = v_school
-        union
-        select upper(btrim(c.course_code)), c.title from public.studbud_classes c
-        where c.teacher_id = auth.uid() and c.school = v_school
-            and public.studbud_has_user_tag(auth.uid(), 'teacher')
-    loop
-        continue when v_course.code is null or char_length(v_course.code) not between 1 and 40;
-        select c.* into v_class from public.studbud_classes c
-        where c.teacher_id is null and c.school = v_school
-            and public.studbud_course_matches(jsonb_build_object('code', v_course.code), c.course_code, '')
-        order by c.created_at, c.id limit 1;
-        if not found then
-            insert into public.studbud_classes (school, course_code, title)
-            values (v_school, v_course.code, coalesce(nullif(v_course.title, ''), v_course.code));
-        elsif cardinality(regexp_split_to_array(v_course.code, '\s*/\s*')) >
-            cardinality(regexp_split_to_array(v_class.course_code, '\s*/\s*')) then
-            update public.studbud_classes set course_code = v_course.code where id = v_class.id;
-        end if;
-    end loop;
+    if v_school not in ('pchs', 'pnhs', 'pshs', 'pwhs') then raise exception 'Choose a supported school first.'; end if;
     return jsonb_build_object('classes', coalesce((
         select jsonb_agg(jsonb_build_object('id', c.id, 'title', c.title, 'course_code', c.course_code,
-            'school', c.school, 'community', true) order by c.title, c.id)
+            'school', c.school) order by c.title, c.id)
         from public.studbud_classes c
-        where c.teacher_id is null and c.school = v_school
+        where c.teacher_id is not null and c.school = v_school
             and public.studbud_community_is_member(auth.uid(), c)
     ), '[]'::jsonb));
 end;
@@ -4882,7 +4787,7 @@ begin
     if public.studbud_community_can_moderate(v_class.school) then return v_class; end if;
     if v_class.school <> v_school then raise exception 'This class is not available to your account.'; end if;
     if public.studbud_community_is_member(auth.uid(), v_class) then return v_class; end if;
-    raise exception 'Sync this course to your account before opening its community.';
+    raise exception 'Join this classroom using the code from your teacher before opening it.';
 end;
 $$;
 revoke all on function public.studbud_community_require_class(uuid) from public, anon, authenticated;
@@ -4965,7 +4870,6 @@ declare
     v_school text;
     v_class public.studbud_classes;
     v_school_discovery boolean := false;
-    v_class_discovery boolean := false;
     v_can_announce boolean := false;
     v_people jsonb := '[]'::jsonb;
     v_decks jsonb := '[]'::jsonb;
@@ -4985,11 +4889,10 @@ begin
     if v_school not in ('pchs', 'pnhs', 'pshs', 'pwhs') then
         raise exception 'Choose a supported school in Settings to use the school community.';
     end if;
-    select coalesce(pp.show_school_discovery, false), coalesce(pp.show_classmates, false)
-    into v_school_discovery, v_class_discovery
+    select coalesce(pp.show_school_discovery, false)
+    into v_school_discovery
     from public.studbud_public_profiles pp where pp.user_id = v_uid;
     v_school_discovery := coalesce(v_school_discovery, false);
-    v_class_discovery := coalesce(v_class_discovery, false);
 
     if p_class_id is not null then
         v_class := public.studbud_community_require_class(p_class_id);
@@ -5032,20 +4935,9 @@ begin
             -- A school-scoped listing reveals affiliation, so require the author's school-disclosure consent.
             join public.studbud_public_profiles author_profile on author_profile.user_id = d.owner_id
                 and v_school_discovery and author_profile.show_school_discovery
-            join public.studbud_user_data viewer_data on viewer_data.user_id = v_uid
             where coalesce(author.is_anonymous, false) = false
               and not public.studbud_is_hidden_user(d.owner_id)
               and public.studbud_community_school(d.owner_id) = v_school
-              and exists (
-                  select 1
-                  from jsonb_array_elements(case
-                      when jsonb_typeof(viewer_data.data #> '{state,courses}') = 'array'
-                      then viewer_data.data #> '{state,courses}' else '[]'::jsonb end) as course(value)
-                  where public.studbud_course_matches(
-                      jsonb_build_object('code', d.course, 'title', d.course),
-                      coalesce(nullif(course.value ->> 'catalogCode', ''), course.value ->> 'code'),
-                      course.value ->> 'title')
-              )
             order by d.study_count desc, d.updated_at desc, d.id
             limit 20
         ) d
@@ -5063,6 +4955,7 @@ begin
                 room.updated_at, room.host_id
             from public.studbud_class_live_rooms link
             join public.studbud_classes c on c.id = link.class_id and c.school = v_school
+                and public.studbud_community_is_member(v_uid, c)
             join public.studbud_game_rooms room on room.id = link.room_id
             join public.studbud_user_tags tag on tag.user_id = c.teacher_id and tag.tag = 'teacher'
             join auth.users host on host.id = room.host_id
@@ -5078,24 +4971,6 @@ begin
         ) r
         join auth.users a on a.id = r.host_id;
     else
-        if v_class_discovery then
-            select coalesce(jsonb_agg(jsonb_build_object('user_id', peers.user_id, 'username', peers.username)
-                order by lower(peers.username), peers.user_id), '[]'::jsonb)
-            into v_people
-            from (
-                select a.id as user_id,
-                    coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student') as username
-                from public.studbud_public_profiles pp
-                join auth.users a on a.id = pp.user_id
-                where pp.show_classmates and pp.user_id <> v_uid
-                  and public.studbud_community_is_member(pp.user_id, v_class)
-                  and coalesce(a.is_anonymous, false) = false
-                  and not public.studbud_is_hidden_user(pp.user_id)
-                order by lower(coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student')), a.id
-                limit 100
-            ) peers;
-        end if;
-
         select coalesce(jsonb_agg(jsonb_build_object(
             'id', d.id, 'title', d.title,
             'author', coalesce(nullif(a.raw_user_meta_data ->> 'username', ''), 'Student'),
@@ -5216,7 +5091,7 @@ begin
         'can_moderate', case when p_class_id is null then false else public.studbud_community_can_moderate(v_class.school) end,
         'course_community', p_class_id is not null and v_class.teacher_id is null,
         'school_discovery', v_school_discovery,
-        'class_discovery', case when p_class_id is null then false else v_class_discovery end,
+        'class_discovery', false,
         'people', v_people,
         'decks', v_decks,
         'class_sets', public.studbud_community_shared_sets(p_class_id, v_school),
