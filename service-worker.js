@@ -1,4 +1,4 @@
-const CACHE_NAME = 'studbud-shell-v244';
+const CACHE_NAME = 'studbud-shell-v245';
 let offlineNavigation = false;
 const PUBLIC_DEPENDENCIES = [
     'https://cdn.jsdelivr.net/npm/chart.js',
@@ -24,7 +24,7 @@ const APP_FILES = [
     './icons/studbud-circle.svg',
     './icons/icon-192.png',
     './icons/icon-512.png',
-    './icons/icon-maskable-512.png?v=2',
+    './icons/icon-maskable-512.png?v=3',
     './icons/apple-touch-icon.png',
     './parkwayData.js',
     './data/schools/central.js',

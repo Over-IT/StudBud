@@ -24,7 +24,7 @@ Open the app online once to cache offline assets; online features still require 
 
 Use `icons/studbud.svg` for rounded-square marks, `icons/studbud-square.svg` for square marks, and `icons/studbud-circle.svg` for circular marks. Each variant has a matching outer frame that reaches its shape's edge. Do not apply a CSS shape mask to logo images.
 
-Run `npm run icons` after replacing `icons/studbud-source.png`. It regenerates the SVG variants and PNGs. Standard app PNGs use the square frame; the Apple icon has a small inset for its rounded-corner mask. The Android maskable icon keeps the unframed mascot in the central safe area on a full-bleed lavender background, so the launcher defines the outer shape.
+Run `npm run icons` after replacing `icons/studbud-source.png`. It regenerates the SVG variants and PNGs. Standard app PNGs use the square frame; the Apple icon has a small inset for its rounded-corner mask. The Android maskable icon uses a dark full-bleed frame so the launcher can cut the outer edge to its own shape. The mascot meets the lower edge of the lavender interior.
 
 ## Run locally
 

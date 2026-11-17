@@ -44,14 +44,8 @@ ${backgroundRect}
 }
 
 function createMaskableLogo(source) {
-    // Crop out the source frame; Android supplies the outer shape.
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="StudBud">
-  <rect width="512" height="512" fill="${LOGO_BACKGROUND}"/>
-  <svg x="121" y="106" width="270" height="296" viewBox="55 40 402 441" overflow="hidden">
-    <image href="data:image/png;base64,${source}" width="512" height="512"/>
-  </svg>
-  <path d="M150 398H362" fill="none" stroke="${LOGO_FRAME}" stroke-width="16" stroke-linecap="round"/>
-</svg>`;
+    // Dark bleed lets the launcher cut the outside of the frame to its own shape.
+    return createLogo(source, { shape: 'circle', background: LOGO_FRAME, inset: 54 });
 }
 
 async function generateIcons() {
