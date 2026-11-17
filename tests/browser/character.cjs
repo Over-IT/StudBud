@@ -45,10 +45,21 @@ async function runCharacterChecks(page) {
     const slider = studio.locator('input[type="range"]');
     await slider.fill('4.25');
     assert.equal(await studio.locator('output').textContent(), '425%', `${diagnostic}: free zoom control`);
-    const stage = studio.locator('.character-stage'), stageBox = await stage.boundingBox();
-    await page.mouse.move(stageBox.x + stageBox.width / 2, stageBox.y + stageBox.height / 2);
+    const stage = studio.locator('.character-stage');
+    const dragPoint = await stage.evaluate(element => {
+        const bounds = element.getBoundingClientRect();
+        const x = bounds.left + bounds.width / 2;
+        const y = [0.5, 0.75, 0.25].map(position => bounds.top + bounds.height * position)
+            .find(candidate => {
+                const target = document.elementFromPoint(x, candidate);
+                return target === element || element.contains(target);
+            });
+        return y === undefined ? null : { x, y };
+    });
+    assert.ok(dragPoint, `${diagnostic}: preview has a visible drag target`);
+    await page.mouse.move(dragPoint.x, dragPoint.y);
     await page.mouse.down();
-    await page.mouse.move(stageBox.x + stageBox.width / 2 + 20, stageBox.y + stageBox.height / 2 + 12);
+    await page.mouse.move(dragPoint.x + 20, dragPoint.y + 12);
     await page.mouse.up();
     assert.equal(await stage.evaluate(element => element.style.getPropertyValue('--character-pan-x')), '20px', `${diagnostic}: drag pans the preview`);
     await stage.focus();
