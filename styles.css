@@ -761,7 +761,6 @@ input:focus, select:focus, textarea:focus {
 .logo-mark {
     width: 40px;
     height: 40px;
-    border-radius: 17.8%;
     flex-shrink: 0;
     box-shadow: none;
 }
@@ -4637,7 +4636,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent-primary);
 #sidebar { background: var(--bg-surface, var(--bg-glass)); border-right: 2px solid var(--border-glass); }
 .sidebar-header { border-bottom: 0; }
 .logo-text { font-weight: 900; font-size: 1.4rem; letter-spacing: -.02em; }
-.logo-mark { box-shadow: none; border-radius: 17.8%; }
+.logo-mark { box-shadow: none; }
 .nav-links { gap: 4px; }
 .nav-item {
     --nav-c: var(--accent-primary);
