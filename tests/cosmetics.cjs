@@ -177,6 +177,12 @@ const preview = previews.find(cos => cos.hat === 'hat_fedora');
 assert.equal(preview.skin, 'skin_robot');
 assert.equal(preview.acc, 'acc_shades', 'hat previews preserve the equipped accessory');
 assert.equal(preview.effect, 'acc_storm_effect', 'hat previews preserve the equipped aura');
+const guestPurchaseAction = app.shopItemAction({ user_id: 'guest', coins: 0, owned_items: [] }, fedora);
+assert.match(guestPurchaseAction, /data-action="guest-create-account"/, 'guest item cards offer account creation instead of a dead purchase button');
+assert.doesNotMatch(guestPurchaseAction, /disabled|data-action="multiplayer-buy"/);
+const guestBoxAction = app.shopBoxCard({ user_id: 'guest', coins: 0, owned_items: [] }, hatBox);
+assert.match(guestBoxAction, /data-action="guest-create-account"/, 'guest boxes have an actionable account prompt');
+assert.doesNotMatch(guestBoxAction, /data-action="multiplayer-mystery"/);
 for (const tab of ['skin', 'hat', 'accessory', 'effect', 'palette', 'inventory']) {
     const everything = { coins: 1000, owned_items: catalog.filter(item => item.type !== 'pet').map(item => item.id) };
     if (tab === 'inventory') { app.inventoryTab = 'all'; app.renderInventory(everything); }
@@ -189,6 +195,12 @@ for (const tab of ['skin', 'hat', 'accessory', 'effect', 'palette', 'inventory']
             `${item.id}'s description is searchable`);
     }
 }
+app.inventoryTab = 'palette';
+app.renderInventory({ coins: 1000, owned_items: ['palette_ocean'], equipped_palette: 'palette_ocean' });
+assert.match(elements.get('multiplayer-inventory-items').innerHTML,
+    /class="ghost-btn shop-unequip" data-action="multiplayer-unequip" data-slot="palette"/, 'colors have the same section-level remove control as other slots');
+app.renderInventory({ coins: 1000, owned_items: ['palette_ocean'], equipped_palette: 'palette_default' });
+assert.doesNotMatch(elements.get('multiplayer-inventory-items').innerHTML, /shop-unequip/, 'the default palette cannot be removed');
 const studio = { innerHTML: '', dataset: {} };
 elements.set('shop-character-studio', studio);
 const outfit = { coins: 1000, owned_items: ['hat_cap'], equipped_skin: 'skin_robot',
@@ -250,11 +262,34 @@ assert.equal(app.characterAppearanceDraft({ user_id: 'owner-b' }).hairColor, per
 app.personalCharacterDraft = null;
 elements.set('inventory-character-studio', studio);
 app.inventoryTab = 'customize';
-app.renderInventory({ ...outfit, user_id: 'owner-b', appearance: personal });
+const defaultOutfit = { ...outfit, equipped_skin: '', user_id: 'owner-b', appearance: personal };
+app.renderInventory(defaultOutfit);
 assert.match(elements.get('multiplayer-inventory-items').innerHTML, /data-feature="hairStyle" data-value="curls" aria-pressed="true"/);
-assert.equal(previews.at(-1).skin, '', 'the personal editor previews the human character, not its equipped costume');
-assert.equal(previews.at(-1).hat, '', 'the personal editor hides hats so hairstyle edits remain visible');
+assert.equal(previews.at(-1).skin, '', 'the default character keeps all free personal options');
+assert.equal(previews.at(-1).hat, 'hat_cap', 'the editor shows the hat that will actually stay equipped');
+assert.equal(previews.at(-1).acc, 'acc_shades', 'the editor preserves wearable accessories');
+assert.equal(previews.at(-1).effect, 'acc_storm_effect', 'the editor preserves auras');
 assert.equal(previews.at(-1).appearance.hairColor, personal.hairColor);
+const costumeProfile = { ...outfit, user_id: 'owner-b', owned_items: ['skin_robot', 'hat_cap'], appearance: personal };
+app.renderInventory(costumeProfile);
+let editor = elements.get('multiplayer-inventory-items').innerHTML;
+assert.doesNotMatch(editor, /data-feature=|data-action="character-save"/, 'costumes cannot edit incompatible personal features or accidentally save over their design');
+assert.match(editor, /data-action="multiplayer-unequip" data-slot="skin"/, 'switching to the default character is explicit');
+assert.match(editor, /data-action="multiplayer-equip" data-id="skin_robot" aria-pressed="true"/, 'owned costumes use the existing equip flow');
+assert.doesNotMatch(editor, /data-id="skin_alien"/, 'unowned costumes are not offered as equip actions');
+for (const tab of ['hat', 'accessory', 'effect', 'palette']) {
+    assert.ok(editor.includes(`data-inventory-tab="${tab}"`), `${tab} is available for shop-first customization`);
+}
+assert.equal(previews.at(-1).skin, 'skin_robot', 'the costume editor previews the equipped character instead of silently substituting a human');
+assert.equal(previews.at(-1).hat, 'hat_cap');
+assert.equal(previews.at(-1).acc, 'acc_shades');
+assert.equal(previews.at(-1).effect, 'acc_storm_effect');
+assert.doesNotMatch(studio.innerHTML, /data-action="character-save"/);
+app.renderCharacterStudio(costumeProfile, 'inventory', 'customize', tryHat);
+assert.equal(previews.at(-1).skin, 'skin_robot');
+assert.equal(previews.at(-1).hat, 'hat_fedora', 'try-on works even when launched from the customization tab');
+app.renderInventory(defaultOutfit);
+assert.equal(previews.at(-1).appearance.hairColor, personal.hairColor, 'returning to default restores the saved personal look');
 const featureFrames = Object.fromEntries(['hairStyle', 'hairColor', 'skinTone', 'eyeColor', 'expression', 'shirtStyle', 'shirtColor', 'pantsColor', 'hat', 'effect']
     .map(feature => [feature, app.characterFraming(feature)]));
 assert.equal(featureFrames.hairStyle.y, featureFrames.hairColor.y, 'hair choices share a crown-centered camera');
@@ -272,11 +307,11 @@ assert.ok((.085 - featureFrames.hat.y) * featureFrames.hat.zoom > -.5, 'tall wiz
 assert.equal(app.characterFraming('accessory', { acc: 'acc_shades' }).view, 'detail');
 assert.equal(app.characterFraming('accessory', { acc: 'acc_wings' }).view, 'full', 'wide accessories are not cropped to a face');
 app.characterCameras.inventory = { view: 'auto', feature: 'pantsColor' };
-app.renderCharacterStudio({ ...outfit, appearance: personal }, 'inventory', 'customize');
+app.renderCharacterStudio(defaultOutfit, 'inventory', 'customize');
 assert.match(studio.innerHTML, /data-camera="legs"/);
 app.characterCameras.shop = { view: 'full', feature: 'hat', zoom: 1.4 };
 app.renderCharacterStudio(outfit, 'shop', 'hat', tryHat);
-app.renderCharacterStudio({ ...outfit, appearance: personal }, 'inventory', 'customize');
+app.renderCharacterStudio(defaultOutfit, 'inventory', 'customize');
 assert.equal(app.characterCameras.shop.zoom, 1.4, 'rendering the hidden locker does not steal the shop camera');
 const cameraEvents = {}, zoomEvents = {}, properties = {};
 const zoomInput = { value: 1, setAttribute: noop, addEventListener: (name, handler) => { zoomEvents[name] = handler; } };
@@ -326,6 +361,8 @@ app.filterShopGrid(filterContainer, 'crown');
 assert.equal(noResults.hidden, false, 'combined filters explain when no items match');
 app.shopAvailability = 'all';
 const shopSql = source('supabase-setup.sql');
+const saveAppearanceSql = shopSql.match(/create or replace function public\.studbud_save_appearance\([\s\S]*?\$\$;/)[0];
+assert.doesNotMatch(saveAppearanceSql, /equipped_skin\s*=/, 'saving default features never unequips a costume during a concurrent wardrobe change');
 for (const [feature, choices] of Object.entries(util.appearanceOptions)) {
     const serverChoices = shopSql.match(new RegExp(`when '${feature}' then array\\[([^\\]]+)\\]`));
     assert.ok(serverChoices, `${feature} has a server-side allowlist`);
@@ -350,6 +387,8 @@ assert.match(source('supabase-setup.sql'), /priced\.price < 200 then 'uncommon'.
 
 (async () => {
     const community = sandbox.window.StudBudCommunityGames;
+    app.multiplayerProfile = costumeProfile;
+    await assert.rejects(app.savePersonalCharacter(), /Choose Default character/, 'stale save actions cannot replace an equipped costume');
     const savedStorage = new Map(), originalClient = community.getClient, originalHasAccount = community.hasAccount;
     sandbox.window.localStorage = { getItem: key => savedStorage.get(key) || null, setItem: (key, value) => savedStorage.set(key, value) };
     community.hasAccount = () => false;
@@ -407,6 +446,16 @@ assert.match(source('supabase-setup.sql'), /priced\.price < 200 then 'uncommon'.
     assert.equal(suppliedProfile, purchased, 'render uses the authoritative purchase response, not another network request');
     assert.deepEqual(controls.map(button => button.disabled), [false, true], 'busy cleanup preserves originally locked controls');
     assert.ok(controls.every(button => !('aria-busy' in button.attrs)));
+    app.multiplayerProfile = { user_id: 'buyer', coins: 1000, owned_items: [] };
+    suppliedProfile = null;
+    const switchedPurchase = app.updateMultiplayerShop('multiplayer-buy', 'hat_fedora');
+    const newSession = { user_id: 'guest', coins: 0, owned_items: [] };
+    app.multiplayerProfile = newSession;
+    releasePurchase(purchased);
+    assert.equal(await switchedPurchase, false, 'a completed purchase from a previous session is not applied');
+    assert.equal(app.multiplayerProfile, newSession, 'late transactions cannot restore a signed-out account inventory');
+    assert.equal(suppliedProfile, null, 'late transactions do not render the old wallet');
+    assert.equal(app.shopPurchaseBusy, false, 'account switching still releases the transaction lock');
     community.purchaseItem = async () => { throw Error('Offline purchase'); };
     await assert.rejects(app.updateMultiplayerShop('multiplayer-buy', 'hat_fedora'), /Offline purchase/);
     assert.equal(app.shopPurchaseBusy, false, 'RPC errors release the action lock');

@@ -66,12 +66,39 @@ async function runCharacterChecks(page) {
     await studio.locator('[data-action="character-save"]').click();
     await page.waitForFunction(() => window.NexusApp.personalCharacterDraft === null);
     assert.equal(await page.evaluate(() => window.StudBudCommunityGames.guestAppearance()?.hairStyle), 'curls', `${diagnostic}: guest can save the character`);
+    const savedProfile = await page.evaluate(() => {
+        const app = window.NexusApp, saved = app.multiplayerProfile;
+        app.multiplayerProfile = { ...saved, owned_items: ['skin_robot', 'hat_cap', 'hat_wizard', 'acc_shades'],
+            equipped_skin: 'skin_robot', equipped_hat: 'hat_cap', equipped_accessory: 'acc_shades' };
+        app.renderInventory(app.multiplayerProfile);
+        return saved;
+    });
+    assert.equal(await page.locator('#inventory-view [data-feature]').count(), 0, `${diagnostic}: costumes hide incompatible personal controls`);
+    assert.equal(await studio.locator('[data-action="character-save"]').count(), 0, `${diagnostic}: costumes have no accidental replace/save action`);
+    assert.equal(await page.evaluate(() => window.NexusApp.characterCameras.inventory.cos.skin), 'skin_robot', `${diagnostic}: costume preview retains the equipped character`);
+    assert.equal(await page.evaluate(() => window.NexusApp.characterCameras.inventory.cos.hat), 'hat_cap', `${diagnostic}: costume preview retains shop items`);
+    await page.locator('#inventory-view .character-option[data-inventory-tab="hat"]').click();
+    await page.locator('#inventory-view [data-action="character-try-on"][data-id="hat_wizard"]').click();
+    assert.equal(await page.evaluate(() => window.NexusApp.characterCameras.inventory.cos.hat), 'hat_wizard', `${diagnostic}: locker try-on previews the proposed hat`);
+    assert.equal(await page.evaluate(() => window.NexusApp.multiplayerProfile.equipped_hat), 'hat_cap', `${diagnostic}: locker try-on leaves the saved hat untouched`);
+    await page.evaluate(profile => {
+        const app = window.NexusApp;
+        app.multiplayerProfile = profile;
+        app.inventoryTab = 'customize';
+        app.renderInventory(profile);
+    }, savedProfile);
+    assert.equal(await page.locator('#inventory-view [data-feature="hairStyle"][data-value="curls"]').getAttribute('aria-pressed'), 'true', `${diagnostic}: default features survive costume changes`);
     await page.evaluate(() => { location.hash = '#shop'; });
     await page.locator('#shop-view [data-shop-tab="hat"]').click();
     await page.locator('#shop-view [data-action="character-try-on"][data-id="hat_wizard"]').click();
     assert.equal(await page.locator('#shop-character-studio .character-stage').getAttribute('data-camera'), 'detail', `${diagnostic}: hats automatically frame the crown`);
     await page.locator('#shop-character-studio [data-action="character-preview-reset"]').click();
     assert.equal(await page.locator('#shop-character-studio .character-selection strong').textContent(), 'Make it yours', `${diagnostic}: try-on resets without equipping`);
+    assert.equal(await page.locator('#shop-view [data-action="multiplayer-buy"]').count(), 0, `${diagnostic}: guests are not shown unusable purchase actions`);
+    assert.ok(await page.locator('#shop-view .multiplayer-shop-item [data-action="guest-create-account"]').count() > 0, `${diagnostic}: guests can create an account from item cards`);
+    await page.locator('#shop-view .shop-tabs [data-shop-tab="boxes"]').click();
+    assert.equal(await page.locator('#shop-view [data-action="multiplayer-mystery"]').count(), 0, `${diagnostic}: guests cannot attempt a paid box opening`);
+    assert.ok(await page.locator('#shop-view .box-card [data-action="guest-create-account"]').count() > 0, `${diagnostic}: guest box cards explain how to collect rewards`);
     return { viewport, frames, controls: 'zoom, pointer/keyboard pan, full/auto/reset, focus, guest save, hat try-on/reset' };
 }
 

@@ -814,7 +814,7 @@ begin
     perform public.studbud_validate_appearance(p_appearance);
     insert into public.studbud_multiplayer_profiles (user_id) values (v_user_id) on conflict (user_id) do nothing;
     update public.studbud_multiplayer_profiles
-    set appearance = p_appearance, equipped_skin = '', updated_at = now()
+    set appearance = p_appearance, updated_at = now()
     where user_id = v_user_id;
     return public.studbud_get_multiplayer_profile();
 end;

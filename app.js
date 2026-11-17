@@ -5501,6 +5501,7 @@
             const has = owned.includes(item.id);
             const equipped = equippedBy[item.type] === item.id;
             const price = item.price == null ? '' : ` · ${item.price} <i class="fas fa-coins"></i>`;
+            if (profile.user_id === 'guest') return `<button type="button" class="secondary-btn" data-action="guest-create-account">Create account${price}</button>`;
             if (has && equipped) return `<button type="button" class="ghost-btn" data-action="multiplayer-unequip" data-slot="${item.type}">Unequip</button>`;
             if (has) return `<button type="button" class="secondary-btn" data-action="multiplayer-equip" data-id="${this.escapeHTML(item.id)}">Equip</button>`;
             if (item.season) return `<button type="button" class="secondary-btn" disabled>${this.escapeHTML(item.set)} box</button>`;
@@ -5524,17 +5525,27 @@
 
         characterEditorMarkup(profile) {
             const util = window.StudBudArcade.util, look = this.characterAppearanceDraft(profile);
+            const costumes = window.StudBudCommunityGames.catalog.filter(item => item.type === 'skin' && (profile.owned_items || []).includes(item.id));
+            const costume = Boolean(profile.equipped_skin);
+            const wardrobe = `<section class="character-editor-section"><h3>Your character</h3><div class="character-options"><div>
+                <button type="button" class="character-option" data-action="multiplayer-unequip" data-slot="skin" aria-pressed="${!costume}" ${!costume ? 'disabled' : ''}>Default character</button>
+                ${costumes.map(item => `<button type="button" class="character-option" data-action="multiplayer-equip" data-id="${this.escapeHTML(item.id)}" aria-pressed="${profile.equipped_skin === item.id}" ${profile.equipped_skin === item.id ? 'disabled' : ''}>${this.escapeHTML(item.name)}</button>`).join('')}
+                </div></div><div class="character-options"><div>${[['skin', 'More characters'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['effect', 'Auras'], ['palette', 'Colors']].map(([tab, label]) => `<button type="button" class="character-option" data-inventory-tab="${tab}">${label}</button>`).join('')}</div></div>
+                <p class="settings-hint">Use items from your locker or <button type="button" class="text-btn" data-target="shop-view">visit the shop</button>. Equipped items stay visible while you customize.</p></section>`;
             const groups = [
                 ['Your features', [['skinTone', 'Skin tone'], ['hairStyle', 'Hairstyle'], ['hairColor', 'Hair color'], ['eyeColor', 'Eye color'], ['expression', 'Expression']]],
                 ['Your outfit', [['shirtStyle', 'Top style'], ['shirtColor', 'Top color'], ['pantsColor', 'Pants color']]]
             ];
-            return `<div class="personal-character-editor"><div class="character-editor-intro"><span class="character-eyebrow">Free character creator</span><h3>Build your own look</h3><p>Mix your features and outfit. Every option here is free. Hats and accessories are hidden here so you can see your features; saving keeps them equipped.</p>${profile.equipped_skin ? '<p class="character-editor-note">Saving switches from your costume to your personal character. Your costume stays in your locker.</p>' : ''}</div>
+            if (costume) return `<div class="personal-character-editor"><div class="character-editor-intro"><span class="character-eyebrow">Your collected character</span><h3>Style your costume</h3><p>Costumes keep their designed features and outfit. Make yours unique with shop hats, accessories, auras and colors.</p><p class="character-editor-note">Choose Default character to edit skin tone, hair, eyes and clothing. Your saved default look is kept when you switch costumes.</p></div>${wardrobe}</div>`;
+            return `<div class="personal-character-editor"><div class="character-editor-intro"><span class="character-eyebrow">Free character creator</span><h3>Build your own look</h3><p>Mix your default character's features and outfit for free, then add items from your locker. Saving keeps your shop items equipped. Remove a hat or accessory in its tab if it covers a feature you want to edit.</p></div>
+                ${wardrobe}
                 ${groups.map(([title, fields]) => `<section class="character-editor-section"><h3>${title}</h3>${fields.map(([key, label]) => `<fieldset class="character-options"><legend>${label}</legend><div>${util.appearanceOptions[key].map(([value, name]) => `<button type="button" class="character-option${value.startsWith('#') ? ' character-swatch' : ''}" data-action="character-option" data-feature="${key}" data-value="${value}" aria-pressed="${look[key] === value}" aria-label="${label}: ${name}" ${value.startsWith('#') ? `style="--swatch:${value}"` : ''}>${value.startsWith('#') ? `<span aria-hidden="true"></span><small>${name}</small>` : name}</button>`).join('')}</div></fieldset>`).join('')}</section>`).join('')}
                 <div class="character-editor-save"><p>${profile.user_id === 'guest' ? 'Saved on this device. Used in solo games and rooms you join.' : 'Saved to your account and used in profiles and games.'}</p><div><button type="button" class="primary-btn" data-action="character-save">Save personal character</button><button type="button" class="ghost-btn" data-action="character-discard">Reset changes</button></div></div></div>`;
         }
 
         async savePersonalCharacter() {
             if (this.shopPurchaseBusy || !this.multiplayerProfile) return;
+            if (this.multiplayerProfile.equipped_skin) throw new Error('Choose Default character before editing personal features. Your costume has not changed.');
             const profile = this.multiplayerProfile, userId = window.StudBudCloud?.user?.id;
             const look = { ...this.characterAppearanceDraft(profile) };
             this.shopPurchaseBusy = true;
@@ -5640,8 +5651,8 @@
             if (!container) return;
             const catalog = window.StudBudCommunityGames.catalog;
             const slots = [['skin', 'Character'], ['hat', 'Hat'], ['accessory', 'Accessory'], ['effect', 'Aura'], ['palette', 'Color']];
-            const editing = scope === 'inventory' && tab === 'customize';
-            const previewProfile = editing ? { ...profile, equipped_skin: '', equipped_hat: '', equipped_accessory: '', appearance: this.characterAppearanceDraft(profile) }
+            const editing = scope === 'inventory' && tab === 'customize' && !profile.equipped_skin && !item;
+            const previewProfile = editing ? { ...profile, appearance: this.characterAppearanceDraft(profile) }
                 : item ? { ...profile, ...(item.type === 'palette' ? { color: undefined } : {}), [`equipped_${item.type}`]: item.id } : profile;
             const cos = this.profileCosmetics(previewProfile);
             this.characterCameras ||= {};
@@ -5716,7 +5727,9 @@
             const seasonMonth = box.seasonal ? box.season.month : null;
             const seasonKey = seasonMonth && profile.user_id ? `${profile.user_id}:${box.id}:${seasonMonth}` : null;
             const alreadyOpened = Boolean(seasonKey && this.completedShopBoxes?.has(seasonKey));
-            const actionButton = alreadyOpened
+            const actionButton = profile.user_id === 'guest'
+                ? `<button type="button" class="${featured ? 'primary-btn' : 'secondary-btn'}" data-action="guest-create-account">Create account to open · ${box.price} <i class="fas fa-coins"></i></button>`
+                : alreadyOpened
                 ? `<button type="button" class="${featured ? 'primary-btn' : 'secondary-btn'}" disabled aria-disabled="true">Opened this month</button>`
                 : `<button type="button" class="${featured ? 'primary-btn' : 'secondary-btn'}" data-action="multiplayer-mystery" data-id="${box.id}" ${box.seasonal ? `data-season-month="${box.season.month}"` : ''} ${profile.coins < box.price ? 'disabled' : ''}>Open · ${box.price} <i class="fas fa-coins"></i></button>`;
             return `<article class="multiplayer-shop-item box-card box-${box.id}${featured ? ' box-featured' : ''}${complete ? ' collection-complete' : ''}"${style} data-search="${this.escapeHTML(`${box.name} ${box.id} ${all.map(item => item.name).join(' ')}`.toLocaleLowerCase())}">
@@ -5821,7 +5834,7 @@
         renderInventory(profile) {
             const games = window.StudBudCommunityGames;
             const owned = profile.owned_items || [];
-            const tabs = [['customize', 'Create character'], ['all', 'All items'], ['skin', 'Costumes'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['effect', 'Auras'], ['palette', 'Colors']];
+            const tabs = [['customize', 'Customize'], ['all', 'All items'], ['skin', 'Costumes'], ['hat', 'Hats'], ['accessory', 'Accessories'], ['effect', 'Auras'], ['palette', 'Colors']];
             const tab = tabs.some(([id]) => id === this.inventoryTab) ? this.inventoryTab : 'customize';
             if (tab === 'customize') {
                 this.renderShopFrame('multiplayer-inventory-items', tabs, tab, 'data-inventory-tab', this.characterEditorMarkup(profile), '', '', 'shop-grid-editor');
@@ -5832,7 +5845,8 @@
             const order = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
             const mine = games.catalog.filter(item => item.type !== 'pet' && owned.includes(item.id));
             const total = games.catalog.filter(item => !item.legacy && item.type !== 'pet').length;
-            const equippedBy = { skin: profile.equipped_skin, hat: profile.equipped_hat, accessory: profile.equipped_accessory, effect: profile.equipped_effect };
+            const equippedBy = { skin: profile.equipped_skin, hat: profile.equipped_hat, accessory: profile.equipped_accessory, effect: profile.equipped_effect,
+                palette: profile.equipped_palette === 'palette_default' ? '' : profile.equipped_palette };
             const sections = Object.keys(typeNames).filter(type => tab === 'all' || tab === type).map(type => {
                 const list = mine.filter(item => item.type === type).sort((a, b) => order.indexOf(b.rarity) - order.indexOf(a.rarity));
                 if (!list.length) return tab === 'all' ? '' : `<p class="settings-hint">No ${typeNames[type].toLocaleLowerCase()} yet. <button type="button" class="text-btn" data-target="shop-view">Find them in the shop</button>.</p>`;
@@ -6711,7 +6725,7 @@
                     throw new Error('The seasonal box has changed. Review the new rewards before opening it.');
                 }
                 if (box) { this.openUnboxing(box); this.unboxState.startedAt = performance.now(); }
-                const previousProfile = this.multiplayerProfile || {};
+                const previousProfile = this.multiplayerProfile || {}, userId = window.StudBudCloud?.user?.id;
                 const profile = action === 'multiplayer-buy'
                     ? await window.StudBudCommunityGames.purchaseItem(itemId)
                     : action === 'multiplayer-mystery'
@@ -6719,6 +6733,10 @@
                         : action === 'multiplayer-unequip'
                             ? await window.StudBudCommunityGames.unequipSlot(itemId)
                             : await window.StudBudCommunityGames.equipItem(itemId);
+                if (this.multiplayerProfile?.user_id !== previousProfile.user_id || window.StudBudCloud?.user?.id !== userId) {
+                    if (box) this.closeUnboxing();
+                    return false;
+                }
                 const hasAppState = typeof AppState !== 'undefined' && AppState && typeof AppState.get === 'function' && typeof AppState.set === 'function';
                 const settings = hasAppState ? (AppState.get('settings') || {}) : {};
                 if (action === 'multiplayer-equip') {
@@ -11722,6 +11740,7 @@
                     this.setGuestColor(target.dataset.color);
                 } else if (action === 'character-option') {
                     if (this.shopPurchaseBusy || !this.multiplayerProfile) return;
+                    if (this.multiplayerProfile.equipped_skin) throw new Error('Choose Default character before editing personal features. Your costume has not changed.');
                     const { feature, value } = target.dataset, util = window.StudBudArcade.util;
                     if (!util.appearanceOptions[feature]?.some(([id]) => id === value)) throw new Error('Choose a valid character option.');
                     this.personalCharacterDraft = { userId: this.multiplayerProfile.user_id, value: { ...this.characterAppearanceDraft(this.multiplayerProfile), [feature]: value } };

@@ -13,6 +13,8 @@ A student home base for planning schoolwork, studying flashcards and playing stu
 - **Import:** paste school data, review matched records and changes, then import or undo the last batch.
 
 Accounts are optional for local study. Sign in for cloud sync and social features.
+In **Locker → Customize**, the default character has free feature and clothing options. Collected costumes keep their designed features; style them with shop hats, accessories, auras and colors. Switching costumes preserves your saved default look, and the preview keeps equipped items visible.
+Guests can try on shop items without purchasing; create an account to earn coins and collect items or open boxes.
 Choose **Other / prefer not to say** for school to use custom classes without selecting a school. Optional public profile details can be left blank.
 Install from your browser's menu, or use **Share → Add to Home Screen** on iOS.
 Open the app online once to cache offline assets; online features still require a connection.
