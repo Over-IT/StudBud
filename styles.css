@@ -761,9 +761,9 @@ input:focus, select:focus, textarea:focus {
 .logo-mark {
     width: 40px;
     height: 40px;
-    border-radius: 19.53125%;
+    border-radius: 17.8%;
     flex-shrink: 0;
-    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
+    box-shadow: none;
 }
 
 .logo-icon {
@@ -4637,7 +4637,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent-primary);
 #sidebar { background: var(--bg-surface, var(--bg-glass)); border-right: 2px solid var(--border-glass); }
 .sidebar-header { border-bottom: 0; }
 .logo-text { font-weight: 900; font-size: 1.4rem; letter-spacing: -.02em; }
-.logo-mark { box-shadow: 0 4px 0 color-mix(in srgb, var(--accent-primary) 55%, #000); border-radius: 19.53125%; }
+.logo-mark { box-shadow: none; border-radius: 17.8%; }
 .nav-links { gap: 4px; }
 .nav-item {
     --nav-c: var(--accent-primary);

@@ -1,12 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title description">
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="35.5 35.5 441 441" role="img" aria-labelledby="title description">
   <title id="title">StudBud</title>
-  <desc id="description">A friendly, dot-eyed lavender graduate with a plum cap and gold tassel, framed by a pale lavender square.</desc>
+  <desc id="description">A friendly, dot-eyed lavender graduate with a plum cap and gold tassel on pale lavender, with a dark outer frame.</desc>
   <defs>
     <clipPath id="inner-frame">
       <circle cx="256" cy="256" r="208"/>
     </clipPath>
   </defs>
-  <circle cx="256" cy="256" r="256" fill="#af83ef"/>
   <circle cx="256" cy="256" r="208" fill="#d9bdf9"/>
   <g clip-path="url(#inner-frame)">
     <g transform="translate(256 256) scale(.92) translate(-256 -256)">

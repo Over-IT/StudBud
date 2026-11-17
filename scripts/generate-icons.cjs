@@ -7,15 +7,13 @@ const icons = path.join(root, 'icons');
 
 async function generateIcons() {
     const rounded = await fs.readFile(path.join(icons, 'studbud.svg'), 'utf8');
-    const outer = '<rect width="512" height="512" rx="100"';
     const inner = '<rect x="48" y="48" width="416" height="416" rx="66"';
-    const background = rounded.match(/<rect width="512" height="512" rx="100" fill="([^"]+)"\/>/)?.[1];
-    if (!background || rounded.split(inner).length !== 4) {
+    const background = rounded.match(/<rect x="48" y="48" width="416" height="416" rx="66" fill="none" stroke="([^"]+)" stroke-width="25"\/>/)?.[1];
+    if (!background || !rounded.includes('viewBox="35.5 35.5 441 441"') || rounded.split(inner).length !== 4) {
         throw new Error('The logo frame geometry changed. Update the square and circular icon generation before continuing.');
     }
-    const square = rounded.replace(outer, '<rect width="512" height="512"');
-    let circle = rounded.replace(outer, '<circle cx="256" cy="256" r="256"')
-        .replaceAll(inner, '<circle cx="256" cy="256" r="208"');
+    const square = rounded.replaceAll(inner, '<rect x="48" y="48" width="416" height="416" rx="0"');
+    let circle = rounded.replaceAll(inner, '<circle cx="256" cy="256" r="208"');
     const portraitStart = circle.indexOf('  <g stroke=');
     const frameStart = circle.lastIndexOf('  <circle cx="256" cy="256" r="208"');
     if (portraitStart < 0 || frameStart <= portraitStart) {
@@ -27,7 +25,8 @@ async function generateIcons() {
     circle = circle.slice(0, portraitStart)
         + '  <g clip-path="url(#inner-frame)">\n    <g transform="translate(256 256) scale(.92) translate(-256 -256)">\n'
         + portrait + '    </g>\n  </g>\n' + circle.slice(frameStart);
-    const adaptive = circle.replace(`<circle cx="256" cy="256" r="256" fill="${background}"/>`, '');
+    const adaptive = circle.replace(`<circle cx="256" cy="256" r="208" fill="none" stroke="${background}" stroke-width="25"/>`, '')
+        .replaceAll('<circle cx="256" cy="256" r="208"', '<circle cx="256" cy="256" r="195.5"');
     await fs.writeFile(path.join(icons, 'studbud-square.svg'), square);
     await fs.writeFile(path.join(icons, 'studbud-circle.svg'), circle);
 
@@ -37,8 +36,8 @@ async function generateIcons() {
         for (const [file, size, source, opaque, scale] of [
             ['icon-192.png', 192, rounded, false, 1],
             ['icon-512.png', 512, rounded, false, 1],
-            ['apple-touch-icon.png', 180, square, true, 1],
-            ['icon-maskable-512.png', 512, adaptive, true, .92]
+            ['apple-touch-icon.png', 180, rounded, true, 1],
+            ['icon-maskable-512.png', 512, adaptive, true, .89]
         ]) {
             await page.setViewportSize({ width: size, height: size });
             await page.setContent(`<style>html,body{margin:0;width:100%;height:100%;background:${opaque ? background : 'transparent'}}svg{display:block;width:100%;height:100%;transform:scale(${scale})}</style>${source}`);
