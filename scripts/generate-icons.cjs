@@ -43,13 +43,24 @@ ${backgroundRect}
 </svg>`;
 }
 
+function createMaskableLogo(source) {
+    // Crop out the source frame; Android supplies the outer shape.
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="StudBud">
+  <rect width="512" height="512" fill="${LOGO_BACKGROUND}"/>
+  <svg x="121" y="106" width="270" height="296" viewBox="55 40 402 441" overflow="hidden">
+    <image href="data:image/png;base64,${source}" width="512" height="512"/>
+  </svg>
+  <path d="M150 398H362" fill="none" stroke="${LOGO_FRAME}" stroke-width="16" stroke-linecap="round"/>
+</svg>`;
+}
+
 async function generateIcons() {
     const source = (await fs.readFile(path.join(icons, 'studbud-source.png'))).toString('base64');
     const logo = createLogo(source);
     const square = createLogo(source, { shape: 'square' });
     const circle = createLogo(source, { shape: 'circle' });
     const apple = createLogo(source, { background: LOGO_BACKGROUND, inset: 40 });
-    const adaptive = createLogo(source, { background: LOGO_BACKGROUND, inset: 112, shape: 'square' });
+    const adaptive = createMaskableLogo(source);
 
     await fs.writeFile(path.join(icons, 'studbud.svg'), logo);
     await fs.writeFile(path.join(icons, 'studbud-square.svg'), square);
