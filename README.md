@@ -24,7 +24,7 @@ Open the app online once to cache offline assets; online features still require 
 
 Use `icons/studbud.svg` for rounded-square marks, `icons/studbud-square.svg` for square marks, `icons/studbud-circle.svg` for circular marks, and `icons/studbud-squircle.svg` for the fuller rounded mark used on sign-in. Do not apply a CSS shape mask to logo images.
 
-Run `npm run icons` after replacing any of the four `icons/*-source.png` artworks. It wraps each supplied variant without reshaping it and regenerates the install PNGs. The standard install PNGs use the regular rounded-square logo with transparent corners, including on Android. The Apple icon has a small inset for its rounded-corner mask.
+Run `npm run icons` after replacing any of the four `icons/*-source.png` artworks. It wraps each supplied variant without reshaping it and regenerates the install PNGs. The Android/PWA install PNGs and SVG use the supplied squircle to match the platform icon mask. The Apple icon uses the regular artwork with a small inset for its rounded-corner mask.
 
 ### Touch gameplay
 

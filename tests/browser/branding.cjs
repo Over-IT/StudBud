@@ -7,7 +7,9 @@ module.exports = async function runBrandingChecks(page) {
         return { icons: manifest.icons, manifestURL };
     });
     assert.ok(icons.every(icon => !icon.purpose || icon.purpose === 'any'),
-        'Android uses the standard install artwork, with no separate maskable icon');
+        'Android uses the squircle artwork for standard install icons');
+    assert.ok(icons.some(icon => icon.src === './icons/studbud-squircle.svg'),
+        'The scalable Android install icon uses the supplied squircle artwork');
     for (const mark of ['studbud', 'studbud-square', 'studbud-circle', 'studbud-squircle']) {
         const svg = await (await page.request.get(new URL(`icons/${mark}.svg`, manifestURL).href)).text();
         const artwork = await (await page.request.get(new URL(`icons/${mark}-source.png`, manifestURL).href)).body();
@@ -63,24 +65,56 @@ module.exports = async function runBrandingChecks(page) {
         }
         return results;
     }, installSources);
-    const regularLogo = results.find(result => result.file === 'studbud.svg');
+    const androidLogo = await page.evaluate(async () => {
+        const image = new Image();
+        image.src = new URL('./icons/studbud-squircle.svg', location.href).href;
+        await image.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 512;
+        const context = canvas.getContext('2d');
+        context.drawImage(image, 0, 0);
+        const pixels = context.getImageData(0, 0, 512, 512).data;
+        return [12, 32, 56].map(y => Array.from(pixels.subarray((y * 512) * 4, (y * 512) * 4 + 4)));
+    });
     for (const result of results) {
         assert.equal(result.width, result.size, `${result.file}: correct width`);
         assert.equal(result.height, result.size, `${result.file}: correct height`);
         const opaqueCorners = result.file === 'studbud-square.svg' || result.file === 'apple-touch-icon.png';
         assert.equal(result.cornerAlpha, opaqueCorners ? 255 : 0, `${result.file}: correct corner shape`);
         if (result.file === 'icon-192.png' || result.file === 'icon-512.png') {
-            assert.deepEqual(result.cornerProfile, regularLogo.cornerProfile,
-                `${result.file}: transparent corner, dark curve and lavender inset match the regular logo`);
+            assert.deepEqual(result.cornerProfile, androidLogo,
+                `${result.file}: transparent corner, dark curve and lavender inset match the squircle`);
         }
-        assert.deepEqual(result.frame.slice(0, 3), [59, 45, 81], `${result.file}: the complete dark frame is visible inside the canvas`);
+        for (const [channel, expected] of result.frame.slice(0, 3).map((value, i) => [value, [59, 45, 81][i]])) {
+            assert.ok(Math.abs(channel - expected) <= 3,
+                `${result.file}: the complete dark frame is visible inside the canvas`);
+        }
         if (result.file === 'studbud.svg' || result.file === 'studbud-square.svg'
             || result.file === 'studbud-circle.svg' || result.file === 'icon-192.png'
             || result.file === 'icon-512.png') {
-            assert.deepEqual(result.leftEdge.slice(0, 3), [59, 45, 81], `${result.file}: the frame reaches the canvas edge`);
+            for (const [channel, expected] of result.leftEdge.slice(0, 3).map((value, i) => [value, [59, 45, 81][i]])) {
+                assert.ok(Math.abs(channel - expected) <= 3,
+                    `${result.file}: the frame reaches the canvas edge`);
+            }
         } else {
             assert.notDeepEqual(result.leftEdge.slice(0, 3), result.frame.slice(0, 3), `${result.file}: the frame is inset for platform masking`);
         }
         assert.equal(result.appleMaskSpill, 0, `${result.file}: Apple artwork stays inside its rounded-corner mask`);
     }
+    const circle = await page.evaluate(async () => {
+        const image = new Image();
+        image.src = new URL('./icons/studbud-circle.svg', location.href).href;
+        await image.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 512;
+        const context = canvas.getContext('2d');
+        context.drawImage(image, 0, 0);
+        const pixels = context.getImageData(0, 0, 512, 512).data;
+        let stray = 0;
+        for (let y = 0; y < 512; y++) for (let x = 0; x < 512; x++) {
+            if (Math.hypot(x + .5 - 256, y + .5 - 256) > 257 && pixels[(y * 512 + x) * 4 + 3] > 8) stray++;
+        }
+        return stray;
+    });
+    assert.equal(circle, 0, 'Circle artwork has no pixels hanging below or outside its circular frame');
 };

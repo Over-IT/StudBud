@@ -25,6 +25,7 @@ async function generateIcons() {
     const readArtwork = async name => (await fs.readFile(path.join(icons, `${name}-source.png`))).toString('base64');
     const source = await readArtwork('studbud');
     const logo = createLogo(source);
+    const androidLogo = createLogo(await readArtwork('studbud-squircle'), { shape: 'squircle' });
     const apple = createLogo(source, { background: LOGO_BACKGROUND, inset: 40 });
     await fs.writeFile(path.join(icons, 'studbud.svg'), logo);
     for (const shape of ['square', 'circle', 'squircle']) {
@@ -36,8 +37,8 @@ async function generateIcons() {
     try {
         const page = await browser.newPage({ deviceScaleFactor: 1 });
         for (const [file, size, source, opaque] of [
-            ['icon-192.png', 192, logo, false],
-            ['icon-512.png', 512, logo, false],
+            ['icon-192.png', 192, androidLogo, false],
+            ['icon-512.png', 512, androidLogo, false],
             ['apple-touch-icon.png', 180, apple, true]
         ]) {
             await page.setViewportSize({ width: size, height: size });
