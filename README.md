@@ -22,9 +22,13 @@ Open the app online once to cache offline assets; online features still require 
 
 ### Logo variants
 
-Use `icons/studbud.svg` for rounded-square marks, `icons/studbud-square.svg` for square marks, and `icons/studbud-circle.svg` for circular marks. Each variant has a matching outer frame that reaches its shape's edge. Do not apply a CSS shape mask to logo images.
+Use `icons/studbud.svg` for rounded-square marks, `icons/studbud-square.svg` for square marks, `icons/studbud-circle.svg` for circular marks, and `icons/studbud-squircle.svg` for the fuller rounded mark used on sign-in. Do not apply a CSS shape mask to logo images.
 
-Run `npm run icons` after replacing `icons/studbud-source.png`. It regenerates the SVG variants and PNGs. The standard install PNGs use the regular rounded-square logo with transparent corners, including on Android. The Apple icon has a small inset for its rounded-corner mask.
+Run `npm run icons` after replacing any of the four `icons/*-source.png` artworks. It wraps each supplied variant without reshaping it and regenerates the install PNGs. The standard install PNGs use the regular rounded-square logo with transparent corners, including on Android. The Apple icon has a small inset for its rounded-corner mask.
+
+### Touch gameplay
+
+The game goal appears above the playfield, with input instructions under **Controls**. In Tower Defense, open **Shop** to build towers or send enemies; selecting a tower collapses the shop so you can tap an open cell. **Hide panel** also works when inspecting a placed tower. In King of the Hill, use **Jump** and **Attack** with your right thumb and the joystick with your left. Holding **Attack** swings at nearby rivals; tapping the arena still lets you aim manually.
 
 ## Run locally
 

@@ -43,7 +43,7 @@ async function runGameLayoutChecks(page) {
     await page.locator('[data-multiplayer-tab="host"]').click();
 }
 
-module.exports = async function runGameChecks(page) {
+async function setGameDeck(page) {
     await page.evaluate(() => window.NexusApp.AppState.set('flashcards', [{
         id: 'browser-game-deck', title: 'Browser checks',
         cards: [
@@ -53,11 +53,90 @@ module.exports = async function runGameChecks(page) {
             { id: 'four', front: 'Three plus two?', back: 'Five' }
         ]
     }]));
+}
+
+async function startPractice(page, mode, botCount = 3) {
+    await page.evaluate(({ mode, botCount }) => window.NexusApp.startPractice(mode, { deckId: 'browser-game-deck', seed: 42, botCount }), { mode, botCount });
+    await page.locator('.mpg-objective').filter({ hasText: /^Goal: / }).waitFor({ state: 'visible' });
+    await page.waitForFunction(() => window.NexusApp.practiceSession?.countdown <= 0);
+}
+
+async function runTouchChecks(page) {
+    await setGameDeck(page);
+    await startPractice(page, 'defense', 0);
+    const shop = page.locator('[data-defense="toggle"]');
+    const panel = page.locator('#mpg-defense-panel');
+    const tray = page.locator('.mpg-defense-tray');
+    assert.match(await page.locator('.mpg-objective').textContent(), /Protect your base/);
+    assert.equal(await panel.isVisible(), false, 'shop starts minimized');
+    const { width, height } = page.viewportSize();
+    const collapsed = await tray.boundingBox();
+    assert.ok(collapsed.width * collapsed.height < width * height * .16, 'minimized controls leave the map visible');
+    await shop.tap();
+    assert.equal(await panel.isVisible(), true);
+    await page.getByRole('button', { name: 'Send enemies', exact: true }).tap();
+    assert.match(await panel.locator('.mpg-defense-instruction').textContent(), /every rival wave/);
+    await shop.tap();
+    assert.equal(await panel.isVisible(), false, 'the shop can be hidden again');
+    await shop.tap();
+    await page.getByRole('button', { name: 'Build towers', exact: true }).tap();
+    const tower = page.locator('[data-defense="build:0"]');
+    assert.ok((await tower.boundingBox()).height >= 44);
+    await tower.tap();
+    assert.equal(await panel.isVisible(), false, 'choosing a tower makes room for placement');
+    assert.match(await tray.locator('.mpg-defense-status').textContent(), /Tap an empty cell/);
+    await page.getByRole('button', { name: 'Cancel', exact: true }).tap();
+    assert.equal(await page.evaluate(() => window.NexusApp.practiceSession.game.buildType), null);
+    await shop.tap();
+    await tower.tap();
+    const cell = await page.evaluate(() => {
+        const session = window.NexusApp.practiceSession, game = session.game;
+        const { x, y } = game.gridPoint(game.me.x, game.me.y);
+        for (const dy of [0, -70, 70, -140, 140]) for (const dx of [0, -70, 70, -140, 140]) {
+            if (!game.validPlacement(x + dx, y + dy, game.myTeam)) continue;
+            const px = ((x + dx - game.camX) * game.zoom + session.vw / 2) * session.scale;
+            const py = ((y + dy - game.camY) * game.zoom + session.vh / 2) * session.scale;
+            if (document.elementFromPoint(px, py) === session.canvas) return { x: px, y: py };
+        }
+        return null;
+    });
+    assert.ok(cell, 'a legal tower cell is reachable without an overlay blocking the map');
+    await page.touchscreen.tap(cell.x, cell.y);
+    await page.waitForFunction(() => window.NexusApp.practiceSession.game.troops.length === 1);
+    await page.touchscreen.tap(cell.x, cell.y);
+    await panel.locator('.mpg-defense-tower').waitFor({ state: 'visible' });
+    await shop.tap();
+    assert.equal(await panel.isVisible(), false, 'tower management can also be minimized');
+    await page.getByRole('button', { name: 'Earn cash', exact: true }).tap();
+    await page.locator('.mpg-question').waitFor({ state: 'visible' });
+    await page.locator('.mpg-q-skip').tap();
+    await page.evaluate(() => window.NexusApp.closePractice());
+
+    await startPractice(page, 'duel');
+    const attack = page.getByRole('button', { name: 'Attack', exact: true });
+    const jump = page.getByRole('button', { name: 'Jump', exact: true });
+    const stick = page.locator('.mpg-stick');
+    const [attackBox, jumpBox, stickBox] = await Promise.all([attack.boundingBox(), jump.boundingBox(), stick.boundingBox()]);
+    assert.ok(stickBox.x + stickBox.width <= jumpBox.x && jumpBox.x + jumpBox.width <= attackBox.x,
+        'movement stays on the left and Jump and Attack sit side by side');
+    assert.ok(Math.min(attackBox.height, jumpBox.height, attackBox.width, jumpBox.width) >= 44);
+    await attack.tap();
+    await page.waitForFunction(() => window.NexusApp.practiceSession.game.swingCd > 0);
+    await jump.tap();
+    await page.waitForFunction(() => {
+        const game = window.NexusApp.practiceSession.game;
+        return game.jumpPulse > 0 || game.airJumpPulse > 0;
+    });
+    await page.evaluate(() => window.NexusApp.closePractice());
+    assert.equal(await page.locator('.mpg-overlay').count(), 0, 'touch sessions clean up on exit');
+}
+
+module.exports = async function runGameChecks(page) {
+    await setGameDeck(page);
     const modes = await page.evaluate(() => Object.keys(window.StudBudArcade.games));
     assert.ok(modes.length > 0);
     for (const mode of modes) {
-        await page.evaluate(mode => window.NexusApp.startPractice(mode, { deckId: 'browser-game-deck', seed: 42, botCount: 3 }), mode);
-        await page.waitForFunction(() => window.NexusApp.practiceSession?.countdown <= 0);
+        await startPractice(page, mode);
         const samples = await page.evaluate(() => new Promise(resolve => {
             const times = [];
             let previous;
@@ -90,3 +169,4 @@ module.exports = async function runGameChecks(page) {
 };
 
 module.exports.runLayoutChecks = runGameLayoutChecks;
+module.exports.runTouchChecks = runTouchChecks;

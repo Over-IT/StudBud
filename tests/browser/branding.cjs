@@ -8,6 +8,12 @@ module.exports = async function runBrandingChecks(page) {
     });
     assert.ok(icons.every(icon => !icon.purpose || icon.purpose === 'any'),
         'Android uses the standard install artwork, with no separate maskable icon');
+    for (const mark of ['studbud', 'studbud-square', 'studbud-circle', 'studbud-squircle']) {
+        const svg = await (await page.request.get(new URL(`icons/${mark}.svg`, manifestURL).href)).text();
+        const artwork = await (await page.request.get(new URL(`icons/${mark}-source.png`, manifestURL).href)).body();
+        assert.ok(svg.includes(`href="data:image/png;base64,${artwork.toString('base64')}"`),
+            `${mark}: uses the matching supplied artwork without reshaping`);
+    }
     const installSources = {};
     for (const size of [192, 512]) {
         const file = `icon-${size}.png`;

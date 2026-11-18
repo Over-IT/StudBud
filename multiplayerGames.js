@@ -3585,7 +3585,7 @@
             this.hitFlash = 0; this.hitlag = 0; this.dropTimer = 0; this.dodge = 0; this.dodgeCd = 0; this.shieldBreak = 0;
             this.shield = 100; this.guardT = 0; this.shieldRest = 0; this.pendingHeavy = [];
             this.combatWaves = [];
-            this.view = { z: 1, x: this.me.x + 17, y: this.me.y + 28 }; this.aim = 0; this.swingAim = 0; this.offX = 0; this.offY = 0; this.touchAim = null;
+            this.view = { z: 1, x: this.me.x + 17, y: this.me.y + 28 }; this.aim = 0; this.swingAim = 0; this.offX = 0; this.offY = 0;
             this.hillTick = 0; this.hillState = 'away';
             this.zones = [
                 { x: 690, y: 270, w: 220, name: 'Top ledge' }, { x: 640, y: 520, w: 320, name: 'Center stage' },
@@ -3729,9 +3729,14 @@
                 else if (this.airJumps > 0) { me.vy = -820; this.airJumps--; this.jumpPulse = 0; this.airJumpPulse = .25; s.sfx('doubleJump'); this.particles.burst(me.x + 17, me.y + 56, '#bae6fd', 8, 120, 0.3, 4); }
             }
             const heavy = s.pressed('KeyR');
-            const attack = heavy ? this.heavyCd <= 0 && this.specialCharge >= 100 : s.mouse.pressed || s.pressed('KeyE');
+            const buttonAttack = s.down('TouchAttack') || s.pressed('TouchAttack');
+            const attack = heavy ? this.heavyCd <= 0 && this.specialCharge >= 100 : s.mouse.pressed || s.pressed('KeyE') || buttonAttack;
             if (heavy && !attack) s.toast(this.heavyCd > 0 ? `Special recharging: ${Math.ceil(this.heavyCd)}s` : 'Charge Special: hold the hill or land attacks', '#fbbf24');
             if (this.stun <= 0 && !this.guard && this.dodge <= 0 && this.swingCd <= 0 && attack && s.spend(heavy ? A.ENERGY_COSTS.duel.special : A.ENERGY_COSTS.duel.swing)) {
+                if (!s.mouse.pressed && (buttonAttack || (heavy && s.overlay.classList.contains('has-touch') && mouseAim === null))) {
+                    this.aim = this.closeRangeAim(heavy);
+                    me.face = Math.cos(this.aim) >= 0 ? 1 : -1;
+                }
                 this.swingHeavy = heavy;
                 if (heavy) { this.heavyCd = 12; this.specialCharge = 0; this.shake = .4; s.toast('THUNDER HAMMER!', '#fbbf24'); }
                 this.swingT = heavy ? 0.45 : 0.22; this.swingCd = heavy ? 1 : 0.52; s.sfx(heavy ? 'hammerSpecial' : 'hammerSwing'); this.swingAim = this.aim;
@@ -3764,12 +3769,25 @@
         aimAngle() {
             const m = this.s.mouse, me = this.me;
             const touch = this.s.overlay.classList.contains('has-touch');
-            if (touch && !m.down && !m.pressed) return this.touchAim;
-            if (!touch && !(m.x || m.y || m.pressed)) return null;
+            if (touch && m.pointerType !== 'mouse' && m.pointerType !== 'pen' && !m.down && !m.pressed) return null;
+            if (!(m.x || m.y || m.pressed)) return null;
             const wx = (m.x - this.offX) / this.view.z, wy = (m.y - this.offY) / this.view.z;
-            const angle = Math.atan2(wy - (me.y + 28), wx - (me.x + 17));
-            if (touch) this.touchAim = angle;
-            return angle;
+            return Math.atan2(wy - (me.y + 28), wx - (me.x + 17));
+        }
+
+        closeRangeAim(heavy) {
+            const me = this.me;
+            let aim = me.face > 0 ? 0 : Math.PI;
+            let range = heavy ? Duel.HEAVY_REACH : 110;
+            for (const rival of this.s.remoteList()) {
+                if (rival.a === 5 || rival.ex?.i) continue;
+                const dx = rival.x - me.x, dy = rival.y - me.y;
+                const distance = Math.hypot(dx, dy);
+                if (distance > 0 && distance < range) {
+                    range = distance; aim = Math.atan2(dy, dx);
+                }
+            }
+            return aim;
         }
 
         updateCamera(w, h, dt = 0) {
@@ -3954,8 +3972,8 @@
         }
 
         goalText() { return `${this.kos} KOs · ${Math.round(this.dmg)}% damage · Special ${this.heavyCd > 0 ? `${this.heavyCd.toFixed(1)}s` : this.specialCharge >= 100 ? 'READY' : `${Math.floor(this.specialCharge)}%`}`; }
-        touchLayout() { return { stick: true, platform: true, buttons: [{ k: 'Space', label: 'Jump' }, { k: 'KeyS', label: 'Guard' }, { k: 'KeyR', label: 'Special', small: true }, { k: 'ShiftLeft', label: 'Dodge' }] }; }
-        touchHint() { return 'Joystick to move · Jump for an air jump · Tap to swing · Charge Special by holding the hill or hitting rivals: 3x power, 10 energy, 12s cooldown'; }
+        touchLayout() { return { stick: true, stickZone: 'local', platform: true, cols: 3, buttons: [{ k: 'KeyS', label: 'Guard' }, { k: 'KeyR', label: 'Special' }, { k: 'ShiftLeft', label: 'Dodge' }, { k: 'Space', label: 'Jump', cls: 'jump' }, { k: 'TouchAttack', label: 'Attack', cls: 'attack' }] }; }
+        touchHint() { return 'Move with the stick · Tap Jump again in the air · Hold Attack to swing at nearby rivals, or tap the arena to aim · Charge Special on the hill or by landing hits'; }
         hint() { return 'A/D move · Space jump twice · S guard · E/click swing · R Special (charge on hill/hits, 3x power, 10 energy, 12s cooldown) · Shift/F dodge · Down fast-fall · Q recharge'; }
 
         drawFighter(ctx, x, y, who, face, state, dmg, name, hammer, swingAge, alpha, you, aim, swingAim, heavySwing = false, shield = 100, motion = {}) {

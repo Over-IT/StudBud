@@ -16,9 +16,9 @@
             this.rects.push(mapped);
             return mapped;
         }
-        inside(r) {
+        inside(r, includeDisabled = false) {
             const m = this.s.mouse;
-            return Boolean(r && r.on && m.x >= r.x && m.x <= r.x + r.w && m.y >= r.y && m.y <= r.y + r.h);
+            return Boolean(r && (r.on || includeDisabled) && m.x >= r.x && m.x <= r.x + r.w && m.y >= r.y && m.y <= r.y + r.h);
         }
         hit(rects = this.prev) {
             if (!this.s.mouse.pressed) return null;
@@ -1201,7 +1201,7 @@
             if (this.finished) return;
             this.step(dt);
             this.shots = this.shots.filter(shot => (shot.t -= dt) > 0);
-            const rects = this.ui.rects.length ? this.ui.rects : this.ui.prev;
+            const rects = this.compactDefense ? [] : this.ui.rects.length ? this.ui.rects : this.ui.prev;
             let action = this.ui.hit(rects);
             if (!action && !this.s.question) for (let i = 0; i < DEFENSE_TROOPS.length; i++) {
                 if (!this.s.pressed(`Digit${i + 1}`, `Numpad${i + 1}`)) continue;
@@ -1209,27 +1209,21 @@
                 else this.s.toast('Not enough cash or tower slots - answer a flashcard or sell a tower', '#fbbf24');
                 break;
             }
-            const overHud = rects.some(r => this.ui.inside({ ...r, on: true }));
+            const overHud = rects.some(r => this.ui.inside(r, true));
             const pointer = this.mouseWorld();
-            if (action?.startsWith('build:')) { this.buildType = Number(action.split(':')[1]); this.selected = null; }
-            else if (this.s.pressed('Escape') || action === 'cancel') { this.selected = null; this.buildType = null; }
-            else if (action === 'shop-build' || action === 'shop-send') { this.shopTab = action === 'shop-build' ? 'build' : 'send'; this.buildType = null; }
-            else if (action?.startsWith('send:')) this.request('send', { type: Number(action.split(':')[1]) });
-            else if (action === 'upgrade') this.request('upgrade', { id: this.selected });
-            else if (action === 'sell') { if (this.request('sell', { id: this.selected })) this.selected = null; }
-            else if (action === 'close-tower') this.selected = null;
-            else if (action === 'earn' || this.s.pressed('KeyE')) this.recharge();
-            else if (!action && this.s.mouse.pressed && !overHud) {
-                const p = this.mouseWorld(), troop = this.troops.find(t => {
-                    const cell = this.gridPoint(p.x, p.y, t.team);
+            if (action || this.s.pressed('Escape', 'KeyE')) {
+                this.defenseAction(action || (this.s.pressed('Escape') ? 'cancel' : 'earn'));
+            } else if (this.s.mouse.pressed && !overHud) {
+                const troop = this.troops.find(t => {
+                    const cell = this.gridPoint(pointer.x, pointer.y, t.team);
                     return t.x === cell.x && t.y === cell.y;
                 });
                 if (troop) {
-                    if (troop.team === this.myTeam) { this.selected = troop.id; this.buildType = null; }
+                    if (troop.team === this.myTeam) { this.selected = troop.id; this.buildType = null; this.defenseOpen = true; }
                     else this.s.toast('Enemy troops cannot be upgraded', '#fbbf24');
                 } else if (this.selected !== null) this.selected = null;
                 else if (this.buildType !== null) {
-                    const snapped = this.gridPoint(p.x, p.y), type = DEFENSE_TROOPS[this.buildType];
+                    const snapped = this.gridPoint(pointer.x, pointer.y), type = DEFENSE_TROOPS[this.buildType];
                     if (!this.canBuild(this.s.user.id)) this.s.toast('Your tower allowance or the team cap has been reached', '#fbbf24');
                     else if (!this.canAfford(this.s.user.id, type.cost)) this.s.toast('Not enough cash - answer a flashcard', '#fbbf24');
                     else if (!this.validPlacement(snapped.x, snapped.y, this.myTeam)) this.s.toast('Choose an empty grid cell on your side, away from the path', '#fbbf24');
@@ -1251,6 +1245,106 @@
             const value = this.teamValue(this.myTeam);
             this.s.score = value; this.s.setGoal(value);
         }
+        defenseAction(action) {
+            if (action.startsWith('build:')) {
+                this.buildType = Number(action.split(':')[1]); this.selected = null; this.defenseOpen = false;
+            } else if (action === 'cancel') {
+                this.selected = null; this.buildType = null; this.defenseOpen = false;
+            } else if (action === 'shop-build' || action === 'shop-send') {
+                this.shopTab = action === 'shop-build' ? 'build' : 'send'; this.buildType = null;
+            } else if (action.startsWith('send:')) this.request('send', { type: Number(action.split(':')[1]) });
+            else if (action === 'upgrade') this.request('upgrade', { id: this.selected });
+            else if (action === 'sell') { if (this.request('sell', { id: this.selected })) this.defenseAction('cancel'); }
+            else if (action === 'close-tower') this.selected = null;
+            else if (action === 'earn') this.recharge();
+        }
+        updateInterface(setText) {
+            const s = this.s, overlay = s.overlay;
+            this.compactDefense = overlay.classList.contains('has-touch') || s.vw * s.scale <= 700 || s.vh * s.scale <= 520;
+            overlay.classList.toggle('defense-compact', this.compactDefense);
+            if (!this.compactDefense) return;
+            if (!this.defenseHud) {
+                const tray = document.createElement('section');
+                tray.className = 'mpg-defense-tray';
+                tray.setAttribute('aria-label', 'Tower Defense actions');
+                const cards = (catalog, action) => catalog.map((_, i) => `<button type="button" data-defense="${action}:${i}"></button>`).join('');
+                tray.innerHTML = `
+                    <p class="mpg-defense-status"></p>
+                    <div class="mpg-defense-bar">
+                        <button type="button" data-defense="toggle" aria-controls="mpg-defense-panel"></button>
+                        <button type="button" data-defense="earn">Earn cash</button>
+                        <button type="button" data-defense="cancel" hidden>Cancel</button>
+                    </div>
+                    <div id="mpg-defense-panel" hidden>
+                        <div class="mpg-defense-catalog">
+                            <div class="mpg-defense-tabs" role="group" aria-label="Shop">
+                                <button type="button" data-defense="shop-build">Build towers</button>
+                                <button type="button" data-defense="shop-send">Send enemies</button>
+                            </div>
+                            <p class="mpg-defense-instruction"></p>
+                            <div class="mpg-defense-cards">${cards(DEFENSE_TROOPS, 'build')}</div>
+                            <div class="mpg-defense-cards">${cards(DEFENSE_ENEMIES, 'send')}</div>
+                        </div>
+                        <div class="mpg-defense-tower" hidden>
+                            <p></p><button type="button" data-defense="upgrade"></button><button type="button" data-defense="sell"></button>
+                        </div>
+                    </div>`;
+                const buttons = new Map([...tray.querySelectorAll('button')].map(button => [button.dataset.defense, button]));
+                const button = action => buttons.get(action);
+                tray.addEventListener('click', event => {
+                    const target = event.target.closest('button');
+                    if (!target || s.countdown > 0 || s.question || s.over || s.paused || this.finished) return;
+                    const action = target.dataset.defense;
+                    if (action === 'toggle') {
+                        this.defenseOpen = !this.defenseOpen;
+                        if (!this.defenseOpen) this.selected = null;
+                    } else this.defenseAction(action);
+                    this.updateInterface(setText);
+                    if (target.closest('[hidden]')) {
+                        if (this.buildType !== null) s.canvas.focus({ preventScroll: true });
+                        else button('toggle').focus({ preventScroll: true });
+                    }
+                });
+                overlay.append(tray);
+                this.defenseHud = { button, panel: tray.querySelector('#mpg-defense-panel'),
+                    status: tray.querySelector('.mpg-defense-status'), instruction: tray.querySelector('.mpg-defense-instruction'),
+                    catalog: tray.querySelector('.mpg-defense-catalog'), cards: [...tray.querySelectorAll('.mpg-defense-cards')],
+                    tower: tray.querySelector('.mpg-defense-tower') };
+            }
+            const { button, panel, status, instruction, catalog, cards, tower } = this.defenseHud;
+            const troop = this.troops.find(t => t.id === this.selected);
+            const build = this.shopTab === 'build', open = Boolean(this.defenseOpen);
+            panel.hidden = !open;
+            button('toggle').setAttribute('aria-expanded', String(open));
+            setText(button('toggle'), open ? 'Hide panel' : 'Shop');
+            button('cancel').hidden = this.buildType === null;
+            button('earn').hidden = this.buildType !== null;
+            const cash = this.unlimitedTestCash ? 'Test cash' : money(this.cashFor(s.user.id));
+            setText(status, this.buildType !== null ? `Tap an empty cell on your side to place ${DEFENSE_TROOPS[this.buildType].name}.`
+                : `${cash} · ${this.myTeam ? 'Red' : 'Blue'} team · ${this.waveStatusText()} · Blue ${this.health[0]} / Red ${this.health[1]} HP`);
+            if (!open) return;
+            catalog.hidden = Boolean(troop);
+            tower.hidden = !troop;
+            if (troop) {
+                const spec = DEFENSE_TROOPS[troop.type], stats = this.troopStats(troop.type, troop.level);
+                setText(tower.querySelector('p'), `${spec.name} Lv. ${troop.level} · ${stats.damage.toFixed(1)} damage · Range ${stats.range}`);
+                setText(button('upgrade'), troop.level >= 3 ? 'Max level' : `Upgrade ${money(this.upgradeCost(troop))}`);
+                button('upgrade').disabled = troop.level >= 3 || !this.canAfford(s.user.id, this.upgradeCost(troop));
+                setText(button('sell'), troop.owner === s.user.id ? `Sell +${money(this.sellValue(troop))}` : 'Owner can sell');
+                button('sell').disabled = troop.owner !== s.user.id;
+            } else {
+                button('shop-build').setAttribute('aria-pressed', String(build));
+                button('shop-send').setAttribute('aria-pressed', String(!build));
+                setText(instruction, build ? 'Choose a tower, then tap an empty cell on your side.' : 'Add an enemy to every rival wave, starting next wave.');
+                cards[0].hidden = !build; cards[1].hidden = build;
+                const canBuild = !build || this.canBuild(s.user.id);
+                (build ? DEFENSE_TROOPS : DEFENSE_ENEMIES).forEach((spec, i) => {
+                    const card = cards[build ? 0 : 1].children[i];
+                    setText(card, `${spec.name} · ${money(spec.cost)}${build ? '' : ` · +${this.reinforcements[1 - this.myTeam][i]}/wave`}`);
+                    card.disabled = !canBuild || !this.canAfford(s.user.id, spec.cost);
+                });
+            }
+        }
         teamValue(team) { return Math.min(100, Math.max(0, Math.floor(this.teamDamage[team]))); }
         standingValues(id) { const value = this.teamValue(this.teamOf(id) ?? this.myTeam); return { s: value, g: value }; }
         rankMetric(row) { return this.isWinner(null, row.id) ? 101 : row.g; }
@@ -1260,8 +1354,8 @@
         isWinner(rows, id) { return this.finished && [0, 1].includes(this.winner) && this.winner === this.teamOf(id); }
         goalText() { return `${this.myTeam ? 'Red' : 'Blue'} team · Wave ${this.waveNumber} · Base ${this.health[this.myTeam]} HP · Towers ${this.troopCount(this.s.user.id)}/${this.playerTroopLimit} · Team ${this.teamTroopCount(this.myTeam)}/40 · ${this.unlimitedTestCash ? 'unlimited test cash' : `$${this.cashFor(this.s.user.id)} yours`}`; }
         hint() { return 'WASD walk · 1-6 or click a loadout card to choose a tower for one placement · Spend your cash to upgrade any friendly tower; only its owner can sell it for 75% · Enemy purchases add +1 every wave starting next wave · Kills give no cash · Q/E answer for your own cash'; }
-        touchHint() { return 'Joystick to walk · Choose a tower, tap a free cell · Tap friendly towers to upgrade with your cash; sell only your own · 40 team slots divided among teammates · Answer for your own cash'; }
-        touchLayout() { return { stick: true, buttons: [{ k: 'KeyE', label: 'Earn cash', cls: 'main' }] }; }
+        touchHint() { return 'Joystick to walk · Open Shop to buy towers or send enemies · Tap friendly towers to upgrade · Earn cash by answering flashcards'; }
+        touchLayout() { return { stick: true, stickZone: 'local', buttons: [] }; }
         drawTroop(ctx, troop, angle = -.6) {
             const spec = DEFENSE_TROOPS[troop.type], level = troop.level || 1;
             ctx.save(); ctx.translate(troop.x, troop.y);
@@ -1358,8 +1452,8 @@
             ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, w, h);
             this.begin(ctx, w, h, 1100);
             const low = Boolean(this.s.graphics?.low);
-            const rects = this.ui.rects.length ? this.ui.rects : this.ui.prev;
-            const overHud = rects.some(r => this.ui.inside({ ...r, on: true }));
+            const rects = this.compactDefense ? [] : this.ui.rects.length ? this.ui.rects : this.ui.prev;
+            const overHud = rects.some(r => this.ui.inside(r, true));
             const pointer = this.mouseWorld();
             this.previewPoint = this.buildType !== null && this.s.mouse.active && !overHud && !this.s.question && this.selected === null
                 ? this.gridPoint(pointer.x, pointer.y) : null;
@@ -1458,7 +1552,7 @@
             this.drawPlayers(ctx);
             this.end(ctx);
             this.ui.begin();
-            if (this.s.preview || this.s.spectator) return;
+            if (this.s.preview || this.s.spectator || this.compactDefense) return;
             this.drawHud(ctx, w, h);
         }
 

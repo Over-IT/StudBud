@@ -48,7 +48,8 @@ async function serve(request, response) {
             ['desktop', 1366, 768], ['tablet', 820, 1180], ['phone', 390, 844],
             ['small-phone', 320, 568], ['landscape', 844, 390]
         ]) {
-            const context = await browser.newContext({ viewport: { width, height }, serviceWorkers: 'block' });
+            const hasTouch = ['phone', 'small-phone', 'landscape'].includes(name);
+            const context = await browser.newContext({ viewport: { width, height }, hasTouch, serviceWorkers: 'block' });
             try {
                 let chartRequests = 0, accountLibraryRequests = 0, chartsReachable = false;
                 await context.addInitScript(() => {
@@ -78,6 +79,7 @@ async function serve(request, response) {
                 if (name === 'desktop') await runPersistenceChecks(page);
                 await runSchoolImportChecks(page);
                 await runGameChecks.runLayoutChecks(page);
+                if (hasTouch) await runGameChecks.runTouchChecks(page);
                 await runCharacterChecks(page);
                 await runCommunityChecks(page);
                 await runCommunityChecks.runClassroomChecks(page);

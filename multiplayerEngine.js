@@ -4,14 +4,14 @@
     const TAU = Math.PI * 2;
     const GAME_GOALS = {
         skyline: 'Climb switchbacks to the summit; lower platforms can catch a fall',
-        duel: 'Hold the glowing hill alone to earn time',
+        duel: 'Stay alone on the glowing hill to earn time. Knock rivals off to clear it.',
         river: 'Catch valuable fish and avoid river hazards',
         market: 'Deliver packages to marked destinations',
         miner: 'Mine crystals and return them to base',
         chess: 'Checkmate the opposing king',
-        defense: 'Defend your team base and send enemies until the rival base reaches 0 HP',
+        defense: 'Protect your base. Send enemies to reduce the rival base to 0 HP.',
         crypto: 'Grow your portfolio by trading and mining',
-        frenzy: 'Score by answering quickly and accurately',
+        frenzy: 'Catch fish to build the most valuable haul',
         fishing: 'Catch fish to build the most valuable haul',
         hack: 'Hack terminals to earn the most payouts'
     };
@@ -650,6 +650,12 @@
             const Game = (window.StudBudArcade.games[this.mode]) || window.StudBudArcade.games.skyline;
             this.buildDom();
             this.game = new Game(this);
+            const objective = this.overlay.querySelector('.mpg-objective');
+            if (objective) {
+                const goal = this.mode === 'shooter' ? `Eliminate ${this.game.multiplayer ? 'opponents' : 'drones'} to score`
+                    : GAME_GOALS[this.mode] || 'Earn the highest score';
+                objective.textContent = `Goal: ${goal}`;
+            }
             if (['chess', 'defense'].includes(this.mode)) this.overlay.querySelector('.mpg-timer').classList.add('hidden');
             if (!this.preview) window.StudBudSfx?.startMusic(this.mode);
             else this.overlay.querySelectorAll('.mpg-hud, .mpg-hint, .mpg-touch, .mpg-countdown').forEach(element => element.classList.add('hidden'));
@@ -1230,7 +1236,7 @@
                         return;
                     }
                     if (e.code === 'Tab') {
-                        const targets = [this.canvas, ...this.overlay.querySelectorAll('.mpg-hud button, .mpg-hud summary, .mpg-hud input, .mpg-hud select, .mpg-resource-notice, .mpg-touch button, .chess-panel button, .chess-panel summary')].filter(el => el.offsetWidth && el.offsetHeight);
+                        const targets = [this.canvas, ...this.overlay.querySelectorAll('.mpg-hud button, .mpg-hud summary, .mpg-hud input, .mpg-hud select, .mpg-resource-notice, .mpg-touch button, .mpg-defense-tray button, .chess-panel button, .chess-panel summary')].filter(el => !el.disabled && el.offsetWidth && el.offsetHeight);
                         const index = targets.indexOf(document.activeElement);
                         targets[(index + (e.shiftKey ? -1 : 1) + targets.length) % targets.length]?.focus();
                         e.preventDefault(); return;
@@ -1496,9 +1502,11 @@
             const status = document.createElement('div');
             status.className = 'mpg-status';
             for (const selector of ['.mpg-score', '.mpg-meter']) status.appendChild(overlay.querySelector(selector));
+            const objective = document.createElement('p');
+            objective.className = 'mpg-objective';
             const panels = document.createElement('div');
             panels.className = 'mpg-panels';
-            hud.append(overlay.querySelector('.mpg-top'), status, overlay.querySelector('.mpg-board'), panels, overlay.querySelector('.mpg-toasts'));
+            hud.append(overlay.querySelector('.mpg-top'), objective, status, overlay.querySelector('.mpg-board'), panels, overlay.querySelector('.mpg-toasts'));
             overlay.appendChild(hud);
             this.bindTouch(overlay);
             overlay.addEventListener('input', event => {
@@ -1882,12 +1890,11 @@
             const touch = o.classList.contains('has-touch');
             const hint = touch ? (this.game.touchHint?.() || this.game.hint()) : this.game.hint();
             const controlsHint = touch ? '' : 'Keyboard/mouse controls';
-            const goalInstructions = this.mode === 'shooter' ? `Eliminate ${this.game.multiplayer ? 'opponents' : 'drones'} to score`
-                : GAME_GOALS[this.mode] || 'Earn the highest score';
-            const hintText = this.question ? '' : [`Goal: ${goalInstructions}`, controlsHint, hint].filter(Boolean).join(' · ');
+            const hintText = this.question ? '' : [controlsHint, hint].filter(Boolean).join(' · ');
             const hintNode = o.querySelector('.mpg-hint');
             if (hintNode.textContent !== hintText) hintNode.textContent = hintText;
             this.applyTouchLayout?.();
+            if (!this.spectator && !this.preview) this.game.updateInterface?.(setText);
             const diagnostics = o.querySelector('.mpg-test-stats');
             if (diagnostics) {
                 const me = this.game.me;
